@@ -228,9 +228,15 @@ use this; closing the pipe does not stop it.
 ## Answering an Interaction After a Restart
 
 A pending question survives both a clean exit and an abrupt one, because it is
-durable session state rather than connection state. A fresh server attaches to
-the same session, receives the pending question in its snapshot at the same
-cursor, and answers it with the identity the question carried. The policy is
+durable session state rather than connection state. A fresh server has no
+active entry for the session until it is resumed, so the client:
+
+1. sends `initialize`;
+2. sends `session.resume` with the known session ID and a fresh command ID,
+   and waits for its result (an error means the session did not resume);
+3. attaches to the session, and receives the recovered pending question in its
+   snapshot at the same cursor;
+4. answers it with the identity the question carried. The policy is
 then asked again, exactly as it would have been in the original process.
 
 **The clock does not stop while the process is gone.** A recovered question is
@@ -264,7 +270,7 @@ promise. Accepted [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept)
 states the concurrency unit as the connection and adds 1 GiB of cumulative
 transfer work per connection; the implementation counts per attachment and
 enforces no cumulative work allowance. That divergence is recorded in the
-[M5 plan](../plans/M5.md#concept) and awaits a maintainer decision. A transfer belongs to
+[M5 plan](../plans/M5.md#concept); its remediation is deferred beyond M5. A transfer belongs to
 the attachment that opened it and is released when that attachment goes.
 
 <a id="operator-app-server-limits"></a>

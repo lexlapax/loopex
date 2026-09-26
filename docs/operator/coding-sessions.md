@@ -390,8 +390,15 @@ bare positional words, using the standard library only. A bare `--` ends option
 parsing and keeps every remaining word as data, which is how an artifact locator
 beginning with `--` stays retrievable.
 
-Exit status is `0` for success and `1` for a refusal or failure, with the reason
-on standard error prefixed `loopex:`. An unrecognised subcommand, or no
+Exit status reports the command, not the run. A refusal or command error exits
+`1`, with the reason on standard error prefixed `loopex:`. A run the command
+started and rendered to its end exits `0` whatever the run's outcome: a run
+that failed, stopped at a bound, stopped with an effect's outcome unknown, or
+ended any other way still exits `0`. Scripts must read the run's ending line on
+standard error rather than the exit status to learn the outcome: `loopex: done`
+is the only successful ending, and `loopex: failed …`,
+`loopex: stopped at the … bound …` and
+`loopex: stopped, but the effect's outcome is unknown` are the others. An unrecognised subcommand, or no
 arguments at all, prints the usage text and exits `1`. The interrupt backstop
 exits `130`. The launcher exits `127` when it finds no escript. The live forms
 and `loopex daemon` add their own statuses, listed on the

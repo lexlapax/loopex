@@ -472,7 +472,11 @@ asks the composed module, and a runtime composed without an artifact store, or
 with an adapter that lacks the three callbacks, answers
 `artifact_transfer_unsupported` rather than falling back to an unbounded
 `fetch/2`. The contract is
-[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept), and the witnesses
+[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept), with one known
+divergence: the implementation counts concurrent transfers per attachment rather
+than per connection and enforces no cumulative per-connection work allowance, as
+the [operator transfer page](../operator/app-server.md#operator-app-server-artifacts)
+discloses; its remediation is deferred beyond M5. The witnesses
 are in `apps/loopex_store_local/test/artifact_transfer_test.exs`.
 
 <a id="technical-embedding-recovery"></a>
