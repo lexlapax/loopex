@@ -22,102 +22,88 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
 - **Placement:** it lives in `apps/loopex_llm_reqllm`, the one edge application
   that carries ReqLLM.
 - **Scope:** it accepts only a provider on its credential-free list, `ollama`
-  in M6. Any other provider refuses `{:not_dispatched, "credential_required"}`
-  before ReqLLM is called, and composition never selects it for one. It passes
-  no `api_key`, and ReqLLM's key lookup (`keys.ex:56-72`) is never reached,
-  because the Ollama provider requires none.
+  in M6, and only in the ephemeral profile. Any other provider refuses
+  `{:not_dispatched, "credential_required"}` before ReqLLM is called, and
+  composition never selects it for one. It passes no `api_key`, and ReqLLM's
+  key lookup (`keys.ex:56-72`) is never reached, because the Ollama provider
+  performs no key lookup or authentication (`providers/ollama.ex:113`).
 - **Selection:** composition selects exactly one adapter per runtime, by the
   model's provider. The companion adapter keeps refusing any in-VM fallback, as
   ADR 0034 fixed.
 
-**Call options** (ReqLLM 1.24.0): `max_retries: 0`, and `receive_timeout` set
-to the time left before the request deadline. The model is built inline as
-`ReqLLM.model(%{provider:, id:, base_url:})`, so no catalog lookup or
-unverified-model warning occurs.
+**The call** (ReqLLM 1.24.0). The adapter calls the non-streaming
+`ReqLLM.generate_text/3` with the model built inline as
+`ReqLLM.model(%{provider: :ollama, id:, base_url:})`, and these options on every
+call:
+- `total_timeout: :infinity`, so ReqLLM's timeout budget calls `Req.request/1`
+  directly in the calling process (`timeout_budget.ex:47`) rather than in a
+  task on the shared `ReqLLM.TaskSupervisor` (`:101-103`), whatever the host's
+  `:req_llm` configuration says;
+- `receive_timeout` set to the time left before the request deadline, and
+  `max_retries: 0`;
+- no `:cache` option, so ReqLLM's response cache is never consulted.
+
+The kernel's own deadline, not ReqLLM's, bounds the call: when it expires the
+coordinator stops the call as described below. The inline model never reaches
+ReqLLM's catalog lookup or its unverified-model warning, which only the string
+lookup path emits (`req_llm.ex:735-750`).
+
+**No streaming.** The in-process adapter delivers the model's reply whole and
+reports no progress deltas. Deltas are transient progress, never session truth,
+so no outcome depends on them; the companion adapter keeps streaming.
 
 **Error classes:**
-- A refusal met before `ReqLLM.stream_text/3` is called is returned, never
+- A refusal met before `ReqLLM.generate_text/3` is called is returned, never
   raised, as `{:not_dispatched, "model_call_failed"}`. That covers model build,
   context, tools and options, and an elapsed deadline.
-- Every return or raise from that call, `{:error, _}` included, is
-  `{:dispatched_or_unknown, "model_call_failed"}`, as the companion classifies
-  it (`req_llm.ex:416-453`, citing ADR 0018), because ReqLLM may already have
-  started its transport.
-- A stream is not a success until its metadata shows no `:error`, no status of
-  400 or more, and no `finish_reason` of `:incomplete`, `:cancelled` or `:error`.
+- Every return or raise from that call, `{:error, _}` and a non-2xx status
+  included, is `{:dispatched_or_unknown, "model_call_failed"}`, as the companion
+  classifies a started call (`req_llm.ex:416-453`, citing ADR 0018), because
+  the request may already have reached the server.
 
 <a id="technical-adr-0039-tree"></a>
-#### The Per-Call Process Tree
+#### The Per-Call Process
 
 Concept: [Context and decision](0039-ephemeral-embedded-profile.md#concept-adr-0039-decision).
 
-In ReqLLM 1.24.0 one `stream_text/3` call creates, in this order, from the
-process that calls it:
+**One process holds the whole call.** On the path above, ReqLLM prepares the
+request and runs `Req.request/1` in the process that called
+`generate_text/3`. Req runs its steps in that process, and Finch's HTTP/1 pool
+checks a connection out to that process, which then performs the socket I/O
+itself. No stream server, HTTP task or metadata worker exists. So the call has
+exactly two processes of its own:
+1. **The cleanup owner.** `complete/3` starts it with
+   `ProviderLifetime.start_child/2` and registers it with
+   `ProviderLifetime.register/2`, the coordinator hook the companion bridge uses
+   for its guardian (`provider_bridge.ex:207`, `:224`), before anything calls
+   ReqLLM. It traps exits, never calls ReqLLM and never blocks, so it answers a
+   stop at any moment.
+2. **The caller.** A process the owner spawns linked, which sets
+   `Logger.put_process_level(self(), :none)` (Elixir's API; OTP's `logger`
+   exports no per-process level setter), calls `ReqLLM.generate_text/3`, maps
+   the response, sends the reply to the owner and exits.
 
-| # | Process | Started by | Link | Ancestry key |
-| --- | --- | --- | --- | --- |
-| 1 | Stream server | the caller, `StreamServer.start_link` (`streaming.ex:211`) | caller | `$ancestors` names the caller |
-| 2 | HTTP task | the stream server, in its `:start_http` call (`stream_server.ex:495`), through `Task.Supervisor.async` (`streaming/finch_client.ex:168`) on the shared `ReqLLM.TaskSupervisor` | the supervisor at spawn; the stream server once `async` links it | `$ancestors` names `ReqLLM.TaskSupervisor`; `$callers` names the stream server only after the handshake |
-| 3 | Metadata handle | the caller, `MetadataHandle.start_link` (`streaming.ex:158`, `:410`; `metadata_handle.ex:17-18`) | caller | `$ancestors` names the caller |
-| 4 | Metadata worker | the metadata handle, raw `:erlang.spawn_opt(..., [:link, :monitor])` (`metadata_handle.ex:54-60`) | metadata handle | none |
+**Cleanup.** On the coordinator's resource stop message
+(`session_coordinator.ex:4627-4634`), or its deadline, the owner monitors the
+caller, kills it with `:kill`, waits for its `DOWN`, and only then acknowledges
+`{:loopex_provider_resource_stopped, stop, self()}` (`:4641`). On completion
+the owner waits for the caller's `DOWN` before it returns the reply. A `DOWN`
+that does not arrive by the cooperative deadline leaves the acknowledgement
+unsent, and the coordinator's existing unproved-cleanup path applies
+(`:4646-4652`). When the caller dies, the pool that lent it a connection
+learns of it through NimblePool's checkout monitor (`nimble_pool.ex:196`) and
+closes or reclaims that connection; the pool is shared and is never killed.
 
-The stream server traps exits (`stream_server.ex:416`) and ignores an
-unrelated linked exit (`:659-662`); its cancellation signals the HTTP task
-without waiting for its `DOWN` (`:1593-1601`); and `stream_text/3` returns
-neither the HTTP task nor the worker (`streaming.ex:126`). So no single kill
-ends the call, and no returned value names every process.
+**Pool protocol.** This holds for ReqLLM's default pool, which uses HTTP/1
+unless configured otherwise (`application.ex:4`, `:94-100`). An HTTP/2 pool
+instead performs the request inside the shared pool process on the caller's
+behalf. So the start step refuses `{:composition, :req_llm_pool_unsupported}`
+when `:req_llm`'s `:stream_pool_protocols` or its `:finch` pools configuration
+includes `:http2`.
 
-**How the HTTP task starts,** in both supported Elixir versions
-(`Task.Supervisor.async/6` and `Task.Supervised.reply/3`, the same in 1.18.5
-and 1.20.3):
-1. the shared supervisor spawns the task, which records its `$ancestors`,
-   monitors its starter, and waits;
-2. the starter links to it;
-3. the starter sends the handshake, which alone carries the function and its
-   arguments, and so the request;
-4. the task records `$callers` and runs the function.
-
-Before step 3 the task holds no request and cannot perform the call, and if its
-starter dies it exits: through its monitor before step 2, through the link
-after it.
-
-**Membership rule.** Starting from the caller, the owner follows links
-transitively. A linked process belongs to the call when any of these holds:
-- its `$ancestors` or `$callers` names a process already in the call;
-- its `$ancestors` names `ReqLLM.TaskSupervisor` and it is linked to a process
-  already in the call: only that process's own `async` links a task of the
-  shared supervisor to it, so this catches an HTTP task between steps 2 and 4;
-- it has neither key and every process it is linked to is already in the call.
-
-Nothing else belongs: the owner itself, `ReqLLM.TaskSupervisor`, the Finch pool
-and every other shared process has ancestry outside the call, is never followed
-past, and is never suspended or killed. Each member is suspended with
-`:erlang.suspend_process/1` before its links are read, so no member can create
-a further link or send a handshake during the walk.
-
-**What the walk can miss, and why that is safe.** An HTTP task at step 1, whose
-starter was suspended before step 2, is linked to no member and is not found.
-The starter never resumes, so the task never receives a request; it exits on
-its monitor when the starter dies. That task is the one process that can
-outlive the acknowledgement, and it holds nothing of the request.
-
-**The owner's sequence,** on a stop, a deadline, or the caller's completion:
-1. suspend the caller, then walk the tree as above, suspending each member;
-2. monitor every member and kill each with `:kill`, which a trapping process
-   cannot ignore;
-3. wait for every member's `DOWN`, up to the cooperative deadline;
-4. only then acknowledge `{:loopex_provider_resource_stopped, stop, self()}`,
-   or on completion return the reply.
-
-On completion the caller hands its reply to the owner and waits, so it is still
-alive and linked when the walk begins. Suspending a member that is waiting on a
-shared process, such as the stream server inside the supervisor's `start_child`
-call, leaves that shared process's reply queued to a process about to be
-killed; the shared process never waits on the member. A killed HTTP task's
-Finch connection is returned to its pool by the pool's checkout monitor; a
-witness proves the pool serves the next call. A `DOWN` that does not arrive
-leaves the acknowledgement unsent, and the coordinator's existing
-unproved-cleanup path applies (`session_coordinator.ex:4639-4652`).
+**What the witness pins.** The witness counts the processes created during a
+call on both toolchain pairs and requires exactly the owner and the caller, so
+a ReqLLM update that moves the request into another process fails it.
 
 **Host hygiene.** `ReqLLM.Application.start/2` reads `:load_dotenv` (default
 `true`) and loads `.env` from the working directory (`application.ex:25-31`).
@@ -138,6 +124,7 @@ application configuration, which outlives any Loopex application's restart:
 | Running | `false` | the marker is set, or the host passed `req_llm: :host_started` | Proceed |
 | Running | `false` | neither | Refuse `{:composition, :req_llm_already_started}` |
 | Running | not `false` | any | Refuse `{:composition, :req_llm_dotenv_enabled}` |
+| Any | any | any, when `:req_llm`'s `:stream_pool_protocols` or `:finch` pools include `:http2` | Refuse `{:composition, :req_llm_pool_unsupported}` |
 
 - **Concurrency.** Two compositions that both find ReqLLM not running write the
   same values and both call `Application.ensure_all_started/1`, which the
@@ -168,16 +155,15 @@ table. All of these are VM-global and named, so one ReqLLM serves every user in
 the VM.
 
 **Paths that can carry request data into the host:**
-- `Logger.error("Failed to start streaming: …")` at `streaming.ex:174`, written
-  in the caller, which sets `Logger.put_process_level(self(), :none)` first
-  (Elixir's API; OTP's `logger` exports no per-process level setter), so it is
-  never emitted;
-- crash reports from the stream server, the HTTP task and the metadata worker;
+- a log line ReqLLM, Req or Finch writes while handling the call: it is written
+  in the caller, which sets `Logger.put_process_level(self(), :none)` first, so
+  it is never emitted;
+- a crash report from the caller, the one per-call process, or from a shared
+  pool process that was handling its connection;
 - an `erl_crash.dump`.
 
 With no credential in the in-process request, the last two can carry only
-request data: the
-prompt, the context, tool output and the reply. The companion suppresses them
+request data: the prompt, the context, tool output and the reply. The companion suppresses them
 by running ReqLLM with the primary level `:none`, an IO sink as group leader and
 `ERL_CRASH_DUMP=/dev/null` (`provider_worker.ex:71-82`); the `ask` command
 reproduces the level and crash-dump parts for its own VM; a library host owns
@@ -208,13 +194,13 @@ Concept: [Observable consequences](0039-ephemeral-embedded-profile.md#concept-ad
 | The memory store is a store | The store conformance suite's `:memory` kind is bound to `Loopex.Store.Memory` itself and passes unchanged |
 | The in-process adapter is a model | Mapping, option and error tests run against a scripted ReqLLM transport. The model streaming conformance suite runs against it. A real-provider lane calls a local Ollama model |
 | It serves only credential-free providers | Every non-Ollama provider refuses before ReqLLM is called; no `api_key` option is ever passed; an ephemeral runtime with an Ollama model opens no credential plane; with `LOOPEX_PROVIDER_API_KEY` set to a canary in the host environment, an in-process run leaves the canary in no plane, no runtime or adapter process state and no captured log event, and leaves the host variable unchanged |
-| Its cleanup ends everything that holds the request | Against a scripted transport, a stop and a deadline at each point of ReqLLM's real order: stream server started; HTTP task spawned but not linked; linked but before the handshake; running; metadata handle started; metadata worker running. And a normal completion. In each, the owner answers while the caller is blocked, every member's `DOWN` precedes the acknowledgement, no process that received the request remains, a task spawned but never handed its request exits on its own and never runs it, and `ReqLLM.TaskSupervisor` and the Finch pool are alive and serve the next call. A member whose exit a test seam withholds takes the unproved path. Both toolchain pairs run it |
+| Its cleanup ends the whole call | On both toolchain pairs, against a local test server that stalls before its response headers, mid-body and after the body: a stop, a deadline and a normal completion each leave no process created by the call alive, the owner answers while the caller is blocked in socket I/O, and the caller's `DOWN` precedes the acknowledgement or the returned reply. A process census taken during the call finds exactly the owner and the caller as new processes. The Finch pool is alive and serves the next call. A caller whose exit a test seam withholds takes the unproved path. Each pool refusal row of the start table refuses |
 | The companion path is unchanged | Every companion suite passes after the shared mapping is extracted; an ephemeral runtime with a hosted model composes `CredentialPlane` exactly as the durable one does; the durable profile refuses an `ollama:` model |
 | Hygiene holds | `:req_llm` is started by no application start while the escript embeds its modules. A `.env` in the working directory is not loaded when composition starts ReqLLM. Each row of the start table; two concurrent first compositions starting it once; a second composition after a Loopex start proceeding; `loopex_composition` stopped and restarted, then a composition proceeding; ReqLLM stopped and restarted by the host with the persistent setting, loading no `.env`; the host turning loading back on, then refused; `warn_unverified_models` never written |
 | The profile is ephemeral and says so | After a proved stop, or its caller exiting, no file remains under the profile's temporary root. The session value and `result` carry `profile: :ephemeral`, and `ask`'s JSON carries `"profile"` |
 | No default authority | Composition without `:policy` refuses with `host_policy_required` |
 | Skills are truthfully named | A `.agents/skills/<name>` directory in the workspace is `project:<name>`; a directory outside is `user:<name>` with its content digest; any other workspace directory refuses; a shared name admits the project skill and reports the user skill as shadowed; the same holds under `ask --state-root` |
-| Rollback holds as stated | A durable root with a pending interaction written by the candidate recovers and is answered under `v0.2.0`, and the reverse; a pending call to `loopex.grep` resumed under `v0.2.0` is committed as `unknown_tool` and the run continues; a completed `loopex.grep` call in history replays under `v0.2.0`; a root with an admitted user skill, written by the candidate, has its retained snapshot reloaded by digest and its session resumed under `v0.2.0` |
+| Rollback holds as stated | A durable root with a pending interaction written by the candidate recovers and is answered under `v0.2.0`, and the reverse; a pending call to `loopex.grep` resumed under `v0.2.0` is committed as `unknown_tool` and the run continues; a completed `loopex.grep` call in history replays under `v0.2.0`; a root with an admitted user skill, written by the candidate, resumes under `v0.2.0`'s offline `loopex resume` with the skill's retained snapshot reloaded by digest, and under `v0.2.0`'s daemon with the session resumed and that skill's context withheld |
 | Core is unchanged | `git diff v0.2.0 -- apps/loopex/lib` is empty outside `apps/loopex/lib/mix/`, and `mix loopex.deps_budget` passes unchanged |
 
 <a id="technical-adr-0039-compatibility"></a>
@@ -249,13 +235,22 @@ reference, digest, decision and selections (`session_state.ex:4898`), and its
 snapshot is retained under the state root by digest and reloaded through core
 validation (`resource_packs.ex:333-380`), exactly as for a project pack. Its
 `source_id` `user:<name>` and nil Git provenance are both accepted by `0.2`'s
-core validation (`resource_pack.ex:203-216`, `:343-348`), so `0.2` reloads it.
+core validation (`resource_pack.ex:203-216`, `:343-348`). `0.2`'s offline
+`loopex resume` reads the session's admitted digest and reloads that snapshot
+before resuming (`loopex_cli.ex:944-990`), so it gets the skill back. `0.2`'s
+daemon instead composes the manifest it discovers in the workspace at start
+(`daemon.ex:239-242`), which never contains a user pack, so core declines the
+session's admitted binding (`resource_pack.ex:497-505`) and withholds that
+skill's context while the session itself resumes. A user skill has nil Git
+provenance, so it gets no separate provenance record
+(`resource_packs.ex:1584`); its retained manifest carries its identity and
+bytes, which is all `load/2` needs.
 
 **Unchanged:** the store format, the public protocol generations 1 and 2, the
 executor protocol, the daemon, the companion and core's library.
 
 **Removal.** Removing the profile deletes these and touches no durable byte:
 - the in-process adapter, the memory store and the ephemeral composition;
-- the ReqLLM start step and its holder, restoring automatic start;
+- the ReqLLM start step, restoring automatic start;
 - the `ask` command;
 - the directory-reading function.

@@ -116,17 +116,14 @@ loop.
   path. The `ask` command, which owns its own VM, discards it unread when it
   selects an Ollama model.
 
-**In-process calls leave nothing that can act on the request.** A provider
-call in the host VM creates processes inside ReqLLM that Loopex did not start: a
-stream server, an HTTP task, a metadata handle and a metadata worker. Each call
-has one cleanup owner that stays responsive at every stage of the call. On a
-stop, a deadline or completion it ends every one of those processes that holds
-the request or can act on it, and acknowledges cleanup only after it has seen
-each of them exit. One transient process can outlive the acknowledgement: an
-HTTP task that the task supervisor created but that never received its request,
-because its starter was ended first. It holds no request data, cannot perform
-the call, and exits on its own when it sees its starter gone. If the owner
-cannot prove the rest, the kernel's existing unproved-cleanup path applies.
+**Each in-process call is one process.** The in-process adapter makes a
+non-streaming call that ReqLLM, Req and Finch perform entirely inside the one
+process that asks for it, so no other process ever holds that call's request.
+Each call has a cleanup owner that stays responsive throughout. On a stop, a
+deadline or completion it ends that process and acknowledges cleanup only after
+it has seen it exit. If it cannot see that, the kernel's existing
+unproved-cleanup path applies. The model's reply arrives whole: an in-process
+call reports no streamed progress, which is transient and never session truth.
 
 **Host hygiene.** The in-process adapter runs inside a host that may do other
 things, and ReqLLM loads a `.env` file when its application starts. So Loopex,
@@ -172,6 +169,12 @@ discovered skills. The rules:
   and activation holds, and its limit of four selected skills applies. In the
   durable profile the admitted snapshot is retained under the state root and
   the admission journaled, like any admitted pack's.
+- **Where the durable profile takes them.** Named skill directories enter a
+  durable session through the durable composition's API and `ask --state-root`,
+  and the offline `loopex resume` reloads them by digest. The daemon is
+  unchanged in M6: it composes only the workspace's discovered project skills,
+  so a session with a user skill that is later resumed through the daemon has
+  that skill's context withheld rather than silently replaced.
 
 **Authority rule.** Neither profile has a default host authority. The caller
 always names the policy:
@@ -214,8 +217,9 @@ it belongs to this decision as an experimental surface:
   - `text` and `text_truncated`;
   - `tools`, each with its tool id and outcome, and `tools_truncated`;
   - `shadowed_skills`;
-  - `cleanup`: whether stopping proved every process ended, and if not, the
-    kept temporary root and what remained unproved;
+  - `cleanup`: whether stopping proved that every provider and tool process of
+    the session had ended, and if not, the kept temporary root and what
+    remained unproved;
   - `details`, whose members are fixed per outcome.
 
   A `run.finished` field outside that set is not emitted. Every string and
@@ -247,7 +251,10 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
 - **Embedding.** An Elixir host that depends on `loopex_composition` calls:
   - `LoopexComposition.Ephemeral.run/2` for one answer;
   - `start_session/1`, `ask/3`, `answer/3`, `last_result/1`, `history/1` and
-    `stop_session/1` for a conversation.
+    `stop_session/1` for a conversation. The session value is an opaque in-VM
+    handle the host passes back and never inspects, like a runtime reference;
+    what the host may read comes back in the result, which carries the session
+    id and the profile.
 
   With a local model it needs no state root, no companion build, no credential
   and no store setup. A hosted model needs what the companion always needs: the
@@ -293,9 +300,12 @@ This is additive:
     when the root is resumed under `0.2`: the call is committed as a failed
     `unknown_tool` call and the run continues;
   - a user skill admitted under `0.3`: its snapshot is retained under the
-    state root by digest like any admitted pack's, and `0.2` reloads it by that
-    digest because its validation already accepts the `user:<name>` identity;
-    but `0.2` cannot admit a new one.
+    state root by digest like any admitted pack's. `0.2`'s offline
+    `loopex resume` reloads it by that digest, because its validation already
+    accepts the `user:<name>` identity. `0.2`'s daemon, which composes only the
+    workspace's discovered project skills, resumes the session with that
+    skill's context withheld, as core does for any snapshot it cannot match.
+    `0.2` cannot admit a new one.
 
 ## Governance Record
 

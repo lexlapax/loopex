@@ -40,6 +40,15 @@ boundary data, and credential isolation.
   claim is narrowed to name what `0.2` does with them;
 - the in-process call's cleanup walks the call's linked process tree.
 
+**Revision, 2026-09-26, after the fourth external review:** the third and
+fourth reviews showed the walk of ReqLLM's streaming process tree cannot be
+made complete, because Task startup and teardown leave request-bearing
+processes briefly unreachable from any link. The in-process adapter therefore
+makes a non-streaming call that runs entirely in one process, so cleanup ends
+that process and nothing else needs finding; the cost is that a local model's
+reply arrives whole, with no progress deltas. This replaces the tree-walk
+choice and is presented to the maintainer for confirmation at acceptance.
+
 **At acceptance of ADR 0039,** the acceptance change also updates the ADR index
 (`docs/adr/README.md`): ADR 0019's row and prose gain "narrowed by 0039 for
 credential-free providers in the ephemeral profile", and ADR 0025's gain
@@ -144,12 +153,14 @@ model must name a provider that credential serves.
   map as `ending`.
 - **`start_session/1`** composes the ephemeral profile and starts one runtime,
   creates one session (`command_id` `"create"`), and attaches from sequence 0.
-  The session value is a map with `session_id`, `profile: :ephemeral`, `model`,
-  `adapter` (`:in_process` or `:companion`), `tools`, `req_llm_started_by` (nil
-  for a companion model) and the owner process. The owner is linked to the
-  caller and holds the runtime and the one attachment (`Runtime.attach` binds an
-  attachment to its caller, `runtime.ex:346-348`). Every call below goes through
-  the owner. `result` also carries `profile`.
+  The session value is opaque: `@opaque session()`. A host holds it and passes
+  it back, and inspects nothing inside it; it is an in-VM handle like a runtime
+  reference, never boundary data, and no public or durable contract carries it.
+  Behind it is an owner process linked to the caller, which holds the runtime
+  and the one attachment (`Runtime.attach` binds an attachment to its caller,
+  `runtime.ex:346-348`); every call below goes through the owner. What a host
+  may read about the session comes from `result`, `history/1` and
+  `last_result/1`: `result` carries `session_id` and `profile`.
 - **`ask/3`** refuses with `{:error, :run_open}` while an earlier run of the
   session has no `run.finished`, for example after `interaction_pending`.
   Otherwise it:
@@ -228,50 +239,44 @@ runtime by the model's provider; the durable composition always uses the
 companion and refuses an `ollama:` model with
 `{:composition, :durable_model_unsupported}`.
 
-**Shared mapping.** The companion's pure mapping functions move into one module
-both adapters use, `Loopex.LLM.ReqLLM.Mapping`, with no change in behaviour:
+**Shared mapping.** The companion's pure request-side and reply functions move
+into one module both adapters use, `Loopex.LLM.ReqLLM.Mapping`, with no change
+in behaviour:
 
 - the request context, `context_of` and `render_message`
   (`req_llm.ex:1031-1082`), including tool id to provider name by last dot
   segment (`:1091`);
 - `provider_tools` (`:1117`);
-- the delta translation, `emit` (`:815-883`);
-- draining and finishing the stream, `drain` (`:502`) and its `finish_drain`
-  and `failure_stage` steps;
-- the stream completion check, `completed/1` (`:709`);
-- response assembly, `ResponseBuilder` (`:746`);
 - bounded tool calls, `bounded_calls` (`:770`);
 - the reply, `reply/6` (`:676`);
 - error classification, `raised_class` (`:590-672`).
 
-`identity/1` (`:181`) is not shared, because it resolves a model string through
-the catalog. The existing companion suites prove the unchanged behaviour. Only
-the transport differs: the in-process adapter calls `ReqLLM.stream_text/3` in
-its caller process, described below, instead of over the bridge. If a function
-in the list turns out to depend on companion-only state, it stays in the
-companion and the in-process adapter gets its own copy, proved by the same
-witness.
+The streaming functions (`emit`, `drain`, `completed/1`, `ResponseBuilder`)
+stay in the companion, which keeps streaming. `identity/1` (`:181`) is not
+shared, because it resolves a model string through the catalog. The existing
+companion suites prove the unchanged behaviour. If a function in the list turns
+out to depend on companion-only state, it stays in the companion and the
+in-process adapter gets its own copy, proved by the same witness.
 
-**Call options, fixed:** `max_retries: 0`; `receive_timeout` is the
-milliseconds left before the request's `deadline`; `max_tokens` from the
-request's sampling; `tools` from the shared mapping. No `api_key` is ever
-passed, and the adapter refuses any provider outside its credential-free list
-with `{:error, {:not_dispatched, "credential_required"}}` before ReqLLM is
-called.
-
-**Model specification.** The adapter builds an inline model:
-
-```elixir
-ReqLLM.model(%{provider: :ollama, id: id, base_url: base_url_or_default})
-```
+**The call.** ADR 0039's technical companion states it once: the non-streaming
+`ReqLLM.generate_text/3` with an inline model
+`ReqLLM.model(%{provider: :ollama, id: id, base_url: base_url_or_default})`,
+`total_timeout: :infinity` so the request runs in the calling process,
+`receive_timeout` from the request deadline, `max_retries: 0`, `max_tokens`
+from the request's sampling, `tools` from the shared mapping, no `:cache` and
+never an `api_key`. The adapter refuses any provider outside its
+credential-free list with `{:error, {:not_dispatched, "credential_required"}}`
+before ReqLLM is called. The reply is mapped from the returned
+`ReqLLM.Response` (its message, tool calls, finish reason and usage) through
+`reply/6`; a response whose finish reason is `:error` or `:incomplete` is not a
+success. The in-process adapter reports no progress deltas.
 
 The runtime's `model` field stays the `provider:model` string, as
 `runtime.ex:1170-1171` requires. The adapter rebuilds the inline model from it
 on every call, and uses it for both the reply's `identity` (provider, model id,
-base URL as endpoint) and dispatch. No catalog lookup or
-`Using unverified model` warning occurs. That matters because Ollama models are
-absent from the pinned catalog. The default base URL is ReqLLM 1.24.0's
-`http://localhost:11434/v1`.
+base URL as endpoint) and dispatch. No catalog lookup or unverified-model
+warning occurs, which matters because Ollama models are absent from the pinned
+catalog. The default base URL is ReqLLM 1.24.0's `http://localhost:11434/v1`.
 
 The model grammar is `<prefix><id>`. The id is everything after the first colon,
 so `ollama:qwen3:14b` names id `qwen3:14b`. A prefix neither the in-process
@@ -282,8 +287,8 @@ table once:
 - `loopex_llm_reqllm` keeps its dependency on `req_llm` but removes it from the
   applications started with it; `loopex_composition` depends on
   `loopex_llm_reqllm` (`apps/loopex_composition/mix.exs:35`), which depends on
-  `req_llm` (`apps/loopex_llm_reqllm/mix.exs:63`),
-  so without this, starting either would start ReqLLM and load `.env`
+  `req_llm` (`apps/loopex_llm_reqllm/mix.exs:63`), so without this, starting
+  either would start ReqLLM and load `.env`
   (`deps/req_llm/lib/req_llm/application.ex:25-31`) before any Loopex code ran;
 - the escript and every build that carries the adapter still carry ReqLLM's
   code; a host building its own OTP release lists `req_llm: :load`, which the
@@ -294,60 +299,44 @@ table once:
   no process: it reads and writes persistent application configuration, a
   `.env` setting and a Loopex marker that outlive any Loopex application's
   restart and any later restart of ReqLLM, so a later composition proceeds and a
-  host that turns loading back on is refused. It never writes
-  `warn_unverified_models`, because the inline model never reaches that
-  warning.
+  host that turns loading back on is refused. It refuses a ReqLLM pool
+  configured for HTTP/2, which would move the request into a shared pool
+  process. It never writes `warn_unverified_models`.
 
-**Errors.** The boundary is the call to `ReqLLM.stream_text/3` itself, exactly
-where the companion places it (`req_llm.ex:416-453`, citing ADR 0018).
+**Errors.** The boundary is the call to `ReqLLM.generate_text/3` itself,
+matching where the companion places its own call (`req_llm.ex:416-453`, citing
+ADR 0018).
 - **Before the call:** a refusal the adapter meets before calling
-  `stream_text/3` is returned, never raised, as
+  `generate_text/3` is returned, never raised, as
   `{:error, {:not_dispatched, "model_call_failed"}}`. A raise is caught by the
   coordinator as `{:error, :provider_call_failed}`
   (`session_coordinator.ex:4149-4152`), which is `dispatched_or_unknown`. That
   covers model build, context, tools and options, and a deadline already
   elapsed. This is the only form the coordinator retries (`@attempt_limit 2`).
-- **From the call on:** every return or raise from `stream_text/3`, including
-  `{:error, _}`, is `{:error, {:dispatched_or_unknown, "model_call_failed"}}`,
-  because ReqLLM may already have started the HTTP transport before it returns
-  an error (`deps/req_llm/lib/req_llm/streaming.ex:116-128`, `:172-175`). A
-  possibly delivered call is never retried.
+- **From the call on:** every return or raise from `generate_text/3`,
+  including `{:error, _}` and a non-2xx status, is
+  `{:error, {:dispatched_or_unknown, "model_call_failed"}}`, because the
+  request may already have reached the server. A possibly delivered call is
+  never retried.
 
-A stream that ends without its terminal event is checked through the metadata
-before success: `:error`, a status of 400 or more, or `finish_reason` in
-`[:incomplete, :cancelled, :error]` is not success.
+**In-flight cleanup.** Each call has two processes of its own, as ADR 0039's
+[per-call process](../adr/0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-tree)
+states: the cleanup owner, registered with the coordinator through
+`ProviderLifetime.start_child/2` and `register/2` (`provider_bridge.ex:207`,
+`:224`) before anything calls ReqLLM, and the caller it spawns linked, which
+alone performs the request. On a stop, on a deadline, and on completion, the
+owner kills the caller if it is alive, waits for its `DOWN`, and only then
+acknowledges `{:loopex_provider_resource_stopped, stop, self()}`
+(`session_coordinator.ex:4641`) or returns the reply. A missing `DOWN`
+withholds the acknowledgement, and the coordinator's existing forced stop and
+unproved-cleanup path applies (`:4646-4652`). The shared Finch pool reclaims
+the caller's connection through its checkout monitor and is never killed.
 
-**In-flight cleanup.** Each call has two processes of its own:
-1. **The cleanup owner.** `complete/3` starts it with
-   `ProviderLifetime.start_child/2` and registers it with
-   `ProviderLifetime.register/2`, the coordinator hook the companion bridge uses
-   for its guardian (`provider_bridge.ex:207`, `:224`), before anything calls
-   ReqLLM. It traps exits and never calls ReqLLM or blocks, so it answers a
-   stop at any stage, stream start included.
-2. **The caller.** A process the owner spawns linked. It sets
-   `Logger.put_process_level(self(), :none)` (Elixir's API; OTP's `logger`
-   exports no per-process level setter), calls `ReqLLM.stream_text/3`, drains
-   the stream, reports deltas through the attempt's progress function, hands the
-   assembled reply to the owner, and waits for the owner.
-
-ReqLLM's own per-call processes, and the membership rule that finds them, are
-in ADR 0039's
-[per-call process tree](../adr/0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-tree):
-the stream server and metadata handle linked to the caller, the HTTP task linked
-to the stream server, and the metadata worker linked to the handle. On a stop,
-on a deadline, and on the caller handing over its reply, the owner suspends and
-walks that tree, kills every member with `:kill`, waits for every member's
-`DOWN`, and only then acknowledges
-`{:loopex_provider_resource_stopped, stop, self()}` (`session_coordinator.ex:4641`)
-or returns the reply. A missing `DOWN` withholds the acknowledgement, and the
-coordinator's existing forced stop and unproved-cleanup path applies
-(`:4646-4652`). The facts hold for the locked ReqLLM 1.24.0, and the witness
-fails if a ReqLLM update changes them.
-
-**Diagnostics.** No credential is in the host VM on this path. What ReqLLM's
-failure paths can log is request data: the stream-start line is silenced in the
-caller; crash reports from the stream server, HTTP task and metadata worker,
-and a crash dump, can hold the prompt, context, tool output or reply. The `ask`
+**Diagnostics.** No key enters the in-process request. What ReqLLM, Req or
+Finch can log about the call is request data. A log line is written in the
+caller, which sets `Logger.put_process_level(self(), :none)` first, so it is
+never emitted; a crash report from the caller or from the shared pool, and a
+crash dump, can hold the prompt, context, tool output or reply. The `ask`
 command sets the primary logger level to `:none`, renders its own lines, and
 sets `ERL_CRASH_DUMP=/dev/null` and `ERL_CRASH_DUMP_SECONDS=0` for its own VM,
 matching the companion (`provider_worker.ex:71-82`); the launcher also exports
@@ -678,12 +667,12 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
 | # | Witness files | What they prove | Lane |
 | --- | --- | --- | --- |
 | 1 | `apps/loopex_composition/test/ephemeral_api_test.exs` (new), with a scripted model adapter behind the same port | `run/2` answers; multi-turn `ask/3` keeps context; `{:error, {:run, :bound_reached, %{"bound" => "max_turns"}}}` at the step limit; a failed tool result reaches the next model call; `{:interaction_pending, _}` under a deferring policy, then `{:error, :run_open}` for the next `ask/3`, then `answer/3` resolving it and `last_result/1` returning the run's ending once the owner observes it; the command-to-run join choosing the right `run.finished`; `history/1` order and entry shapes; `stop_session/1` idempotent, aborting an open run, and removing the root only after all three cleanup items are proved; with each item made unprovable in turn (an abort that ends `outcome_unknown`, a run ending that never arrives, a process group that survives), `cleanup_unproved` naming that item, the root kept, and a later stop removing it once only item 3 was pending and now passes; `run/2` returning `cleanup_unproved` with the run's ending; the owner doing the same when the caller exits and logging the kept root | fast |
-| 2 | `apps/loopex_llm_reqllm/test/in_process_adapter_test.exs` (new), against a scripted ReqLLM transport; `apps/loopex_llm_reqllm/test/in_process_cleanup_test.exs` (new); `apps/loopex_composition/test/req_llm_start_test.exs` (new); the existing streaming conformance suite run against the new adapter; the unchanged companion suites; `apps/loopex_llm_reqllm/test/in_process_real_test.exs` (new, `real_provider`) | Request and reply mapping, including tool calls, deltas, and identity from the inline model. `max_retries: 0` and `receive_timeout` always passed and `api_key` never. Every non-Ollama provider refused before ReqLLM is called. The `not_dispatched`/`dispatched_or_unknown` split. No catalog warning. `Logger.put_process_level/2` accepting `:none` on the floor pair. Cleanup, for a stop and a deadline at each point of ReqLLM's real order (stream server started; HTTP task spawned but not linked; linked but before its handshake; running; metadata handle started; metadata worker running) and for a normal completion, on both toolchain pairs: the owner answers while the caller is blocked, every member's `DOWN` precedes the acknowledgement, no process that received the request remains, a task spawned but never handed its request exits by itself without running it, and `ReqLLM.TaskSupervisor` and the Finch pool are alive and serve the next call; a member whose exit a test seam withholds takes the unproved path. Hygiene: `:req_llm` absent from every Loopex application's start list while the escript embeds its modules and a fixture release built with `req_llm: :load` boots without starting it; each row of ADR 0039's start table; two concurrent first compositions starting ReqLLM once; a later composition proceeding, including after `loopex_composition` restarts; a host restart of ReqLLM loading no `.env`; a host turning loading back on, then refused; `warn_unverified_models` never written; a `.env` in the working directory not loaded. With `LOOPEX_PROVIDER_API_KEY` set to a canary in the host environment, an in-process run opens no credential plane and leaves the canary in no plane, no runtime or adapter process state and no captured log event, and the host variable unchanged. Real calls to a local Ollama model | fast; release |
+| 2 | `apps/loopex_llm_reqllm/test/in_process_adapter_test.exs` (new), against a scripted ReqLLM transport; `apps/loopex_llm_reqllm/test/in_process_cleanup_test.exs` (new); `apps/loopex_composition/test/req_llm_start_test.exs` (new); the existing streaming conformance suite run against the new adapter; the unchanged companion suites; `apps/loopex_llm_reqllm/test/in_process_real_test.exs` (new, `real_provider`) | Request and reply mapping from `ReqLLM.Response`, including tool calls, finish reasons and identity from the inline model. `total_timeout: :infinity`, `max_retries: 0` and `receive_timeout` always passed, and `api_key` and `:cache` never. Every non-Ollama provider refused before ReqLLM is called. The `not_dispatched`/`dispatched_or_unknown` split. No catalog warning. `Logger.put_process_level/2` accepting `:none` on the floor pair. Cleanup, on both toolchain pairs, against a local test server that stalls before its response headers, mid-body and after the body, for a stop, a deadline and a normal completion: the owner answers while the caller is blocked in socket I/O, the caller's `DOWN` precedes the acknowledgement or the returned reply, a process census during the call finds exactly the owner and the caller as new processes, and the Finch pool is alive and serves the next call; a caller whose exit a test seam withholds takes the unproved path; an HTTP/2 pool configuration refuses Hygiene: `:req_llm` absent from every Loopex application's start list while the escript embeds its modules and a fixture release built with `req_llm: :load` boots without starting it; each row of ADR 0039's start table; two concurrent first compositions starting ReqLLM once; a later composition proceeding, including after `loopex_composition` restarts; a host restart of ReqLLM loading no `.env`; a host turning loading back on, then refused; `warn_unverified_models` never written; a `.env` in the working directory not loaded. With `LOOPEX_PROVIDER_API_KEY` set to a canary in the host environment, an in-process run opens no credential plane and leaves the canary in no plane, no runtime or adapter process state and no captured log event, and the host variable unchanged. Real calls to a local Ollama model | fast; release |
 | 2 | `apps/loopex_composition/test/ephemeral_companion_test.exs` (new), against the companion's existing scripted provider | An ephemeral runtime with a companion model composes `CredentialPlane` exactly as the durable one does, refuses without `:provider_launch` before its temporary root exists, answers through the companion, and leaves `LOOPEX_PROVIDER_API_KEY` absent from the VM environment after composition; the durable composition and `ask --state-root` refuse an `ollama:` model | fast |
 | 3 | The store conformance suite with `:memory` bound to `Loopex.Store.Memory`; `apps/loopex_composition/test/ephemeral_profile_test.exs` (new) | The memory store passes every conformance case. The ephemeral profile refuses without a policy, creates its root `0700`, removes it after a proved stop and on owner exit, keeps it after an unproved one, composes no artifact store, and names its profile | fast |
 | 4 | `apps/loopex_cli/test/ask_command_test.exs` (new), `apps/loopex_cli/test/ask_exit_test.exs` (new), `apps/loopex_cli/test/ask_delegation_test.exs` (new), `apps/loopex_executor_local/test/read_only_tools_test.exs` (new), `apps/loopex_composition/test/skill_directories_test.exs` (new), `apps/loopex_composition/test/tool_preset_budget_test.exs` (new) | The grammar and refusals; `-p` identical to `ask`; a prompt from stdin; stdout carrying only the answer or only one JSON object; every exit status in the map, driven with a scripted model; the ephemeral profile with no `LOOPEX_HOME`; `--state-root` selecting the durable profile; the credential-discard order at dispatch for both adapters; the JSON member set and `details` per outcome exactly as tabled, every bound and truncation flag, the `no_ending` object, the `cleanup` member for both results, and nothing on standard output for a refusal; skill directories classified against the workspace, a workspace `.agents/skills/<name>` as `project:<name>`, an outside directory as `user:<name>`, another workspace directory refused, a shared name admitting the project skill and reporting the user skill as shadowed, refusals when malformed, duplicated within a kind or more than four, and the same under `--state-root`; `grep`/`find`/`ls` bounds, confinement and refusals; each tool preset's system-class projection measured under ADR 0017's limit; a separate OS process running `loopex -p` with a scripted model and reading its JSON, and driving the app server | fast |
 | 5 | The M5 suites and release lanes, unchanged except the version literal; `mix loopex.deps_budget`; `git diff v0.2.0 -- apps/loopex/lib ':(exclude)apps/loopex/lib/mix'` empty at the tested candidate, and the only paths added under `apps/loopex/lib/mix/tasks/` being the two closure tasks | The durable profile, the companion, the daemon and both protocol generations unchanged; the durable composition's default active tools still the four; core's runtime library and dependency list unchanged. `VERSION` moving to `0.3.0` changes `Loopex.version()`, read from `VERSION` at compile time (`loopex.ex:28-42`), and with it the `daemon_ready` version; the durable `policy_identity` revision stays `"0.2.0"`. The tests that assert the literal `"0.2.0"` against the running build read `Loopex.version()` instead: `service_lifecycle_test.exs:139`, `daemon_command_test.exs:163,221` and `multi_client_workflow_test.exs:72`. `readiness_test.exs:11-42` passes the version as an argument to the pure encoder and stays unchanged. `scripts/check-release.sh:30`'s `release_version` moves to `0.3.0` as an explicit literal, and `DEVELOPMENT.md` states `0.3.0`. These are the only changes M6 makes to an M5 check's expectation | fast; release |
-| 5 | `apps/loopex_cli/test/rollback_test.exs` (new, release lane `rollback`), against a `v0.2.0` build made from a fresh `git archive v0.2.0` and a scripted model | A durable root holding a pending interaction written by the candidate recovers, and the interaction is answered, under `v0.2.0`, and the reverse; a pending call to `loopex.grep` written by the candidate, resumed under `v0.2.0`, is committed as a failed `unknown_tool` call and the run continues; a completed `loopex.grep` call in history replays under `v0.2.0`; a root with an admitted user skill, written by the candidate, has its retained snapshot reloaded by digest under `v0.2.0` and its session resumed. The default `policy_identity` revision is `"0.2.0"` under both | release |
+| 5 | `apps/loopex_cli/test/rollback_test.exs` (new, release lane `rollback`), against a `v0.2.0` build made from a fresh `git archive v0.2.0` and a scripted model | A durable root holding a pending interaction written by the candidate recovers, and the interaction is answered, under `v0.2.0`, and the reverse; a pending call to `loopex.grep` written by the candidate, resumed under `v0.2.0`, is committed as a failed `unknown_tool` call and the run continues; a completed `loopex.grep` call in history replays under `v0.2.0`; a root with an admitted user skill, written by the candidate, resumes under `v0.2.0`'s offline `loopex resume` with the retained snapshot reloaded by digest, and under `v0.2.0`'s daemon with the session resumed and that skill's context withheld. The default `policy_identity` revision is `"0.2.0"` under both | release |
 | 6 | `apps/loopex/test/closure_tooling_test.exs` (new); `scripts/test/stage-archive-manifest-test.sh`, `scripts/test/floor-lane-test.sh`, `scripts/test/attended-release-test.sh` (new); `bash scripts/check.sh --docs` | Each closure command reproduces the M5 closure's checks on a fixture, with a failing case for each; the attended runner refuses automatic mode for a missing anchor, another milestone, another SHA and an entry without the authorization, and accepts only the exact one; M6's own closure uses only them; P1 to P4 are in place and the documentation check passes | fast; closure |
 | 1–4 | `scripts/m6-demonstration.sh`, the single acceptance demonstration, run from a clean checkout with no `LOOPEX_HOME` on macOS and on Linux | Its four steps in order, each printing its own `PASS` or `FAIL` line and the elapsed time; the complete output of each platform's run retained with its reference and SHA-256 digest in `docs/evidence/M6-closure-runs.md` | closure |
 | — | An independent read-only security review of the in-process path and the ephemeral companion path, naming the tested SHA, retained as `docs/evidence/M6-security-review.md` with the reviewer's retained output reference and SHA-256 digest | No credential reaches the in-process path; the ephemeral companion path composes the credential plane exactly as the durable one; the process-tree walk kills only the call's own processes; hygiene holds | closure |
@@ -728,8 +717,8 @@ Concept: [Scope](M6.md#concept-plan-scope).
 | --- | --- | --- |
 | Host process ↔ ephemeral owner | `LoopexComposition.Ephemeral` owner, linked to the caller and trapping exits | The caller exits: the owner aborts an open run, stops the runtime (the executor terminating its owned process groups) and removes the root only when cleanup is proved, otherwise keeping it and logging its path. The owner crashes: the linked caller receives the exit, and the runtime and executor, linked under the owner, stop with it; the root may remain, as with a hard VM kill, named in the limitations |
 | Coordinator ↔ either adapter | The session coordinator, as for any model | A raise or exit inside the adapter is `dispatched_or_unknown` by the existing rule, and the run ends `failed`. A pre-dispatch refusal is retried once by the existing attempt limit |
-| Cleanup owner ↔ the call's process tree | The in-process adapter's cleanup owner, registered with the coordinator before the call | A stop, a deadline or completion walks and kills the whole tree and answers only after every `DOWN`; a missing `DOWN` withholds the answer, and the coordinator's unproved-cleanup path applies |
-| Adapter ↔ ReqLLM | The in-process adapter | Stream start failure is `dispatched_or_unknown`. An incomplete stream is not success. A timeout bounded by the request deadline ends the run `failed` |
+| Cleanup owner ↔ the caller | The in-process adapter's cleanup owner, registered with the coordinator before the call | A stop, a deadline or completion kills the caller if alive and answers only after its `DOWN`; a missing `DOWN` withholds the answer, and the coordinator's unproved-cleanup path applies; the shared pool reclaims the connection |
+| Adapter ↔ ReqLLM | The in-process adapter | Any return or raise from `generate_text/3` is `dispatched_or_unknown`. A response whose finish reason is `:error` or `:incomplete` is not success. The kernel's deadline ends the call through the cleanup owner, and the run ends `failed` or `outcome_unknown` by the existing rules |
 | Composition ↔ ReqLLM's start | The start step, over persistent application configuration and the application controller's serialized start | An undeclared ReqLLM started by the host, or a declared one with `.env` loading on, refuses before any root exists |
 | Composition ↔ companion | `CredentialPlane` and the companion bridge, unchanged | Their M5 behaviour. In the ephemeral profile the credential plane opens at step 1, before the temporary root exists, so a missing `:provider_launch` or credential refuses with no root; the durable composition keeps its M5 order |
 | Runtime ↔ memory store | The store GenServer, supervised under the ephemeral owner | Store loss is loss of the session. The runtime reports it by its existing classes, and nothing is recovered |
@@ -771,7 +760,7 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 | Backup and restore or downgrade policy | Unchanged from `0.2`; the `0.2` binary opens and resumes every root `0.3` writes, with the two exceptions below |
 | Pending interactions across versions | The default policy revision is `"0.2.0"` in both releases, so a pending interaction recovers and can be answered after an upgrade or a rollback |
 | Exception: a pending call to an M6-only tool | Recovery re-resolves a pending call against the active tool set (`session_coordinator.ex:6602`); `0.2` answers `{:error, {:unknown_tool, name}}` (`:6844`) and commits it as a failed tool call (`:6625-6626`), and the run continues. The call's effect never ran, so no effect is lost; the model sees the failure |
-| Exception: an admitted user skill | Its admission is journaled as a reference, digest, decision and selections (`session_state.ex:4898`) and its snapshot is retained under the state root by digest (`resource_packs.ex:333-380`), as for any pack; `0.2`'s `load/2` reloads it through core validation, which accepts its `user:<name>` identity (`resource_pack.ex:203-216`, `:343-348`); `0.2` cannot admit a new one |
+| Exception: an admitted user skill | Its admission is journaled as a reference, digest, decision and selections (`session_state.ex:4898`) and its snapshot retained under the state root by digest (`resource_packs.ex:333-380`), as for any pack. `0.2`'s offline `loopex resume` reloads it by digest through core validation, which accepts its `user:<name>` identity (`resource_pack.ex:203-216`, `:343-348`). `0.2`'s daemon composes only discovered project skills (`daemon.ex:239-242`), so the session resumes with that skill's context withheld (`resource_pack.ex:497-505`). `0.2` cannot admit a new one |
 | Proof | The `rollback` lane proves both directions and both exceptions |
 
 <a id="technical-plan-packaging"></a>
@@ -800,7 +789,7 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 - The ephemeral API is one module that polls the existing facade and composes
   the companion path exactly as the durable composition does.
 - The adapter is one module over the shared mapping, with its cleanup owner,
-  caller and tree walk as functions of it.
+  caller as functions of it.
 - The start step is one function over application configuration.
 - The memory store is the promoted 125-line wrapper.
 - The command is one parser branch and one renderer mode.
@@ -825,4 +814,6 @@ Concept: [Non-goals](M6.md#concept-plan-non-goals).
 | 7 | An ephemeral session's memory grows with its history, bounded per run but not across runs | Ephemeral sessions are meant to be short; stopping the session releases it |
 | 8 | A stop whose cleanup cannot be proved keeps the temporary root for the host to remove | Deleting it while an effect may still use it would be worse; the root is named in the error, and a later stop removes it when only process groups were pending |
 | 9 | Rolling a durable root back to `0.2` fails a pending call to an M6-only tool as `unknown_tool`, and `0.2` cannot admit a new user skill | Stated and proved by the `rollback` lane; the call's effect never ran |
-| 10 | The in-process cleanup depends on ReqLLM 1.24.0's process structure | The lock pins it, and the cleanup witness fails if an update changes it |
+| 10 | The in-process call runs in one process only with `total_timeout: :infinity` and an HTTP/1 pool | Both are set or checked by Loopex: the option on every call, and the start step refuses an HTTP/2 pool; the process census in the cleanup witness fails if a ReqLLM update moves the request elsewhere |
+| 11 | A local model's reply arrives whole, with no streamed progress | Progress is transient and never session truth; the companion keeps streaming for hosted models |
+| 12 | The daemon is unchanged, so a durable session resumed through it composes only the workspace's discovered project skills and withholds a user skill's context | Named skill directories in daemon-owned sessions belong to the M7 draft's saved configuration; the offline `loopex resume` reloads them |
