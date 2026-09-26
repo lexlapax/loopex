@@ -316,7 +316,9 @@ where each request stops.
 Ask for the outcome in ordinary words. These verbs belong to the repository, not
 to any tool. A development client may offer a shortcut for one — a named skill,
 a menu entry, a slash command — and those shortcuts are adapter conveniences
-recorded in
+recorded in the context map's
+[development client guidance](../developer/agent-context-map.md#development-client-guidance),
+with their tested loading in
 [the adapter smoke evidence](../developer/agent-adapter-smoke.md). A shortcut
 never changes what a request authorizes, and a client that has no shortcut
 changes nothing about how the work is directed.
