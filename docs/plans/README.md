@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M5` is in review; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
-| Last closed product checkpoint | `M4` — 2026-09-19 |
-| Blockers | `M5` awaits the closure matrix and independent review of its exact candidate |
-| Authorized work | Implementation inside the accepted `M5` plan pair, landing on `main` in small reviewed changes |
-| Next maintainer decision | Close `M5` or reject its closure candidate on the matrix or review findings |
-| Next transition | After the maintainer closes it, make the administrative direct child: fill the existing `docs/evidence/M5-closure-runs.md` scaffold, record the closure governance row naming the tested implementation SHA, and move `M5` to Closed |
+| Last closed product checkpoint | `M5` — 2026-09-26 |
+| Blockers | None; `M5` is closed and its governance row is recorded |
+| Authorized work | Explicitly authorized planning, ADR, and review work only; no product implementation until the next milestone is accepted |
+| Next maintainer decision | Open the next milestone, or defer it |
+| Next transition | Write the next milestone's plan pair and move it to Open |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -137,7 +137,7 @@ representable.
 | `M2` | Closed | [concept](M2.md) | [technical depth](M2-technical.md) | [gate](M2-gate.md) |
 | `M3` | Closed | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
-| `M5` | In review | [concept](M5.md) | [technical depth](M5-technical.md) | — |
+| `M5` | Closed | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact

@@ -5918,3 +5918,29 @@ On 2026-09-24 the maintainer decided:
   cut and barrier calls catch every exit, and #22, a resource-pack import
   that can outlast its caller's deadline by the cleanup period, the reply
   margin and the import settlement wait; both are liveness or diagnosis only.
+
+<a id="disposition-m5-closure-2026-09-26"></a>
+### M5 closure — 2026-09-26
+
+The external review of `9045835d8847a1c8a557e985a9a014e6b213f323` returned CLOSE WITH NOTES. The maintainer then decided to close M5 on that evidence after a documentation pass, and that documentation-only changes reuse its closure matrix and reviews. The external review of the pass returned ACCEPT WITH NOTES, with no outstanding objection to closure once its last wording correction was applied. After that correction, the maintainer said:
+
+> ok. this is final.. correct then let's go
+
+This closes M5 at the tested implementation SHA `fe020e24b62504f6f2fbc6c81711f399803b6fa9`. `git diff --name-only 9045835d fe020e24` lists 40 Markdown paths and nothing else. The floor, `long_bound`, release and Outcome 6 results in [M5 closure runs](../evidence/M5-closure-runs.md) are runs of `9045835d`, reused under that decision. Hosted CI passed on the tested SHA itself. Closure binds the plan pair as committed at the tested SHA:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept | `sha256:ce7e40112dc635f450a0f4844c5a2964be7b6bd930548f16c4861f359a41eb6a` |
+| Technical depth | `sha256:5ee0f71ab8a7f61936baa87160761ac798997dd38b024f5600e6420510f52266` |
+
+Decisions recorded with this closure:
+
+- **Floor runs:** one floor-pair fast check per platform, on serenity and on Darwin, at the exact candidate (2026-09-26).
+- **ADR 0028 divergence:** remediation is deferred beyond M5 (2026-09-26). The operator and developer disclosures stay, and the follow-up is carried to the next milestone plan.
+- **Proposals for the next milestone to consider:** four governance proposals from the documentation pass, none of them adopted:
+  - the charter exception list;
+  - when the release check runs;
+  - where the pre-merge fast check may run;
+  - the closure-candidate branch.
+
+This record grants no integration to `main`, no tag, no release and no publication.
