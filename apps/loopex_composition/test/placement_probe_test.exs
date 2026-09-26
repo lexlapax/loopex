@@ -1,9 +1,9 @@
-defmodule LoopexCli.PlacementProbeTest do
+defmodule LoopexComposition.PlacementProbeTest do
   @moduledoc false
 
   use ExUnit.Case, async: true
 
-  alias LoopexCli.Placement
+  alias LoopexComposition.Placement
 
   # Concept: the placement lock reads a helper that could not inspect the owner
   # as an owner it cannot examine, never as a dead one.
@@ -39,8 +39,11 @@ defmodule LoopexCli.PlacementProbeTest do
     bytes = File.read!(handle)
 
     failing = fn _pid -> {:error, {:process_probe_failed, {:exit_status, 2}}} end
-    assert {:error, message} = Placement.acquire(root, failing)
-    assert message =~ "could not be taken" and message =~ "process_probe_failed"
+
+    assert {:error, {:placement_lock_failed, {:guard_failed, reason}}} =
+             Placement.acquire(root, failing)
+
+    assert inspect(reason) =~ "process_probe_failed"
     assert File.read!(handle) == bytes, "a failed probe let the lock be rewritten"
     assert :ok = Placement.release(handle)
   end

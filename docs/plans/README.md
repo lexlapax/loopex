@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M5` is accepted; next candidate `M6` is open.
+**Revision status:** Closed milestone product baseline; active milestone `M6` is open; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
-| Last closed product checkpoint | `M4` — 2026-09-19 |
-| Blockers | None for `M5` delivery; `M6` cannot be accepted or implemented until `M5` closes; `M6` waits on ADR 0036, ADR 0037, and ADR 0038 before the outcomes that depend on them |
-| Authorized work | Implementation inside the accepted `M5` plan pair, landing on `main` in small reviewed changes; planning and review for Open `M6`, with no `M6` product implementation |
-| Next maintainer decision | None until `M5` is ready for independent review; `M6` cannot be accepted before `M5` closes; disposition [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept), [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept), and [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) |
-| Next transition | Complete `M5`, move it to In progress, then make its tested candidate by moving it to In review; run the closure matrix and independent review, close it, then accept or reject `M6` |
+| Last closed product checkpoint | `M5` — 2026-09-26 |
+| Blockers | `M6` is open and not accepted; the maintainer must accept its plan pair; `M6` waits on ADR 0036, ADR 0037, and ADR 0038 before the outcomes that depend on them |
+| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
+| Next maintainer decision | Accept or reject the `M6` plan pair; disposition [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept), [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept), and [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) |
+| Next transition | Record the acceptance governance row and move `M6` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -137,7 +137,7 @@ representable.
 | `M2` | Closed | [concept](M2.md) | [technical depth](M2-technical.md) | [gate](M2-gate.md) |
 | `M3` | Closed | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
-| `M5` | Accepted | [concept](M5.md) | [technical depth](M5-technical.md) | — |
+| `M5` | Closed | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 | `M6` | Open | [concept](M6.md) | [technical depth](M6-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
@@ -317,7 +317,9 @@ where each request stops.
 Ask for the outcome in ordinary words. These verbs belong to the repository, not
 to any tool. A development client may offer a shortcut for one — a named skill,
 a menu entry, a slash command — and those shortcuts are adapter conveniences
-recorded in
+recorded in the context map's
+[development client guidance](../developer/agent-context-map.md#development-client-guidance),
+with their tested loading in
 [the adapter smoke evidence](../developer/agent-adapter-smoke.md). A shortcut
 never changes what a request authorizes, and a client that has no shortcut
 changes nothing about how the work is directed.

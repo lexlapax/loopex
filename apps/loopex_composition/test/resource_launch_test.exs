@@ -69,7 +69,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
 
     try do
       assert {:error, :stop_after_resource_observation} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "resource-launch",
                  state_root: state_root,
                  workspace: workspace,
@@ -99,7 +99,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
 
     try do
       assert {:error, {:invalid_composition_option, :resource_manifest}} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "prevalidated",
                  state_root: "/unused",
                  workspace: "/unused",
@@ -137,7 +137,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
 
     try do
       result =
-        LoopexComposition.start(
+        LoopexComposition.TestHost.start(
           runtime_id: "wrong-workspace",
           state_root: state_root,
           workspace: workspace,
@@ -168,7 +168,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
 
     try do
       assert :callback_result =
-               LoopexComposition.with_runtime(
+               LoopexComposition.TestHost.with_runtime(
                  [
                    runtime_id: "bracketed-runtime",
                    state_root: state_root,
@@ -218,7 +218,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
 
     try do
       assert {:error, {:composition_cleanup_unconfirmed, failures}} =
-               LoopexComposition.with_runtime(
+               LoopexComposition.TestHost.with_runtime(
                  [
                    runtime_id: "forced-cleanup-runtime",
                    state_root: state_root,
@@ -272,7 +272,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
 
     try do
       assert {:error, {:composition_cleanup_unconfirmed, failures}} =
-               LoopexComposition.with_runtime(
+               LoopexComposition.TestHost.with_runtime(
                  [
                    runtime_id: "unconfirmed-cleanup-runtime",
                    state_root: state_root,
@@ -316,7 +316,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
           result
         end)
 
-        LoopexComposition.with_runtime(
+        LoopexComposition.TestHost.with_runtime(
           [
             runtime_id: "lost-caller-runtime",
             state_root: state_root,
@@ -362,7 +362,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
     {state_root, workspace} = roots()
 
     assert_raise RuntimeError, "callback failed", fn ->
-      LoopexComposition.with_runtime(
+      LoopexComposition.TestHost.with_runtime(
         [
           runtime_id: "exception-runtime",
           state_root: state_root,
@@ -376,7 +376,7 @@ defmodule LoopexComposition.ResourceLaunchTest do
     refute File.exists?(Path.join(state_root, "store.log.writer"))
 
     assert :reopened =
-             LoopexComposition.with_runtime(
+             LoopexComposition.TestHost.with_runtime(
                [
                  runtime_id: "exception-runtime-reopened",
                  state_root: state_root,

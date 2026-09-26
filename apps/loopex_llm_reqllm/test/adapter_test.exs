@@ -6,8 +6,8 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
 
   Everything about the adapter boundary that can be proved without spending a
   token: that the pinned model specification still names a real catalog entry,
-  that identity crosses the boundary as plain non-secret data, and that a missing
-  credential is reported before anything is dispatched.
+  that identity crosses the boundary as plain non-secret data, and that missing
+  credential custody is reported before provider transport is dispatched.
 
   ## Technical depth
 
@@ -17,7 +17,7 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
   returns before dispatch.
   """
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
@@ -46,37 +46,22 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
   end
 
   test "a missing credential is reported before any provider is called" do
-    variable = Adapter.credential_variable()
-    assert variable == "LOOPEX_PROVIDER_API_KEY"
-
-    # Concept: a test must not disarm the lane that carries the real-path evidence.
-    #
-    # Technical depth: the variable is restored afterwards so this test cannot
-    # disarm the real-provider lane for a later run in the same VM. `async:
-    # false` keeps the mutation off concurrent tests.
-    previous = System.get_env(variable)
-    System.delete_env(variable)
     fixture = Fixture.new()
+    {:ok, custody} = Loopex.LLM.ReqLLM.CredentialCustody.reference(fixture.custody_pid)
+    assert :ok = Loopex.LLM.ReqLLM.CredentialCustody.rotate(custody, nil)
 
-    try do
-      assert Fixture.complete(fixture) ==
-               {:error, {:not_dispatched, "model_call_failed"}}
+    assert Fixture.complete(fixture) ==
+             {:error, {:not_dispatched, "model_call_failed"}}
 
-      assert Fixture.canaries(fixture) == 0
-      assert Fixture.count(fixture) == 0
-      Fixture.assert_gone(fixture)
-    after
-      if previous, do: System.put_env(variable, previous)
-    end
+    assert Fixture.canaries(fixture) == 0
+    assert Fixture.count(fixture) == 0
+    Fixture.assert_gone(fixture)
   end
 
-  test "the adapter reads exactly one credential environment variable" do
-    # Concept: other provider keys present on the host are not this lane's to
-    # spend. Drift protection against a fallback read being added later; it
-    # proves what the adapter reads, not what ReqLLM would read on its own.
-    # ADR 0019 moves the sole credential read into the raw sender. The worker
-    # reads only its non-secret crash policy, and the launcher enumerates names
-    # solely to clear the first image's environment; neither is a key fallback.
+  test "the adapter library has no credential environment read" do
+    # Concept: credentials enter through host-owned custody only.
+    # Technical depth: the worker still reads its non-secret crash policy and
+    # the launcher enumerates names solely to scrub the first child image.
     for path <- Path.wildcard(Path.join(__DIR__, "../lib/**/*.ex")) do
       source = File.read!(path)
 
@@ -87,7 +72,6 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
 
       expected =
         case Path.basename(path) do
-          "provider_bridge.ex" -> ["\"LOOPEX_PROVIDER_API_KEY\""]
           "provider_worker.ex" -> ["\"ERL_CRASH_DUMP\"", "\"ERL_CRASH_DUMP_SECONDS\""]
           "provider_launcher.ex" -> [""]
           _ -> []
@@ -95,6 +79,19 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
 
       assert reads == expected
       refute source =~ ~r/System\.fetch_env!?\(/
+
+      # Every other way to read the environment is absent: the Erlang calls
+      # and a captured or applied `System.get_env`. The whole-environment read
+      # is the launcher's one allowed name enumeration, counted above.
+      for form <- [
+            ~r/:os\.getenv/,
+            ~r/:os\.env\b/,
+            ~r/&System\.get_env\//,
+            ~r/&System\.fetch_env/,
+            ~r/apply\(\s*System\s*,\s*:(get|fetch)_env/
+          ] do
+        refute source =~ form, "#{Path.basename(path)} reads the environment as #{inspect(form)}"
+      end
     end
   end
 end

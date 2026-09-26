@@ -1,20 +1,23 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderBackpressureObserverTest do
-  use ExUnit.Case, async: false
-  alias Loopex.LLM.ReqLLM, as: Adapter
+  use ExUnit.Case, async: true
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
+  # Technical depth: ExUnit's clock starts before `Fixture.new` compiles the
+  # synthetic worker (a watchdog of up to 50 s) and before the real child boots,
+  # while every wait below is bounded by the request's own 60 s deadline. This
+  # bound covers compile, deadline and cleanup, so the case's own deadlines,
+  # not ExUnit's, decide; it only catches a true hang.
+  @moduletag timeout: 150_000
+
+  # Technical depth: every wait below spends the one request budget, which
+  # must cover starting a companion BEAM and each staged proof on a machine
+  # running the whole fast check at once; the case proves how writer calls are
+  # counted under backpressure, not a deadline, so its budget is 60 s rather
+  # than the fixture's 10 s default.
   test "barrier-drained real writer calls remain counted on the next observer iteration" do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, "synthetic-observer-regression")
-
-    on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-    end)
-
-    request = Fixture.request()
+    request = Fixture.request(deadline_ms: 60_000)
 
     fixture =
       Fixture.new(:backpressure,

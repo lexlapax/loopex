@@ -2,11 +2,11 @@ defmodule LoopexProtocol.Session do
   @moduledoc """
   ## Concept
 
-  The one experimental public session protocol: which generation a client and
-  server agree on, exactly which methods and record families that generation
-  admits, the limits the server enforces, and the digest that names the whole
-  contract. A client negotiates against these values before it may change
-  anything, and a server that changes any of them changes the digest.
+  The generation-one experimental public session protocol: which generation a
+  client and server agree on, exactly which methods and record families that
+  generation admits, the limits the server enforces, and the digest that names
+  the whole contract. A client negotiates against these values before it may
+  change anything, and a server that changes any of them changes the digest.
 
   ## Technical depth
 
@@ -29,7 +29,7 @@ defmodule LoopexProtocol.Session do
 
   alias LoopexProtocol.Canonical
 
-  @generation "loopex.session.v1-experimental"
+  @generation "loopex.experimental/1"
 
   @methods [
     "session.create",

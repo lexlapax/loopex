@@ -9,6 +9,15 @@ The governing method is in [AGENTS.md](../../AGENTS.md), the current mapping is
 in the [context map](agent-context-map.md), and the capability classes are
 defined by the [Concept rule](development-charter.md#concept-capability-follows-consequence)
 and [Technical depth](development-charter-technical.md#technical-capability-follows-consequence).
+What a new entry retains, and when a smoke is rerun, is in the context map's
+Development Client Guidance section.
+
+Entries are dated and newest first. Each describes only the source revision,
+client versions, and environment it names; commands in an older entry, such as
+the Python bootstrap scripts of 2026-08-15, belong to that revision and are
+not current commands. The structural half of today's adapter check is
+`scripts/check-agent-bootstrap.sh`, which runs `mix loopex.agent_bootstrap`
+as part of `bash scripts/check-bootstrap.sh`.
 
 ## 2026-08-16 — read-only review lane, positive and negative smoke
 

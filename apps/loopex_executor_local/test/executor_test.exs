@@ -358,6 +358,324 @@ defmodule Loopex.Executor.LocalTest do
     :ets.delete(table)
   end
 
+  test "cancellation keeps waiting past the episode instant" do
+    # Concept: the caller of `cancel/2` keeps listening after the episode's
+    # instant, because the answer it waits for is sent after that.
+    #
+    # Technical depth: this proves only that the caller waits past the
+    # instant. The stand-in owner holds the real caller's exact episode, waits
+    # until the instant has passed on the same monotonic clock, gives the
+    # caller up to 300 ms more to stop waiting, and then answers `cleaned`. A
+    # caller that stops at the instant has returned `unconfirmed` by then; one
+    # that keeps waiting returns the answer.
+    {worker, job_id, table} =
+      stand_in_owner("late-answer-cancel-job", 40, fn token, reply_to, {until, _grace, _probe} ->
+        requester =
+          receive do
+            {:requester, pid} -> pid
+          end
+
+        wait_past(until)
+        requester_monitor = Process.monitor(requester)
+
+        receive do
+          {:DOWN, ^requester_monitor, :process, ^requester, _reason} -> :ok
+        after
+          300 -> Process.demonitor(requester_monitor, [:flush])
+        end
+
+        send(reply_to, {:loopex_cancel_result, token, {:ok, :cleaned}})
+      end)
+
+    cancelling = Task.async(fn -> Local.cancel(worker, job_id) end)
+    send(worker, {:requester, cancelling.pid})
+    assert Task.await(cancelling, 5_000) == {:ok, :cleaned}
+    :ets.delete(table)
+  end
+
+  test "the reply margin is the retention allowance plus a second, capped inside Core's bound" do
+    # Concept: how long past its episode a cancelling caller waits follows the
+    # job's own settlement bound, and never lets the whole wait reach the
+    # bound Core observes the cancellation for.
+    #
+    # Technical depth: the margin is `min(receipt_retention_ms + 1_000,
+    # executor_observe_ms - grace - 250)` for the job's period. A stand-in
+    # owner reports the exact episode instant it was handed and answers at
+    # once; the caller's traced wait shows the instant it waits until, and the
+    # difference is the margin. 2,000 and 6,000 ms take the uncapped branch;
+    # 7,500 ms is capped at `9_750 - grace`, and 16,000 ms at 1,750 ms.
+    for {grace, margin} <- [{2_000, 1_500}, {6_000, 2_500}, {7_500, 2_250}, {16_000, 1_750}] do
+      parent = self()
+
+      {worker, job_id, table} =
+        stand_in_owner("margin-#{grace}", grace, fn token, reply_to, {until, _grace, _probe} ->
+          send(parent, {:instant, until})
+          send(reply_to, {:loopex_cancel_result, token, {:ok, :cleaned}})
+        end)
+
+      events =
+        trace_local_calls([await_cancel_result: 4], fn ->
+          assert Local.cancel(worker, job_id) == {:ok, :cleaned}
+        end)
+
+      assert_receive {:instant, instant}, 1_000
+      [{:await_cancel_result, [_watched, _monitor, _token, waits_until]} | _] = events
+      assert waits_until - instant == margin, "grace #{grace} waited #{waits_until - instant}ms"
+      :ets.delete(table)
+    end
+  end
+
+  test "a cancellation that stopped waiting receives nothing sent to it afterwards" do
+    # Concept: once `cancel/2` has returned, its caller's mailbox is its own
+    # again: a hand-off or answer that arrives late never lands in it.
+    #
+    # Technical depth: the requests carry a process alias as their reply
+    # target, and `cancel/2` removes it before returning. The stand-in owner
+    # holds this case's request without answering until the case's own
+    # `cancel/2` has timed out and returned `unconfirmed`, then sends a
+    # hand-off and an answer to the reply target it was given and reports that
+    # it has. Both come from the stand-in before its report, so a pid target
+    # would have them queued here ahead of it; the removed alias has the VM
+    # drop them.
+    parent = self()
+
+    {worker, job_id, table} =
+      stand_in_owner("late-reply-cancel-job", 5, fn token, reply_to, _episode ->
+        receive do
+          :send_late -> :ok
+        end
+
+        send(reply_to, {:loopex_cancel_handoff, token, parent})
+        send(reply_to, {:loopex_cancel_result, token, {:ok, :cleaned}})
+        send(parent, :sent_late)
+      end)
+
+    assert Local.cancel(worker, job_id) == {:ok, :unconfirmed}
+    send(worker, :send_late)
+    assert_receive :sent_late, 2_000
+    refute_received {:loopex_cancel_handoff, _token, _settler}
+    refute_received {:loopex_cancel_result, _token, _answer}
+    :ets.delete(table)
+  end
+
+  test "forced KILL cleanup is confirmed by exactly its three positive facts" do
+    # Concept: a forced cancellation is confirmed when KILL went over the live
+    # Port, the Port then exited nonzero, and a complete process table shows the
+    # captured group empty -- and by nothing less.
+    #
+    # Technical depth: the real-process case cannot choose which of these a
+    # loaded host delivers inside the period, so the rule is proved here on
+    # supplied facts through the seam that composes production's own private
+    # functions. The table is well formed and witnessed by its own probe row;
+    # only the rows of the captured group differ.
+    group = 900
+    witness = 700
+    empty = {:answered, "#{witness} #{witness}\n800 800\n", 0, witness}
+    occupied = {:answered, "#{witness} #{witness}\n901 #{group}\n", 0, witness}
+
+    all = %{kill_sent: true, port_exit_status: 137, table_answer: empty, group: group}
+
+    assert Local.forced_kill_confirmed?(all),
+           "KILL over the live Port, a nonzero Port exit and an empty table did not confirm"
+
+    refute Local.forced_kill_confirmed?(%{all | kill_sent: false}),
+           "cleanup was confirmed although KILL was never sent over the live Port"
+
+    refute Local.forced_kill_confirmed?(%{all | port_exit_status: 0}),
+           "cleanup was confirmed although the killed guard's Port exited zero"
+
+    refute Local.forced_kill_confirmed?(%{all | port_exit_status: nil}),
+           "cleanup was confirmed although the Port never reported an exit"
+
+    refute Local.forced_kill_confirmed?(%{all | table_answer: occupied}),
+           "cleanup was confirmed although the table still held a group member"
+
+    refute Local.forced_kill_confirmed?(%{all | table_answer: :no_answer}),
+           "cleanup was confirmed although the probe never answered"
+  end
+
+  test "a cleanup probe and the confirmation of its helper stay inside the owner's instant" do
+    # Concept: an owner's probe spends only what remains of the owner's episode,
+    # so the owner's verdict exists by the episode's instant; and a probe with
+    # too little time does not start.
+    #
+    # Technical depth: this is observed through call tracing of the helper's
+    # private steps rather than wall time, so it holds on any host. The owner's
+    # instant is the one handed to `guarded_answer_until/3` -- production owner
+    # sites pass their episode's `until` there unchanged, which the source check
+    # below pins, and `answer_within/3` passes the instant it opens for its
+    # bound. The helper never answers, so its answer wait expires and it is
+    # abandoned. Its episode must end at exactly the owner's instant rather than
+    # at a rebuilt `now + remaining`; every instant its KILL confirmation is
+    # given must be at or before the owner's instant; and the answer must stop
+    # strictly before it so the confirmation has time. A bound of one
+    # millisecond cannot hold both shares, so no launcher opens.
+    events =
+      trace_local_calls(
+        [guarded_answer_until: 3, collect_answer: 4, await_helper_guard_exit: 5],
+        fn ->
+          assert Local.answer_within("/bin/sh", ["-c", "sleep 30"], 300) == :no_answer
+        end
+      )
+
+    [{:guarded_answer_until, [_program, _arguments, owner_until]}] =
+      Enum.filter(events, &match?({:guarded_answer_until, _}, &1))
+
+    [{:collect_answer, [_port, _collector, {answer_stop, {helper_until, _, nil}}, _limit]} | _] =
+      Enum.filter(events, &match?({:collect_answer, _}, &1))
+
+    assert helper_until == owner_until,
+           "the helper's episode ends at #{helper_until}, not at the owner's instant #{owner_until}"
+
+    confirmation_stops =
+      for {:await_helper_guard_exit, [_port, _collector, stop, _limit, _overflow]} <- events,
+          uniq: true,
+          do: stop
+
+    assert confirmation_stops != [], "the abandoned helper's KILL was never confirmed"
+
+    assert Enum.all?(confirmation_stops, &(&1 <= owner_until)),
+           "the helper's KILL confirmation was given until #{inspect(confirmation_stops)}, " <>
+             "past the owner's instant #{owner_until}"
+
+    assert answer_stop < owner_until,
+           "the helper's answer took the whole bound and left nothing for its confirmation"
+
+    opened =
+      trace_local_calls([open_launcher: 4], fn ->
+        assert Local.answer_within("/bin/sh", ["-c", "printf answered"], 1) == :no_answer
+      end)
+
+    assert opened == [], "a probe with one millisecond left still launched a helper"
+
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    assert source =~ "answer = process_table_until(probe, until)",
+           "the quiescence probe no longer receives its owner's episode instant"
+
+    assert source =~ "confirm_released_group_terminated(group, probe, until) ->",
+           "the post-KILL probe no longer receives its owner's episode instant"
+  end
+
+  test "a command worker that exits before its effect with nobody to settle hands nothing on" do
+    # Concept: a worker that ends before its process begins never answers a
+    # cancellation, and hands one on only to an execute caller that will
+    # settle the job; with none left, the request is left to its caller's
+    # `DOWN`, which `cancel/2` answers `unconfirmed`.
+    #
+    # Technical depth: three exits leave the start handshake without running
+    # the effect: the execute caller's death, the Local authority's death, and
+    # a run signal consumed after that authority has died. The stand-in
+    # authority owns the in-flight table, as the executor does, so its death
+    # takes the table the hand-off claim is taken in; the caller's death here
+    # is observed directly by the worker. In none of them is the request
+    # answered or handed on. The worker is
+    # suspended, the triggering signal is queued ahead of a request, and the
+    # worker is resumed; mailbox order fixes which is matched first.
+    for exit <- [:caller_down, :guard_down, :run_with_dead_guard] do
+      {worker, _table, tag, _job_id, caller, guard} = pre_run_worker("pre-run-exit-#{exit}", exit)
+      worker_monitor = Process.monitor(worker)
+      assert :erlang.suspend_process(worker)
+
+      case exit do
+        :caller_down ->
+          Process.exit(caller, :kill)
+          assert {:ok, :ready} = await_mailbox(worker, &down_from?(&1, caller))
+
+        :guard_down ->
+          Process.exit(guard, :kill)
+          assert {:ok, :ready} = await_mailbox(worker, &down_from?(&1, guard))
+
+        :run_with_dead_guard ->
+          send(worker, {tag, :run})
+          Process.exit(guard, :kill)
+          assert {:ok, :ready} = await_mailbox(worker, &down_from?(&1, guard))
+      end
+
+      token = queue_cancellation(worker)
+      assert :erlang.resume_process(worker)
+      assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 2_000
+      refute_received {:loopex_cancel_handoff, ^token, _settler}
+      refute_received {^tag, :cancel_requests, _requests}
+      refute_received {:loopex_cancel_result, ^token, _answer}
+      send(guard, :stop)
+    end
+  end
+
+  test "a cancellation before the process begins is handed to the execute caller with the refusal" do
+    # Concept: a cancellation that stops a job before its process begins is
+    # answered by whoever publishes the refusal, once it is durable -- never by
+    # the worker that refused.
+    #
+    # Technical depth: this case is the execute caller. The worker refuses the
+    # job on the first request and hands both that request and one queued
+    # behind it to the execute caller, ahead of the cancelled result and from
+    # the same sender, so the caller holds them before it can settle; each
+    # requester is told the execute caller will answer. The worker answers
+    # neither. It used to answer the first `cleaned` before anything was
+    # published.
+    {worker, _table, tag, _job_id, _caller, guard} = pre_run_worker("pre-run-cancel", nil)
+    worker_monitor = Process.monitor(worker)
+    assert :erlang.suspend_process(worker)
+    first = queue_cancellation(worker)
+    second = queue_cancellation(worker)
+    assert :erlang.resume_process(worker)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 2_000
+
+    {:messages, queued} = Process.info(self(), :messages)
+    handed_at = Enum.find_index(queued, &match?({^tag, :cancel_requests, _}, &1))
+    result_at = Enum.find_index(queued, &match?({^tag, :worker_result, _, _}, &1))
+    assert handed_at < result_at, "the refusal reached its execute caller before its requests"
+
+    me = self()
+    assert_received {^tag, :cancel_requests, [{^first, ^me}, {^second, ^me}]}
+    assert_received {^tag, :worker_result, {{:cancelled, _, :complete}, 0, :confirmed}, false}
+    assert_received {:loopex_cancel_handoff, ^first, ^me}
+    assert_received {:loopex_cancel_handoff, ^second, ^me}
+    refute_received {:loopex_cancel_result, _token, _answer}
+    send(guard, :stop)
+  end
+
+  test "a terminated group that was proved gone is reported confirmed" do
+    # Concept: terminating a group is not a failure to clean up; proving it gone
+    # is confirmed cleanup, and a job that exited on its own stays completed.
+    #
+    # Technical depth: real cases pair their outcome with whatever cleanup fact
+    # the host lets them prove, so a regression that made a terminated group
+    # never confirmable would pass them. The two rules that decide it are pinned
+    # here on supplied facts: the forced-KILL rule confirms a group with KILL
+    # sent, a nonzero Port exit and an empty table, and the exited-command rule
+    # reports a confirmed terminated group `completed` with the terminated note
+    # and `confirmed`.
+    witness = 700
+    empty = {:answered, "#{witness} #{witness}\n", 0, witness}
+
+    assert Local.forced_kill_confirmed?(%{
+             kill_sent: true,
+             port_exit_status: 137,
+             table_answer: empty,
+             group: 900
+           })
+
+    assert {{:completed, output, :complete}, :confirmed} =
+             Local.exited_result(0, "done\n", :terminated, true, 4_096)
+
+    assert output =~ "\n[loopex: the command exited, but its process group could not be shown"
+    assert output =~ "so the group was terminated. It is confirmed cleaned"
+    assert Local.command_output(output) == "done\n"
+    assert Local.command_output("done\n") == "done\n"
+    assert Local.command_output(<<"a", 0, "b", 0>>) == <<"a", 0, "b", 0>>
+
+    assert {{:completed, "done\n", :complete}, :confirmed} =
+             Local.exited_result(0, "done\n", :quiescent, true, 4_096)
+
+    assert {{:outcome_unknown, unproven, :complete}, :unconfirmed} =
+             Local.exited_result(0, "done\n", :unconfirmed, false, 4_096)
+
+    assert unproven =~ "could not be confirmed cleaned"
+    assert Local.command_output(unproven) == unproven
+  end
+
   test "a command worker exits before run when its execute caller dies" do
     # Concept: a command worker that has only announced readiness cannot survive
     # the caller responsible for sending its run signal.
@@ -1830,6 +2148,148 @@ defmodule Loopex.Executor.LocalTest do
       {:atom, _, ^value} -> true
       _other -> false
     end)
+  end
+
+  # A command worker waiting in the start handshake for `job_id`. Its caller is
+  # this case unless the case will kill the caller. Its guard is a stand-in
+  # authority that owns the in-flight table, as the executor does, so the
+  # guard's death takes the table and with it any hand-off claim.
+  defp pre_run_worker(job_id, exit) do
+    tag = make_ref()
+    parent = self()
+
+    guard =
+      spawn(fn ->
+        table = :ets.new(:pre_run_worker, [:set, :public])
+        send(parent, {:pre_run_table, self(), table})
+        receive(do: (:stop -> :ok))
+      end)
+
+    assert_receive {:pre_run_table, ^guard, table}, 2_000
+
+    caller =
+      if exit == :caller_down,
+        do: spawn(fn -> receive(do: (:stop -> :ok)) end),
+        else: parent
+
+    worker =
+      spawn(fn ->
+        Process.put(:loopex_inflight_table, table)
+        send(parent, {:pre_run_worker, self()})
+        Local.await_owned_process_start(caller, guard, tag, job_id)
+      end)
+
+    assert_receive {:pre_run_worker, ^worker}, 2_000
+
+    assert {:ok, :ready} =
+             await_mailbox(worker, fn _messages ->
+               Process.info(worker, [:current_function, :status]) ==
+                 [current_function: {Local, :await_owned_process_start, 4}, status: :waiting]
+             end)
+
+    if caller == parent, do: assert_receive({^tag, :worker_ready, ^worker}, 2_000)
+    {worker, table, tag, job_id, caller, guard}
+  end
+
+  defp queue_cancellation(worker) do
+    token = make_ref()
+    episode = {System.monotonic_time(:millisecond) + 1_000, 1_000, "/bin/ps"}
+    send(worker, {:loopex_cancel_pending, token, self(), episode})
+    token
+  end
+
+  # Returns `{:ok, :ready}` once `predicate` holds for `pid`'s queued messages.
+  defp await_mailbox(pid, predicate, attempts \\ 400) do
+    {:messages, messages} = Process.info(pid, :messages)
+
+    cond do
+      predicate.(messages) -> {:ok, :ready}
+      attempts == 0 -> :error
+      true -> Process.sleep(5) && await_mailbox(pid, predicate, attempts - 1)
+    end
+  end
+
+  defp down_from?(messages, pid),
+    do: Enum.any?(messages, &match?({:DOWN, _, :process, ^pid, _}, &1))
+
+  # Runs `work` in this process with call tracing on the named private
+  # functions of `Local`, and returns `{name, arguments}` for every traced call
+  # in order. Trace delivery is awaited before the collector reports, and the
+  # patterns and flags are removed even when `work` fails.
+  defp trace_local_calls(functions, work) do
+    collector = spawn_link(fn -> collect_traced_calls([]) end)
+    Code.ensure_loaded!(Local)
+
+    for {name, arity} <- functions do
+      assert :erlang.trace_pattern({Local, name, arity}, true, [:local]) == 1,
+             "#{name}/#{arity} is not a function of Local to trace"
+    end
+
+    :erlang.trace(self(), true, [:call, {:tracer, collector}])
+
+    try do
+      work.()
+    after
+      :erlang.trace(self(), false, [:call])
+
+      for {name, arity} <- functions,
+          do: :erlang.trace_pattern({Local, name, arity}, false, [:local])
+    end
+
+    delivered = :erlang.trace_delivered(self())
+    assert_receive {:trace_delivered, _pid, ^delivered}, 5_000
+    send(collector, {:report, self()})
+    assert_receive {:traced_calls, events}, 5_000
+    events
+  end
+
+  defp collect_traced_calls(events) do
+    receive do
+      {:trace, _pid, :call, {Local, name, arguments}} ->
+        collect_traced_calls([{name, arguments} | events])
+
+      {:report, requester} ->
+        send(requester, {:traced_calls, Enum.reverse(events)})
+    end
+  end
+
+  # A stand-in launch owner published for `job_id` with the committed period
+  # `grace`, which hands the one cancellation request it receives to `act`.
+  defp stand_in_owner(job_id, grace, act) do
+    table = :ets.new(:stand_in_owner, [:set, :public])
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        Process.put(:loopex_inflight_table, table)
+        send(parent, {:stand_in_owner, self()})
+
+        receive do
+          {:loopex_cancel_pending, token, reply_to, {_until, ^grace, _probe} = episode} ->
+            act.(token, reply_to, episode)
+        end
+      end)
+
+    assert_receive {:stand_in_owner, ^worker}, 1_000
+
+    true =
+      :ets.insert(table, [
+        {job_id, 4_294_967_000},
+        {{:loopex_process_authority, job_id}, worker, grace}
+      ])
+
+    {worker, job_id, table}
+  end
+
+  # Returns only once the monotonic clock the executor's cleanup episodes use
+  # has moved past `instant`.
+  defp wait_past(instant) do
+    remaining = instant - System.monotonic_time(:millisecond)
+
+    if remaining >= 0 do
+      Process.sleep(remaining + 1)
+      wait_past(instant)
+    end
   end
 
   defp stop_fixture(fixture) do

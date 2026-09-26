@@ -2,9 +2,12 @@ Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   @moduledoc false
+  # The host-diagnostics witness temporarily captures the named ReqLLM task
+  # supervisor's IO and compares VM-global application/logger state, so this
+  # module remains serial.
   use ExUnit.Case, async: false
   import ExUnit.CaptureIO
-  alias Loopex.LLM.ReqLLM, as: Adapter
+  alias Loopex.LLM.ReqLLM.CredentialCustody
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
   # Concept: a completed failing suite reports its seed alongside the refusal.
@@ -29,21 +32,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   # and every post-canary failure mode. Loopback HTTP is not live-provider or
   # exact-package evidence.
   setup %{test: case_name} do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, "credential-shaped-canary-secret")
-
-    on_exit(fn ->
-      try do
-        if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-      catch
-        kind, reason ->
-          stack = __STACKTRACE__
-          Fixture.report_failure(case_name, :credential_restore, stack)
-          :erlang.raise(kind, reason, stack)
-      end
-    end)
-
     {:ok, _started} = Application.ensure_all_started(:req_llm)
     parent_state = parent_state()
 
@@ -284,12 +272,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   test "the shipped adapter declares not_dispatched only before its transport canary and ambiguity after it",
        %{test: case_name} do
     before = Fixture.new(:reply, diagnostic_case: case_name)
-    System.delete_env(Adapter.credential_variable())
+    {:ok, custody} = CredentialCustody.reference(before.custody_pid)
+    :ok = CredentialCustody.rotate(custody, nil)
     assert Fixture.complete(before) == {:error, {:not_dispatched, "model_call_failed"}}
     assert Fixture.canaries(before) == 0
     assert Fixture.count(before) == 0
     Fixture.assert_gone(before)
-    System.put_env(Adapter.credential_variable(), "credential-shaped-canary-secret")
 
     for mode <- [
           :closed_port,
@@ -521,7 +509,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       assert Enum.find_index(messages, &(&1 == terminal)) <
                Enum.find_index(messages, &(&1 == down))
 
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
     end
 
     assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 2_500
@@ -561,7 +549,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert {_output, 0} = System.cmd("/bin/kill", ["-STOP", Integer.to_string(pid)])
 
     try do
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
 
       assert Fixture.eventually(
                fn ->

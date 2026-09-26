@@ -5,9 +5,10 @@
 
 Concept: [How a run works](how-a-run-works.md#concept).
 
-This companion gives the ordering, the file layout, the numbers, and the
-refusals behind the walkthrough. It states what is durable, what is not, and
-what each failure leaves behind.
+This companion gives the ordering, the file layout, the numbers and the refusals
+behind the walkthrough: what is durable, what is not, and what each failure
+leaves behind. Mechanisms an operator does not act on are specified in the
+developer guides this page links to rather than repeated here.
 
 <a id="technical-run-planes"></a>
 ## Two Planes Reach Your Terminal
@@ -19,22 +20,22 @@ same store transaction and read back from the journal's outbox. They carry
 stable identifiers and sequences, so a reader that reattaches gets the same rows
 again. This is the record.
 
-**Transient plane.** Streaming text, tool child bytes, and diagnostics are
-decoration. Each stream belongs to one *attempt* — not one turn — and is named
-by an opaque `stream_domain_id`; a retry opens a new domain and never reuses the
-old one. A domain owes exactly one content-free closing item while its owner can
-state the disposition truthfully, but that is an emission obligation and not a
-delivery guarantee: a closure may be coalesced away or dropped under
-backpressure, and an abruptly lost owner ends the plane with no closure at all.
+**Transient plane.** Streaming text, tool output bytes and diagnostics are
+decoration. Each stream belongs to one *attempt* — not one turn — and is named by
+an opaque `stream_domain_id`; a retry opens a new domain and never reuses the old
+one. While its owner can state the outcome truthfully, a domain owes exactly one
+content-free closing item, but that is an emission obligation and not a delivery
+guarantee: a closure may be coalesced away or dropped under backpressure, and an
+owner that is lost abruptly ends the plane with no closure at all. A successor
+neither reuses nor closes the old domain; it recovers from the durable record.
 
-The consequence is a rule the terminal follows and you can rely on: an absent
-closure is never read as abandonment. The terminal falls back to the durable
-record instead of starting a timeout, because a timeout would be a guess about a
-stream that may simply have been dropped. Where it does stop reading, it reports
-its own view rather than the run's fate.
+So the terminal never reads an absent closure as abandonment. It falls back to
+the durable record instead of starting a timeout, because a timeout would be a
+guess about a stream that may simply have been dropped. Where it does stop
+reading, it reports its own view rather than the run's fate.
 
 The durable assistant message is built from the model adapter's return value and
-is never assembled from what was streamed, so the record and the screen cannot
+never assembled from what was streamed, so the record and the screen cannot
 disagree about what the model said.
 
 <a id="technical-run-durability"></a>
@@ -44,17 +45,17 @@ Concept: [One run, from prompt to answer](how-a-run-works.md#concept-run-flow).
 
 Every durable message on your screen is preceded by the record that authorizes
 it, and the record and its public event are written in one transaction. The one
-exception is the streamed answer text, which the table marks transient: it
-reaches the screen as the model produces it and is committed only when the
-turn's reply settles. Nothing on this table is published from a mutation reply.
+exception is the streamed answer text, marked transient below: it reaches the
+screen as the model produces it and is committed only when the turn's reply
+settles. Nothing in this table is published from a mutation reply.
 
 | Step | Committed first | Then published |
 | --- | --- | --- |
 | Skill manifest retained | Complete verified snapshot under its manifest digest, before resource admission | nothing; installation and retention do not grant session trust |
 | Resources admitted or declined | `resource_command_v1` with the exact manifest and decision binding | no new public event; the matching active catalog is available through the facade query |
-| Skill selected | `resource_command_v1` with source, name, pack digest, and ordered supporting labels; the selection is frozen for the next run | no new public event |
+| Skill selected | `resource_command_v1` with source, name, pack digest and ordered supporting labels; the selection is frozen for the next run | no new public event |
 | Prompt admitted | `prompt_admitted_v2` — command digest, run id, content, the run's bounds and context ceiling | `user.message_appended`, echoed as `> ...` |
-| Request staged | `model_request_committed` (canonical request bytes and their digest, applied steer, context receipt), `model_request_committed_resources_v1` when resources are admitted, **and** `model_attempt_opened_v1`, one transaction | `run.started`, on the first turn only |
+| Request staged | `model_request_committed` (canonical request bytes and their digest, applied steer, context receipt), `model_request_committed_resources_v1` when resources are admitted, **and** `model_attempt_opened_v1`, in one transaction | `run.started`, on the first turn only |
 | Model called | nothing | streamed text, transient |
 | Reply settled | `model_attempt_settled_v2` | `assistant.message_appended` |
 | Tool authorized | `effect_intent_committed` — the whole executor job **and** the host grant | `tool.started` |
@@ -70,22 +71,22 @@ provider call. A process that committed the request and died before the attempt
 opened has staged a request nobody may send.
 
 **The deadline becomes an instant exactly once**, when the run's first attempt
-opens, and it is then read back from history rather than recomputed. A recovering
-owner therefore resumes the deadline the run actually had instead of being handed
+opens, and is then read back from history rather than recomputed. A recovering
+owner therefore resumes the deadline the run actually had instead of being given
 back the time it spent dead.
 
 `run.finished` carries one of five outcomes: `completed`, `bound_reached`,
-`cancelled`, `failed`, `outcome_unknown`. The last outranks all of the others.
-A run holding an effect whose result nobody can state cannot honestly end
-`completed` or `bound_reached`, and it is not resumed past that effect either —
+`cancelled`, `failed`, `outcome_unknown`. The last outranks all the others. A
+run holding an effect whose result nobody can state cannot honestly end
+`completed` or `bound_reached`, and it is not resumed past that effect either:
 feeding an unprovable result back to the model would continue a loop past an
 ending that is already terminal.
 
-A steer is read at exactly one point: after every tool result of the current turn
-has committed, and after the bound checks have decided another request will
-actually be staged. It is recorded `applied` only when an attempt opened over a
-request that carried it. Otherwise it resolves `unapplied` with the bound name or
-`run_terminal` as the reason, or `cancelled` on an abort — and it is never
+A steer is read at exactly one point: after every tool result of the current
+turn has committed, and after the bound checks have decided another request
+will be staged. It is recorded `applied` only when an attempt opened over a
+request that carried it. Otherwise it resolves `unapplied` with the bound name
+or `run_terminal` as the reason, or `cancelled` on an abort, and it is never
 promoted into a follow-up.
 
 <a id="technical-run-state-root"></a>
@@ -95,20 +96,21 @@ Concept: [What runs where](how-a-run-works.md#concept-run-parts).
 
 Everything below is under the resolved state root, which comes from
 `--state-root` or, absent that, from `LOOPEX_HOME`. It is never read from Elixir
-application environment.
+application environment, and a command that finds neither refuses.
 
 | Path | Written by | Contents |
 | --- | --- | --- |
-| `store.log` | the local store | The journal: append-only frames, each carrying a magic header, the payload size, a header digest, and a payload digest |
+| `store.log` | the local store | The journal: append-only frames, each carrying a magic header, the payload size, a header digest and a payload digest |
 | `store.log.writer` | the local store | The writer marker that keeps two writers off one log |
 | `artifacts/` | the artifact store | Content-addressed objects at `<2 hex>/<64 hex>`, with immutable use records under `uses/` |
 | `receipts/` | the local executor | The ledger root: `generation`, the `claim` directory, `markers/`, `open/`, and one `<job digest>.receipt` per job |
 | `sessions/<session id>` | the runtime | The entries `loopex sessions` lists |
 | `runtime_id` | the runtime | The durable placement identity sessions are recorded under |
-| `placement.lock` | the `loopex` command | The owning process, for single-owner exclusion |
+| `placement.lock` | the `loopex` command or the daemon | The owning process, for single-owner exclusion |
 | `resource-packs/manifests/` | the composition host | Complete verified skill snapshots named by manifest digest |
-| `resource-packs/provenance/` | the composition host | Exact source, commit, and tree provenance for imported pack bytes |
+| `resource-packs/provenance/` | the composition host | Exact source, commit and tree provenance for imported pack bytes |
 | `resource-packs/receipts/` | the local executor | Receipts for the bounded Git acquisition jobs |
+| `daemon/` | the daemon | Its socket (`daemon.sock` by default) and its session index |
 
 Sizes and their refusals: one journal frame is at most 4 MiB and one log at most
 256 MiB, past which the log accepts no further append; one artifact is at most
@@ -116,35 +118,30 @@ Sizes and their refusals: one journal frame is at most 4 MiB and one log at most
 8 MiB of spilled output. Nothing collects artifacts, so that directory only
 grows.
 
-Three integrity properties are worth knowing because they turn into refusals you
-may see. The store holds the log's *file identity*, not its path, and re-checks
-it after opening the append handle — a log removed or replaced underneath a live
-session is a write whose outcome cannot be stated, so the store stops rather than
-continuing into a new empty log at the same name. Replay does not trust the
-frames: each is re-derived from the prior state and must match byte for byte,
-and a mismatch is `{:invalid_history, index, detail}`, reported to you as
+Three integrity properties turn into refusals you may see. The store holds the
+log's *file identity*, not its path, and re-checks it after opening the append
+handle: a log removed or replaced underneath a live session is a write whose
+outcome cannot be stated, so the store stops rather than continuing into a new,
+empty log at the same name. Replay does not trust the frames: each is re-derived
+from the prior state and must match byte for byte, and a mismatch is
+`{:invalid_history, index, detail}`, reported as
 `its recorded history could not be replayed`. Artifact bytes are verified against
 their digest and length on the way out, so a corrupt object reports unavailable
-rather than handing you content it cannot vouch for.
+rather than handing you content nobody can vouch for.
 
-The executor's ledger root carries authority, not cache. An entry is opened
-before the effect starts and closed only when cleanup was confirmed, so an
-unproven effect deliberately leaves its entry open — and an open entry left
-stranded quarantines the root until it is reconciled. Treat that directory as one
-intact administrative unit; the full disposition is in
-[What local execution can reach](tools-and-policy.md#operator-tools-reach).
-The same quarantine remains when a bounded artifact-store worker cannot be
-confirmed stopped: no receipt is published while that worker may still publish
-its result.
+The executor's ledger root carries authority, not cache: an entry opened for an
+unproven effect stays open and quarantines the root until it is reconciled. How
+to treat that directory is set out under
+[the executor's ledger root](tools-and-policy.md#operator-tools-ledger).
 
 <a id="technical-run-bounds"></a>
 ## The Numbers You Control
 
 Concept: [Where Ctrl-C enters](how-a-run-works.md#concept-run-interrupt).
 
-Five numbers bound a run. The `loopex` command exposes two of them as flags; the
-other three take the runtime's declared defaults, and a host embedding Loopex
-sets them when it starts the runtime.
+Five numbers bound a run. The `loopex` command exposes two of them as flags, and
+`loopex daemon` exposes the cleanup grace; the other three take the runtime's
+declared defaults, which a host embedding Loopex sets when it starts the runtime.
 
 | Number | Set by | Default | What reaching it does |
 | --- | --- | --- | --- |
@@ -154,10 +151,10 @@ sets them when it starts the runtime.
 | Context token budget | `--context-token-budget` | 8,192 | `run.finished` `failed`, category `context_budget_exceeded` |
 | Cleanup grace | `--cleanup-grace-ms` | 5,000 ms | bounds how long stopping may take; ends no run by itself |
 
-The first three are checked in a fixed order between turns, and the order carries
-meaning: a reply with no tool calls is `completed` first and unconditionally, so
-a run whose model stopped on its own is never reported as one that was cut off.
-Then max turns, then the token budget, then the deadline.
+The first three are checked in a fixed order between turns, and the order
+carries meaning: a reply with no tool calls is `completed` first and
+unconditionally, so a run whose model stopped on its own is never reported as
+one that was cut off. Then max turns, then the token budget, then the deadline.
 
 Reaching a bound is not a failure and is not recorded as one. The ending names
 the bound, what was observed, and the declared limit.
@@ -167,8 +164,7 @@ provider call; the deadline also bounds work already in flight, so reaching it
 can abort a request the provider may already have billed. It commits
 `bound_reached` only where every owned operation reached a validated terminal
 fact and every owned process tree was confirmed cleaned; otherwise the run ends
-`outcome_unknown`. A deadline is not a guaranteed clean stop and nothing claims
-it is.
+`outcome_unknown`. A deadline is not a guaranteed clean stop.
 
 The context ceiling is admission policy over one exact provider-visible request,
 measured by a repository-owned estimator at one token per three canonical bytes,
@@ -184,28 +180,16 @@ executor is watched for its answer for `max(10000, g + 2000)` ms; and the
 terminal's own backstop is the executor's watch window plus the result reserve
 plus the terminal reserve, which outlasts every window above it, so a session
 configured to spend a long time stopping is not halted while its executor is
-still inside the period it was promised. No window is derived from another
-one's already-spent clock.
-
-Stopping a tool child is one budget covering the whole sequence: a termination
-signal sent to the child's *process group* rather than its leader, then the
-cooperative window in which the child may finish a write and exit on its own,
-then a kill signal to the group if it is still there, then confirmation that the
-group is gone. Confirmation means running
-a program — `/bin/ps` by default — and an image where that program is elsewhere
-can confirm nothing, so every command is reported `outcome_unknown`. Each receipt
-records which program was asked, the period it ran under as `cleanup_grace_ms`,
-and its own write bound as `receipt_retention_bound_ms`. The program must emit
-the full `-e -o pid= -o pgid=` table: the runtime parses exact PGID equality and
-requires the probe's Port carrier PID-equals-PGID row before absence is accepted.
+still inside the period it was promised. The stop sequence those windows bound,
+and what a receipt records about it, is described under
+[run and cleanup bounds](tools-and-policy.md#operator-tools-bounds).
 
 An interrupt becomes the ordinary public abort. However many signals arrive, one
 stop is submitted under one identity; acceptance extends the backstop exactly
 once; and an answer the handler cannot classify leaves the backstop armed,
 because a timeout is not a verdict about whether the abort committed. If the
-backstop does expire, the process exits with status `130` — and it watches the
-terminal that installed it, so a terminal that already reported and exited is
-never halted after the fact.
+backstop expires, the process exits with status `130`, and it never halts a
+terminal that already reported and exited.
 
 <a id="technical-run-recovery"></a>
 ## Crash, and What Recovery Proves
@@ -214,20 +198,9 @@ Concept: [Where resume and cancel pick up](how-a-run-works.md#concept-run-again)
 
 What a crash costs depends on which record had landed.
 
-New writers settle every attempt with `model_attempt_settled_v2`, including an
-already open version-1 attempt, without redispatch. A version-1 prefix remains
-readable except `unreadable_model_answer` with reported accounting, which fails
-as `ambiguous_legacy_provider_accounting`. A later version-1 settlement after
-version 2 is invalid history. Neither reader rewrites committed accounting or
-reconstructs missing provenance. The old reader refuses version 2 before owner
-readiness and semantic work; fenced ownership administration may already have
-committed. Rollback therefore requires stopped owners and a complete backup,
-and supports only histories without version 2. See
-[ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-consequences).
-
 | Crashed at | What survives | What resume does |
 | --- | --- | --- |
-| Before the journal opened | nothing but a placement lock | The next command probes the recorded process incarnation, finds it gone, and reclaims the lock |
+| Before the journal opened | nothing but a placement lock | The next command probes the recorded process, finds it gone, and reclaims the lock |
 | After the prompt committed | the run, with no request staged | Stages the first request; the deadline has not started, so the downtime is not spent |
 | After the request and attempt rows committed | the staged request and its fixed deadline | Re-presents the exact transaction; the deadline instant is read back, so downtime does count |
 | While a tool was in flight | the effect intent and the host grant | Holds the work and opens a reconciliation query |
@@ -237,38 +210,21 @@ and supports only histories without version 2. See
 prepare: they contest and win ownership, the store advances the owner epoch
 exactly once against the expected epoch and journal version, and the session's
 complete history is rebuilt. Only the *scheduling* of recovered work waits. A
-prepared owner is a real owner in every other respect — it answers status, it
-accepts an attachment, and it admits an abort.
+prepared owner is a real owner in every other respect — it answers status,
+accepts an attachment and admits an abort. What is held back is fixed once, at
+preparation, so a prompt admitted after you decided is not silenced by a
+decision that predates it.
 
-What is held back is fixed once, at preparation, rather than recomputed, so a
-prompt admitted after you decided is not silenced by a decision that predates it.
-
-**Activation is a one-use capability.** It is runtime-local, non-serializable,
-and usable only by its current holder; it never enters a record, an event, a
-snapshot, a progress item, or a diagnostic. The holder is the process that asked
-for the preparation until `resume` starts a temporary lifetime guard. That guard
-monitors the installer before creating a linked and monitored holder, waits for
-the holder to acknowledge its own guard monitor, and only then unlinks the pair
-into a one-way lifetime. `resume` then arms that guard against the exact signal
-manager, installs the visible handler, and asks the session coordinator to hand
-the capability to that exact guarded holder. The coordinator decides the handoff
-and sends its verdict to the installer; the installer forwards it to the guard,
-and the coordinator records the holder and returns `:ok` only after that guard
-acknowledges it.
-Installer death before holder readiness or before verdict forwarding fails
-closed. After forwarding, ordered delivery makes the handoff independent of the
-installer even if its reply is lost. Manager, coordinator, or holder loss ends
-the exact authority rather than authorizing a substitute. The capability has
-four states — prepared, spent, abandoned, fenced
-— and only *spent* schedules anything. `resume` installs the interrupt handler sized by the period
-this session committed (a period the sizing formula refuses would leave a fixed
-ten-second backstop, and no such period can be committed), hands the
-capability to its holder, and asks that
-holder to spend it, waiting without a bound; the handler keeps handling signals
-while it waits. `cancel` never spends it: it admits the abort
-while the work is still held. An abort fences the capability *before* its store
-transaction, so even an abort whose commit is unknown permanently blocks
-activation. Abandoning is idempotent; activating is not.
+**Activation is a one-use capability.** It is local to the runtime, never
+serialized, and never enters a record, an event, a snapshot, a progress item or
+a diagnostic. It has four states — prepared, spent, abandoned, fenced — and only
+*spent* schedules anything. `resume` hands it to its interrupt handler before
+spending it, so recovered work never runs without a handler that can stop it;
+`cancel` never spends it and admits the abort while the work is still held. An
+abort fences the capability *before* its store transaction, so even an abort
+whose commit is unknown permanently blocks activation. Abandoning is idempotent;
+activating is not. The handoff protocol is specified in
+[compatibility surfaces](../developer/compatibility-surfaces.md#technical-depth).
 
 **Reconciling an in-flight tool is an exact match, not a search.** The session
 opens a query naming eleven facts: the query identifier, the current session
@@ -278,39 +234,71 @@ request digest, the original session and executor epochs, the origin executor
 identity, and the origin fencing token. A receipt is admitted only where all
 eleven agree *and* fifteen receipt fields match the journaled job, including
 protocol version, job identifier, session, run, turn and tool-call identifiers,
-the canonical request digest, both epochs at dispatch, executor identity, fencing
-token, and the tool's identity and version.
-
-A field the answer does not carry is a mismatch, never a match. An omitted field
-can no longer satisfy an expected value that happens to be absent itself.
+the canonical request digest, both epochs at dispatch, executor identity,
+fencing token, and the tool's identity and version. A field the answer does not
+carry is a mismatch, never a match.
 
 Where no provable receipt exists, the answer is `outcome_unknown`. That commits,
 and it is terminal for the run. The effect is never redispatched merely because
 its result is missing.
 
 Resource recovery uses the same identity rule. A session with a successful
-resource admission names its durable manifest digest. A recovering runtime can
-read or stage resource content only from a matching snapshot supplied at
-launch; rediscovering today's workspace cannot stand in for yesterday's
-admitted bytes. If the retained snapshot is missing or invalid, new resource
-reads remain withheld while ordinary session and tool recovery continues. A
-request whose complete resource blocks were already committed remains
-recoverable from the journal without reopening the pack.
+resource admission names its durable manifest digest, and a recovering runtime
+can read or stage resource content only from a matching snapshot supplied at
+launch; today's workspace cannot stand in for yesterday's admitted bytes. If the
+retained snapshot is missing or invalid, new resource reads stay withheld while
+ordinary session and tool recovery continues. A request whose complete resource
+blocks were already committed remains recoverable from the journal.
 
-Resource-bearing histories are a forward format boundary. This reader replays
-histories from before resources unchanged. An older binary refuses a history
-containing `resource_command_v1` or
-`model_request_committed_resources_v1` before dispatch. Rollback therefore
-requires stopped owners plus the matching old binary and a complete old-format
-state-root backup. Removing installed skills or running an older binary does
-not convert a resource-bearing root, and no in-place downgrade is provided.
-
-`loopex cancel` applies only where no live process holds the placement lock, and
-is refused against a live owner rather than racing it. A lock this version cannot
-read is not evidence its owner is gone: the process identifier is salvaged out of
-the record and probed the same way, and only an absent process makes it
-reclaimable. The refusals and their exact text are in
+`loopex cancel` applies only where no live process holds the placement lock and
+is refused against a live owner rather than racing it. A lock record this
+version cannot read is still probed through the process identifier it names, and
+only an absent process makes it reclaimable. The refusals and their text are in
 [`loopex cancel` is narrow](coding-sessions.md#operator-sessions-cancel).
+
+### Rollback boundaries
+
+Some records are forward format boundaries: an older build refuses a history
+containing them rather than misreading it. Before any rollback, stop every owner
+of the state root and take a complete backup of it; no in-place downgrade is
+provided.
+
+- **Provider accounting.** Current builds settle every model attempt with
+  `model_attempt_settled_v2`, including an attempt a version-1 writer opened,
+  without redispatching it. A validated answer omitted because its complete
+  record exceeds Store limits keeps its known usage; an unreadable raw answer
+  consumes the estimated remaining allowance. A version-1 prefix stays readable
+  except `unreadable_model_answer` with reported accounting, which fails as
+  `ambiguous_legacy_provider_accounting`, and a version-1 settlement after a
+  version-2 one is invalid history. An older reader refuses version 2 before its
+  owner becomes ready, though fenced ownership administration may already have
+  committed. Rollback is therefore possible only for histories containing no
+  version-2 settlement. See
+  [ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-consequences).
+- **Project resources.** Histories from before resources replay unchanged. An
+  older build refuses a history containing `resource_command_v1` or
+  `model_request_committed_resources_v1` before dispatch. Rolling back requires
+  the matching older build and a complete state-root backup taken in the old
+  format; removing installed skills does not convert a resource-bearing root.
+
+<a id="technical-run-daemon"></a>
+## What Changes Under a Daemon
+
+Concept: [When a daemon holds the root](how-a-run-works.md#concept-run-daemon).
+
+| | One `loopex` process | Under `loopex daemon` |
+| --- | --- | --- |
+| Who composes the runtime | The command, for its own lifetime | The daemon, once per daemon lifetime |
+| Workspace, policy, credential | The command's flags and environment | The daemon's, fixed at start; a live form refuses those flags |
+| Placement lock and Store marker | Held by the command while it runs | Held by the daemon; offline commands refuse against it |
+| Clients of one session | One | Any number observing, one controlling under a lease |
+| Ctrl-C, `SIGTERM`, `SIGHUP`, `SIGQUIT` on the command | Abort the run | Release control within 5 s and exit `0`; the run continues |
+| Stopping the work | Ctrl-C through the launcher, or `loopex cancel` once nothing holds the root | The daemon's orderly `SIGTERM`, then `loopex cancel` if needed |
+| Transport | None | Generation-2 JSON lines over the root's Unix-domain socket |
+
+The journal, receipts, artifacts and recovery rules on this page are the same in
+both columns. See the [daemon page](daemon.md#technical-depth) for its grammar,
+limits, stop bound and exit statuses.
 
 <a id="technical-run-authority"></a>
 ## Authority, Refusal, and the Credential
@@ -322,14 +310,16 @@ Concept: [What makes this safe](how-a-run-works.md#concept-run-safe).
 | `--policy` | Allows | Refuses |
 | --- | --- | --- |
 | `allow-all` | every decision it is asked | nothing; it announces itself once, at the first call it decides |
-| `shell-allowlist` | the filesystem tools, and `bash` whose first word is `cat`, `ls`, `pwd`, `echo`, `git`, `grep`, `head`, `tail`, or `wc` | every other command, with `policy_denied`; and any call it cannot read a command out of |
+| `shell-allowlist` | the filesystem tools, and `bash` whose first word is `cat`, `ls`, `pwd`, `echo`, `git`, `grep`, `head`, `tail` or `wc` | every other command, with `policy_denied`, and any call it cannot read a command out of |
 | none, on `loopex cancel` | nothing | every tool call, which is correct for a command that runs none |
 
-A policy that raises, times out, or returns a malformed value becomes a denial
-rather than falling through to allow. `defer` is declared in the port and refused
-in this milestone rather than being treated as either answer. The decision is
-made on the tool's generation triple rather than the model-supplied name, so it
-cannot be steered by what the model chose to call something.
+A policy that raises, times out or returns a malformed value becomes a denial
+rather than falling through to allow. A policy may also `defer`, which opens a
+durable question a client answers; the command's stances never defer, and the
+command cannot answer one (see [host policy](tools-and-policy.md#operator-tools-policy)).
+The decision is made on the tool's generation triple rather than the
+model-supplied name, so it cannot be steered by what the model chose to call
+something.
 
 **A grant is not a token the executor trusts on sight.** Before any effect it
 recomputes the canonical job bytes and digest independently, checks the tool
@@ -337,37 +327,30 @@ identity, version and effect class against its own definition, checks that the
 workspace lease is held and its holder alive, checks the fencing token, and then
 validates ten grant bindings: operation identifier, attempt, canonical request
 digest, tool identifier, tool version, effect class, workspace lease, audience,
-expiry, and fencing token. A missing binding and a wrong one are distinguished. A
+expiry and fencing token. A missing binding and a wrong one are distinguished. A
 job that fails any of this runs nothing, and the refusal is published durably
 before the caller hears about it.
 
-**Nothing about the credential is on disk.** The host adapter reads
-`LOOPEX_PROVIDER_API_KEY` only for the provider call. A short-lived sender
-materializes it only after the configured private companion proves its protected
-entry and build identity, and the companion uses it as a per-request option. It
-is not stored in application state and reaches no journal record, receipt,
-artifact, public event, progress item, or diagnostic.
+**Nothing about the credential is on disk.** The composing host reads
+`LOOPEX_PROVIDER_API_KEY` once into private custody and removes it from its
+environment. For each provider call a short-lived sender materializes it only
+after the configured private companion proves its protected entry and build
+identity, and the companion uses it as a per-request option. It is not stored in
+application state and reaches no journal record, receipt, artifact, public
+event, progress item or diagnostic.
 
-Every executor spawn removes that name explicitly, and the model-supplied command
+Every executor spawn removes that name explicitly, and a model-supplied command
 then crosses `/usr/bin/env -i` and receives `PATH=/usr/bin:/bin` and nothing
 else. Each receipt records the constructed environment's variable names and
-whether the credential was present, so the claim is journalled rather than
-asserted.
-
-Provider failures are bounded before they can carry it anywhere. The companion
-suppresses its raw diagnostics before ReqLLM starts. The host's private guardian
-can also receive a validated finite failure stage/class pair, observable only
-after a valid terminal frame and timely clean end-of-stream. Core and public
-callers retain the classified `model_call_failed` error; provider diagnostic text
-is never forwarded.
-Before Control is asked to authorize the attempt, the coordinator starts a
-dormant lifetime guard under the owner generation's private supervisor.
-The exact permitted worker asks that guard to create a linked callback. Catchable
-failures are normalized inside the callback;
-the guard traps asynchronous linked exits, cannot finish before the callback, and
-stops it if the worker or coordinator ends. Every terminal path awaits that
-guard, and abrupt owner loss cannot advance to a successor while the supervisor
-is still stopping it. An interrupted stream is an error, never a partial reply.
+whether the credential was present, so the claim is journaled rather than
+asserted. Provider failures are bounded before they can carry it anywhere: the
+companion suppresses its raw diagnostics before the provider library starts,
+and core and public callers see only the classified `model_call_failed` error,
+never provider text. The supervision that keeps a blocked provider call inside
+the run's deadline is specified in the
+[developer runtime guide](../developer/runtime-and-embedding.md#technical-depth).
+What remains visible to your own operating-system account is stated under
+[credential boundary](tools-and-policy.md#operator-tools-credential).
 
 The shipped composition selects `anthropic:claude-haiku-4-5` and resolves its
 endpoint from the adapter's bundled catalog, without a network call and without
@@ -376,7 +359,7 @@ the credential. Changing the model is a host decision, not a command flag.
 ## Related
 
 - [How a run works](how-a-run-works.md#concept) — this page's concept companion.
-- [Coding sessions](coding-sessions.md#technical-depth) — commands, flags, state layout, and interrupt handling in detail.
-- [Tools and policy](tools-and-policy.md#technical-depth) — declared budgets, the policy port, grant validation, and the credential boundary.
+- [Coding sessions](coding-sessions.md#technical-depth) — command grammar, state rules, resource bounds and interrupt handling.
+- [Tools and policy](tools-and-policy.md#technical-depth) — declared budgets, the policy port, grant validation and the credential boundary.
 - [Runtime operations](runtime.md#operator-runtime-recovery) — the embedded runtime's crash-recovery procedure.
 - [Operator documentation index](README.md).

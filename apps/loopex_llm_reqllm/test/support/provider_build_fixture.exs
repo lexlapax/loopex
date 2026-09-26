@@ -137,13 +137,66 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
     unless status == 0, do: raise("provider cold build failed (#{status}):\n#{output}")
   end
 
+  @doc """
+  ## Concept
+
+  Host credential custody for a real-provider call, which since ADR 0034
+  resolves its credential per invocation and refuses without it. A caller
+  that already holds the value — a trace child reads it from standard input —
+  hands it here directly, so it never enters an environment.
+
+  ## Technical depth
+
+  Starts a routing registry and a custody process holding `credential`,
+  binds a fresh opaque token to that custody, and returns the two options the
+  adapter requires. The bytes stay inside custody.
+  """
+  def custody_options(credential) when is_binary(credential) and credential != "" do
+    {:ok, registry_pid} = Loopex.LLM.ReqLLM.CredentialRegistry.start_link([])
+    {:ok, registry} = Loopex.LLM.ReqLLM.CredentialRegistry.handle(registry_pid)
+    {:ok, custody_pid} = Loopex.LLM.ReqLLM.CredentialCustody.start_link(credential: credential)
+    {:ok, custody} = Loopex.LLM.ReqLLM.CredentialCustody.reference(custody_pid)
+    token = Loopex.LLM.ReqLLM.CredentialToken.new()
+    :ok = Loopex.LLM.ReqLLM.CredentialRegistry.put(registry, token, custody)
+    [credential_token: token, credential_registry: registry]
+  end
+
+  @doc """
+  ## Concept
+
+  Takes the lane's credential the way the reference hosts compose one: read
+  once from the environment, removed from this VM's environment in the same
+  step, and held only in custody from then on.
+
+  ## Technical depth
+
+  Reads and deletes `Loopex.LLM.ReqLLM.credential_variable/0` as
+  `LoopexComposition.CredentialHost.open/0` does, then starts a routing
+  registry and a custody process holding the value and returns the opaque
+  token and registry handle routed to it. The variable is deleted whether or not
+  its value is usable; an absent value is unavailable evidence and raises
+  without naming anything but the variable.
+  """
+  def consume_custody_options do
+    variable = Loopex.LLM.ReqLLM.credential_variable()
+    credential = System.get_env(variable)
+    System.delete_env(variable)
+
+    if is_binary(credential) and credential != "",
+      do: custody_options(credential),
+      else: raise("evidence unavailable: #{variable} is not set")
+  end
+
   defp verify!(worker, source) do
     {:ok, [configuration]} = :file.consult(String.to_charlist(worker <> ".launch"))
     {:ok, [manifest]} = :file.consult(String.to_charlist(worker <> ".manifest"))
     {:ok, validated} = ProviderConfiguration.validate(configuration)
 
     expected = %{
-      "source" => source,
+      "source" => source.commit,
+      # A checkout build carries no archive source digest; an extraction's
+      # build carries the digest of its own archive manifest.
+      "source_digest" => source.source_digest,
       "version" => File.read!(Path.join(@source_root, "VERSION")) |> String.trim(),
       "dependency_lock_sha256" => digest(File.read!(Path.join(@source_root, "mix.lock"))),
       "packaged_input_sha256" => Mix.Tasks.Loopex.Provider.Build.packaged_input_digest(worker),
@@ -196,7 +249,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
     File.cp_r!(source, destination, dereference_symlinks: true)
   end
 
+  # Concept: the fixture builds from the same source identity the production
+  # build records: a clean checkout's commit, or, in a `git archive`
+  # extraction with no `.git`, the archive-carried `SOURCE_IDENTITY` and its
+  # manifest digest. The release check runs every lane inside an extraction.
+  #
+  # Technical depth: in a checkout the Git children run with the scrubbed
+  # environment the M0 child-environment conformance case pins; an extraction
+  # has no Git to run and resolves through `Mix.LoopexSourceIdentity`.
   defp clean_source! do
+    if File.exists?(Path.join(@source_root, ".git")),
+      do: checkout_source!(),
+      else: archive_source!()
+  end
+
+  defp checkout_source! do
     environment =
       empty_environment()
       |> Map.merge(%{"PATH" => "/usr/bin:/bin", "GIT_OPTIONAL_LOCKS" => "0"})
@@ -210,7 +277,17 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
 
     unless status == "", do: raise("provider fixture requires a clean source checkout")
     {source, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: @source_root, env: environment)
-    String.trim(source)
+    %{commit: String.trim(source), source_digest: nil}
+  end
+
+  defp archive_source! do
+    case Mix.LoopexSourceIdentity.resolve(@source_root) do
+      {:ok, %{mode: :archive, commit: commit, source_digest: digest}} ->
+        %{commit: commit, source_digest: digest}
+
+      {:error, reason} ->
+        raise("provider fixture cannot identify its archive source: #{inspect(reason)}")
+    end
   end
 
   defp empty_environment do

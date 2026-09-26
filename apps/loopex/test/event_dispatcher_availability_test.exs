@@ -14,7 +14,7 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
       {session_b, attachment_b} = session(fixture, "b")
       prompt(attachment_a, "prompt-a")
 
-      {reader, waiter} = held_read(fixture, session_a, attachment_a, entry)
+      {reader, waiter} = held_read(fixture, session_a, attachment_a, entry, self())
 
       # The Store reply remains withheld until after the other command has
       # returned and its exact durable row has crossed the publication fence.
@@ -102,8 +102,18 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
             assert after_succession.owner.owner_epoch == before.owner.owner_epoch + 1
           end
 
+          attach_options =
+            if replacement_kind == :replacement do
+              [
+                after_event_sequence: 0,
+                replace_attachment_id: attachment.attachment_id
+              ]
+            else
+              [after_event_sequence: 0]
+            end
+
           assert {:ok, replacement} =
-                   Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+                   Loopex.attach(fixture.runtime, session_id, attach_options)
 
           assert {:error, :stale_attachment} = Task.await(reader)
           assert_receive {:DOWN, ^worker_monitor, :process, _, :killed}, 2_000
@@ -151,10 +161,7 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
       state = :sys.get_state(fixture.dispatcher)
 
       pending =
-        case entry do
-          :attach_scan -> state.pending_scans
-          :attach_prefetch -> state.pending_reads
-        end
+        state.staged_attachments
         |> Map.values()
 
       assert [%{worker: worker}] = pending
@@ -164,7 +171,7 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
       assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 2_000
 
       state = :sys.get_state(fixture.dispatcher)
-      assert state.pending_scans == %{}
+      assert state.staged_attachments == %{}
       assert state.pending_reads == %{}
       assert state.read_monitors == %{}
       TestStore.release(waiter)
@@ -304,29 +311,48 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
              Loopex.command(attachment, %{type: :prompt, command_id: id, content: "content"})
   end
 
-  defp held_read(fixture, session_id, attachment, entry) do
+  defp held_read(fixture, session_id, attachment, entry, attach_holder \\ :caller) do
     TestStore.block_next_event_read(fixture.store, self())
 
     reader =
       Task.async(fn ->
         case entry do
-          :next_event -> Loopex.next_event(attachment)
-          :attachment_status -> Loopex.attachment_status(attachment)
-          _attach -> Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+          :next_event ->
+            Loopex.next_event(attachment)
+
+          :attachment_status ->
+            Loopex.attachment_status(attachment)
+
+          _attach when is_pid(attach_holder) ->
+            Runtime.attach_for_holder(
+              fixture.runtime,
+              session_id,
+              attach_holder,
+              after_event_sequence: 0
+            )
+
+          _attach ->
+            Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
         end
       end)
 
-    assert_receive {:event_history_read, waiter, _, ^session_id, _}, 2_000
+    assert_receive {:event_history_read, waiter, _, ^session_id, _first_rows}, 2_000
 
     if entry == :attach_prefetch do
-      [pending] = Map.values(:sys.get_state(fixture.dispatcher).pending_scans)
-      monitor = Process.monitor(pending.worker)
+      [pending] = Map.values(:sys.get_state(fixture.dispatcher).staged_attachments)
       :ok = :sys.suspend(fixture.dispatcher)
-      TestStore.release(waiter)
-      assert_receive {:DOWN, ^monitor, :process, _, :normal}, 2_000
+
       TestStore.block_next_event_read(fixture.store, self())
+      TestStore.release(waiter)
+      assert_receive {:event_history_read, scan_tail_waiter, _, ^session_id, []}, 2_000
+
+      TestStore.block_next_event_read(fixture.store, self())
+      TestStore.release(scan_tail_waiter)
+
+      assert_receive {:event_history_read, prefetch_waiter, _, ^session_id, [_event]}, 2_000
       :ok = :sys.resume(fixture.dispatcher)
-      assert_receive {:event_history_read, prefetch_waiter, _, ^session_id, _}, 2_000
+
+      assert Process.alive?(pending.worker)
       {reader, prefetch_waiter}
     else
       {reader, waiter}

@@ -1,10 +1,25 @@
+Code.require_file("../../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+
 defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   @moduledoc false
 
   import ExUnit.Assertions
-  alias Loopex.LLM.ReqLLM.{ProviderConfiguration, ProviderWorker}
+
+  alias Loopex.LLM.ReqLLM.{
+    CredentialCustody,
+    CredentialRegistry,
+    CredentialToken,
+    ProviderConfiguration,
+    ProviderWorker
+  }
+
+  alias Loopex.LLM.ReqLLM.TraceCapability.Direct
   alias Loopex.LLM.ReqLLM, as: Adapter
-  alias Loopex.{Model, Runtime.ProviderLifetime}
+  alias Loopex.M1RuntimeTestStore, as: TestStore
+  alias Loopex.Trace.Capability
+  alias Loopex.{Model, Runtime, Runtime.ProviderLifetime}
+
+  @default_credential "synthetic-provider-credential"
 
   @diagnostic_cases [
     :"test one durable model attempt invokes the provider transport exactly once",
@@ -113,6 +128,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     {:ok, events} = Agent.start_link(fn -> [] end)
     {:ok, transport_events} = Agent.start_link(fn -> [] end)
     {:ok, probe_events} = Agent.start_link(fn -> [] end)
+    {:ok, request_headers} = Agent.start_link(fn -> [] end)
     {:ok, probe_listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     {:ok, {_address, probe_port}} = :inet.sockname(probe_listener)
 
@@ -133,13 +149,49 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}, reuseaddr: true])
 
     {:ok, {_address, port}} = :inet.sockname(listener)
-    expected = Keyword.get(options, :credential, System.get_env(Adapter.credential_variable()))
+    expected = Keyword.get(options, :credential, @default_credential)
+
+    {:ok, custody_pid} = CredentialCustody.start_link(credential: expected)
+    {:ok, custody} = CredentialCustody.reference(custody_pid)
+    {:ok, registry_pid} = CredentialRegistry.start_link()
+    {:ok, registry} = CredentialRegistry.handle(registry_pid)
+    token = CredentialToken.new()
+    :ok = CredentialRegistry.put(registry, token, custody)
+
+    {store_pid, store} = TestStore.start_store()
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "provider-fixture-#{nonce}",
+        store: store,
+        context_token_budget: 8_192
+      )
+
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    :ok = Capability.bind(capability, runtime)
+    {:ok, workers} = Task.Supervisor.start_link()
+
+    starter =
+      Loopex.Runtime.ProviderLifetime.Starter.new(fn child ->
+        Task.Supervisor.start_child(workers, child,
+          restart: :temporary,
+          shutdown: :brutal_kill
+        )
+      end)
 
     responses = response_plan!(mode, root, options)
 
     acceptor =
       spawn_link(fn ->
-        accept_loop(listener, events, transport_events, mode, expected, responses)
+        accept_loop(
+          listener,
+          {events, request_headers},
+          transport_events,
+          mode,
+          expected,
+          responses
+        )
       end)
 
     if mode == :closed_port, do: :gen_tcp.close(listener)
@@ -147,11 +199,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     fixture = %{
       root: root,
       events: events,
+      request_headers: request_headers,
       transport_events: transport_events,
       probe_events: probe_events,
       listener: listener,
       acceptor: acceptor,
       mode: mode,
+      credential: expected,
+      custody_pid: custody_pid,
+      registry_pid: registry_pid,
+      runtime: runtime,
+      store_pid: store_pid,
+      capability_pid: capability_pid,
+      capability: capability,
+      workers: workers,
+      starter: starter,
       paused: Keyword.get(options, :paused, false),
       hold_caller: Keyword.get(options, :hold_caller, false)
     }
@@ -167,6 +229,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         if Process.alive?(events), do: Agent.stop(events)
         if Process.alive?(transport_events), do: Agent.stop(transport_events)
         if Process.alive?(probe_events), do: Agent.stop(probe_events)
+        if Process.alive?(request_headers), do: Agent.stop(request_headers)
+        if Runtime.alive?(runtime), do: Loopex.stop(runtime)
+        stop_if_alive(workers)
+        stop_if_alive(capability_pid)
+        stop_if_alive(store_pid)
+        stop_if_alive(registry_pid)
+        stop_if_alive(custody_pid)
         File.rm_rf!(root)
       catch
         kind, reason ->
@@ -182,7 +251,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       File.write!(Path.join(root, ".env"), "LOOPEX_DOTENV_CANARY=loaded\nTIDEWAVE_REPL=true\n")
     end
 
-    Map.put(fixture, :options, launch)
+    direct_options =
+      Keyword.merge(launch,
+        credential_token: token,
+        credential_registry: registry,
+        tracing_capability: Direct.new()
+      )
+
+    Map.put(fixture, :options, direct_options)
   end
 
   def request(options \\ []) do
@@ -226,24 +302,83 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         retainer \\ self(),
         progress \\ Model.discard_progress()
       ) do
+    if retainer == :unmanaged do
+      direct_call(fixture, request, progress)
+    else
+      managed_call(fixture, request, retainer, progress)
+    end
+  end
+
+  defp direct_call(fixture, request, progress) do
     observer = self()
 
     {caller, caller_monitor} =
       spawn_monitor(fn ->
+        receive do
+          :start -> :ok
+        end
+
+        result = complete(fixture, request, progress)
+        send(observer, {:completed, self(), result})
+        if fixture.hold_caller, do: receive(do: (:finish_callback -> :ok))
+      end)
+
+    trace_flags =
+      [:procs, :set_on_spawn, {:tracer, observer}] ++
+        if(fixture.paused, do: [:receive], else: [])
+
+    1 = :erlang.trace(caller, true, trace_flags)
+    send(caller, :start)
+
+    guardian =
+      receive do
+        {:trace, ^caller, :spawn, pid, {:erlang, :apply, [_closure, []]}} when is_pid(pid) -> pid
+      after
+        1_000 -> flunk("direct provider guardian did not start")
+      end
+
+    %{
+      caller: caller,
+      caller_monitor: caller_monitor,
+      guardian: guardian,
+      monitor: Process.monitor(guardian),
+      stop_reference: nil,
+      deadline: request.deadline,
+      lifetime: :unmanaged
+    }
+  end
+
+  defp managed_call(fixture, request, retainer, progress) do
+    observer = self()
+    managed_options = Keyword.put(fixture.options, :tracing_capability, fixture.capability)
+
+    {caller, caller_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          :start -> :ok
+        end
+
         result =
           ProviderLifetime.scoped(
             fn guardian, stop_reference ->
               send(observer, {:registered, self(), guardian, stop_reference})
               if fixture.paused, do: receive(do: (:continue -> :ok))
-              if retainer == :unmanaged, do: :unmanaged, else: {:managed, retainer, 2_000}
+              {:managed, retainer, 2_000}
             end,
-            fn -> complete(fixture, request, progress) end
+            fixture.starter,
+            fn -> Adapter.complete(request, managed_options, progress) end
           )
 
         send(observer, {:completed, self(), result})
         if fixture.hold_caller, do: receive(do: (:finish_callback -> :ok))
       end)
 
+    # The callback owns the invocation clock snapshot before the guardian
+    # exists. Inheriting call and process tracing from this parked callback
+    # lets boundary tests observe that exact anchor and the subsequently
+    # supervised guardian without adding a production test seam.
+    1 = :erlang.trace(caller, true, [:call, :procs, :set_on_spawn, {:tracer, observer}])
+    send(caller, :start)
     assert_receive {:registered, ^caller, guardian, stop_reference}, 1_000
 
     %{
@@ -252,7 +387,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       guardian: guardian,
       monitor: Process.monitor(guardian),
       stop_reference: stop_reference,
-      deadline: request.deadline
+      deadline: request.deadline,
+      lifetime: :managed
     }
   end
 
@@ -264,6 +400,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   # hosted runner.
   def until_settled(call),
     do: max(call.deadline - System.system_time(:millisecond), 0) + 5_000
+
+  def stop(%{lifetime: :unmanaged} = call) do
+    if Process.alive?(call.caller), do: Process.exit(call.caller, :kill)
+    guardian = call.guardian
+    monitor = call.monitor
+    assert_receive {:DOWN, ^monitor, :process, ^guardian, _reason}, 2_500
+  end
 
   def stop(call) do
     stop = make_ref()
@@ -283,11 +426,32 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
   def events(fixture), do: Agent.get(fixture.events, &Enum.reverse/1)
   def transport_events(fixture), do: Agent.get(fixture.transport_events, &Enum.reverse/1)
+
+  # The raw request headers the fake provider received, in order. Tests that
+  # use them carry only synthetic credentials.
+  def request_headers(fixture), do: Agent.get(fixture.request_headers, &Enum.reverse/1)
   def probe_events(fixture), do: Agent.get(fixture.probe_events, &Enum.reverse/1)
   def count(fixture), do: length(events(fixture))
+  def credential(fixture), do: fixture.credential
   def marker(fixture, name), do: Path.join(fixture.root, name)
   def reached?(fixture, name), do: File.regular?(marker(fixture, name))
   def release(fixture), do: File.write!(marker(fixture, "release"), "release")
+
+  # Concept: resume a guardian a case held, so that it runs again.
+  #
+  # Technical depth: on OTP 29.0.5 a process suspended while it waits in
+  # `receive ... after` can lose that timeout on resume and then wait forever.
+  # The guardian polls accept and checks its deadline only from its `after 10`,
+  # so a hosted current-pair run left one stranded until the request deadline
+  # (run 36199494299). A standalone loop reproduced it within a few dozen
+  # suspend/resume cycles on 29.0.5, and never in 4,500 cycles on 27.3.4. One
+  # message, which the guardian's loop ignores, restarts that receive and its
+  # timer. Production suspends a guardian only immediately before killing it.
+  def resume_guardian(guardian) do
+    true = :erlang.resume_process(guardian)
+    send(guardian, :loopex_test_resume_nudge)
+    true
+  end
 
   def canaries(fixture), do: length(methods(fixture))
 
@@ -350,9 +514,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
   end
 
+  defp stop_if_alive(pid) when is_pid(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid)
+  catch
+    :exit, _reason -> :ok
+  end
+
   defp write_worker(root, mode, port, probe_port) do
     manifest = %{
       "source" => "synthetic-process-fixture",
+      "source_digest" => nil,
       "version" => "fixture",
       "dependency_lock_sha256" => String.duplicate("0", 64),
       "packaged_input_sha256" => String.duplicate("1", 64),
@@ -997,10 +1168,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   # before request creation. No worker entry, dependency application startup,
   # model catalog lookup, socket, readiness frame or credential is pre-started.
   # The actual child still owns all those steps under the unchanged deadline.
-  # The compiler's ten-second fail-stop starts at its main entry and bounds
-  # compilation, not OS bootstrap or immediate response to parent death;
-  # it extends neither request deadlines nor ExUnit timeouts. Root cleanup is
-  # registered first, including for compiler failure.
+  # The compiler's fifty-second fail-stop starts at its main entry and bounds
+  # compilation, not OS bootstrap or immediate response to parent death. It
+  # only guards against a hung compile, so it sits just under ExUnit's 60 s
+  # default rather than at ten seconds, which a loaded floor-pair run
+  # exceeded with the compile still progressing. It extends no request
+  # deadline, but it does run inside the caller's ExUnit timeout, so a case
+  # whose request deadline approaches 60 s carries a larger module timeout.
+  # Root cleanup is registered first, including for compiler failure.
   defp prepare_worker(root, source, paths) do
     preparation = Path.join(root, "prepare.escript")
 
@@ -1014,7 +1189,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     #!/usr/bin/env escript
     %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2
     main([]) ->
-      spawn(fun() -> receive after 10000 -> erlang:halt(70) end end),
+      spawn(fun() -> receive after 50000 -> erlang:halt(70) end end),
       ok = code:add_paths(#{paths}),
       {ok, _} = application:ensure_all_started(elixir),
       'Elixir.Code':eval_string(base64:decode("#{Base.encode64(compiler)}")),
@@ -1085,7 +1260,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         send(handler, {:socket, socket})
         accept_loop(listener, events, transport_events, mode, expected, remaining_responses)
 
-      {:error, :closed} ->
+      # A listener closed at teardown while this accept waits answers
+      # `:closed` or, depending on the moment, `:einval`; both end the loop.
+      {:error, reason} when reason in [:closed, :einval] ->
         :ok
     end
   end
@@ -1094,10 +1271,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   defp next_response({:sequence, [response_body | rest]}), do: {response_body, {:sequence, rest}}
   defp next_response({:sequence, []} = responses), do: {:sequence_exhausted, responses}
 
-  defp serve(socket, events, transport_events, mode, expected, response_body) do
+  defp serve(socket, {events, request_headers}, transport_events, mode, expected, response_body) do
     with {:ok, headers, body} <- read_request(socket, "") do
       authorized = is_binary(expected) and String.contains?(headers, expected)
       Agent.update(events, &[{Jason.decode!(body), authorized} | &1])
+      Agent.update(request_headers, &[headers | &1])
 
       case mode do
         :backpressure ->

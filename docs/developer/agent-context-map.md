@@ -1,12 +1,30 @@
 # Agent Context Map
 
-This is the lazy-loaded routing map for development work. It points to the first
-documents to read when the active plan and local code are not enough. Each
-paired route starts with Concept and then identifies the exact Technical depth.
+This is the lazy-loaded routing map for development work. It tells a
+contributor, or a coding agent working for one, which documents to read first
+when the active plan and the local code are not enough, and it records the
+dated client facts and maintainer decisions that governance records cite.
+Every client adapter and repository skill loads it second, after `AGENTS.md`.
+
+It has five parts:
+
+1. [How to use it](#how-to-use) — the reading order.
+2. [Area routing](#area-routing) — for each subsystem, the Concept section to
+   read first and the exact Technical depth section behind it.
+3. [Checks and tests](#test-quick-reference) — the commands and test lanes, in
+   brief, with the page that owns each.
+4. [Development client guidance](#development-client-guidance) and
+   [version-specific guidance](#version-specific-technical-guidance) — client
+   facts, capability mappings and invocation, and any in-flight milestone
+   notes.
+5. [Retained authority dispositions](#disposition-index) — the durable record
+   of explicit maintainer decisions, with an index by period.
+
 Replace founding-document pointers with nearer accepted decisions as they land,
 and add code and test evidence pointers without changing the authority order in
 `AGENTS.md`.
 
+<a id="how-to-use"></a>
 ## How To Use
 
 1. Read `AGENTS.md` first.
@@ -26,19 +44,29 @@ Either member of the vision pair may be edited only under an explicit current
 maintainer or developer request naming a vision change; see `AGENTS.md` for the
 separate decision duty when a founding boundary or invariant would change.
 
+<a id="area-routing"></a>
 ## Area Routing
+
+The first group routes the development process; the rest route the product,
+starting from the founding vision and moving to the implemented subsystems.
 
 | Area | Concept | Technical depth | Notes |
 | --- | --- | --- | --- |
+| Getting started | [Developer getting started](getting-started.md#concept) | [Getting started technical depth](getting-started-technical.md#technical-depth) | Two tracks, building on Loopex and contributing; [DEVELOPMENT.md](../../DEVELOPMENT.md) has prerequisites, the toolchain pairs and the two check commands, and the [developer index](README.md) groups every page by reader. |
+| Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
+| Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
+| Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
+| Architecture as implemented | [Architecture](architecture.md#concept) | [Architecture invariants and mechanics](architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
 | Ownership and trust boundaries | [Ownership](../vision.md#concept-vision-ownership-trust) | [Ownership mechanics](../vision-technical.md#technical-vision-ownership-trust) | Loopex/host/executor ownership, policy decisions, and grants. A host policy may also defer and be asked again: accepted [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) makes that question durable session state, and an answer is evidence for a new decision, never a grant. |
 | Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, one admitted `:telemetry` dependency in core, bootstrap floor. Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) owns the refreshed floor, Elixir 1.18.5 with OTP 27.3.4, and accepted [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) admits `:telemetry` in core and supersedes exactly the ADR 0001 clauses that required an empty core dependency list. The enforced inventory and the per-role rules are in the [architecture technical companion](architecture-technical.md#technical-arch-applications). |
 | Debugging a runtime, tracing, telemetry | [Observability](observability.md#concept) | [Observability contracts and inventory](observability-technical.md#technical-depth) | Diagnose through a runtime-scoped trace session and the telemetry inventory rather than inserted printing: both are bounded, both redact content, and neither changes the code under observation. Operator levels, ceilings and events are in the [runbook](../operator/observability.md#concept); accepted [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) fixes the emission inventory. |
-| Serving a session over the wire | [App server protocol](app-server-protocol.md#concept) | [Protocol contract, records and limits](app-server-protocol-technical.md#technical-depth) | The experimental generation `loopex.session.v1-experimental`: sixteen methods, seven record families, fifteen error codes, the wire encodings and the exact limits. Accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) is the deciding authority; the operator [runbook](../operator/app-server.md#concept) covers launching it. |
-| Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [M1 runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
+| Daemon, socket clients, controller lease | [Daemon](daemon.md#concept) and the [operator daemon page](../operator/daemon.md#concept) | [Daemon mechanics](daemon-technical.md#technical-depth) | The M5 daemon host: generation `loopex.experimental/2` over a Unix-domain socket, admission relay, controller lease and takeover, attachment residency and the orderly stop. Accepted [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept), [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept), [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept) and [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept). |
+| Serving a session over the wire | [App server protocol](app-server-protocol.md#concept) | [Protocol contract, records and limits](app-server-protocol-technical.md#technical-depth) | The foreground stdio generation `loopex.experimental/1`: sixteen methods, seven record families, fifteen error codes, the wire encodings and the exact limits. Accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) is the deciding authority; the operator [runbook](../operator/app-server.md#concept) covers launching it. The daemon's generation 2 is in the daemon row above. |
+| Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
 | Transactions, operations, recovery, cancellation | [Recovery truth](../vision.md#concept-vision-recovery-truth) | [Transaction and recovery mechanics](../vision-technical.md#technical-vision-recovery-truth) | `commit_unknown`, operation lifecycle, reconciliation, outcome algebra. |
-| Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
+| Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. The implemented turn machine, tool registry and bounds are in [agent loop and tools](agent-loop-and-tools.md#concept). |
 | Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries. Accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) fixes the headless protocol and accepted [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) puts durable interactions in core before any wire mapping; both are prerequisites of the Closed [`M4` plan](../plans/M4.md#concept). Read the wire reference in the [protocol pair](app-server-protocol.md#concept), the embedding contract in [durable interactions](runtime-and-embedding.md#technical-embedding-interactions), and the [M4 pre-acceptance choices](#disposition-m4-preacceptance-contract-choices-2026-09-13) for the exclusions the maintainer approved. |
 | Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. Accepted [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) adds the optional bounded transfer triple on the ArtifactStore port and its exact ceilings; use the [embedding contract](runtime-and-embedding.md#technical-embedding-transfers) for the facade family, ownership and refusals, and the [selected profile](#disposition-m4-preacceptance-contract-choices-2026-09-13) for how those limits were chosen. |
 | Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. Accepted [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) and its [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision) govern M3 provider-attempt retention. |
@@ -52,28 +80,35 @@ separate decision duty when a founding boundary or invariant would change.
 | Repository layout and ADR agenda | [Repository seed](../vision.md#concept-vision-repository-seed) | [Exact seed](../vision-technical.md#technical-vision-repository-seed) | Pair with the [ADR 0001 decision](../adr/0001-repository-and-application-layout.md#concept-adr-0001-decision) and its [technical mechanics](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision). |
 | Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. [M4](../plans/M4.md#concept) is Closed; the register carries the current M5 state. How a milestone is planned, run and closed is the [milestone guide](milestones.md#concept), and which checks a change must pass is the [verification guide](verification.md#concept). |
 | Serial barriers | [Ordering constraint](../vision.md#concept-vision-serial-barriers) | [Exact rejoin order](../vision-technical.md#technical-vision-serial-barriers) | A milestone may add barriers but cannot weaken the founding sequence. |
-| Verification, invariants, budgets | [Verification](../vision.md#concept-vision-verification) | [Exact evidence](../vision-technical.md#technical-vision-verification) | Claim-proportional tests and scope-specific minimalism budgets. |
-| Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. What is exposed today, with M4's experimental labels and the app server's exact-generation rule, is in [compatibility surfaces](compatibility-surfaces.md#concept); M4 moved the source `VERSION` to `0.1.0`, which ADR 0023 keeps separate from any package, tag, publication or freeze. |
+| Verification, invariants, budgets | [Verification](../vision.md#concept-vision-verification) | [Exact evidence](../vision-technical.md#technical-vision-verification) | Claim-proportional tests and scope-specific minimalism budgets. The day-to-day rule book is the [verification guide](verification.md#concept). |
+| Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. What is exposed today, with its experimental labels and the app server's exact-generation rule, is in [compatibility surfaces](compatibility-surfaces.md#concept). M4 moved the source `VERSION` to `0.1.0` and the checked-out source carries `0.2.0`; ADR 0023 keeps a source version separate from any package, tag, publication or freeze. |
 | Prior-system evidence | [Sources](../vision.md#concept-vision-sources) | [Source record](../vision-technical.md#technical-vision-sources) | Consulted sources are linked; independent implementation remains mandatory. |
-| Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 
+<a id="test-quick-reference"></a>
 ## Test Quick Reference
 
-Product tests run with `mix test` from the repository root. Repository checks
-are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
-`loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`,
-`loopex.hook_registration`, and `loopex.self_hosting`.
-`bash scripts/check-bootstrap.sh` runs the bootstrap aggregate.
-`bash scripts/check.sh` is the fast check each integration candidate runs
-once, in CI on the branch or locally before the merge, and
-`bash scripts/check-release.sh` is the slow check run once before closure; an
-unchanged-source release reuses that evidence and runs only its pre-tag
-administrative-SHA proofs. [DEVELOPMENT.md](../../DEVELOPMENT.md) describes
-both. The milestone
-gate runners they replaced are gone, and the gate files under `docs/plans/`
-are historical records of what those runs proved. The four repository skills
-are `open-milestone`, `close-milestone`, `adr`, and `mutant-hunt` as an
-optional technique; there is no `/gate`.
+[DEVELOPMENT.md](../../DEVELOPMENT.md) owns the commands and the
+[verification guide](verification.md#concept) owns which ones a change needs;
+this is the short form.
+
+- `bash scripts/check.sh` is the fast check each integration candidate runs
+  once, in CI on the branch or locally before the merge. Its structure step is
+  `bash scripts/check-bootstrap.sh`, the bootstrap aggregate.
+- `bash scripts/check-release.sh` is the slow check run once before closure;
+  an unchanged-source release reuses that evidence and runs only its pre-tag
+  administrative-SHA proofs.
+- Product tests run with `mix test` from the repository root or an
+  application directory.
+- Repository checks are Mix tasks. `mix loopex.status`,
+  `loopex.agent_bootstrap`, `loopex.docs_check`, `loopex.deps_budget` and
+  `loopex.version_train` run inside the fast check; `loopex.core_only`,
+  `loopex.matrix`, `loopex.format_scope`, `loopex.hook_registration` and
+  `loopex.self_hosting` are run directly, and several carry tests of their
+  own in the `loopex` suite. `mix help loopex.<task>` says what each proves.
+- The four repository skills are `open-milestone`, `close-milestone`, `adr`,
+  and `mutant-hunt` as an optional technique; there is no `/gate`. The
+  milestone gate runners the two checks replaced are gone, and the gate files
+  under `docs/plans/` are historical records of what those runs proved.
 
 Hosted CI — `.github/workflows/agent-bootstrap.yml` — runs
 `bash scripts/check.sh --select` on every push to `main` and every pull
@@ -85,9 +120,14 @@ Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour
 change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
-lane — never part of the default suite, and so are the three `long_bound`
-cases whose claim is a real duration: the two `test_helper.exs` files exclude
+lane — never part of the default suite, and so are the `long_bound`
+cases whose claim is a real duration: the `test_helper.exs` files exclude
 them and `scripts/check-release.sh` runs them in a pass of its own.
+
+### Gate-era routing notes
+
+These notes route readers of M3-era records; the retired gate machinery they
+describe no longer runs, except where a note restates a current rule.
 
 M3's implementation used focused checks under the reviewed
 [end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10),
@@ -116,7 +156,14 @@ replacement binding if the approved change reaches its bytes. The
 is the current example: the test file is not digest-bound, so no gate-generation
 transaction is needed for the approved assertion change.
 
+<a id="development-client-guidance"></a>
 ## Development Client Guidance
+
+Development clients are optional. Their files in `.claude/`, `.codex/` and
+`.agents/skills/` are adapters that defer to `AGENTS.md` and this map; the
+entries below record what the repository enforces about them, the dated
+maintainer decisions that shape them, the current capability mapping, and the
+current per-client compatibility and invocation facts.
 
 - `scripts/check-agent-bootstrap.sh`, `scripts/check-gitignore.sh`,
   `scripts/check-commit-messages.sh`, `scripts/check-repo-hygiene.sh`,
@@ -278,6 +325,7 @@ transaction is needed for the approved assertion change.
   the Claude hook is early feedback that calls it and must not be described as
   repository enforcement in its own right.
 
+<a id="version-specific-technical-guidance"></a>
 ## Version-Specific Technical Guidance
 
 This section holds temporary technical routing while a milestone is planned and
@@ -285,7 +333,40 @@ implemented. It never owns milestone status; read the
 [plans index](../plans/README.md) for that. Clear in-flight notes at milestone
 closeout, including for milestones such as M0 that produce no release.
 
-Revision-scoped milestone status is deliberately not repeated here.
+Revision-scoped milestone status is deliberately not repeated here. No
+in-flight note is recorded at this revision; the M5 subsystem routes are in
+the [daemon row](#area-routing) of the area table.
+
+<a id="disposition-index"></a>
+## Disposition Index
+
+The entries below this index are the retained record of explicit maintainer
+decisions. Each is immutable once written and true for the revision it names;
+a later decision is a new entry, and a milestone's administrative closure
+commit appends its closure disposition at the end of the file. Entries are in
+the order they were recorded, which is mostly but not strictly by date. This
+index groups them by period and links the entries that carry an anchor; it is
+navigation only, and an entry appended after it was written is found at the
+end of the file.
+
+| Period | Entries |
+| --- | --- |
+| Founding and M0, 2026-08-15 to 2026-08-21 | [Founding ADR acceptance](#disposition-founding-adrs-2026-08-15); [M0 plan pair and gate acceptance](#disposition-m0-acceptance-2026-08-17) with its [Amendment 1](#disposition-m0-amendment-1-2026-08-17), [Amendments 2 and 3](#disposition-m0-amendments-2-and-3-2026-08-17), [Amendment 4](#disposition-m0-amendment-4-2026-08-20), [closure](#disposition-m0-closure-2026-08-21) and [Amendment 5](#disposition-m0-amendment-5-2026-08-20); the seed bootstrap closure under "Retained Seed Bootstrap Evidence" |
+| M1, 2026-08-21 to 2026-08-26 | [Prerequisite ADRs](#disposition-m1-prerequisite-adrs-2026-08-21); [plan and gate acceptance](#disposition-m1-plan-acceptance-2026-08-22); [governance-only acceptance integration](#disposition-governance-acceptance-integration-2026-08-22); Amendments [1 and 2](#disposition-m1-amendments-1-and-2-2026-08-22), [3](#disposition-m1-amendment-3-2026-08-22), [4](#disposition-m1-amendment-4-2026-08-22), [5](#disposition-m1-amendment-5-2026-08-23) and [6](#disposition-m1-amendment-6-2026-08-23); [ADR 0008](#disposition-adr-0008-acceptance-2026-08-22); gate generations [7](#disposition-m1-gate-generation-7-2026-08-24) and [8](#disposition-m1-gate-generation-8-2026-08-26); the [gate-generation baseline exception](#disposition-m1-gate-generation-exception-2026-08-23) |
+| Cross-cutting, 2026-08-23 and 2026-09-01 | [Vision terminal algebra gains `bound_reached`](#disposition-bound-reached-vision-change-2026-08-23); [provider recovery requires proof before retry](#disposition-provider-recovery-proof-before-retry-2026-09-01) |
+| M2, 2026-08-24 to 2026-09-03 | [Prerequisite ADRs 0009–0011](#disposition-m2-prerequisite-adrs-2026-08-24); [plan pair and gate acceptance](#disposition-m2-plan-acceptance-2026-08-24); [inherited-gate enforcement](#disposition-m2-inherited-gate-enforcement-2026-08-27); gate amendments [1](#disposition-m2-gate-amendment-1-2026-08-25) through [9](#disposition-m2-gate-amendment-9-2026-09-03); ADRs [0012 and 0013](#disposition-adrs-0012-and-0013-acceptance-2026-08-29), [0014](#disposition-adr-0014-acceptance-2026-08-29) and [0015 through 0018](#disposition-adrs-0015-through-0018-acceptance-2026-09-01); [M2 closure](#disposition-m2-closure-2026-09-03) |
+| Between M2 and M3, 2026-09-07 and 2026-09-08 | [ADRs 0019–0021 and the repair implementation](#disposition-adrs-0019-0021-2026-09-07); [local executor Bash requirement](#disposition-local-executor-bash-2026-09-07); [M0 gate generation 6](#disposition-m0-gate-generation-6-2026-09-07); [ADR 0022](#disposition-adr-0022-acceptance-2026-09-08) |
+| M3, 2026-09-09 to 2026-09-13 | [CLI extension override](#disposition-m3-cli-extension-override-2026-09-09) and its [ratification](#override-disposition-m3-cli-extension-ratification-2026-09-10); [prerequisite ADRs 0025 and 0027](#disposition-m3-prerequisite-adrs-2026-09-10); [plan pair and gate acceptance](#disposition-m3-plan-acceptance-2026-09-10); [implementation gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10); commit-title [exception](#override-disposition-m3-commit-titles-2026-09-11) and [replacement](#override-disposition-m3-commit-title-replacement-2026-09-12); [ADR 0029](#disposition-adr-0029-acceptance-2026-09-11); Amendments [1](#disposition-m3-amendment-1-acceptance-2026-09-11), [2](#disposition-m3-amendment-2-acceptance-2026-09-12) and [3](#disposition-m3-amendment-3-acceptance-2026-09-12); [final validation scope](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13); [M3 closure](#disposition-m3-closure-2026-09-13) |
+| M4 planning, 2026-09-11 to 2026-09-14 | [Planning-revision aggregate override](#override-disposition-m4-planning-aggregate-2026-09-11) and its [scope](#override-disposition-m4-planning-aggregate-scope-2026-09-11); [planning packet approval](#disposition-m4-planning-packet-approval-2026-09-11); [telemetry admitted to core](#disposition-m4-vision-core-telemetry-2026-09-13); [pre-acceptance contract choices](#disposition-m4-preacceptance-contract-choices-2026-09-13); ADRs [0023](#disposition-adr-0023-acceptance-2026-09-13), [0024](#disposition-adr-0024-acceptance-2026-09-13), [0026](#disposition-adr-0026-acceptance-2026-09-13), [0028](#disposition-adr-0028-acceptance-2026-09-13) and [0030](#disposition-adr-0030-acceptance-2026-09-13); [M4 plan acceptance](#disposition-m4-plan-acceptance-2026-09-14) |
+| M4 delivery, 2026-09-14 to 2026-09-19 | Inherited re-proof decisions ([before integration](#override-disposition-m4-inherited-evidence-before-integration-2026-09-14), [M1 and M2 waiver](#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14), [M0 deferral](#override-disposition-m4-m0-reproof-deferred-to-implementation-2026-09-14)); [commit-title exception](#override-disposition-m4-commit-titles-2026-09-15); [observability rule](#disposition-m4-observability-rule-2026-09-15); [the Node consumer](#disposition-m4-plan-amendment-node-consumer-2026-09-15); [closed-gate repair chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17); the gate generations recorded between 2026-09-12 and 2026-09-18; [closure schedule](#override-disposition-m4-closure-schedule-2026-09-19); [M4 closure](#disposition-m4-closure-2026-09-19) |
+| Post-M4 closure procedure, 2026-09-20 and 2026-09-21 | Six unanchored entries after the M4 closure: "Closure names two commits", "Closure and release evidence sequencing", "Administrative confinement is content confinement", "Closure candidate ownership and archive producer", "Administrative reconstruction and four release proofs" and "Archive extraction ignores the caller umask". The [milestone guide](milestones.md#concept) states the resulting procedure |
+| M5, from 2026-09-21 | [Plan pair and ADR 0031–0034 acceptance](#disposition-m5-acceptance-2026-09-21); [host application role](#disposition-m5-host-role-2026-09-22); [per-session progress routing](#disposition-m5-progress-routing-2026-09-22); [escript archive exclusion](#disposition-m5-escript-exclusion-2026-09-22); [no resident window](#disposition-m5-no-resident-window-2026-09-22); [residual proofs](#disposition-m5-residual-proofs-2026-09-22); [trace sessions load named modules](#disposition-m5-trace-loads-named-modules-2026-09-23); [closure-review decisions](#disposition-m5-closure-review-2026-09-23); [release-check attendance](#disposition-m5-driver-attendance-2026-09-23); [session-index loss](#disposition-m5-session-index-lost-2026-09-23); [non-blocking daemon components](#disposition-m5-nonblocking-components-2026-09-24); [executor cancellation and the risk packet](#disposition-m5-cleaned-implies-durable-2026-09-24) |
+
+Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
+names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
+[M4](#override-disposition-m4-commit-titles-2026-09-15) commit-title
+exceptions, and `apps/loopex_cli/test/cli_test.exs` names the
+[M3 CLI extension ratification](#override-disposition-m3-cli-extension-ratification-2026-09-10).
 
 ## Retained Authority Dispositions
 
@@ -5591,3 +5672,275 @@ only the register row and the two supplied status blocks, the M5 Acceptance
 row, the four ADRs' Concept status lines and Acceptance rows, the ADR index's
 status cells and prose, and this disposition. It moves `M5` to `Accepted` and
 grants no closure, merge, tag, release or publication.
+
+<a id="disposition-m5-host-role-2026-09-22"></a>
+### M5 host application role — 2026-09-22
+
+The accepted M5 plan puts `loopex daemon` — its readiness line, signal routing
+and exit classes — in the reference CLI and the daemon's process and socket
+lifetime in `loopex_daemon`, but the dependency oracle forbade any client
+application from depending on another, for the reason its own test records: a
+client could otherwise inherit another client's permissive policy. On
+2026-09-22 the maintainer chose, from three presented options (a named
+single-pair exception, a new role, or a separate daemon escript), a new
+`:host` role. `loopex_daemon` is now `:host`: it obeys every client rule and
+may depend on no client and no host. A client may depend in production on at
+most one host, and every other role still refuses a host dependency. The
+reference CLI declares that one production dependency and starts the daemon
+from `loopex daemon`. The general prohibition on client-to-client
+dependencies is unchanged. This changes what `mix loopex.deps_budget`
+enforces; its cases in `apps/loopex/test/deps_budget_test.exs` pin the new
+role in both directions.
+
+<a id="disposition-m5-progress-routing-2026-09-22"></a>
+### M5 per-session progress routing — 2026-09-22
+
+The accepted M5 plan reuses ADR 0023's progress record on the daemon socket,
+but core delivered transient progress to one runtime-wide `progress_to` sink
+whose stream items carry no session identity, so a daemon serving many
+sessions could not route progress to the right attachment. On 2026-09-22 the
+maintainer chose, over emitting no progress in M5, an additional named core
+change: core tags the progress it delivers with its session so a host sink can
+route it, and the daemon forwards each session's progress to that session's
+attachments within ADR 0023's 32-record and 512 KiB progress bound, dropping
+or coalescing before it would delay a durable record. Embedded callers keep
+their existing progress messages.
+
+<a id="disposition-m5-escript-exclusion-2026-09-22"></a>
+### M5 archive build exclusion for the command escript — 2026-09-22
+
+The plan's fresh-source witness compares the extraction's manifest before and
+after the documented build with exactly one exclusion, the top-level `_build`
+and `deps` roots. The documented build writes the `loopex` escript beside its
+application at `apps/loopex_cli/loopex`, so an honest build always differs by
+that one file. On 2026-09-22 the maintainer chose, over moving the escript into
+`_build` or dropping the after-build comparison, to name exactly
+`apps/loopex_cli/loopex` as a second exclusion — the build's one declared
+output outside the build roots — recorded with the other exclusion in the
+retained evidence. The operator build and `bin/loopex` are unchanged; any other
+path the build writes is still a change.
+
+<a id="disposition-m5-no-resident-window-2026-09-22"></a>
+### M5 ships no resident window — 2026-09-22
+
+ADR 0032 describes a per-session resident window: a droppable cache of
+already-encoded events, bounded at 4,096 events and 16 MiB, so a second
+connection at the same position need not re-encode. Each daemon connection
+encodes its own events from core's stream, so a shared cache would add a
+cross-process call per event to save a cheap encode. On 2026-09-22 the
+maintainer chose, over building it, that M5 ships no resident window: every
+delivery is encoded from core's stream, which ADR 0032 already permits because
+the window "may be dropped at any moment with no effect but re-encoding". The
+plan's window-disabled and window-dropped delivery proofs are therefore not
+owed, and aggregate reclamation begins at the unattached-connection tier:
+unattached connections by descending output-buffer bytes with the connection
+incarnation as tie-break, then live-attachment detachment. Every other
+residency ceiling is unchanged.
+
+<a id="disposition-m5-residual-proofs-2026-09-22"></a>
+### M5 residual proofs without new product seams — 2026-09-22
+
+An audit of the M5 verification table against the tests found claims with no
+test. Most have since been proved and recorded as progress rows. On 2026-09-22
+the maintainer chose, over adding test-only hooks to product code or stopping
+now, that every remaining claim provable without a product change is proved
+before closure, and that the claims which would need a new test-only seam are
+recorded as named limitations for the closure disposition instead: the
+credential handoff's private `:timeout` cuts and before/after-deadline pairs,
+a rotation landing between two in-flight same-token replies, the
+pre-installation signal window, an accept failure after `begin_accept`, and a
+command's own `commit_unknown` when the capacity refusal lands mid-transaction;
+likewise a foreign-owned socket subdirectory at a real start, which needs a
+second user to own it, and overflow detachment driven through a real socket.
+Each is named in the plan's progress rows where it arises.
+
+<a id="disposition-m5-trace-loads-named-modules-2026-09-23"></a>
+### A trace session loads the modules it names — 2026-09-23
+
+OTP installs call patterns only for loaded modules, so a trace session that
+named an adapter the runtime had not called yet silently traced nothing; M5's
+provider-bridge trace case found it. On 2026-09-23 the maintainer chose, over
+documenting the gap or refusing an unloaded module, that the session loads
+what it names. The principle weighed is the product rule that only the VM
+generation manager performs code loading. The session calls
+`Code.ensure_loaded/1`, which loads installed code from the code path, as the
+Store, executor and artifact boundaries already do when they probe an adapter;
+it creates, replaces or purges no code generation, so that rule is unchanged.
+Compatibility impact: `Loopex.trace/2` keeps its shape and refusals, and a
+session now also observes named modules not yet called; a name no installed
+module answers to still traces nothing. No migration is needed.
+
+<a id="disposition-m5-closure-review-2026-09-23"></a>
+### M5 closure-review decisions — 2026-09-23
+
+The independent review of the first closure candidate found Outcome 5's
+real-provider two-process demonstration defined nowhere: the real-provider
+daemon workflow ran in the test VM without a kill, and the separate-process
+kill-and-takeover ran against a scripted provider. On 2026-09-23 the maintainer
+chose, over accepting the two halves or an attended manual run, to build it:
+`apps/loopex_cli/test/multi_client_workflow_real_test.exs` runs `loopex daemon`,
+a CLI controller killed with `SIGKILL` and the Node observer taking over, each
+its own operating-system process, the observer's prompt answered by the real
+provider, and is the release manifest's ninth row, so the release check now
+requires nine rows where the technical plan names eight.
+
+The maintainer also chose that the named limitations the residual-proofs
+disposition did not list are accepted here by name, each with its nearest
+proof: an uncreated path component at a real start (the other socket-directory
+refusals at a real start in `daemon_command_test.exs` and `paths_test.exs`); an
+effect in flight when the daemon is killed not being dispatched twice after
+restart (core's restart recovery for embedded callers); a claimed
+`artifact.read_chunk` held through quiesce until `connection_lost` at the
+socket (the unclaimed read's cancellation without dispatch in
+`admission_relay_test.exs`); and the per-invocation guardian and credential
+sender absent from the positive trace census (`trace_exclusion_test.exs`,
+which proves the bridge traced and no credential function or value recorded).
+The overflow detachment through a real socket that the residual-proofs
+disposition listed was proved instead. Three witness files the accepted
+Outcomes table names were remapped as the code settled, recorded in the plan's
+evidence-scaffold progress row: `session_lifetime_test.exs`,
+`replay_residency_test.exs` and `apps/loopex_daemon/test/multi_client_workflow_test.exs`.
+
+<a id="disposition-m5-driver-attendance-2026-09-23"></a>
+### M5 release-check attendance — 2026-09-23
+
+The release check has two attended cases, which wait for a person to type
+`yes` at an exact notice. On the M5 closure candidates they were answered by
+the implementing session's terminal driver on the maintainer's instruction,
+only at their exact notice, not by a person watching the run. The final delta
+review asked that the evidence not read as human attendance. On 2026-09-23 the
+maintainer accepted the driver-answered run as the closure run of record.
+What changes is what the two cases prove: the automated sequence each case
+drives, without a person's independent observation of it. The cases, the
+release check and every other lane are unchanged. The closure evidence page
+says this beside the release-check result.
+
+<a id="disposition-m5-session-index-lost-2026-09-23"></a>
+### M5 session-index loss and the transport cut — 2026-09-23
+
+An adversarial review of candidate `e1dea424` found two lifecycle gaps. First,
+the daemon's session index is a linked running component, yet its exit was
+ignored, so a daemon whose index had died stayed ready while every create, list
+and status request exited its connection. On 2026-09-23 the maintainer chose,
+over folding the loss into another component's class or restarting the index in
+a degraded mode, a fail-stop with its own class: `session_index_lost`, exit
+status `111`, reaching clients as `daemon.stopping` with
+`fatal:session_index_lost`. The principle is the exit-status table's rule that
+every linked running component has exactly one row. The generation-two
+`daemon.stopping` reason set, its schema and vector files and ADR 0032's list
+of ordinary component reasons gain that one value. The negotiated
+`loopex.experimental/2` schema digest, which covers methods, record families,
+error codes and limits, is unchanged. No release carries generation two or the
+daemon, so no migration is needed. Clients should treat `daemon.stopping`
+reasons they do not know as a fatal stop, as they already must.
+
+Second, the orderly stop's transport cut ran separate clocks and dropped the
+uninitialized-peer sweep's result, where the plan and ADR 0032 require one
+absolute five-second deadline begun before the relay cut and a fail-stop on any
+missing acknowledgement. That is a defect against the accepted plan, repaired
+without a decision; the code now matches the text.
+
+<a id="disposition-m5-nonblocking-components-2026-09-24"></a>
+### M5 non-blocking daemon components — 2026-09-24
+
+Five review rounds showed that the blocking calls between daemon components had
+no correct set of timeouts: short bounds gave up on working callees and
+stranded operations, while long bounds outran the deadlines of the callers
+above and let a slow but answering relay end the daemon under the wrong class.
+On 2026-09-24 the maintainer chose to replace those calls with request messages
+inside M5, and decided three points of the design:
+
+- **Per-step budgets.** Each serving step of a grant, expiry, release or
+  owner-loss operation has its own five-second instant, fixed when its request
+  is sent and never restarted; an overrun names the step's owner — the registry
+  as `connections_lost`, the relay as `relay_lost`. Once the stop begins, the
+  stop phase's deadline replaces every step instant. This replaces ADR 0033's
+  single operation clock and the release's two instants.
+- **A late lease owner is replaced.** A lease owner that overruns its own
+  resolution, attachment or retirement acknowledgement is killed and
+  superseded, scoped to its session, instead of `connections_lost`.
+- **A late holder connection is closed alone.** A holder that overruns its
+  owner-loss close step is killed; the daemon's monitor `DOWN` completes the
+  close, that client observes EOF instead of `control_owner_lost`, and the
+  daemon keeps serving. `connections_lost` names the registry only.
+
+The principle is ADR 0033's session-scoped lease-owner rule and the exit
+table's one-component-per-class rule: a deadline names only the component
+whose own work was late. The generation-two wire, its error codes and the exit
+status set are unchanged; exit selection changes as above. No durable record
+changes, so no migration is needed. ADR 0033's accepted text is amended in the
+same change and its governance record is re-bound. Witnesses T1–T26 of the
+design must be red with their mechanism removed. On 2026-09-24 the maintainer accepted this amendment as written at `2a197943`; ADR 0033's governance record is re-bound to its bytes there, and it replaces the record of the ADR's 2026-09-21 acceptance, which remains in [that disposition](#disposition-m5-acceptance-2026-09-21).
+
+<a id="disposition-m5-cleaned-implies-durable-2026-09-24"></a>
+### M5 executor cancellation, output artifacts and the risk packet — 2026-09-24
+
+On 2026-09-24 the maintainer decided:
+
+- **The forced-KILL test is split.** A deterministic rule test pins
+  `cleanup_confirmed?/3`; the real-process case accepts `:cleaned` or
+  `:unconfirmed`, provided the answer agrees with the receipt and the outcome
+  is `:cancelled` or `:outcome_unknown` as ADR 0016 requires.
+- **Option A for spilled output.** A spilled output artifact holds the
+  command's bytes only; the executor's notes appear only in the model-facing
+  text, and "N of M" counts command bytes.
+- **Notes state only what was proved.** A process-group note says the group
+  "could not be shown to hold only the command", never that members were
+  running.
+- **Cleaned implies durable.** `Loopex.Executor.Local.cancel/2` answers
+  `{:ok, :cleaned}` only after a durable receipt with
+  `cleanup_confirmation: :confirmed` is published; everything else answers
+  `unconfirmed`. An answer weaker than the receipt is allowed and a stronger
+  one must be impossible. This replaces the verdict-record machinery and
+  closes a gap already in v0.1.0, where a running job's cancel could answer
+  `cleaned` while its receipt later said `unconfirmed`.
+- **Pre-run cancellation conforms to ADR 0016.** A cancel of an admitted job
+  before it runs answers `cleaned` only after durable publication, under
+  clauses 5 and 7; clause 4 covers only the queued or pre-marker refusal
+  record. This is a conformance change, not a new decision, and a special case
+  of the rule above.
+- **The risk packet.** Items 1–6 were fixed: the settling import worker
+  (`15e1152b`, with its close hook moved off `add/3` in `ae74367f`), no mirror
+  clock during the stop, the deleted blocking lease-owner calls and the latched
+  relay reports (`9cc8f075`), the missing hand-off table (`996b0d7d`) and the
+  cancel answer allowed to be weaker than its receipt (`c36d74d0`); item 7, the holder-close
+  monitor, was fixed in step 7 (`b3c295b8`); items 8–12 and 14–19 are
+  accepted as the M5 plan's "Named limitation: 2026-09-24 risk packet" rows,
+  each with its reachability, direction and tripwire. Item 13, the stop
+  helper's near-deadline answer, was later closed by the external audit's
+  repair: components now stop with the owner's own stop reason and the
+  monitor's `DOWN` reason alone decides the step. The final internal pass over steps 7
+  and 8 added one accepted residual, #20: a lease-owner step still
+  unfinished at `freeze_deadline`, from a lease owner stalled since the cut,
+  is classified `relay_lost` — the wrong exit class, with no durability
+  effect. The external audit of the in-review candidate added #21, a late or
+  dead collaboration owner during the stop reported `relay_lost` because the
+  cut and barrier calls catch every exit, and #22, a resource-pack import
+  that can outlast its caller's deadline by the cleanup period, the reply
+  margin and the import settlement wait; both are liveness or diagnosis only.
+
+<a id="disposition-m5-closure-2026-09-26"></a>
+### M5 closure — 2026-09-26
+
+The external review of `9045835d8847a1c8a557e985a9a014e6b213f323` returned CLOSE WITH NOTES. The maintainer then decided to close M5 on that evidence after a documentation pass, and that documentation-only changes reuse its closure matrix and reviews. The external review of the pass returned ACCEPT WITH NOTES, with no outstanding objection to closure once its last wording correction was applied. After that correction, the maintainer said:
+
+> ok. this is final.. correct then let's go
+
+This closes M5 at the tested implementation SHA `fe020e24b62504f6f2fbc6c81711f399803b6fa9`. `git diff --name-only 9045835d fe020e24` lists 40 Markdown paths and nothing else. The floor, `long_bound`, release and Outcome 6 results in [M5 closure runs](../evidence/M5-closure-runs.md) are runs of `9045835d`, reused under that decision. Hosted CI passed on the tested SHA itself. Closure binds the plan pair as committed at the tested SHA:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept | `sha256:ce7e40112dc635f450a0f4844c5a2964be7b6bd930548f16c4861f359a41eb6a` |
+| Technical depth | `sha256:5ee0f71ab8a7f61936baa87160761ac798997dd38b024f5600e6420510f52266` |
+
+Decisions recorded with this closure:
+
+- **Floor runs:** one floor-pair fast check per platform, on serenity and on Darwin, at the exact candidate (2026-09-26).
+- **ADR 0028 divergence:** remediation is deferred beyond M5 (2026-09-26). The operator and developer disclosures stay, and the follow-up is carried to the next milestone plan.
+- **Proposals for the next milestone to consider:** four governance proposals from the documentation pass, none of them adopted:
+  - the charter exception list;
+  - when the release check runs;
+  - where the pre-merge fast check may run;
+  - the closure-candidate branch.
+
+This record grants no integration to `main`, no tag, no release and no publication.

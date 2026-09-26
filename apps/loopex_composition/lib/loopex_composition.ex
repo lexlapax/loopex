@@ -35,7 +35,9 @@ defmodule LoopexComposition do
   alias Loopex.{Executor.Local, LLM.ReqLLM, Store}
   alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
   alias Loopex.Store.Local.{Artifacts, Transfers}
-  alias LoopexComposition.{RuntimeOwner, WorkspaceIdentity}
+  alias LoopexComposition.{Edges, RuntimeOwner, WorkspaceIdentity}
+
+  require Logger
 
   # Concept: what the host decides stays the host's to supply; an option the
   # host did not supply is absent rather than a default this module invented.
@@ -106,6 +108,25 @@ defmodule LoopexComposition do
   @doc """
   ## Concept
 
+  Starts the reference edges in the caller's own process for a long-lived
+  host, which then owns their links and their stop order.
+
+  ## Technical depth
+
+  `options` is `start/1`'s host option set plus the host-started
+  `:credential_plane` map carrying `:capability` and the credential
+  `:model_options`. `lifecycle` accepts only `:interrupt`, a zero-arity
+  function evaluated before each of the Store, optional transfers, workspace
+  lease, executor and runtime; `{:stop, reason}` starts nothing further.
+  Returns `{:ok, edges}` or `{:error, reason, partial_edges}` naming exactly
+  the edges started, as `LoopexComposition.Edges` describes.
+  """
+  @spec start_edges(keyword(), keyword()) :: {:ok, map()} | {:error, term(), map()}
+  def start_edges(options, cycle \\ []), do: Edges.start(options, cycle, &validate/1, &compose/1)
+
+  @doc """
+  ## Concept
+
   The artifact store this stack composes, for a caller retrieving a spill.
 
   ## Technical depth
@@ -126,6 +147,7 @@ defmodule LoopexComposition do
          {:ok, [root, workspace, id]} <- required(options, @required_options),
          :ok <- boolean(options, :recover_stale_writer),
          :ok <- boolean(options, :artifact_transfers),
+         :ok <- provider_launch(options),
          :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
          :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
          do: {:ok, {options, root, workspace, id, policy}}
@@ -141,6 +163,18 @@ defmodule LoopexComposition do
 
   defp policy(module) when is_atom(module) and not is_nil(module), do: {:ok, module}
   defp policy(_absent), do: {:error, :host_policy_required}
+
+  defp provider_launch(options) do
+    launch = Keyword.get(options, :provider_launch, [])
+    reserved = [:credential_token, :credential_registry, :tracing_capability]
+
+    if Keyword.keyword?(launch) and
+         Enum.all?(reserved, &(not Keyword.has_key?(launch, &1))) do
+      :ok
+    else
+      {:error, {:invalid_composition_option, :provider_launch}}
+    end
+  end
 
   defp required(options, keys) do
     Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, values} ->
@@ -168,34 +202,42 @@ defmodule LoopexComposition do
          :ok <- start_applications(),
          :ok <- File.mkdir_p(root),
          {:ok, options} <- LoopexComposition.ResourcePacks.retain_launch_option(options, root),
+         {:ok, credential_plane} <- Edges.credential_plane(options, &start_edge/2),
          {:ok, adapter} <- start_edge(Store.Local, store_options(root, options)),
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, spill} <- artifact_placement(root, options),
          {:ok, executor} <- open_executor(root, workspace, options, spill) do
       tools = CodingTools.definitions()
 
-      start_edge(
-        Loopex,
-        [
-          runtime_id: runtime_id,
-          store: store,
-          policy: policy,
-          policy_identity: policy_identity(options, policy),
-          executor: executor,
-          tools: tools
-        ] ++
-          [
-            model: %{
-              module: ReqLLM,
-              model: ReqLLM.default_model(),
-              options: Keyword.get(options, :provider_launch, [])
-            }
-          ] ++
-          [active_tools: Enum.map(tools, & &1["tool_id"])] ++
-          context_token_budget(options) ++
-          served_artifacts(options, spill) ++
-          Keyword.take(options, @host_supplied)
-      )
+      with {:ok, runtime} <-
+             start_edge(
+               Loopex,
+               [
+                 runtime_id: runtime_id,
+                 store: store,
+                 policy: policy,
+                 policy_identity: policy_identity(options, policy),
+                 executor: executor,
+                 tools: tools
+               ] ++
+                 [
+                   model: %{
+                     module: ReqLLM,
+                     model: ReqLLM.default_model(),
+                     options:
+                       Keyword.get(options, :provider_launch, []) ++
+                         credential_plane.model_options
+                   }
+                 ] ++
+                 [active_tools: Enum.map(tools, & &1["tool_id"])] ++
+                 context_token_budget(options) ++
+                 served_artifacts(options, spill) ++
+                 Keyword.take(options, @host_supplied)
+             ),
+           :ok <- Loopex.Trace.Capability.bind(credential_plane.capability, runtime) do
+        Logger.debug("reference composition trace capability bound")
+        {:ok, runtime}
+      end
     end
   end
 

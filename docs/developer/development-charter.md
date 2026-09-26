@@ -10,6 +10,18 @@ Technical depth: [Development charter mechanics](development-charter-technical.m
 > commitment remains traceable to precise technical contracts and evidence.
 > Nothing essential depends on hidden context.
 
+This charter explains the shape of Loopex's development records: how
+documentation is split into two depths, how links make that split traceable,
+how reports and decision questions are written, how much reasoning capability a
+task needs, and why every rule has to work from an ordinary checkout. Read it
+before creating or restructuring project documentation.
+
+It does not set who decides what. Authority, autonomy tiers, milestones and
+the two repository checks are set by the canonical
+[development contract](../../AGENTS.md); how a milestone runs is the
+[milestone guide](milestones.md#concept), and which checks a change must pass
+is the [verification guide](verification.md#concept).
+
 <a id="concept-one-explanation"></a>
 ## One Explanation at Two Depths
 

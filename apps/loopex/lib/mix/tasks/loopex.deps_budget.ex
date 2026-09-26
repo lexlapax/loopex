@@ -5,7 +5,7 @@ defmodule Loopex.Checks.DepsBudget do
   Enforces ADR 0001's application roles and inward dependency direction from
   the repository's actual umbrella inventory. The contract stays independent,
   core stays protocol-only, concrete edges point inward, clients compose edges
-  only in tests, and the M1 repository contains only its six planned application
+  only in tests, and the repository contains only its planned application
   identities. Standalone extension checks retain ADR 0003's protocol-only shape.
 
   ## Technical depth
@@ -19,21 +19,21 @@ defmodule Loopex.Checks.DepsBudget do
 
   A project declaration must expose literal application and role identities,
   exact internal or Hex dependency records, and owned literal compile roots.
-  The repository overlay permits only the planned M1 identities and only the
-  ReqLLM edge's exact direct external requirement. Before all six identities are
-  present, that one edge retains its inherited protocol-only internal shape;
-  complete M1 inventory requires its runtime edge like every other concrete
-  edge. External requirements resolve through the candidate's canonical
+  The repository overlay permits only the planned identities and only the
+  ReqLLM edge's exact direct external requirement. Before the complete planned
+  inventory is present, that one edge retains its inherited protocol-only
+  internal shape; the complete inventory requires its runtime edge like every
+  other concrete edge. External requirements resolve through the candidate's canonical
   `mix.lock`; the standalone materializer reconstructs only checksum-bound
   cached Hex packages. Unknown, alternate-source, or redirected applications
-  fail closed. Aliases for a command the M1 gate locks also fail as defense in
+  fail closed. Aliases for a command the repository gate locks also fail as defense in
   depth.
   """
 
   @contract_app :loopex_protocol
   @runtime_app :loopex
-  @roles [:contract, :core, :edge, :composition, :client, :extension]
-  @m1_planned_roles %{
+  @roles [:contract, :core, :edge, :composition, :host, :client, :extension]
+  @planned_roles %{
     loopex_protocol: :contract,
     loopex: :core,
     loopex_store_local: :edge,
@@ -43,7 +43,8 @@ defmodule Loopex.Checks.DepsBudget do
     loopex_reference_client: :client,
     loopex_cli: :client,
     loopex_app_server: :client,
-    loopex_telemetry: :edge
+    loopex_telemetry: :edge,
+    loopex_daemon: :host
   }
   # Concept: the one external dependency core may carry, named here rather than
   # implied by a count.
@@ -55,7 +56,7 @@ defmodule Loopex.Checks.DepsBudget do
   # version range is a visible change to this oracle rather than a silent one in
   # a project file.
   @core_external %{telemetry: "~> 1.3"}
-  @reqllm_requirement "~> 1.17.1"
+  @reqllm_requirement "~> 1.24.0"
   @floor_elixir_version Version.parse!("1.18.5")
 
   @locked_aliases [
@@ -204,8 +205,8 @@ defmodule Loopex.Checks.DepsBudget do
         |> Enum.reject(&is_nil(&1.app))
         |> Map.new(&{&1.app, &1.role})
 
-      complete_m1_inventory? =
-        Enum.all?(Map.keys(@m1_planned_roles), &Map.has_key?(roles, &1))
+      complete_planned_inventory? =
+        Enum.all?(Map.keys(@planned_roles), &Map.has_key?(roles, &1))
 
       reasons =
         duplicate_app_reasons(records) ++
@@ -213,9 +214,9 @@ defmodule Loopex.Checks.DepsBudget do
           planned_inventory_reasons(records) ++
           Enum.flat_map(
             records,
-            &repository_record_reasons(&1, roles, complete_m1_inventory?)
+            &repository_record_reasons(&1, roles, complete_planned_inventory?)
           ) ++
-          m1_external_dependency_reasons(records, roles) ++
+          external_dependency_reasons(records, roles) ++
           external_lock_reasons(root, records, roles) ++
           Enum.flat_map(records, &source_root_reasons(root, &1)) ++
           reverse_edge_reasons(contract_source_roots(records))
@@ -1518,15 +1519,15 @@ defmodule Loopex.Checks.DepsBudget do
     records
     |> Enum.reject(&is_nil(&1.app))
     |> Enum.flat_map(fn record ->
-      case Map.fetch(@m1_planned_roles, record.app) do
+      case Map.fetch(@planned_roles, record.app) do
         :error ->
           [
-            "#{record.path}: application #{inspect(record.app)} is outside the exact M1 planned inventory"
+            "#{record.path}: application #{inspect(record.app)} is outside the exact planned inventory"
           ]
 
         {:ok, expected_role} when record.role != expected_role ->
           [
-            "#{record.path}: M1 application #{inspect(record.app)} must declare role " <>
+            "#{record.path}: application #{inspect(record.app)} must declare role " <>
               inspect(expected_role)
           ]
 
@@ -1536,7 +1537,7 @@ defmodule Loopex.Checks.DepsBudget do
     end)
   end
 
-  defp m1_external_dependency_reasons(records, roles) do
+  defp external_dependency_reasons(records, roles) do
     records
     |> Enum.reject(&is_nil(&1.app))
     |> Enum.flat_map(fn record ->
@@ -1551,7 +1552,7 @@ defmodule Loopex.Checks.DepsBudget do
 
         {:loopex_llm_reqllm, found} ->
           [
-            "#{record.path}: M1 ReqLLM edge must declare exactly external dependency " <>
+            "#{record.path}: ReqLLM edge must declare exactly external dependency " <>
               "{:req_llm, #{inspect(@reqllm_requirement)}}; found #{inspect(found)}"
           ]
 
@@ -1576,7 +1577,7 @@ defmodule Loopex.Checks.DepsBudget do
 
         {application, found} ->
           [
-            "#{record.path}: M1 application #{inspect(application)} may not declare external " <>
+            "#{record.path}: application #{inspect(application)} may not declare external " <>
               "dependencies; found #{inspect(found)}"
           ]
       end
@@ -1591,7 +1592,7 @@ defmodule Loopex.Checks.DepsBudget do
     legacy_reqllm_reasons(record, roles)
   end
 
-  defp repository_record_reasons(record, roles, _complete_m1_inventory?),
+  defp repository_record_reasons(record, roles, _complete_planned_inventory?),
     do: record_reasons(record, roles)
 
   defp legacy_reqllm_reasons(record, roles) do
@@ -1607,7 +1608,7 @@ defmodule Loopex.Checks.DepsBudget do
 
       true ->
         [
-          "#{record.path}: incomplete M1 ReqLLM edge must depend internally only on the " <>
+          "#{record.path}: incomplete ReqLLM edge must depend internally only on the " <>
             "production protocol application"
         ]
     end
@@ -1683,6 +1684,15 @@ defmodule Loopex.Checks.DepsBudget do
     do: composition_reasons(record, roles)
 
   defp record_reasons(%{role: :client} = record, roles), do: client_reasons(record, roles)
+
+  # Concept: a host is a long-lived owner of the reference composition that a
+  # client may start, and it obeys every client rule except that it may not
+  # itself depend on a host.
+  #
+  # Technical depth: the maintainer's decision of 2026-09-22 introduced the role
+  # so the reference CLI can start the daemon without admitting any
+  # client-to-client dependency; a host depends on no client and no host.
+  defp record_reasons(%{role: :host} = record, roles), do: client_reasons(record, roles, :host)
 
   defp record_reasons(record, _roles),
     do: ["#{record.path}: application has no valid dependency role"]
@@ -1814,8 +1824,9 @@ defmodule Loopex.Checks.DepsBudget do
     end
   end
 
-  defp client_reasons(record, roles) do
+  defp client_reasons(record, roles, role \\ :client) do
     {known, unknown} = split_internal(record.dependencies, roles)
+    hosts = Enum.filter(known, &(target_role(roles, elem(&1, 0)) == :host))
     core = Enum.filter(known, &(elem(&1, 0) == @runtime_app))
     compositions = Enum.filter(known, &(target_role(roles, elem(&1, 0)) == :composition))
     # The grouping is load-bearing. `--` is right-associative in Elixir, so
@@ -1831,7 +1842,7 @@ defmodule Loopex.Checks.DepsBudget do
     # hidden behind a transitive dependency; it is still one production
     # in-umbrella dependency on the contract and nothing else.
     contracts = Enum.filter(known, &(target_role(roles, elem(&1, 0)) == :contract))
-    other = ((known -- core) -- compositions) -- contracts
+    other = (((known -- core) -- compositions) -- contracts) -- hosts
 
     external =
       Enum.reject(record.dependencies, fn {name, _requirement, options} ->
@@ -1861,6 +1872,17 @@ defmodule Loopex.Checks.DepsBudget do
 
       length(contracts) > 1 ->
         ["#{record.path}: clients may depend on at most one contract application"]
+
+      role == :host and hosts != [] ->
+        ["#{record.path}: a host may not depend on another host"]
+
+      length(hosts) > 1 ->
+        ["#{record.path}: clients may depend on at most one host"]
+
+      not Enum.all?(hosts, fn {_name, _requirement, options} ->
+        production_internal?(options)
+      end) ->
+        ["#{record.path}: a client's host dependency must be production and in-umbrella"]
 
       not Enum.all?(contracts, fn {_name, _requirement, options} ->
         production_internal?(options)
@@ -1904,7 +1926,7 @@ defmodule Loopex.Checks.DepsBudget do
   # on a composition -- which the client rule exists to permit -- reads as an
   # unknown in-umbrella dependency whenever its own file is checked alone.
   defp standalone_roles(record) do
-    @m1_planned_roles
+    @planned_roles
     |> Map.merge(%{
       @contract_app => :contract,
       @runtime_app => :core,

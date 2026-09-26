@@ -6,9 +6,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest.CleanupTrace do
   @calls [
     finish_guarded_output: 8,
     guard_children_gone?: 2,
-    process_table_within: 2,
+    process_table_until: 2,
     await_launch_guard_exit: 7,
-    kill_guarded_helper: 3,
+    kill_guarded_helper: 4,
     finish_guarded_helper: 2,
     await_helper_guard_exit: 5,
     launch_guard_exit_proved?: 2
@@ -49,7 +49,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest.CleanupTrace do
           assert Map.get(report, :owned_flags_removed) == true, "cleanup trace flags remain"
 
           for iteration <- iterations,
-              function <- [:finish_guarded_output, :process_table_within],
+              function <- [:finish_guarded_output, :process_table_until],
               phase <- [:call, :return] do
             assert Enum.any?(report.events, fn event ->
                      event.iteration == iteration and event.function == function and
@@ -377,13 +377,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest.CleanupTrace do
      %{s | guards: Map.put_new(s.guards, pid, membership(g))}}
   end
 
-  defp call(:process_table_within, [_program, bound], s, _pid, _time),
-    do: {%{remaining_ms: number(bound)}, s}
+  defp call(:process_table_until, [_program, until], s, _pid, time),
+    do: {%{remaining_ms: remaining(until, time)}, s}
 
   defp call(:await_launch_guard_exit, [_port, c, episode, _, _, _, _], s, _pid, time),
     do: {Map.put(collector(c), :remaining_ms, remaining(episode, time)), s}
 
-  defp call(:kill_guarded_helper, [_port, c, _limit], s, _pid, _time), do: {collector(c), s}
+  defp call(:kill_guarded_helper, [_port, c, _limit, _episode], s, _pid, _time),
+    do: {collector(c), s}
 
   defp call(:finish_guarded_helper, [c, _limit], s, _pid, _time),
     do: {Map.put(collector(c), :ack_count, ack(c)), s}
@@ -401,7 +402,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest.CleanupTrace do
 
   defp call(_, _, s, _, _time), do: {%{shape: :unexpected}, %{s | incomplete: true}}
 
-  defp returned(:process_table_within, answer, g), do: table(answer, g)
+  defp returned(:process_table_until, answer, g), do: table(answer, g)
 
   defp returned(:finish_guarded_output, result, _),
     do: %{

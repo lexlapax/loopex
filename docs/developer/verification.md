@@ -11,6 +11,14 @@ amendment transaction. What remains is one current test suite, two commands,
 an independent review, and the maintainer's decisions, arranged so that the
 cost of proving a change is proportional to what the change could break.
 
+To use it: while editing, run the focused tests for what you touched; before
+merging, find the boundary your change touches in the
+[selection table](#concept-verification-selection) and run what its row names
+in addition to the fast check (or, for a documentation-only change, instead of
+it); at closure and release, follow the [stages](#concept-verification-stages)
+and the [milestone guide](milestones.md#concept). The commands themselves are
+described in [DEVELOPMENT.md](../../DEVELOPMENT.md).
+
 The design goal set by the maintainer is that verification takes a small share
 of development time, on the order of one fifth, while every real product
 guarantee still has a check that would fail if it were broken. The measured
@@ -32,8 +40,8 @@ Technical depth: [What each stage runs](verification-technical.md#technical-veri
 | Stage | Question | What runs | Who or what can stop it |
 | --- | --- | --- | --- |
 | Change | Is this change whole, and is it what it claims to be? | While editing: the focused tests for the changed boundary, `mix format`, a warning-free compile. Before merge to `main`: `bash scripts/check.sh` green in hosted CI on the branch, plus an independent review of the diff against its stated purpose. Every merge, not only milestone closures. | A red check or a blocking review finding; the integrator merges only a green, reviewed candidate |
-| Close | Did the milestone deliver its outcomes? | An indexed evidence-page scaffold in the candidate; `check.sh` once under the floor toolchain pair (the current pair is already proved by CI on every change); `bash scripts/check-release.sh` once, whose M5-delivered fresh-source lane retains the exact NUL-delimited output from the M5-delivered `scripts/source-archive-manifest.sh` on the tested archive extraction staged under the [canonical archive-extraction rule](milestones-technical.md#technical-milestones-archive-extraction); the outcome-to-evidence map in the plan; an independent review of the candidate. All checks and review use the **tested implementation SHA** once. The **administrative closure SHA** fills the scaffold and records the decision without re-running the matrix | The maintainer, who closes it or does not |
-| Release | Is the source about to be tagged the closed source? | Reuse the closure evidence when implementation source is unchanged and re-prove the administrative documentation below. On the **administrative closure SHA**, verify the five paths and each path's exact allowed region from the complete retained patch, including byte-for-byte reconstruction of `docs/plans/README.md` from the administrative register row and Current Status block and of the root `README.md` from its administrative marked block; run `check.sh --docs`; run the final semantic gate over the relevant operator and developer documentation; stage a fresh `git archive` extraction under the same [canonical archive-extraction rule](milestones-technical.md#technical-milestones-archive-extraction), run the M5-delivered repository-owned `scripts/source-archive-manifest.sh`, require each complete unexcluded `(kind, mode, path)` projection to match its commit’s independent Git-tree projection and require the tested and administrative projections to match each other, then compare that exact manifest with the retained tested manifest outside `docs/`, except for the supplied root `README.md` and separately validated M5-delivered `SOURCE_IDENTITY`. Retain these proofs outside the repository and put their results, retained-output references, and SHA-256 digests in the annotated tag at creation. No suite and no release check run twice | The maintainer's separate release decision |
+| Close | Did the milestone deliver its outcomes? | The closure matrix, once, from the **tested implementation SHA**, which already carries an indexed evidence-page scaffold and the plan's outcome-to-evidence map: `check.sh` under the floor toolchain pair (the current pair is already proved by CI on every change); `bash scripts/check-release.sh` once, whose fresh-source lane retains the exact NUL-delimited output of the repository-owned `scripts/source-archive-manifest.sh` for the tested archive extraction staged under the [canonical archive-extraction rule](milestones-technical.md#technical-milestones-archive-extraction); and an independent review of the candidate. The **administrative closure SHA** fills the scaffold and records the decision without re-running the matrix. The [milestone guide](milestones.md#concept-milestones-close) has the procedure | The maintainer, who closes it or does not |
+| Release | Is the source about to be tagged the closed source? | Reuse the closure evidence when implementation source is unchanged and re-prove the administrative documentation: on the **administrative closure SHA**, run the [four pre-tag proofs](milestones.md#concept-milestones-release) — confinement of its complete retained patch to [the five paths and their allowed regions](milestones-technical.md#technical-milestones-confinement), including byte-for-byte reconstruction of `docs/plans/README.md` and the root `README.md`; `check.sh --docs`; the final semantic gate over the relevant operator and developer documentation; and the archive-manifest comparison with the retained tested manifest under the same extraction rule. Retain these proofs outside the repository and put their results, retained-output references, and SHA-256 digests in the annotated tag at creation. No suite and no release check run twice | The maintainer's separate release decision |
 
 The two-commit closure and release rows govern M5 and later milestones.
 Earlier closures and tags retain their recorded procedure; `v0.1.0` remains
@@ -77,7 +85,8 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 | The wire protocol, its schema or vectors | The Node consumer workflows (`--only node_client`, part of the release check), and the compatibility surfaces page updated in the same change |
 | The CLI or operator-facing commands | The operator page that describes the behavior updated in the same change; a changed operator command also selects its workflow in the release check |
 | Provider or credential handling | `bash scripts/check-release.sh`, the real-provider cases |
-| The executor's OS boundary (launch, signals, cleanup) | `bash scripts/fixtures/pinned-load.sh` over the touched cases on a Linux host: thirty runs under four pinned cores and load, no failure and no hang |
+| An operating-system process boundary: the executor's or the provider child's (launch, signals, credential delivery, cleanup) | `bash scripts/fixtures/pinned-load.sh` over the touched cases on a Linux host: thirty runs under four pinned cores and load, no failure and no hang |
+| The daemon's socket, peer check or lifecycle | The daemon's `node_client`, `long_bound` and Linux `cross_uid` lanes in the release check, and the [daemon operator page](../operator/daemon.md#concept) updated in the same change |
 | The toolchain floor or `.tool-versions` | The fast check under the floor pair once |
 | Documentation only | `bash scripts/check.sh --docs`, which `check.sh --select` chooses on its own for a prose-only diff |
 | Unknown | The release check, and the review names the boundaries it found |
@@ -99,8 +108,8 @@ absence was exploited or nearly exploited during M0–M4.
   own response identifiers and the observed model identity. A scripted model
   cannot pass them.
 - Tests fail before touching real user state; a leaked credential or a shared
-  environment variable is a defect, and the release check runs each
-  application in its own VM so one test cannot reach the next.
+  environment variable is a defect, and both checks run each application in
+  its own VM so one application's tests cannot reach the next.
 - Compile before validating: a project-defined Mix task runs whatever beams
   the build directory holds, so every check compiles first.
 - The dependency direction, the documentation chain and the ban on
@@ -123,8 +132,8 @@ is now the provider suite, which cannot be split from the test side, so more
 test changes elsewhere no longer shorten the check.
 Technical depth: [Measurements and plan](verification-technical.md#technical-verification-speed).
 
-1. **Run applications in parallel VMs.** The suite is ten independent
-   applications. Run concurrently on the Mac, the four heavy ones finished in
+1. **Run applications in parallel VMs.** At M4 the suite was ten independent
+   applications; M5's daemon made it eleven. Run concurrently on the Mac, the four heavy ones finished in
    312 s wall against 795 s in sequence, all green, with no contention. This
    takes the push check from about 14 minutes to about 5 and changes no test.
 2. **Inject the time bounds the slow tests wait for.** Forty tests wait on

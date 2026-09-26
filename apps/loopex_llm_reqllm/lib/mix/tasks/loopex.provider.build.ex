@@ -8,7 +8,8 @@ defmodule Mix.Tasks.Loopex.Provider.Build do
   ## Technical depth
 
   Run in the reference adapter project. The generated manifest binds the clean
-  source revision, train version, dependency lock, actual archive entry paths
+  source revision (and, built from an archive, its source digest), train
+  version, dependency lock, actual archive entry paths
   and bytes, and exact Elixir/OTP pair. A second archive build proves that
   embedding the manifest did not change its inputs. Only the manifest BEAM and
   final executable are excluded, avoiding self-reference. The `.launch` file
@@ -34,7 +35,8 @@ defmodule Mix.Tasks.Loopex.Provider.Build do
       do: Mix.raise("provider build accepts only --force and --warnings-as-errors")
 
     root = Path.expand("../..", File.cwd!())
-    source = clean_source!(root)
+    identity = source_identity!(root)
+    source = identity.commit
     lock_digest = digest(File.read!(Path.join(root, "mix.lock")))
     compile_source!()
     worker = Mix.Project.config()[:escript][:path] |> Path.expand()
@@ -44,6 +46,7 @@ defmodule Mix.Tasks.Loopex.Provider.Build do
 
     manifest = %{
       "source" => source,
+      "source_digest" => identity.source_digest,
       "version" => Mix.Project.config()[:version],
       "dependency_lock_sha256" => lock_digest,
       "packaged_input_sha256" => packaged_input_digest(worker),
@@ -55,9 +58,9 @@ defmodule Mix.Tasks.Loopex.Provider.Build do
     build_archive!()
     verify_packaged_input!(worker, manifest["packaged_input_sha256"])
 
-    unless clean_source!(root) == source and
+    unless Mix.LoopexSourceIdentity.verify_unchanged(root, identity) == :ok and
              digest(File.read!(Path.join(root, "mix.lock"))) == lock_digest,
-           do: Mix.raise("provider source changed during build")
+           do: Mix.raise("provider source changed during build: source_changed_during_build")
 
     {:ok, worker_digest} = ProviderConfiguration.file_digest(worker)
 
@@ -116,13 +119,18 @@ defmodule Mix.Tasks.Loopex.Provider.Build do
     end
   end
 
-  defp clean_source!(root) do
-    {status, 0} =
-      System.cmd("git", ["status", "--porcelain=v1", "--untracked-files=all"], cd: root)
+  # Concept: a checkout or an archive, the build names the source it proves.
+  defp source_identity!(root) do
+    case Mix.LoopexSourceIdentity.resolve(root) do
+      {:ok, identity} ->
+        identity
 
-    unless status == "", do: Mix.raise("provider build requires a clean source checkout")
-    {source, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: root)
-    String.trim(source)
+      {:error, :source_checkout_dirty} ->
+        Mix.raise("provider build requires a clean source checkout: source_checkout_dirty")
+
+      {:error, reason} ->
+        Mix.raise("provider build refused: #{reason}")
+    end
   end
 
   defp compile_source! do

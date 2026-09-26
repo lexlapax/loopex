@@ -107,11 +107,19 @@ defmodule LoopexCli.FoundationWorkflowTest do
         runtime_id: "foundation-embedded",
         policy: AllowAll,
         policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
-        provider_launch: embedded.provider.options,
+        provider_launch:
+          Keyword.drop(embedded.provider.options, [
+            :credential_token,
+            :credential_registry,
+            :tracing_capability
+          ]),
         resource_manifest: embedded.manifest
       )
 
     on_exit(fn -> stop_runtime(embedded_runtime) end)
+    # The embedded composition consumed the variable; the source-built CLI is a
+    # separate host process that inherits the operator's credential afresh.
+    System.put_env(variable, credential)
     run_embedded(embedded_runtime, embedded)
     embedded_locator = assert_provider_workflow(embedded)
     {:ok, embedded_artifacts} = LoopexComposition.artifacts(embedded.state_root)
@@ -715,7 +723,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
     full = String.duplicate("artifact-byte-sequence\n", CodingTools.limits().read_bytes)
     File.write!(Path.join(workspace, "large.txt"), full)
     File.mkdir_p!(state_root)
-    {:ok, workspace_ref} = LoopexCli.ProjectResources.workspace_reference(workspace)
+    {:ok, workspace_ref} = LoopexComposition.ProjectResources.workspace_reference(workspace)
 
     {:ok, manifest} =
       LoopexComposition.ResourcePacks.discover(workspace,

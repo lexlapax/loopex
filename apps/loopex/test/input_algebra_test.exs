@@ -35,7 +35,7 @@ defmodule Loopex.InputAlgebraTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "the task"})
 
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
     run_id = run_id_of(fixture, session_id)
 
     {fixture, attachment, session_id, run_id, model}
@@ -199,7 +199,7 @@ defmodule Loopex.InputAlgebraTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "go"})
 
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
     run_id = run_id_of(fixture, session_id)
 
     {:accepted, "s1"} =
@@ -256,7 +256,9 @@ defmodule Loopex.InputAlgebraTest do
     assert is_binary(active)
 
     send(model, :release)
-    Process.sleep(200)
+    # Technical depth: settling is the successor's end, so every event of both
+    # runs is already published; a fixed sleep raced them on a loaded host.
+    assert :settled = settle(fixture, session_id)
 
     # Promotion happened in the same transaction that ended the first run, so
     # the session never looked settled while work was still owed.
@@ -277,8 +279,12 @@ defmodule Loopex.InputAlgebraTest do
     # run durable but unstaged. Recovery must dispatch it once with a deadline
     # derived at staging; carrying the predecessor's instant or inventing one at
     # promotion would instead end it before the provider call.
+    # The duration must outlast a loaded machine's first model request; the
+    # case then waits longer than it, so it proves the same thing at 5 s as
+    # it did at 200 ms. At 2 s a floor-pair run with ten suites at once starved
+    # the first run past its own deadline before its model was scheduled.
     parent = self()
-    duration_ms = 200
+    duration_ms = 5_000
 
     fixture =
       start(
@@ -295,7 +301,7 @@ defmodule Loopex.InputAlgebraTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "first"})
 
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, duration_ms + 5_000
 
     assert {:accepted, "f1"} =
              Loopex.command(attachment, %{
@@ -408,7 +414,9 @@ defmodule Loopex.InputAlgebraTest do
              Loopex.command(attachment, %{type: :abort, command_id: "a1"})
 
     send(model, :release)
-    Process.sleep(200)
+    # Technical depth: settling follows the abort's terminal transaction, which
+    # resolves both queue entries; a fixed sleep raced it on a loaded host.
+    assert :settled = settle(fixture, session_id)
 
     events = drain_events(attachment)
 
@@ -454,7 +462,7 @@ defmodule Loopex.InputAlgebraTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "first"})
 
-    assert_receive {:holding, first_model}, 2_000
+    assert_receive {:holding, first_model}, 5_000
     {:accepted, "a1"} = Loopex.command(attachment, %{type: :abort, command_id: "a1"})
     send(first_model, :release)
     assert :settled = settle(fixture, session_id)
@@ -462,7 +470,7 @@ defmodule Loopex.InputAlgebraTest do
     {:accepted, "p2"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p2", content: "second"})
 
-    assert_receive {:holding, second_model}, 2_000
+    assert_receive {:holding, second_model}, 5_000
     second_run = run_id_of(fixture, session_id)
 
     {:accepted, "s1"} =
@@ -518,7 +526,7 @@ defmodule Loopex.InputAlgebraTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "the task"})
 
-    assert_receive {:holding, model}, 2_000
+    assert_receive {:holding, model}, 5_000
     run_id = run_id_of(fixture, session_id)
 
     {:accepted, "s1"} =

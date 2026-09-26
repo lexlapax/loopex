@@ -1060,6 +1060,7 @@ defmodule Loopex.Store do
             fn -> adapter.runtime_command(reference, command) end,
             :unavailable
           )
+          |> normalize_runtime_command(command)
         end
       )
     else
@@ -1720,6 +1721,39 @@ defmodule Loopex.Store do
 
   defp normalize_ownership_head(result) when result in [:absent, :unavailable], do: result
   defp normalize_ownership_head(_malformed), do: :unavailable
+
+  defp normalize_runtime_command(:absent, _command), do: :absent
+  defp normalize_runtime_command(:unavailable, _command), do: :unavailable
+
+  defp normalize_runtime_command({:error, :runtime_command_conflict}, _command),
+    do: {:error, :runtime_command_conflict}
+
+  defp normalize_runtime_command({:completed, %{result: result}}, %{command_kind: :create})
+       when is_binary(result) and byte_size(result) > 0 and
+              byte_size(result) <= @max_identifier_bytes,
+       do: {:completed, %{result: result}}
+
+  defp normalize_runtime_command(
+         {:open, %{attempt_generation: generation, candidate_tx_id: tx_id}} = result,
+         %{command_kind: :resume}
+       )
+       when is_integer(generation) and generation > 0 and is_binary(tx_id) and
+              byte_size(tx_id) > 0 and
+              byte_size(tx_id) <= @max_identifier_bytes,
+       do: result
+
+  defp normalize_runtime_command(
+         {:completed,
+          %{attempt_generation: generation, candidate_tx_id: tx_id, result: session_id}} = result,
+         %{command_kind: :resume}
+       )
+       when is_integer(generation) and generation > 0 and is_binary(tx_id) and
+              byte_size(tx_id) > 0 and
+              byte_size(tx_id) <= @max_identifier_bytes and is_binary(session_id) and
+              byte_size(session_id) > 0 and byte_size(session_id) <= @max_identifier_bytes,
+       do: result
+
+  defp normalize_runtime_command(_malformed, _command), do: :unavailable
 
   defp normalize_private_page({:ok, rows}, after_version, limit)
        when is_list(rows) and length(rows) <= limit do

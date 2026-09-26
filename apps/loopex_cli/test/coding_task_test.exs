@@ -449,21 +449,22 @@ defmodule LoopexCli.CodingTaskTest do
   test "one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce" do
     {root, _workspace} = Demonstration.repository("real-reply")
     on_exit(fn -> File.rm_rf(root) end)
-    launch = ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000]
+    # The adapter resolves its credential per invocation from host custody
+    # (ADR 0034), so a direct call composes that custody from the lane's key,
+    # reading and deleting the variable as a host does.
+    credential_options = ProviderBuildFixture.consume_custody_options()
 
-    {:ok, request} =
-      Loopex.Model.request(
-        Loopex.LLM.ReqLLM.default_model(),
-        [%{"role" => "user", "content" => "Reply with the single word: acknowledged."}],
-        sampling: %{"max_tokens" => 64},
-        deadline: System.system_time(:millisecond) + 120_000
-      )
+    launch =
+      ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000] ++ credential_options
 
+    # A standalone call goes through `complete_prompt/3`, which supplies the
+    # no-runtime trace capability a direct call needs (ADR 0034) and the same
+    # 64-token allowance this case used.
     assert {:ok, reply} =
-             Loopex.LLM.ReqLLM.complete(
-               request,
-               launch,
-               Loopex.Model.discard_progress()
+             Loopex.LLM.ReqLLM.complete_prompt(
+               Loopex.LLM.ReqLLM.default_model(),
+               "Reply with the single word: acknowledged.",
+               launch
              )
 
     # The identifier and the reported usage come from the provider. A scripted

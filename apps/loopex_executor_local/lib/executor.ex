@@ -195,11 +195,25 @@ defmodule Loopex.Executor.Local do
   # the moment it is signalled -- pays one look rather than the whole window.
   @cooperative_poll_ms 25
 
-  # The wait for a cleanup helper's Port-owned guard to report its final exit.
-  # It is a fixed bound for the same reason `@abandon_confirmation_ms` is: it is
-  # asked only after the helper has answered or its own bound has expired, and a
-  # token-bound KILL has already been delivered to the still-live guard.
+  # The most a probe holds back from its answer for its guard to report the
+  # final exit after a token-bound KILL. The confirmation itself may use
+  # everything left of the probe's own bound: a guard stalled past this
+  # reservation after an early answer is still waited for, never past the
+  # bound, rather than discarding a real answer.
   @helper_signal_ms 250
+
+  # The scheduling and delivery slack a cancellation's answer gets beyond the
+  # settlement it follows; see `cancel_reply_margin_ms/1`.
+  @cancel_reply_slack_ms 1_000
+
+  # What a cancellation leaves unspent of Core's `executor_observe_ms`, so that
+  # Core's observer receives an answer given at the last instant this caller
+  # waits; see `cancel_reply_margin_ms/1`.
+  @cancel_observation_reserve_ms 250
+
+  # The in-flight table key of the claim deciding one job run's cancellation
+  # hand-off; see `claim_hand_off/2`.
+  @hand_off_claim_key :loopex_cancel_hand_off
   @helper_control_bytes 256
   @launch_guard_handshake_ms 5_000
 
@@ -230,15 +244,23 @@ defmodule Loopex.Executor.Local do
     :loopex_effect_owner,
     :loopex_cleanup_episode,
     :loopex_retention_episode,
-    :loopex_admission
+    :loopex_admission,
+    :loopex_cancel_requests
   ]
 
-  @group_terminated_note "\n[loopex: the command exited while members of its own process " <>
-                           "group were still running. The group was terminated and is " <>
+  # Concept: a process-group note says only what was proved about the group.
+  #
+  # Technical depth: both notes follow a command that exited while its group
+  # could not be shown to hold only the command. That covers a group that still
+  # had members and a probe that did not answer in time, so neither note claims
+  # that members were running; the first then states the proved termination and
+  # cleanup, and the second that cleanup was not confirmed.
+  @group_terminated_note "\n[loopex: the command exited, but its process group could not be " <>
+                           "shown to hold only the command, so the group was terminated. It is " <>
                            "confirmed cleaned, so nothing it left behind outlives this job.]"
 
-  @group_unconfirmed_note "\n[loopex: the command exited while members of its own process " <>
-                            "group were still running, and the group could not be confirmed " <>
+  @group_unconfirmed_note "\n[loopex: the command exited, but its process group could not be " <>
+                            "shown to hold only the command, and the group could not be confirmed " <>
                             "cleaned. Whether its effect is complete is unproven.]"
 
   @lease_lost_note "\n[loopex: the workspace lease was lost before this job's receipt was " <>
@@ -361,16 +383,23 @@ defmodule Loopex.Executor.Local do
   and confirms its own group; a cached numeric identifier never becomes signal
   authority in a different process. An absent or unavailable owner proves
   nothing because work or unresolved durable authority may still exist.
+
+  `{:ok, :cleaned}` is returned only after the job's receipt with
+  `cleanup_confirmation: :confirmed` is durable and its open authority is
+  removed; every other ending is `{:ok, :unconfirmed}`. That includes an
+  answer that does not arrive within the episode's instant plus the reply
+  margin `min(receipt_retention_ms + 1_000, executor_observe_ms - grace - 250)`,
+  both from `Loopex.Executor.cancellation_bounds/1` for the job's period.
+  Above a 7,000 ms period the second term binds, so the margin no longer
+  covers the whole retention allowance and a slower settlement is answered
+  `unconfirmed` although its receipt may be `confirmed`.
   """
   @impl Loopex.Executor
   @spec cancel(t(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
   def cancel(executor, job_id) when is_pid(executor) and is_binary(job_id) do
     case lookup_inflight(executor, job_id) do
       {:owned, worker, grace, probe} ->
-        cancel_owned_job(
-          worker,
-          cancellation_episode(grace, probe)
-        )
+        cancel_owned_job(worker, cancellation_episode(grace, probe))
 
       # Concept: an identity nothing here has ever heard of is an identity this
       # executor cannot speak for, and saying nothing is different from saying
@@ -409,23 +438,135 @@ defmodule Loopex.Executor.Local do
   # `@timer_slice_ms`, which changes how the wait is implemented and not how long
   # it is. The caller opens the cleanup episode before enqueueing the request and
   # the live launch owner consumes that exact instant. A second request queues
-  # behind the first and the owner exits after reporting its single terminal
+  # behind the first and the owner exits after handing off its single terminal
   # result, so neither queueing nor concurrent callers can refresh the group's
   # cleanup deadline.
-  defp cancel_owned_job(worker, {until, _grace, _probe} = episode) do
+  #
+  # The answer obeys one invariant: `{:ok, :cleaned}` is sent only after this
+  # job's receipt with `cleanup_confirmation: :confirmed` is durable, so no
+  # answer is stronger than what the job durably says. The owner acts on the
+  # request -- a running group joins its one cleanup episode (ADR 0016 clause
+  # 5); a job whose process has not begun is refused before it begins -- but
+  # never answers it. It hands the request to the job's execute caller and
+  # tells this caller who that is. The execute caller answers once
+  # `settle_receipt/4` has returned: `cleaned` if and only if that settlement
+  # retained a confirmed receipt with file and parent-sync proof, under a root
+  # claim that revalidated the root, and removed the job's open authority
+  # under that claim; `unconfirmed` for every other ending, including one that
+  # never reaches settlement. A refusal after admission but before the
+  # process begins is the case with no process: the job's receipt is still the
+  # durable terminal whose open entry ADR 0016 clause 7 removes.
+  #
+  # This caller waits on the owner and, after the hand-off, on the execute
+  # caller, and answers `unconfirmed` itself on the `DOWN` of whichever it is
+  # watching. An owner's `DOWN` before a hand-off means the request was never
+  # handed to anyone who could publish it: the owner died first, or its
+  # execute caller had already withdrawn from the job alive, or this executor
+  # went with its table, or the request reached the owner after its final
+  # drain. An execute caller's `DOWN` means it can no longer answer; one that
+  # leaves the job alive after the hand-off answers what it was handed
+  # `unconfirmed` as it leaves. The whole wait ends at `until +
+  # cancel_reply_margin_ms(grace)`; a publication that misses it leaves the
+  # weaker `unconfirmed`, which ADR 0016 permits. A caller that is itself the
+  # job's execute caller -- a progress callback cancelling its own job --
+  # cannot publish while it waits, so it answers `unconfirmed` at the hand-off.
+  #
+  # Replies are addressed to a process alias rather than to this pid, and the
+  # alias is removed before this function returns. A hand-off or answer sent
+  # after that -- to a caller that stopped waiting at its bound, or to one that
+  # already answered itself -- is dropped by the VM instead of arriving in the
+  # mailbox of a process that has moved on; any delivered before the removal
+  # but not read is flushed.
+  #
+  # Core's retained `Executor.cancel/3` waits a fixed 60 s. This caller returns
+  # as soon as it is answered, so the margin lengthens only the wait for an
+  # answer that is late. For a period near or above 60 s that facade can stop
+  # before the answer arrives, as it already could before the margin existed;
+  # production uses `Executor.cancel/4`, whose observation bound covers the
+  # period plus 2 s.
+  defp cancel_owned_job(worker, {until, grace, _probe} = episode) do
     token = make_ref()
-    monitor = Process.monitor(worker)
-    send(worker, {:loopex_cancel_pending, token, self(), episode})
-    await_cancel_result(worker, monitor, token, until)
+    reply_to = Process.alias()
+    monitor = watch_for_answer(token, worker)
+    send(worker, {:loopex_cancel_pending, token, reply_to, episode})
+
+    try do
+      await_cancel_result(worker, monitor, token, until + cancel_reply_margin_ms(grace))
+    after
+      # Whichever process this caller was watching when it stopped -- the
+      # owner or, after the hand-off, the execute caller -- is released on
+      # every exit from the wait, including a raise or throw out of it.
+      Process.unalias(reply_to)
+
+      case Process.delete({:loopex_cancel_watch, token}) do
+        nil -> :ok
+        watched -> Process.demonitor(watched, [:flush])
+      end
+
+      flush_cancel_replies(token)
+    end
   end
 
-  defp await_cancel_result(worker, monitor, token, until) do
+  defp watch_for_answer(token, pid) do
+    monitor = Process.monitor(pid)
+    Process.put({:loopex_cancel_watch, token}, monitor)
+    monitor
+  end
+
+  defp flush_cancel_replies(token) do
+    receive do
+      {:loopex_cancel_result, ^token, _answer} -> flush_cancel_replies(token)
+      {:loopex_cancel_handoff, ^token, _settler} -> flush_cancel_replies(token)
+    after
+      0 -> :ok
+    end
+  end
+
+  # Concept: a cancelling caller waits past the episode for as long as the
+  # settlement its answer follows is allowed to take, and never past what Core
+  # observes it for.
+  #
+  # Technical depth: the owner reaches its verdict by the episode's instant
+  # `until`, and the execute caller then settles. ADR 0016 clause 6 gives the
+  # whole settlement -- receipt preparation, an artifact spill, the claim wait,
+  # retention and open-entry removal -- one retention allowance,
+  # `receipt_retention_ms = ceil(grace / 4)`, opened once the effect result
+  # exists; the claim wait (`claim_deadline/0`) and every later phase take
+  # shares of that same allowance rather than adding to it. The margin is that
+  # allowance plus `@cancel_reply_slack_ms` for handing the job over and
+  # delivering the answer. A fixed second was shorter than the allowance of
+  # any period above four seconds, so a durable `cleaned` could reach a caller
+  # that had already answered `unconfirmed`. The margin is capped so that the
+  # episode and margin together stay `@cancel_observation_reserve_ms` inside
+  # Core's `executor_observe_ms = max(10_000, grace + 2_000)`. Exactly, the
+  # margin is `min(receipt_retention_ms + 1_000, executor_observe_ms - grace -
+  # 250)`. The cap binds for every period above 7,000 ms: there it is `9_750 -
+  # grace` up to 8,000 ms and 1,750 ms from 8,000 ms on, less than the
+  # allowance plus the slack. Above 7,000 ms the margin therefore does not
+  # cover the whole retention allowance, and a settlement that finishes later
+  # than the margin after the instant is answered `unconfirmed` -- weaker than
+  # its receipt, which ADR 0016 permits.
+  defp cancel_reply_margin_ms(grace) do
+    {:ok, bounds} = Executor.cancellation_bounds(grace)
+    settlement = bounds.receipt_retention_ms + @cancel_reply_slack_ms
+    min(settlement, bounds.executor_observe_ms - grace - @cancel_observation_reserve_ms)
+  end
+
+  defp await_cancel_result(watched, monitor, token, until) do
     receive do
       {:loopex_cancel_result, ^token, result} ->
         Process.demonitor(monitor, [:flush])
         result
 
-      {:DOWN, ^monitor, :process, ^worker, _reason} ->
+      {:loopex_cancel_handoff, ^token, settler} when settler == self() ->
+        Process.demonitor(monitor, [:flush])
+        {:ok, :unconfirmed}
+
+      {:loopex_cancel_handoff, ^token, settler} ->
+        Process.demonitor(monitor, [:flush])
+        await_cancel_result(settler, watch_for_answer(token, settler), token, until)
+
+      {:DOWN, ^monitor, :process, ^watched, _reason} ->
         {:ok, :unconfirmed}
     after
       min(cleanup_remaining(until), @timer_slice_ms) ->
@@ -433,8 +574,173 @@ defmodule Loopex.Executor.Local do
           Process.demonitor(monitor, [:flush])
           {:ok, :unconfirmed}
         else
-          await_cancel_result(worker, monitor, token, until)
+          await_cancel_result(watched, monitor, token, until)
         end
+    end
+  end
+
+  # Concept: the owner keeps every cancellation it received and gives them all
+  # to the process that will publish the job's receipt.
+  #
+  # Technical depth: a request the owner acted on is kept in its own process
+  # dictionary; one still queued when it finishes is collected here. The
+  # execute caller receives the whole list first, before the job's result and
+  # from the same sender, so it holds every request before it can settle. Each
+  # requester is then told who will answer, so its wait moves from the owner to
+  # the execute caller. An owner killed between the two leaves a requester
+  # still watching it, whose `DOWN` answers `unconfirmed`. Nothing here
+  # answers, so no death of the owner can leave an answer stronger than the
+  # receipt its execute caller then builds.
+  #
+  # The hand-off is decided by one atomic claim that an execute caller leaving
+  # the job alive -- its progress callback raised -- contends for too
+  # (`claim_hand_off/2`). Whichever inserts the claim first wins, and there is
+  # no interval in which both believe they won:
+  #
+  #   * this owner wins: it sends the requests and only then removes the
+  #     claim, so a caller leaving afterwards either sees the claim and waits
+  #     for them or, once it is removed, already has them in its mailbox;
+  #     either way it collects and answers them as it leaves
+  #     (`withdraw_from_hand_off/3`).
+  #   * the leaving caller wins: this owner hands nothing on and removes the
+  #     caller's claim, and each requester answers `unconfirmed` on this
+  #     owner's `DOWN` rather than waiting out its bound on a live process that
+  #     will never answer.
+  #
+  # An execute caller that died is handed the requests anyway; its requesters
+  # then see its `DOWN` at once. With this executor gone its table is gone, the
+  # claim cannot be taken, and nothing is handed on; an owner that sees the
+  # table while the executor is still exiting hands on as usual, and the
+  # answer then follows whatever its execute caller durably publishes.
+  defp hand_off_cancellations(settler, tag) do
+    requests = Enum.reverse(Process.get(:loopex_cancel_requests, [])) ++ queued_cancellations()
+    Process.delete(:loopex_cancel_requests)
+
+    if claim_hand_off(tag, :owner) == true do
+      send(settler, {tag, :cancel_requests, requests})
+
+      Enum.each(requests, fn {token, reply_to} ->
+        send(reply_to, {:loopex_cancel_handoff, token, settler})
+      end)
+    end
+
+    release_hand_off_claim(tag)
+  end
+
+  # Concept: the one claim that decides whether an owner hands its
+  # cancellations to an execute caller that is leaving the job.
+  #
+  # Technical depth: an `insert_new/2` of the job run's own tag into this
+  # executor's public in-flight table, taken by the owner as `:owner` and by a
+  # leaving execute caller as `:caller_left`. ETS makes the insert atomic, so
+  # exactly one succeeds. The tag is unique to one launch of one job, so a
+  # claim can never be mistaken for another job's or another attempt's. A
+  # table that no longer exists takes no claim and answers `:unavailable`
+  # rather than `false`: `false` means the other claimant holds the claim and
+  # is acting on it, while a missing table means its executor is gone and
+  # nobody holds anything a leaving caller could wait for.
+  defp claim_hand_off(tag, claimant) do
+    :ets.insert_new(inflight_table(), {{@hand_off_claim_key, tag}, claimant})
+  rescue
+    ArgumentError -> :unavailable
+  end
+
+  defp release_hand_off_claim(tag) do
+    :ets.delete(inflight_table(), {@hand_off_claim_key, tag})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp hold_cancellation(token, from) do
+    Process.put(:loopex_cancel_requests, [
+      {token, from} | Process.get(:loopex_cancel_requests, [])
+    ])
+
+    :ok
+  end
+
+  defp queued_cancellations do
+    receive do
+      {:loopex_cancel_pending, token, from, _episode} ->
+        [{token, from} | queued_cancellations()]
+    after
+      0 -> []
+    end
+  end
+
+  # Concept: the execute caller answers every cancellation handed to it exactly
+  # once, and says `cleaned` only for a durable confirmed receipt.
+  #
+  # Technical depth: `published` is true only when `settle_receipt/4` returned
+  # `{:ok, receipt}` with `cleanup_confirmation: :confirmed`, which that
+  # settlement returns only after retaining the receipt with sync proof and
+  # removing the open authority under a root claim that revalidated the root.
+  # The requests are removed as they are answered, so the `after` that ends
+  # every admission answers any that remain `unconfirmed`. A request this
+  # caller made itself was answered at its hand-off and its reply alias is
+  # gone, so the answer sent to it here is dropped.
+  defp answer_cancellations(published) do
+    answer = if published, do: {:ok, :cleaned}, else: {:ok, :unconfirmed}
+
+    for {token, reply_to} <- Process.delete(:loopex_cancel_requests) || [],
+        do: send(reply_to, {:loopex_cancel_result, token, answer})
+
+    :ok
+  end
+
+  # Concept: an execute caller that leaves a job before its result withdraws
+  # from the hand-off, and answers every cancellation already handed to it
+  # rather than leaving their callers waiting out their bound.
+  #
+  # Technical depth: the caller contends for the hand-off claim. Winning it
+  # means the owner has not handed off and now never will; any requests the
+  # owner sent before removing an earlier claim of its own are already in this
+  # mailbox. Losing it means the owner holds the claim and is sending right
+  # now, so this waits for those requests or for the owner's death. The claim
+  # this caller took is left for the owner to remove when it reaches its
+  # hand-off, except when the owner's requests are already here, which means
+  # the owner is past it. Either way the collected requests go into the
+  # admission's request list, and the admission's `after` answers them
+  # `unconfirmed`.
+  #
+  # A claim that is unavailable -- the executor and its table are gone -- is
+  # neither: no owner can take the claim either, so nothing more will be handed
+  # on and waiting for the owner's death would hold this caller's raise for as
+  # long as the owner lives, up to its whole cleanup period. The caller keeps
+  # only what is already in its mailbox and leaves at once; each requester still
+  # watching the owner answers `unconfirmed` on the owner's `DOWN`.
+  defp withdraw_from_hand_off(tag, worker, monitor) do
+    case claim_hand_off(tag, :caller_left) do
+      true ->
+        if collect_handed_off_cancellations(tag), do: release_hand_off_claim(tag)
+
+      :unavailable ->
+        collect_handed_off_cancellations(tag)
+
+      false ->
+        receive do
+          {^tag, :cancel_requests, requests} -> hold_handed_off(requests)
+          {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+        end
+
+        collect_handed_off_cancellations(tag)
+    end
+
+    :ok
+  end
+
+  defp hold_handed_off(requests),
+    do: Process.put(:loopex_cancel_requests, Process.get(:loopex_cancel_requests, []) ++ requests)
+
+  # Whether any requests handed on under `tag` were waiting in this mailbox.
+  defp collect_handed_off_cancellations(tag, found \\ false) do
+    receive do
+      {^tag, :cancel_requests, requests} ->
+        hold_handed_off(requests)
+        collect_handed_off_cancellations(tag, true)
+    after
+      0 -> found
     end
   end
 
@@ -1546,6 +1852,7 @@ defmodule Loopex.Executor.Local do
     close_cleanup_episode()
     close_retention_episode()
     Process.delete(:loopex_admission)
+    Process.delete(:loopex_cancel_requests)
 
     try do
       case request_effect_permit(placement, job, grant) do
@@ -1681,7 +1988,9 @@ defmodule Loopex.Executor.Local do
                  progress
                ) do
             {:settle, receipt} ->
-              settle_receipt(placement, job, receipt, lease)
+              settled = settle_receipt(placement, job, receipt, lease)
+              answer_cancellations(match?({:ok, %{cleanup_confirmation: :confirmed}}, settled))
+              settled
 
             {:settlement_unconfirmed, reason} ->
               # No receipt can truthfully summarize a retention worker that may
@@ -1697,6 +2006,7 @@ defmodule Loopex.Executor.Local do
               {:error, {:receipt_not_retained, reason}}
           end
         after
+          answer_cancellations(false)
           Process.delete(:loopex_admission)
           Process.demonitor(elem(lease, 0), [:flush])
         end
@@ -3758,6 +4068,7 @@ defmodule Loopex.Executor.Local do
                 owner
               )
 
+            hand_off_cancellations(caller, tag)
             send(caller, {tag, :worker_result, result, not is_nil(cleanup_episode())})
 
           :stop ->
@@ -3769,7 +4080,14 @@ defmodule Loopex.Executor.Local do
       {^tag, :worker_ready, ^worker} ->
         register_starting_process(job.job_id, worker, grace)
         send(worker, {tag, :run})
-        await_owned_process_worker(worker, monitor, tag, job, progress)
+
+        try do
+          await_owned_process_worker(worker, monitor, tag, job, progress)
+        catch
+          kind, reason ->
+            withdraw_from_hand_off(tag, worker, monitor)
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        end
 
       {:DOWN, ^monitor, :process, ^worker, reason} ->
         forget_inflight(job.job_id)
@@ -3815,13 +4133,27 @@ defmodule Loopex.Executor.Local do
         else
           forget_inflight(job_id)
           Process.demonitor(guard_monitor, [:flush])
+          hand_off_cancellations(caller, tag)
           send(caller, {tag, :worker_result, prelaunch_owner_lost_result(), false})
           :stop
         end
 
+      # Concept: a cancellation that wins before the process begins is refused
+      # here and answered by the execute caller once the refusal is durable.
+      #
+      # Technical depth: effect admission has already won here -- the marker
+      # and open entry are durable -- so ADR 0016 clause 5 makes this
+      # cancellation part of the job's one cleanup episode, which here ends
+      # before any process exists, and clause 7 removes the open entry only
+      # after a matching durable terminal proves it. This worker cannot publish
+      # anything; its execute caller does, when it settles the cancelled result
+      # sent here, and it answers this request and any queued behind it from
+      # that settlement.
       {:loopex_cancel_pending, token, from, _episode} ->
         forget_inflight(job_id)
-        send(from, {:loopex_cancel_result, token, {:ok, :cleaned}})
+        hold_cancellation(token, from)
+        Process.demonitor(guard_monitor, [:flush])
+        hand_off_cancellations(caller, tag)
 
         send(
           caller,
@@ -3832,9 +4164,19 @@ defmodule Loopex.Executor.Local do
 
         :stop
 
+      # The Local authority's death takes its in-flight table with it, so the
+      # hand-off claim normally cannot be taken, nothing is handed on, and a
+      # request queued here answers `unconfirmed` on this worker's `DOWN`. A
+      # worker that still sees the table while that authority is exiting hands
+      # on as usual; the request is then answered `unconfirmed`, or `cleaned`
+      # only if the execute caller durably publishes this prelaunch-lost
+      # receipt, which records `confirmed` cleanup because no process began. A
+      # caller that is itself gone settles nothing: a request queued in the
+      # branch below sees this worker exit without a hand-off.
       {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
         forget_inflight(job_id)
         Process.demonitor(caller_monitor, [:flush])
+        hand_off_cancellations(caller, tag)
         send(caller, {tag, :worker_result, prelaunch_owner_lost_result(), false})
         :stop
 
@@ -3854,6 +4196,10 @@ defmodule Loopex.Executor.Local do
     receive do
       {^tag, :worker_progress, event} when is_function(progress, 1) ->
         :ok = progress.(event)
+        await_owned_process_worker(worker, monitor, tag, job, progress)
+
+      {^tag, :cancel_requests, requests} ->
+        Process.put(:loopex_cancel_requests, Process.get(:loopex_cancel_requests, []) ++ requests)
         await_owned_process_worker(worker, monitor, tag, job, progress)
 
       {^tag, :worker_result, result, cleanup_used} ->
@@ -4060,20 +4406,10 @@ defmodule Loopex.Executor.Local do
         {:exited, status, output, progress_count, quiescence, confirmed} ->
           forget_inflight(job.job_id)
 
-          case {quiescence, confirmed} do
-            {:quiescent, true} ->
-              {bound_process_output(status, output, "", limits.output), progress_count,
-               :confirmed}
+          {tool_result, cleanup} =
+            exited_result(status, output, quiescence, confirmed, limits.output)
 
-            {:terminated, true} ->
-              {bound_process_output(status, output, @group_terminated_note, limits.output),
-               progress_count, :confirmed}
-
-            _unconfirmed ->
-              {unproven(
-                 bound_process_output(status, output, @group_unconfirmed_note, limits.output)
-               ), progress_count, :unconfirmed}
-          end
+          {tool_result, progress_count, cleanup}
 
         {:artifact_limit_exceeded, output, observed, progress_count, confirmed} ->
           {{if(confirmed, do: :failed, else: :outcome_unknown),
@@ -4280,21 +4616,90 @@ defmodule Loopex.Executor.Local do
   #
   # The status is appended after bounding rather than before, because a failure
   # whose diagnosis is the first thing truncated away is the defect again in
-  # another form. It is appended to the spilled copy too, so the truncation
-  # notice's "N of M bytes shown" counts the same bytes on both sides.
+  # another form.
+  #
+  # Concept: the retained artifact is what the command printed, and the
+  # executor's own notes are part of what the model is shown, not of that.
+  #
+  # Technical depth: ADR 0009 retains "the untruncated bytes" and requires spilled
+  # bytes to be byte-identical to the untruncated output. The exit-status and
+  # process-group notes used to be appended to the spilled copy as well, so an
+  # artifact was the command's bytes only on a clean exit whose group was proved
+  # quiescent, and otherwise those bytes plus up to a few hundred of the
+  # executor's; the notice's "N of M bytes shown" counted the notes, and a
+  # command that printed exactly the artifact ceiling spilled more than it. The
+  # spill now carries the command's bytes and the note separately: the artifact
+  # and M are the command's bytes, N is how many of them are shown, and the note
+  # stays in the model-facing text beside the notice.
   defp bound_process_output(status, output, group_note, output_limit) do
     outcome = if status == 0, do: :completed, else: :failed
     note = exit_note(status) <> group_note
-    full = output <> note
 
-    if byte_size(full) <= output_limit do
-      {outcome, full, :complete}
+    if byte_size(output) + byte_size(note) <= output_limit do
+      {outcome, output <> note, :complete}
     else
-      {outcome, bounded_with_suffix(output, note, output_limit), {:truncated, full, note}}
+      {outcome, bounded_with_suffix(output, note, output_limit), {:truncated, output, note}}
     end
   end
 
   defp unproven({_outcome, kept, spill}), do: {:outcome_unknown, kept, spill}
+
+  # Concept: how a command that exited on its own is reported, from how its
+  # group was ended and whether that was proved.
+  #
+  # Technical depth: `finish_guarded_output/8` reports `:quiescent` or
+  # `:terminated` only when cleanup is confirmed and `:unconfirmed` otherwise,
+  # so `confirmed` here is the cleanup fact the owner reports for the job. A
+  # group proved to hold only the command gains no note; a
+  # terminated group that was proved gone is `completed` or `failed` with the
+  # terminated note; anything unproved is `outcome_unknown`. It is exposed so a
+  # case can pin that a terminated group can be confirmed, which a real group's
+  # timing on a loaded host cannot. It is a `@doc false` seam and no part of
+  # any contract.
+  @doc """
+  ## Concept
+
+  The bytes a completed command printed, for a caller that parses them as
+  data rather than showing them to a model.
+
+  ## Technical depth
+
+  A completed receipt whose process group had to be terminated, and was
+  confirmed cleaned, carries the executor's terminated-group note after the
+  command's bytes. Under load the quiescence probe can miss its bound, so the
+  note appears on a command that did nothing unusual. This removes exactly
+  that one trailing note and returns every other output unchanged. The
+  unconfirmed-cleanup note is not removed: that receipt is `outcome_unknown`,
+  never a completed result to parse.
+  """
+  @spec command_output(binary()) :: binary()
+  def command_output(output) when is_binary(output) do
+    note_size = byte_size(@group_terminated_note)
+    size = byte_size(output)
+
+    if size >= note_size and
+         binary_part(output, size - note_size, note_size) == @group_terminated_note,
+       do: binary_part(output, 0, size - note_size),
+       else: output
+  end
+
+  @doc false
+  @spec exited_result(integer(), binary(), atom(), boolean(), pos_integer()) ::
+          {tuple(), :confirmed | :unconfirmed}
+  def exited_result(status, output, quiescence, confirmed, output_limit)
+      when is_integer(status) and is_binary(output) and is_boolean(confirmed) do
+    case {quiescence, confirmed} do
+      {:quiescent, true} ->
+        {bound_process_output(status, output, "", output_limit), :confirmed}
+
+      {:terminated, true} ->
+        {bound_process_output(status, output, @group_terminated_note, output_limit), :confirmed}
+
+      _unconfirmed ->
+        {unproven(bound_process_output(status, output, @group_unconfirmed_note, output_limit)),
+         :unconfirmed}
+    end
+  end
 
   defp exit_note(0), do: ""
 
@@ -5330,8 +5735,8 @@ defmodule Loopex.Executor.Local do
 
           forget_inflight(job.job_id)
 
-          answer = if finished.confirmed, do: {:ok, :cleaned}, else: {:ok, :unconfirmed}
-          send(caller, {:loopex_cancel_result, token, answer})
+          # The request joined this episode; its answer waits for the receipt.
+          hold_cancellation(token, caller)
 
           {:external_cancelled, finished.output, finished.progress_count, finished.confirmed}
 
@@ -5716,17 +6121,80 @@ defmodule Loopex.Executor.Local do
         {:artifact_limit_exceeded, finished, _overflow} -> finished
       end
 
-    protocol_proved =
-      collector.protocol_valid and collector.guard.announced and
-        is_integer(collector.guard.terminal_wrapper_pid) and guard_exit_proved
+    confirmed = cleanup_confirmed?(collector, cleanup_proved, guard_exit_proved)
 
     %{
       output: flatten_chunks(collector),
       progress_count: progress_count(collector),
       observed: observed,
-      quiescence: if(cleanup_proved and protocol_proved, do: quiescence, else: :unconfirmed),
-      confirmed: cleanup_proved and protocol_proved
+      quiescence: if(confirmed, do: quiescence, else: :unconfirmed),
+      confirmed: confirmed
     }
+  end
+
+  # Concept: cleanup is confirmed only when the group was proved gone and the
+  # guard's own protocol and exit agree with how it was ended.
+  #
+  # Technical depth: this is the whole `finished.confirmed` formula, named so
+  # that `forced_kill_confirmed?/1` evaluates exactly the rule production uses.
+  defp cleanup_confirmed?(collector, cleanup_proved, guard_exit_proved) do
+    cleanup_proved and collector.protocol_valid and collector.guard.announced and
+      is_integer(collector.guard.terminal_wrapper_pid) and guard_exit_proved
+  end
+
+  # Concept: after a final KILL, the group is proved gone only when that KILL
+  # was sent and a later complete process table shows the group empty.
+  #
+  # Technical depth: the emptiness wait is a function so that an unsent KILL
+  # still skips it, as the inline `and` it replaces did.
+  defp killed_group_proved?(kill_sent, group_empty?) when is_function(group_empty?, 0),
+    do: kill_sent and group_empty?.()
+
+  # Concept: the forced-KILL cleanup rule, evaluated on supplied facts without
+  # a process.
+  #
+  # Technical depth: a forced cancellation is confirmed by three positive
+  # facts: KILL was sent over the live Port to its token-bound guard, the Port
+  # then exited nonzero, and a complete process table from a probe that answered
+  # shows the captured group empty. A real case cannot choose which of those a
+  # loaded host delivers inside the period, so the rule is exposed here and
+  # composed from the same private functions `finish_guarded_output/8` uses: the
+  # guard transition of `kill_launch_guard/2`, `killed_group_proved?/2`,
+  # `launch_guard_exit_proved?/2` and `cleanup_confirmed?/3`.
+  # `port_exit_status` is `nil` when the Port reported no exit inside the
+  # episode. The protocol facts default to a valid, announced guard with a known
+  # terminal wrapper. It is a `@doc false` seam and no part of any contract.
+  @doc false
+  @spec forced_kill_confirmed?(map()) :: boolean()
+  def forced_kill_confirmed?(%{kill_sent: kill_sent, table_answer: answer, group: group} = facts)
+      when is_boolean(kill_sent) and is_integer(group) and group > 1 do
+    guard =
+      killed_guard(
+        %{
+          state: :live,
+          group: group,
+          announced: Map.get(facts, :announced, true),
+          terminal_wrapper_pid: Map.get(facts, :terminal_wrapper_pid, group + 1)
+        },
+        kill_sent
+      )
+
+    collector = %{
+      protocol_valid: Map.get(facts, :protocol_valid, true),
+      command_status: nil,
+      guard: guard
+    }
+
+    cleanup_proved =
+      killed_group_proved?(kill_sent, fn -> process_group_answered_empty?(answer, group) end)
+
+    guard_exit_proved =
+      case Map.get(facts, :port_exit_status) do
+        status when is_integer(status) -> launch_guard_exit_proved?(collector, status)
+        nil -> false
+      end
+
+    cleanup_confirmed?(collector, cleanup_proved, guard_exit_proved)
   end
 
   defp quiesce_launch_guard(guard, episode, status_known?) do
@@ -5740,7 +6208,9 @@ defmodule Loopex.Executor.Local do
         {released, :quiescent, true}
       else
         {killed, kill_sent} = kill_launch_guard(released, episode)
-        {killed, :terminated, kill_sent and await_released_group_empty(killed, episode)}
+
+        {killed, :terminated,
+         killed_group_proved?(kill_sent, fn -> await_released_group_empty(killed, episode) end)}
       end
     else
       terminate_launch_guard(guard, episode, status_known?)
@@ -5757,12 +6227,14 @@ defmodule Loopex.Executor.Local do
         {released, :terminated, term_sent or release_sent}
       else
         {killed, kill_sent} = kill_launch_guard(released, episode)
-        {killed, :terminated, kill_sent and await_released_group_empty(killed, episode)}
+
+        {killed, :terminated,
+         killed_group_proved?(kill_sent, fn -> await_released_group_empty(killed, episode) end)}
       end
     else
       {killed, kill_sent} = kill_launch_guard(guard, episode)
       group_empty = await_released_group_empty(killed, episode)
-      {killed, :terminated, kill_sent and group_empty}
+      {killed, :terminated, killed_group_proved?(kill_sent, fn -> group_empty end)}
     end
   end
 
@@ -5794,11 +6266,16 @@ defmodule Loopex.Executor.Local do
   defp kill_launch_guard(guard, {_until, _grace, _probe}) do
     if launch_guard_live?(guard) do
       sent = signal_guard_group(guard, :kill)
-      {%{guard | state: if(sent, do: :kill_sent, else: :guard_missing)}, sent}
+      {killed_guard(guard, sent), sent}
     else
-      {%{guard | state: :guard_missing}, false}
+      {killed_guard(guard, false), false}
     end
   end
+
+  # The guard transition a KILL request makes: only a KILL actually written to
+  # the live Port moves the guard to `:kill_sent`.
+  defp killed_guard(guard, sent),
+    do: %{guard | state: if(sent, do: :kill_sent, else: :guard_missing)}
 
   defp signal_guard_group(guard, signal) when signal in [:term, :kill] do
     # The Port object is the authority operation: a token-bound instruction is
@@ -5825,7 +6302,7 @@ defmodule Loopex.Executor.Local do
 
   defp guard_children_gone?(guard, {until, _grace, probe}) do
     if launch_guard_live?(guard) do
-      answer = process_table_within(probe, cleanup_remaining(until))
+      answer = process_table_until(probe, until)
 
       guard_answered_alone?(
         answer,
@@ -5882,7 +6359,7 @@ defmodule Loopex.Executor.Local do
 
   defp await_released_group_empty(%{group: group}, {until, _grace, probe} = episode) do
     cond do
-      confirm_released_group_terminated(group, probe, cleanup_remaining(until)) ->
+      confirm_released_group_terminated(group, probe, until) ->
         true
 
       cleanup_remaining(until) == 0 ->
@@ -5894,9 +6371,9 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp confirm_released_group_terminated(group, probe, bound) do
+  defp confirm_released_group_terminated(group, probe, until) do
     probe
-    |> process_table_within(bound)
+    |> process_table_until(until)
     |> process_group_answered_empty?(group)
   end
 
@@ -6050,20 +6527,55 @@ defmodule Loopex.Executor.Local do
 
   def answer_within(program, arguments, bound)
       when is_binary(program) and is_list(arguments) and is_integer(bound) and bound > 0 do
-    case guarded_answer_within(program, arguments, bound) do
+    case guarded_answer_until(program, arguments, cleanup_now_ms() + bound) do
       {:answered, output, status, _witness} -> {output, status}
       :no_answer -> :no_answer
     end
   end
 
-  defp process_table_within(program, bound) do
-    guarded_answer_within(program, ["-e", "-o", "pid=", "-o", "pgid="], bound)
+  defp process_table_until(program, until) do
+    guarded_answer_until(program, ["-e", "-o", "pid=", "-o", "pgid="], until)
   end
 
-  defp guarded_answer_within(_program, _arguments, 0), do: :no_answer
+  # Concept: a probe spends only the time it was given, including the time it
+  # takes to put its own helper away, and does not start when that time cannot
+  # hold both.
+  #
+  # Technical depth: `until` is the owner's own cleanup instant, and the
+  # owner's verdict about that episode must exist by it. The helper's answer
+  # used to receive the whole remaining time while the guarded KILL
+  # confirmation after it waited a further fixed `@helper_signal_ms` against a
+  # dummy episode, so a probe started near the instant could finish up to that
+  # allowance late and prove cleanup after the episode it belonged to had
+  # ended. Rebuilding an instant as `now + remaining` could
+  # also land a millisecond past the owner's when the clock ticked between the
+  # two reads, so the helper is handed the owner's instant itself: it reserves
+  # `helper_cleanup_allowance/1` of what remains for the KILL confirmation, gives
+  # the answer only the rest, and confirms the KILL against that same instant.
+  # When either share would be zero no helper is launched: a non-answer is what
+  # that probe would have produced anyway.
+  defp guarded_answer_until(program, arguments, until) do
+    remaining = cleanup_remaining(until)
+    allowance = helper_cleanup_allowance(remaining)
 
-  defp guarded_answer_within(program, arguments, bound) do
-    stop = System.monotonic_time(:millisecond) + bound
+    if allowance > 0 and remaining - allowance > 0 do
+      launch_guarded_helper(program, arguments, {until, remaining, nil}, allowance)
+    else
+      :no_answer
+    end
+  end
+
+  # Concept: the time held back for putting a helper away is a share of the
+  # helper's bound, never more than the fixed confirmation wait.
+  #
+  # Technical depth: half the bound, capped at `@helper_signal_ms`, keeps a
+  # probe usable under a short committed period instead of refusing every probe
+  # below twice the fixed wait, and never lengthens the confirmation the fixed
+  # wait already bounded.
+  defp helper_cleanup_allowance(bound), do: min(@helper_signal_ms, div(bound, 2))
+
+  defp launch_guarded_helper(program, arguments, {until, _bound, _probe} = episode, allowance) do
+    stop = until - allowance
     environment = demonstration_environment()
     token = launch_guard_token()
 
@@ -6077,13 +6589,13 @@ defmodule Loopex.Executor.Local do
 
     try do
       case start_guarded_helper(port, collector, stop, collector_limit) do
-        {:ok, ready} -> collect_answer(port, ready, stop, collector_limit)
-        {:error, last} -> abandon_helper(port, last)
+        {:ok, ready} -> collect_answer(port, ready, {stop, episode}, collector_limit)
+        {:error, last} -> abandon_helper(port, last, episode)
       end
     rescue
-      _error -> abandon_helper(port, collector)
+      _error -> abandon_helper(port, collector, episode)
     catch
-      _kind, _value -> abandon_helper(port, collector)
+      _kind, _value -> abandon_helper(port, collector, episode)
     after
       close_helper(port)
     end
@@ -6096,7 +6608,7 @@ defmodule Loopex.Executor.Local do
   defp start_guarded_helper(port, collector, stop, limit) do
     with true <- safe_port_command(port, "#{@guard_init}:#{collector.guard.token}\n"),
          {:ok, ready} <- await_helper_guard_ready(port, collector, stop, limit),
-         true <- System.monotonic_time(:millisecond) < stop,
+         true <- cleanup_now_ms() < stop,
          true <- safe_port_command(port, "#{@guard_run}:#{collector.guard.token}\n") do
       {:ok, ready}
     else
@@ -6106,7 +6618,7 @@ defmodule Loopex.Executor.Local do
   end
 
   defp await_helper_guard_ready(port, collector, stop, limit) do
-    remaining = stop - System.monotonic_time(:millisecond)
+    remaining = stop - cleanup_now_ms()
 
     if remaining <= 0 do
       {:error, collector}
@@ -6128,11 +6640,11 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp collect_answer(port, collector, stop, limit) do
-    remaining = stop - System.monotonic_time(:millisecond)
+  defp collect_answer(port, collector, {stop, episode} = bounds, limit) do
+    remaining = stop - cleanup_now_ms()
 
     if remaining <= 0 do
-      abandon_helper(port, collector)
+      abandon_helper(port, collector, episode)
     else
       receive do
         {^port, {:data, chunk}} ->
@@ -6140,13 +6652,13 @@ defmodule Loopex.Executor.Local do
             {:ok,
              %{command_status: status, guard: %{terminal_wrapper_pid: wrapper_pid}} = answered}
             when is_integer(status) and is_integer(wrapper_pid) ->
-              finish_helper_answer(port, answered, limit)
+              finish_helper_answer(port, answered, limit, episode)
 
             {:ok, next} ->
-              collect_answer(port, next, stop, limit)
+              collect_answer(port, next, bounds, limit)
 
             {:artifact_limit_exceeded, next, _observed} ->
-              abandon_helper(port, next)
+              abandon_helper(port, next, episode)
           end
 
         {^port, {:exit_status, _status}} ->
@@ -6158,13 +6670,13 @@ defmodule Loopex.Executor.Local do
         # wait is derived from it, so an unsliced `after` raises
         # `:timeout_value`. The instant above is what the wait ends against; a
         # slice only decides how often it is looked at.
-        min(remaining, @timer_slice_ms) -> collect_answer(port, collector, stop, limit)
+        min(remaining, @timer_slice_ms) -> collect_answer(port, collector, bounds, limit)
       end
     end
   end
 
-  defp finish_helper_answer(port, collector, limit) do
-    case kill_guarded_helper(port, collector, limit) do
+  defp finish_helper_answer(port, collector, limit, episode) do
+    case kill_guarded_helper(port, collector, limit, episode) do
       {:ok, complete, output}
       when complete.command_status not in [126, 127] and byte_size(output) <= @max_output_bytes ->
         {:answered, output, complete.command_status, complete.guard.os_pid}
@@ -6188,15 +6700,30 @@ defmodule Loopex.Executor.Local do
   # acknowledgement and Port exit all agree. Merely queueing `Port.command/2`
   # cannot prove the instruction ran. The timeout path requests the same cleanup
   # but returns no verdict regardless of whether confirmation arrives.
-  defp abandon_helper(port, collector) do
-    _ = kill_guarded_helper(port, collector, @max_output_bytes)
+  defp abandon_helper(port, collector, episode) do
+    _ = kill_guarded_helper(port, collector, @max_output_bytes, episode)
     :no_answer
   end
 
-  defp kill_guarded_helper(port, collector, limit) do
-    {guard, sent} = kill_launch_guard(collector.guard, {0, 0, nil})
+  # Concept: a real answer is kept when its guard is slow to confirm the KILL,
+  # as long as the confirmation lands inside the probe's own episode.
+  #
+  # Technical depth: when a KILL was delivered to the live guard, the
+  # confirmation waits until the episode's `until`, so it can never carry the
+  # probe past it. It was cut to a fixed 250 ms, so a guard stalled for longer
+  # on a loaded host turned an answer that arrived with nearly the whole bound
+  # unspent into `:no_answer`. When no KILL could be sent -- a helper that
+  # failed to start, or a guard already gone -- the verdict is `:error`
+  # whatever the wait observes, so the wait keeps the fixed `@helper_signal_ms`
+  # cut to what remains and only reaps the Port.
+  defp kill_guarded_helper(port, collector, limit, {until, _bound, _probe} = episode) do
+    {guard, sent} = kill_launch_guard(collector.guard, episode)
     collector = %{collector | guard: guard}
-    stop = System.monotonic_time(:millisecond) + @helper_signal_ms
+
+    stop =
+      if sent,
+        do: until,
+        else: cleanup_now_ms() + min(@helper_signal_ms, cleanup_remaining(until))
 
     case await_helper_guard_exit(port, collector, stop, limit, false) do
       {finished, true, false} when sent -> finish_guarded_helper(finished, limit)
@@ -6218,7 +6745,7 @@ defmodule Loopex.Executor.Local do
   defp helper_kill_ack(token), do: "#{@guard_signal_ack}:#{token}:KILL\n"
 
   defp await_helper_guard_exit(port, collector, stop, limit, overflow) do
-    remaining = stop - System.monotonic_time(:millisecond)
+    remaining = stop - cleanup_now_ms()
 
     if remaining <= 0 do
       close_helper(port)
@@ -6386,9 +6913,12 @@ defmodule Loopex.Executor.Local do
       "\n\n[loopex: output truncated. #{byte_size(kept)} of #{total} bytes shown.]"
   end
 
+  # `full` is the command's own bytes -- what was, or would have been, retained
+  # -- and `diagnostic` is the executor's note, which is shown but never counted
+  # or retained. Each marker counts only the shown prefix of `full`.
   defp bounded_artifact_notice(full, diagnostic, limit, reference) do
     bounded_notice(
-      output_without_suffix(full, diagnostic),
+      full,
       diagnostic,
       limit,
       &Loopex.ArtifactStore.truncation_notice(&1, byte_size(full), reference)
@@ -6396,44 +6926,49 @@ defmodule Loopex.Executor.Local do
   end
 
   defp bounded_truncation_marker(full, diagnostic, limit) do
-    bounded_notice(
-      output_without_suffix(full, diagnostic),
-      diagnostic,
-      limit,
-      &truncation_marker(&1, byte_size(full))
-    )
+    bounded_notice(full, diagnostic, limit, &truncation_marker(&1, byte_size(full)))
   end
 
   defp bounded_truncation_with_extra(full, diagnostic, limit, extra) do
     bounded_notice(
-      output_without_suffix(full, diagnostic),
+      full,
       diagnostic,
       limit,
       &(truncation_marker(&1, byte_size(full)) <> extra)
     )
   end
 
-  defp bounded_notice(output, diagnostic, limit, builder) do
+  defp bounded_notice(output, diagnostic, limit, marker) do
     if byte_size(diagnostic) >= limit do
       binary_part(diagnostic, 0, limit)
     else
-      converge_bounded_notice(output, diagnostic, limit, builder, 0, 0)
+      converge_bounded_notice(output, diagnostic, limit, marker, 0, 0)
     end
   end
 
-  defp converge_bounded_notice(output, diagnostic, limit, builder, shown, attempts) do
+  # Concept: the shown prefix, then the note, then the marker, and the marker
+  # counts only the prefix.
+  #
+  # Technical depth: `marker` builds `kept <> marker_text` exactly as the shared
+  # notice does, so `N` is `byte_size(kept)`; the note is placed between the
+  # prefix and the marker text, where it was when it was counted.
+  defp noticed(kept, diagnostic, marker) do
+    marked = marker.(kept)
+
+    kept <>
+      diagnostic <> binary_part(marked, byte_size(kept), byte_size(marked) - byte_size(kept))
+  end
+
+  defp converge_bounded_notice(output, diagnostic, limit, marker, shown, attempts) do
     kept = binary_part(output, 0, min(byte_size(output), shown))
-    displayed = kept <> diagnostic
-    candidate = builder.(displayed)
-    notice_bytes = byte_size(candidate) - byte_size(displayed)
-    next = min(byte_size(output), max(limit - byte_size(diagnostic) - notice_bytes, 0))
+    overhead = byte_size(noticed(kept, diagnostic, marker)) - byte_size(kept)
+    next = min(byte_size(output), max(limit - overhead, 0))
 
     if next == shown or attempts == 4 do
-      next_kept = binary_part(output, 0, next)
-      bounded = builder.(next_kept <> diagnostic)
+      bounded = noticed(binary_part(output, 0, next), diagnostic, marker)
       binary_part(bounded, 0, min(byte_size(bounded), limit))
     else
-      converge_bounded_notice(output, diagnostic, limit, builder, next, attempts + 1)
+      converge_bounded_notice(output, diagnostic, limit, marker, next, attempts + 1)
     end
   end
 
@@ -6472,13 +7007,6 @@ defmodule Loopex.Executor.Local do
     available = limit - byte_size(kept_suffix)
     kept_output = binary_part(output, 0, min(byte_size(output), available))
     kept_output <> kept_suffix
-  end
-
-  defp output_without_suffix(full, ""), do: full
-
-  defp output_without_suffix(full, suffix) do
-    size = byte_size(full) - byte_size(suffix)
-    binary_part(full, 0, max(size, 0))
   end
 
   # Concept: a tool that did something says what it did.

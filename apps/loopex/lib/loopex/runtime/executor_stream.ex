@@ -76,7 +76,7 @@ defmodule Loopex.Runtime.ExecutorStream do
   @doc false
   @spec open(
           Supervisor.supervisor(),
-          pid() | nil,
+          pid() | {pid(), binary()} | nil,
           Executor.job_request(),
           non_neg_integer(),
           publish()

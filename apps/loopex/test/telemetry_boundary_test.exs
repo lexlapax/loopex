@@ -580,6 +580,7 @@ defmodule Loopex.TelemetryBoundaryTest do
     %{admission: admission, dispatcher: dispatcher, slot: live_slot} = state
     sender = start_sender(admission)
     held_by_sender = reach_cut(sender, cut, live_slot)
+    settle_delivery(state, cut)
 
     before_down = Admission.held(admission)
     monitor = Process.monitor(sender)
@@ -592,6 +593,21 @@ defmodule Loopex.TelemetryBoundaryTest do
 
     assert owner(admission, live_slot) == {live, live_ticket}
   end
+
+  # Concept: a sent item's slot belongs to the item, not the sender.
+  #
+  # Technical depth: the dispatcher frees that slot when it consumes the item,
+  # whether or not the sender lives. The item is consumed here, before the
+  # kill, so the `DOWN` that follows is seen to release nothing; left queued
+  # behind the kill, the slot's release would race the count below.
+  defp settle_delivery(%{admission: admission, dispatcher: dispatcher}, :after_send) do
+    delivered = Admission.held(admission)
+    :ok = :sys.resume(dispatcher)
+    await_held(admission, delivered - 1)
+    :ok = :sys.suspend(dispatcher)
+  end
+
+  defp settle_delivery(_state, _cut), do: :ok
 
   # Concept: drive one sender to the step it is to be killed at, and say how
   # many slots it holds there.

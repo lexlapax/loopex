@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
   alias Mix.Tasks.Loopex.DepsBudget
 
   @fixture "scripts/fixtures/deps-budget-invalid/mix.exs"
-  @reqllm_requirement "~> 1.17.1"
+  @reqllm_requirement "~> 1.24.0"
   # The one external dependency accepted ADR 0030 admits for core and for the
   # telemetry edge, pinned here exactly as the oracle pins it.
   @telemetry_requirement "~> 1.3"
@@ -13,7 +13,8 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
   defp repo_root, do: Path.expand("../../..", __DIR__)
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "deps-budget-#{System.unique_integer([:positive])}")
+    run_id = "#{System.system_time(:nanosecond)}-#{System.unique_integer([:positive])}"
+    dir = Path.join(System.tmp_dir!(), "deps-budget-#{run_id}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     {:ok, dir: dir}
@@ -336,9 +337,9 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     assert Enum.any?(reasons, &String.contains?(&1, "loopex.status"))
   end
 
-  test "M1 planned applications accept only their declared dependency shapes", %{dir: dir} do
+  test "planned applications accept only their declared dependency shapes", %{dir: dir} do
     positive = Path.join(dir, "positive")
-    write_m1_inventory(positive)
+    write_repository_inventory(positive)
     track!(positive)
     assert Budget.check_repository(positive) == :ok
 
@@ -386,13 +387,13 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
            {:loopex_composition, [in_umbrella: true]}
          ])
        end},
-      {"extra-extension", "outside the exact M1 planned inventory",
+      {"extra-extension", "outside the exact planned inventory",
        fn root ->
          write_child(root, "loopex_probe_extension", :extension, [
            {:loopex_protocol, [in_umbrella: true]}
          ])
        end},
-      {"extra-edge", "outside the exact M1 planned inventory",
+      {"extra-edge", "outside the exact planned inventory",
        fn root ->
          write_child(root, "loopex_other_edge", :edge, [{:loopex, [in_umbrella: true]}])
        end},
@@ -437,7 +438,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     for {name, expected_reason, mutate} <- negative_cases do
       root = Path.join(dir, name)
-      write_m1_inventory(root)
+      write_repository_inventory(root)
       mutate.(root)
       track!(root)
 
@@ -446,10 +447,10 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     end
   end
 
-  test "the M2 planned inventory admits exactly eight applications with their declared roles",
+  test "the planned inventory admits exactly eleven applications with their declared roles",
        %{dir: dir} do
     positive = Path.join(dir, "m2-positive")
-    write_m1_inventory(positive)
+    write_repository_inventory(positive)
     track!(positive)
     assert Budget.check_repository(positive) == :ok
 
@@ -457,7 +458,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     # name is refused, and one it does name cannot be dropped or re-roled. A
     # count alone would admit a swap.
     negative_cases = [
-      {"ninth-app", "outside the exact M1 planned inventory",
+      {"twelfth-app", "outside the exact planned inventory",
        fn root ->
          write_child(root, "loopex_extra_client", :client, [{:loopex, [in_umbrella: true]}])
        end},
@@ -471,12 +472,19 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
            {:loopex, [in_umbrella: true]},
            {:loopex_store_local, [in_umbrella: true]}
          ])
+       end},
+      {"daemon-as-composition", "must declare role :host",
+       fn root ->
+         write_child(root, "loopex_daemon", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_composition, [in_umbrella: true]}
+         ])
        end}
     ]
 
     for {name, expected_reason, mutate} <- negative_cases do
       root = Path.join(dir, name)
-      write_m1_inventory(root)
+      write_repository_inventory(root)
       mutate.(root)
       track!(root)
 
@@ -529,7 +537,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     for {name, expected_reason, mutate} <- negative_cases do
       root = Path.join(dir, name)
-      write_m1_inventory(root)
+      write_repository_inventory(root)
       mutate.(root)
       track!(root)
 
@@ -578,7 +586,60 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     for {name, expected_reason, mutate} <- negative_cases do
       root = Path.join(dir, name)
-      write_m1_inventory(root)
+      write_repository_inventory(root)
+      mutate.(root)
+      track!(root)
+
+      assert {:error, reasons} = Budget.check_repository(root)
+
+      assert Enum.any?(reasons, &String.contains?(&1, expected_reason)),
+             "#{name}: expected #{inspect(expected_reason)}, got #{inspect(reasons)}"
+    end
+  end
+
+  test "a host is started by a client and depends on no client or host", %{dir: dir} do
+    # The maintainer's decision of 2026-09-22: the reference CLI starts the
+    # daemon through one production dependency on the host application, while
+    # the general prohibition on client-to-client dependencies stays closed.
+    negative_cases = [
+      {"host-on-client", "may compose only edge applications",
+       fn root ->
+         write_child(root, "loopex_daemon", :host, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_composition, [in_umbrella: true]},
+           {:loopex_cli, [in_umbrella: true]}
+         ])
+       end},
+      {"client-test-only-host", "host dependency must be production",
+       fn root ->
+         write_child(root, "loopex_cli", :client, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_composition, [in_umbrella: true]},
+           {:loopex_daemon, [in_umbrella: true, only: :test]}
+         ])
+       end},
+      {"edge-on-host", "only on core and protocol",
+       fn root ->
+         write_child(root, "loopex_store_local", :edge, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_daemon, [in_umbrella: true]}
+         ])
+       end},
+      {"composition-on-host", "",
+       fn root ->
+         write_child(root, "loopex_composition", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_store_local, [in_umbrella: true]},
+           {:loopex_llm_reqllm, [in_umbrella: true]},
+           {:loopex_executor_local, [in_umbrella: true]},
+           {:loopex_daemon, [in_umbrella: true]}
+         ])
+       end}
+    ]
+
+    for {name, expected_reason, mutate} <- negative_cases do
+      root = Path.join(dir, name)
+      write_repository_inventory(root)
       mutate.(root)
       track!(root)
 
@@ -601,7 +662,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     # The lock names every external dependency the repository declares, which
     # now includes core's own.
-    write_lock!(dir, [{:req_llm, "1.17.1"}, {:telemetry, "1.3.0"}])
+    write_lock!(dir, [{:req_llm, "1.24.0"}, {:telemetry, "1.3.0"}])
     core = Path.join(dir, "apps/loopex/mix.exs")
 
     File.write!(
@@ -872,7 +933,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     assert {"", 0} = System.cmd("elixir", materialize_args, cd: dir, stderr_to_stdout: true)
     assert File.read!(Path.join(destination, "req_llm/lib/probe.ex")) =~ "defmodule Probe"
 
-    archive = Path.join([cache, "hexpm", "req_llm-1.17.1.tar"])
+    archive = Path.join([cache, "hexpm", "req_llm-1.24.0.tar"])
     protected_fixture = Path.join(dir, "protected-fixture.tar")
     File.ln!(archive, protected_fixture)
     stat = File.lstat!(protected_fixture)
@@ -1157,7 +1218,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     write_lock!(root, [{:telemetry, "1.3.0"}])
   end
 
-  defp write_m1_inventory(root) do
+  defp write_repository_inventory(root) do
     write_inventory(root)
 
     write_child(root, "loopex_store_local", :edge, [
@@ -1184,7 +1245,8 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     write_child(root, "loopex_cli", :client, [
       {:loopex, [in_umbrella: true]},
-      {:loopex_composition, [in_umbrella: true]}
+      {:loopex_composition, [in_umbrella: true]},
+      {:loopex_daemon, [in_umbrella: true]}
     ])
 
     write_child(root, "loopex_reference_client", :client, [
@@ -1194,9 +1256,9 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:loopex_executor_local, [in_umbrella: true, only: :test]}
     ])
 
-    # The ninth and tenth applications accepted ADR 0030 and ADR 0023 add: a
-    # client that speaks the wire and names the contract it speaks, and the edge
-    # that owns the only Loopex-attached telemetry handler.
+    # The later applications accepted by ADR 0030, ADR 0023 and M5 add the edge
+    # that owns the only Loopex-attached telemetry handler and the two clients
+    # that speak the public protocol.
     write_child(root, "loopex_app_server", :client, [
       {:loopex, [in_umbrella: true]},
       {:loopex_protocol, [in_umbrella: true]},
@@ -1208,7 +1270,13 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:telemetry, @telemetry_requirement}
     ])
 
-    write_lock!(root, [{:req_llm, "1.17.1"}, {:telemetry, "1.3.0"}])
+    write_child(root, "loopex_daemon", :host, [
+      {:loopex, [in_umbrella: true]},
+      {:loopex_protocol, [in_umbrella: true]},
+      {:loopex_composition, [in_umbrella: true]}
+    ])
+
+    write_lock!(root, [{:req_llm, "1.24.0"}, {:telemetry, "1.3.0"}])
   end
 
   defp write_child(root, directory, role, dependencies) do
@@ -1263,13 +1331,13 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     :ok = :erl_tar.create(String.to_charlist(contents_path), tar_entries, [:compressed])
     contents = File.read!(contents_path)
     checksum = String.duplicate("a", 64)
-    archive_path = Path.join([cache, "hexpm", "req_llm-1.17.1.tar"])
+    archive_path = Path.join([cache, "hexpm", "req_llm-1.24.0.tar"])
     File.mkdir_p!(Path.dirname(archive_path))
 
     metadata =
       [
         {"name", "req_llm"},
-        {"version", "1.17.1"},
+        {"version", "1.24.0"},
         {"elixir", "~> 1.17"},
         {"requirements", []},
         {"build_tools", ["mix"]}
@@ -1293,7 +1361,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     File.write!(Path.join(root, "mix.lock"), """
     %{
-      "req_llm": {:hex, :req_llm, "1.17.1", "#{checksum}", [:mix], [], "hexpm", "#{archive_sha}"}
+      "req_llm": {:hex, :req_llm, "1.24.0", "#{checksum}", [:mix], [], "hexpm", "#{archive_sha}"}
     }
     """)
 
@@ -1307,7 +1375,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
   defp materializer_packages do
     [
-      package("req_llm", "1.17.1", [:mix], "~> 1.17", [
+      package("req_llm", "1.24.0", [:mix], "~> 1.17", [
         lock_dependency("bridge", "~> 2.0")
       ]),
       package("bridge", "2.0.0", [:mix], ">= 1.17.0", [
@@ -1341,7 +1409,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
   end
 
   defp write_materializer_fixture!(root, cache, packages) do
-    write_m1_inventory(root)
+    write_repository_inventory(root)
     lock_entries = Enum.map(packages, &write_package_archive!(root, cache, &1))
     File.write!(Path.join(root, "mix.lock"), "%{\n#{Enum.join(lock_entries, ",\n")}\n}\n")
     track!(root)

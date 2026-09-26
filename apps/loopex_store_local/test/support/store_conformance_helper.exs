@@ -357,6 +357,37 @@ defmodule LoopexStoreLocalTest.Conformance do
     assert_derived_fault_injection()
   end
 
+  def create_history_projection do
+    each_store(fn context ->
+      runtime_id = unique("history-runtime")
+      command_id = unique("history-create")
+      {:ok, transaction} = Store.create_session(runtime_id, command_id, genesis("exact"))
+      command = create_command(transaction)
+
+      assert :absent = Store.runtime_command(context.store, command)
+      assert {:committed, ^command_id, receipt} = Store.transact(context.store, transaction)
+
+      before = store_snapshot(context)
+
+      assert {:completed, %{result: receipt.session_id}} ==
+               Store.runtime_command(context.store, command)
+
+      {:ok, changed_transaction} =
+        Store.create_session(runtime_id, command_id, genesis("changed"))
+
+      assert {:error, :runtime_command_conflict} ==
+               Store.runtime_command(context.store, create_command(changed_transaction))
+
+      assert {:error, :runtime_command_conflict} ==
+               Store.runtime_command(
+                 context.store,
+                 owner_command(runtime_id, command_id, receipt.session_id)
+               )
+
+      assert before == store_snapshot(context)
+    end)
+  end
+
   def replay_audit do
     context = start_store(:local)
 
@@ -1564,6 +1595,35 @@ defmodule LoopexStoreLocalTest.Conformance do
     }
   end
 
+  defp create_command(transaction) do
+    succession_bytes =
+      :erlang.term_to_binary(
+        [
+          "loopex_owner_operation_v1",
+          transaction.runtime_id,
+          "create",
+          "",
+          transaction.command_id
+        ],
+        [:deterministic]
+      )
+
+    encoded = :crypto.hash(:sha256, succession_bytes) |> Base.encode16(case: :lower)
+
+    %{
+      runtime_id: transaction.runtime_id,
+      command_id: transaction.command_id,
+      command_kind: :create,
+      mutation_domain: "session",
+      succession_id: "succession_" <> binary_part(encoded, 0, 40),
+      canonical_command_bytes: transaction.canonical_record_bytes,
+      canonical_command_digest: transaction.canonical_mutation_digest
+    }
+  end
+
+  defp store_snapshot(%{kind: :local, path: path}), do: File.read!(path)
+  defp store_snapshot(%{kind: :memory, pid: pid}), do: :sys.get_state(pid)
+
   defp assert_binding_conflicts(context, transaction) do
     changed = [
       %{transaction | expected_owner_epoch: transaction.expected_owner_epoch + 1},
@@ -2086,7 +2146,7 @@ defmodule LoopexStoreLocalTest.Conformance do
   end
 
   defp unique(prefix),
-    do: "#{prefix}-#{System.unique_integer([:positive, :monotonic])}"
+    do: "#{prefix}-#{Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)}"
 
   defp kill(pid) do
     reference = Process.monitor(pid)

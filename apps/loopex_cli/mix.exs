@@ -30,13 +30,12 @@ defmodule LoopexCli.MixProject do
   def application, do: [extra_applications: [:crypto]]
 
   defp build_pair(args) do
-    root = Path.expand("../..", __DIR__)
-    {source, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: root)
     adapter = Path.expand("../loopex_llm_reqllm", __DIR__)
     build_path = Mix.Project.build_path() |> Path.expand()
     elixir_bin = Path.expand("../../bin", List.to_string(:code.lib_dir(:elixir)))
     mix = Path.expand("../../bin/mix", List.to_string(:code.lib_dir(:mix)))
     command = Path.join(elixir_bin, "elixir")
+    source = source_identity(command, mix, adapter)
 
     {output, status} =
       System.cmd(command, [mix, "loopex.provider.build" | args],
@@ -75,15 +74,13 @@ defmodule LoopexCli.MixProject do
       tasks = tasks ++ Enum.map(compilers, &"compile.#{&1}")
       Enum.each(tasks, &Mix.Task.reenable/1)
       Mix.Task.run("compile", ["--force", "--warnings-as-errors"])
-      Mix.Tasks.Escript.Build.run([])
 
-      {current_source, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: root)
-
-      {status, 0} =
-        System.cmd("git", ["status", "--porcelain=v1", "--untracked-files=all"], cd: root)
-
-      unless source == current_source and status == "",
+      # The escript is this build's one output outside the build root, so the
+      # unchanged-source check runs after compilation and before it is written.
+      unless source_identity(command, mix, adapter) == source,
         do: Mix.raise("command source changed while building the provider pair")
+
+      Mix.Tasks.Escript.Build.run([])
     after
       if previous,
         do: System.put_env("LOOPEX_BUILD_PROVIDER_CONFIG", previous),
@@ -91,16 +88,36 @@ defmodule LoopexCli.MixProject do
     end
   end
 
+  # Concept: the command is built from one proved source, a checkout or an
+  # archive of one, and the same source must still be there when it is done.
+  defp source_identity(command, mix, adapter) do
+    case System.cmd(command, [mix, "loopex.source_identity"],
+           cd: adapter,
+           env: [{"MIX_ENV", Atom.to_string(Mix.env())}],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        output |> String.split("\n") |> Enum.find(&String.starts_with?(&1, "commit "))
+
+      {output, _status} ->
+        Mix.raise("command source identity refused: " <> String.trim(output))
+    end
+  end
+
   # Concept: the operator command is a client and a peer surface.
   #
   # Technical depth: it owns no loop, no durable session truth, no cursor truth,
   # no Store access, and no authority decision. It depends on the runtime for the
-  # public facade and on exactly one composition for wiring, which is the whole
-  # of what a client may declare in production.
+  # public facade, on the protocol contract its live forms speak, on exactly one
+  # composition for wiring, and on the one host application whose daemon
+  # `loopex daemon` starts, which is the whole of what a client may declare in
+  # production.
   defp deps do
     [
       {:loopex, in_umbrella: true},
-      {:loopex_composition, in_umbrella: true}
+      {:loopex_protocol, in_umbrella: true},
+      {:loopex_composition, in_umbrella: true},
+      {:loopex_daemon, in_umbrella: true}
     ]
   end
 end

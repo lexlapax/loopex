@@ -1,9 +1,10 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Loopex.LLM.ReqLLM
+  alias Loopex.LLM.ReqLLM.CredentialCustody
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
   alias Loopex.Model
 
@@ -45,51 +46,46 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
     assert deterministic.text == "deterministic:hello"
     assert plain_reply?(deterministic)
 
-    variable = ReqLLM.credential_variable()
-    previous = System.get_env(variable)
-    System.delete_env(variable)
     synthetic = "synthetic-model-conformance-credential"
     fixture = Fixture.new(:reply, credential: synthetic)
+    {:ok, custody} = CredentialCustody.reference(fixture.custody_pid)
+    assert :ok = CredentialCustody.rotate(custody, nil)
 
-    try do
-      assert ReqLLM.complete(request, fixture.options, Model.discard_progress()) ==
-               {:error, {:not_dispatched, "model_call_failed"}}
+    assert ReqLLM.complete(request, fixture.options, Model.discard_progress()) ==
+             {:error, {:not_dispatched, "model_call_failed"}}
 
-      assert Fixture.canaries(fixture) == 0
-      assert Fixture.count(fixture) == 0
-      Fixture.assert_gone(fixture)
-      System.put_env(variable, synthetic)
-      assert {:ok, provider} = ReqLLM.complete(request, fixture.options, Model.discard_progress())
-      assert provider.text == "loopex"
-      assert plain_reply?(provider)
-      assert provider.canonical_request_bytes == request.canonical_request_bytes
-      assert provider.staged_request_digest == request.staged_request_digest
+    assert Fixture.canaries(fixture) == 0
+    assert Fixture.count(fixture) == 0
+    Fixture.assert_gone(fixture)
+    assert :ok = CredentialCustody.rotate(custody, synthetic)
+    assert {:ok, provider} = ReqLLM.complete(request, fixture.options, Model.discard_progress())
+    assert provider.text == "loopex"
+    assert plain_reply?(provider)
+    assert provider.canonical_request_bytes == request.canonical_request_bytes
+    assert provider.staged_request_digest == request.staged_request_digest
+    assert Fixture.methods(fixture) == ["POST"]
+    assert [{_body, true}] = Fixture.events(fixture)
+    Fixture.assert_gone(fixture)
+
+    for adapter <- [Deterministic, ReqLLM],
+        field <- [:canonical_request_bytes, :staged_request_digest] do
+      original = Map.fetch!(request, field)
+      assert is_binary(original)
+      changed = Map.put(request, field, original <> "changed")
+
+      # ADR 0018 bounds the shipped provider adapter's pre-transport refusal to
+      # the generic not-dispatched shape; the in-process deterministic adapter
+      # has no transport and keeps naming the mismatch.
+      expected =
+        case adapter do
+          ReqLLM -> {:error, {:not_dispatched, "model_call_failed"}}
+          Deterministic -> {:error, :canonical_model_request_mismatch}
+        end
+
+      options = if adapter == ReqLLM, do: fixture.options, else: []
+      assert adapter.complete(changed, options, Model.discard_progress()) == expected
       assert Fixture.methods(fixture) == ["POST"]
-      assert [{_body, true}] = Fixture.events(fixture)
-      Fixture.assert_gone(fixture)
-
-      for adapter <- [Deterministic, ReqLLM],
-          field <- [:canonical_request_bytes, :staged_request_digest] do
-        original = Map.fetch!(request, field)
-        assert is_binary(original)
-        changed = Map.put(request, field, original <> "changed")
-
-        # ADR 0018 bounds the shipped provider adapter's pre-transport refusal to
-        # the generic not-dispatched shape; the in-process deterministic adapter
-        # has no transport and keeps naming the mismatch.
-        expected =
-          case adapter do
-            ReqLLM -> {:error, {:not_dispatched, "model_call_failed"}}
-            Deterministic -> {:error, :canonical_model_request_mismatch}
-          end
-
-        options = if adapter == ReqLLM, do: fixture.options, else: []
-        assert adapter.complete(changed, options, Model.discard_progress()) == expected
-        assert Fixture.methods(fixture) == ["POST"]
-        assert Fixture.count(fixture) == 1
-      end
-    after
-      if previous, do: System.put_env(variable, previous)
+      assert Fixture.count(fixture) == 1
     end
   end
 

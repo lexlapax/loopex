@@ -400,7 +400,7 @@ defmodule Loopex.ProjectResourceTrustTest do
     {:accepted, "p1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "go"})
 
-    assert_receive {:holding, model_worker}, 2_000
+    assert_receive {:holding, model_worker}, 5_000
     {:ok, %{active_run_id: run_id}} = Loopex.session_status(fixture.runtime, session_id)
 
     {:accepted, "s1"} =

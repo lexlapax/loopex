@@ -23,7 +23,7 @@ defmodule Loopex.AppServer.StdioProbeTest do
 
   alias LoopexProtocol.Session
 
-  @generation "loopex.session.v1-experimental"
+  @generation "loopex.experimental/1"
 
   test "the process negotiates, then refuses a second attempt, over raw bytes" do
     [initialized, refused] =

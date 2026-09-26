@@ -1,4 +1,4 @@
-defmodule LoopexCli.Placement do
+defmodule LoopexComposition.Placement do
   @moduledoc """
   ## Concept
 
@@ -41,6 +41,12 @@ defmodule LoopexCli.Placement do
   @typedoc false
   @type process_probe :: (binary() -> {:ok, binary()} | {:error, term()})
 
+  @typedoc false
+  @type refusal ::
+          {:placement_active, binary()}
+          | {:placement_unverifiable, term()}
+          | {:placement_lock_failed, term()}
+
   @doc """
   ## Concept
 
@@ -53,25 +59,19 @@ defmodule LoopexCli.Placement do
   refused with the owning process identifier, because an operator told only "in
   use" cannot tell a forgotten window from a genuine conflict.
   """
-  @spec acquire(Path.t()) :: {:ok, Path.t()} | {:error, binary()}
+  @spec acquire(Path.t()) :: {:ok, Path.t()} | {:error, refusal()}
   def acquire(state_root) do
     acquire(state_root, &process_incarnation/1)
   end
 
   @doc false
-  @spec acquire(Path.t(), process_probe()) :: {:ok, Path.t()} | {:error, binary()}
+  @spec acquire(Path.t(), process_probe()) :: {:ok, Path.t()} | {:error, refusal()}
   def acquire(state_root, process_probe)
       when is_binary(state_root) and is_function(process_probe, 1) do
     path = lock_path(state_root)
     File.mkdir_p!(Path.dirname(path))
 
-    case with_guard(path, process_probe, fn -> acquire_locked(path, process_probe) end) do
-      {:guard_error, reason} ->
-        {:error, "the placement lock could not be taken: #{reason}"}
-
-      result ->
-        result
-    end
+    with_guard(path, process_probe, fn -> acquire_locked(path, process_probe) end)
   end
 
   @doc """
@@ -110,14 +110,14 @@ defmodule LoopexCli.Placement do
   the race the lock exists to prevent, so the command refuses rather than
   competing.
   """
-  @spec live_owner(Path.t()) :: {:ok, binary()} | :none | {:error, binary()}
+  @spec live_owner(Path.t()) :: {:ok, binary()} | :none | {:error, refusal()}
   def live_owner(state_root) do
     live_owner(state_root, &process_incarnation/1)
   end
 
   @doc false
   @spec live_owner(Path.t(), process_probe()) ::
-          {:ok, binary()} | :none | {:error, binary()}
+          {:ok, binary()} | :none | {:error, refusal()}
   def live_owner(state_root, process_probe)
       when is_binary(state_root) and is_function(process_probe, 1) do
     path = lock_path(state_root)
@@ -129,14 +129,14 @@ defmodule LoopexCli.Placement do
             case owner_status(owner, process_probe) do
               {:ok, :alive} -> {:ok, owner.pid}
               {:ok, :dead} -> :none
-              {:error, reason} -> owner_probe_error(reason)
+              {:error, reason} -> unverifiable(reason)
             end
 
           :error ->
             case unreadable_owner_status(bytes, process_probe) do
               {:ok, {:alive, pid}} -> {:ok, pid}
               {:ok, :dead} -> :none
-              {:error, reason} -> owner_probe_error(reason)
+              {:error, reason} -> unverifiable(reason)
             end
         end
 
@@ -144,7 +144,7 @@ defmodule LoopexCli.Placement do
         :none
 
       {:error, reason} ->
-        {:error, "the placement lock could not be read: #{inspect(reason)}"}
+        lock_failed({:read_failed, reason})
     end
   end
 
@@ -155,15 +155,13 @@ defmodule LoopexCli.Placement do
           {:ok, owner} ->
             case owner_status(owner, process_probe) do
               {:ok, :alive} ->
-                {:error,
-                 "another loopex process (pid #{owner.pid}) is using this state root; " <>
-                   "stop it, or pass --state-root to work somewhere else"}
+                {:error, {:placement_active, owner.pid}}
 
               {:ok, :dead} ->
                 reclaim_owner(path, process_probe)
 
               {:error, reason} ->
-                owner_probe_error(reason)
+                unverifiable(reason)
             end
 
           :error ->
@@ -172,13 +170,10 @@ defmodule LoopexCli.Placement do
                 reclaim_owner(path, process_probe)
 
               {:ok, {:alive, pid}} ->
-                {:error,
-                 "the placement lock at #{path} names live process #{pid} but this version " <>
-                   "cannot read the record; stop that process and remove the file, or pass " <>
-                   "--state-root to work somewhere else"}
+                {:error, {:placement_active, pid}}
 
               {:error, reason} ->
-                owner_probe_error(reason)
+                unverifiable(reason)
             end
         end
 
@@ -186,8 +181,8 @@ defmodule LoopexCli.Placement do
         cleanup_owner_handles(path)
         create_owner(path, process_probe)
 
-      {:error, _reason} ->
-        {:error, "a placement lock exists but could not be read: #{path}"}
+      {:error, reason} ->
+        lock_failed({:read_failed, path, reason})
     end
   end
 
@@ -201,7 +196,7 @@ defmodule LoopexCli.Placement do
     case File.rm(path) do
       :ok -> create_owner(path, process_probe)
       {:error, :enoent} -> acquire_locked(path, process_probe)
-      {:error, reason} -> lock_error(reason)
+      {:error, reason} -> lock_failed({:remove_failed, reason})
     end
   end
 
@@ -219,14 +214,14 @@ defmodule LoopexCli.Placement do
             {:error, reason} ->
               _ = :file.close(file)
               _ = File.rm(path)
-              lock_error(reason)
+              lock_failed({:owner_write_failed, reason})
           end
 
         {:error, reason} ->
-          lock_error(reason)
+          lock_failed({:owner_create_failed, reason})
       end
     else
-      {:error, reason} -> lock_error(reason)
+      {:error, reason} -> lock_failed(reason)
     end
   end
 
@@ -277,11 +272,6 @@ defmodule LoopexCli.Placement do
     end
   end
 
-  defp lock_error(:eexist), do: {:error, "another loopex process took this state root first"}
-
-  defp lock_error(reason),
-    do: {:error, "the placement lock could not be taken: #{inspect(reason)}"}
-
   # Concept: stale ownership is reclaimed without letting two observers both
   # become the owner.
   #
@@ -299,12 +289,12 @@ defmodule LoopexCli.Placement do
         end
 
       {:error, reason} ->
-        {:guard_error, reason}
+        lock_failed({:guard_failed, reason})
     end
   end
 
   defp take_guard(_path, _process_probe, 0),
-    do: {:error, "placement lock coordination timed out"}
+    do: {:error, :coordination_timeout}
 
   defp take_guard(path, process_probe, attempts_left) do
     guard = guard_path(path)
@@ -329,7 +319,7 @@ defmodule LoopexCli.Placement do
 
       {:error, reason} ->
         cleanup_contender(contender, marker)
-        {:error, "guard creation failed: #{inspect(reason)}"}
+        {:error, {:guard_creation_failed, reason}}
     end
   end
 
@@ -347,17 +337,17 @@ defmodule LoopexCli.Placement do
         if String.starts_with?(entry, "owner-") do
           reclaim_or_wait_for_guard(path, marker, process_probe, attempts_left)
         else
-          {:error, "placement lock coordination data is malformed"}
+          {:error, :malformed_guard}
         end
 
       {:ok, _entries} ->
-        {:error, "placement lock coordination data is malformed"}
+        {:error, :malformed_guard}
 
       {:error, :enoent} ->
         take_guard(path, process_probe, attempts_left - 1)
 
       {:error, reason} ->
-        {:error, "guard inspection failed: #{inspect(reason)}"}
+        {:error, {:guard_inspection_failed, reason}}
     end
   end
 
@@ -374,14 +364,14 @@ defmodule LoopexCli.Placement do
             take_guard(path, process_probe, attempts_left - 1)
 
           {:error, reason} ->
-            owner_probe_error(reason)
+            {:error, {:guard_owner_unverifiable, reason}}
         end
 
       {:error, :enoent} ->
         take_guard(path, process_probe, attempts_left - 1)
 
       {:error, reason} ->
-        {:error, "guard owner could not be read: #{inspect(reason)}"}
+        {:error, {:guard_owner_unreadable, reason}}
     end
   end
 
@@ -494,8 +484,8 @@ defmodule LoopexCli.Placement do
     end
   end
 
-  defp owner_probe_error(reason),
-    do: {:error, "the placement owner could not be verified: #{inspect(reason)}"}
+  defp unverifiable(reason), do: {:error, {:placement_unverifiable, reason}}
+  defp lock_failed(reason), do: {:error, {:placement_lock_failed, reason}}
 
   defp encode_owner(%{pid: pid, incarnation: incarnation}) do
     encoded = Base.url_encode64(incarnation, padding: false)
@@ -545,7 +535,7 @@ defmodule LoopexCli.Placement do
     try do
       case System.cmd(probe, ["-o", "lstart=", "-p", pid],
              stderr_to_stdout: true,
-             env: [{"LC_ALL", "C"}]
+             env: [{"LC_ALL", "C"}, {Loopex.LLM.ReqLLM.credential_variable(), nil}]
            ) do
         {output, 0} ->
           case String.trim(output) do

@@ -33,19 +33,19 @@ defmodule LoopexComposition.StaleWriterRecoveryTest do
     File.write!(marker, bytes)
     options = options(state_root, workspace)
 
-    assert {:error, {:store_writer_active, ^marker}} = LoopexComposition.start(options)
+    assert {:error, {:store_writer_active, ^marker}} = LoopexComposition.TestHost.start(options)
     assert File.regular?(marker), "the refused open removed a marker it did not write"
 
     assert {:error, {:store_writer_active, ^marker}} =
-             LoopexComposition.start(options ++ [recover_stale_writer: false])
+             LoopexComposition.TestHost.start(options ++ [recover_stale_writer: false])
 
     assert {:error, {:invalid_composition_option, :recover_stale_writer}} =
-             LoopexComposition.start(options ++ [recover_stale_writer: "true"])
+             LoopexComposition.TestHost.start(options ++ [recover_stale_writer: "true"])
 
     # The v1 marker names no holder, so nothing can establish that holder is
     # gone and the request is refused rather than granted.
     assert {:error, {:store_writer_unverifiable, ^marker, :undecodable_marker}} =
-             LoopexComposition.start(options ++ [recover_stale_writer: true])
+             LoopexComposition.TestHost.start(options ++ [recover_stale_writer: true])
 
     assert File.read!(marker) == bytes
   end
@@ -56,15 +56,17 @@ defmodule LoopexComposition.StaleWriterRecoveryTest do
     options = options(state_root, workspace)
     observe_stores()
 
-    assert {:ok, _first} = LoopexComposition.start(options)
+    assert {:ok, _first} = LoopexComposition.TestHost.start(options)
     assert File.regular?(marker)
     dead = File.read!(marker)
     kill_store()
 
     assert File.read!(marker) == dead, "an untrappable kill gave the marker back"
-    assert {:error, {:store_writer_active, ^marker}} = LoopexComposition.start(options)
+    assert {:error, {:store_writer_active, ^marker}} = LoopexComposition.TestHost.start(options)
 
-    assert {:ok, runtime} = LoopexComposition.start(options ++ [recover_stale_writer: true])
+    assert {:ok, runtime} =
+             LoopexComposition.TestHost.start(options ++ [recover_stale_writer: true])
+
     stop_later(runtime)
 
     assert {:ok, _session_id} =
@@ -76,12 +78,12 @@ defmodule LoopexComposition.StaleWriterRecoveryTest do
     marker = Path.join(state_root, "store.log.writer")
     options = options(state_root, workspace)
 
-    assert {:ok, embedder} = LoopexComposition.start(options ++ [runtime_id: "embedder"])
+    assert {:ok, embedder} = LoopexComposition.TestHost.start(options ++ [runtime_id: "embedder"])
     stop_later(embedder)
     bytes = File.read!(marker)
 
     assert {:error, {:store_writer_active, ^marker}} =
-             LoopexComposition.start(options ++ [recover_stale_writer: true])
+             LoopexComposition.TestHost.start(options ++ [recover_stale_writer: true])
 
     assert File.read!(marker) == bytes, "a recovering opener evicted a live runtime"
 

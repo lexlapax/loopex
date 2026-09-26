@@ -12,7 +12,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Executor.Local
   alias LoopexCli.Interrupt
-  alias LoopexCli.Placement
+  alias LoopexComposition.Placement
   alias LoopexCli.Render
 
   @grace 7_311
@@ -2184,9 +2184,13 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     {fixture, activation, coordinator, presentation, incumbent} =
       blocked_prepared_presentation("blocked-participant-loss")
 
+    # The holder monitor is a request to the holder, while the kill below
+    # reaches it through the guard; nothing orders the two. `prepared_guard`
+    # makes a synchronous request to the holder, which returns only after this
+    # monitor is set up.
+    holder_monitor = Process.monitor(incumbent.holder)
     guard = prepared_guard(coordinator, incumbent.holder)
     guard_monitor = Process.monitor(guard)
-    holder_monitor = Process.monitor(incumbent.holder)
 
     try do
       Process.exit(guard, :kill)

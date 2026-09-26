@@ -14,9 +14,9 @@ defmodule Loopex.AppServer.Host do
   Everything that decides what a session can do is chosen here, at launch, and
   nothing a client sends can change any of it: where durable state lives, which
   workspace the hands hold, which provider companion the adapter may start, and
-  which host policy answers for authority. The credential is not among them —
-  it stays in the environment, is read by the adapter itself, and never reaches
-  an argument, a record or a log.
+  which host policy answers for authority. The composition owner consumes the
+  credential once into private custody and removes its environment name before
+  publishing the runtime; it never reaches an argument, a record or a log.
 
   ## Technical depth
 
@@ -26,7 +26,7 @@ defmodule Loopex.AppServer.Host do
   | `LOOPEX_WORKSPACE` | The workspace root the executor leases and project skills are discovered under. |
   | `LOOPEX_PROVIDER_LAUNCH` | The `.launch` file naming the provider companion this host may start. It carries no credential. |
   | `LOOPEX_POLICY` | `allow-all` or `ask`. There is no default: authority is the operator's to name. |
-  | `LOOPEX_PROVIDER_API_KEY` | Read by the model adapter, never by this module. Its presence is checked so an unattended launch refuses in a second rather than at the first dispatch. |
+  | `LOOPEX_PROVIDER_API_KEY` | Consumed exactly once by the composition owner into private custody, then deleted from the VM environment before composition succeeds. |
 
   A missing or unusable input refuses on standard error and halts with status 3.
   Nothing but protocol records reaches standard output — the diagnostics sink is
@@ -69,17 +69,65 @@ defmodule Loopex.AppServer.Host do
   """
   @spec serve() :: :ok
   def serve do
+    case route_default_logger_to_standard_error() do
+      :ok ->
+        serve_with_routed_diagnostics()
+
+      {:error, reason} ->
+        refuse("the diagnostic logger could not be routed to standard error: #{inspect(reason)}")
+    end
+  end
+
+  defp serve_with_routed_diagnostics do
     case launch() do
       {:ok, options} ->
         announce(options)
 
         case LoopexComposition.with_runtime(options, &Stdio.serve/1) do
-          :ok -> :ok
-          other -> refuse("the composed runtime did not start or stop cleanly: #{inspect(other)}")
+          :ok ->
+            :ok
+
+          {:error, :provider_credential_required} ->
+            refuse(
+              "LOOPEX_PROVIDER_API_KEY is required, is never passed on a command line, " <>
+                "and must contain at most 65536 bytes"
+            )
+
+          other ->
+            refuse("the composed runtime did not start or stop cleanly: #{inspect(other)}")
         end
 
       {:error, message} ->
         refuse(message)
+    end
+  end
+
+  # Concept: standard output belongs exclusively to the wire protocol.
+  #
+  # Technical depth: the standalone host starts with OTP's default
+  # `:logger_std_h` handler targeting `:standard_io`. Its type cannot be changed
+  # in place, so preserve its formatter, filters and overload configuration
+  # while replacing it before any runtime component can log. Refuse if either
+  # half fails: continuing would make a diagnostic line a malformed protocol
+  # frame. A host that already targets another sink needs no change.
+  defp route_default_logger_to_standard_error do
+    case :logger.get_handler_config(:default) do
+      {:ok, %{module: :logger_std_h, config: %{type: :standard_io}} = handler} ->
+        options =
+          handler
+          |> Map.drop([:id, :module])
+          |> put_in([:config, :type], :standard_error)
+
+        with :ok <- :logger.remove_handler(:default),
+             :ok <- :logger.add_handler(:default, :logger_std_h, options) do
+          :ok
+        end
+
+      {:ok, _other_sink} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -124,7 +172,6 @@ defmodule Loopex.AppServer.Host do
          {:ok, workspace} <- workspace(),
          {:ok, provider_launch} <- provider_launch(),
          {:ok, policy} <- policy(),
-         :ok <- credential(),
          {:ok, runtime_id} <- runtime_id(state_root),
          {:ok, manifest} <- skills(workspace, state_root) do
       {:ok,
@@ -209,23 +256,6 @@ defmodule Loopex.AppServer.Host do
         {:error,
          "LOOPEX_POLICY is required: name the host policy that answers for this " <>
            "server's authority (#{Enum.join(Enum.sort(Map.keys(@policies)), " or ")})"}
-    end
-  end
-
-  # Concept: a host that spends a real credential says so before it starts.
-  #
-  # Technical depth: the value is never read into a variable that outlives this
-  # check, never logged and never passed onward; the adapter reads the variable
-  # itself after its companion is ready.
-  defp credential do
-    case System.get_env("LOOPEX_PROVIDER_API_KEY") do
-      value when is_binary(value) and value != "" ->
-        :ok
-
-      _absent ->
-        {:error,
-         "LOOPEX_PROVIDER_API_KEY is required: the model adapter reads it from the " <>
-           "environment and it is never passed on a command line or written to disk"}
     end
   end
 

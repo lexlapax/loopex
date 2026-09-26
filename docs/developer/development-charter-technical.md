@@ -46,9 +46,9 @@ An ADR pair records one status and governance table in its Concept file. Its
 acceptance binds the reachable historical Proposed candidate plus the SHA-256
 digest of both files. A milestone uses a Concept plan and a Technical depth
 plan; acceptance and closure bind the accepted or reviewed candidate. A
-milestone run under the retired gate machinery also carries a gate file and
-bound its digests, and those rows are read as written. The exact formats and
-lifecycle transitions live in [the plans index](../plans/README.md).
+milestone run under the retired gate machinery also carries a gate file whose
+digests its governance rows bound; those rows are read as written. The exact
+formats and lifecycle transitions live in [the plans index](../plans/README.md).
 
 Pairing applies to substantive concept documents, including the vision,
 roadmap, development charters, architecture and protocol documents, ADRs, and
@@ -75,6 +75,10 @@ references under `docs/generated/`, standalone evidence logs under
 fixture trees, `.github/` interaction templates, and license files are also
 reserved exception paths. Any other new exception requires a deliberate checker
 and index update rather than passing as an unknown class.
+
+The executable form of this classification is `Loopex.Checks.Documents` in
+`apps/loopex/lib/mix/tasks/status/documents.ex`, which `mix loopex.status`
+runs; a path it cannot classify fails the check.
 
 <a id="technical-traceable-depth"></a>
 ## Anchors, Reciprocal Links, and Placement
@@ -239,32 +243,36 @@ Concept: [Portable development](development-charter.md#concept-portable-developm
 
 Repository-owned commands enforce structure and retained evidence. Hosted CI
 and client hooks call the same commands and do not redefine or waive them. The
-bootstrap checks cover:
+structure step of `bash scripts/check.sh` is `bash scripts/check-bootstrap.sh`;
+[DEVELOPMENT.md](../../DEVELOPMENT.md) lists what it runs. Its documentation
+checks, `mix loopex.status` and `mix loopex.agent_bootstrap`, cover:
 
 - classification of every active Markdown file;
 - required companion existence and absence of orphan companions;
 - unique explicit anchors, exact targets, reciprocal links, and repository-safe
   relative paths;
+- the directory-index chain from every `docs/` directory back to the root
+  README;
 - paired ADR and plan governance records and exact digests;
 - the plan and technical-depth plan pair for active milestones; and
 - the absence of policy that exists only in a client directory.
 
-M0 added the Elixir/Mix documentation check, `mix loopex.docs_check`. It reads
-compiled documentation through `Code.fetch_docs/1` and requires `## Concept`
-before `## Technical depth` for modules, behaviours, callbacks, public APIs,
-and public types, and `scripts/check.sh` runs it on every invocation. Review remains responsible for whether those
-sections are useful and for the proportional private-comment rule, which cannot
-be inferred safely from syntax alone.
+`mix loopex.docs_check` reads compiled documentation through
+`Code.fetch_docs/1` and requires `## Concept` before `## Technical depth` for
+modules, behaviours, callbacks, public APIs, and public types;
+`scripts/check.sh` runs it in both its full and `--docs` modes. Review remains
+responsible for whether those sections are useful and for the proportional
+private-comment rule, which cannot be inferred safely from syntax alone.
 
 Independent review covers semantic qualities a parser cannot prove: concept
 clarity, constraint-first ordering, adequate nearby technical links, locally
 defined vocabulary, companion readability, consistency, and absence of hidden
 decisions. Structural success never substitutes for that review.
 
-Bootstrap enforcement used Python 3.11 and `jq` only through M0, whose closure
-replaced both with Elixir and Mix entrypoints while preserving the behavioral
-and mutation-test corpus. The enduring local baseline is Git, shell/POSIX
-tools, and the accepted Elixir/OTP toolchain.
+The enduring local baseline is Git, shell/POSIX tools, and the accepted
+Elixir/OTP toolchain. Python 3.11 and `jq` served as bootstrap bridges only
+through M0, whose closure replaced both with Elixir and Mix entrypoints while
+preserving the behavioral and mutation-test corpus.
 
 Client files remain adapters. They import or route to `AGENTS.md`, this charter,
 and the context map; they may add discovery, invocation, permissions, hooks, and

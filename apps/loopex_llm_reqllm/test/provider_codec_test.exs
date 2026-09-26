@@ -399,17 +399,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     <<header::binary-size(8), first::binary-size(4_096), tail::binary>> = frame
     :ok = :gen_tcp.send(sender, header)
 
+    # Each fragment lands within 400 ms of the read before it, so a deadline
+    # per read would receive the whole frame; one deadline shared across the
+    # reads times out at 400 ms, well before the 500 ms tail, and the 700 ms
+    # ceiling leaves a loaded machine room without reaching the tail.
     producer =
       spawn_link(fn ->
-        Process.sleep(80)
+        Process.sleep(250)
         :ok = :gen_tcp.send(sender, first)
-        Process.sleep(80)
+        Process.sleep(250)
         :ok = :gen_tcp.send(sender, tail)
       end)
 
     started = System.monotonic_time(:millisecond)
-    assert {:error, :timeout} = ProviderCodec.recv(receiver, 120)
-    assert System.monotonic_time(:millisecond) - started < 220
+    assert {:error, :timeout} = ProviderCodec.recv(receiver, 400)
+    assert System.monotonic_time(:millisecond) - started < 700
     monitor = Process.monitor(producer)
     assert_receive {:DOWN, ^monitor, :process, ^producer, _reason}, 1_000
   end

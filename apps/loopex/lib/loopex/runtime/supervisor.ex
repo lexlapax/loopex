@@ -125,4 +125,21 @@ defmodule Loopex.Runtime.Supervisor do
   end
 
   def children(_root), do: {:error, :runtime_unavailable}
+
+  @doc false
+  @spec control(pid()) :: {:ok, pid()} | {:error, :runtime_unavailable}
+  def control(root) when is_pid(root) do
+    try do
+      case Enum.find(Supervisor.which_children(root), fn {id, _pid, _type, _modules} ->
+             id == @control_id
+           end) do
+        {@control_id, control, _type, _modules} when is_pid(control) -> {:ok, control}
+        _other -> {:error, :runtime_unavailable}
+      end
+    catch
+      :exit, _reason -> {:error, :runtime_unavailable}
+    end
+  end
+
+  def control(_root), do: {:error, :runtime_unavailable}
 end

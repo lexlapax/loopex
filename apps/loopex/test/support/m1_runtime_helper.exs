@@ -46,8 +46,16 @@ defmodule Loopex.M1RuntimeTestStore do
       when is_binary(kind) and is_pid(observer),
       do: GenServer.call(pid, {:hold_next_record_before_linearization, kind, observer})
 
+  def hold_next_transition_before_linearization(pid, transition, observer)
+      when is_atom(transition) and is_pid(observer),
+      do: GenServer.call(pid, {:hold_next_transition_before_linearization, transition, observer})
+
   def block_next_event_read(pid, observer) when is_pid(observer),
     do: GenServer.call(pid, {:block_next_event_read, observer})
+
+  def delay_ownership_heads(pid, session_ids, observer)
+      when is_list(session_ids) and is_pid(observer),
+      do: GenServer.call(pid, {:delay_ownership_heads, session_ids, observer})
 
   def release(waiter) when is_pid(waiter), do: send(waiter, :release)
 
@@ -75,8 +83,11 @@ defmodule Loopex.M1RuntimeTestStore do
     do: GenServer.call(pid, {:transaction_status, session_id, domain, tx_id})
 
   @impl Store
+  # A head read the test holds with `delay_ownership_heads/3` waits for the test
+  # rather than GenServer's 5 s default, so a production-bound fence case is
+  # ended by the runtime's own fence cutoff, not by this store's call timeout.
   def ownership_head(pid, session_id, _domain),
-    do: GenServer.call(pid, {:ownership_head, session_id})
+    do: GenServer.call(pid, {:ownership_head, session_id}, :infinity)
 
   @impl Store
   def runtime_command(pid, command),
@@ -108,8 +119,10 @@ defmodule Loopex.M1RuntimeTestStore do
        delayed: %{},
        delayed_records: %{},
        held_before_records: %{},
+       held_before_transitions: %{},
        pending_transactions: %{},
        event_read_block: nil,
+       delayed_ownership_heads: %{},
        fail_reads: false,
        refuse_records: MapSet.new()
      }}
@@ -144,8 +157,25 @@ defmodule Loopex.M1RuntimeTestStore do
      %{state | held_before_records: Map.put(state.held_before_records, kind, observer)}}
   end
 
+  def handle_call(
+        {:hold_next_transition_before_linearization, transition, observer},
+        _from,
+        state
+      ) do
+    {:reply, :ok,
+     %{
+       state
+       | held_before_transitions: Map.put(state.held_before_transitions, transition, observer)
+     }}
+  end
+
   def handle_call({:block_next_event_read, observer}, _from, state) do
     {:reply, :ok, %{state | event_read_block: observer}}
+  end
+
+  def handle_call({:delay_ownership_heads, session_ids, observer}, _from, state) do
+    delayed = Map.new(session_ids, &{&1, observer})
+    {:reply, :ok, %{state | delayed_ownership_heads: delayed}}
   end
 
   def handle_call({:fail_reads, enabled}, _from, state) do
@@ -166,8 +196,10 @@ defmodule Loopex.M1RuntimeTestStore do
         :delayed,
         :delayed_records,
         :held_before_records,
+        :held_before_transitions,
         :pending_transactions,
-        :event_read_block
+        :event_read_block,
+        :delayed_ownership_heads
       ])
 
     {:reply, visible, state}
@@ -195,7 +227,7 @@ defmodule Loopex.M1RuntimeTestStore do
   def handle_call({:ownership_head, _session_id}, _from, %{fail_reads: true} = state),
     do: {:reply, :unavailable, state}
 
-  def handle_call({:ownership_head, session_id}, _from, state) do
+  def handle_call({:ownership_head, session_id}, from, state) do
     result =
       case Map.get(state.sessions, session_id) do
         nil ->
@@ -209,7 +241,16 @@ defmodule Loopex.M1RuntimeTestStore do
            }}
       end
 
-    {:reply, result, state}
+    case Map.pop(state.delayed_ownership_heads, session_id) do
+      {observer, delayed} when is_pid(observer) ->
+        caller = elem(from, 0)
+        waiter = delayed_reply(from, result)
+        send(observer, {:ownership_head_delayed, waiter, caller, self(), session_id})
+        {:noreply, %{state | delayed_ownership_heads: delayed}}
+
+      {nil, _same} ->
+        {:reply, result, state}
+    end
   end
 
   def handle_call({:runtime_command, command}, _from, state) do
@@ -217,6 +258,12 @@ defmodule Loopex.M1RuntimeTestStore do
       case Map.get(state.runtime_commands, {command.runtime_id, command.command_id}) do
         nil ->
           :absent
+
+        %{binding: binding, outcome: {:committed, _command_id, _receipt}, session_id: session_id}
+        when command.command_kind == :create ->
+          if create_command_matches?(command, binding),
+            do: {:completed, %{result: session_id}},
+            else: {:error, :runtime_command_conflict}
 
         %{command: ^command, status: status, generation: generation, candidate: candidate} =
             entry ->
@@ -320,20 +367,32 @@ defmodule Loopex.M1RuntimeTestStore do
     end
   end
 
-  defp held_before_record(%{held_before_records: held}, transaction) do
-    transaction
-    |> Map.get(:records, [])
-    |> Enum.find_value(fn record ->
-      kind = record_kind(record)
+  defp held_before_record(state, transaction) do
+    case Transitions.id(transaction) do
+      {:ok, transition} ->
+        case Map.fetch(state.held_before_transitions, transition) do
+          {:ok, observer} ->
+            {{:transition, transition}, observer}
 
-      case Map.fetch(held, kind) do
-        {:ok, observer} -> {kind, observer}
-        :error -> nil
-      end
-    end)
+          :error ->
+            transaction
+            |> Map.get(:records, [])
+            |> Enum.find_value(fn record ->
+              kind = record_kind(record)
+
+              case Map.fetch(state.held_before_records, kind) do
+                {:ok, observer} -> {{:record, kind}, observer}
+                :error -> nil
+              end
+            end)
+        end
+
+      {:error, _reason} ->
+        nil
+    end
   end
 
-  defp hold_before_linearization(state, from, transaction, kind, observer) do
+  defp hold_before_linearization(state, from, transaction, hold_key, observer) do
     token = make_ref()
     server = self()
 
@@ -344,13 +403,25 @@ defmodule Loopex.M1RuntimeTestStore do
         end
       end)
 
-    send(observer, {:record_held_before_linearization, waiter, self(), kind, transaction})
+    held_name = elem(hold_key, 1)
+    send(observer, {:record_held_before_linearization, waiter, self(), held_name, transaction})
+
+    state =
+      case hold_key do
+        {:record, kind} ->
+          %{state | held_before_records: Map.delete(state.held_before_records, kind)}
+
+        {:transition, transition} ->
+          %{
+            state
+            | held_before_transitions: Map.delete(state.held_before_transitions, transition)
+          }
+      end
 
     {:noreply,
      %{
        state
-       | held_before_records: Map.delete(state.held_before_records, kind),
-         pending_transactions: Map.put(state.pending_transactions, token, {from, transaction})
+       | pending_transactions: Map.put(state.pending_transactions, token, {from, transaction})
      }}
   end
 
@@ -847,6 +918,13 @@ defmodule Loopex.M1RuntimeTestStore do
         :release -> GenServer.reply(from, reply)
       end
     end)
+  end
+
+  defp create_command_matches?(command, binding) do
+    command.runtime_id == binding.runtime_id and
+      command.command_id == binding.command_id and
+      command.canonical_command_bytes == binding.canonical_record_bytes and
+      command.canonical_command_digest == binding.canonical_mutation_digest
   end
 
   defp empty_session do

@@ -14,9 +14,9 @@ defmodule Loopex.AppServer.HostTest do
   ## Technical depth
 
   No credential is spent here. `LOOPEX_PROVIDER_API_KEY` carries a placeholder,
-  because this host only establishes that a credential is present and never
-  reads its value; the adapter reads the variable itself, later, and none of
-  these cases reaches a dispatch. The provider launch configuration names a
+  which the composition owner consumes into private custody and deletes before
+  it publishes a runtime; none of these cases reaches a dispatch. The provider
+  launch configuration names a
   companion that is not on disk for the same reason: the host consults the file,
   and nothing here starts a provider.
 
@@ -241,6 +241,7 @@ defmodule Loopex.AppServer.HostTest do
       :loopex,
       :loopex_app_server,
       :loopex_composition,
+      :loopex_llm_reqllm,
       :loopex_store_local,
       :loopex_executor_local,
       :telemetry

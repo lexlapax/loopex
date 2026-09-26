@@ -48,18 +48,29 @@ defmodule Loopex.SessionLifecycleTest do
     {:ok, %{control: control, dispatcher: dispatcher}} = Runtime.children(fixture.runtime)
     :ok = :sys.suspend(dispatcher)
 
+    holder = self()
+
     try do
       caller =
         Task.async(fn ->
-          Loopex.attach(fixture.runtime, session_id, request_id: "delayed-attachment-request")
+          Runtime.attach_for_holder(
+            fixture.runtime,
+            session_id,
+            holder,
+            request_id: "delayed-attachment-request"
+          )
         end)
 
       assert eventually(fn ->
                {:messages, messages} = Process.info(dispatcher, :messages)
 
                Enum.any?(messages, fn
-                 {:"$gen_call", _from, {:attach, _token, ^session_id, _options}} -> true
-                 _other -> false
+                 {:stage_attachment, ^control, _attach_ref,
+                  %{session_id: ^session_id, holder: ^holder}} ->
+                   true
+
+                 _other ->
+                   false
                end)
              end)
 
@@ -72,8 +83,8 @@ defmodule Loopex.SessionLifecycleTest do
                {:messages, messages} = Process.info(control, :messages)
 
                Enum.any?(messages, fn
-                 {:"$gen_call", _from,
-                  {:finish_attach, _token, ^session_id, _generation, _options, _attachment}} ->
+                 {:attachment_staged, ^dispatcher, _dispatcher_incarnation, _attach_ref, _id,
+                  _incarnation_id, _attachment} ->
                    true
 
                  _other ->

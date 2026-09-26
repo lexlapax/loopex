@@ -1,11 +1,14 @@
 defmodule LoopexCli.LiveStoreHolderTest do
   @moduledoc false
 
-  # Async, with one shared thing named: `LoopexCli.dispatch` takes the VM-wide
-  # placement slot and every case here releases it explicitly. No other
-  # concurrent module in this application dispatches; one that does must stay
-  # serial or this module must.
-  use ExUnit.Case, async: true
+  # Serial: `LoopexCli.dispatch` takes the VM-wide placement slot, and the
+  # command consumes the VM-wide provider credential variable each case sets.
+  use ExUnit.Case, async: false
+
+  setup do
+    System.put_env(Loopex.LLM.ReqLLM.credential_variable(), "live-holder-placeholder")
+    on_exit(fn -> System.delete_env(Loopex.LLM.ReqLLM.credential_variable()) end)
+  end
 
   # Concept: a command asked to work on a state root another live runtime is
   # writing is refused, and told so in words.
@@ -103,6 +106,7 @@ defmodule LoopexCli.LiveStoreHolderTest do
           :stderr_to_stdout,
           :hide,
           :line,
+          env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"live-holder-placeholder"}],
           args: Enum.map(arguments, &String.to_charlist/1)
         ]
       )

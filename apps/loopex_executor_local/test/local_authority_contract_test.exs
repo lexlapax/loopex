@@ -326,7 +326,10 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
   end
 
   test "wall truth and the immutable monotonic action deadline fence effects independently" do
-    wall = System.system_time(:millisecond)
+    # The scripted samples decide admission and the fence; the wall anchor sits
+    # ahead of the host clock so the root claim's real-time wait, which is
+    # bounded by the job deadline, is never what ends the case.
+    wall = System.system_time(:millisecond) + 10_000
 
     # `clock_provider` is a reversible test-only edge seam: it substitutes the
     # one paired sample source ADR 0016 names and enters no job, ledger, receipt,
@@ -410,7 +413,10 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     # permit. The missing process-start notification is the decisive observation
     # that no model command was created.
     fixture = prepared_fixture("process-expired-before-port")
-    wall = System.system_time(:millisecond)
+    # The scripted samples decide admission and the fence; the wall anchor sits
+    # ahead of the host clock so the root claim's real-time wait, which is
+    # bounded by the job deadline, is never what ends the case.
+    wall = System.system_time(:millisecond) + 10_000
 
     clock =
       clock_provider([

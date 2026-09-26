@@ -67,7 +67,10 @@ defmodule Loopex.AgentLoopTestModel do
     #
     # Technical depth: the adapter blocks inside the supervised task exactly as a
     # slow provider would, which is the only way to observe input admitted while
-    # a run is genuinely active rather than between runs.
+    # a run is genuinely active rather than between runs. A test's wait for
+    # `{:holding, _}` is liveness only: it measures how soon a loaded host
+    # schedules the run to its first request, which no case claims, so those
+    # waits allow 5 s rather than a bound a busy suite can cross.
     case Map.get(turn, :hold) do
       nil ->
         :ok

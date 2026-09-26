@@ -45,17 +45,8 @@ defmodule Loopex.AppServer.SourceArchive do
   @spec extract!(binary()) :: binary()
   def extract!(root) when is_binary(root) do
     repository = repository_root()
-    {committed, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: repository)
-    committed = String.trim(committed)
-    {dirty, 0} = System.cmd("git", ["status", "--porcelain"], cd: repository)
-
-    assert dirty == "",
-           "the tree is not the committed candidate; extracting it would prove nothing: #{dirty}"
-
     archive = Path.join(root, "source.tar")
-
-    {_output, 0} =
-      System.cmd("git", ["archive", "--format=tar", "-o", archive, committed], cd: repository)
+    committed = stage!(repository, archive)
 
     extracted = Path.join(root, "source")
     File.mkdir_p!(extracted)
@@ -75,6 +66,50 @@ defmodule Loopex.AppServer.SourceArchive do
 
     IO.puts(:stderr, "extracted candidate: #{committed} archive sha256: #{digest}")
     extracted
+  end
+
+  # Concept: the archive is the exact committed source, from a checkout or
+  # from the release check's own `git archive` extraction.
+  #
+  # Technical depth: in a checkout a dirty tree refuses and `git archive`
+  # stages `HEAD`. The release check runs every lane inside an extraction that
+  # has no `.git`, whose revision `Mix.LoopexSourceIdentity` reads from the
+  # archive-carried `SOURCE_IDENTITY`, and whose only additions are the
+  # declared build outputs its own unchanged check allows — the top-level
+  # `_build` and `deps` and the CLI escript — so those are left out.
+  defp stage!(repository, archive) do
+    if File.exists?(Path.join(repository, ".git")) do
+      {committed, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: repository)
+      committed = String.trim(committed)
+      {dirty, 0} = System.cmd("git", ["status", "--porcelain"], cd: repository)
+
+      assert dirty == "",
+             "the tree is not the committed candidate; extracting it would prove nothing: #{dirty}"
+
+      {_output, 0} =
+        System.cmd("git", ["archive", "--format=tar", "-o", archive, committed], cd: repository)
+
+      committed
+    else
+      assert {:ok, %{mode: :archive, commit: committed}} =
+               Mix.LoopexSourceIdentity.resolve(repository)
+
+      {_output, 0} =
+        System.cmd(
+          "tar",
+          [
+            "-cf",
+            archive,
+            "--exclude=./_build",
+            "--exclude=./deps",
+            "--exclude=./apps/loopex_cli/loopex",
+            "."
+          ],
+          cd: repository
+        )
+
+      committed
+    end
   end
 
   @doc """

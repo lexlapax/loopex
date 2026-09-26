@@ -1,6 +1,8 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
+  # The no-fallback witness installs a VM-global trace pattern on
+  # System.get_env/1 and captures Logger output, so this module remains serial.
   use ExUnit.Case, async: false
   import ExUnit.CaptureIO
   import ExUnit.CaptureLog
@@ -10,25 +12,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
 
   @canary "synthetic-provider-preentry-credential-7d81"
 
-  setup do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, @canary)
-
-    on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-    end)
-
-    :ok
-  end
-
   test "an actual pre-entry crash resolves no credential and invokes no transport" do
     # Concept: readiness, not merely child creation, authorizes credential
     # resolution. An entry failure must stay a bounded pre-dispatch refusal.
-    # Technical depth: the real successful worker is a positive control for the
-    # credential-read observer. The failing child exits before Worker.main;
-    # neither branch supplies a synthetic private-protocol acknowledgement.
-    # Trace only calls, never return values containing the synthetic credential.
+    # Technical depth: both branches use host custody, and the environment-call
+    # observer proves neither falls back to the old adapter read. The failing
+    # child exits before Worker.main; neither branch supplies a synthetic
+    # private-protocol acknowledgement. Trace only calls, never return values.
     assert :erlang.trace_pattern({System, :get_env, 1}, true, [:local]) == 1
     observer = self()
 
@@ -38,7 +28,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
           output =
             capture_io(fn ->
               for mode <- [:reply, :pre_entry_crash] do
-                fixture = Fixture.new(mode, paused: true)
+                fixture = Fixture.new(mode, paused: true, credential: @canary)
 
                 # The crashing child never becomes ready, so its refusal is
                 # reached by the committed deadline expiring, and the deadline
@@ -74,7 +64,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderStartupBoundariesTest do
                 if mode == :reply do
                   assert {:ok, %{text: text}} = result
                   assert is_binary(text)
-                  assert length(reads) == 1
+                  assert reads == []
                   assert Fixture.methods(fixture) == ["POST"]
                   assert [{_body, true}] = Fixture.events(fixture)
                 else

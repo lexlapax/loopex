@@ -27,6 +27,16 @@ defmodule LoopexComposition.ResourcePacks do
   @max_text_bytes 65_536
   @max_detail_bytes 1_024
   @max_deadline_ms 30_000
+
+  # Concept: every import job commits one cleanup period, and the import
+  # executor names its own root-claim wait, so a cancellation knows how long a
+  # settling worker may still need.
+  #
+  # Technical depth: the period is each Git job's `cleanup_grace_ms`; the claim
+  # wait is the executor's `claim_wait_ms` start option, equal to its default.
+  # `import_settlement_ms/0` derives the settling worker's bound from both.
+  @import_cleanup_grace_ms 5_000
+  @import_claim_wait_ms 5_000
   @git_oid ~r/\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z/
   @skill_name ~r/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/
   @frontmatter_keys ~w(name description license compatibility metadata disable-model-invocation)
@@ -190,7 +200,15 @@ defmodule LoopexComposition.ResourcePacks do
           )
         else
           refusal ->
-            cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+            cancel_import_worker(
+              context,
+              tag,
+              worker,
+              worker_monitor,
+              current_job,
+              config.deadline
+            )
+
             refusal
         end
 
@@ -210,7 +228,7 @@ defmodule LoopexComposition.ResourcePacks do
         result
 
       {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
-        cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+        cancel_import_worker(context, tag, worker, worker_monitor, current_job, config.deadline)
         :caller_down
 
       {:DOWN, ^worker_monitor, :process, ^worker, reason} ->
@@ -218,12 +236,24 @@ defmodule LoopexComposition.ResourcePacks do
         error(:executor_failed, inspect(reason))
     after
       remaining_ms(config.deadline) ->
-        cancel_import_worker(context, worker, worker_monitor, current_job, config.deadline)
+        cancel_import_worker(context, tag, worker, worker_monitor, current_job, config.deadline)
         error(:git_failed, "resource import deadline reached")
     end
   end
 
-  defp cancel_import_worker(context, worker, worker_monitor, current_job, deadline) do
+  # Concept: an unconfirmed cancellation may mean the worker is still settling
+  # its job, so it is given the time that settlement is allowed before it is
+  # killed.
+  #
+  # Technical depth: the worker is the job's execute caller, and after its
+  # effect ends it retains the receipt and removes the open entry under the
+  # shared ledger's root claim. `Local.cancel/2` answers `unconfirmed` for a job
+  # it can no longer find, including one whose settlement is still running. A
+  # kill there can strand the claim or leave the root settling, which refuses
+  # every later import on this state root. The worker is therefore awaited for
+  # `import_settlement_ms/0` and killed only if it is still alive. A worker that
+  # announces its next job is between effects, so it is killed at once.
+  defp cancel_import_worker(context, tag, worker, worker_monitor, current_job, deadline) do
     cancellation =
       if is_binary(current_job),
         do: Local.cancel(context.executor, current_job),
@@ -241,11 +271,37 @@ defmodule LoopexComposition.ResourcePacks do
         end
 
       _unconfirmed ->
-        Process.exit(worker, :kill)
-        await_worker_down(worker, worker_monitor)
+        case await_settling_worker(tag, worker, worker_monitor, import_settlement_ms()) do
+          :ok ->
+            :ok
+
+          :kill ->
+            Process.exit(worker, :kill)
+            await_worker_down(worker, worker_monitor)
+        end
     end
 
     close_import_executor(context)
+  end
+
+  defp await_settling_worker(tag, worker, monitor, bound_ms) do
+    receive do
+      {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+      {^tag, :job_ready, ^worker, _job_id} -> :kill
+    after
+      bound_ms -> :kill
+    end
+  end
+
+  # Concept: the longest one import job's settlement may take after its effect.
+  #
+  # Technical depth: the executor bounds a settlement by the job's retention
+  # allowance, `receipt_retention_ms` from `Loopex.Executor.cancellation_bounds/1`
+  # for the committed period, and an admission may first wait the executor's
+  # root-claim ceiling. The sum is the bound; a worker alive past it is killed.
+  defp import_settlement_ms do
+    {:ok, bounds} = Executor.cancellation_bounds(@import_cleanup_grace_ms)
+    bounds.receipt_retention_ms + @import_claim_wait_ms
   end
 
   defp await_worker_down(worker, monitor) do
@@ -770,7 +826,8 @@ defmodule LoopexComposition.ResourcePacks do
          path: selected_path,
          git: git,
          deadline: deadline,
-         authorization: {:host_policy, :allow}
+         authorization: {:host_policy, :allow},
+         open_authority_close: open_authority_close_seam()
        }}
     else
       false -> error(:invalid_revision, "revision must be one exact lowercase Git object ID")
@@ -782,6 +839,24 @@ defmodule LoopexComposition.ResourcePacks do
 
   defp authorization(_other),
     do: error(:executor_authorization_required, "explicit host-policy allow is required")
+
+  # Concept: a case in the importing process can hand the import executor its
+  # own open-authority close, so it can hold a settlement where it runs.
+  #
+  # Technical depth: the hook is read from the calling process's dictionary,
+  # the same kind of trusted-local seam as the composition's edge observer, and
+  # is passed unchanged as the executor's `open_authority_close` start option.
+  # It is no `add/3` option and no public contract. Anything other than a
+  # function of two arguments is ignored and the executor keeps its default.
+  # It enters no job, ledger record, receipt, manifest, or provenance record.
+  @open_authority_close_seam :"$loopex_resource_import_open_authority_close"
+
+  defp open_authority_close_seam do
+    case Process.get(@open_authority_close_seam) do
+      close when is_function(close, 2) -> close
+      _absent -> nil
+    end
+  end
 
   defp deadline(value) when is_integer(value) and value in 1..@max_deadline_ms, do: {:ok, value}
 
@@ -1118,12 +1193,15 @@ defmodule LoopexComposition.ResourcePacks do
       with {:ok, artifacts} <- LoopexComposition.artifacts(config.state_root),
            {:ok, executor} <-
              Local.start_link(
-               identity: identity,
-               epoch: 1,
-               fencing_token: 1,
-               workspace_leases: %{lease_id => lease},
-               ledger_root: ledger,
-               artifacts: artifacts
+               [
+                 identity: identity,
+                 epoch: 1,
+                 fencing_token: 1,
+                 workspace_leases: %{lease_id => lease},
+                 ledger_root: ledger,
+                 artifacts: artifacts,
+                 claim_wait_ms: @import_claim_wait_ms
+               ] ++ executor_seams(config)
              ) do
         {:ok,
          %{lease: lease, lease_id: lease_id, executor: executor, identity: identity, sequence: 0}}
@@ -1134,6 +1212,9 @@ defmodule LoopexComposition.ResourcePacks do
     if match?({:error, _reason}, result), do: stop_process(lease)
     result
   end
+
+  defp executor_seams(%{open_authority_close: nil}), do: []
+  defp executor_seams(%{open_authority_close: close}), do: [open_authority_close: close]
 
   defp close_import_executor(context) do
     Enum.each([context.executor, context.lease], &stop_process/1)
@@ -1172,7 +1253,7 @@ defmodule LoopexComposition.ResourcePacks do
              "--verify",
              config.rev <> "^{commit}"
            ]),
-         true <- first_line(commit) == config.rev,
+         {:check, _commit, true} <- {:check, "commit", first_line(commit) == config.rev},
          {:ok, context, tree_output} <-
            git_job(context, config, "tree", [
              "-C",
@@ -1181,20 +1262,23 @@ defmodule LoopexComposition.ResourcePacks do
              config.rev <> ":" <> config.path
            ]),
          tree = first_line(tree_output),
-         true <- matching_git_ids?(config.rev, tree),
+         {:check, _tree, true} <- {:check, "tree identity", matching_git_ids?(config.rev, tree)},
          {:ok, context, tree_type} <-
            git_job(context, config, "tree-type", ["-C", repo, "cat-file", "-t", tree]),
-         true <- first_line(tree_type) == "tree",
+         {:check, _type, true} <- {:check, "tree type", first_line(tree_type) == "tree"},
          {:ok, context, tree_files_output} <-
            git_job(context, config, "tree-files", ["-C", repo, "ls-tree", "-r", "-l", "-z", tree]),
-         true <- tree_files_output == "" or String.ends_with?(tree_files_output, <<0>>),
+         {:check, _listing, true} <-
+           {:check, "tree listing terminator",
+            tree_files_output == "" or String.ends_with?(tree_files_output, <<0>>)},
          {:ok, tree_files} <- git_tree_files(tree_files_output),
          {:ok, repo_root} <- fixed_directory(repo, staging_root),
          {:ok, selected_root} <- create_export_directory(export_root, config.path),
          :ok <- export_git_blobs(context, config, repo_root, selected_root, tree_files),
          selected = selected_root.path,
          {:ok, metadata_name} <- frontmatter_name(selected_root),
-         true <- metadata_name == Path.basename(selected),
+         {:check, _name, true} <-
+           {:check, "skill name", metadata_name == Path.basename(selected)},
          identity = %{
            "source_id" => "git:" <> Canonical.digest_bytes(config.origin),
            "origin" => config.origin,
@@ -1202,9 +1286,15 @@ defmodule LoopexComposition.ResourcePacks do
            "tree_digest" => tree
          },
          {:ok, pack} <- read_pack(selected_root, metadata_name, identity),
-         true <- matching_git_files?(pack["files"], tree_files) do
+         {:check, _files, true} <-
+           {:check, "exported file set", matching_git_files?(pack["files"], tree_files)} do
       {:ok, pack, selected_root}
     else
+      # Technical depth: each identity check names itself, in fixed text, so a
+      # refusal says which comparison failed without echoing repository data.
+      {:check, check, false} ->
+        error(:git_identity_mismatch, "Git #{check} did not match")
+
       false ->
         error(
           :git_identity_mismatch,
@@ -1246,12 +1336,30 @@ defmodule LoopexComposition.ResourcePacks do
 
   defp remaining_ms(deadline), do: max(deadline - System.system_time(:millisecond), 0)
 
+  # Concept: a Git command whose output is data yields only its stdout.
+  #
+  # Technical depth: the executor merges a job's stderr into its captured
+  # output, so a warning Git or a platform wrapper prints — seen only under a
+  # heavily loaded machine — would be parsed as a tree listing or a temporary
+  # filename and refuse a legitimate import. The data commands run with stderr
+  # sent to `/dev/null`; a failure still reports through the exit status, and
+  # `clone`, whose output is only diagnostic, keeps its stderr. For the same
+  # reason a completed job's output is read through `Local.command_output/1`:
+  # when a loaded host's quiescence probe misses its bound, the executor
+  # terminates the confirmed-idle group and appends a note that is not Git's.
+  @git_data_labels ["commit", "tree", "tree-type", "tree-files", "blob"]
+
   defp git_job(context, config, label, args) do
     sequence = context.sequence + 1
     deadline = config.deadline
     remaining_ms = max(deadline - System.system_time(:millisecond), 1)
     job_id = "resource-import-#{label}-#{nonce()}"
-    argv = ["/usr/bin/env" | @git_environment ++ [config.git] ++ @git_config ++ args]
+    command = ["/usr/bin/env" | @git_environment ++ [config.git] ++ @git_config ++ args]
+
+    argv =
+      if label in @git_data_labels,
+        do: ["/bin/sh", "-c", "exec \"$@\" 2>/dev/null", "loopex-git-data" | command],
+        else: command
 
     fields = %{
       protocol_version: 1,
@@ -1278,7 +1386,7 @@ defmodule LoopexComposition.ResourcePacks do
       fencing_token: 1,
       artifact_policy: %{"retain" => false},
       output_policy: %{"capture" => true},
-      cleanup_grace_ms: 5_000
+      cleanup_grace_ms: @import_cleanup_grace_ms
     }
 
     with {:ok, job} <- Executor.job(fields),
@@ -1289,7 +1397,7 @@ defmodule LoopexComposition.ResourcePacks do
          :ok <- adopt_import_job(config, job_id),
          {:ok, receipt} <- Local.execute(context.executor, job, grant),
          :completed <- receipt.outcome do
-      {:ok, %{context | sequence: sequence}, receipt.output}
+      {:ok, %{context | sequence: sequence}, Local.command_output(receipt.output)}
     else
       {:ok, %{outcome: outcome, output: output}} -> error(:git_failed, "#{outcome}: #{output}")
       {:error, reason} -> error(:executor_failed, inspect(reason))

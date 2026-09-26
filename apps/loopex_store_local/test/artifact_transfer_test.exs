@@ -307,9 +307,15 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert {:ok, chunk} = Loopex.read_artifact_chunk(first, transfer.transfer_ref, 8)
     assert chunk.bytes == binary_part(bytes, 0, 8)
 
-    # A second attachment replaces the first, which releases what the first
-    # held; the reference it was using is not readable through either.
-    {:ok, second} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+    # Replacing the first attachment by name releases what it held; the
+    # reference it was using is not readable through either. Attachments under
+    # one holder otherwise coexist, so the replacement is explicit.
+    {:ok, second} =
+      Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
+        request_id: "replace-first",
+        after_event_sequence: 0,
+        replace_attachment_id: first.attachment_id
+      )
 
     assert {:error, :unknown_transfer} =
              Loopex.read_artifact_chunk(second, transfer.transfer_ref, 8)
@@ -318,6 +324,48 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
              Loopex.read_artifact_chunk(first, transfer.transfer_ref, 8)
 
     assert [] = Transfers.live(handle.transfers)
+  end
+
+  # Concept: a holder's death releases every transfer its attachments held,
+  # and nothing another holder holds.
+  #
+  # Technical depth: one stand-in holder process owns two attachments to the
+  # session and another owns one; each attachment opens a transfer. Killing the
+  # first holder leaves exactly the other holder's transfer live and readable.
+  test "a holder's death releases all of that holder's transfers and only them" do
+    %{handle: handle, reference: reference} = stored("bytes for two holders")
+    %{runtime: runtime, session_id: session_id} = session(handle)
+    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    doomed = spawn(fn -> Process.sleep(:infinity) end)
+    survivor = spawn(fn -> Process.sleep(:infinity) end)
+    on_exit(fn -> Process.exit(survivor, :kill) end)
+
+    attachments =
+      for {holder, id} <- [{doomed, "d1"}, {doomed, "d2"}, {survivor, "s1"}] do
+        {:ok, attachment} =
+          Loopex.Runtime.attach_for_holder(runtime, session_id, holder,
+            request_id: id,
+            after_event_sequence: 0
+          )
+
+        {:ok, transfer} = Loopex.open_artifact_transfer(attachment, request)
+        {holder, attachment, transfer}
+      end
+
+    assert length(Transfers.live(handle.transfers)) == 3
+    Process.exit(doomed, :kill)
+
+    eventually(fn -> length(Transfers.live(handle.transfers)) == 1 end)
+    [{^survivor, attachment, transfer}] = Enum.filter(attachments, &(elem(&1, 0) == survivor))
+    assert {:ok, _chunk} = Loopex.read_artifact_chunk(attachment, transfer.transfer_ref, 4)
+  end
+
+  defp eventually(predicate, attempts \\ 200) do
+    cond do
+      predicate.() -> :ok
+      attempts == 0 -> flunk("condition never held")
+      true -> Process.sleep(10) && eventually(predicate, attempts - 1)
+    end
   end
 
   defmodule LegacyStore do
@@ -463,9 +511,14 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert {:error, :unknown_transfer} =
              Loopex.read_artifact_chunk(stranger, transfer.transfer_ref, 16)
 
-    # A second attachment on this session replaces the first, which releases
-    # what the first held: the reference is readable through neither.
-    {:ok, replacement} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+    # Replacing the first attachment by name releases what it held: the
+    # reference is readable through neither.
+    {:ok, replacement} =
+      Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
+        request_id: "replace-holder",
+        after_event_sequence: 0,
+        replace_attachment_id: holder.attachment_id
+      )
 
     assert {:error, :unknown_transfer} =
              Loopex.read_artifact_chunk(replacement, transfer.transfer_ref, 16)

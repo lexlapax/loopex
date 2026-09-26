@@ -24,10 +24,13 @@ defmodule Loopex.Runtime do
   alias Loopex.Attachment
   alias Loopex.Executor
   alias Loopex.Runtime.DiagnosticsAdmission
+  alias Loopex.Runtime.Control
+  alias Loopex.Runtime.DaemonRoute
+  alias Loopex.Runtime.EventDispatcher
+  alias Loopex.Runtime.Quiesce
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Store
-  alias Loopex.Trace
 
   @max_identifier_bytes 256
   @max_attachment_capacity 65_536
@@ -60,7 +63,7 @@ defmodule Loopex.Runtime do
           {:runtime_id, binary()}
           | {:store, Store.t()}
           | {:attachment_capacity, pos_integer()}
-          | {:progress_to, pid() | nil}
+          | {:progress_to, pid() | {:session, pid()} | nil}
           | {:diagnostics_to, pid() | nil}
           | {:model, map() | nil}
           | {:executor, map() | nil}
@@ -92,13 +95,26 @@ defmodule Loopex.Runtime do
       token = make_ref()
 
       case RuntimeSupervisor.start_link(Keyword.put(configuration, :token, token)) do
-        {:ok, supervisor} -> {:ok, %__MODULE__{supervisor: supervisor, token: token}}
+        {:ok, supervisor} -> await_ready(%__MODULE__{supervisor: supervisor, token: token})
         {:error, reason} -> {:error, reason}
       end
     end
   end
 
   def start_link(_options), do: {:error, :invalid_runtime_options}
+
+  # Concept: `start_link/1` returns a runtime whose dispatcher can already
+  # serve; otherwise a resume issued at once could be refused as unavailable.
+  defp await_ready(runtime) do
+    case control_call(runtime, {:await_dispatcher_ready, runtime.token}, :infinity) do
+      :ok ->
+        {:ok, runtime}
+
+      _unavailable ->
+        _ = stop(runtime)
+        {:error, :runtime_unavailable}
+    end
+  end
 
   @doc """
   ## Concept
@@ -121,6 +137,47 @@ defmodule Loopex.Runtime do
   end
 
   def stop(_runtime), do: {:error, :runtime_unavailable}
+
+  @doc false
+  @spec quiesce(t()) ::
+          {:ok,
+           %{
+             settled: [binary()],
+             unsettled: [binary()],
+             absent: [binary()],
+             budget_ms: non_neg_integer(),
+             fence_budget_ms: 130_000,
+             drain_id: binary(),
+             fences: %{
+               binary() =>
+                 :committed
+                 | :superseded
+                 | {:unknown, :no_head}
+                 | {:unknown, :abort, map()}
+                 | {:unknown, :fence, map()}
+             }
+           }}
+          | {:error, :runtime_unavailable}
+  def quiesce(%__MODULE__{supervisor: supervisor, token: token}) do
+    case Quiesce.run(supervisor, token) do
+      {:ok, result} ->
+        {:ok,
+         Map.take(result, [
+           :settled,
+           :unsettled,
+           :absent,
+           :budget_ms,
+           :fence_budget_ms,
+           :drain_id,
+           :fences
+         ])}
+
+      {:error, :runtime_unavailable} = error ->
+        error
+    end
+  end
+
+  def quiesce(_runtime), do: {:error, :runtime_unavailable}
 
   @doc """
   ## Concept
@@ -152,31 +209,121 @@ defmodule Loopex.Runtime do
 
   def configuration(_runtime), do: {:error, :runtime_unavailable}
 
+  @doc """
+  ## Concept
+
+  Reports whether durable truth contains one session identifier without
+  starting, resuming, or attaching to that session.
+
+  ## Technical depth
+
+  Identifier validation happens before the runtime is contacted. A valid query
+  is serialized through the exact current Control process and maps only the
+  Store ownership-head classes. Losing that Control process remains a runtime
+  failure rather than being reported as Store absence or unavailability.
+  """
+  @spec session_existence(t(), binary()) ::
+          {:ok, :present | :absent | :invalid_id | :store_unavailable}
+          | {:error, :runtime_unavailable}
+  def session_existence(%__MODULE__{} = runtime, session_id) do
+    if valid_identifier?(session_id) do
+      control_call(runtime, {:session_existence, runtime.token, session_id})
+    else
+      {:ok, :invalid_id}
+    end
+  end
+
+  def session_existence(_runtime, _session_id), do: {:error, :runtime_unavailable}
+
+  @doc """
+  ## Concept
+
+  Looks up the durable historical result of one create command without
+  creating a coordinator or changing Store state.
+
+  ## Technical depth
+
+  Control rebuilds the canonical create transaction from the supplied session
+  options and this runtime's creation configuration. The Store compares that
+  exact binding with the retained command row, so changed options and reuse by
+  another command kind are conflicts rather than historical success.
+  """
+  @spec lookup_create_result(t(), binary(), map()) ::
+          {:ok, {:historical, binary()} | :absent | :conflict | :store_unavailable | :unexpected}
+          | {:error, :runtime_unavailable}
+  def lookup_create_result(%__MODULE__{} = runtime, command_id, session_options) do
+    control_call(
+      runtime,
+      {:lookup_create_result, runtime.token, command_id, session_options}
+    )
+  end
+
+  def lookup_create_result(_runtime, _command_id, _session_options),
+    do: {:error, :runtime_unavailable}
+
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do
-    control_call(
-      runtime,
-      {:create_session, runtime.token, command_id, session_options},
-      :infinity
-    )
+    runtime
+    |> create_session_detailed(command_id, session_options)
+    |> project_detailed_session_result()
   end
 
   def create_session(_runtime, _command_id, _session_options),
     do: {:error, :runtime_reference_required}
 
   @doc false
-  @spec resume_session(t(), binary(), binary()) :: {:ok, binary()} | {:error, term()}
-  def resume_session(%__MODULE__{} = runtime, session_id, command_id) do
+  @spec create_session_detailed(t(), binary(), map()) ::
+          {:ok,
+           %{
+             session_id: binary(),
+             disposition: :activated | :no_activation,
+             control_entry: :active | :acquiring | :dormant
+           }}
+          | {:error, term(), %{disposition: :activated | :no_activation, control_entry: atom()}}
+          | {:error, :runtime_unavailable}
+  def create_session_detailed(%__MODULE__{} = runtime, command_id, session_options) do
     control_call(
       runtime,
-      {:resume_session, runtime.token, session_id, command_id, :ordinary},
+      {:create_session, runtime.token, command_id, session_options, :detailed},
       :infinity
     )
   end
 
+  def create_session_detailed(_runtime, _command_id, _session_options),
+    do: {:error, :runtime_unavailable}
+
+  @doc false
+  @spec resume_session(t(), binary(), binary()) :: {:ok, binary()} | {:error, term()}
+  def resume_session(%__MODULE__{} = runtime, session_id, command_id) do
+    runtime
+    |> resume_session_detailed(session_id, command_id)
+    |> project_detailed_session_result()
+  end
+
   def resume_session(_runtime, _session_id, _command_id),
     do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec resume_session_detailed(t(), binary(), binary()) ::
+          {:ok,
+           %{
+             session_id: binary(),
+             disposition: :activated | :no_activation,
+             control_entry: :active | :acquiring | :dormant
+           }}
+          | {:error, term(), %{disposition: :activated | :no_activation, control_entry: atom()}}
+          | {:error, :runtime_unavailable}
+  def resume_session_detailed(%__MODULE__{} = runtime, session_id, command_id) do
+    control_call(
+      runtime,
+      {:resume_session, runtime.token, session_id, command_id, :detailed},
+      :infinity
+    )
+  end
+
+  def resume_session_detailed(_runtime, _session_id, _command_id),
+    do: {:error, :runtime_unavailable}
 
   @doc false
   @spec prepare_resume_session(t(), binary(), binary()) ::
@@ -197,19 +344,41 @@ defmodule Loopex.Runtime do
   @doc false
   @spec attach(t(), binary(), keyword()) :: {:ok, Attachment.t()} | {:error, term()}
   def attach(%__MODULE__{} = runtime, session_id, options) when is_list(options) do
-    case control_call(runtime, {:begin_attach, runtime.token, session_id, options}) do
+    attach_for_holder(runtime, session_id, self(), options)
+  end
+
+  def attach(_runtime, _session_id, _options), do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec attach_for_holder(t(), binary(), pid(), keyword()) ::
+          {:ok, Attachment.t()} | {:error, term()}
+  def attach_for_holder(%__MODULE__{} = runtime, session_id, holder, options)
+      when is_pid(holder) and is_list(options) do
+    case control_call(runtime, {:attach, runtime.token, session_id, holder, options}, :infinity) do
       {:ok, attachment} ->
         build_attachment(runtime, session_id, attachment)
-
-      {:new, generation, validated_options} ->
-        finish_attachment(runtime, session_id, generation, validated_options)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  def attach(_runtime, _session_id, _options), do: {:error, :runtime_reference_required}
+  def attach_for_holder(_runtime, _session_id, _holder, _options),
+    do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec release_holder(t(), pid()) :: :ok | {:error, :runtime_unavailable}
+  def release_holder(%__MODULE__{} = runtime, holder) when is_pid(holder) do
+    with {:ok, %{control: control, dispatcher: dispatcher}} <-
+           RuntimeSupervisor.children(runtime.supervisor) do
+      :ok = EventDispatcher.release_holder(dispatcher, holder)
+      safe_call(control, {:release_holder, runtime.token, holder}, :infinity)
+    else
+      _other -> {:error, :runtime_unavailable}
+    end
+  end
+
+  def release_holder(_runtime, _holder), do: {:error, :runtime_unavailable}
 
   @doc false
   @spec command(Attachment.t(), map()) :: {:accepted, binary()} | {:error, term()}
@@ -229,6 +398,70 @@ defmodule Loopex.Runtime do
   end
 
   def command(_attachment, _command), do: {:error, :attachment_required}
+
+  @doc false
+  @spec command_for_daemon(Attachment.t(), map()) ::
+          {:routed, DaemonRoute.t(), {:accepted, binary()} | {:error, term()}}
+          | {:error, {:superseded_before_admission, DaemonRoute.t()}}
+          | {:error, {:admission_unknown, DaemonRoute.t()}}
+          | {:error, {:attachment_route_invalidated, binary(), binary()}}
+          | {:error, :session_unavailable | :runtime_unavailable | :attachment_required}
+  def command_for_daemon(%Attachment{} = attachment, command) when is_map(command) do
+    with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
+           Attachment.routing(attachment),
+         {:ok, %{control: control}} <- RuntimeSupervisor.children(runtime.supervisor),
+         {:ok, coordinator, owner, route} <-
+           safe_call(
+             control,
+             {:route_command_for_daemon, runtime.token, session_id, attachment_id,
+              incarnation_id},
+             :infinity
+           ) do
+      case SessionCoordinator.command_detailed(coordinator, owner, command) do
+        {:result, reply} ->
+          {:routed, route, reply}
+
+        {:error, :superseded_before_admission} ->
+          {:error, {:superseded_before_admission, route}}
+
+        {:error, :runtime_unavailable} ->
+          {:error, :runtime_unavailable}
+
+        {:error, :coordinator_unavailable} ->
+          if exact_control_current?(runtime, control),
+            do: {:error, {:admission_unknown, route}},
+            else: {:error, :runtime_unavailable}
+      end
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :runtime_unavailable}
+    end
+  end
+
+  def command_for_daemon(_attachment, _command), do: {:error, :attachment_required}
+
+  @doc false
+  @spec classify_daemon_result(t(), DaemonRoute.t()) ::
+          :before_succession_cut
+          | {:after_succession_cut, binary(), binary()}
+          | {:error, :runtime_unavailable}
+  def classify_daemon_result(%__MODULE__{} = runtime, %DaemonRoute{} = route) do
+    with {:ok, control, runtime_token, session_id, attachment_id, attachment_incarnation,
+          coordinator, owner_generation} <- DaemonRoute.routing(route),
+         true <- runtime.token == runtime_token,
+         {:ok, %{control: ^control}} <- RuntimeSupervisor.children(runtime.supervisor) do
+      safe_call(
+        control,
+        {:classify_daemon_result, runtime_token, session_id, attachment_id,
+         attachment_incarnation, coordinator, owner_generation},
+        :infinity
+      )
+    else
+      _other -> {:error, :runtime_unavailable}
+    end
+  end
+
+  def classify_daemon_result(_runtime, _route), do: {:error, :runtime_unavailable}
 
   @doc false
   @spec next_event(Attachment.t()) ::
@@ -342,8 +575,8 @@ defmodule Loopex.Runtime do
   @doc false
   @spec trace(t(), term()) :: {:ok, map()} | {:error, term()}
   def trace(%__MODULE__{supervisor: supervisor, token: token}, config) do
-    case RuntimeSupervisor.children(supervisor) do
-      {:ok, %{tracer: tracer}} -> Trace.start_session(tracer, token, config)
+    case RuntimeSupervisor.control(supervisor) do
+      {:ok, control} -> Control.trace_start(control, token, config)
       _unavailable -> {:error, :runtime_unavailable}
     end
   end
@@ -353,8 +586,8 @@ defmodule Loopex.Runtime do
   @doc false
   @spec trace_stop(t()) :: :ok | {:error, term()}
   def trace_stop(%__MODULE__{supervisor: supervisor, token: token}) do
-    case RuntimeSupervisor.children(supervisor) do
-      {:ok, %{tracer: tracer}} -> Trace.stop_session(tracer, token)
+    case RuntimeSupervisor.control(supervisor) do
+      {:ok, control} -> Control.trace_stop(control, token)
       _unavailable -> {:error, :runtime_unavailable}
     end
   end
@@ -364,8 +597,8 @@ defmodule Loopex.Runtime do
   @doc false
   @spec trace_status(t()) :: {:ok, map()} | {:error, term()}
   def trace_status(%__MODULE__{supervisor: supervisor, token: token}) do
-    case RuntimeSupervisor.children(supervisor) do
-      {:ok, %{tracer: tracer}} -> Trace.status(tracer, token)
+    case RuntimeSupervisor.control(supervisor) do
+      {:ok, control} -> Control.trace_status(control, token)
       _unavailable -> {:error, :runtime_unavailable}
     end
   end
@@ -475,6 +708,20 @@ defmodule Loopex.Runtime do
     end
   end
 
+  defp exact_control_current?(%__MODULE__{supervisor: supervisor}, control) do
+    match?({:ok, %{control: ^control}}, RuntimeSupervisor.children(supervisor)) and
+      Process.alive?(control)
+  end
+
+  defp project_detailed_session_result({:ok, %{session_id: session_id}}),
+    do: {:ok, session_id}
+
+  defp project_detailed_session_result({:error, :runtime_placement_mismatch, _metadata}),
+    do: {:error, :owner_recovery_failed}
+
+  defp project_detailed_session_result({:error, reason, _metadata}), do: {:error, reason}
+  defp project_detailed_session_result({:error, :runtime_unavailable} = error), do: error
+
   defp dispatcher_call(%__MODULE__{supervisor: supervisor}, message, timeout \\ 5_000) do
     with {:ok, %{dispatcher: dispatcher}} <- RuntimeSupervisor.children(supervisor) do
       deadline = if timeout == :infinity, do: :infinity, else: monotonic_now() + timeout
@@ -526,32 +773,14 @@ defmodule Loopex.Runtime do
   defp remaining_call_time(deadline), do: max(deadline - monotonic_now(), 0)
   defp monotonic_now, do: System.monotonic_time(:millisecond)
 
+  defp valid_identifier?(value),
+    do: is_binary(value) and byte_size(value) > 0 and byte_size(value) <= @max_identifier_bytes
+
   defp safe_call(server, message, timeout) do
     try do
       GenServer.call(server, message, timeout)
     catch
       :exit, _reason -> {:error, :runtime_unavailable}
-    end
-  end
-
-  defp finish_attachment(runtime, session_id, generation, options) do
-    case dispatcher_call(runtime, {:attach, runtime.token, session_id, options}, :infinity) do
-      {:ok, attachment} ->
-        # Concept: attachment registration answers with its actual outcome.
-        # Technical depth: Dispatcher has already created the attachment, and
-        # this Control call installs its routing. A caller timeout cannot revoke
-        # either mutation or truthfully report that the attachment failed.
-        case control_call(
-               runtime,
-               {:finish_attach, runtime.token, session_id, generation, options, attachment},
-               :infinity
-             ) do
-          {:ok, installed} -> build_attachment(runtime, session_id, installed)
-          {:error, reason} -> {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
@@ -600,7 +829,7 @@ defmodule Loopex.Runtime do
            validate_context_token_budget(validated[:context_token_budget]),
          {:ok, %Store{} = store} <- Keyword.fetch(validated, :store),
          {:ok, attachment_capacity} <- validate_capacity(validated[:attachment_capacity]),
-         {:ok, progress_to} <- validate_sink(validated[:progress_to]),
+         {:ok, progress_to} <- validate_progress_sink(validated[:progress_to]),
          {:ok, diagnostics_to} <- validate_sink(validated[:diagnostics_to]),
          {:ok, model} <- validate_model(validated[:model]),
          {:ok, executor} <- validate_executor(validated[:executor]),
@@ -922,6 +1151,15 @@ defmodule Loopex.Runtime do
        do: {:ok, %{module: module, handle: handle}}
 
   defp validate_artifact_store(_store), do: {:error, :invalid_artifact_store}
+
+  # Concept: a host serving many sessions asks for progress tagged with its
+  # session, so it can route each item to that session's readers.
+  #
+  # Technical depth: `{:session, pid}` makes every stream relay deliver
+  # `{:loopex_progress, session_id, item}`, the shape attachment progress
+  # already uses; a bare pid keeps the untagged `{:loopex_progress, item}`.
+  defp validate_progress_sink({:session, pid} = sink) when is_pid(pid), do: {:ok, sink}
+  defp validate_progress_sink(sink), do: validate_sink(sink)
 
   defp validate_sink(nil), do: {:ok, nil}
   defp validate_sink(pid) when is_pid(pid), do: {:ok, pid}

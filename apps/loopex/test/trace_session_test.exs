@@ -25,8 +25,70 @@ defmodule Loopex.TraceSessionTest do
   alias Loopex.M1RuntimeTestStore, as: TestStore
   alias Loopex.Runtime
   alias Loopex.Trace
+  alias Loopex.Trace.Capability
 
   @control Loopex.Runtime.Control
+
+  defmodule PendingCall do
+    @moduledoc false
+
+    def block(parent) do
+      send(parent, {:pending_trace_call, self()})
+      receive do: (:finish -> :ok)
+    end
+  end
+
+  defmodule ExclusionProbe do
+    @moduledoc false
+
+    def before(parent) do
+      send(parent, {:exclusion_probe, self(), :before})
+      :ok
+    end
+
+    def after_exclusion(parent) do
+      send(parent, {:exclusion_probe, self(), :after})
+      :ok
+    end
+
+    def control(parent) do
+      send(parent, {:exclusion_probe, self(), :control})
+      :ok
+    end
+  end
+
+  defmodule SensitiveProbe do
+    @moduledoc false
+
+    def carry(parent) do
+      send(parent, {:sensitive_probe, self()})
+      :ok
+    end
+  end
+
+  defmodule CanaryTrace do
+    @moduledoc false
+
+    @canary "loopex-private-trace-handle-canary"
+
+    def canary, do: @canary
+
+    def session_create(:loopex_trace, tracer, []) when is_pid(tracer) do
+      {{@canary, make_ref()}, {:loopex_trace, System.unique_integer([:positive])}}
+    end
+
+    def function({{@canary, reference}, {:loopex_trace, id}}, _mfa, _match_spec, _options)
+        when is_reference(reference) and is_integer(id),
+        do: 1
+
+    def process({{@canary, reference}, {:loopex_trace, id}}, pid, _enabled, _flags)
+        when is_reference(reference) and is_integer(id) and is_pid(pid),
+        do: 1
+
+    def session_destroy({{@canary, reference}, {:loopex_trace, id}})
+        when is_reference(reference) and is_integer(id),
+        do: true
+  end
 
   test "a runtime owned session traces only allowed modules and owned processes and leaves a second VM tracer unaffected" do
     runtime = fixture()
@@ -63,6 +125,51 @@ defmodule Loopex.TraceSessionTest do
     # The other tracer still receives its own session's messages.
     send(worker, :call)
     assert_receive {:trace, ^worker, :call, {Loopex.Trace.Config, :ceilings, _arguments}}, 1_000
+  end
+
+  # Concept: a session traces a named module the runtime has not called yet,
+  # because the session loads it before installing its patterns.
+  #
+  # Technical depth: a module is compiled to a `.beam` file in a temporary code
+  # path directory and never loaded, so `:code.is_loaded/1` is false when the
+  # session starts. After the session starts it is loaded, and a call from a
+  # runtime-owned worker produces a `trace_call` entry naming it.
+  test "a session loads a named module that is not yet loaded and traces its calls" do
+    runtime = fixture(runtime_id: "trace-unloaded-module")
+    module = :"Elixir.Loopex.TraceSessionTest.Unloaded#{System.unique_integer([:positive])}"
+    directory = Path.join(System.tmp_dir!(), "ltu-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(directory)
+
+    [{^module, binary}] =
+      Code.compile_string("""
+      defmodule #{inspect(module)} do
+        def call(parent), do: send(parent, {:unloaded_called, self()})
+      end
+      """)
+
+    :code.purge(module)
+    true = :code.delete(module)
+    :code.purge(module)
+    File.write!(Path.join(directory, "#{module}.beam"), binary)
+    true = Code.prepend_path(directory)
+
+    on_exit(fn ->
+      Code.delete_path(directory)
+      File.rm_rf(directory)
+    end)
+
+    assert :code.is_loaded(module) == false
+    assert {:ok, _status} = Loopex.trace(runtime, %{modules: [module], level: :calls})
+    assert {:file, _path} = :code.is_loaded(module)
+
+    {:ok, %{workers: workers}} = Runtime.children(runtime)
+    parent = self()
+    {:ok, worker} = Task.Supervisor.start_child(workers, fn -> module.call(parent) end)
+    assert_receive {:unloaded_called, ^worker}
+
+    entry = await_entry("trace_call")
+    assert entry["module"] == inspect(module)
+    assert entry["function"] == "call"
   end
 
   test "each trace level reports its documented fields and the arguments level redacts credential references model content tool arguments and artifact bytes" do
@@ -116,6 +223,18 @@ defmodule Loopex.TraceSessionTest do
     assert rendered =~ "session-1"
     assert rendered =~ "redacted"
 
+    short_credential = "canary-under-sixty-four-bytes"
+
+    keyword_rendered =
+      Loopex.Trace.Entry.render(
+        [credential_token: short_credential, ordinary_option: short_credential],
+        4_096
+      )
+
+    refute keyword_rendered =~ "credential_token: \"#{short_credential}\""
+    assert keyword_rendered =~ "ordinary_option: \"#{short_credential}\""
+    assert keyword_rendered =~ "redacted"
+
     # An entry is bounded whatever the term was.
     assert byte_size(Loopex.Trace.Entry.render(Enum.to_list(1..1_000), 256)) <= 256
   end
@@ -161,6 +280,287 @@ defmodule Loopex.TraceSessionTest do
 
     assert {:error, :invalid_trace_limits} =
              Loopex.trace(runtime, %{limits: %{entry_bytes: 4_097}})
+  end
+
+  test "calls-only sessions retain no pending calls and return sessions purge pending calls when a process dies" do
+    calls = fixture(runtime_id: "trace-no-pending-calls")
+    assert {:ok, _status} = Loopex.trace(calls, %{modules: [PendingCall], level: :calls})
+    {:ok, %{tracer: calls_tracer, workers: calls_workers}} = Runtime.children(calls)
+    parent = self()
+
+    {:ok, calls_task} =
+      Task.Supervisor.start_child(calls_workers, fn -> PendingCall.block(parent) end)
+
+    assert_receive {:pending_trace_call, ^calls_task}
+    assert %{calls: %{}, call_monitors: %{}} = :sys.get_state(calls_tracer)
+    send(calls_task, :finish)
+
+    returns = fixture(runtime_id: "trace-pending-return")
+    assert {:ok, _status} = Loopex.trace(returns, %{modules: [PendingCall], level: :returns})
+    {:ok, %{tracer: returns_tracer, workers: returns_workers}} = Runtime.children(returns)
+
+    {:ok, returns_task} =
+      Task.Supervisor.start_child(returns_workers, fn -> PendingCall.block(parent) end)
+
+    assert_receive {:pending_trace_call, ^returns_task}
+
+    assert eventually(fn ->
+             state = :sys.get_state(returns_tracer)
+             map_size(state.calls) == 1 and map_size(state.call_monitors) == 1
+           end)
+
+    Process.exit(returns_task, :kill)
+
+    assert eventually(fn ->
+             state = :sys.get_state(returns_tracer)
+             state.calls == %{} and state.call_monitors == %{}
+           end)
+  end
+
+  test "trace status formatting exposes no process state message reason or log" do
+    secret = "credential-canary"
+
+    assert %{
+             state: :redacted_trace_state,
+             message: :redacted_trace_message,
+             reason: :redacted_trace_reason,
+             log: []
+           } =
+             Trace.format_status(%{
+               state: %{credential_token: secret},
+               message: {:credential_token, secret},
+               reason: {:credential_token, secret},
+               log: [secret]
+             })
+  end
+
+  test "a bound capability excludes its caller through a delivery barrier and restores the last named MFA on caller death" do
+    runtime = fixture(runtime_id: "trace-exclusion")
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    assert :ok = Capability.bind(capability, runtime)
+    assert :ok = Capability.bind(capability, runtime)
+
+    assert {:ok, _status} =
+             Loopex.trace(runtime, %{
+               modules: [Trace, ExclusionProbe, SensitiveProbe],
+               level: :returns
+             })
+
+    {:ok, %{tracer: tracer, workers: workers, control: control}} = Runtime.children(runtime)
+    :ok = :sys.suspend(tracer)
+    parent = self()
+
+    {:ok, sender} =
+      Task.Supervisor.start_child(workers, fn ->
+        ExclusionProbe.before(parent)
+
+        result =
+          Trace.exclude_self(capability,
+            functions: [{SensitiveProbe, :carry, 1}]
+          )
+
+        send(parent, {:excluded, self(), result})
+        SensitiveProbe.carry(parent)
+        ExclusionProbe.after_exclusion(parent)
+        send(parent, {:excluded_sender_parked, self()})
+        receive do: (:finish -> :ok)
+      end)
+
+    assert_receive {:exclusion_probe, ^sender, :before}
+    refute_receive {:excluded, ^sender, _result}, 50
+    :ok = :sys.resume(tracer)
+    assert_receive {:excluded, ^sender, :ok}, 1_000
+
+    trace_state = :sys.get_state(tracer)
+
+    refute Enum.any?(trace_state.calls, fn {{pid, _, _, _}, _started} -> pid == sender end)
+    refute Map.has_key?(trace_state.call_monitors, sender)
+
+    assert_receive {:sensitive_probe, ^sender}
+    assert_receive {:exclusion_probe, ^sender, :after}
+    assert_receive {:excluded_sender_parked, ^sender}
+
+    before_entry =
+      await_entry("trace_call", fn entry ->
+        entry["pid"] == inspect(sender) and entry["function"] == "before"
+      end)
+
+    assert before_entry["pid"] == inspect(sender)
+
+    sender_text = inspect(sender)
+
+    refute_receive {:loopex_diagnostic,
+                    %{"kind" => "trace_call", "pid" => ^sender_text, "function" => "carry"}},
+                   50
+
+    refute_receive {:loopex_diagnostic,
+                    %{
+                      "kind" => "trace_call",
+                      "pid" => ^sender_text,
+                      "function" => "after_exclusion"
+                    }},
+                   50
+
+    {:ok, control_task} =
+      Task.Supervisor.start_child(workers, fn -> ExclusionProbe.control(parent) end)
+
+    assert_receive {:exclusion_probe, ^control_task, :control}
+
+    control_entry =
+      await_entry("trace_call", fn entry ->
+        entry["pid"] == inspect(control_task) and entry["function"] == "control"
+      end)
+
+    assert control_entry["pid"] == inspect(control_task)
+
+    {:ok, globally_cleared} =
+      Task.Supervisor.start_child(workers, fn -> SensitiveProbe.carry(parent) end)
+
+    assert_receive {:sensitive_probe, ^globally_cleared}
+    Process.sleep(50)
+
+    refute Enum.any?(drain_entries(), fn entry ->
+             entry["pid"] == inspect(globally_cleared) and entry["function"] == "carry"
+           end)
+
+    send(sender, :finish)
+
+    assert eventually(fn ->
+             state = :sys.get_state(control)
+             state.trace_excluded == %{} and state.trace_mfa_counts == %{}
+           end)
+
+    {:ok, restored} = Task.Supervisor.start_child(workers, fn -> SensitiveProbe.carry(parent) end)
+    assert_receive {:sensitive_probe, ^restored}
+
+    restored_entry =
+      await_entry("trace_call", fn entry ->
+        entry["pid"] == inspect(restored) and entry["function"] == "carry"
+      end)
+
+    assert restored_entry["pid"] == inspect(restored)
+  end
+
+  test "a capability binds once and malformed or cross-runtime handles refuse" do
+    runtime_a = fixture(runtime_id: "trace-capability-a")
+    runtime_b = fixture(runtime_id: "trace-capability-b")
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+
+    assert :ok = Capability.bind(capability, runtime_a)
+    assert :ok = Capability.bind(capability, runtime_a)
+    assert {:error, :capability_already_bound} = Capability.bind(capability, runtime_b)
+
+    malformed = Map.put(capability, :extra, :not_allowed)
+    assert {:error, :invalid_tracing_capability} = Capability.bind(malformed, runtime_a)
+    assert {:error, :unavailable} = Trace.exclude_self(malformed, functions: [])
+  end
+
+  test "trace exclusions grow with live senders instead of refusing an artificial MFA ceiling" do
+    runtime = fixture(runtime_id: "trace-proportional-exclusion")
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    assert :ok = Capability.bind(capability, runtime)
+
+    assert {:ok, _status} =
+             Loopex.trace(runtime, %{modules: [ExclusionProbe], level: :calls})
+
+    {:ok, %{workers: workers, control: control}} = Runtime.children(runtime)
+    functions = Enum.map(0..64, &{ExclusionProbe, :proportional_probe, &1})
+    parent = self()
+
+    {:ok, sender} =
+      Task.Supervisor.start_child(workers, fn ->
+        send(
+          parent,
+          {:proportional_exclusion, self(), Trace.exclude_self(capability, functions: functions)}
+        )
+
+        receive do: (:finish -> :ok)
+      end)
+
+    assert_receive {:proportional_exclusion, ^sender, :ok}, 1_000
+
+    assert eventually(fn ->
+             state = :sys.get_state(control)
+
+             case state.trace_excluded do
+               %{^sender => %{functions: retained}} ->
+                 MapSet.size(retained) == 65 and map_size(state.trace_mfa_counts) == 65
+
+               _not_registered ->
+                 false
+             end
+           end)
+
+    send(sender, :finish)
+
+    assert eventually(fn ->
+             state = :sys.get_state(control)
+             state.trace_excluded == %{} and state.trace_mfa_counts == %{}
+           end)
+  end
+
+  test "Trace owns the only full session handle in private ETS and restores an active session after restart" do
+    runtime = fixture(runtime_id: "trace-private-handle")
+    assert {:ok, original} = Loopex.trace(runtime, %{modules: [@control], level: :calls})
+    {:ok, %{tracer: tracer}} = Runtime.children(runtime)
+    state = :sys.get_state(tracer)
+
+    assert state.session_identity == {:loopex_trace, elem(state.session_identity, 1)}
+    assert_raise ArgumentError, fn -> :ets.lookup(state.session_table, :session) end
+    refute Map.has_key?(state, :session)
+
+    Process.exit(tracer, :kill)
+
+    assert eventually(fn ->
+             case Runtime.children(runtime) do
+               {:ok, %{tracer: replacement}} -> replacement != tracer
+               _unavailable -> false
+             end
+           end)
+
+    assert {:ok, restored} = Loopex.trace_status(runtime)
+    assert Map.take(restored, [:modules, :level, :limits, :sink]) == original
+    provoke(runtime)
+    assert %{"kind" => "trace_call"} = await_entry("trace_call")
+  end
+
+  test "a canary-bearing private trace handle is absent from crash reports and exit reasons" do
+    runtime = fixture(runtime_id: "trace-private-handle-crash", trace_module: CanaryTrace)
+
+    assert {:ok, original} =
+             Loopex.trace(runtime, %{modules: [ExclusionProbe], level: :calls})
+
+    {:ok, %{tracer: tracer}} = Runtime.children(runtime)
+    reference = Process.monitor(tracer)
+    parent = self()
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        call_exit = catch_exit(GenServer.call(tracer, :force_trace_crash))
+
+        assert_receive {:DOWN, ^reference, :process, ^tracer, reason}, 1_000
+        send(parent, {:trace_crash_evidence, call_exit, reason})
+        Logger.flush()
+      end)
+
+    assert_receive {:trace_crash_evidence, call_exit, reason}
+    assert log =~ "GenServer"
+    refute log =~ CanaryTrace.canary()
+    refute inspect(call_exit) =~ CanaryTrace.canary()
+    refute inspect(reason) =~ CanaryTrace.canary()
+
+    assert eventually(fn ->
+             case Runtime.children(runtime) do
+               {:ok, %{tracer: replacement}} -> replacement != tracer
+               _unavailable -> false
+             end
+           end)
+
+    assert {:ok, restored} = Loopex.trace_status(runtime)
+    assert Map.take(restored, [:modules, :level, :limits, :sink]) == original
   end
 
   test "no session command client content model output project resource or wire request starts changes or stops a session and stop releases every flag" do
@@ -282,4 +682,17 @@ defmodule Loopex.TraceSessionTest do
       50 -> Enum.reverse(collected)
     end
   end
+
+  defp eventually(fun, attempts \\ 100)
+
+  defp eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
+    end
+  end
+
+  defp eventually(_fun, 0), do: false
 end

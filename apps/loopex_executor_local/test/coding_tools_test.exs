@@ -239,6 +239,28 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
   @fence 7
 
+  # Concept: a job a case needs pinned to an exact cleanup outcome commits a
+  # period long enough that the probes deciding it answer on any host.
+  #
+  # Technical depth: this is the test job's own `cleanup_grace_ms`, carried on
+  # its `JobRequest` as ADR 0016 allows every job to do; no executor start
+  # option or product default is changed. A group proved alone on the first
+  # probe, or one that dies on its first TERM, ends long before the period, so
+  # the length costs nothing unless the host stalls.
+  @generous_job_grace_ms 30_000
+
+  # Concept: a job whose waiting caller, if it were left to its bound, would
+  # answer only minutes later, so "at once" can be asserted with a bound far
+  # from both a slow host and the timeout.
+  #
+  # Technical depth: this too is the test job's own `cleanup_grace_ms`. A
+  # cancellation's wait ends at its episode's instant plus the reply margin,
+  # so under this period a caller that was never answered returns three
+  # minutes after it asked, while cases require the answer within a minute of
+  # the event that should produce it. Cases that wait on an owner for up to
+  # this period raise their own ExUnit timeout to cover those waits.
+  @long_job_grace_ms 180_000
+
   # Concept: every case owns an isolated root and never touches real user state.
   #
   # Technical depth: the root is created under the system temporary directory and
@@ -1575,6 +1597,136 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              ]
   end
 
+  test "a group that cannot be shown alone at exit keeps its note out of the artifact" do
+    # Concept: the retained artifact is exactly what the command printed. The
+    # executor's note about the process group is shown to the model beside the
+    # truncation notice, says only what was proved, and is neither retained nor
+    # counted.
+    #
+    # Technical depth: the background child outlives the shell, so the first
+    # quiescence probe cannot find the group holding only the command and the
+    # terminate path runs on every host, loaded or not. That path used to append
+    # its 184-byte note to the spilled copy, so the artifact was the command's
+    # bytes plus the note and the notice's total counted the note; the note also
+    # claimed members were still running when the probe may only have failed to
+    # answer. The model-facing text still obeys the smaller declared ceiling.
+    #
+    # The job commits `@generous_job_grace_ms` as its own period, so the probe
+    # that proves the terminated group gone answers on any host and the outcome
+    # is pinned: `completed`, `confirmed`, and the terminated note.
+    root = workspace()
+    store = recording_store()
+
+    {executor, lease_id} =
+      executor_for(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.RecordingStore,
+        handle: store
+      })
+
+    output_limit = 1_024
+    full = String.duplicate("bounded-output-", 256)
+
+    assert {:ok, receipt} =
+             run(
+               root,
+               "loopex.bash",
+               %{"command" => "printf %s #{full}; (sleep 30 &)"},
+               %{
+                 executor: executor,
+                 lease_id: lease_id,
+                 cleanup_grace_ms: @generous_job_grace_ms,
+                 resource_budgets: %{
+                   "max_output_bytes" => output_limit,
+                   "max_wall_time_ms" => 30_000
+                 }
+               }
+             )
+
+    assert receipt.outcome == :completed
+    assert receipt.cleanup_confirmation == :confirmed
+    note = terminated_note()
+    assert byte_size(receipt.output) <= output_limit
+
+    assert [reference] = receipt.artifacts
+    assert reference.size == byte_size(full)
+
+    assert store |> Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored() |> Map.values() ==
+             [full],
+           "the retained artifact is not exactly the command's bytes"
+
+    assert [_, shown, total] =
+             Regex.run(~r/output truncated\. (\d+) of (\d+) bytes shown/, receipt.output)
+
+    shown = String.to_integer(shown)
+    assert String.to_integer(total) == byte_size(full)
+    assert shown > 0
+
+    assert String.starts_with?(
+             receipt.output,
+             binary_part(full, 0, shown) <> note <> "\n\n[loopex:"
+           )
+
+    refute receipt.output =~ "still running"
+  end
+
+  test "a shell job just under its artifact ceiling spills no note past that ceiling" do
+    # Concept: the declared artifact ceiling bounds the retained artifact, and
+    # the executor's exit-status and process-group notes are not part of that
+    # artifact.
+    #
+    # Technical depth: the collector admits command output up to the ceiling,
+    # and both notes together are a few hundred bytes. They used to be appended
+    # to the spilled copy, so a command that printed a hundred bytes under the
+    # ceiling, left a background child and exited nonzero retained an artifact
+    # larger than the ceiling it was collected under.
+    root = workspace()
+    store = recording_store()
+
+    {executor, lease_id} =
+      executor_for(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.RecordingStore,
+        handle: store
+      })
+
+    definition = Enum.find(CodingTools.definitions(), &(&1["tool_id"] == "loopex.bash"))
+    artifact_limit = get_in(definition, ["budgets", "artifact_bytes"])
+
+    assert {:ok, receipt} =
+             run(
+               root,
+               "loopex.bash",
+               %{
+                 "argv" => [
+                   "/bin/sh",
+                   "-c",
+                   "yes output 2>/dev/null | head -c \"$1\"; (sleep 30 &); exit 3",
+                   "loopex-near-artifact-ceiling",
+                   Integer.to_string(artifact_limit - 100)
+                 ]
+               },
+               %{executor: executor, lease_id: lease_id, cleanup_grace_ms: @generous_job_grace_ms}
+             )
+
+    # The job's own generous period pins the outcome, as in the case above.
+    assert receipt.outcome == :failed
+    assert receipt.cleanup_confirmation == :confirmed
+
+    assert receipt.output =~
+             "\n[loopex: the command exited with status 3.]" <> terminated_note()
+
+    assert [reference] = receipt.artifacts
+    assert reference.size == artifact_limit - 100
+
+    assert [retained] =
+             store
+             |> Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored()
+             |> Map.values()
+
+    assert byte_size(retained) == artifact_limit - 100
+    assert byte_size(retained) <= artifact_limit
+    refute retained =~ "[loopex:"
+  end
+
   test "a shell job exceeding the tool artifact ceiling is stopped without retaining a partial artifact" do
     # Concept: the artifact ceiling is a production bound, not metadata. A
     # command cannot make this executor retain output forever by never stopping.
@@ -2533,6 +2685,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
   test "a command that backgrounds work and exits is not completed until its group is quiescent" do
     # Concept: the launcher's exit status is one process ending, not the job.
+    # The job ends the group it owns rather than waiting for it.
     #
     # Technical depth: the captured group was forgotten and the monitor dropped
     # the moment the launcher exited, so
@@ -2541,43 +2694,68 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # after the receipt existed and after the lease had gone. Process groups are
     # what this executor owns and cancels, so success has to mean what
     # cancellation already means.
+    #
+    # The outcome is pinned exactly: `completed`, `confirmed`, and the terminated
+    # note as the whole output. Whether the probes answer inside the period is
+    # the only host-dependent step, so the job commits a generous period of its
+    # own through its `cleanup_grace_ms` -- a parameter of this test's job, not
+    # an executor or product default. The descendant sleeps twenty seconds, so
+    # a job that waited for its group instead of ending it takes at least that
+    # long; the job must end in under fifteen, which leaves seconds of slack for
+    # a slow probe. The captured group must then be empty and the descendant's
+    # marker absent.
     root = workspace()
     marker = Path.join(root, "after-receipt.txt")
-
+    group_file = Path.join(root, "descendant-group")
     started = System.monotonic_time(:millisecond)
 
     assert {:ok, receipt} =
-             run(root, "loopex.bash", %{
-               "command" =>
-                 "( sleep 2; printf survived > after-receipt.txt ) >/dev/null 2>&1 & exit 0"
-             })
+             run(
+               root,
+               "loopex.bash",
+               %{
+                 "command" =>
+                   "/bin/ps -o pgid= -p $$ | /usr/bin/tr -d ' ' > #{shell_path(group_file)}; " <>
+                     "( sleep 20; printf survived > after-receipt.txt ) >/dev/null 2>&1 & exit 0"
+               },
+               %{cleanup_grace_ms: @generous_job_grace_ms}
+             )
 
     elapsed = System.monotonic_time(:millisecond) - started
-
-    # The job ends the descendant rather than waiting for it, which is the
-    # difference between owning a group and joining one.
-    assert elapsed < 1_500, "the job waited for its descendant instead of ending it"
-
+    assert elapsed < 15_000, "the job waited #{elapsed}ms for its descendant instead of ending it"
     assert receipt.outcome == :completed
+    assert receipt.cleanup_confirmation == :confirmed
 
-    # The harm the defect did, asserted before the wording that reports it: the
-    # descendant is gone, so nothing writes into this workspace after the
-    # receipt claiming the job is over already exists.
-    Process.sleep(3_000)
+    # The command printed nothing, so its whole result is the note that says
+    # its group was terminated and proved gone.
+    assert receipt.output == terminated_note()
 
-    refute File.exists?(marker),
-           "a descendant of a completed job wrote into the workspace after the receipt existed"
+    group = group_file |> File.read!() |> String.trim() |> String.to_integer()
 
-    assert receipt.output =~ "still running"
-    assert receipt.output =~ "confirmed cleaned"
+    assert {:ok, ^group} =
+             await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ),
+           "the descendant's group #{group} outlived the completed job"
 
-    # An ordinary command leaves nothing behind, so it gains no note: a note on
-    # every result is noise a model learns to skip.
-    assert {:ok, %{outcome: :completed, output: plain}} =
-             run(root, "loopex.bash", %{"command" => "echo ok"})
+    refute File.exists?(marker)
+  end
 
-    assert String.trim(plain) == "ok"
-    refute plain =~ "still running"
+  test "an ordinary command at the product's default period is completed with no note" do
+    # Concept: a command that leaves nothing behind is proved alone and gains
+    # no note: a note on every result is noise a model learns to skip.
+    #
+    # Technical depth: this job commits no period of its own, so it runs under
+    # the product default. Proving `echo ok` alone takes one quiescence probe,
+    # and a default episode too short for one `ps` would be a product defect,
+    # so the outcome is pinned exactly: `completed`, `confirmed`, and the
+    # command's own output with nothing appended.
+    root = workspace()
+    assert {:ok, plain} = run(root, "loopex.bash", %{"command" => "echo ok"})
+    assert plain.outcome == :completed
+    assert plain.cleanup_confirmation == :confirmed
+    assert plain.output == "ok\n"
   end
 
   test "a lease lost while a job's group is brought to quiescence is reported unproven" do
@@ -3143,7 +3321,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "the single launch port no longer receives the production option list"
 
     assert source =~
-             ~r/defp guarded_answer_within\(program, arguments, bound\).*?process_launcher\(%\{helper: \[program \| arguments\]\}, environment\).*?open_launcher\(launcher, command_arguments, environment/s,
+             ~r/defp guarded_answer_until\(program, arguments, until\).*?process_launcher\(%\{helper: \[program \| arguments\]\}, environment\).*?open_launcher\(launcher, command_arguments, environment/s,
            "bounded helpers no longer use the same guarded launcher and environment boundary"
 
     refute source =~ ~s|{:spawn_executable, ~c"/bin/kill"}|,
@@ -4395,8 +4573,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     # Four since ADR 0016's shared retention deadline: the job's cleanup episode,
     # a cancellation's own episode, the cooperative share inside both, and the
-    # one retention allowance every phase of a settlement draws on.
-    assert length(instants) == 4,
+    # one retention allowance every phase of a settlement draws on. Six since
+    # probes were contained inside the episode that bounds them: the instant
+    # `answer_within/3` opens for a caller that holds only a relative bound, and
+    # the short reaping wait of a cleanup helper whose KILL could not be sent,
+    # cut to what remains of its instant. A delivered KILL's confirmation waits
+    # until the episode's own instant and opens none, and an owner's probe
+    # opens no instant of its own; it is handed the episode's.
+    # The helper's waits used to be measured on the same monotonic clock
+    # outside this domain, which is how a probe's confirmation could outlast
+    # the episode that started it.
+    assert length(instants) == 6,
            "the cleanup domain now opens #{length(instants)} instants against its own base; each " <>
              "one has to take that base, so a new one means this case needs to have been told " <>
              "about it"
@@ -5221,6 +5408,22 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     end
   end
 
+  # Concept: a helper's real answer survives a guard that is slow to confirm
+  # its KILL, as long as the confirmation lands inside the probe's bound.
+  #
+  # Technical depth: the probe stops its own guard for half a second after
+  # answering, longer than the 250 ms the confirmation used to be cut to.
+  test "a helper answer is kept when its guard confirms the kill late" do
+    probe = """
+    guard=$(/bin/ps -o ppid= -p $PPID | tr -d ' ')
+    kill -STOP "$guard"
+    (sleep 0.5; kill -CONT "$guard") >/dev/null 2>&1 &
+    echo answered
+    """
+
+    assert {"answered\n", 0} = Local.answer_within("/bin/sh", ["-c", probe], 30_000)
+  end
+
   test "commands and bounded helpers retain their actual distinct supervision groups" do
     root = workspace()
 
@@ -5266,7 +5469,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       assert Enum.all?([command, status, guard, carrier], &(&1.group == carrier.pid))
     end
 
-    assert {output, 0} = Local.answer_within("/bin/sh", ["-c", probe], 5_000)
+    # The probe's own answer bound, not a product bound: 30 s leaves a loaded
+    # machine room to start the shell and its supervision chain.
+    assert {output, 0} = Local.answer_within("/bin/sh", ["-c", probe], 30_000)
     [command, status, guard, carrier] = observed_supervision_chain(output)
     assert command.parent == status.pid
     assert status.parent == guard.pid
@@ -5401,12 +5606,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         stalled = Enum.filter(report.events, &(&1.iteration == 2))
 
         assert Enum.any?(stalled, fn event ->
-                 event.function == :process_table_within and event.phase == :return and
+                 event.function == :process_table_until and event.phase == :return and
                    event.result == :no_answer
                end)
 
         assert Enum.any?(stalled, fn event ->
-                 event.function == :process_table_within and event.phase == :return and
+                 event.function == :process_table_until and event.phase == :return and
                    event.result == :answered and event.valid_shape and event.helper_witness
                end)
       end
@@ -5632,9 +5837,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              ~r/defp launch_guard_live\?\(%\{state: :live, port: port, os_pid: os_pid\}\).*?Port\.info\(port, :os_pid\) == \{:os_pid, os_pid\}/s,
            "a released or killed guard can still authorize a group signal"
 
+    # The formula is named so the forced-KILL rule can be proved on supplied
+    # facts; production must still reach its verdict through it.
     assert source =~
-             ~r/protocol_proved =\s+collector\.protocol_valid and collector\.guard\.announced and\s+is_integer\(collector\.guard\.terminal_wrapper_pid\) and guard_exit_proved/s,
+             ~r/defp cleanup_confirmed\?\(collector, cleanup_proved, guard_exit_proved\) do\s+cleanup_proved and collector\.protocol_valid and collector\.guard\.announced and\s+is_integer\(collector\.guard\.terminal_wrapper_pid\) and guard_exit_proved\s+end/s,
            "missing, forged, or duplicate guard control evidence can be reported confirmed"
+
+    assert source =~
+             ~r/defp finish_guarded_output\(.*?confirmed = cleanup_confirmed\?\(collector, cleanup_proved, guard_exit_proved\).*?confirmed: confirmed/s,
+           "the process path reaches its cleanup verdict without the named confirmation rule"
 
     assert source =~
              ~r/defp collect_guard_frame\(_collector, _duplicate_or_invalid\), do: :error/,
@@ -6000,7 +6211,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # to survive a loaded hosted runner's disk, and the claim does not depend on it.
     {executor, lease_id} = executor_with_grace(root, 2_000)
     ready = Path.join(root, "term-resistant-ready")
+    group_file = Path.join(root, "term-resistant-group")
     job_id = "term-resistant-#{System.unique_integer([:positive])}"
+
+    identity_file = Path.join(root, "term-resistant-identity")
+    on_exit(fn -> kill_leftover_group(group_file, identity_file) end)
 
     running =
       Task.async(fn ->
@@ -6009,24 +6224,52 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           "loopex.bash",
           %{
             "command" =>
-              "printf 'hello\\n'; trap '' TERM; printf ready > #{shell_path(ready)}; while :; do sleep 1; done"
+              "printf 'hello\\n'; trap '' TERM; " <>
+                "/bin/ps -o pgid= -p $$ | /usr/bin/tr -d ' ' > #{shell_path(group_file)}; " <>
+                "/bin/ps -o pid=,lstart= -p $$ > #{shell_path(identity_file)}; " <>
+                "printf ready > #{shell_path(ready)}; while :; do sleep 1; done"
           },
           %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 2_000}
         )
       end)
 
     assert wait_for_file(ready), "the TERM-resistant command never started"
+    group = group_file |> File.read!() |> String.trim() |> String.to_integer()
 
-    # The command cannot report its own status after KILL takes the complete
-    # group, including the guard. Cleanup nevertheless has two positive facts:
-    # KILL was sent over the exact live Port channel to its token-bound guard,
-    # and a later ps found the captured group empty. A direct-child status is
-    # mandatory for ordinary release, not for forced cancellation's cleanup truth.
-    assert Local.cancel(executor, job_id) == {:ok, :cleaned}
+    # Concept: against a real group this case proves what a real host always
+    # delivers: one answer for the episode, and a group that does not outlive
+    # the job.
+    #
+    # Technical depth: the command cannot report its own status after KILL
+    # takes the complete group, including the guard. Whether the positive facts
+    # that confirm forced cleanup -- KILL over the live Port, a nonzero Port
+    # exit and an empty process table -- all arrive inside the period depends
+    # on how loaded the host is, so which answer comes back is not asserted
+    # here; the rule that turns those facts into `cleaned` is proved on
+    # supplied facts by `Local.forced_kill_confirmed?/1` in the executor tests.
+    # Whatever the answer, it may not be stronger than the receipt's verdict,
+    # the receipt must carry the outcome ADR 0016 pairs with that verdict, and
+    # the case's own `ps` must find the captured group gone once the job has
+    # ended.
+    assert {:ok, answer} = Local.cancel(executor, job_id)
+    assert answer in [:cleaned, :unconfirmed]
     assert {:ok, killed} = Task.await(running, 5_000)
-    assert killed.outcome == :cancelled
-    assert killed.cleanup_confirmation == :confirmed
+
+    assert never_stronger_than?({:ok, answer}, killed),
+           "cancel answered #{inspect(answer)} for a job whose receipt recorded " <>
+             "#{inspect(killed.cleanup_confirmation)}"
+
+    assert killed.outcome ==
+             if(killed.cleanup_confirmation == :confirmed, do: :cancelled, else: :outcome_unknown)
+
     assert String.starts_with?(killed.output, "hello\n")
+
+    assert {:ok, ^group} =
+             await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ),
+           "the cancelled TERM-resistant group #{group} outlived its job"
 
     # A model command can end its grandparent guard by pid, but that act grants this
     # runtime no cleanup authority and supplies no authenticated status frame.
@@ -6088,6 +6331,868 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     refute File.exists?(survived_guard),
            "the carrier let work survive after its launch guard was killed"
+  end
+
+  test "a cancellation queued behind a command's final output is answered from its settlement" do
+    # Concept: a cancellation that reaches the owner as the command finishes on
+    # its own belongs to that job's one cleanup episode, and hears what the
+    # job's settlement made durable.
+    #
+    # Technical depth: the owner is suspended while the command writes its last
+    # output and its authenticated status frame, so those Port messages are in
+    # its mailbox before the cancellation is. On resumption the owner reads them
+    # first, proves quiescence and finishes the job without ever matching the
+    # queued request. It must hand that request to the execute caller rather
+    # than exit with it unread or answer it, and the execute caller's answer is
+    # traced: it is given whether its settlement published a confirmed receipt,
+    # and that must agree with the receipt it returns. The answer may be weaker
+    # than that receipt when the settlement outlasts the caller's bound, but
+    # never stronger.
+    root = workspace()
+    {executor, lease_id} = executor_with_grace(root, 2_000)
+    ready = Path.join(root, "finishing-ready")
+    release = Path.join(root, "finishing-release")
+    job_id = "finishing-#{System.unique_integer([:positive])}"
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "printf ready > #{shell_path(ready)}; " <>
+                "while [ ! -f #{shell_path(release)} ]; do sleep 0.05; done; printf finished"
+          },
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 2_000}
+        )
+      end)
+
+    assert wait_for_file(ready), "the command never started"
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    sends = record_sends(owner)
+    on_exit(fn -> resume_if_suspended(owner) end)
+
+    assert :erlang.suspend_process(owner)
+    File.write!(release, "finish")
+
+    assert {:ok, :framed} =
+             await_path(
+               fn -> if owner_holds_status_frame?(owner), do: {:ok, :framed}, else: :error end,
+               10_000
+             ),
+           "the command's final status frame never reached the suspended owner"
+
+    cancelling = cancelling(executor, job_id)
+
+    assert {:ok, 1} =
+             await_path(fn -> queued_cancellations(owner) end, 5_000),
+           "the cancellation never queued behind the final output"
+
+    {receipt, events} =
+      trace_local([running.pid], [answer_cancellations: 1], fn ->
+        assert :erlang.resume_process(owner)
+        assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 10_000
+        assert {:ok, receipt} = Task.await(running, 10_000)
+        receipt
+      end)
+
+    answer = Task.await(cancelling, 10_000)
+    assert String.starts_with?(receipt.output, "finished")
+
+    assert receipt.outcome ==
+             if(receipt.cleanup_confirmation == :confirmed,
+               do: :completed,
+               else: :outcome_unknown
+             )
+
+    assert published_flags(events) == [receipt.cleanup_confirmation == :confirmed, false],
+           "the settlement did not answer from what it published: #{inspect(events)}"
+
+    assert never_stronger_than?(answer, receipt),
+           "cancel answered #{inspect(answer)} for a job whose receipt recorded " <>
+             "#{inspect(receipt.cleanup_confirmation)}"
+
+    assert_owner_only_handed_off(sent_messages(sends), 1)
+  end
+
+  test "a cancellation that finds a finished job absent answers unconfirmed" do
+    # Concept: once the owner has left, this executor cannot speak for the job,
+    # so the answer is ADR 0016 clause 4's `unconfirmed` for an absent ID.
+    #
+    # Technical depth: the execute caller is suspended before it settles and
+    # the owner is confirmed dead, so the public `cancel/2` finds no owner while
+    # the job's settlement has not happened. Nothing it could read would yet be
+    # durable, and it answers `unconfirmed` without reading anything.
+    root = workspace()
+    {executor, lease_id} = executor_with_grace(root, 2_000)
+    ready = Path.join(root, "absent-before-settlement-ready")
+    release = Path.join(root, "absent-before-settlement-release")
+    job_id = "absent-before-settlement-#{System.unique_integer([:positive])}"
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "printf ready > #{shell_path(ready)}; " <>
+                "while [ ! -f #{shell_path(release)} ]; do sleep 0.05; done; printf finished"
+          },
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 2_000}
+        )
+      end)
+
+    assert wait_for_file(ready), "the command never started"
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    on_exit(fn -> resume_if_suspended(running.pid) end)
+
+    assert :erlang.suspend_process(running.pid)
+    File.write!(release, "finish")
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 10_000
+    assert Local.cancel(executor, job_id) == {:ok, :unconfirmed}
+
+    assert :erlang.resume_process(running.pid)
+    assert {:ok, receipt} = Task.await(running, 10_000)
+    assert String.starts_with?(receipt.output, "finished")
+  end
+
+  test "a running job's cancellation is answered only after its confirmed receipt is final" do
+    # Concept: `cleaned` is a statement about the job's durable truth, so it is
+    # never sent before that truth exists, and the process that stops the group
+    # never sends it.
+    #
+    # Technical depth: removing the open entry is the last step of publishing a
+    # confirmed receipt: the receipt is retained first and is final only once
+    # the entry it was written under is gone (ADR 0016 clause 7). The removal
+    # is driven through the `open_authority_close` seam, which reports that it
+    # has begun and waits for this case before running the real
+    # `Ledger.close_open/2`. By then the owner has finished its cleanup episode
+    # and exited, so everything except the removal has happened, and the
+    # cancellation must still be unanswered: its caller is suspended and read
+    # for where it waits and what is queued for it. Released, the answer must be
+    # `cleaned`, and the receipt `cancelled`, `confirmed` and already final when
+    # the answer arrived. Every message the owner sent is recorded: it handed
+    # the request on and answered nothing. The owner used to answer at its
+    # verdict, before any receipt existed.
+    root = workspace()
+    parent = self()
+    ready = Path.join(root, "answer-after-removal-ready")
+    job_id = "answer-after-removal-#{System.unique_integer([:positive])}"
+
+    held_close = fn prepared, closing ->
+      if closing == job_id do
+        send(parent, {:removing, self()})
+
+        receive do
+          :release_removal -> :ok
+        end
+      end
+
+      Ledger.close_open(prepared, closing)
+    end
+
+    {executor, lease_id} =
+      executor_with_options(root, cleanup_grace_ms: 8_000, open_authority_close: held_close)
+
+    running = Task.async(fn -> run_until_cancelled(root, executor, lease_id, job_id, ready) end)
+    assert wait_for_file(ready), "the command never started"
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    sends = record_sends(owner)
+
+    cancelling =
+      cancelling(executor, job_id, fn answer -> {answer, Local.receipt(executor, job_id)} end)
+
+    assert_receive {:removing, remover}, 20_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 5_000
+
+    refute cancel_answered?(cancelling),
+           "the cancellation was answered before the job's open entry was removed"
+
+    send(remover, :release_removal)
+    {answer, receipt_at_answer} = Task.await(cancelling, 20_000)
+    assert {:ok, receipt} = Task.await(running, 20_000)
+
+    assert receipt.outcome == :cancelled
+    assert receipt.cleanup_confirmation == :confirmed
+    assert answer == {:ok, :cleaned}
+    assert receipt_at_answer == {:ok, receipt}
+    assert_owner_only_handed_off(sent_messages(sends), 1)
+  end
+
+  test "a cancellation whose confirmed receipt cannot be made final is answered unconfirmed" do
+    # Concept: a settlement that cannot finish publishing leaves nothing durable
+    # to be `cleaned` about, whatever the owner proved about the group.
+    #
+    # Technical depth: the open-entry removal is refused through the
+    # `open_authority_close` seam, so the receipt is retained with `confirmed`
+    # cleanup but the entry it was written under stays and the settlement
+    # returns `effect_settling`; a reader is told the same. The cancellation
+    # must hear `unconfirmed`, weaker than the bytes on the root, which is the
+    # direction ADR 0016 allows. The owner used to answer `cleaned` from its own
+    # verdict before settlement began.
+    root = workspace()
+    ready = Path.join(root, "unpublished-cancel-ready")
+    job_id = "unpublished-cancel-#{System.unique_integer([:positive])}"
+    refuse_removal = fn _prepared, _job_id -> {:error, :removal_refused_by_case} end
+
+    {executor, lease_id, _lease, ledger} =
+      executor_lease_ledger_with_options(root,
+        cleanup_grace_ms: 8_000,
+        open_authority_close: refuse_removal
+      )
+
+    running = Task.async(fn -> run_until_cancelled(root, executor, lease_id, job_id, ready) end)
+    assert wait_for_file(ready), "the command never started"
+    assert Local.cancel(executor, job_id) == {:ok, :unconfirmed}
+
+    assert {:error, {:effect_settling, {:open_authority_not_removed, :removal_refused_by_case}}} =
+             Task.await(running, 20_000)
+
+    retained = retained_receipt!(ledger, job_id)
+    assert retained.outcome == :cancelled
+    assert retained.cleanup_confirmation == :confirmed
+    assert Local.receipt(executor, job_id) == {:error, :effect_settling}
+  end
+
+  test "an owner lost inside its cleanup episode leaves the answer and receipt unconfirmed" do
+    # Concept: an owner's death is not cleanup proof, and it cannot leave behind
+    # an answer stronger than the receipt its execute caller then builds.
+    #
+    # Technical depth: the process probe is held at the start of its table
+    # query, which the owner makes inside the cleanup episode after it has
+    # signalled the group, and the owner is killed there. It has handed nothing
+    # off and answered nothing -- every message it sent is recorded -- so the
+    # waiting caller sees its `DOWN` and answers `unconfirmed`, and the execute
+    # caller's lost-owner receipt is `outcome_unknown` with `unconfirmed`
+    # cleanup.
+    root = workspace()
+    ready = Path.join(root, "lost-owner-ready")
+    probe_started = Path.join(root, "lost-owner-probe-started")
+    release_probe = Path.join(root, "lost-owner-release-probe")
+    probe = Path.join(root, "held-ps")
+    job_id = "lost-owner-#{System.unique_integer([:positive])}"
+
+    File.write!(
+      probe,
+      "#!/bin/sh\n: > #{shell_path(probe_started)}\n" <>
+        "while [ ! -f #{shell_path(release_probe)} ]; do sleep 0.02; done\n" <>
+        "exec /bin/ps \"$@\"\n"
+    )
+
+    File.chmod!(probe, 0o700)
+    on_exit(fn -> File.write(release_probe, "release") end)
+
+    {executor, lease_id} =
+      executor_with_options(root, cleanup_grace_ms: 8_000, process_probe: probe)
+
+    running = Task.async(fn -> run_until_cancelled(root, executor, lease_id, job_id, ready) end)
+    assert wait_for_file(ready), "the command never started"
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    sends = record_sends(owner)
+    cancelling = cancelling(executor, job_id)
+
+    assert wait_for_file(probe_started), "the owner never queried the process table"
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 5_000
+
+    assert Task.await(cancelling, 20_000) == {:ok, :unconfirmed}
+    assert {:ok, receipt} = Task.await(running, 20_000)
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :unconfirmed
+    assert_owner_only_handed_off(sent_messages(sends), 0)
+  end
+
+  test "a cancellation whose execute caller dies before settling answers unconfirmed" do
+    # Concept: the process that would publish the job's receipt is the only one
+    # that can say `cleaned`; losing it leaves `unconfirmed`.
+    #
+    # Technical depth: the execute caller is suspended before the cancellation,
+    # so the owner finishes its episode, hands the request to that caller and
+    # exits while nothing is settled. The cancellation, now waiting on the
+    # execute caller, must still be unanswered; the caller is then killed and
+    # the answer must be `unconfirmed`, with no final receipt for the job. The
+    # owner used to answer from its own verdict whatever became of the caller.
+    root = workspace()
+    ready = Path.join(root, "lost-caller-ready")
+    job_id = "lost-caller-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_with_grace(root, 8_000)
+
+    running = Task.async(fn -> run_until_cancelled(root, executor, lease_id, job_id, ready) end)
+    caller = running.pid
+    Process.unlink(caller)
+    on_exit(fn -> resume_if_suspended(caller) end)
+    assert wait_for_file(ready), "the command never started"
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    sends = record_sends(owner)
+
+    assert :erlang.suspend_process(caller)
+    cancelling = cancelling(executor, job_id)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 20_000
+    assert_owner_only_handed_off(sent_messages(sends), 1)
+    refute cancel_answered?(cancelling), "the cancellation was answered before any settlement"
+
+    Process.exit(caller, :kill)
+    assert Task.await(cancelling, 20_000) == {:ok, :unconfirmed}
+    refute match?({:ok, _}, Local.receipt(executor, job_id))
+  end
+
+  test "a cancellation that meets a prelaunch refusal is answered only after the refusal is durable" do
+    # Concept: a cancellation that reaches a job whose process never began is
+    # `cleaned` only once the refusal is durable, which only the execute caller
+    # can report.
+    #
+    # Technical depth: the executor's composed clock is the one hook inside the
+    # launch owner's start window: the owner samples it once, at the final
+    # permit, after the waiting guard exists and before the command is allowed
+    # to begin. The clock holds the owner there, so a real `cancel/2` routed to
+    # it queues behind the permit; the clock then reports a wall time past the
+    # run deadline, so the owner refuses the job before its process begins. The
+    # execute caller is suspended across that refusal: the owner must hand the
+    # request to it and exit with the cancellation still unanswered. Once the
+    # caller settles, the answer must be `cleaned`, the receipt `cancelled` with
+    # `confirmed` cleanup, and that receipt already final when the answer
+    # arrived. The owner used to answer `cleaned` as soon as it handed the
+    # refusal over, before anything was durable.
+    root = workspace()
+    parent = self()
+    job_id = "prelaunch-cancel-#{System.unique_integer([:positive])}"
+    {:ok, clock_state} = Agent.start_link(fn -> %{wall_offset: 0, hold: nil} end)
+    on_exit(fn -> stop_test_process(clock_state) end)
+
+    clock = fn ->
+      case Agent.get(clock_state, & &1.hold) do
+        {executor, held_job} ->
+          if job_owner_or_nil(executor, held_job) == self() do
+            Agent.update(clock_state, &%{&1 | hold: nil})
+            send(parent, {:held_at_permit, self()})
+
+            receive do
+              :release_permit -> :ok
+            end
+          end
+
+        nil ->
+          :ok
+      end
+
+      offset = Agent.get(clock_state, & &1.wall_offset)
+      {System.system_time(:millisecond) + offset, System.monotonic_time(:millisecond)}
+    end
+
+    {executor, lease_id} = executor_with_options(root, clock_provider: clock)
+    Agent.update(clock_state, &%{&1 | hold: {executor, job_id}})
+
+    running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => "printf began > began.txt"}, %{
+          executor: executor,
+          lease_id: lease_id,
+          job_id: job_id
+        })
+      end)
+
+    assert_receive {:held_at_permit, owner}, 10_000
+    owner_monitor = Process.monitor(owner)
+    sends = record_sends(owner)
+    on_exit(fn -> resume_if_suspended(running.pid) end)
+
+    cancelling =
+      cancelling(executor, job_id, fn answer -> {answer, Local.receipt(executor, job_id)} end)
+
+    assert {:ok, 1} = await_path(fn -> queued_cancellations(owner) end, 5_000)
+    Agent.update(clock_state, &%{&1 | wall_offset: 120_000})
+    assert :erlang.suspend_process(running.pid)
+    send(owner, :release_permit)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 10_000
+
+    refute cancel_answered?(cancelling),
+           "the cancellation was answered before the refusal was published"
+
+    assert :erlang.resume_process(running.pid)
+    {answer, receipt_at_answer} = Task.await(cancelling, 10_000)
+    assert {:ok, receipt} = Task.await(running, 10_000)
+
+    assert receipt.outcome == :cancelled
+    assert receipt.cleanup_confirmation == :confirmed
+    assert receipt.output =~ "the run deadline passed before the process began"
+    refute File.exists?(Path.join(root, "began.txt"))
+    assert answer == {:ok, :cleaned}
+    assert receipt_at_answer == {:ok, receipt}
+    assert_owner_only_handed_off(sent_messages(sends), 1)
+  end
+
+  test "a second cancellation queued behind the first hears the same answer" do
+    # Concept: two requests to cancel one job are two questions about one
+    # cleanup episode, and both get its one answer.
+    #
+    # Technical depth: both requests are queued while the owner is suspended.
+    # The owner matches the first and runs the episode; the second stays in its
+    # mailbox. The owner used to exit with it unread, so its caller saw `DOWN`
+    # and answered `unconfirmed`. Both must now be handed to the execute
+    # caller, whose traced answer is given whether its settlement published a
+    # confirmed receipt, and neither answer may be stronger than the receipt.
+    root = workspace()
+    ready = Path.join(root, "twice-cancelled-ready")
+    job_id = "twice-cancelled-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_with_grace(root, 2_000)
+
+    running = Task.async(fn -> run_until_cancelled(root, executor, lease_id, job_id, ready) end)
+    assert wait_for_file(ready), "the command never started"
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    sends = record_sends(owner)
+    on_exit(fn -> resume_if_suspended(owner) end)
+
+    assert :erlang.suspend_process(owner)
+    first = cancelling(executor, job_id)
+    assert {:ok, 1} = await_path(fn -> queued_cancellations(owner) end, 5_000)
+    second = cancelling(executor, job_id)
+    assert {:ok, 2} = await_path(fn -> queued_cancellations(owner, 2) end, 5_000)
+
+    {receipt, events} =
+      trace_local([running.pid], [answer_cancellations: 1], fn ->
+        assert :erlang.resume_process(owner)
+        assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 10_000
+        assert {:ok, receipt} = Task.await(running, 10_000)
+        receipt
+      end)
+
+    first_answer = Task.await(first, 10_000)
+    second_answer = Task.await(second, 10_000)
+
+    assert receipt.outcome ==
+             if(receipt.cleanup_confirmation == :confirmed,
+               do: :cancelled,
+               else: :outcome_unknown
+             )
+
+    assert published_flags(events) == [receipt.cleanup_confirmation == :confirmed, false],
+           "the settlement did not answer from what it published: #{inspect(events)}"
+
+    assert never_stronger_than?(first_answer, receipt)
+
+    assert never_stronger_than?(second_answer, receipt),
+           "the queued second cancellation answered #{inspect(second_answer)} for a job " <>
+             "whose receipt recorded #{inspect(receipt.cleanup_confirmation)}"
+
+    assert_owner_only_handed_off(sent_messages(sends), 2)
+  end
+
+  test "a cancellation hears a settlement that ends more than a second after its episode" do
+    # Concept: below a 7,000 ms period a cancelling caller waits past its
+    # episode for the job's whole retention allowance plus a second, so a
+    # durable `cleaned` published late in that allowance still reaches it.
+    #
+    # Technical depth: the job commits 6,000 ms, so its retention allowance is
+    # 1,500 ms and the reply margin is the uncapped `1_500 + 1_000`. The owner
+    # is suspended with the command's final output and one cancellation queued,
+    # and the caller's exact instant is read from that request in the owner's
+    # mailbox. The owner is resumed 1,050 ms after the instant and finishes the
+    # job normally, handing the request on; the settlement's open-entry removal
+    # is held through the `open_authority_close` seam until 1,250 ms after the
+    # instant, well inside the removal's share of the allowance. The answer
+    # must be `cleaned` and must have arrived more than a second after the
+    # instant: past the fixed one-second margin this caller used to stop at,
+    # where it answered `unconfirmed` for a receipt that became durable and
+    # confirmed, and more than a second inside the margin it waits now.
+    root = workspace()
+    parent = self()
+    grace = 6_000
+    ready = Path.join(root, "late-settlement-ready")
+    release = Path.join(root, "late-settlement-release")
+    job_id = "late-settlement-#{System.unique_integer([:positive])}"
+
+    held_close = fn prepared, closing ->
+      if closing == job_id do
+        send(parent, {:removing, self()})
+
+        receive do
+          {:release_at, instant} -> wait_until_monotonic(instant)
+        end
+      end
+
+      Ledger.close_open(prepared, closing)
+    end
+
+    {executor, lease_id} =
+      executor_with_options(root, cleanup_grace_ms: grace, open_authority_close: held_close)
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "printf ready > #{shell_path(ready)}; " <>
+                "while [ ! -f #{shell_path(release)} ]; do sleep 0.05; done; printf finished"
+          },
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: grace}
+        )
+      end)
+
+    assert wait_for_file(ready), "the command never started"
+    owner = job_owner(executor, job_id)
+    on_exit(fn -> resume_if_suspended(owner) end)
+    assert :erlang.suspend_process(owner)
+    File.write!(release, "finish")
+
+    assert {:ok, :framed} =
+             await_path(
+               fn -> if owner_holds_status_frame?(owner), do: {:ok, :framed}, else: :error end,
+               10_000
+             )
+
+    cancelling =
+      cancelling(executor, job_id, fn answer ->
+        {answer, System.monotonic_time(:millisecond)}
+      end)
+
+    assert {:ok, 1} = await_path(fn -> queued_cancellations(owner) end, 5_000)
+    {:messages, queued} = Process.info(owner, :messages)
+    [instant] = for {:loopex_cancel_pending, _token, _reply, {until, _, _}} <- queued, do: until
+    wait_until_monotonic(instant + 1_050)
+    assert :erlang.resume_process(owner)
+
+    assert_receive {:removing, remover}, 10_000
+    send(remover, {:release_at, instant + 1_250})
+    {answer, answered_at} = Task.await(cancelling, 10_000)
+    assert {:ok, receipt} = Task.await(running, 10_000)
+
+    assert receipt.outcome == :completed
+    assert receipt.cleanup_confirmation == :confirmed
+    assert answer == {:ok, :cleaned}
+
+    assert answered_at > instant + 1_000,
+           "the answer arrived within a second of the episode, so the case proves nothing"
+  end
+
+  test "a TERM-resistant group is killed, proved gone, and answered cleaned" do
+    # Concept: forced cleanup on a real group is confirmed and answered
+    # `cleaned` when the host gives the probes the time they need.
+    #
+    # Technical depth: the command and every member of its group ignore TERM,
+    # so only the final KILL ends them. The job commits
+    # `@generous_job_grace_ms` as its own period, so the cooperative share runs
+    # out, KILL goes over the live Port, and the post-KILL process table has
+    # ample time to answer on any host. The real delivery path is then pinned:
+    # the Port's nonzero exit and an empty post-KILL table confirm cleanup, the
+    # answer is `cleaned`, the receipt is `cancelled` with `confirmed` cleanup,
+    # and the case's own `ps` finds the group gone.
+    root = workspace()
+    {executor, lease_id} = executor_with_grace(root, @generous_job_grace_ms)
+    ready = Path.join(root, "killed-ready")
+    group_file = Path.join(root, "killed-group")
+    identity_file = Path.join(root, "killed-identity")
+    job_id = "killed-#{System.unique_integer([:positive])}"
+    on_exit(fn -> kill_leftover_group(group_file, identity_file) end)
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "printf 'hello\\n'; trap '' TERM; " <>
+                "/bin/ps -o pgid= -p $$ | /usr/bin/tr -d ' ' > #{shell_path(group_file)}; " <>
+                "/bin/ps -o pid=,lstart= -p $$ > #{shell_path(identity_file)}; " <>
+                "printf ready > #{shell_path(ready)}; while :; do sleep 1; done"
+          },
+          %{
+            executor: executor,
+            lease_id: lease_id,
+            job_id: job_id,
+            cleanup_grace_ms: @generous_job_grace_ms
+          }
+        )
+      end)
+
+    assert wait_for_file(ready), "the TERM-resistant command never started"
+    group = group_file |> File.read!() |> String.trim() |> String.to_integer()
+    assert Local.cancel(executor, job_id) == {:ok, :cleaned}
+    assert {:ok, killed} = Task.await(running, @generous_job_grace_ms)
+    assert killed.outcome == :cancelled
+    assert killed.cleanup_confirmation == :confirmed
+    assert String.starts_with?(killed.output, "hello\n")
+    assert killed.output =~ "Its process group is confirmed cleaned."
+
+    assert {:ok, ^group} =
+             await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ),
+           "the killed group #{group} outlived its job"
+  end
+
+  @tag timeout: 2 * @long_job_grace_ms + 60_000
+  test "a progress callback that cancels its own job is answered unconfirmed at the hand-off" do
+    # Concept: a caller that is itself the job's execute caller cannot publish
+    # while it waits, so it hears `unconfirmed` when the owner hands the
+    # request to it rather than waiting out its bound.
+    #
+    # Technical depth: the job's progress callback runs in its execute caller
+    # and cancels that job once this case has the owner monitored. The owner
+    # runs the episode, hands the request to the execute caller -- the
+    # requester -- and exits; the answer is given at that hand-off, before the
+    # owner's `DOWN`. The job commits `@long_job_grace_ms` as its own period,
+    # so a caller left waiting on itself would answer only minutes after the
+    # owner exits; the answer is required within a minute of it. The wait for
+    # the owner is bounded by the job's own period, so a slow probe cannot
+    # fail the case.
+    root = workspace()
+    parent = self()
+    job_id = "self-cancel-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_with_grace(root, @long_job_grace_ms)
+
+    progress = fn _event ->
+      unless Process.get(:self_cancel_sent) do
+        Process.put(:self_cancel_sent, true)
+        send(parent, {:callback_ready, self()})
+
+        receive do
+          :cancel_now -> :ok
+        end
+
+        send(parent, {:self_cancel, Local.cancel(executor, job_id)})
+      end
+
+      :ok
+    end
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{"command" => "printf progress; while :; do sleep 0.05; done"},
+          %{
+            executor: executor,
+            lease_id: lease_id,
+            job_id: job_id,
+            cleanup_grace_ms: @long_job_grace_ms,
+            progress: progress
+          }
+        )
+      end)
+
+    assert_receive {:callback_ready, caller}, 30_000
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    send(caller, :cancel_now)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, @long_job_grace_ms
+    assert_receive {:self_cancel, answer}, 60_000
+    assert answer == {:ok, :unconfirmed}
+    assert {:ok, receipt} = Task.await(running, 60_000)
+    assert String.starts_with?(receipt.output, "progress")
+  end
+
+  @tag timeout: 3 * @long_job_grace_ms + 60_000
+  test "a cancellation of a job its execute caller abandoned alive is answered at once" do
+    # Concept: an execute caller that leaves a job while it lives on -- its
+    # progress callback raised -- settles nothing, so a cancellation of that
+    # job hears `unconfirmed` promptly rather than waiting out its bound on a
+    # process that will never answer.
+    #
+    # Technical depth: the progress callback is held on its first event and
+    # raises when this case says. Two orders:
+    #
+    #   * the caller leaves before the cancellation, while this executor is
+    #     suspended so that the caller's reservation release -- an asynchronous
+    #     cast -- cannot have been processed. The caller's withdrawal from the
+    #     hand-off claim is what the owner must see: it hands the request to
+    #     nobody and exits, and the requester answers on the owner's `DOWN`.
+    #     The owner used to decide from the reservation, which still looked
+    #     held, and handed the request to the departed caller.
+    #   * the cancellation runs first: the owner hands the request to the
+    #     still-attending caller and exits. The callback then raises, and the
+    #     caller collects the request as it leaves and answers it
+    #     `unconfirmed`.
+    #
+    # Each job commits `@long_job_grace_ms` as its own period, so a caller left
+    # waiting would answer only minutes later; the answer is required within a
+    # minute of the owner's exit, or of the caller leaving after it. Waits for
+    # the owner are bounded by the job's own period.
+    for order <- [:left_before_cancel, :left_after_hand_off] do
+      root = workspace()
+      parent = self()
+      ready = Path.join(root, "abandoned-#{order}-ready")
+      job_id = "abandoned-#{order}-#{System.unique_integer([:positive])}"
+      {executor, lease_id} = executor_with_grace(root, @long_job_grace_ms)
+      on_exit(fn -> resume_if_suspended(executor) end)
+
+      progress = fn _event ->
+        send(parent, {:callback_held, self()})
+
+        receive do
+          :raise_now -> :ok
+        end
+
+        raise "host progress callback failed"
+      end
+
+      caller =
+        spawn(fn ->
+          result =
+            try do
+              run(
+                root,
+                "loopex.bash",
+                %{
+                  "command" =>
+                    "printf ready > #{shell_path(ready)}; printf progress; " <>
+                      "while :; do sleep 0.05; done"
+                },
+                %{
+                  executor: executor,
+                  lease_id: lease_id,
+                  job_id: job_id,
+                  cleanup_grace_ms: @long_job_grace_ms,
+                  progress: progress
+                }
+              )
+            rescue
+              error -> {:raised, error}
+            end
+
+          send(parent, {:abandoned, self(), result})
+
+          receive do
+            :finish -> :ok
+          end
+        end)
+
+      on_exit(fn -> if Process.alive?(caller), do: send(caller, :finish) end)
+      assert_receive {:callback_held, ^caller}, 30_000
+      owner = job_owner(executor, job_id)
+      owner_monitor = Process.monitor(owner)
+      sends = record_sends(owner)
+
+      case order do
+        :left_before_cancel ->
+          assert :erlang.suspend_process(executor)
+          send(caller, :raise_now)
+          assert_receive {:abandoned, ^caller, {:raised, %RuntimeError{}}}, 60_000
+          cancelling = cancelling(executor, job_id)
+          assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _}, @long_job_grace_ms
+          assert Task.await(cancelling, 60_000) == {:ok, :unconfirmed}
+          assert_owner_only_handed_off(sent_messages(sends), 0)
+          assert :erlang.resume_process(executor)
+
+        :left_after_hand_off ->
+          cancelling = cancelling(executor, job_id)
+          assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _}, @long_job_grace_ms
+          assert_owner_only_handed_off(sent_messages(sends), 1)
+
+          refute cancel_answered?(cancelling),
+                 "the cancellation was answered before the caller left"
+
+          send(caller, :raise_now)
+          assert_receive {:abandoned, ^caller, {:raised, %RuntimeError{}}}, 60_000
+          assert Task.await(cancelling, 60_000) == {:ok, :unconfirmed}
+      end
+
+      send(caller, :finish)
+    end
+  end
+
+  test "an execute caller whose executor table is gone leaves at once when its callback raises" do
+    # Concept: once its executor's table is gone nobody can hand a caller
+    # anything, so a caller whose progress callback raises leaves at once
+    # rather than waiting for its job owner to die.
+    #
+    # Technical depth: the caller's in-flight table is replaced, from inside the
+    # held callback, by a stand-in whose owning process has already exited, so
+    # the hand-off claim meets a missing table exactly as it would after the
+    # executor died. The job's owner stays alive running the command. A caller
+    # that read the missing table as a claim the owner holds waited for that
+    # owner's `DOWN`, which comes only at the job's 60-second run deadline; the
+    # raise must instead arrive while the owner still lives. The job is then
+    # cancelled through the real executor so no group outlives the case.
+    root = workspace()
+    parent = self()
+    ready = Path.join(root, "table-gone-ready")
+    job_id = "table-gone-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_with_grace(root, 2_000)
+
+    stand_in_owner =
+      spawn(fn ->
+        send(parent, {:stand_in_table, :ets.new(:loopex_stand_in, [:public, :set])})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive {:stand_in_table, stand_in}, 5_000
+
+    progress = fn _event ->
+      send(parent, {:callback_held, self()})
+
+      receive do
+        :raise_now -> Process.put(:loopex_inflight_table, stand_in)
+      end
+
+      raise "host progress callback failed"
+    end
+
+    caller =
+      spawn(fn ->
+        result =
+          try do
+            run(
+              root,
+              "loopex.bash",
+              %{
+                "command" =>
+                  "printf ready > #{shell_path(ready)}; printf progress; " <>
+                    "while :; do sleep 0.05; done"
+              },
+              %{
+                executor: executor,
+                lease_id: lease_id,
+                job_id: job_id,
+                cleanup_grace_ms: 2_000,
+                progress: progress
+              }
+            )
+          rescue
+            error -> {:raised, error}
+          end
+
+        send(parent, {:abandoned, self(), result})
+
+        receive do
+          :finish -> :ok
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(caller), do: send(caller, :finish) end)
+    assert_receive {:callback_held, ^caller}, 30_000
+    owner = job_owner(executor, job_id)
+    owner_monitor = Process.monitor(owner)
+    stand_in_monitor = Process.monitor(stand_in_owner)
+    send(stand_in_owner, :stop)
+    assert_receive {:DOWN, ^stand_in_monitor, :process, ^stand_in_owner, :normal}, 5_000
+
+    send(caller, :raise_now)
+
+    assert_receive {:abandoned, ^caller, {:raised, %RuntimeError{}}},
+                   10_000,
+                   "the raise waited on the job owner although no table remained"
+
+    assert Process.alive?(owner), "the raise arrived only after the job owner stopped"
+
+    assert {:ok, _answer} = Local.cancel(executor, job_id)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _reason}, 30_000
+    send(caller, :finish)
   end
 
   test "a TERM-interrupted wrapper waits for its owned shell job rather than rechecking its pid" do
@@ -6218,7 +7323,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert File.read!(Path.join(root, "nested.txt")) == "nested"
 
     assert outer.outcome == :completed
-    assert outer.output == "outer"
+    # Technical depth: this case proves the outer execution context, not group
+    # quiescence. On a loaded host the quiescence probe can miss its bound, and
+    # then the executor terminates the finished group and appends its note to
+    # the output. `command_output/1` removes exactly that note, so the command's
+    # own bytes are still compared exactly.
+    assert Local.command_output(outer.output) == "outer"
     assert outer.cleanup_grace_ms == 2_000
     assert outer.receipt_retention_bound_ms == 500
     assert outer.observed_at_ms == observed_at_ms
@@ -6256,6 +7366,256 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   catch
     _kind, _reason -> :ok
   end
+
+  # Concept: teardown ends a group a failed case left running, and only while
+  # that group is still provably the case's own.
+  #
+  # Technical depth: the command recorded its group and its shell's pid and start
+  # time. The group is signalled by number -- which this runtime never does --
+  # only while that same shell, identified by pid and start time together, is
+  # still a member of that same group, so a group number reissued to unrelated
+  # work after the case's group ended is left alone. The signal follows that
+  # observation immediately; the only window left is the shell exiting and the
+  # group number being reissued in between, and a group with no recorded member
+  # alive is never signalled.
+  defp kill_leftover_group(group_file, identity_file) do
+    with {:ok, group_bytes} <- File.read(group_file),
+         {group, ""} when group > 1 <- group_bytes |> String.trim() |> Integer.parse(),
+         {:ok, identity} <- File.read(identity_file),
+         [pid, started] <- String.split(String.trim(identity), ~r/\s+/, parts: 2),
+         {observed, 0} <-
+           System.cmd("/bin/ps", ["-o", "pgid=,lstart=", "-p", pid], stderr_to_stdout: true),
+         [observed_group, observed_started] <-
+           String.split(String.trim(observed), ~r/\s+/, parts: 2),
+         true <- observed_group == Integer.to_string(group) and observed_started == started do
+      System.cmd("/bin/kill", ["-KILL", "-#{group}"], stderr_to_stdout: true)
+    end
+
+    :ok
+  end
+
+  # The exact process-group note a command that exited without being shown to
+  # hold only itself receives, by whether its terminated group was confirmed.
+  defp terminated_note do
+    "\n[loopex: the command exited, but its process group could not be shown to hold " <>
+      "only the command, so the group was terminated. It is confirmed cleaned, so nothing " <>
+      "it left behind outlives this job.]"
+  end
+
+  # The job's registered launch owner, or nil before one is registered.
+  defp job_owner_or_nil(executor, job_id) do
+    with {:dictionary, dictionary} <- Process.info(executor, :dictionary),
+         table when not is_nil(table) <- Keyword.get(dictionary, :loopex_inflight_table),
+         [{_key, owner, _grace}] <- :ets.lookup(table, {:loopex_process_authority, job_id}) do
+      owner
+    else
+      _absent -> nil
+    end
+  end
+
+  # The live launch owner Local routes a job's cancellation to.
+  defp job_owner(executor, job_id) do
+    {:dictionary, dictionary} = Process.info(executor, :dictionary)
+    table = Keyword.fetch!(dictionary, :loopex_inflight_table)
+    [{_key, owner, _grace}] = :ets.lookup(table, {:loopex_process_authority, job_id})
+    owner
+  end
+
+  # Whether the owner's queued Port data already holds a complete status frame.
+  defp owner_holds_status_frame?(owner) do
+    case Process.info(owner, :messages) do
+      {:messages, messages} ->
+        bytes =
+          for {port, {:data, chunk}} when is_port(port) <- messages, into: "", do: chunk
+
+        case :binary.match(bytes, "loopex-command-status:") do
+          {offset, size} ->
+            rest = binary_part(bytes, offset + size, byte_size(bytes) - offset - size)
+            :binary.match(rest, "\n") != :nomatch
+
+          :nomatch ->
+            false
+        end
+
+      nil ->
+        false
+    end
+  end
+
+  defp queued_cancellations(owner, expected \\ 1) do
+    case Process.info(owner, :messages) do
+      {:messages, messages} ->
+        count = Enum.count(messages, &match?({:loopex_cancel_pending, _, _, _}, &1))
+        if count == expected, do: {:ok, count}, else: :error
+
+      nil ->
+        :error
+    end
+  end
+
+  # Runs `work` with call and return tracing of the named private functions of
+  # `Local` in `pids`, and returns `{result, events}` with events in order as
+  # `{:call, name, arguments}` and `{:return, name, value}`. Trace delivery is
+  # awaited before the collector reports; patterns and flags are removed even
+  # when `work` fails.
+  defp trace_local(pids, functions, work) do
+    collector = spawn_link(fn -> collect_local_trace([]) end)
+    Code.ensure_loaded!(Local)
+
+    for {name, arity} <- functions do
+      assert :erlang.trace_pattern({Local, name, arity}, [{:_, [], [{:return_trace}]}], [:local]) ==
+               1,
+             "#{name}/#{arity} is not a function of Local to trace"
+    end
+
+    for pid <- pids, do: :erlang.trace(pid, true, [:call, {:tracer, collector}])
+
+    result =
+      try do
+        work.()
+      after
+        for pid <- pids, Process.alive?(pid), do: :erlang.trace(pid, false, [:call])
+
+        for {name, arity} <- functions,
+            do: :erlang.trace_pattern({Local, name, arity}, false, [:local])
+      end
+
+    delivered = :erlang.trace_delivered(:all)
+    assert_receive {:trace_delivered, :all, ^delivered}, 5_000
+    send(collector, {:report, self()})
+    assert_receive {:traced_local, events}, 5_000
+    {result, events}
+  end
+
+  defp collect_local_trace(events) do
+    receive do
+      {:trace, _pid, :call, {Local, name, arguments}} ->
+        collect_local_trace([{:call, name, arguments} | events])
+
+      {:trace, _pid, :return_from, {Local, name, _arity}, value} ->
+        collect_local_trace([{:return, name, value} | events])
+
+      {:report, requester} ->
+        send(requester, {:traced_local, Enum.reverse(events)})
+    end
+  end
+
+  # A command that runs until its group is signalled, announcing that it began.
+  defp run_until_cancelled(root, executor, lease_id, job_id, ready) do
+    run(
+      root,
+      "loopex.bash",
+      %{"command" => "printf ready > #{shell_path(ready)}; while :; do sleep 0.05; done"},
+      %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 8_000}
+    )
+  end
+
+  # A real `cancel/2` in its own process. `after_answer` runs in that process
+  # on the answer, so a case can read durable state at the moment it arrived.
+  defp cancelling(executor, job_id, after_answer \\ & &1) do
+    Task.async(fn -> after_answer.(Local.cancel(executor, job_id)) end)
+  end
+
+  # Whether a `cancelling/3` caller has been answered. It is read only once it
+  # has come to rest -- blocked in a receive or finished -- because only then
+  # is what it holds a fact rather than a step in progress. At rest in
+  # `cancel/2`'s wait with no answer queued, it is unanswered; anywhere else it
+  # has been answered. An answer sent before this call is already queued for
+  # it, so the read cannot miss one that preceded it.
+  defp cancel_answered?(%Task{pid: pid}) do
+    {:ok, answered} =
+      await_path(
+        fn ->
+          case Process.info(pid, [:status, :current_function, :messages]) do
+            nil ->
+              {:ok, true}
+
+            [
+              status: :waiting,
+              current_function: {Local, :await_cancel_result, 4},
+              messages: queued
+            ] ->
+              {:ok, Enum.any?(queued, &match?({:loopex_cancel_result, _, _}, &1))}
+
+            [status: :waiting, current_function: _past_the_answer, messages: _queued] ->
+              {:ok, true}
+
+            _moving ->
+              :error
+          end
+        end,
+        5_000
+      )
+
+    answered
+  end
+
+  # Records every message `pid` sends from now on; `sent_messages/1` returns
+  # them in order as `{message, recipient}`.
+  defp record_sends(pid) do
+    recorder = spawn_link(fn -> collect_sends([]) end)
+    assert :erlang.trace(pid, true, [:send, {:tracer, recorder}]) == 1
+    recorder
+  end
+
+  defp sent_messages(recorder) do
+    delivered = :erlang.trace_delivered(:all)
+    assert_receive {:trace_delivered, :all, ^delivered}, 5_000
+    send(recorder, {:report, self()})
+    assert_receive {:sent_messages, ^recorder, sent}, 5_000
+    sent
+  end
+
+  defp collect_sends(sent) do
+    receive do
+      {:trace, _pid, :send, message, to} ->
+        collect_sends([{message, to} | sent])
+
+      {:trace, _pid, :send_to_non_existing_process, message, to} ->
+        collect_sends([{message, to} | sent])
+
+      {:report, requester} ->
+        send(requester, {:sent_messages, self(), Enum.reverse(sent)})
+    end
+  end
+
+  # The owner answered no cancellation and handed exactly `handed` requests on.
+  # Requests carry each caller's reply alias rather than its pid, so they are
+  # counted rather than matched to callers.
+  defp assert_owner_only_handed_off(sent, handed) do
+    answered = for {{:loopex_cancel_result, _, _} = answer, to} <- sent, do: {answer, to}
+    assert answered == [], "the owner answered a cancellation itself: #{inspect(answered)}"
+    handoffs = for {{:loopex_cancel_handoff, _token, _settler}, to} <- sent, do: to
+
+    assert length(handoffs) == handed,
+           "the owner handed off #{length(handoffs)} requests, not #{handed}"
+  end
+
+  # Whether each traced settlement answer was told a confirmed receipt was
+  # published: the settlement's own call, then the `after` that ends every
+  # admission.
+  defp published_flags(events),
+    do: for({:call, :answer_cancellations, [published]} <- events, do: published)
+
+  # Returns once the monotonic clock the executor's episodes use reaches
+  # `instant`.
+  defp wait_until_monotonic(instant) do
+    remaining = instant - System.monotonic_time(:millisecond)
+    if remaining > 0, do: Process.sleep(remaining)
+    :ok
+  end
+
+  # Concept: a cancellation's answer may be weaker than the job's receipt but
+  # never stronger.
+  #
+  # Technical depth: `cleaned` requires a receipt whose cleanup is confirmed;
+  # `unconfirmed` is admissible for any receipt, because a settlement that
+  # finishes after the caller's bound leaves the caller the weaker answer.
+  defp never_stronger_than?({:ok, :cleaned}, receipt),
+    do: receipt.cleanup_confirmation == :confirmed
+
+  defp never_stronger_than?({:ok, :unconfirmed}, _receipt), do: true
+  defp never_stronger_than?(_answer, _receipt), do: false
 
   defp wait_for_os_pid_exit(_os_pid, 0), do: false
 

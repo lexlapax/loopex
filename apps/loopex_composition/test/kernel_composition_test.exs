@@ -21,7 +21,7 @@ defmodule LoopexCompositionTest do
 
     def run(state_root, workspace, prompt) do
       with {:ok, runtime} <-
-             LoopexComposition.start(
+             LoopexComposition.TestHost.start(
                runtime_id: "embedder",
                state_root: state_root,
                workspace: workspace,
@@ -196,28 +196,28 @@ defmodule LoopexCompositionTest do
 
     try do
       assert {:error, :host_policy_required} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "prevalidated",
                  state_root: "/unused",
                  workspace: "/unused"
                )
 
       assert {:error, {:invalid_composition_option, :state_root}} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "prevalidated",
                  workspace: "/unused",
                  policy: Embedder
                )
 
       assert {:error, {:invalid_composition_option, :workspace}} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "prevalidated",
                  state_root: "/unused",
                  policy: Embedder
                )
 
       assert {:error, {:invalid_composition_option, :runtime_id}} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  state_root: "/unused",
                  workspace: "/unused",
                  policy: Embedder
@@ -243,7 +243,14 @@ defmodule LoopexCompositionTest do
 
       expected =
         Enum.take(
-          [Loopex.Store.Local, Loopex.Executor.Local.WorkspaceLease, Loopex.Executor.Local],
+          [
+            Loopex.LLM.ReqLLM.CredentialRegistry,
+            Loopex.LLM.ReqLLM.CredentialCustody,
+            Loopex.Trace.Capability,
+            Loopex.Store.Local,
+            Loopex.Executor.Local.WorkspaceLease,
+            Loopex.Executor.Local
+          ],
           length(captured)
         )
 
@@ -267,7 +274,7 @@ defmodule LoopexCompositionTest do
 
     try do
       assert {:ok, runtime} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "owned-stack",
                  state_root: state_root,
                  workspace: workspace,
@@ -309,7 +316,7 @@ defmodule LoopexCompositionTest do
 
     try do
       assert {:ok, runtime} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "abnormal-owned-stack",
                  state_root: state_root,
                  workspace: workspace,
@@ -346,14 +353,14 @@ defmodule LoopexCompositionTest do
     # depends on this application, which is exactly the inheritance the two
     # shipped permissive policies exist in clients to avoid.
     assert {:error, :host_policy_required} =
-             LoopexComposition.start(
+             LoopexComposition.TestHost.start(
                runtime_id: "no-policy",
                state_root: state_root,
                workspace: workspace
              )
 
     assert {:error, :host_policy_required} =
-             LoopexComposition.start(
+             LoopexComposition.TestHost.start(
                runtime_id: "nil-policy",
                state_root: state_root,
                workspace: workspace,
@@ -446,7 +453,7 @@ defmodule LoopexCompositionTest do
     end)
 
     try do
-      assert {:ok, runtime} = LoopexComposition.start(options)
+      assert {:ok, runtime} = LoopexComposition.TestHost.start(options)
 
       try do
         for _ <- 1..2, into: %{} do
@@ -494,7 +501,7 @@ defmodule LoopexCompositionTest do
 
     try do
       assert {:error, _reason} =
-               LoopexComposition.start(
+               LoopexComposition.TestHost.start(
                  runtime_id: "failure-#{failure}",
                  state_root: state_root,
                  workspace: workspace,
@@ -504,6 +511,9 @@ defmodule LoopexCompositionTest do
       count =
         Enum.find_index(
           [
+            Loopex.LLM.ReqLLM.CredentialRegistry,
+            Loopex.LLM.ReqLLM.CredentialCustody,
+            Loopex.Trace.Capability,
             Loopex.Store.Local,
             Loopex.Executor.Local.WorkspaceLease,
             Loopex.Executor.Local,

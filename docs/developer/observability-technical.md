@@ -12,6 +12,8 @@ enforces each, and the tests that hold them.
 <a id="technical-observability-inventory"></a>
 ## The Emission Inventory
 
+Concept: [Observability](observability.md#concept).
+
 Accepted [ADR 0030](../adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth)
 fixes this set exactly. Every name emits `start`, `stop` and `exception`. Adding
 a name, removing one, or emitting a second span from one boundary is an ADR
@@ -35,6 +37,8 @@ Six coordinator transaction cuts:
 
 <a id="technical-observability-span"></a>
 ## `Loopex.Instrumentation` Is the Only Place a Span Opens
+
+Concept: [Why core emits and the edge handles](observability.md#concept-observability-emitting).
 
 Every emission goes through `Loopex.Instrumentation`. There is no second path,
 and that is enforced by review rather than by a compiler, so a change that emits
@@ -67,6 +71,8 @@ invisible to error handling.
 <a id="technical-observability-handler"></a>
 ## The Edge Handler
 
+Concept: [Why core emits and the edge handles](observability.md#concept-observability-emitting).
+
 `Loopex.Telemetry` in `loopex_telemetry` is the only Loopex-attached handler.
 
 - `attach/1` reads the runtime's diagnostics admission handle **once** and
@@ -82,6 +88,10 @@ invisible to error handling.
 
 <a id="technical-observability-trace"></a>
 ## Trace Session Domain
+
+Concept: [Neither is truth, and neither is authority](observability.md#concept-observability-not-truth).
+
+Concept: [Everything is bounded, and says so when it bounds](observability.md#concept-observability-bounded).
 
 `Loopex.Trace.Config.validate/1` is the whole domain. A supplied value is
 accepted when it is positive and no larger than the ceiling, and refused by name
@@ -110,8 +120,38 @@ traced process and never replies to one.
 Match specs by level: `:calls` sends the caller; `:returns` and `:arguments` add
 the return trace; `:arguments` drops the `:arity` flag so argument terms arrive.
 
+Call patterns are installed with `trace:function/4` when the session starts,
+and OTP installs them only for loaded modules, so the session first calls
+`Code.ensure_loaded/1` on every module it names, the namespace wildcards
+included. That loads installed code from the code path, as the Store and
+executor boundaries already do when they probe an adapter; it never creates a
+code generation, which stays the VM generation manager's alone. A name that no
+installed module answers to traces nothing.
+`apps/loopex/test/trace_session_test.exs` compiles a module to a code-path
+directory without loading it and proves a session naming it traces its calls.
+
+**Exclusion.** `Loopex.Trace.exclude_self/2` takes a host-bound capability
+(`Loopex.Trace.Capability.Handle`, bound once per runtime) and the exact
+`{module, function, arity}` list that can carry sensitive data. `Control`
+records the caller in a monitored excluded-process set and adds the functions
+to a ref-counted union with no fixed ceiling; the active session clears the
+caller's flags and those match specs, and the call returns only after an OTP
+trace-delivery barrier. A session started later applies the retained set. When
+the excluded process exits, its whole contribution is removed. The ReqLLM
+credential sender is the one caller: it excludes itself before it receives any
+credential context and refuses the call if exclusion is unavailable. `Trace`
+keeps the full OTP session handle in private ETS so neither crash output nor
+status formatting carries it, and a replacement tracer recreates an active
+session from `Control`'s retained metadata.
+
+Trace sessions cover only runtime-owned processes. A host's own processes —
+the daemon's listener, connections and lease owners — are not flagged and are
+not claimed as trace-session witnesses.
+
 <a id="technical-observability-redaction"></a>
 ## Redaction Rules
+
+Concept: [Redaction is a contract, not a filter](observability.md#concept-observability-redaction).
 
 `Loopex.Trace.Entry.redact/1` walks the term before rendering.
 
@@ -132,6 +172,9 @@ marker, so an entry is bounded however deep or wide the term was.
 | Claim | Where it is proved |
 | --- | --- |
 | Five locked trace-session witnesses, redaction and limit negatives | `apps/loopex/test/trace_session_test.exs` |
+| Exclusion: 65 functions for one sender enter and leave both `Control` sets; the private session handle never reaches crash output | `apps/loopex/test/trace_session_test.exs` |
+| A session driven over the daemon socket emits the embedded caller's span names and metadata key sets, and neither the daemon nor the CLI emits telemetry | `apps/loopex_daemon/test/telemetry_parity_test.exs` |
+| The credential sender is excluded before credential context, and a refused exclusion refuses the call | `apps/loopex_llm_reqllm/test/provider_bridge_test.exs` |
 | Port and cut emissions, and the absence of content | `apps/loopex/test/telemetry_boundary_test.exs` |
 | The edge handler carries spans into the diagnostics plane and refuses anything richer | `apps/loopex_telemetry/test/telemetry_handler_test.exs` |
 | A stalled sink neither blocks an emitting boundary nor exceeds the ceiling; ten thousand spans with no handler stay inside a bounded cost | `apps/loopex/test/telemetry_boundary_test.exs` |

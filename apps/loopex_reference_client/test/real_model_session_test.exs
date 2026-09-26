@@ -49,96 +49,97 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
 
   @tag :real_provider
   test "one real non-streaming model call receives the committed canonical request bytes and digest and completes inside a session" do
-    Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic.capture(fn ->
-      fixture =
-        Fixture.start(
-          "real-model-session",
-          Loopex.LLM.ReqLLM,
-          max_tokens: 128,
-          relative_path: "real-session.txt",
-          content: "loopex-real-session"
-        )
-        |> Fixture.create("real-model-session")
-
-      on_exit(fn -> Fixture.stop(fixture) end)
-
-      capture_session_failure(
-        fn ->
-          {Fixture.records(fixture, fixture.client.session_id),
-           Fixture.events(fixture, fixture.client.session_id)}
-        end,
-        fn ->
-          assert {:accepted, "prompt-real-model-session"} =
-                   ReferenceClient.prompt(
-                     fixture.client,
-                     "prompt-real-model-session",
-                     # The prompt names the effect it wants, because M2's loop lets the
-                     # model choose its own arguments where M1 forced the selection.
-                     "Use the registered tool once to write the file real-session.txt " <>
-                       "with the exact content loopex-real-session. When the tool reports it " <>
-                       "wrote the file, confirm completion in one sentence and make no " <>
-                       "further tool calls."
-                   )
-
-          Fixture.await_terminal(fixture, 6_000)
-          records = Fixture.records(fixture, fixture.client.session_id)
-
-          requests = Enum.filter(records, &(&1.payload.kind == "model_request_committed"))
-          # ADR 0018: a turn's reply is retained on the attempt settlement whose
-          # conversation is canonical, as the eight-key durable projection under
-          # `result`, joined to its request by the staged request digest.
-          results =
-            Enum.filter(
-              records,
-              &(&1.payload.kind == "model_attempt_settled_v2" and
-                  &1.payload["conversation"] == "canonical")
-            )
-
-          # This is an inherited M1 protection. M2's loop may run for more turns in
-          # general, but this task deliberately needs exactly the request that chooses
-          # the tool and the request that confirms its durable result. Relaxing that
-          # count would let a session stop after the effect without proving the
-          # post-tool confirmation call the inherited role closed with.
-          assert length(requests) == 2
-          assert length(results) == 2
-
-          Enum.zip(requests, results)
-          |> Enum.each(fn {request_record, result_record} ->
-            reply = result_record.payload["result"]["reply"]
-
-            # The committed request record is the bytes' only durable home; the reply
-            # names them by digest and never carries them (ADR 0018 technical).
-            assert is_binary(request_record.payload["request"]["canonical_request_bytes"])
-            refute Map.has_key?(reply, "canonical_request_bytes")
-
-            assert reply["staged_request_digest"] ==
-                     request_record.payload["request"]["staged_request_digest"]
-          end)
-
-          assert File.read!(Path.join(fixture.workspace, "real-session.txt")) ==
-                   "loopex-real-session"
-
-          events = Fixture.events(fixture, fixture.client.session_id)
-          # The completed run ends and, with nothing queued behind it, settles the
-          # session in the same transaction, so the run's own ending is the last
-          # event before that settled fact.
-          assert List.last(events).kind == "session.settled"
-          assert Enum.at(events, -2).kind == "run.finished"
-          assert Enum.at(events, -2)["outcome"] == "completed"
-
-          identity = List.last(results).payload["result"]["reply"]["identity"]
-
-          announce_attestation(results)
-
-          report_real_path(%{
-            "provider" => identity["provider"],
-            "model" => identity["model"],
-            "endpoint" => identity["endpoint"],
-            "adapter_build" => "loopex_llm_reqllm@#{Loopex.version()}"
-          })
-        end
+    # The phase diagnostic's legacy tracer would trace the runtime it spawns,
+    # and a traced credential sender refuses the credential (ADR 0034), so this
+    # runtime-level case keeps only its own bounded session diagnostics.
+    fixture =
+      Fixture.start(
+        "real-model-session",
+        Loopex.LLM.ReqLLM,
+        max_tokens: 128,
+        relative_path: "real-session.txt",
+        content: "loopex-real-session"
       )
-    end)
+      |> Fixture.create("real-model-session")
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+
+    capture_session_failure(
+      fn ->
+        {Fixture.records(fixture, fixture.client.session_id),
+         Fixture.events(fixture, fixture.client.session_id)}
+      end,
+      fn ->
+        assert {:accepted, "prompt-real-model-session"} =
+                 ReferenceClient.prompt(
+                   fixture.client,
+                   "prompt-real-model-session",
+                   # The prompt names the effect it wants, because M2's loop lets the
+                   # model choose its own arguments where M1 forced the selection.
+                   "Use the registered tool once to write the file real-session.txt " <>
+                     "with the exact content loopex-real-session. When the tool reports it " <>
+                     "wrote the file, confirm completion in one sentence and make no " <>
+                     "further tool calls."
+                 )
+
+        Fixture.await_terminal(fixture, 6_000)
+        records = Fixture.records(fixture, fixture.client.session_id)
+
+        requests = Enum.filter(records, &(&1.payload.kind == "model_request_committed"))
+        # ADR 0018: a turn's reply is retained on the attempt settlement whose
+        # conversation is canonical, as the eight-key durable projection under
+        # `result`, joined to its request by the staged request digest.
+        results =
+          Enum.filter(
+            records,
+            &(&1.payload.kind == "model_attempt_settled_v2" and
+                &1.payload["conversation"] == "canonical")
+          )
+
+        # This is an inherited M1 protection. M2's loop may run for more turns in
+        # general, but this task deliberately needs exactly the request that chooses
+        # the tool and the request that confirms its durable result. Relaxing that
+        # count would let a session stop after the effect without proving the
+        # post-tool confirmation call the inherited role closed with.
+        assert length(requests) == 2
+        assert length(results) == 2
+
+        Enum.zip(requests, results)
+        |> Enum.each(fn {request_record, result_record} ->
+          reply = result_record.payload["result"]["reply"]
+
+          # The committed request record is the bytes' only durable home; the reply
+          # names them by digest and never carries them (ADR 0018 technical).
+          assert is_binary(request_record.payload["request"]["canonical_request_bytes"])
+          refute Map.has_key?(reply, "canonical_request_bytes")
+
+          assert reply["staged_request_digest"] ==
+                   request_record.payload["request"]["staged_request_digest"]
+        end)
+
+        assert File.read!(Path.join(fixture.workspace, "real-session.txt")) ==
+                 "loopex-real-session"
+
+        events = Fixture.events(fixture, fixture.client.session_id)
+        # The completed run ends and, with nothing queued behind it, settles the
+        # session in the same transaction, so the run's own ending is the last
+        # event before that settled fact.
+        assert List.last(events).kind == "session.settled"
+        assert Enum.at(events, -2).kind == "run.finished"
+        assert Enum.at(events, -2)["outcome"] == "completed"
+
+        identity = List.last(results).payload["result"]["reply"]["identity"]
+
+        announce_attestation(results)
+
+        report_real_path(%{
+          "provider" => identity["provider"],
+          "model" => identity["model"],
+          "endpoint" => identity["endpoint"],
+          "adapter_build" => "loopex_llm_reqllm@#{Loopex.version()}"
+        })
+      end
+    )
   end
 
   # Concept: preserve a failed real-path assertion with bounded, secret-free context.

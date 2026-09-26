@@ -25,6 +25,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   alias LoopexProtocol.Frame
   alias LoopexProtocol.Session
+  alias LoopexProtocol.Session.V2
   alias LoopexProtocol.Wire
 
   @frame_limit 65_536
@@ -45,11 +46,11 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
   # agree with each other, which is not what an independent implementation needs
   # to check itself against.
   @admitted [
-    {~s({"method":"initialize","request_id":"r1","generations":["loopex.session.v1-experimental"],"capabilities":[]}),
+    {~s({"method":"initialize","request_id":"r1","generations":["loopex.experimental/1"],"capabilities":[]}),
      %{
        "method" => "initialize",
        "request_id" => "r1",
-       "generations" => ["loopex.session.v1-experimental"],
+       "generations" => ["loopex.experimental/1"],
        "capabilities" => []
      }},
     {~s({"a":0}), %{"a" => 0}},
@@ -167,15 +168,21 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
       flunk("Node is required for the independent client and was not found")
     end
 
+    executor = Path.join([repository_root(), "clients", "node", "vectors.mjs"])
+    assert File.exists?(executor)
+
+    for generation <- [1, 2] do
+      assert_vector_clients_agree(node_executable, executor, generation)
+    end
+  end
+
+  defp assert_vector_clients_agree(node_executable, executor, generation) do
     vectors_path =
       Path.join([
         Application.app_dir(:loopex_protocol, "priv"),
         "vectors",
-        "loopex-experimental-1.json"
+        "loopex-experimental-#{generation}.json"
       ])
-
-    executor = Path.join([repository_root(), "clients", "node", "vectors.mjs"])
-    assert File.exists?(executor)
 
     {output, status} =
       System.cmd(node_executable, [executor, vectors_path], stderr_to_stdout: false)
@@ -186,7 +193,9 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     assert reported["format"] == "loopex.experimental.hex-vectors/1"
 
     results = reported["results"]
-    assert length(results) >= 30, "only #{length(results)} vectors were executed"
+
+    assert length(results) >= 30,
+           "generation #{generation} executed only #{length(results)} vectors"
 
     # The Elixir side reads the same file and decides the same question with its
     # own decoder. Neither client uses the other's: what makes this conformance
@@ -279,7 +288,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     # agreement with a contract it had not actually met.
 
     # The schema identity the vectors belong to.
-    assert Session.generation() == "loopex.session.v1-experimental"
+    assert Session.generation() == "loopex.experimental/1"
     assert String.match?(Session.schema_digest(), ~r/\A[0-9a-f]{64}\z/)
 
     # The schema digest names the contract, not the file: it covers the
@@ -288,7 +297,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     # here rather than recomputed, and a change to any of those five fails here
     # rather than silently renaming what clients are agreeing to.
     assert Session.schema_digest() ==
-             "3a1723e370bf392e2a6e9d2709c22735577d8cfbf946d63ac22e12a8fa1708f4"
+             "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
 
     # The schema and vector files an independent client reads are identified by
     # their own bytes, which are the digests the gate binds. A conformance
@@ -306,8 +315,10 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
       assert File.exists?(path), "the #{directory} file is missing"
 
-      measured = :sha256 |> :crypto.hash(File.read!(path)) |> Base.encode16(case: :lower)
+      bytes = File.read!(path)
+      measured = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
       assert measured == expected, "the #{directory} file is #{measured}"
+      assert JSON.decode!(bytes)["generation"] == Session.generation()
     end
 
     vectors_digest = "a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951"
@@ -348,7 +359,34 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   test "the schema digest is the value an independent implementation checks against" do
     assert Session.schema_digest() ==
-             "3a1723e370bf392e2a6e9d2709c22735577d8cfbf946d63ac22e12a8fa1708f4"
+             "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
+  end
+
+  test "generation-two schema and vector files have pinned identities" do
+    for {directory, expected} <- [
+          {"schema", "f30f9822f818417823f6fa917175314060fe5dcb0429f97280d0af2bc3372970"},
+          {"vectors", "d37e086e42b84b266bbd80633b5b1409a61373a047eded8bede70a595bb33beb"}
+        ] do
+      path =
+        Path.join([
+          Application.app_dir(:loopex_protocol, "priv"),
+          directory,
+          "loopex-experimental-2.json"
+        ])
+
+      bytes = File.read!(path)
+      measured = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+      assert measured == expected, "the generation-two #{directory} file is #{measured}"
+      assert JSON.decode!(bytes)["generation"] == V2.generation()
+    end
+
+    # The schema names its vectors file by digest; the two must agree.
+    priv = Application.app_dir(:loopex_protocol, "priv")
+    schema = JSON.decode!(File.read!(Path.join([priv, "schema", "loopex-experimental-2.json"])))
+    vectors = File.read!(Path.join([priv, "vectors", "loopex-experimental-2.json"]))
+
+    assert schema["vectors"]["sha256"] ==
+             :sha256 |> :crypto.hash(vectors) |> Base.encode16(case: :lower)
   end
 
   test "an encoded record is the exact bytes an independent implementation expects" do

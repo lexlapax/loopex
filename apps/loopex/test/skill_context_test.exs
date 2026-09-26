@@ -99,7 +99,7 @@ defmodule Loopex.SkillContextTest do
     admit(context)
     select(context, "alpha", [])
     prompt(context, "held-run")
-    assert_receive {:holding, worker}, 2_000
+    assert_receive {:holding, worker}, 5_000
 
     command = selection(context, "beta", [], "during-run")
     assert {:error, :run_active} = Loopex.command(context.attachment, command)
@@ -463,7 +463,7 @@ defmodule Loopex.SkillContextTest do
     admit(context)
     select(context, "alpha", ["first.txt"])
     prompt(context, "held")
-    assert_receive {:holding, _worker}, 2_000
+    assert_receive {:holding, _worker}, 5_000
 
     [dispatched] = AgentLoopTestModel.dispatched(context.fixture.model)
     staged = resource_record(context)

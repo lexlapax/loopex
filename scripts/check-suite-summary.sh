@@ -38,5 +38,22 @@ expect red '2 tests, 0 failures, 2 excluded'
 expect red '2 tests, 1 failure'
 expect red '3 tests, 0 failures, 1 invalid'
 expect red 'no result line at all'
+# The executed count a caller asserts on, read from both shapes.
+count() {
+  local want=$1 line=$2 tmp got
+  tmp=$(mktemp)
+  printf 'noise\n%s\ntrailer\n' "$line" > "$tmp"
+  got=$(bash "$judge" "$tmp" --count 2>/dev/null || echo red)
+  rm -f "$tmp"
+  if [ "$got" != "$want" ]; then
+    printf 'suite summary count failed: %s counted %s, expected %s\n' "$line" "$got" "$want"
+    status=1
+  fi
+}
+count 2 'Result: 2 passed, 40 excluded'
+count 2 '42 tests, 0 failures, 40 excluded'
+count 1 '1 test, 0 failures'
+count 5 '1 doctest, 4 tests, 0 failures'
+count red '1 test, 0 failures, 1 excluded'
 [ "$status" -eq 0 ] && printf 'suite summary check passed\n'
 exit "$status"

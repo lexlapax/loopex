@@ -32,10 +32,38 @@ defmodule Loopex.Trace do
 
   alias Loopex.Runtime.DiagnosticsAdmission
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
+  alias Loopex.Trace.Capability
+  alias Loopex.Trace.Capability.Handle
   alias Loopex.Trace.Config
   alias Loopex.Trace.Entry
 
   require Logger
+
+  @doc """
+  ## Concept
+
+  Excludes the calling process from every current and future trace session of
+  the runtime bound to the supplied capability.
+
+  ## Technical depth
+
+  The caller supplies the exact functions that can carry sensitive data. Core
+  clears those match specifications and the caller's process flags, then waits
+  for an OTP trace-delivery barrier before returning. The caller must complete
+  this token-free operation before receiving credential context.
+  """
+  @spec exclude_self(Handle.t(), keyword()) :: :ok | {:error, :unavailable}
+  def exclude_self(capability, options) when is_list(options) do
+    case options do
+      [functions: functions] when is_list(functions) ->
+        Capability.exclude(capability, self(), functions)
+
+      _invalid ->
+        {:error, :unavailable}
+    end
+  end
+
+  def exclude_self(_capability, _options), do: {:error, :unavailable}
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -92,19 +120,31 @@ defmodule Loopex.Trace do
 
   @impl GenServer
   def init(options) do
-    {:ok,
-     %{
-       root: Keyword.fetch!(options, :root),
-       token: Keyword.fetch!(options, :token),
-       trace_module: Keyword.get(options, :trace_module, :trace),
-       session: nil,
-       config: nil,
-       admission: nil,
-       calls: %{},
-       window: nil,
-       emitted: 0,
-       dropped: 0
-     }}
+    state =
+      %{
+        root: Keyword.fetch!(options, :root),
+        token: Keyword.fetch!(options, :token),
+        trace_module: Keyword.get(options, :trace_module, :trace),
+        incarnation: :crypto.strong_rand_bytes(16),
+        session_table: :ets.new(:loopex_trace_handles, [:set, :private]),
+        session_identity: nil,
+        config: nil,
+        admission: nil,
+        calls: %{},
+        call_monitors: %{},
+        monitor_to_call_pid: %{},
+        excluded_pids: MapSet.new(),
+        excluded_mfas: MapSet.new(),
+        exclusion_version: 0,
+        pending_deliveries: %{},
+        pending_operations: %{},
+        window: nil,
+        emitted: 0,
+        dropped: 0
+      }
+
+    Process.send_after(self(), :register_with_control, 0)
+    {:ok, state}
   end
 
   @impl GenServer
@@ -113,18 +153,7 @@ defmodule Loopex.Trace do
          :ok <- ensure_available(state),
          :ok <- ensure_idle(state),
          {:ok, validated} <- Config.validate(config),
-         {:ok, session} <- create_session(validated, state) do
-      started = %{
-        state
-        | session: session,
-          config: validated,
-          admission: admission(state, validated),
-          calls: %{},
-          window: nil,
-          emitted: 0,
-          dropped: 0
-      }
-
+         {:ok, started} <- create_session(validated, trace_snapshot(state), state) do
       {:reply, {:ok, session_description(validated)}, started}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -149,9 +178,119 @@ defmodule Loopex.Trace do
   end
 
   @impl GenServer
+  def handle_info(:register_with_control, state) do
+    case RuntimeSupervisor.control(state.root) do
+      {:ok, control} ->
+        send(control, {:trace_hello, self(), state.incarnation})
+        {:noreply, state}
+
+      {:error, _reason} ->
+        Process.send_after(self(), :register_with_control, 10)
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:trace_operation, control, incarnation, request_ref, operation, snapshot},
+        %{incarnation: incarnation} = state
+      ) do
+    case perform_operation(operation, snapshot, state) do
+      {:reply, result, metadata, next} ->
+        send_trace_reply(control, incarnation, request_ref, result, metadata, snapshot.version)
+        {:noreply, next}
+
+      {:pending, remaining, next} ->
+        pending = %{
+          control: control,
+          incarnation: incarnation,
+          request_ref: request_ref,
+          result: :ok,
+          metadata: session_metadata(next),
+          version: snapshot.version,
+          remaining: remaining
+        }
+
+        pending_deliveries =
+          Enum.reduce(remaining, next.pending_deliveries, fn reference, deliveries ->
+            case Map.fetch!(deliveries, reference) do
+              {:unbound_request, pid} -> Map.put(deliveries, reference, {request_ref, pid})
+              {_other_request, _pid} = bound -> Map.put(deliveries, reference, bound)
+            end
+          end)
+
+        {:noreply,
+         %{
+           next
+           | pending_deliveries: pending_deliveries,
+             pending_operations: Map.put(next.pending_operations, request_ref, pending)
+         }}
+    end
+  end
+
+  def handle_info(
+        {:trace_operation, _control, _incarnation, _request_ref, _operation, _snapshot},
+        state
+      ) do
+    {:noreply, state}
+  end
+
+  def handle_info({:trace_delivered, pid, reference}, state) do
+    case Map.pop(state.pending_deliveries, reference) do
+      {{request_ref, ^pid}, pending_deliveries} ->
+        state =
+          state
+          |> Map.put(:pending_deliveries, pending_deliveries)
+          |> purge_calls_for_pid(pid)
+
+        case Map.get(state.pending_operations, request_ref) do
+          %{remaining: remaining} = pending ->
+            remaining = MapSet.delete(remaining, reference)
+
+            if MapSet.size(remaining) == 0 do
+              finish_pending_operation(state, request_ref, pending)
+            else
+              pending = %{pending | remaining: remaining}
+
+              {:noreply,
+               %{
+                 state
+                 | pending_operations: Map.put(state.pending_operations, request_ref, pending)
+               }}
+            end
+
+          _absent ->
+            {:noreply, state}
+        end
+
+      {nil, _pending_deliveries} ->
+        {:noreply, state}
+    end
+  end
+
+  @impl GenServer
   def handle_info(message, state)
       when is_tuple(message) and elem(message, 0) in [:trace, :trace_ts] do
-    if state.session, do: {:noreply, observe(state, message)}, else: {:noreply, state}
+    if state.session_identity,
+      do: {:noreply, observe(state, message)},
+      else: {:noreply, state}
+  end
+
+  def handle_info({:DOWN, reference, :process, pid, _reason}, state) do
+    case Map.pop(state.monitor_to_call_pid, reference) do
+      {^pid, monitor_to_call_pid} ->
+        calls = Map.reject(state.calls, fn {{call_pid, _, _, _}, _started} -> call_pid == pid end)
+
+        {:noreply,
+         %{
+           state
+           | calls: calls,
+             call_monitors: Map.delete(state.call_monitors, pid),
+             monitor_to_call_pid: monitor_to_call_pid
+         }}
+
+      {nil, _unchanged} ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -160,6 +299,15 @@ defmodule Loopex.Trace do
   def terminate(_reason, state) do
     destroy_session(state)
     :ok
+  end
+
+  @impl GenServer
+  def format_status(status) do
+    status
+    |> Map.put(:state, :redacted_trace_state)
+    |> Map.put(:message, :redacted_trace_message)
+    |> Map.put(:reason, :redacted_trace_reason)
+    |> Map.put(:log, [])
   end
 
   # Concept: one observed trace message becomes at most one entry.
@@ -228,13 +376,68 @@ defmodule Loopex.Trace do
 
   defp rendered_return(_state, _value), do: nil
 
+  defp remember_call(%{config: %{level: :calls}} = state, _pid, _module, _function, _arity, _at),
+    do: state
+
   defp remember_call(state, pid, module, function, call_arity, timestamp) do
-    %{state | calls: Map.put(state.calls, {pid, module, function, call_arity}, timestamp)}
+    key = {pid, module, function, call_arity}
+    calls = Map.update(state.calls, key, [timestamp], &[timestamp | &1])
+
+    case Map.fetch(state.call_monitors, pid) do
+      {:ok, %{reference: reference, count: count}} ->
+        call_monitors =
+          Map.put(state.call_monitors, pid, %{reference: reference, count: count + 1})
+
+        %{state | calls: calls, call_monitors: call_monitors}
+
+      :error ->
+        reference = Process.monitor(pid)
+
+        %{
+          state
+          | calls: calls,
+            call_monitors: Map.put(state.call_monitors, pid, %{reference: reference, count: 1}),
+            monitor_to_call_pid: Map.put(state.monitor_to_call_pid, reference, pid)
+        }
+    end
   end
 
   defp take_call(state, pid, module, function, call_arity) do
-    {started, calls} = Map.pop(state.calls, {pid, module, function, call_arity})
-    {started, %{state | calls: calls}}
+    key = {pid, module, function, call_arity}
+
+    case Map.get(state.calls, key, []) do
+      [] ->
+        {nil, state}
+
+      [started] ->
+        {started, drop_call_monitor(%{state | calls: Map.delete(state.calls, key)}, pid)}
+
+      [started | rest] ->
+        {started, drop_call_monitor(%{state | calls: Map.put(state.calls, key, rest)}, pid)}
+    end
+  end
+
+  defp drop_call_monitor(state, pid) do
+    case Map.fetch(state.call_monitors, pid) do
+      {:ok, %{reference: reference, count: 1}} ->
+        Process.demonitor(reference, [:flush])
+
+        %{
+          state
+          | call_monitors: Map.delete(state.call_monitors, pid),
+            monitor_to_call_pid: Map.delete(state.monitor_to_call_pid, reference)
+        }
+
+      {:ok, %{reference: reference, count: count}} ->
+        %{
+          state
+          | call_monitors:
+              Map.put(state.call_monitors, pid, %{reference: reference, count: count - 1})
+        }
+
+      :error ->
+        state
+    end
   end
 
   # Concept: the ceilings are applied here, before a sink can see anything.
@@ -313,7 +516,7 @@ defmodule Loopex.Trace do
     if available?(state.trace_module), do: :ok, else: {:error, :trace_sessions_unavailable}
   end
 
-  defp ensure_idle(%{session: nil}), do: :ok
+  defp ensure_idle(%{session_identity: nil}), do: :ok
   defp ensure_idle(_state), do: {:error, :trace_session_already_running}
 
   defp session_description(config) do
@@ -322,40 +525,312 @@ defmodule Loopex.Trace do
 
   defp counters(state), do: %{emitted: state.emitted, dropped: state.dropped}
 
-  # Concept: the session observes named modules inside owned processes only.
+  defp perform_operation({:start, config}, snapshot, state) do
+    with :ok <- ensure_available(state),
+         :ok <- ensure_idle(state),
+         {:ok, started} <- create_session(config, snapshot, state) do
+      {:reply, {:ok, session_description(config)}, session_metadata(started), started}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, nil, state}
+    end
+  end
+
+  defp perform_operation(:stop, _snapshot, state) do
+    {:reply, :ok, nil, destroy_session(state)}
+  end
+
+  defp perform_operation(:status, _snapshot, %{config: nil} = state) do
+    {:reply, {:error, :no_trace_session}, nil, state}
+  end
+
+  defp perform_operation(:status, _snapshot, state) do
+    status = Map.merge(session_description(state.config), counters(state))
+    {:reply, {:ok, status}, session_metadata(state), state}
+  end
+
+  defp perform_operation({:reconcile, nil}, snapshot, state) do
+    state = state |> destroy_session() |> install_snapshot_without_session(snapshot)
+    {:reply, :ok, nil, state}
+  end
+
+  defp perform_operation({:reconcile, %{config: config}}, snapshot, state) do
+    state = destroy_session(state)
+
+    with :ok <- ensure_available(state),
+         {:ok, started} <- create_session(config, snapshot, state) do
+      {:reply, :ok, session_metadata(started), started}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, nil, state}
+    end
+  end
+
+  defp perform_operation(:sync, snapshot, state), do: synchronize_snapshot(snapshot, state)
+
+  defp perform_operation({:exclude, _pid}, snapshot, state),
+    do: synchronize_snapshot(snapshot, state)
+
+  defp synchronize_snapshot(snapshot, %{session_identity: nil} = state) do
+    state = install_snapshot_without_session(state, snapshot)
+    {:reply, :ok, session_metadata(state), state}
+  end
+
+  defp synchronize_snapshot(snapshot, state) do
+    with {:ok, session} <- session_handle(state) do
+      removed_mfas = MapSet.difference(state.excluded_mfas, snapshot.excluded_mfas)
+      added_mfas = MapSet.difference(snapshot.excluded_mfas, state.excluded_mfas)
+
+      Enum.each(removed_mfas, fn {module, _function, _arity} = mfa ->
+        if module in modules(state.config) do
+          trace_apply(state, :function, [session, mfa, match_spec(state.config.level), [:local]])
+        end
+      end)
+
+      Enum.each(added_mfas, fn mfa ->
+        trace_apply(state, :function, [session, mfa, false, [:local]])
+      end)
+
+      new_pids = MapSet.difference(snapshot.excluded_pids, state.excluded_pids)
+
+      {pending_deliveries, references, process_clear_ok?} =
+        Enum.reduce(
+          new_pids,
+          {state.pending_deliveries, MapSet.new(), true},
+          fn pid, {pending, refs, all_clear?} ->
+            cleared = safe_trace_apply(state, :process, [session, pid, false, [:all]])
+
+            case {cleared, safe_trace_apply(state, :delivered, [session, pid])} do
+              {1, reference} when is_reference(reference) ->
+                {
+                  Map.put(pending, reference, {:unbound_request, pid}),
+                  MapSet.put(refs, reference),
+                  all_clear?
+                }
+
+              _unavailable ->
+                {pending, refs, false}
+            end
+          end
+        )
+
+      next = %{
+        state
+        | excluded_pids: snapshot.excluded_pids,
+          excluded_mfas: snapshot.excluded_mfas,
+          exclusion_version: snapshot.version,
+          pending_deliveries: pending_deliveries
+      }
+
+      cond do
+        not process_clear_ok? ->
+          {:reply, {:error, :trace_sessions_unavailable}, nil, next}
+
+        MapSet.size(references) == 0 ->
+          {:reply, :ok, session_metadata(next), next}
+
+        true ->
+          {:pending, references, next}
+      end
+    else
+      :absent -> {:reply, {:error, :trace_sessions_unavailable}, nil, state}
+    end
+  end
+
+  defp install_snapshot_without_session(state, snapshot) do
+    %{
+      state
+      | excluded_pids: snapshot.excluded_pids,
+        excluded_mfas: snapshot.excluded_mfas,
+        exclusion_version: snapshot.version
+    }
+  end
+
+  defp finish_pending_operation(state, request_ref, pending) do
+    send_trace_reply(
+      pending.control,
+      pending.incarnation,
+      pending.request_ref,
+      pending.result,
+      pending.metadata,
+      pending.version
+    )
+
+    {:noreply, %{state | pending_operations: Map.delete(state.pending_operations, request_ref)}}
+  end
+
+  defp send_trace_reply(control, incarnation, request_ref, result, metadata, version) do
+    send(
+      control,
+      {:trace_reply, self(), incarnation, request_ref, result, metadata, version}
+    )
+  end
+
+  defp session_metadata(%{session_identity: nil}), do: nil
+
+  defp session_metadata(state) do
+    %{
+      identity: state.session_identity,
+      config: state.config,
+      selected_modules: modules(state.config)
+    }
+  end
+
+  defp trace_snapshot(state) do
+    %{
+      version: state.exclusion_version,
+      excluded_pids: state.excluded_pids,
+      excluded_mfas: state.excluded_mfas
+    }
+  end
+
+  # Concept: the session observes named modules inside owned processes only,
+  # including a named module the runtime has not yet called.
   #
-  # Technical depth: call patterns are installed per module, and trace flags per
-  # owned process with `set_on_spawn`, so a session coordinator started later is
-  # covered and a process outside this runtime's tree never is. A session that
-  # cannot install its patterns is destroyed rather than left half-armed.
-  defp create_session(config, state) do
-    session = :trace.session_create(:loopex_trace, self(), [])
+  # Technical depth: OTP installs call patterns only for loaded modules, so the
+  # session first loads each named module from the installed code path with
+  # `Code.ensure_loaded/1`; a name no installed module answers to still traces
+  # nothing. This loads existing code, never a new code generation. Patterns are
+  # installed per module, and trace flags per owned process with
+  # `set_on_spawn`, so a session coordinator started later is covered and a
+  # process outside this runtime's tree never is. A session that cannot install
+  # its patterns is destroyed rather than left half-armed.
+  defp create_session(config, snapshot, state) do
+    named = modules(config)
+    Enum.each(named, &Code.ensure_loaded/1)
+    Logger.debug("loopex trace session loaded its named modules")
+    session = trace_apply(state, :session_create, [:loopex_trace, self(), []])
+    identity = weak_identity(session)
+    true = :ets.insert(state.session_table, {:session, session})
 
     try do
-      Enum.each(modules(config), fn module ->
-        :trace.function(session, {module, :_, :_}, match_spec(config.level), [:local])
+      Enum.each(named, fn module ->
+        trace_apply(state, :function, [
+          session,
+          {module, :_, :_},
+          match_spec(config.level),
+          [:local]
+        ])
+      end)
+
+      Enum.each(snapshot.excluded_mfas, fn mfa ->
+        trace_apply(state, :function, [session, mfa, false, [:local]])
       end)
 
       state.root
       |> runtime_processes()
-      |> Enum.reject(&excluded?(&1, config, state))
+      |> Enum.reject(
+        &(excluded?(&1, config, state) or MapSet.member?(snapshot.excluded_pids, &1))
+      )
       |> Enum.each(fn pid ->
-        :trace.process(session, pid, true, process_flags(config.level, pid == state.root))
+        trace_apply(state, :process, [
+          session,
+          pid,
+          true,
+          process_flags(config.level, pid == state.root)
+        ])
       end)
 
-      {:ok, session}
+      {:ok,
+       %{
+         state
+         | session_identity: identity,
+           config: config,
+           admission: admission(state, config),
+           calls: %{},
+           call_monitors: %{},
+           monitor_to_call_pid: %{},
+           excluded_pids: snapshot.excluded_pids,
+           excluded_mfas: snapshot.excluded_mfas,
+           exclusion_version: snapshot.version,
+           window: nil,
+           emitted: 0,
+           dropped: 0
+       }}
     rescue
       error ->
-        _destroyed = :trace.session_destroy(session)
+        _destroyed = safe_trace_apply(state, :session_destroy, [session])
+        true = :ets.delete(state.session_table, :session)
         {:error, {:trace_session_refused, Exception.message(error)}}
     end
   end
 
-  defp destroy_session(%{session: nil} = state), do: state
+  defp destroy_session(%{session_identity: nil} = state), do: clear_pending_calls(state)
 
   defp destroy_session(state) do
-    _destroyed = :trace.session_destroy(state.session)
-    %{state | session: nil, config: nil, admission: nil, calls: %{}, window: nil, emitted: 0}
+    case session_handle(state) do
+      {:ok, session} -> _destroyed = safe_trace_apply(state, :session_destroy, [session])
+      :absent -> :ok
+    end
+
+    true = :ets.delete(state.session_table, :session)
+    state = clear_pending_calls(state)
+
+    %{
+      state
+      | session_identity: nil,
+        config: nil,
+        admission: nil,
+        excluded_pids: MapSet.new(),
+        excluded_mfas: MapSet.new(),
+        exclusion_version: 0,
+        pending_deliveries: %{},
+        pending_operations: %{},
+        window: nil,
+        emitted: 0
+    }
+  end
+
+  defp session_handle(state) do
+    case :ets.lookup(state.session_table, :session) do
+      [{:session, session}] -> {:ok, session}
+      [] -> :absent
+    end
+  end
+
+  defp weak_identity({_strong_reference, {name, id}})
+       when is_atom(name) and is_integer(id) and id >= 0,
+       do: {name, id}
+
+  defp weak_identity(_other), do: {:loopex_trace, :opaque}
+
+  defp trace_apply(state, operation, arguments) do
+    apply(state.trace_module, operation, arguments)
+  end
+
+  defp safe_trace_apply(state, operation, arguments) do
+    try do
+      trace_apply(state, operation, arguments)
+    rescue
+      _error -> :unavailable
+    catch
+      :exit, _reason -> :unavailable
+    end
+  end
+
+  defp clear_pending_calls(state) do
+    Enum.each(state.call_monitors, fn {_pid, %{reference: reference}} ->
+      Process.demonitor(reference, [:flush])
+    end)
+
+    %{state | calls: %{}, call_monitors: %{}, monitor_to_call_pid: %{}}
+  end
+
+  defp purge_calls_for_pid(state, pid) do
+    calls = Map.reject(state.calls, fn {{call_pid, _, _, _}, _started} -> call_pid == pid end)
+
+    case Map.pop(state.call_monitors, pid) do
+      {nil, _monitors} ->
+        %{state | calls: calls}
+
+      {%{reference: reference}, monitors} ->
+        Process.demonitor(reference, [:flush])
+
+        %{
+          state
+          | calls: calls,
+            call_monitors: monitors,
+            monitor_to_call_pid: Map.delete(state.monitor_to_call_pid, reference)
+        }
+    end
   end
 
   defp modules(config) do

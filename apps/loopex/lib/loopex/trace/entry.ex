@@ -205,6 +205,12 @@ defmodule Loopex.Trace.Entry do
   # the entry reports the shape the call actually had.
   defp redact_list([], _depth, _count, walked), do: Enum.reverse(walked)
 
+  defp redact_list([{key, value} | tail], depth, count, walked)
+       when count < 32 and (is_atom(key) or is_binary(key)) do
+    pair = {key, redact(value, depth + 1, key)}
+    redact_list(tail, depth, count + 1, [pair | walked])
+  end
+
   defp redact_list([head | tail], depth, count, walked) when count < 32 do
     redact_list(tail, depth, count + 1, [redact(head, depth + 1, nil) | walked])
   end

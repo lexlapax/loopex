@@ -3,53 +3,69 @@
 <a id="concept"></a>
 ## Concept
 
-M2 turns M1's fixed two-turn trace into a loop that finishes a coding task. A
-session runs as many model turns as the work needs; every request carries the
-whole conversation the session has committed — the operator's prompt, the
-model's own prior messages, and the real output of every tool it ran; deltas
-reach the operator while a reply is still incomplete; and a named set of tools
-acts on a real workspace under a host policy that can refuse.
+A session's loop runs a coding task to its end. It runs as many model turns as
+the work needs; every request carries the whole conversation the session has
+committed — the operator's prompt, the model's own prior messages, and the real
+output of every tool it ran; deltas reach the operator while a reply is still
+incomplete; and a named set of tools acts on a real workspace under a host
+policy that can refuse. This page is the reference for how that loop orders its
+work, what a tool is, and what bounds, streams, and artifacts promise. How a
+host starts a runtime and drives sessions is in
+[Runtime and embedding](runtime-and-embedding.md#concept).
 
-Three declared bounds stop a run the model will not stop itself: a maximum
-number of model turns, a cumulative token budget, and a wall-clock deadline.
-Reaching one is not a failure. A run ends `completed` when the model stops
-asking for tools, `bound_reached` when a declared bound decides, `cancelled`
-when an abort proved every owned operation terminal and every captured executor
-process group associated with those operations quiescent, and `outcome_unknown`
-when it could not. Nothing infers an outcome from
-silence.
+**Runs end truthfully.** Three declared bounds stop a run the model will not
+stop itself: a maximum number of model turns, a cumulative token budget, and a
+wall-clock deadline. Reaching one is not a failure. A run ends `completed` when
+the model stops asking for tools, `bound_reached` when a declared bound decides,
+`failed` when a model call or required context could not be admitted,
+`cancelled` when an abort proved every owned operation terminal and every
+captured executor process group quiescent, and `outcome_unknown` when it could
+not. Nothing infers an outcome from silence.
 
-Authority stays with the host. Every executor-backed call consults
+**Authority stays with the host.** Every executor-backed call consults
 `Loopex.Policy` — a read-only tool asks exactly as a process-spawning one does —
 and anything that is not a well-formed allow is a denial, including a policy
-that raises, blocks, or answers `defer`. A denial is a committed outcome the
-model is told about and is never retried. A runtime that has any tool active and
-no policy configured refuses to start.
+that raises or blocks. A policy may instead defer to a durable question the
+operator answers; the answer is evidence for a new decision, never a grant. A
+denial is a committed outcome the model is told about and is never retried. A
+runtime that has any tool active and no policy configured refuses to start.
 
-A tool is bounded plain data, not a function or a module: an identity, the bytes
-a model is shown, and the declared class of effect and cost that running it may
-incur. Its identity is the generation triple `{tool_id, tool_version,
-definition_digest}`, and a staged request carries the complete definition
-records it used, so what a model was shown stays reconstructible from the
-journal after the registry that held them has changed. Registration is
-append-only and scoped to one runtime; being registered and being offered to a
-model are separate facts.
+**A tool is bounded plain data**, not a function or a module: an identity, the
+bytes a model is shown, and the declared class of effect and cost that running
+it may incur. Its identity is the generation triple `{tool_id, tool_version,
+definition_digest}`, and a staged request carries the complete definitions it
+used, so what a model was shown stays reconstructible from the journal after
+the registry that held them has changed. Registration is append-only and scoped
+to one runtime; being registered and being offered to a model are separate
+facts. The reference distribution ships four coding tools — read, write, edit,
+and a shell tool — under the reserved `loopex.` namespace.
+
+**Context is admitted, not assumed.** Required context — the system block,
+history, steers, and tool definitions — is measured before any optional content
+is read, and a request that would exceed the committed context budget or the
+Store's record ceiling is refused before a provider sees it. Optional project
+content (a root `AGENTS.md` the operator trusted, and selected project skills)
+is added only where it fits whole, never trimmed, and changes no tool
+definition, policy result, or grant.
+
+**Output is bounded and nothing is silently lost.** A tool's model-facing result
+is bounded; output beyond the bound is retained as an artifact an operator can
+read back, and the result names it. Progress streams while work runs but is
+never durable truth; a consumer that misses a stream's closing item falls back
+to the durable record.
 
 The reference local executor requires `/bin/bash` for its internal supervision
-scripts, while raw tool commands stay on `/bin/sh` and argv calls remain literal.
-This prerequisite belongs to the concrete adapter, not Core or custom executors;
-see the [operator setup boundary](../operator/tools-and-policy.md#operator-local-supervision-shell).
+scripts, while raw tool commands stay on `/bin/sh` and argv calls remain
+literal. This prerequisite belongs to the concrete adapter, not Core or custom
+executors; see the
+[operator setup boundary](../operator/tools-and-policy.md#operator-local-supervision-shell).
 
 None of these surfaces is frozen or labelled:
 [Compatibility surfaces](compatibility-surfaces.md#concept).
 
-M3 lets an operator add trusted project skills to that input. Installation,
-admission and selection are separate steps. The run sees a bounded catalog and
-only the selected instructions and supporting files; those bytes change no tool
-definition, policy result or grant. Required context is checked before optional
-content is read.
-
-Technical depth: [Progressive skill context](#technical-loop-skills).
+Technical depth: [Progressive skill context](#technical-loop-skills),
+[project resources](#technical-loop-project-resources), and
+[commit ordering for one turn](#technical-loop-turn-order).
 
 Operator workflow: [Coding sessions](../operator/coding-sessions.md#concept).
 Tool reach and policy selection:
@@ -153,7 +169,7 @@ attributes), and `Loopex.Store.Local.Artifacts` (content addressing). The
 module's own documentation names four contracts that depend on one answer;
 `Loopex.Executor` is the fourth by technique rather than by call — it computes
 its job bytes as `:erlang.term_to_binary(ordered, [:deterministic])` over its own
-`job_fields/0` projection, unchanged from M1, and digests them with `:crypto`
+`job_fields/0` projection, and digests them with `:crypto`
 directly.
 
 ### The Runtime-Scoped Tool Registry
@@ -180,7 +196,7 @@ A reserved identifier enters only through the runtime's `:tools` start option,
 which is the reference distribution declaring its own tools; the start option is
 the boundary, so no trust flag is needed on the call. An invalid or conflicting
 definition in that list refuses runtime start rather than leaving a runtime
-half-composed. There is no unregistration and no replacement in M2.
+half-composed. There is no unregistration and no replacement.
 
 `resolve/2` returns the highest version by numeric component order, so `0.10.0`
 resolves above `0.9.0`; `resolve/3` distinguishes `:unknown_tool` from
@@ -193,8 +209,8 @@ legitimately claim one model-visible name as long as they are never
 simultaneously active. `compose_active_set/2` is where the rule is enforced — it
 resolves each selection, builds `name -> generation`, and refuses the whole
 composition when a name is claimed twice, naming both claiming generations, with
-no precedence and no disambiguation suffix. In the M2 runtime that function is
-exercised by its own conformance corpus; the session's active set is composed at
+no precedence and no disambiguation suffix. That function is exercised by its
+own conformance corpus; the session's active set is composed at
 runtime start by `Loopex.Runtime.Control`, which filters the configured `:tools`
 by the `:active_tools` selections and hands the coordinator the resulting
 definition records. Either way the mapping is fixed for the session's lifetime,
@@ -245,7 +261,7 @@ representation self-consistently is refused.
 `:sampling` and `:deadline` are required and neither has a default here: a
 request without a declared `max_tokens` is refused rather than truncated at
 dispatch by a number no record names. `continuation` is structurally present,
-always `nil`, and never read, written, or compared in M2; it exists so a later
+always `nil`, and never read, written, or compared; it exists so a later
 adapter-private continuation handle can land without changing what the
 canonicalization covers. The declared limits are a model identifier of 1 to 512
 bytes, 1 to 1024 messages, at most 256 tool definitions, and `max_tokens` in
@@ -260,55 +276,26 @@ rule, and the two were deliberately separated:
 | Digest name | `staged_request_digest` | `canonical_request_digest` |
 | Covers attempt identity | no | yes, `operation_id` and `attempt` are job fields |
 | A retry | opens a new durable attempt over the same staged bytes and digest only after exact pretransport refusal | canonicalizes its own attempt and therefore computes a new digest |
-| Attempt limit in M2 | attempt one, then attempt two only after attempt one settles `not_dispatched` | governed by the effect's idempotency class and reconciliation |
+| Attempt limit | attempt one, then attempt two only after attempt one settles `not_dispatched` | governed by the effect's idempotency class and reconciliation |
 
-One identifier carrying both rules carried two opposite retry meanings, which is
-why the model side was renamed and the bytes kept their name.
+One name for both rules would carry two opposite retry meanings, which is why
+they have two names.
 
 The staged digest is identity, not dispatch authority. First staging commits
 `model_request_committed` and `model_attempt_opened_v1` together; a request row
-without its consecutive open row exposes no dispatchable request. After the
-open fact is durable, Runtime Control validates the complete current owner,
+without its consecutive open row exposes no dispatchable request. After the open
+fact is durable, Runtime Control validates the complete current owner,
 operation, attempt, digest, journal position, worker, permit reference, and
-deadline, samples the deadline again immediately before sending one fresh permit
-directly to that worker, and spends the attempt with that send. The receiving
-worker compares the same committed deadline immediately after receiving the
-permit and before entering the adapter. The send remains the
-provider-dispatch linearization point: a permit that arrives late is retained as
-possibly dispatched and is never retried, even though the receiver makes no
-provider call. An unresolved spent identity survives owner and worker
-replacement. Control retires it after its matching committed settlement closes
-the attempt, with a consecutive matching terminal row when required. Current
-ownership, journal position and exact attempt-open binding remain mandatory even
-after the spent entry is gone, so a timeout, lost reply, dead worker or successor
-cannot mint another call for it. Missing settlement evidence retains the spend;
-a run terminal alone leaves it retained until session release. This is the
-in-memory change accepted in
-[ADR 0027](../adr/0027-provider-permit-retirement.md#concept).
-
-The Store read that rebuilds the committed binding is owned by a guardian that
-monitors Runtime Control. A timeout or Control death kills and awaits the exact
-reader, and its successful result is forwarded only after that reader exits. A
-model result likewise retains its worker-provenance wrapper through admission,
-so adapter data cannot impersonate the receiver's private deadline result.
-
-The coordinator also starts and retains a dormant provider lifetime guard under
-the owner generation's private supervisor before Control is asked to authorize
-the attempt. The guard binds the exact permit worker and starts no adapter work
-until that worker receives its permit and asks the guard to create a linked
-callback. Catchable failures normalize inside that callback;
-the trapping guard converts an asynchronous linked exit into the same fixed
-private result. It waits for a successful callback to exit before forwarding the
-result and cannot finish while the callback lives. An adapter can register a
-private resource guardian before it releases provider work; the permit worker
-retains the same stop handle independently. The ReqLLM guardian owns the linked
-and spawned transport tree through per-process trace-delivery barriers, including
-the externally supervised HTTP task and any private descendants, and suppresses
-direct provider IO. It does not acknowledge cleanup until every retained process
-is down. Every terminal path stops and awaits the retained guard and resource;
-on abrupt owner loss, the generation barrier cannot fall until its private
-supervisor has proved both down. Neither worker nor coordinator loss therefore
-leaves detached provider work, and no provider value can forge `not_dispatched`.
+deadline, samples the deadline again, and sends one fresh permit directly to the
+waiting worker; that send spends the attempt and is the provider-dispatch
+linearization point. The worker checks the same committed deadline again before
+entering the adapter, and a permit that arrives late is retained as possibly
+dispatched and never retried. Control keeps the spent identity until the
+matching settlement closes the attempt
+([ADR 0027](../adr/0027-provider-permit-retirement.md#concept)). The permit, the
+guarded binding read, and the lifetime guard that owns every process an adapter
+starts are described once, in
+[the architecture technical depth](architecture-technical.md#technical-arch-session-owner).
 
 A conforming adapter may report `not_dispatched` only before it invokes or
 hands bytes to provider transport. The coordinator proves the same fact for one
@@ -327,15 +314,11 @@ effect that reconciliation can complete safely. A successful reply carries a
 closed provider-neutral identity, normalized usage, tool calls, stream facts,
 response identifier, and the exact staged digest; raw provider structures and
 reasons cross no Core, Store, public, progress, diagnostic, or fixture plane.
-The reference adapter isolates provider dependencies and credential-bearing work
-in one host-owned companion BEAM per invocation, as defined by
-[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept). Its protected entry
-suppresses that child's Logger and direct IO before starting ReqLLM; the parent
-installs no credential registry, Logger filter, or shared group-leader change.
-An independent process guardian owns the worker group through result retention
-and cleanup. The private channel carries bounded plain data, not provider
-exceptions or runtime terms. Missing explicit launch configuration refuses before
-dispatch; it never falls back to executing ReqLLM in the embedding VM.
+The reference adapter runs provider work in a host-owned companion process per
+invocation under
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept); its launch
+and credential custody are in
+[the architecture technical depth](architecture-technical.md#technical-arch-brains-hands).
 
 A settlement is four closed enumerations and one result. `transport` is
 `not_dispatched` or `dispatched_or_unknown`; `termination` is absent, `abort`,
@@ -426,13 +409,10 @@ the transaction it is holding. Once fixed, the instant is read back from
 committed history, so a recovering owner re-presents the deadline the run
 actually had instead of being handed back the downtime it slept through.
 `decide/2` therefore reads `:deadline`, the instant, while `declare/1` validates
-`:deadline_ms`, the duration. ADR 0010 asks prompt admission to carry that
-instant and ADR 0011 asks promotion to carry it; ADR 0013 replaces both timing
-clauses with the first-staged-request boundary. The deviation and its bounded
-consequence are recorded in
-[M2 recorded limitations](../evidence/M2-recorded-limitations.md).
+`:deadline_ms`, the duration. The first-staged-request boundary is fixed by
+[ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept).
 
-Reaching the deadline is not a promised clean stop. `settle_turn/2` commits
+Reaching the deadline is not a promised clean stop. The turn settlement commits
 `bound_reached(:deadline)` only when the run has no committed effect intent
 without a validated fact; otherwise the run ends `outcome_unknown` carrying its
 reconciliation reference. A tool call whose intent would commit after the
@@ -512,11 +492,14 @@ domain; no comparison between two domains is defined.
 Streaming is one extra argument on the same call, not a second code path. An
 adapter or executor that emits nothing is conformant: it accepts the progress
 function, returns the same result, and reports a count of zero.
-`Loopex.Executor.Local` is currently such an implementation — it accepts the
-progress function, never calls it, and reports `progress_count: 0`, so the
-coordinator closes that operation's domain with a truthful count. The runtime
-path that carries executor progress to a terminal before the tool finishes is
-proved with a fixture executor that does emit.
+`Loopex.Executor.Local` streams the shell tool's output: each collected chunk of
+the command's output, whose standard error is merged into standard output,
+becomes one progress event carrying `progress_sequence`, `stream: "stdout"`,
+`byte_offset`, and at most 65,536 bytes of `chunk`, and the receipt's
+`progress_count` is exactly the number of events it emitted. The three
+filesystem tools emit none and report zero. Either way the coordinator closes
+the operation's domain with a truthful count, and the item reaches a protocol
+client as `tool_progress`.
 
 ### The Host Policy Port
 
@@ -543,19 +526,17 @@ That table is the one-shot projection, and it is still exact for `decide/2`: a
 caller that asks for a single verdict and has nowhere to put a question reads a
 `defer` as `{:deny, :interaction_unsupported}`.
 
-The round trip that a `defer` implies now exists beside it. M4 adds durable
-interactions under
+The session coordinator does not use that projection. It calls the
+interaction-aware `Loopex.Policy.evaluate/2`, which admits a validated deferred
+question under
 [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept):
-a separately named interaction-aware evaluator, `Loopex.Policy.evaluate/2`,
-admits a validated deferred question, and the session coordinator commits it as
-durable session state, suspends the tool call without minting a grant or
-committing an effect intent, and re-enters the same host callback once an answer
-commits. The callback itself did not change — there is no second callback and no
-new arity, so a host that already returned `{:defer, request}` needs no edit —
-and a defer outside the admitted question family is `policy_unavailable` rather
-than a malformed interaction. The app server uses that path, which is what lets
-an operator answer a policy question from outside the runtime and after a
-restart.
+the coordinator commits the question as durable session state, suspends the
+tool call without minting a grant or committing an effect intent, and calls the
+same host callback again once an answer commits. There is one callback and one
+arity, so a host returns `{:defer, request}` from the same `decide/1`, and a
+defer outside the admitted question family is `policy_unavailable` rather than
+a malformed interaction. This is what lets an operator answer a policy question
+from outside the runtime and after a restart.
 
 The lifecycle, the admitted question family and its bounds, the answer command,
 the resolution rules and the restart behavior are in
@@ -591,6 +572,24 @@ answer, and the defensive case of a legacy module missing the required callback
 to unconfirmed cleanup. Retained `cancel/3` keeps its fixed defensive bound for
 direct compatibility callers and is never selected by production coordination.
 
+`Loopex.Executor.Local.cancel/2` answers `{:ok, :cleaned}` only after the job's
+receipt with `cleanup_confirmation: :confirmed` is durably published and its
+open entry removed; every other ending answers `{:ok, :unconfirmed}`. The rule
+is one-directional: an answer weaker than the receipt is allowed, one stronger
+is impossible. The launch owner still acts on a cancellation — TERM, KILL, or
+refusing a job before it begins, all inside the job's one cleanup episode —
+but never answers; it hands each request to the execute caller, which answers
+it exactly once after `settle_receipt`, and a caller or owner that dies first
+leaves the answer `unconfirmed`. A pre-run cancellation of an admitted job is
+the same case: it answers `cleaned` only once the refusal is durable, as ADR
+0016's clauses 5 and 7 require. A requester waits until its episode instant
+plus the reply margin `min(receipt_retention_ms + 1_000, executor_observe_ms -
+grace - 250)`, both from `Loopex.Executor.cancellation_bounds/1` for the job's
+period, where `receipt_retention_ms = ceil(grace / 4)` and `executor_observe_ms
+= max(10_000, grace + 2_000)`. Above a 7,000 ms period the second term binds,
+so a settlement slower than the margin is answered `unconfirmed` although its
+receipt may be `confirmed`.
+
 ### Tool Output, Spill, and Artifacts
 
 `Loopex.ArtifactStore` is both the Core-owned caller facade and the adapter
@@ -620,7 +619,7 @@ may leave an unreachable object orphan, never a reference whose required use is
 missing. `stat/2` returns only the object triple, `fetch/2` accepts that object
 truth and verifies exact bytes, and `describe/2` resolves the use locator. The
 declared object ceiling is 64 MiB, the exact canonical use ceiling is 131,072
-bytes, and nothing is collected automatically in M2.
+bytes, and nothing is collected automatically.
 
 Core computes digest and size from the exact input, validates every adapter
 answer, reconstructs and checks the complete use, and immediately resolves the
@@ -635,15 +634,20 @@ collects at most the tool's declared 8 MiB artifact ceiling and drops the rest,
 and hands what it collected to the Core facade its host composed, with the exact
 validated session, run, operation, attempt, and tool-call identities. A
 truncated result carries `ArtifactStore.truncation_notice/3` naming the compact
-reference, and the receipt carries that reference in `artifacts`. The reference
+reference, and the receipt carries that reference in `artifacts`. The artifact
+holds exactly the bytes the command produced. The executor's own notes, such as
+a nonzero exit status or a process group that could not be shown to hold only
+the command at exit, appear only in the model-facing result beside the notice;
+they are never retained, and the notice's "N of M bytes shown" counts only the
+command's bytes. The reference
 reaches the public plane on `tool.finished`; the terminal prints it; and
 `loopex artifact <reference>` extracts its object locator and reads exact bytes
 back through the same Core facade.
 
 Two paths do not spill, and both keep the marker instead. A host that composed no
 artifact store — the executor's `:artifacts` option is optional — and a store
-that refuses the write both fall back to `truncation_marker/2`, which names no
-reference. **In both cases the bytes beyond the bound are gone**, not merely
+that refuses the write both fall back to a plain truncation marker, which names
+no reference. **In both cases the bytes beyond the bound are gone**, not merely
 unretrievable: nothing else holds them. The receipt then records an empty
 artifact list, which is true rather than a silent absence. The shipped
 composition always supplies a store, so an operator using `loopex` does not take
@@ -696,8 +700,8 @@ vector, passed through without a shell, or an explicit raw `command`, which asks
 for a shell and gets one; collapsing the two would surprise a caller who supplied
 arguments safely. A job dispatched past its effective deadline is refused before it begins rather
 than interrupted while running: the three filesystem tools do not use deadline
-expiry as a mid-call verdict, so `run_coding_tool/5` compares the instant against
-the clock and returns `the effective deadline passed before this tool began`. No
+expiry as a mid-call verdict, so the executor compares the instant against the
+clock before starting one and returns `the effective deadline passed before this tool began`. No
 process is terminated because none was started. `bash` is the tool whose deadline
 governs a running child, and its expiry enters the termination and
 cleanup-confirmation sequence. Independently, loss of the Local instance that
@@ -710,10 +714,8 @@ guard. Both internal scripts use absolute `/bin/bash`, independently of the raw
 command's `/bin/sh` interpreter. The carrier preserves its control input before
 asynchronous guard launch and closes the redundant descriptor in both processes;
 the model command receives neither that input nor the private status descriptor.
-There is no interpreter-selection option or fallback. The
-[implementation disposition](agent-context-map.md#disposition-local-executor-bash-2026-09-07)
-authorizes this scoped repair; [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
-is Accepted through its exact-pair disposition.
+There is no interpreter-selection option or fallback; the supervision shell is
+fixed by [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept).
 In command mode, the carrier leads the Port-created process group and the
 guard, status wrapper, command, and remaining descendants share that group. The
 guard receives private control and signals the group it is still a member of, so
@@ -785,25 +787,15 @@ context overflow commits `context_admission_refused_v1` and the run's `failed`
 terminal in one transaction, opens no model attempt, and publishes exactly five
 members: `category`, `retryable: false`, `dimension`, `observed`, and `limit`.
 
-M3's [required-only preflight](#technical-loop-skills) measures required context
-before optional content is read. M2 originally resolved optional content before
-the required-only fallback described below; its retained receipts remain valid.
-
-In that M2 fallback, every retained refusal was decided on and built from a
-required-only candidate. The compact record's four counts — system, session,
-steer, tool — had no member for an optional project descriptor, so a dimension no
-withholding could cure (the strict system-class ceiling, record depth, record
-cardinality) was re-decided over the required-only set before anything was
-retained. Those counts partitioned the exact descriptor sequence behind
-`ordered_descriptor_digest`; `not_evaluated_required_failure` described a project
-whose budget contribution was never reached. A required-only candidate admitted
-at that point was discarded rather than staged, because its receipt still
-claimed the project resolution that produced the removed optional block.
-Optional content could not be the sole cause of a structural refusal in M2, so
-that state indicated a broken invariant and made the session unavailable. A
-required-only candidate whose counts and sequence disagreed was likewise an
-invariant failure. The staged source list named the blocks the request actually
-carried. The earlier ordering gap is retained in
+Required context is measured before optional content is read, as
+[progressive skill context](#technical-loop-skills) describes. A refusal is
+decided on and built from the required-only candidate: the compact record's four
+counts — system, session, steer, tool — partition the exact descriptor sequence
+behind `ordered_descriptor_digest`, and a dimension no withholding could cure
+(the strict system-class ceiling, record depth, record cardinality) is decided
+over the required-only set before anything is retained. Receipts written under
+the earlier ordering, which resolved optional content before a required-only
+fallback, remain valid for replay; that ordering is recorded in
 [M2 recorded limitations](../evidence/M2-recorded-limitations.md#adr-0017-step-five).
 
 The candidate record's own byte cost is a fixed point, and one that does not
@@ -830,7 +822,10 @@ and the trust class that class fixes:
 three provenance buckets, zero-filled, summing to the outer total, so what an
 operator was charged for is attributable by origin and not only in aggregate.
 
+<a id="technical-loop-project-resources"></a>
 ### Project Resources
+
+Concept: [Agent loop and tools](#concept).
 
 The root project-resource class is shallow and content-independent: it names exactly
 one resource, `AGENTS.md` at the root of the canonical workspace. There is no
@@ -906,8 +901,8 @@ does not approach those structural ceilings.
 
 The resource header has at most 37 rows and 8 KiB metadata. Its identities and
 selection digest bind the frozen run selection; source descriptors bind each
-actual staged body. The new model-request record uses receipt revision 3 and
-adds the `resource_pack` totals bucket; existing M2 receipt validation is unchanged.
+actual staged body. The resource-aware model-request record uses receipt revision 3 and
+adds the `resource_pack` totals bucket; earlier receipt revisions validate as before.
 If the metadata cannot fit, resources are withheld before
 content resolution. If any retained body is missing or inconsistent, the entire
 resource class is withheld, including earlier provisional blocks. Root project
@@ -919,7 +914,10 @@ selection and actual message bytes, checks complete ordered rows and budgets,
 and recomputes digests and receipt totals. It neither reads today's snapshot nor
 treats retained staged bytes as permission to redispatch an ambiguous attempt.
 
+<a id="technical-loop-turn-order"></a>
 ### Commit Ordering for One Turn
+
+Concept: [Agent loop and tools](#concept).
 
 The coordinator is the sole serial writer. Its pending-work stages are committed
 facts, so a successor resumes from the journal rather than from anyone's memory:
@@ -973,37 +971,21 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    request or commit the run's terminal record and one `run.finished` event.
 
 Public events are projections of committed facts, and delivery is fenced by
-resolution as well as by commit. An attached reader is handed outbox rows only
-up to the position Runtime Control has recorded as resolved, so a row that is
-durably linearized while its owner still holds an unresolved transaction
-publishes nothing until re-presentation settles it. An attaching reader's own
-snapshot scan is bounded by the same watermark, because it reaches the outbox by
-a second path: an unfenced scan would anchor on the durable tail, answer with
-truth every already-attached consumer is withheld from, and set `seen` past rows
-the event plane then never delivers. The watermark is pushed to
-the dispatcher rather than pulled from it, is applied to the read rather than to
-the queue, and is dropped when this runtime stops owning the session — a
-dormant session's history therefore reads and scans without a fence. Progress items and
-diagnostics are transient, are not fenced, and are never durable truth.
+resolution as well as by commit: an attached reader is handed outbox rows only
+up to the position Runtime Control has recorded as resolved, and an attaching
+reader's snapshot scan is bounded by the same position. The fence is described
+in [the architecture technical depth](architecture-technical.md#technical-arch-truth-planes).
+Progress items and diagnostics are transient, are not fenced, and are never
+durable truth.
 
-### Verification Entry Points
+### Verification
 
-- `mix test` — one application's credential-free suite; the test helpers
-  exclude the `real_provider` and `long_bound` tags.
-- `mix loopex.deps_budget` — ten-application inventory, roles including
-  `:composition`, the admitted external dependencies, and direction.
-- `mix loopex.core_only` — core has no adapter resolution or environment-held
-  runtime state.
-- `mix loopex.docs_check` — compiled public documentation orders Concept before
-  Technical depth.
-- `mix loopex.status` — governance rows, indexes, links, and bound artifacts.
-- `bash scripts/check.sh` — the fast check, which runs the credential-free
-  suite one application per VM with the structural and documentation checks
-  above.
-- `bash scripts/check-release.sh` — the slow check: the real-provider
-  workflows, the independent Node client, the fresh-source archive build, and
-  the `long_bound` proofs. It reads the provider credential from
-  `LOOPEX_PROVIDER_API_KEY`; never put it in argv or in retained evidence.
-
-Retained evidence from the milestones that proved these guarantees is indexed
-in [docs/evidence](../evidence/README.md).
+The loop's guarantees are held by the `apps/loopex/test/` suites named for them
+— `agent_loop_test.exs`, `bounds_test.exs`, `conversation_test.exs`,
+`tool_registry_test.exs`, `context_admission_test.exs`, `skill_context_test.exs`,
+`provider_attempt_protocol_test.exs`, and `cancellation_test.exs` among them —
+and by the executor's own suites under `apps/loopex_executor_local/test/`. The
+commands that run them are in
+[the contributing track](getting-started-technical.md#technical-getting-started-checks);
+retained evidence from the milestones that proved these guarantees is indexed in
+[docs/evidence](../evidence/README.md).

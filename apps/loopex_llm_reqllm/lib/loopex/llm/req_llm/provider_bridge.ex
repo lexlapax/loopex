@@ -1,9 +1,22 @@
 defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   @moduledoc false
 
+  require Logger
+
   alias Loopex.Model
   alias Loopex.Runtime.ProviderLifetime
-  alias Loopex.LLM.ReqLLM.{ProviderCodec, ProviderConfiguration, ProviderLauncher}
+
+  alias Loopex.LLM.ReqLLM.{
+    CredentialCustody,
+    CredentialRegistry,
+    ProviderCodec,
+    ProviderConfiguration,
+    ProviderLauncher
+  }
+
+  alias Loopex.LLM.ReqLLM.TraceCapability.Direct
+
+  alias Loopex.Trace
 
   @not_dispatched {:error, {:not_dispatched, "model_call_failed"}}
   @unknown {:error, {:dispatched_or_unknown, "model_call_failed"}}
@@ -22,22 +35,598 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     with :ok <- Model.validate_request(request),
          true <- request.deadline > System.system_time(:millisecond),
          :ok <- ProviderConfiguration.verify_artifact(configuration) do
-      caller = self()
-      reference = make_ref()
-      stop_reference = make_ref()
-      progress_slot = :atomics.new(1, [])
-
-      {guardian, monitor} =
-        spawn_monitor(fn -> initialize(caller, reference, stop_reference, progress_slot) end)
-
-      lifetime = ProviderLifetime.register(guardian, stop_reference)
-      send(guardian, {:initialize, reference, lifetime, request, configuration})
-      await_result(guardian, monitor, reference, progress_slot, progress)
+      case credential_mode(configuration) do
+        :managed -> complete_managed(request, configuration, progress)
+        :direct -> complete_direct(request, configuration, progress)
+        :missing -> @not_dispatched
+      end
     else
       _refused -> @not_dispatched
     end
   catch
     _kind, _reason -> @unknown
+  end
+
+  defp complete_direct(request, configuration, progress) do
+    case ProviderLifetime.starter() do
+      :unmanaged ->
+        caller = self()
+        reference = make_ref()
+        stop_reference = make_ref()
+        progress_slot = :atomics.new(1, [])
+
+        {guardian, monitor} =
+          spawn_monitor(fn -> initialize(caller, reference, stop_reference, progress_slot) end)
+
+        send(guardian, {:initialize, reference, :unmanaged, request, configuration})
+        await_result(guardian, monitor, reference, progress_slot, progress)
+
+      {:managed, _starter} ->
+        @not_dispatched
+    end
+  end
+
+  defp complete_managed(request, configuration, progress) do
+    with {:managed, starter} <- ProviderLifetime.starter() do
+      caller = self()
+      guardian_ref = make_ref()
+      sender_ref = make_ref()
+      stop_reference = make_ref()
+      progress_slot = :atomics.new(1, [])
+      deadline = invocation_deadline(request.deadline, System.time_offset(:native))
+
+      case start_managed_child(:guardian, guardian_ref, starter, fn ->
+             managed_guardian({guardian_ref, caller, stop_reference})
+           end) do
+        {:ok, guardian, guardian_monitor} ->
+          complete_with_managed_guardian(
+            guardian,
+            guardian_monitor,
+            guardian_ref,
+            sender_ref,
+            stop_reference,
+            starter,
+            caller,
+            request,
+            configuration,
+            progress_slot,
+            deadline,
+            progress
+          )
+
+        {:error, :unavailable} ->
+          @not_dispatched
+      end
+    else
+      _unmanaged -> @not_dispatched
+    end
+  end
+
+  defp complete_with_managed_guardian(
+         guardian,
+         guardian_monitor,
+         guardian_ref,
+         sender_ref,
+         stop_reference,
+         starter,
+         caller,
+         request,
+         configuration,
+         progress_slot,
+         deadline,
+         progress
+       ) do
+    case register_managed_guardian(guardian, stop_reference) do
+      {:managed, retainer, grace}
+      when is_pid(retainer) and is_integer(grace) and grace > 0 ->
+        case authorize_guardian(
+               guardian,
+               guardian_monitor,
+               guardian_ref,
+               caller,
+               retainer,
+               grace,
+               sender_ref
+             ) do
+          :ok ->
+            complete_with_managed_sender(
+              guardian,
+              guardian_monitor,
+              guardian_ref,
+              sender_ref,
+              stop_reference,
+              starter,
+              caller,
+              request,
+              configuration,
+              progress_slot,
+              deadline,
+              progress
+            )
+
+          {:error, :unavailable} ->
+            cleanup_managed_child(guardian, guardian_monitor)
+            @not_dispatched
+        end
+
+      _unavailable ->
+        cleanup_managed_child(guardian, guardian_monitor)
+        @not_dispatched
+    end
+  end
+
+  defp complete_with_managed_sender(
+         guardian,
+         guardian_monitor,
+         guardian_ref,
+         sender_ref,
+         stop_reference,
+         starter,
+         caller,
+         request,
+         configuration,
+         progress_slot,
+         deadline,
+         progress
+       ) do
+    result =
+      with {:ok, sender, sender_monitor} <-
+             start_managed_child(:sender, sender_ref, starter, fn ->
+               credential_sender(
+                 sender_ref,
+                 caller,
+                 guardian,
+                 configuration.tracing_capability
+               )
+             end),
+           :ok <- adopt_sender(sender, sender_monitor, sender_ref, caller, guardian) do
+        result_monitor = Process.monitor(guardian)
+
+        send(
+          guardian,
+          {:initialize, guardian_ref, caller, request, configuration, progress_slot, deadline}
+        )
+
+        await_result(guardian, result_monitor, guardian_ref, progress_slot, progress)
+      else
+        _unavailable -> :setup_failed
+      end
+
+    case result do
+      :setup_failed ->
+        Process.demonitor(guardian_monitor, [:flush])
+        stop_managed_guardian(guardian, Process.monitor(guardian), stop_reference)
+        @not_dispatched
+
+      provider_result ->
+        provider_result
+    end
+  end
+
+  defp register_managed_guardian(guardian, stop_reference) do
+    ProviderLifetime.register(guardian, stop_reference)
+  catch
+    _kind, _reason -> :unavailable
+  end
+
+  defp credential_mode(%{tracing_capability: %Direct{}}), do: :direct
+  defp credential_mode(%{tracing_capability: _managed}), do: :managed
+  defp credential_mode(_configuration), do: :missing
+
+  defp start_managed_child(kind, reference, starter, child) do
+    caller = self()
+
+    {proxy, proxy_monitor} =
+      :erlang.spawn_opt(
+        fn ->
+          result =
+            try do
+              ProviderLifetime.start_child(starter, child)
+            catch
+              _kind, _reason -> {:error, :unavailable}
+            end
+
+          send(caller, {:start_proxy_result, kind, reference, self(), result})
+        end,
+        [:link, :monitor]
+      )
+
+    await_managed_child_start(kind, reference, proxy, proxy_monitor, nil, nil, nil, false)
+  end
+
+  defp await_managed_child_start(
+         kind,
+         reference,
+         proxy,
+         proxy_monitor,
+         result_pid,
+         acknowledged_pid,
+         child_monitor,
+         proxy_down?
+       ) do
+    receive do
+      {:start_proxy_result, ^kind, ^reference, ^proxy, {:ok, pid}} when is_pid(pid) ->
+        case disclose_managed_child(pid, acknowledged_pid, child_monitor) do
+          {:ok, child_monitor} ->
+            continue_managed_child_start(
+              kind,
+              reference,
+              proxy,
+              proxy_monitor,
+              pid,
+              acknowledged_pid,
+              child_monitor,
+              proxy_down?
+            )
+
+          :error ->
+            cleanup_managed_child(acknowledged_pid || pid, child_monitor)
+            await_proxy_down(proxy, proxy_monitor)
+            {:error, :unavailable}
+        end
+
+      {:start_proxy_result, ^kind, ^reference, ^proxy, {:error, :unavailable}} ->
+        cleanup_managed_child(acknowledged_pid, child_monitor)
+        await_proxy_down(proxy, proxy_monitor)
+        {:error, :unavailable}
+
+      {ack, ^reference, pid}
+      when ack in [:guardian_started, :sender_started] and is_pid(pid) ->
+        expected_ack = if kind == :guardian, do: :guardian_started, else: :sender_started
+
+        if ack == expected_ack do
+          case disclose_managed_child(pid, result_pid, child_monitor) do
+            {:ok, child_monitor} ->
+              continue_managed_child_start(
+                kind,
+                reference,
+                proxy,
+                proxy_monitor,
+                result_pid,
+                pid,
+                child_monitor,
+                proxy_down?
+              )
+
+            :error ->
+              cleanup_managed_child(result_pid || pid, child_monitor)
+              await_proxy_down(proxy, proxy_monitor)
+              {:error, :unavailable}
+          end
+        else
+          cleanup_managed_child(result_pid || pid, child_monitor)
+          await_proxy_down(proxy, proxy_monitor)
+          {:error, :unavailable}
+        end
+
+      {:DOWN, ^proxy_monitor, :process, ^proxy, :normal} ->
+        continue_managed_child_start(
+          kind,
+          reference,
+          proxy,
+          proxy_monitor,
+          result_pid,
+          acknowledged_pid,
+          child_monitor,
+          true
+        )
+
+      {:DOWN, ^proxy_monitor, :process, ^proxy, _reason} ->
+        cleanup_managed_child(result_pid || acknowledged_pid, child_monitor)
+        {:error, :unavailable}
+
+      {:DOWN, ^child_monitor, :process, pid, _reason}
+      when pid == result_pid or pid == acknowledged_pid ->
+        await_proxy_down(proxy, proxy_monitor)
+        {:error, :unavailable}
+
+      {:EXIT, ^proxy, :normal} ->
+        await_managed_child_start(
+          kind,
+          reference,
+          proxy,
+          proxy_monitor,
+          result_pid,
+          acknowledged_pid,
+          child_monitor,
+          proxy_down?
+        )
+    end
+  end
+
+  defp continue_managed_child_start(
+         kind,
+         reference,
+         proxy,
+         proxy_monitor,
+         result_pid,
+         acknowledged_pid,
+         child_monitor,
+         proxy_down?
+       ) do
+    if proxy_down? and is_pid(result_pid) and result_pid == acknowledged_pid do
+      log_managed_child_started(kind)
+      {:ok, result_pid, child_monitor}
+    else
+      await_managed_child_start(
+        kind,
+        reference,
+        proxy,
+        proxy_monitor,
+        result_pid,
+        acknowledged_pid,
+        child_monitor,
+        proxy_down?
+      )
+    end
+  end
+
+  defp log_managed_child_started(:guardian),
+    do: Logger.debug("provider credential guardian started")
+
+  defp log_managed_child_started(:sender),
+    do: Logger.debug("provider credential sender started")
+
+  defp disclose_managed_child(pid, nil, nil), do: {:ok, Process.monitor(pid)}
+  defp disclose_managed_child(pid, pid, monitor), do: {:ok, monitor}
+  defp disclose_managed_child(_pid, _different_pid, _monitor), do: :error
+
+  defp await_proxy_down(proxy, proxy_monitor) do
+    receive do
+      {:DOWN, ^proxy_monitor, :process, ^proxy, _reason} -> :ok
+      {:EXIT, ^proxy, _reason} -> await_proxy_down(proxy, proxy_monitor)
+    end
+  end
+
+  defp cleanup_managed_child(nil, nil), do: :ok
+
+  defp cleanup_managed_child(pid, monitor) when is_pid(pid) do
+    Logger.debug("provider managed child cleanup started")
+    Process.exit(pid, :kill)
+
+    if is_reference(monitor) do
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+      after
+        1_000 -> :ok
+      end
+    end
+  end
+
+  defp stop_managed_guardian(guardian, monitor, stop_reference) do
+    stop = make_ref()
+
+    send(
+      guardian,
+      {:loopex_provider_resource_stop, stop_reference, stop, self(), false, nil}
+    )
+
+    receive do
+      {:loopex_provider_resource_stopped, ^stop, ^guardian} ->
+        receive do
+          {:DOWN, ^monitor, :process, ^guardian, _reason} ->
+            Logger.debug("provider credential guardian cleanup completed")
+            :ok
+        after
+          1_000 -> cleanup_managed_child(guardian, monitor)
+        end
+
+      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
+        Logger.debug("provider credential guardian cleanup completed")
+        :ok
+    after
+      1_000 -> cleanup_managed_child(guardian, monitor)
+    end
+  end
+
+  defp authorize_guardian(
+         guardian,
+         monitor,
+         guardian_ref,
+         callback,
+         retainer,
+         grace,
+         sender_ref
+       ) do
+    send(
+      guardian,
+      {:authorize_guardian, guardian_ref, callback, retainer, grace, sender_ref}
+    )
+
+    receive do
+      {:guardian_authorized, ^guardian_ref, ^guardian} ->
+        Process.demonitor(monitor, [:flush])
+        Logger.debug("provider credential guardian authorized")
+        :ok
+
+      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
+        {:error, :unavailable}
+    end
+  end
+
+  defp adopt_sender(sender, monitor, sender_ref, callback, guardian) do
+    send(sender, {:authorize_sender, sender_ref, callback, guardian})
+
+    receive do
+      {:sender_adopted, ^sender_ref, ^sender} ->
+        Process.demonitor(monitor, [:flush])
+        Logger.debug("provider credential sender adopted")
+        :ok
+
+      {:DOWN, ^monitor, :process, ^sender, _reason} ->
+        {:error, :unavailable}
+    end
+  end
+
+  defp managed_guardian({guardian_ref, callback, stop_reference}) do
+    Process.flag(:trap_exit, true)
+    callback_monitor = Process.monitor(callback)
+    send(callback, {:guardian_started, guardian_ref, self()})
+
+    receive do
+      {:authorize_guardian, ^guardian_ref, ^callback, retainer, grace, sender_ref}
+      when is_pid(retainer) and is_integer(grace) and grace > 0 and is_reference(sender_ref) ->
+        retainer_monitor = Process.monitor(retainer)
+        Process.demonitor(callback_monitor, [:flush])
+        send(callback, {:guardian_authorized, guardian_ref, self()})
+
+        await_managed_sender(
+          guardian_ref,
+          callback,
+          retainer,
+          retainer_monitor,
+          grace,
+          sender_ref,
+          stop_reference
+        )
+
+      {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
+        :ok
+    end
+  end
+
+  defp await_managed_sender(
+         guardian_ref,
+         callback,
+         retainer,
+         retainer_monitor,
+         grace,
+         sender_ref,
+         stop_reference
+       ) do
+    receive do
+      {:sender_adopt, ^sender_ref, sender} when is_pid(sender) ->
+        sender_monitor = Process.monitor(sender)
+        send(sender, {:sender_adopted_by_guardian, sender_ref, sender, self()})
+
+        await_managed_initialize(
+          guardian_ref,
+          callback,
+          retainer,
+          retainer_monitor,
+          grace,
+          sender_ref,
+          sender,
+          sender_monitor,
+          stop_reference
+        )
+
+      {:loopex_provider_resource_stop, ^stop_reference, stop, requester, _cooperative,
+       _observation}
+      when is_reference(stop) and is_pid(requester) ->
+        send(requester, {:loopex_provider_resource_stopped, stop, self()})
+        :ok
+
+      {:DOWN, ^retainer_monitor, :process, ^retainer, _reason} ->
+        :ok
+    end
+  end
+
+  defp await_managed_initialize(
+         guardian_ref,
+         callback,
+         retainer,
+         retainer_monitor,
+         grace,
+         sender_ref,
+         sender,
+         sender_monitor,
+         stop_reference
+       ) do
+    receive do
+      {:initialize, ^guardian_ref, ^callback, request, configuration, progress_slot, deadline}
+      when is_integer(deadline) ->
+        state = %{
+          caller: callback,
+          caller_monitor: nil,
+          reference: guardian_ref,
+          stop_reference: stop_reference,
+          slot: progress_slot,
+          lifetime: {:managed, retainer, grace},
+          retainer: retainer,
+          retainer_monitor: retainer_monitor,
+          request: request,
+          configuration: configuration,
+          grace: grace,
+          nonce: Base.encode16(:crypto.strong_rand_bytes(32), case: :lower),
+          deadline: deadline,
+          phase: :launch,
+          namespace: nil,
+          port: nil,
+          carrier: nil,
+          socket: nil,
+          receiver: nil,
+          sender: nil,
+          credential_sender: sender,
+          credential_sender_monitor: sender_monitor,
+          sender_ref: sender_ref,
+          credential_mode: :managed,
+          possible_delivery: false,
+          result: nil,
+          failure: nil,
+          delivered: false,
+          cleanup: nil,
+          proved: false,
+          protocol_failed: false,
+          port_exited: false,
+          retainer_lost: false
+        }
+
+        if System.monotonic_time() < deadline, do: launch(state), else: expire(state)
+
+      {:loopex_provider_resource_stop, ^stop_reference, stop, requester, _cooperative,
+       _observation}
+      when is_reference(stop) and is_pid(requester) ->
+        stop_credential_sender(sender, sender_monitor, Process.group_leader())
+        send(requester, {:loopex_provider_resource_stopped, stop, self()})
+        :ok
+
+      {:DOWN, ^sender_monitor, :process, ^sender, _reason} ->
+        :ok
+
+      {:DOWN, ^retainer_monitor, :process, ^retainer, _reason} ->
+        stop_credential_sender(sender, sender_monitor, Process.group_leader())
+        :ok
+    end
+  end
+
+  defp credential_sender(sender_ref, callback, guardian, capability) do
+    callback_monitor = Process.monitor(callback)
+    send(callback, {:sender_started, sender_ref, self()})
+
+    receive do
+      {:authorize_sender, ^sender_ref, ^callback, ^guardian} ->
+        Process.link(guardian)
+        send(guardian, {:sender_adopt, sender_ref, self()})
+
+        receive do
+          {:sender_adopted_by_guardian, ^sender_ref, sender, ^guardian} when sender == self() ->
+            Process.demonitor(callback_monitor, [:flush])
+            send(callback, {:sender_adopted, sender_ref, self()})
+            await_bootstrap(sender_ref, guardian, capability)
+
+          {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
+            :ok
+        end
+
+      {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
+        :ok
+    end
+  end
+
+  defp start_direct_credential_sender(state) do
+    guardian = self()
+    sender_ref = state.sender_ref
+    direct = state.configuration.tracing_capability
+
+    {sender, monitor} =
+      :erlang.spawn_opt(
+        fn -> await_bootstrap(sender_ref, guardian, direct) end,
+        [:link, :monitor]
+      )
+
+    Logger.debug("provider direct credential sender started")
+    {sender, monitor}
   end
 
   defp await_result(guardian, monitor, reference, progress_slot, progress) do
@@ -97,6 +686,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
               socket: nil,
               receiver: nil,
               sender: nil,
+              credential_sender: nil,
+              credential_sender_monitor: nil,
+              sender_ref: make_ref(),
+              credential_mode: :direct,
               possible_delivery: false,
               result: nil,
               failure: nil,
@@ -178,6 +771,24 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
       {:provider_frame, receiver, frame} when receiver == state.receiver ->
         data_frame(state, frame)
 
+      # Concept: a credential-sender message moves the guardian only from the
+      # phase that awaits it and only from its live sender.
+      # Technical depth: without the pid guard, a message naming a `nil`
+      # sender matched whenever no sender was live, and the release it
+      # triggered raised on `send(nil, ...)` with the token, registry handle
+      # and nonce in the crash report. A bootstrap result outside
+      # `:credential_bootstrap` is ignored like any other stranger's message.
+      {:bootstrap_result, sender_ref, sender, guardian, result}
+      when state.phase == :credential_bootstrap and is_pid(state.credential_sender) and
+             sender_ref == state.sender_ref and sender == state.credential_sender and
+             guardian == self() ->
+        credential_bootstrap_result(state, result)
+
+      {:credential_phase_result, sender_ref, guardian, sender, phase, result}
+      when is_pid(state.credential_sender) and sender_ref == state.sender_ref and
+             sender == state.credential_sender and guardian == self() ->
+        credential_phase_result(state, phase, result)
+
       {:provider_sent, sender, phase, result} when sender == state.sender ->
         sent(%{state | sender: nil}, phase, result)
 
@@ -193,6 +804,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
       {:DOWN, _monitor, :process, pid, _reason} when pid == state.sender ->
         fail(%{state | sender: nil})
+
+      {:DOWN, monitor, :process, pid, reason}
+      when pid == state.credential_sender and monitor == state.credential_sender_monitor ->
+        credential_sender_down(
+          %{state | credential_sender: nil, credential_sender_monitor: nil},
+          reason
+        )
 
       {:DOWN, _monitor, :process, pid, _reason} when pid == state.receiver ->
         fail(%{state | receiver: nil})
@@ -257,7 +875,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
   defp tick(state) do
     cond do
-      System.monotonic_time() >= state.deadline -> fail(state)
+      System.monotonic_time() >= state.deadline -> expire(state)
       state.phase == :accept -> accept(state)
       true -> loop(state)
     end
@@ -381,47 +999,392 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     sender
   end
 
-  # Concept: only a minimal raw sender resolves and transmits the credential.
-  # Technical depth: its closure contains no credential. It establishes its own
-  # IO sink, reads the environment after exact readiness, validates the bound,
-  # sends the frame itself and reports only an atom. No Task/GenServer request,
-  # process state, exit reason, argv, environment update or file carries the key.
-  defp start_credential_sender(socket, nonce) do
-    guardian = self()
+  defp await_bootstrap(sender_ref, guardian, capability) do
+    receive do
+      {:begin_bootstrap, ^sender_ref, ^guardian, sender, deadline}
+      when sender == self() and is_integer(deadline) ->
+        result =
+          with :ok <- credential_deadline!(deadline),
+               :ok <- exclude_credential_sender(capability, deadline),
+               :ok <- credential_deadline!(deadline),
+               :ok <- install_sender_sink() do
+            :ok
+          else
+            _refused -> {:error, :unavailable}
+          end
 
-    {sender, _monitor} =
-      :erlang.spawn_opt(
-        fn ->
-          sender = self()
-          sink = spawn(fn -> sink_loop(Process.monitor(sender)) end)
-          Process.group_leader(self(), sink)
+        send(guardian, {:bootstrap_result, sender_ref, self(), guardian, result})
 
-          result =
-            try do
-              case System.get_env("LOOPEX_PROVIDER_API_KEY") do
-                key when is_binary(key) and byte_size(key) in 1..65_536 ->
-                  case ProviderCodec.send(socket, :credential, %{
-                         "nonce" => nonce,
-                         "credential" => key
-                       }) do
-                    :ok -> :ok
-                    _failed -> :error
-                  end
-
-                _refused ->
-                  :error
-              end
-            catch
-              _kind, _reason -> :error
-            end
-
-          send(guardian, {:provider_sent, self(), :credential, result})
-        end,
-        [:link, :monitor]
-      )
-
-    sender
+        if result == :ok do
+          Logger.debug("provider credential sender trace exclusion completed")
+          await_credential_context(sender_ref, guardian, deadline)
+        else
+          Logger.debug("provider credential sender trace exclusion refused")
+          :ok
+        end
+    end
   end
+
+  defp exclude_credential_sender(%Direct{} = direct, deadline) do
+    with :ok <- Direct.validate(direct),
+         :ok <- direct_trace_clear(deadline) do
+      :ok
+    else
+      _refused -> {:error, :unavailable}
+    end
+  end
+
+  defp exclude_credential_sender(capability, _deadline) do
+    Trace.exclude_self(capability,
+      functions: [
+        {__MODULE__, :route_credential, 2},
+        {__MODULE__, :receive_custody_reply, 2},
+        {__MODULE__, :write_credential_frame, 2}
+      ]
+    )
+  end
+
+  defp direct_trace_clear(deadline) do
+    credential_deadline!(deadline)
+
+    with {:ok, sessions} <- named_trace_sessions(),
+         :ok <- clear_named_sessions(sessions),
+         :ok <- clear_legacy_trace(),
+         :ok <- verify_trace_clear(sessions, [self()]),
+         :ok <- await_named_delivery(sessions, self(), deadline),
+         :ok <- await_legacy_delivery(self(), deadline),
+         :ok <- verify_trace_clear(sessions, [self()]) do
+      credential_deadline!(deadline)
+      :ok
+    end
+  catch
+    :exit, :credential_deadline -> exit(:credential_deadline)
+    _kind, _reason -> {:error, :unavailable}
+  end
+
+  defp named_trace_sessions do
+    case :trace.session_info(:all) do
+      sessions when is_list(sessions) ->
+        if Enum.all?(sessions, &valid_weak_trace_session?/1) do
+          {:ok, Enum.reject(sessions, &(&1 == {:legacy, :default}))}
+        else
+          {:error, :unavailable}
+        end
+
+      _unavailable ->
+        {:error, :unavailable}
+    end
+  catch
+    _kind, _reason -> {:error, :unavailable}
+  end
+
+  defp valid_weak_trace_session?({name, id})
+       when is_atom(name) and (is_integer(id) or id == :default),
+       do: true
+
+  defp valid_weak_trace_session?(_session), do: false
+
+  defp clear_named_sessions(sessions) do
+    Enum.reduce_while(sessions, :ok, fn session, :ok ->
+      case named_trace_operation(session, fn ->
+             :trace.process(session, self(), false, [:all])
+           end) do
+        {:ok, count} when is_integer(count) and count >= 0 -> {:cont, :ok}
+        :absent -> {:cont, :ok}
+        _refused -> {:halt, {:error, :unavailable}}
+      end
+    end)
+  end
+
+  defp clear_legacy_trace do
+    case :erlang.trace(self(), false, [:all]) do
+      count when is_integer(count) and count >= 0 -> :ok
+      _refused -> {:error, :unavailable}
+    end
+  catch
+    _kind, _reason -> {:error, :unavailable}
+  end
+
+  defp verify_trace_clear(sessions, pids) do
+    with :ok <- verify_named_trace_clear(sessions, pids),
+         :ok <- verify_legacy_trace_clear(pids) do
+      :ok
+    end
+  end
+
+  defp verify_named_trace_clear(sessions, pids) do
+    Enum.reduce_while(sessions, :ok, fn session, :ok ->
+      result =
+        Enum.reduce_while(pids, :ok, fn pid, :ok ->
+          case named_trace_operation(session, fn -> :trace.info(session, pid, :flags) end) do
+            {:ok, {:flags, []}} -> {:cont, :ok}
+            :absent -> {:cont, :ok}
+            _traced -> {:halt, {:error, :unavailable}}
+          end
+        end)
+
+      if result == :ok, do: {:cont, :ok}, else: {:halt, result}
+    end)
+  end
+
+  defp verify_legacy_trace_clear(pids) do
+    if Enum.all?(pids, fn pid -> :erlang.trace_info(pid, :flags) == {:flags, []} end),
+      do: :ok,
+      else: {:error, :unavailable}
+  catch
+    _kind, _reason -> {:error, :unavailable}
+  end
+
+  defp named_trace_operation(session, operation) do
+    {:ok, operation.()}
+  catch
+    _kind, _reason -> if named_trace_session_absent?(session), do: :absent, else: :error
+  end
+
+  defp named_trace_session_absent?(session) do
+    case named_trace_sessions() do
+      {:ok, sessions} -> session not in sessions
+      {:error, :unavailable} -> false
+    end
+  end
+
+  defp await_named_delivery(sessions, pid, deadline) do
+    references =
+      Enum.reduce_while(sessions, {:ok, []}, fn session, {:ok, references} ->
+        credential_deadline!(deadline)
+
+        case named_trace_operation(session, fn -> :trace.delivered(session, pid) end) do
+          {:ok, reference} when is_reference(reference) ->
+            {:cont, {:ok, [reference | references]}}
+
+          :absent ->
+            {:cont, {:ok, references}}
+
+          _refused ->
+            {:halt, {:error, :unavailable}}
+        end
+      end)
+
+    case references do
+      {:ok, pending} -> await_delivery_references(MapSet.new(pending), pid, deadline)
+      {:error, :unavailable} = refusal -> refusal
+    end
+  end
+
+  defp await_legacy_delivery(pid, deadline) do
+    credential_deadline!(deadline)
+
+    case :erlang.trace_delivered(pid) do
+      reference when is_reference(reference) ->
+        await_delivery_references(MapSet.new([reference]), pid, deadline)
+
+      _refused ->
+        {:error, :unavailable}
+    end
+  catch
+    :exit, :credential_deadline -> exit(:credential_deadline)
+    _kind, _reason -> {:error, :unavailable}
+  end
+
+  defp await_delivery_references(pending, pid, deadline) do
+    if MapSet.size(pending) == 0 do
+      :ok
+    else
+      credential_deadline!(deadline)
+
+      receive do
+        {:trace_delivered, ^pid, reference} ->
+          if MapSet.member?(pending, reference) do
+            await_delivery_references(MapSet.delete(pending, reference), pid, deadline)
+          else
+            await_delivery_references(pending, pid, deadline)
+          end
+      end
+    end
+  end
+
+  # Concept: a credential sender that consumes a release at or after the
+  # invocation deadline starts nothing more, in managed and direct mode alike.
+  # Technical depth: ADR 0034 technical step 10. The check runs when the sender
+  # receives `:begin_bootstrap`, credential context or a phase continuation and
+  # again immediately before the one operation that message permits. Expiry
+  # exits with the fixed non-secret `:credential_deadline` reason, which drops
+  # any custody bytes the sender holds and sends no phase result. The guardian
+  # classifies the resulting `DOWN` as a timeout only after its own clock
+  # confirms expiry.
+  defp credential_deadline!(deadline) do
+    if System.monotonic_time() < deadline, do: :ok, else: exit(:credential_deadline)
+  end
+
+  defp install_sender_sink do
+    sender = self()
+    sink = spawn_link(fn -> sink_loop(Process.monitor(sender)) end)
+
+    try do
+      Process.group_leader(sender, sink)
+
+      case named_trace_sessions() do
+        {:ok, sessions} -> verify_trace_clear(sessions, [sender, sink])
+        {:error, :unavailable} = refusal -> refusal
+      end
+    catch
+      _kind, _reason -> {:error, :unavailable}
+    end
+  end
+
+  defp await_credential_context(sender_ref, guardian, deadline) do
+    receive do
+      {:credential_context, ^sender_ref, ^guardian, sender, token, registry, socket, nonce}
+      when sender == self() ->
+        with :ok <- credential_deadline!(deadline),
+             {:ok, custody} <- route_credential(registry, token) do
+          Logger.debug("provider credential route resolved")
+          send(guardian, {:credential_phase_result, sender_ref, guardian, self(), :registry, :ok})
+
+          await_registry_continue(
+            sender_ref,
+            guardian,
+            deadline,
+            custody,
+            socket,
+            nonce
+          )
+        else
+          _refused ->
+            Logger.debug("provider credential route refused")
+
+            send(
+              guardian,
+              {:credential_phase_result, sender_ref, guardian, self(), :registry,
+               {:error, :unavailable}}
+            )
+        end
+    end
+  end
+
+  defp await_registry_continue(sender_ref, guardian, deadline, custody, socket, nonce) do
+    receive do
+      {:credential_phase_continue, ^sender_ref, ^guardian, sender, :registry, ^deadline}
+      when sender == self() ->
+        with :ok <- credential_deadline!(deadline),
+             {:ok, credential_reply} <- receive_custody_reply(custody, :resolve),
+             :ok <- credential_size(credential_reply) do
+          Logger.debug("provider credential custody resolved")
+          send(guardian, {:credential_phase_result, sender_ref, guardian, self(), :custody, :ok})
+
+          await_custody_continue(
+            sender_ref,
+            guardian,
+            deadline,
+            credential_reply,
+            socket,
+            nonce
+          )
+        else
+          {:error, reason} when reason in [:missing, :expired, :oversized, :unavailable] ->
+            Logger.debug("provider credential custody refused")
+
+            send(
+              guardian,
+              {:credential_phase_result, sender_ref, guardian, self(), :custody, {:error, reason}}
+            )
+
+          _refused ->
+            Logger.debug("provider credential custody refused")
+
+            send(
+              guardian,
+              {:credential_phase_result, sender_ref, guardian, self(), :custody,
+               {:error, :unavailable}}
+            )
+        end
+    end
+  end
+
+  defp await_custody_continue(
+         sender_ref,
+         guardian,
+         deadline,
+         credential_reply,
+         socket,
+         nonce
+       ) do
+    receive do
+      {:credential_phase_continue, ^sender_ref, ^guardian, sender, :custody, ^deadline}
+      when sender == self() ->
+        result =
+          with :ok <- credential_deadline!(deadline),
+               :ok <- write_credential_frame(socket, {nonce, credential_reply}) do
+            :ok
+          else
+            _refused -> {:error, :unavailable}
+          end
+
+        if result == :ok do
+          Logger.debug("provider credential frame written")
+          credential_final_wait(sender_ref, guardian, deadline)
+        else
+          Logger.debug("provider credential frame refused")
+
+          send(
+            guardian,
+            {:credential_phase_result, sender_ref, guardian, self(), :credential_frame, result}
+          )
+        end
+    end
+  end
+
+  defp credential_final_wait(sender_ref, guardian, deadline) do
+    send(
+      guardian,
+      {:credential_phase_result, sender_ref, guardian, self(), :credential_frame, :ok}
+    )
+
+    receive do
+      {:credential_phase_continue, ^sender_ref, ^guardian, sender, :credential_frame, ^deadline}
+      when sender == self() ->
+        credential_deadline!(deadline)
+    end
+  end
+
+  @doc false
+  def route_credential(registry, token), do: CredentialRegistry.route(registry, token)
+
+  @doc false
+  def receive_custody_reply(custody, :resolve) do
+    case CredentialCustody.resolve(custody) do
+      {:ok, %{credential: credential} = reply}
+      when map_size(reply) == 1 and is_binary(credential) ->
+        {:ok, reply}
+
+      {:error, reason} when reason in [:missing, :expired, :unavailable] ->
+        {:error, reason}
+
+      _invalid ->
+        {:error, :unavailable}
+    end
+  end
+
+  def receive_custody_reply(_custody, _operation), do: {:error, :unavailable}
+
+  @doc false
+  def write_credential_frame(socket, {nonce, %{credential: credential} = reply})
+      when is_binary(nonce) and map_size(reply) == 1 and is_binary(credential) do
+    ProviderCodec.send(socket, :credential, %{
+      "nonce" => nonce,
+      "credential" => credential
+    })
+  catch
+    _kind, _reason -> {:error, :unavailable}
+  end
+
+  def write_credential_frame(_socket, _credential), do: {:error, :unavailable}
+
+  defp credential_size(%{credential: credential} = reply)
+       when map_size(reply) == 1 and is_binary(credential) and byte_size(credential) in 1..65_536,
+       do: :ok
+
+  defp credential_size(_credential), do: {:error, :oversized}
 
   defp sink_loop(monitor) do
     receive do
@@ -439,18 +1402,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
   defp sent(%{phase: :bootstrap} = state, :bootstrap, :ok), do: loop(state)
 
-  defp sent(%{phase: :credential} = state, :credential, :ok) do
-    payload = %{
-      "nonce" => state.nonce,
-      "request" => Map.take(state.request, @semantic_fields),
-      "canonical_request_bytes" => state.request.canonical_request_bytes,
-      "staged_request_digest" => state.request.staged_request_digest
-    }
-
-    sender = start_send(state.socket, :invocation, payload)
-    loop(%{state | phase: :invocation, sender: sender, possible_delivery: true})
-  end
-
   defp sent(%{phase: phase} = state, :invocation, :ok)
        when phase in [:invocation, :running, :terminal_end, :retained],
        do: loop(state)
@@ -460,8 +1411,29 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   defp data_frame(%{phase: :bootstrap} = state, {:ok, :ready, payload}) do
     if payload == identity(state) do
       send(state.receiver, :next)
-      sender = start_credential_sender(state.socket, state.nonce)
-      loop(%{state | phase: :credential, sender: sender})
+
+      if is_pid(state.credential_sender) do
+        send(
+          state.credential_sender,
+          {:begin_bootstrap, state.sender_ref, self(), state.credential_sender, state.deadline}
+        )
+
+        loop(%{state | phase: :credential_bootstrap})
+      else
+        {sender, sender_monitor} = start_direct_credential_sender(state)
+
+        send(
+          sender,
+          {:begin_bootstrap, state.sender_ref, self(), sender, state.deadline}
+        )
+
+        loop(%{
+          state
+          | phase: :credential_bootstrap,
+            credential_sender: sender,
+            credential_sender_monitor: sender_monitor
+        })
+      end
     else
       fail(state)
     end
@@ -519,11 +1491,88 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
         do: begin_cleanup(state, nil),
         else: deliver_or_retain(state)
     else
-      fail(state)
+      expire(state)
     end
   end
 
   defp data_frame(state, _invalid), do: fail(%{state | protocol_failed: true})
+
+  defp credential_bootstrap_result(state, :ok) do
+    if System.monotonic_time() < state.deadline do
+      send(
+        state.credential_sender,
+        {:credential_context, state.sender_ref, self(), state.credential_sender,
+         state.configuration.credential_token, state.configuration.credential_registry,
+         state.socket, state.nonce}
+      )
+
+      loop(%{state | phase: :credential_registry})
+    else
+      expire(state)
+    end
+  end
+
+  defp credential_bootstrap_result(state, _refused), do: fail(state)
+
+  defp credential_phase_result(%{phase: :credential_registry} = state, :registry, :ok) do
+    continue_credential_sender(state, :registry, :credential_custody)
+  end
+
+  defp credential_phase_result(%{phase: :credential_custody} = state, :custody, :ok) do
+    continue_credential_sender(state, :custody, :credential_frame)
+  end
+
+  defp credential_phase_result(%{phase: :credential_frame} = state, :credential_frame, :ok) do
+    continue_credential_sender(state, :credential_frame, :credential_sender_exit)
+  end
+
+  defp credential_phase_result(state, _phase, _refused), do: fail(state)
+
+  defp continue_credential_sender(state, completed_phase, next_phase) do
+    if System.monotonic_time() < state.deadline do
+      send(
+        state.credential_sender,
+        {:credential_phase_continue, state.sender_ref, self(), state.credential_sender,
+         completed_phase, state.deadline}
+      )
+
+      loop(%{state | phase: next_phase})
+    else
+      expire(state)
+    end
+  end
+
+  defp credential_sender_down(%{phase: :credential_sender_exit} = state, :normal) do
+    if System.monotonic_time() < state.deadline do
+      Logger.debug("provider credential sender exited before invocation")
+
+      payload = %{
+        "nonce" => state.nonce,
+        "request" => Map.take(state.request, @semantic_fields),
+        "canonical_request_bytes" => state.request.canonical_request_bytes,
+        "staged_request_digest" => state.request.staged_request_digest
+      }
+
+      sender = start_send(state.socket, :invocation, payload)
+      loop(%{state | phase: :invocation, sender: sender, possible_delivery: true})
+    else
+      expire(state)
+    end
+  end
+
+  defp credential_sender_down(state, _reason) do
+    if System.monotonic_time() < state.deadline, do: fail(state), else: expire(state)
+  end
+
+  # Concept: the guardian, not the sender, decides that an invocation timed
+  # out, and only after its own clock has reached the deadline.
+  # Technical depth: a sender's `:credential_deadline` exit is not proof of
+  # time, so every path that has just read the guardian's clock at or after
+  # the deadline ends here and every other failure ends in `fail/1`. The
+  # public result is the same fixed failure either way; this function is the
+  # timeout classification, and test support may attach a static arity-only
+  # trace pattern to it.
+  defp expire(state), do: fail(state)
 
   # Concept: only a sealed, finite failure category is observable locally.
   # Technical depth: test support may attach static arity-only trace patterns.
@@ -573,10 +1622,26 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     # socket's abortive-close setting discards pending output here; ordinary
     # close may wait on an independent drain timer beyond the committed bound.
     stop_process(state.sender)
+
+    stop_credential_sender(
+      state.credential_sender,
+      state.credential_sender_monitor,
+      Process.group_leader()
+    )
+
     stop_process(state.receiver)
     close_socket(state.socket)
     if state.namespace, do: close_socket(state.namespace.listener)
-    state = %{state | sender: nil, receiver: nil, socket: nil, failure: nil}
+
+    state = %{
+      state
+      | sender: nil,
+        credential_sender: nil,
+        credential_sender_monitor: nil,
+        receiver: nil,
+        socket: nil,
+        failure: nil
+    }
 
     cleanup = state.cleanup || new_cleanup(state, request)
     cleanup = attach_request(cleanup, request)
@@ -679,6 +1744,46 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
   defp stop_process(nil), do: :ok
   defp stop_process(pid), do: Process.exit(pid, :kill)
+
+  defp stop_credential_sender(nil, _monitor, _guardian_group_leader), do: :ok
+
+  defp stop_credential_sender(sender, sender_monitor, guardian_group_leader)
+       when is_pid(sender) do
+    sender_monitor =
+      if is_reference(sender_monitor), do: sender_monitor, else: Process.monitor(sender)
+
+    sink_monitor = credential_sink_monitor(sender, guardian_group_leader)
+    Process.exit(sender, :kill)
+    await_process_down(sender_monitor, sender)
+
+    if sink_monitor do
+      {sink, monitor} = sink_monitor
+      await_process_down(monitor, sink)
+    end
+
+    Logger.debug("provider credential sender cleanup completed")
+    :ok
+  end
+
+  defp credential_sink_monitor(sender, guardian_group_leader) do
+    with {:group_leader, sink} when is_pid(sink) <- Process.info(sender, :group_leader),
+         true <- sink != guardian_group_leader and sink != self(),
+         {:links, links} <- Process.info(sender, :links),
+         true <- sink in links do
+      {sink, Process.monitor(sink)}
+    else
+      _no_private_sink -> nil
+    end
+  end
+
+  defp await_process_down(monitor, pid) do
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+    after
+      5_000 -> exit(:credential_helper_stop_timeout)
+    end
+  end
+
   defp close_socket(nil), do: :ok
   defp close_socket(socket), do: :gen_tcp.close(socket)
   defp close_port(nil), do: :ok

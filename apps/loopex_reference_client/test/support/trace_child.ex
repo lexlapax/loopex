@@ -9,18 +9,25 @@ defmodule Loopex.ReferenceClientTraceChild do
   @marker "LOOPEX_TRACE_V1 "
   @credential_limit 16_384
 
+  # Concept: the child is handed the credential the way an operator hands it
+  # to a host, and its composition consumes it.
+  #
+  # Technical depth: the frame arrives on standard input so the child's
+  # initial environment never carries it, and it is never placed in the
+  # environment: the value goes straight to the fixture, which hands it to
+  # the custody helper at composition. Nothing started before or after that
+  # can inherit it from this VM's environment.
   def run do
     credential = read_credential!()
-    System.put_env("LOOPEX_PROVIDER_API_KEY", credential)
 
     case System.argv() do
-      ["phase1", root] -> phase1(root)
-      ["phase2", root, session_id, job_id] -> phase2(root, session_id, job_id)
+      ["phase1", root] -> phase1(root, credential)
+      ["phase2", root, session_id, job_id] -> phase2(root, session_id, job_id, credential)
       _other -> raise "invalid real trace phase"
     end
   end
 
-  defp phase1(root) do
+  defp phase1(root, credential) do
     ensure_started!()
 
     fixture =
@@ -37,7 +44,8 @@ defmodule Loopex.ReferenceClientTraceChild do
           content: "loopex-real-recovery"
         ],
         root: root,
-        fault_to: self()
+        fault_to: self(),
+        credential: credential
       )
       |> Fixture.create("real-recovery")
 
@@ -87,16 +95,13 @@ defmodule Loopex.ReferenceClientTraceChild do
           provider_credential_present: receipt.provider_credential_present
         })
 
-        receive do
-        after
-          :infinity -> :ok
-        end
+        Process.sleep(:infinity)
     after
       120_000 -> raise "real trace did not reach the receipt fault point"
     end
   end
 
-  defp phase2(root, session_id, job_id) do
+  defp phase2(root, session_id, job_id, credential) do
     ensure_started!()
 
     fixture =
@@ -113,7 +118,8 @@ defmodule Loopex.ReferenceClientTraceChild do
           content: "loopex-real-recovery"
         ],
         root: root,
-        recover_stale_writer: true
+        recover_stale_writer: true,
+        credential: credential
       )
       |> Fixture.resume(session_id)
 

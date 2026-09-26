@@ -3,66 +3,52 @@
 <a id="concept"></a>
 ## Concept
 
-Every surface M2, M3 and M4 touch is unstable. None is labelled, frozen, versioned for
-consumers, or given a compatibility promise, and none is owed a deprecation
-window or a migration note. M4 changes the source `VERSION` from `0.0.0` to
-`0.1.0` at its closure candidate, which accepted
-[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) keeps
-deliberately separate from every claim on this page: a source version is not a
-package, a tag, a publication or a compatibility freeze, and the protocol
-generation is negotiated independently of it. `v0.0.0-m2` identifies
-the exact integrated M2 source snapshot and labels no consumer surface.
-Nothing is packaged or published, so the vision's package
-surface — released names, their contents, and the constraints they declare —
-stays inert because it has never been created.
+Every surface Loopex exposes is unstable. None is labelled, frozen, versioned
+for consumers, or given a compatibility promise, and none is owed a deprecation
+window or a migration note. This page lists what an embedder, a client author,
+or an operator can reach today, what each surface consists of, which data a
+given reader can open, and what would have to exist before any surface could be
+frozen.
 
 That is a deliberate position, not an omission. The
 [compatibility contract](../vision.md#concept-vision-compatibility) freezes a
 surface only when its own consumers, schemas, vectors, migration, rollback, and
-operational evidence justify the claim. No surface in this milestone has those,
-so labelling one stable would be a promise with nothing behind it.
+operational evidence justify the claim. No surface has all of those yet, so
+labelling one stable would be a promise with nothing behind it.
 
-For an embedder this means: pin an exact revision, expect any surface named
-below to change without notice, and read the changelog for the milestone you
-move to rather than a version constraint. Treat the whole umbrella as one
-moving target — a change to the private journal, the executor protocol, or the
-tool record can reach you through the facade you call.
+**Versions name source, not contracts.** The source `VERSION` is `0.2.0`. The
+annotated tag `v0.0.0-m2` identifies one integrated source snapshot and
+`v0.1.0` a source release; neither is a package, a publication, or a
+compatibility freeze. Nothing is packaged or published, so the vision's package
+surface — released names, their contents, and the constraints they declare —
+has never been created. The session protocol's generations are negotiated
+independently of the source version, as accepted
+[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept)
+requires.
 
-One consequence is concrete and worth stating on its own: **a session data root
-written by an M1-era revision is not readable by M2.** M2 adds new durable
-record kinds for conversation turns, tool definition generations, denials,
-steers, follow-ups, and cancellations. There is no migration, and none is owed,
-because M1 accepted no installed-store compatibility contract and M2 accepts
-none either. Start M2 with a fresh state root.
+**The wire protocol is experimental by name.** The app server speaks the exact
+generation `loopex.experimental/1` over standard input and output, and the
+daemon speaks `loopex.experimental/2` over its socket. A client offers an
+ordered list of generations and the server selects one it knows, with no
+partial match, no nearest neighbour, and no version comparison that could round
+the word `experimental` up to a released contract. A generation has schemas,
+vectors, and an independent consumer; it has no migration path and no freeze.
 
-Internal process topology, process messages, supervision structure, and private
-structs are not a public surface at all, at any point, and are not listed below.
+**Durable data grows by new record kinds, and older readers refuse.** A reader
+replays every history a later revision can still interpret, and a session that
+contains a record kind an older reader does not know is refused by that reader
+at load, before any model or executor work. There is no in-place migration and
+none is owed. Rollback means returning to a retained old binary with a complete
+backup of the state root it wrote; removing a feature's files or its server
+never downgrades a root that already holds its records.
 
-The scoped statement of this position for the milestone is
-[M3's compatibility section](../plans/M3-technical.md#technical-plan-compatibility).
-M3 preserves genuine M2 histories, including settlement-v2. Once a session
-contains a resource command, an M2 binary cannot open it. Even a refused resource
-command creates this boundary. Rollback uses the old binary with a complete
-old-format state-root backup; removing skill files does not downgrade history.
-Provider-permit retirement changes only Control's in-memory retention. It adds
-no record or retry permission; rollback to longer retention requires no journal
-migration for this repair.
-
-M4 adds the first surface that is not an Elixir API, and labels it in its own
-name. The app-server wire protocol is one exact generation,
-`loopex.session.v1-experimental`: a client offers an ordered list of
-generations and the server selects one it knows, with no partial match, no
-nearest neighbour and no version comparison that could round the word
-`experimental` up to a released contract. A generation has schemas, vectors and
-an independent consumer; it has no migration path and no freeze, and a later
-milestone may change it. M4 also adds versioned durable interaction records, so
-once a session contains one, an M3-era reader must refuse it before any effect
-rather than replaying it, while a current reader still replays genuine M3 and
-M2 histories; rollback returns to a retained old root/binary pair, and removing
-the server cannot downgrade an interaction-bearing root. The optional artifact
-transfer capability and the telemetry events add no durable format at all.
-The scoped statement for the milestone is
-[M4's compatibility section](../plans/M4-technical.md#technical-plan-compatibility).
+For an embedder this means: pin an exact revision, expect any surface below to
+change without notice, and read the changelog for the revision you move to
+rather than a version constraint. Treat the whole umbrella as one moving target
+— a change to the private journal, the executor protocol, or the tool record can
+reach you through the facade you call. Internal process topology, process
+messages, supervision structure, and private structs are not a surface at all
+and are not listed.
 
 Operator-facing consequences:
 [Coding sessions](../operator/coding-sessions.md#concept) and
@@ -71,620 +57,297 @@ Operator-facing consequences:
 <a id="technical-depth"></a>
 ## Technical depth
 
-### The Surfaces M2, M3 and M4 Touch
+### The Surfaces
 
-Each row names what an embedder or operator can reach, and the vision surface it
-belongs to under
+Each row names what an embedder, client, or operator can reach, and the vision
+surface it belongs to under
 [separately versioned surfaces](../vision-technical.md#technical-vision-compatibility).
 
 | Surface | Reached through | Vision surface | State |
 | --- | --- | --- | --- |
-| Embedded facade | `Loopex` | 5, embedded Elixir API | Unstable |
+| Embedded facade | `Loopex` and its start options | 5, embedded Elixir API | Unstable |
+| Reference composition | `LoopexComposition.start/1`, `with_runtime/2`, `start_edges/2`, `artifacts/1` | 5, embedded Elixir API | Unstable |
 | Store port | `Loopex.Store` behaviour and handle | 1, private journal and store schema | Unstable |
 | Model port | `Loopex.Model` behaviour, request and reply shapes, delta contract | 2, public protocol semantics | Unstable |
 | Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2`, optional `retained_receipt/2` | 3, executor protocol | Unstable |
-| Policy port | `Loopex.Policy` behaviour, request, context, refusal categories | 2, public protocol semantics | Unstable |
+| Policy port | `Loopex.Policy` behaviour, request, context, refusal categories, defer | 2, public protocol semantics | Unstable |
 | Artifact-store port | `Loopex.ArtifactStore` object/use behaviour and eight-member `artifact_reference` | 6, artifact formats | Unstable |
-| Artifact transfer capability | optional `open_transfer/4`, `read_transfer/3`, `close_transfer/2` on `Loopex.ArtifactStore`, and `Loopex.open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` on the facade | 6, artifact formats, and 5, embedded Elixir API | Experimental, new in M4 |
-| App-server wire protocol | the `loopex.session.v1-experimental` generation: methods, records, error codes, identities and limits | 2, public protocol semantics | Experimental, new in M4; exact generation agreement only |
-| Public protocol schema and vectors | `apps/loopex_protocol/priv/schema/loopex-experimental-1.json` and `priv/vectors/loopex-experimental-1.json`, reported as a schema digest at initialization | 2, public protocol semantics | Experimental, new in M4 |
-| Durable interaction records | `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental, new in M4; refused by older readers |
-| Telemetry events | the bound `[:loopex, …]` span inventory, and `Loopex.Telemetry.attach/1` and `detach/1` | not yet a listed surface; transient diagnostics | Experimental, new in M4 |
-| Trace sessions | `Loopex.trace/1` and `trace/2`, `trace_status/1`, `trace_stop/1` | 5, embedded Elixir API; transient diagnostics | Experimental, new in M4 |
-| Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable, changed in M2 and M3 |
+| Artifact transfer capability | the optional transfer callbacks and the facade transfer family | 6 and 5 | Experimental |
+| Tool definition contract | `LoopexProtocol.ToolDefinition`, `LoopexProtocol.Canonical` | 2 and 3 | Unstable |
+| Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable |
+| Durable interaction records | `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental; refused by older readers |
 | Public event shapes | `Loopex.attach/3`, `Loopex.next_event/1` | 2, public protocol | Unstable |
-| Tool definition contract | `LoopexProtocol.ToolDefinition`, `LoopexProtocol.Canonical` | 2 and 3 | Unstable, new in M2 |
-| Reference composition | `LoopexComposition.start/1`, `with_runtime/2` and `artifacts/1` | 5, embedded Elixir API | Unstable; `with_runtime/2` added in M3 |
-| Operator command | the `loopex` escript and its subcommands and flags | not yet a listed surface | Unstable, new in M2 |
+| App-server wire protocol | generation `loopex.experimental/1`: methods, records, error codes, identities, limits | 2, public protocol semantics | Experimental; exact generation agreement only |
+| Daemon wire protocol | generation `loopex.experimental/2` over the daemon's Unix-domain socket | 2, public protocol semantics | Experimental; exact generation agreement only |
+| Public protocol schemas and vectors | `apps/loopex_protocol/priv/schema/` and `priv/vectors/`, reported as a schema digest at initialization | 2, public protocol semantics | Experimental |
+| Telemetry events | the `[:loopex, …]` span inventory, `Loopex.Telemetry.attach/1` and `detach/1` | not a listed surface; transient diagnostics | Experimental |
+| Trace sessions | `Loopex.trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` | 5, embedded Elixir API; transient diagnostics | Experimental |
+| Operator command | the `loopex` escript, its subcommands, flags, exit statuses, and the compact JSON of daemon queries | not a listed surface | Unstable |
 
-Surface 4, the extension manifest and lifecycle API, does not exist yet. Surface
-7, released package names and their contents, is inert: no package is published,
-so nothing has welded two surfaces together by shipping them in one artifact.
+Surface 4, the extension manifest and lifecycle API, does not exist yet.
+Surface 7, released package names and their contents, is inert: no package is
+published, so nothing has welded two surfaces together by shipping them in one
+artifact.
 
-### What Each Surface Currently Consists Of
+### What Each Surface Consists Of
 
-**Embedded facade.** `Loopex.start_link/1`, `stop/1`, `create_session/3`,
-`resume_session/3`, `resume_known_session/4`, `attach/2` and `attach/3`,
-`command/2`,
-`next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`,
-`diagnostic/2`, `session_status/2`, `reconciliation_query/1`, `reconcile/2`,
-`prepare_resume_session/3`, `prepare_resume_known_session/4`,
-`activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3`, `state_root/0`,
-`runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, and `version/0`.
-M3 adds `resource_catalog/2` and `read_resource/3`, the `resource_manifest:`
-launch option, and settled-state `:admit_resources` / `:activate_skill` commands.
-These experimental resource operations use the existing facade and Store;
-they create no new behaviour or wire protocol. Resource admission never changes
-the tool registry, policy or grant contract.
-
-M4 adds `open_artifact_transfer/2`, `read_artifact_chunk/3` and
-`close_artifact_transfer/2` for bounded artifact retrieval, `trace/1`,
-`trace/2`, `trace_status/1` and `trace_stop/1` for a runtime-scoped trace
-session, the `:interaction_answer` command, the `:policy_identity` launch
-option required whenever `:policy` is supplied, and an `open_interaction` view
-on the attachment returned by `attach/2` and `attach/3`, captured at the same
-cursor as the unchanged revision-2 snapshot rather than hidden inside it. None
-of these introduces a sixth port or a second loop.
-
-Prepared resume entries return an opaque one-use activation capability; neither
-preparation nor handler installation schedules recovered work. `activate_resume/1`
-and `abandon_resume/1` wait for the coordinator's answer rather than expiring on
-a bound. The message carrying either call is not withdrawn when its caller stops
-waiting, so a bounded call that expired would report the session unavailable
-while the coordinator went on to spend the very activation the caller was told it
-had not got. Neither call proposes a Store mutation, so waiting commits nothing,
-and a coordinator that has died still refuses, because its exit is the answer.
-The runtime
-start options are part of this surface, including
-`:tools`, `:active_tools`, `:policy`, `:bounds`, `:sampling`, `:progress_to`,
-`:diagnostics_to`, `:cleanup_grace_ms`, and the required positive
-`:context_token_budget`. Direct Runtime callers choose that context value;
-Runtime supplies no default.
-
-[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept) adds the explicit
-three-argument prepared handoff: it names a local receiving holder and its
-local lifetime participant. Ordinary `transfer_resume/2` keeps its PID domain
-and no longer reads a CLI-written process-dictionary selector. The new entry
-distinguishes a definitive refusal from loss after a possible handoff. The CLI
-refuses duplicate handler installation atomically instead of replacing/draining
-the incumbent. Missing decision replies do not authorize retries, abandonment,
-or activation; read-only holder observations remain bounded. These are
-unreleased source/behavior changes, not new portable or durable data.
-
-**Reference provider launch.**
-[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) requires one
-private companion process per invocation and explicit adapter options:
-`worker_path`, `interpreter_path`, `worker_sha256`, and
-`build_manifest_sha256`. Unmanaged calls additionally supply the validated
-`cleanup_grace_ms`; managed calls use Core's retained value. Missing, malformed,
-or mismatched configuration refuses before credential delivery, with no
-shared-VM fallback or runtime code discovery. The bare-model `complete/2` helper
-now refuses; direct callers use `complete_prompt/3` with explicit configuration.
-The Model callback remains `complete/3`.
-
-`Loopex.LLM.ReqLLM.call_options/3` also remains an exported, unstable helper.
-It takes an explicit credential and returns provider options containing that
-credential; calling it is not protected credential admission. Normal provider
-execution calls it inside the isolated companion after private delivery, not
-in the host callback. A direct caller owns the returned secret-bearing value
-and must not log or retain it in public or durable data.
-
-The sole credential source remains `LOOPEX_PROVIDER_API_KEY`, with a new
-65,536-byte maximum; empty and oversized credentials refuse. Starting or stopping
-the adapter installs no parent Logger filter or credential registry and changes
-no parent group leader. Provider-side raw diagnostics are unavailable rather
-than forwarded for secret-dependent scrubbing. Companion startup consumes the
-existing deadline. Rollback must contain live children and change bridge,
-companion, and launch configuration together; it does not restore unsafe shared
-diagnostics or retry an uncertain invocation. The companion is private
-source-build output, not a separately published package.
-
-The generic Model reply accepts an optional nonempty UTF-8
-`provider_response_id` of at most 256 bytes and retains its bytes unchanged.
-It does not normalize whitespace or Unicode. The historical M2 attestation
-dialect `req_` plus 16–64 ASCII identifier characters is a narrower evidence
-format for those provider records, not the generic Model callback's domain.
-An account-verification record must still satisfy its own declared format;
-generic reply admission alone does not prove account visibility.
-
-**Ports.** Core declares exactly five behaviours: `Loopex.Store`,
-`Loopex.Model`, `Loopex.Executor`, `Loopex.Policy`, and
-`Loopex.ArtifactStore`. M1 declared the first three; M2 adds the last two, and
-widens `Loopex.Executor` with the required `cancel/2` callback accepted in
-[ADR 0012](../adr/0012-executor-cancellation-capability.md#concept). This is a
-source-breaking change for a previous module that declares
-`@behaviour Loopex.Executor` but does not implement `cancel/2`: it must add the
-callback before it is conformant. The callback returns `{:ok, :cleaned}`,
-`{:ok, :unconfirmed}`, or `{:error, term()}`. The facade defensively maps the
-latter two, a malformed or failed call, and a legacy module missing the required
-callback to unconfirmed cleanup. That fallback makes mixed-version failure safe;
-it does not restore conformance to an implementation that omits the callback.
-The port also declares an optional `retained_receipt/2`, which reads the terminal receipt
-an executor retained for one job: `{:ok, receipt}`, `:absent`, or
-`{:error, term()}`, with `{:error, :effect_in_flight}` reserved for a job the
-executor still holds; the shipped local executor also answers
-`{:error, :effect_unresolved}` for an admitted job this Local does not hold,
-with an open entry and no final receipt, and `{:error, :effect_settling}` for a
-receipt whose open entry still stands. A receipt is final only once its entry is
-gone. The session
-coordinator consults it once when a prepared resume is activated over a
-dispatched effect, ending the run `outcome_unknown` on absence, an unresolved
-entry, or a settling one; `Loopex.Executor.retained_receipt/3` bounds
-the call and reports an absent callback, a raise, a malformed answer, or the
-bound elapsing as distinct errors that leave reconciliation host-driven. Omitting
-it is conformant. M4 adds three more optional callbacks, on
-`Loopex.ArtifactStore`, and no sixth behaviour; the count of ports is still
-five. An implementation of any port is written against bytes that
-may change in the next milestone.
-
-The shipped local executor now requires executable `/bin/bash` for its internal
-carrier and cleanup guard on Darwin and Linux. This is a new concrete-adapter
-runtime prerequisite, not a Core or custom-executor dependency. Raw commands
-still use `/bin/sh`; argv vectors remain literal. There is no interpreter
-selection option or silent fallback. No callback, journal record, or configuration
-schema changes with this prerequisite. The
-[current implementation disposition](agent-context-map.md#disposition-local-executor-bash-2026-09-07)
-authorizes the change; [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
-is Accepted through its [exact-pair disposition](agent-context-map.md#disposition-adr-0022-acceptance-2026-09-08).
-A host that previously supplied only a
-POSIX shell must provide `/bin/bash` or select a different executor before using
-this repaired reference stack.
-
-The shipped local executor's `process_probe` start option is edge configuration,
-defaults to `/bin/ps`, and is recorded on receipts that use it. The probe contract
-is the `-e -o pid= -o pgid=` table dialect with the probe's Port carrier as the
-PID-equals-PGID witness row; empty, malformed, or nonzero answers fail closed.
-The cleanup period is
-different: the session commits it, every job and terminal carries it,
-and `Loopex.Executor.cancellation_bounds/1` derives each production observation
-window from it. `Loopex.Executor.cancel/4` applies that configured observation
-around required callback `cancel/2`; retained `cancel/3` is a defensive legacy
-entry and production coordination never selects it. Local's
-`prepare_placement/3` prepares the durable ledger generation under the same
-committed value before effect authority exists. These additions are source and
-behaviour changes to direct integrations even though every surface remains
-unreleased.
-
-The local adapter's queue reservation is deliberately not evidence that an
-effect is live. A second serialized permit decision revalidates the exact live
-holder, the complete shared-root reconciliation result, the job, grant, lease,
-and deadline, then repeats the complete root snapshot after any bounded
-validation wait. A successful newly admitted permit publishes the marker and
-open entry, installs the exact operation-owner token under the same root claim,
-and counts as a dispatch. Publication can stop after the open entry but before
-the marker; that incomplete state installs no owner token and deliberately
-quarantines the root. Another reservation for that job is only a joiner. If
-closing an entry changes only part of the ledger, the adapter restores the open
-authority before releasing the root claim or retains the claim and quarantines
-the root when restoration cannot be proved. These are current semantics of the
-unstable trusted-local adapter, not new callbacks in the executor port.
-
-Local's generation writer and reader enforce ADR 0016's exact lowercase
-64-hex encoding of its positive 256-bit epoch. Earlier development code's
-uppercase rendering was nonconforming; a generation ID containing uppercase
-letters now makes its record unavailable rather than silently rewritten or
-accepted through a legacy decoder. Digits-only encodings already conform. The
-generation digest continues to bind the original stored record, and no encoding
-establishes provenance.
-This restores the existing unreleased contract: M2 promises no installed-store
-compatibility and forbids ledger downgrades or rewrites. Preserve refused roots;
-the [operator recovery procedure](../operator/tools-and-policy.md#operator-tools-reach)
-still requires positive cessation of every old effect authority, or the
-prescribed host reboot, before using a fresh root. No new migration, callback,
-persistent record version or public compatibility guarantee is introduced.
-
-The concrete Local start options also include `clock_provider` (a zero-argument
-function returning paired wall and monotonic millisecond instants),
-`open_authority_close` (a two-argument function replacing `Ledger.close_open/2`)
-and `claim_wait_ms` (a non-negative millisecond ceiling, defaulting to `5_000`,
-on how long one admission waits for another instance's root claim).
-`open_authority_close` receives the prepared ledger and job ID and must answer
-`:ok` or `{:error, reason}`; an invalid answer, failed call, or unfinished
-bounded removal does not prove authority was removed. `claim_wait_ms` is still
-capped by the job's own remaining allowance and never becomes permission: only
-the holder releases the claim. These are trusted host configuration, executable
-in the first two cases, not portable job fields or model-supplied tools.
-
-The private reservation/permit exchange copies Local placement values to the
-trusted executing process. That native map includes the public ETS table ID,
-artifact-store handle and removal callback; it is executable authority within
-the same VM, not a sandbox or a serializable capability. A reservation alone
-does not authorize an effect. Its holder must obtain the separately fenced
-permit. The holder liveness observation and a subsequent death are not one
-atomic operation: no reservation becomes a permit after the relevant loss is
-observed, not a promise that a later death is impossible.
-
-Reserve and permit callers wait for that serialized decision or server exit;
-they do not impose separate 10/15-second observation ceilings that can expire
-while admission continues. This does not widen the job's effect deadline or
-convert missing replies into authority. A stalled host filesystem can still
-prevent the server answering; this wait is not a promise of bounded host-disk
-latency.
-
-Additional concrete error families include
-`{:ledger_unavailable, :operation_owner_unavailable}`, `:effect_settling`,
-`{:receipt_not_retained, reason}`, `{:receipt_read_failed, reason}`,
-`{:refusal_not_retained, reason}`, and nested settlement/removal or
-`root_claim_retained` details. These remain unstable terms. Only the explicit
-`{:refused_before_effect, reason}` wrapper proves pre-effect refusal; neither
-an unfamiliar error atom nor loss of a reply proves that nothing ran.
-
-Local also exports hidden test-support entries: `stats/1`, `tool/1`,
-`bounded_work/3,4`, `bounded_read_probe/2`, `await_owned_process_start/4`,
-`artifact_retention_result/1`, `launcher_probe_port/1,3`, `launcher_vector/1`,
-`answer_within/3`, `guard_protocol_probe/1`, `receipt_decode_probe/3`, and
-`process_group_answered_empty?/2,3`. `@doc false` hides
-generated documentation, not callability. These are unstable concrete test
-support, not additions to `Loopex.Executor` conformance or supported embedder
-extension points.
-
-The adapter refuses a missing, empty, or larger-than-8,192-byte `job_id` before
-it enters the shared ledger or creates a reservation. That is a constraint of
-this concrete unstable adapter rather than a new field or callback in the
-executor protocol. Its filesystem effects also remain bound to the exact Local
-instance that admitted them. A command worker is not released to run after its
-execute caller or launch guard has disappeared, and a potentially proved command
-result is re-fenced by the Local owner after cleanup before it can be reported.
-An artifact-retention worker that cannot be confirmed stopped produces no
-receipt and leaves the job's durable open entry in place, so uncertainty in a
-host-supplied store cannot be converted into permission for a later effect.
-
-**Artifact object and use identity.** The adapter callbacks are `put/3`,
-`fetch/2`, `stat/2`, and `describe/2`. Core owns the caller-facing
-`Loopex.ArtifactStore` facade, computes and validates the object and immutable
-use identities, and exposes locator-only `retrieve/2`; runtime, command, and
-embedders do not call a concrete adapter. The compact reference has eight
-members: object digest, size, and locator; media type and role; and use
-canonicalization version, digest, and digest-derived locator. The exact five
-provenance labels remain private behind `describe/2`. This breaks every caller
-or adapter written against M2's earlier five-member reference or three-callback
-shape; no compatibility decoder reconstructs missing use truth.
-
-`Loopex.Executor`'s job request gains one declared budget,
-`resource_budgets["max_wall_time_ms"]`, beside the output ceiling already there.
-`resource_budgets` is an open plain map, so this is additive: an executor that
-ignores the key behaves as before, and the shipped local executor bounds a job by
-the smallest of the run's instant, that budget, and the budget its own copy of
-the definition declares. The key is covered by the job's canonical digest like
-every other semantic field, so a job built by an M2 coordinator and one built by
-hand without it are different jobs.
+**Embedded facade.** The functions, start options, and command shapes are
+listed once, in
+[Runtime and embedding](runtime-and-embedding.md#technical-embedding-api). None
+introduces a sixth port or a second loop. Prepared resume returns an opaque
+one-use activation capability; neither preparation nor handler installation
+schedules recovered work, and `activate_resume/1` and `abandon_resume/1` wait
+for the coordinator's answer rather than expiring on a bound, because the
+message carrying either call is not withdrawn when its caller stops waiting.
+Neither call proposes a Store mutation, and a coordinator that has died still
+refuses, because its exit is the answer. The explicit three-argument handoff of
+[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept) distinguishes a
+definitive refusal from loss after a possible handoff; a missing decision reply
+never authorizes a retry, an abandonment, or an activation.
 
 **An abort's acceptance is an admission, not an ending.** `Loopex.command/2`
 returns `{:accepted, command_id}` once the abort commits durably; ADR 0009 then
 orders the cleanup, then the run's terminal. The run is still active between the
 two, so a prompt submitted there is queued as a follow-up on that run rather
 than starting a new one, and a caller that needs the run over waits for its
-`run.finished` event. The previous shape committed the admission and the ending
-as one record after the cleanup, which is why no caller had to think about the
-gap — and is also why a host that died inside the cleanup left no record that
-anyone had asked to stop.
+`run.finished` event.
 
-`Loopex.Executor` gains no second callback, but the *meaning* of one of its
-return values changed and an existing implementation is affected without
-recompiling. An executor that refused a job before its effect started says so by
-returning `{:error, {:refused_before_effect, reason}}`; the runtime commits that
-as an ordinary terminal `failed` carrying `reason`. Every other `{:error, _}` is
-read as unproven and ends the run `outcome_unknown` with a reconciliation
-reference. The runtime previously recognised a list of error *names* copied from
-the shipped local executor and applied to every implementation, which meant a
-conforming executor that lost its lease halfway through a write and returned
-`{:error, :workspace_lease_lost}` had that effect committed as `failed` and the
-loop carried on past it. Failing closed is the correct default and it is a real
-behaviour change: an executor that adopts nothing keeps compiling, stays
-conforming, and sees errors that used to end a call `failed` now end the run
-`outcome_unknown`.
+**Ports.** Core declares exactly five behaviours: `Loopex.Store`,
+`Loopex.Model`, `Loopex.Executor`, `Loopex.Policy`, and `Loopex.ArtifactStore`;
+their callbacks are listed in
+[the architecture technical depth](architecture-technical.md#technical-arch-ports).
+`Loopex.Executor.cancel/2` is required and returns `{:ok, :cleaned}`,
+`{:ok, :unconfirmed}`, or `{:error, term()}`; the facade maps every answer but
+confirmed cleanup, a raise, a malformed answer, and a module missing the
+callback to unconfirmed cleanup, which keeps a mixed-version failure safe
+without making a module that omits the callback conformant. The optional
+`retained_receipt/2` reads the terminal receipt an executor retained for one
+job: `{:ok, receipt}`, `:absent`, or `{:error, term()}`, with
+`{:error, :effect_in_flight}` reserved for a job the executor still holds.
+`Loopex.Executor.retained_receipt/3` bounds that call and reports an absent
+callback, a raise, a malformed answer, or the bound elapsing as distinct errors
+that leave reconciliation host-driven. The ArtifactStore transfer triple is
+optional as well.
 
-**Progress plane.** Every item of a stream domain, including its closing item, is
-now emitted by one process per open domain rather than by the producer's callback
-and the coordinator between them. Nothing about the items changes — same shapes,
-same labels, same sequences — but a consumer can now rely on the rule ADR 0011
-already stated and this runtime only approximated: no item of a domain appears
-after that domain's closure. ADR 0014 narrows the producer-liveness promise, not
-the consumer input algebra: abrupt owner death and recognized executor owner
-loss without a retained terminal fact may end the process-local plane without a
-closure, while a retained terminal fact may still close its originating domain
-truthfully after handoff. Consumers already had to tolerate a missing closure
-because delivery is transient; they keep the same durable fallback and infer no
-abandonment.
+An executor that refused a job before its effect started says so by returning
+`{:error, {:refused_before_effect, reason}}`; the runtime commits that as a
+terminal `failed` carrying `reason`. Every other `{:error, _}` is read as
+unproven and ends the run `outcome_unknown` with a reconciliation reference, so
+an executor that adopts nothing keeps compiling and stays conformant, and its
+errors fail closed. The job's `resource_budgets` is an open plain map; the
+declared `resource_budgets["max_wall_time_ms"]` is covered by the job's canonical
+digest like every other semantic field, and the shipped local executor bounds a
+job by the smallest of the run's deadline, that budget, and the budget its own
+copy of the definition declares.
 
-**Canonical model deltas.** `Loopex.Model.valid_delta?/1` now requires a delta to
-carry *exactly* the fields `Loopex.Model.delta_fields/1` declares for its kind.
-Carrying an undeclared name was already refused; omitting a declared one now is
-too, so an adapter that emitted `%{kind: :text_delta, text: "x"}` without a
-`content_index` had that item published and counted before and has it dropped
-now. The payload ceiling is also total: any field whose size the named
-measurements do not otherwise know is measured by encoding it, so an unbounded
-integer no longer measures as nothing. Both are behaviour changes for an adapter
-that compiles unchanged, and the shipped adapter already emitted complete deltas.
+**Reference provider launch.**
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) requires one
+private companion process per invocation and explicit adapter options:
+`worker_path`, `interpreter_path`, `worker_sha256`, and
+`build_manifest_sha256`, which `mix loopex.provider.build` writes to a `.launch`
+file. Unmanaged calls also supply the validated `cleanup_grace_ms`; managed calls
+use Core's retained value. Missing, malformed, or mismatched configuration
+refuses before credential delivery, with no shared-VM fallback or runtime code
+discovery. The Model callback is `complete/3`; the bare-model `complete/2`
+helper refuses, and direct callers use `complete_prompt/3`, which takes a
+composed `:credential_token` and `:credential_registry` and refuses before
+launch without them — compose custody as `LoopexComposition.CredentialHost`
+does. `Loopex.LLM.ReqLLM.call_options/3` is an exported, unstable helper that
+takes an explicit credential and returns provider options containing it; a
+direct caller owns that secret-bearing value and must not log or retain it. The
+credential source is `LOOPEX_PROVIDER_API_KEY`, at most 65,536 bytes; empty and
+oversized credentials refuse. Provider-side raw diagnostics are unavailable
+rather than forwarded for secret-dependent scrubbing. The generic Model reply
+accepts an optional non-empty UTF-8 `provider_response_id` of at most 256 bytes
+and retains it unchanged.
 
-A reply's usage map is also closed to `input_tokens` and `output_tokens`, and
-the complete raw usage subtree must satisfy the Store's bounded plain-data
-admission before either key or value is normalized. An
-adapter that reports a third key — a cache count, a reasoning count, a provider's
-own total — now settles the attempt as `unreadable_model_answer` instead of
-having the extra number silently dropped, because a usage record Core cannot
-account for in full is one it must not charge from. Omitting either key stays
-legal and normalizes as unreported. A present, Store-admitted plain-data value
-of the wrong numeric shape is classified rather than refused; a non-plain raw
-term fails the reply's Store admission before projection. Widening that key set
-is the change a later milestone makes deliberately, and it is why the closure
-exists rather than a lenient filter.
+**The shipped local executor.** It requires executable `/bin/bash` for its
+internal carrier and cleanup guard on Darwin and Linux under
+[ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept); raw
+commands use `/bin/sh`, argv vectors remain literal, and there is no interpreter
+selection or fallback. This is an adapter prerequisite, not a Core or
+custom-executor dependency. Its start options are trusted host configuration,
+not portable job fields: `process_probe` (default `/bin/ps`, recorded on
+receipts that use it, answering the `-e -o pid= -o pgid=` table dialect with the
+probe's own Port carrier as the witness row), `clock_provider` (a zero-argument
+function returning paired wall and monotonic instants), `open_authority_close`
+(a two-argument replacement for `Ledger.close_open/2` that must answer `:ok` or
+`{:error, reason}`), and `claim_wait_ms` (default `5_000`, capped by the job's
+remaining allowance, never a permission). It refuses a missing, empty, or
+larger-than-8,192-byte `job_id` before touching the shared ledger. Its ledger
+generation encodes the positive 256-bit epoch as exact lowercase 64-hex; a
+generation identity containing uppercase letters makes its record unavailable
+rather than being rewritten. Its concrete error families include
+`{:ledger_unavailable, :operation_owner_unavailable}`, `:effect_settling`,
+`{:receipt_not_retained, reason}`, `{:receipt_read_failed, reason}`,
+`{:refusal_not_retained, reason}`, and nested `root_claim_retained` details;
+only the `{:refused_before_effect, reason}` wrapper proves pre-effect refusal. A
+reservation is not evidence that an effect is live: only the separately fenced
+permit authorizes one, as
+[the turn order](agent-loop-and-tools.md#technical-loop-turn-order) describes.
+Functions marked `@doc false` — `stats/1`, `tool/1`, the `bounded_*`, `*_probe`,
+and `await_*` helpers among them — are callable test support, not extension
+points.
 
-An unreadable sibling or any other canonical mismatch invalidates the usage
-projection as well: accounting charges the committed remaining allowance as
-estimated even when the rejected raw reply contains a plausible pair. Reported
-usage survives only when the entire canonical reply validates and the later
-complete-settlement size preflight alone requires a compact unreadable result.
+**Model deltas and usage.** `Loopex.Model.valid_delta?/1` requires a delta to
+carry exactly the fields `Loopex.Model.delta_fields/1` declares for its kind, and
+the payload ceiling is total: a field whose size the named measurements do not
+know is measured by encoding it. A reply's usage map is closed to
+`input_tokens` and `output_tokens`; a third key settles the attempt as
+`unreadable_model_answer`, and omitting either key normalizes as unreported.
+Accounting settlements are `model_attempt_settled_v2` under
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept);
+the details are in
+[the agent loop](agent-loop-and-tools.md#technical-depth).
 
-[ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept)
-versions that distinction. New writers retain `model_attempt_settled_v2`;
-unreadable results carry either no validated accounting evidence or the exact
-normalized usage and Store byte/depth overage observed for the full settlement.
-Reported accounting must equal that retained usage in both members. This is a
-private journal change, not a new public reply or terminal field.
-
-The reader accepts an unambiguous version-1 prefix, followed by version 2, and
-refuses a version-1 settlement after that cutover. A legacy unreadable result
-with reported accounting now refuses as
-`ambiguous_legacy_provider_accounting`: it is neither rewritten nor silently
-charged as estimated. A version-2 settlement can close an existing version-1
-attempt without another provider call. Unknown versions refuse.
-
-Rollback therefore requires stopping owners and preserving a complete backup.
-An older binary cannot resume a history containing version 2; there is no
-in-place migration or hot-upgrade promise. Ownership acquisition may still
-write fenced administration before replay refuses, so this is not a promise of
-zero writes. Readiness and recovered semantic work require successful replay
-through the committed head. The exact old-binary execution proof remains a
-release-review evidence obligation, not something a schema comparison proves.
-
-**Store port.** An append failure gains one pair of reasons and one changed
-consequence. The local Store holds the log *file* rather than its path: it
-records the file's device and inode at start-up and re-reads the path once its
-append handle is held, because opening in append mode creates a missing file and
-a check made only before the open would let a removal be answered with a new,
-empty, history-free log at the same name. A log removed or replaced underneath a
-live Store is `{:log_unavailable, :enoent}` or `{:log_unavailable, :replaced}`,
-commit-ambiguous exactly as any other append failure is: the caller receives
+**Store port.** A log removed or replaced underneath a live local Store is
+`{:log_unavailable, :enoent}` or `{:log_unavailable, :replaced}`,
+commit-ambiguous exactly as any other append failure: the caller receives
 `{:commit_unknown, tx_id}` and must re-present that exact transaction, and the
-Store process terminates for recovery rather than continuing against a file it
-cannot vouch for. An implementation that never checked its own file identity
-keeps compiling and stays conformant; a caller that read an append error as a
-non-commit was already wrong and now fails visibly instead of quietly.
+Store process terminates. Item admission has one refusal taxonomy whichever way
+a caller reaches it — building a transaction, preflighting through
+`Loopex.Store.normalize_and_measure_item/2`, or validating one: `:invalid_item`
+for a private record and `:invalid_event` for a public event that is not bounded
+plain data, `{:item_structure_exceeded, dimension, observed, limit}` for depth
+or cardinality, and `{:item_too_large, observed, limit}` for size. The
+list-level `:invalid_records` and `:invalid_events` remain for an ordinary
+malformed member.
 
-Item admission has one refusal taxonomy, and the reason atoms moved. Building a
-transaction, preflighting through `Loopex.Store.normalize_and_measure_item/2`,
-and validating a transaction run the same normalizer and the same measurement,
-so the same bytes get the same answer whichever way a caller reaches the
-boundary. An item that is not bounded plain data is `:invalid_item` for a
-private record and `:invalid_event` for a public event, replacing
-`:not_plain_data`, `:not_plain_event_data`, `:invalid_record`, and
-`:reserved_event_field`. A depth or cardinality breach is
-`{:item_structure_exceeded, dimension, observed, limit}` and an oversized item
-is `{:item_too_large, observed, limit}`; both now survive a list's own refusal
-rather than collapsing into `:invalid_records` or `:invalid_events`, which is
-what lets a preflight and a commit agree about one item. A caller that matched
-on the old atoms must change; one that reported the reason as opaque text does
-not. The list-level `:invalid_records` and `:invalid_events` remain for an
-ordinary malformed member, because which member was malformed tells a caller
-nothing it can act on.
+**Durable records.** The record kinds are listed in
+[the architecture technical depth](architecture-technical.md#technical-arch-session-owner).
+The Local executor's generation, admission, open, refusal, and receipt ledgers
+and the ArtifactStore object and use records are separate kind-owned durability
+domains.
 
-**Durable records.** M3 adds `resource_command_v1` and
-`model_request_committed_resources_v1` without rewriting M2 records. The first
-retains admission/selection outcomes, including stateful refusal; the second
-carries a resource-aware receipt and exact model input. The receipt variant is
-part of that new record kind, not a new public event. Sessions without resource
-admission keep the existing model-request kind. Removing content or revoking
-admission does not remove these retained format markers. M2 readers refuse a
-session containing them at load, before model or executor work.
-
-M2's session schema includes `session_genesis_v2`,
-`owner_advanced`, `prompt_admitted_v2`, the other input-command admissions and
-`command_admission_refused_v1`, `model_request_committed`,
-`model_attempt_opened_v1`, `model_termination_admitted_v1`,
-`model_attempt_settled_v2` (and readable legacy `model_attempt_settled_v1`),
-`context_admission_refused_v1`,
-`deadline_staging_failed_v1`, `effect_intent_committed`,
-`executor_receipt_committed`, `tool_result_committed`,
-`outcome_unknown_committed`, and `run_terminal_committed`. The model-attempt
-records replace the earlier `model_result_committed`,
-`model_attempt_evidence_retained`, and `model_attempt_abandoned` vocabulary:
-opening identifies one permitted attempt, settlement atomically carries bounded
-result, accounting, conversation disposition, and next action, and only exact
-pretransport refusal permits attempt two. A settlement naming a retry at the
-attempt limit, and one whose reply carries a termination without being
-evidence-only, are refused as invalid history rather than applied, so no owner
-installs permission for an attempt that can never open and no answer is retained
-that the run has no record of receiving. The payloads also carry projected
-conversation elements, staged request bytes and digest, tool generations,
-context and Store-admission observations, declared bounds, cleanup truth,
-denials, and terminal detail. The Local executor's generation, admission, open,
-refusal, and receipt ledgers and ArtifactStore object/use records are separate
-kind-owned durability domains. This is the surface an M1-era data root fails on.
-
-**Public events.** The event kinds are `user.message_appended`, `run.started`,
-`assistant.message_appended`, `tool.started`, `tool.finished`, `run.finished`,
-`steer.resolved`, and `follow_up.resolved`. `tool.started` now carries `tool_id`
-and `tool_version` and `tool.finished` carries `tool_id` and the outcome, so a
-terminal can name the tool rather than only an opaque call identifier. A call
-whose name resolved to no active generation carries no tool identity, because
-publishing the model-supplied string would read as a name the runtime accepted.
-A `run.finished` that ends `failed` carries a `failure` projection only where a
-context refusal was actually admitted and a `reason` only where one exists, so a
-consumer reads one or the other and never a placeholder for both.
-
-Delivery is now fenced by resolution as well as by commit: an attachment is
-handed rows only up to the position the runtime has acknowledged as resolved, so
-a durably linearized row whose owner still holds an unresolved transaction is
-invisible until re-presentation settles it. The fence binds both paths to the
-outbox. `Loopex.attach/3`'s own snapshot scan stops at that same acknowledged
-position rather than at the durable tail, so an attachment's anchor never
-reports run state derived from a row no consumer may yet read and never sets its
-cursor past rows the event plane still owes it. A session this runtime does not
-own carries no fence on either path. Cursors, sequences, and gap
-semantics are unchanged; a consumer that already tolerated waiting sees the same
-stream a little later, and one that read the store's files directly to get ahead
-of the fence was never on this surface. Progress items and diagnostics are
-transient and are not this surface: they are not durable truth, are not fenced,
-and carry no compatibility expectation at all.
+**Public events.** The event kinds are listed in the same place. `tool.started`
+carries `tool_id` and `tool_version` and `tool.finished` carries `tool_id` and
+the outcome; a call whose name resolved to no active tool carries no tool
+identity, because publishing the model-supplied string would read as a name the
+runtime accepted. A `run.finished` that ends `failed` carries a `failure`
+projection only where a context refusal was admitted and a `reason` only where
+one exists. Delivery is fenced by resolution as well as commit; cursors,
+sequences, and gap semantics are otherwise plain. Progress items and
+diagnostics are transient, are not this surface, and carry no compatibility
+expectation.
 
 **Tool definition contract.** The nine required fields, the evaluable schema
 subset, the generation triple, the reserved `loopex.` namespace, and the
 canonical encoding `loopex.canonical.v1` with the record tag
-`loopex.tool_definition.v1`. Widening the schema subset or the budget set is
-additive and does not disturb a retained generation, because a definition that
-did not use the wider form encodes exactly as it did before; anything else is a
-breaking change to every retained digest. See
-[Agent loop and tools](agent-loop-and-tools.md#technical-depth).
+`loopex.tool_definition.v1`, as
+[the tool contract](agent-loop-and-tools.md#technical-depth) states. Widening
+the schema subset or the budget set is additive and does not disturb a retained
+generation, because a definition that did not use the wider form encodes
+exactly as before; anything else changes every retained digest.
 
-**Reference composition.** `LoopexComposition.start/1` requires `:runtime_id`,
-`:state_root`, `:workspace`, and `:policy`, and accepts `:progress_to`,
-`:diagnostics_to`, `:cleanup_grace_ms`, and `:context_token_budget`; omission of
-the context option selects the reference policy default of 8,192, while an
-explicit valid value is forwarded unchanged as the required top-level Runtime
-option. It passes `:project_manifest` and `:project_decision` through to the
-runtime, and hands `:cleanup_grace_ms` to the session and the executor together
-so a run's ending cannot report a period its cleanup did not run under.
-`:process_probe` reaches the executor alone, which is where that option belongs.
-`:provider_launch` carries the host's explicit companion configuration opaquely
-to the reference model adapter; no default worker is discovered.
-It names four concrete implementations, so an embedder that
-depends on it transitively acquires the reference adapters and their external
-dependency whether or not every one is used. An embedder who wants a different
-Store, Model, Executor, or ArtifactStore composes the ports and the `Loopex`
-facade directly instead. See
-[Runtime and embedding](runtime-and-embedding.md#technical-depth).
+**Reference composition.** Its options are listed in
+[Runtime and embedding](runtime-and-embedding.md#technical-embedding-composition).
+It names four concrete implementations, so an embedder that depends on it
+acquires the reference adapters and their external dependency whether or not
+every one is used; an embedder that wants a different Store, Model, Executor, or
+ArtifactStore composes the ports and the `Loopex` facade directly.
 
-**Operator command.** `loopex run`, `sessions`, `resume`, `cancel`, and
-`artifact`. The flags are `--policy`, `--state-root`, `--workspace`,
-`--steer`, `--follow-up`, `--cleanup-grace-ms`, and
-`--context-token-budget`, and each subcommand admits its own subset: `sessions`
-and `artifact` take `--state-root` alone, `resume` and `cancel` take everything
-but `--steer` and `--follow-up`, and only `run` takes those. The pairing is part
-of the surface, so admitting a flag on one more subcommand is observable and
-withdrawing one is breaking. A bare `--` ends option parsing and preserves every
-remaining word as data, which is what makes an artifact locator beginning with
-`--` retrievable at all. The reference command defaults a new prompt's context
-value to 8,192; prepared `resume` and `cancel` recover an active run's committed
-value on omission and refuse an explicit conflict before activation or abort.
-The command's cross-application interrupt entries are `install/1`,
-`install/2`, `install_prepared(attachment, cleanup_ms, activation)`, which
-returns `:ok`, a definitive `{:error, reason}`, or `{:unresolved, reason}`,
-`activate_prepared(activation)`,
-and `abandon_prepared(activation)`. Prepared installation binds the handler to
-the attachment and the exact one-use capability and makes a holder process the
-handler owns that capability's acknowledged holder. Before creating it, a
-temporary lifetime guard monitors the installer; it creates the holder linked
-and monitored, waits for the holder's acknowledgement, then unlinks the pair
-into a one-way lifetime. That same guard is armed against the exact signal
-manager, and the handler is visible before public transfer begins. On this
-explicit `transfer_resume/3` path the coordinator fixes the verdict, the installer forwards it to
-the guard, and the guard acknowledges it before the coordinator records the
-holder and returns `:ok`.
-Installer death before holder readiness or before forwarding fails closed; after
-forwarding, ordered delivery makes the handoff independent of the installer even
-if its public reply is lost. Ordinary `transfer_resume/2` has no guard and a
-missing reply does not prove whether its coordinator transfer happened.
-Activation and abandonment
-are presented from that holder and wait for the owner's exact answer. A lost
-holder or coordinator after a possible presentation is unresolved, not proof
-that the decision failed; read-only holder lookup independently reports
-unavailable on observation expiry. Installation errors may originate in
-configuration, the signal manager, or the owner, and are not all owner refusals.
-Abandonment schedules no recovered work. Under
-[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept), installation
-atomically claims one handler identity on the exact signal manager. A duplicate
-returns `interrupt_already_installed` and preserves the incumbent attachment,
-holder, abort identity and backstop. There is no dynamic replacement or
-predecessor drain. Orderly removal releases its own holder asynchronously;
-manager and coordinator loss independently end dependent holders, without
-undoing work already activated. Unresolved installation keeps recovery fenced
-and lifetime cleanup active; the command neither activates nor retries it
-speculatively. `abandon_resume(attachment,
-activation)`, the entry ADR 0016 names, is kept and presents the capability
-from the same holder.
-An unrecognised flag is refused rather than
-ignored, which means adding a flag is observable and removing one is breaking.
-`loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the
-subcommand follows whatever artifact store a composition supplies rather than
-naming the local one. `--policy` accepts `allow-all` and `shell-allowlist`;
-the set of accepted names is part of the surface, so adding one is observable
-and removing one is breaking.
+**Operator command.** The subcommands are `run`, `sessions`, `resume`,
+`attach`, `cancel`, `artifact`, `skill`, and `daemon`. Each admits its own flags,
+and an unrecognised flag is refused rather than ignored, so admitting a flag on
+one more subcommand is observable and withdrawing one is breaking:
 
-**App-server wire protocol.** One generation string,
-`loopex.session.v1-experimental`, sixteen methods, seven record families,
-fifteen error codes, and the exact framing and limits in
+| Subcommand | Flags |
+| --- | --- |
+| `run` | `--policy`, `--state-root`, `--workspace`, `--steer`, `--follow-up`, `--cleanup-grace-ms`, `--context-token-budget`, `--skill`, `--skill-resource` |
+| `resume`, `cancel` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |
+| `sessions`, `artifact` | `--state-root` |
+| `skill` | `--state-root`, `--workspace`, `--rev`, `--path` |
+
+A `--daemon SOCKET` argument selects the live grammar of `run`, `resume`, and
+`sessions`, and `attach` exists only in that grammar; it is stated with the
+daemon's exit statuses in
+[the operator daemon reference](../operator/daemon.md#technical-depth). A bare
+`--` ends option parsing and preserves every remaining word as data, which is
+what makes an artifact locator beginning with `--` retrievable. `--policy`
+accepts `allow-all` and `shell-allowlist`; the set of names is part of the
+surface. `loopex artifact` reads objects through the `Loopex.ArtifactStore`
+port. The command's cross-application interrupt entries —
+`LoopexCli.Interrupt.install/1`, `install/2`, `install_prepared/3`,
+`activate_prepared/1`, `abandon_prepared/1`, and `abandon_resume/2` — are
+described in
+[Runtime and embedding](runtime-and-embedding.md#technical-embedding-recovery).
+
+**App-server and daemon wire protocols.** Generation `loopex.experimental/1`
+has sixteen methods, seven record families, and fifteen error codes;
+`loopex.experimental/2` adds four methods, two record families, twelve error
+codes, seven limits, and a `writer_epoch` on every mutation of an existing
+session. The exact contract is
 [the protocol technical reference](app-server-protocol-technical.md#technical-depth).
-Agreement is by exact generation: a client offers an ordered list, the server
-selects one it knows, and an unknown offer is refused with
-`unsupported_generation` rather than served the nearest thing. Initialization
-happens exactly once per connection and before any mutation; the `initialized`
-record reports the selected generation, the exact schema digest, the supported
-methods and the limits, so a client verifies the contract instead of assuming
-it. A method this build does not implement is refused with
-`unsupported_method`, and that check precedes every other one. Because the
-digest covers the whole schema, any change to a method, record or limit changes
-what a client sees at initialization; there is no partial compatibility within a
-generation and no promise across generations. Strictness is itself part of the
-surface: one JSON object per line with LF only, no duplicate members, no float
-where an integer belongs, no trailing bytes. A lenient client that relied on
-repair was never conformant. Fixed by
-[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept).
+Initialization reports the selected generation, the exact schema digest, the
+methods, and the limits, and because the digest covers the whole schema, any
+change to a method, record, or limit changes what a client sees at
+initialization. There is no partial compatibility within a generation and no
+promise across generations. Generation 1 was once named
+`loopex.session.v1-experimental`; that name is no longer served, and a client
+offering it is refused with `unsupported_generation`. Strictness is part of the
+surface: a lenient client that relied on repair was never conformant.
 
-**Durable interaction records.** `interaction_requested_v1`,
-`interaction_answer_admitted_v1`, and `interaction_resolved_v1`, plus the
-`interaction_answer` command record and the `interaction.requested`,
-`interaction.resolved`, `interaction.expired` and `interaction.cancelled`
-public events. This is the M3 boundary again, one milestone on: a reader that
-predates these kinds must refuse a session containing one before any effect,
-rather than replaying around it, while a current reader still replays genuine
-M3 and M2 histories including settlement-v2. There is no migration and none is
-owed. Rollback uses a retained old root/binary pair; removing the app server or
-the new reader does not downgrade an interaction-bearing root. The answer inside
-those records is bounded evidence for a host-policy decision and never an
-authorization, and the host's own opaque `decision_ref` stays private and is
-never projected. Fixed by
+**Durable interactions.** The three record kinds, the `interaction_answer`
+command, and the `interaction.requested`, `interaction.resolved`,
+`interaction.expired`, and `interaction.cancelled` events, under
 [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
+A runtime that names `:policy` must name `:policy_identity`, because a pending
+question is resumed only by the same policy identity and revision that asked
+it. The answer is bounded evidence for a host-policy decision, never an
+authorization, and the host's `decision_ref` is never projected.
 
 **Artifact transfer capability.** Three optional ArtifactStore callbacks —
 `open_transfer/4`, `read_transfer/3`, `close_transfer/2` — and the facade family
-`Loopex.open_artifact_transfer/2`, `read_artifact_chunk/3` and
-`close_artifact_transfer/2`. `put/3`, `fetch/2`, `stat/2` and `describe/2` are
-unchanged, the object and use identities and the opaque `use:<sha256>` locator
-are unchanged, and no artifact format migrates. An adapter that does not
-implement the triple is still conformant: the facade answers that the capability
-is unsupported rather than falling back to an unbounded fetch, and removing the
-capability restores the prior API without rewriting data. The ceilings a
-transfer runs under are part of the surface and are returned as data by
-`Loopex.ArtifactStore.transfer_limits/0`: a 64 MiB maximum object, a 60-second
-opening deadline over 128 MiB of counted storage work, 32 KiB chunks with a
-five-second read deadline, a ten-minute lifetime, and at most two live transfers
-per attachment and four per runtime. They are safety ceilings, not measured
-throughput promises. Fixed by
-[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept).
+`Loopex.open_artifact_transfer/2`, `read_artifact_chunk/3`, and
+`close_artifact_transfer/2`, under
+[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept). The object and
+use identities and the opaque `use:<sha256>` locator are unchanged by it, and no
+artifact format migrates. An adapter without the triple stays conformant and
+the facade refuses rather than falling back to an unbounded fetch. The ceilings
+are part of the surface and are listed in
+[Runtime and embedding](runtime-and-embedding.md#technical-embedding-transfers).
 
 **Telemetry events and trace sessions.** The `[:loopex, …]` span inventory is
 bound exactly by
-[ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept): five
-port callbacks and six coordinator transaction cuts, each emitting `start`,
-`stop` and `exception` with identities, kinds, outcome categories, durations and
-counts, and never content or credentials. Adding a name, removing one, or
-emitting a second span from one boundary is an ADR amendment rather than an
-implementation choice, which is what makes the inventory something a consumer
-can read against. Core attaches no handler; `loopex_telemetry` owns the only
-Loopex-attached one, and a host handler runs in the emitting process and is the
-host's own responsibility. Trace sessions are runtime-scoped, need the refreshed
-OTP floor, and are administrative diagnostics: neither plane is durable truth,
-neither is authority, and no session command, wire request, model output or
-project resource can start, change or stop either. No durable format changes,
-and removing the facility needs no migration.
+[ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) and
+listed in [the observability inventory](observability-technical.md#technical-observability-inventory);
+adding a name, removing one, or emitting a second span from one boundary is an
+ADR amendment. Trace sessions need the OTP 27 floor, load each named module
+from the code path before observing it, and are administrative diagnostics:
+neither plane is durable truth or authority, and no session command, wire
+request, model output, or project resource can start, change, or stop either.
+Neither changes a durable format, and removing either needs no migration.
+
+### Reader Boundaries and Rollback
+
+| Data in a state root | Current reader | Older reader |
+| --- | --- | --- |
+| A root written before conversation, tool-generation, steer, follow-up, and cancellation records existed (the M1 era) | Not readable; start on a fresh state root | — |
+| `model_attempt_settled_v1` settlements | Replayed as an unambiguous prefix; a version-1 settlement after the first version-2 one refuses, and a legacy unreadable result with reported accounting refuses as `ambiguous_legacy_provider_accounting` | — |
+| `model_attempt_settled_v2` settlements | Replayed | A reader without version 2 refuses the session |
+| `resource_command_v1`, `model_request_committed_resources_v1` | Replayed; even a refused resource command creates this boundary | A reader without resource records refuses the session at load |
+| `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1` | Replayed | A reader without interaction records refuses the session before any effect |
+| A root with a session directory but no daemon index | Offline commands read it; the daemon refuses it as `session_index_upgrade_required` until `loopex daemon prepare-index` imports it | — |
+
+Rollback therefore requires stopping owners and preserving a complete backup of
+the root. Ownership acquisition may still write fenced administration before
+replay refuses, so an older reader is not promised zero writes; readiness and
+recovered work require successful replay through the committed head. Removing
+skill files, the app server, or the daemon does not downgrade a root that holds
+their records. The old-binary execution proof for accounting settlements is
+`scripts/provider-accounting-rollback.exs`, described in
+[DEVELOPMENT.md](../../DEVELOPMENT.md). A local executor ledger that a reader
+refuses is preserved, and the
+[operator recovery procedure](../operator/tools-and-policy.md#operator-tools-reach)
+still requires positive cessation of every old effect authority, or the
+prescribed host reboot, before a fresh root is used.
 
 ### What an Embedder Should Do About It
 
-- Pin an exact revision of this repository. There is no version constraint that
-  expresses "the M2 loop", because no version has been published.
+- Pin an exact revision of this repository. No published version expresses a
+  loop, because no version has been published.
 - Do not persist anything that depends on a durable record shape outside the
-  Store, and do not read the store's files with your own code.
+  Store, and do not read the Store's files with your own code.
 - Treat `artifact_reference.locator` as opaque. Core never parses, joins, or
   reconstructs it, and an adapter is free to change what it means.
 - Treat `stream_domain_id` as an opaque comparison key of 32 hexadecimal
@@ -693,38 +356,30 @@ and removing the facility needs no migration.
   delivery guarantee, so a consumer falls back to the durable record rather than
   inferring abandonment.
 - Know which policy caller you are answering. The one-shot
-  `Loopex.Policy.decide/2` still resolves `{:defer, _}` to
+  `Loopex.Policy.decide/2` resolves `{:defer, _}` to
   `{:deny, :interaction_unsupported}`; the interaction-aware
   `Loopex.Policy.evaluate/2`, which the session owner uses, admits a validated
-  defer and suspends the tool call on a durable question. The callback shape a
-  host implements did not change.
-- Supply a `:policy_identity` alongside `:policy` from M4 on. A pending
-  interaction is resumed only by the same policy identity and revision that
-  asked it; a launch that names a policy without an identity is refused, and a
-  session whose binding changed stays suspended rather than deciding under a
-  binding it did not have.
-- Treat a transfer reference as opaque and attachment-owned. Another attachment,
-  session or runtime does not know it, and detaching or being replaced releases
-  every transfer that attachment opened.
-- Expect an app-server client to renegotiate. The generation and schema digest
-  are checked at initialization, and an exact mismatch is the intended outcome
+  defer and suspends the tool call on a durable question.
+- Supply a `:policy_identity` alongside `:policy`, and change its revision when
+  your policy's behaviour changes.
+- Treat a transfer reference as opaque and attachment-owned.
+- Expect a protocol client to renegotiate. The generation and schema digest are
+  checked at initialization, and an exact mismatch is the intended outcome
   rather than a fault to work around.
-- Start on a fresh state root when moving from an M1-era revision, and again for
-  M4 interaction evidence.
 
 ### What Would Have To Exist Before Any Freeze
 
 Nothing here becomes a release candidate by accumulating usage. Under the
 [compatibility contract](../vision.md#concept-vision-compatibility) and its
 [technical rules](../vision-technical.md#technical-vision-compatibility), a
-surface needs schemas, conformance vectors, independent consumers, and
-upgrade and rollback evidence appropriate to what it claims, and the public
-protocol specifically waits until embedded, RPC, daemon, host, and extension
-callers have exercised its semantics. Executor-protocol stability additionally
-waits on isolated and remote evidence, not only the trusted-local implementation
-this milestone ships. Deciding what a published package would contain is itself
-a compatibility decision, because a consumer pins the package rather than the
+surface needs schemas, conformance vectors, independent consumers, and upgrade
+and rollback evidence appropriate to what it claims, and the public protocol
+specifically waits until embedded, RPC, daemon, host, and extension callers have
+exercised its semantics. Executor-protocol stability additionally waits on
+isolated and remote evidence, not only the trusted-local implementation that
+exists today. Deciding what a published package would contain is itself a
+compatibility decision, because a consumer pins the package rather than the
 surface inside it.
 
-Until a milestone does that work and records it, the answer to "is this stable
-yet" is no, for all of the above.
+Until that work is done and recorded, the answer to "is this stable yet" is no,
+for all of the above.

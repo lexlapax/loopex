@@ -760,7 +760,11 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
 
     # The claim is taken after admission, because admission takes it too: a claim
     # held before the job starts refuses the effect rather than its settlement.
-    assert wait_for_file(ready), "the command never started"
+    # The wait ends on one of the two events that decide it -- the command's own
+    # marker, or the job ending without one -- rather than on a fixed count of
+    # polls, so a slow admission is waited out and a job that ended first is
+    # reported with the result it actually returned.
+    assert :started = await_started(ready, running)
 
     claim = Path.join(ledger, "claim")
     on_exit(fn -> File.rmdir(claim) end)
@@ -913,6 +917,10 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
       {:normalize_tool_result, 1},
       {:receipt, 10}
     ]
+
+    # A pattern over a module not yet loaded matches nothing, and whether this
+    # case runs before any other has loaded `Local` depends on the seed.
+    Code.ensure_loaded!(Local)
 
     for {name, arity} <- traced do
       assert :erlang.trace_pattern({Local, name, arity}, [{:_, [], [{:return_trace}]}], [:local]) ==
@@ -1455,6 +1463,27 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
         {:cont, false}
       end
     end)
+  end
+
+  # Returns `:started` once `ready` exists; flunks with the job's own result if
+  # the job ended first. Bounded by the case's ExUnit timeout, not by a count.
+  defp await_started(ready, running) do
+    cond do
+      File.exists?(ready) ->
+        :started
+
+      true ->
+        case Task.yield(running, 25) do
+          nil ->
+            await_started(ready, running)
+
+          {:ok, result} ->
+            flunk("the job ended before its command started: #{inspect(result)}")
+
+          {:exit, reason} ->
+            flunk("the job exited before its command started: #{inspect(reason)}")
+        end
+    end
   end
 
   defp elapsed(work) do

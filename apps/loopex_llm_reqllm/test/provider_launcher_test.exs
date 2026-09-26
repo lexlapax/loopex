@@ -9,8 +9,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
   end
 
   setup do
-    root =
-      Path.join(System.tmp_dir!(), "loopex-provider-launch-#{System.unique_integer([:positive])}")
+    # A random, exclusively created root: a root left by a killed run can never
+    # be reused, and a collision fails here rather than sharing state.
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+    root = Path.join(System.tmp_dir!(), "loopex-provider-launch-" <> suffix)
 
     File.mkdir!(root)
     previous = Process.flag(:trap_exit, true)

@@ -181,6 +181,11 @@ defmodule Loopex.Executor.Local.ReceiptPublicationObservationTest do
   end
 
   defp observed_execution(local, request) do
+    # A pattern over a module not yet loaded matches nothing; `:file` is
+    # preloaded, `IO` is not guaranteed to be.
+    for {module, _function, _arity} <- @traced_returns ++ traced_calls(),
+        do: Code.ensure_loaded!(module)
+
     for mfa <- @traced_returns do
       assert :erlang.trace_pattern(mfa, [{:_, [], [{:return_trace}]}], [:local]) == 1
     end

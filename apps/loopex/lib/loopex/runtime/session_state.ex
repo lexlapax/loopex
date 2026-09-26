@@ -332,6 +332,57 @@ defmodule Loopex.Runtime.SessionState do
   def propose(_state, _command, _resolved), do: {:error, :invalid_command}
 
   @doc false
+  @spec drain_abort_command_id(binary(), non_neg_integer()) :: binary()
+  def drain_abort_command_id(session_id, owner_epoch)
+      when is_binary(session_id) and is_integer(owner_epoch) and owner_epoch >= 0 do
+    stable_id("drain_abort", session_id, owner_epoch)
+  end
+
+  @doc false
+  @spec drain_abort_record?(map(), binary(), map(), binary() | nil) :: boolean()
+  def drain_abort_record?(record, command_id, head, run_id)
+      when is_map(record) and is_binary(command_id) and is_map(head) do
+    {:ok, digest} = command_digest(%{type: :abort, command_id: command_id})
+    payload = Map.get(record, :payload, %{})
+    owner_epoch = Map.get(head, :owner_epoch)
+    journal_version = Map.get(head, :journal_version)
+
+    base? =
+      is_integer(owner_epoch) and owner_epoch >= 0 and is_integer(journal_version) and
+        journal_version >= 0 and Map.get(record, :owner_epoch) == owner_epoch and
+        Map.get(record, :journal_version) == journal_version + 1 and
+        Map.get(payload, :kind, Map.get(payload, "kind")) == "command_admitted" and
+        Map.get(payload, "command_id") == command_id and
+        Map.get(payload, "command_digest") == digest and
+        Map.get(payload, "command_type") == "abort"
+
+    case run_id do
+      run_id when is_binary(run_id) ->
+        base? and Map.get(payload, "admission") == "accepted" and
+          Map.get(payload, "run_id") == run_id
+
+      nil ->
+        base? and Map.get(payload, "admission") == "rejected_no_active_run" and
+          not Map.has_key?(payload, "run_id")
+    end
+  end
+
+  def drain_abort_record?(_record, _command_id, _head, _run_id), do: false
+
+  @doc false
+  @spec drain_abort_binding(t(), binary()) :: :match | :collision | :absent
+  def drain_abort_binding(%__MODULE__{} = state, command_id) when is_binary(command_id) do
+    {:ok, digest} = command_digest(%{type: :abort, command_id: command_id})
+
+    case Map.get(state.commands, command_id) do
+      %{digest: ^digest, reply: {:accepted, ^command_id}} -> :match
+      %{digest: ^digest, reply: {:error, :no_active_run}} -> :match
+      nil -> :absent
+      _other -> :collision
+    end
+  end
+
+  @doc false
   @spec prepare_resource_command(t(), map()) ::
           {:new, map()} | {:replayed, term()} | {:error, term()}
   def prepare_resource_command(%__MODULE__{} = state, command) do

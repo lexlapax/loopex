@@ -142,10 +142,100 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @doc false
+  @spec start_quiesce_fence(
+          pid(),
+          Store.t(),
+          binary(),
+          reference(),
+          pid(),
+          integer(),
+          term()
+        ) :: {pid(), reference()}
+  def start_quiesce_fence(
+        control,
+        store,
+        session_id,
+        operation_ref,
+        phase_owner,
+        deadline,
+        abort_resolution
+      )
+      when is_pid(control) and is_binary(session_id) and is_reference(operation_ref) and
+             is_pid(phase_owner) and is_integer(deadline) do
+    spawn_monitor(fn ->
+      run_quiesce_fence(
+        control,
+        store,
+        session_id,
+        operation_ref,
+        phase_owner,
+        deadline,
+        abort_resolution
+      )
+    end)
+  end
+
+  @doc false
+  @spec drain_fence_transaction_id(binary(), non_neg_integer()) :: binary()
+  def drain_fence_transaction_id(session_id, owner_epoch)
+      when is_binary(session_id) and is_integer(owner_epoch) and owner_epoch >= 0,
+      do: owner_identity("drain_fence", session_id, owner_epoch)
+
+  @doc false
+  @spec drain_fence_incarnation_id(binary(), non_neg_integer()) :: binary()
+  def drain_fence_incarnation_id(session_id, owner_epoch)
+      when is_binary(session_id) and is_integer(owner_epoch) and owner_epoch >= 0,
+      do: owner_identity("drain_fence_incarnation", session_id, owner_epoch)
+
+  @doc false
   @spec command(pid(), owner(), map()) :: {:accepted, binary()} | {:error, term()}
   def command(coordinator, owner, command)
       when is_pid(coordinator) and is_map(owner) and is_map(command) do
     safe_call(coordinator, {:command, owner, command}, :infinity)
+  end
+
+  @doc false
+  @spec command_detailed(pid(), owner(), map()) ::
+          {:result, {:accepted, binary()} | {:error, term()}}
+          | {:error, :superseded_before_admission}
+          | {:error, :runtime_unavailable | :coordinator_unavailable}
+  def command_detailed(coordinator, owner, command)
+      when is_pid(coordinator) and is_map(owner) and is_map(command) do
+    try do
+      GenServer.call(coordinator, {:command_detailed, owner, command}, :infinity)
+    catch
+      :exit, _reason -> {:error, :coordinator_unavailable}
+    end
+  end
+
+  @doc false
+  @spec admit_quiesce_abort(pid(), owner(), binary(), pid()) ::
+          {:admitted,
+           %{
+             command_id: binary(),
+             run_id: binary(),
+             cleanup_grace_ms: pos_integer(),
+             owner_epoch: non_neg_integer()
+           }}
+          | :rejected_no_active_run
+          | {:unknown, %{command_id: binary(), head: map(), run_id: binary() | nil}}
+          | {:error, term()}
+  def admit_quiesce_abort(coordinator, owner, drain_id, phase_owner)
+      when is_pid(coordinator) and is_map(owner) and is_binary(drain_id) and
+             is_pid(phase_owner) do
+    safe_call(coordinator, {:admit_quiesce_abort, owner, drain_id, phase_owner}, :infinity)
+  end
+
+  @doc false
+  @spec release_quiesce_cleanup(pid(), owner(), binary(), pid()) :: :ok | {:error, term()}
+  def release_quiesce_cleanup(coordinator, owner, drain_id, phase_owner)
+      when is_pid(coordinator) and is_map(owner) and is_binary(drain_id) and
+             is_pid(phase_owner) do
+    safe_call(
+      coordinator,
+      {:release_quiesce_cleanup, owner, drain_id, phase_owner},
+      :infinity
+    )
   end
 
   # Concept: status is the one session question that may give up on an owner
@@ -271,6 +361,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        # The journal prefix the owner-discovery scan already read. Recovery
        # continues from its tail instead of reading the same rows a second time.
        recovery_records: [],
+       recovery_events: nil,
        attempt: 1,
        # Technical depth: one counter for the whole acquisition, never reset. A
        # counter reset by succession contention would multiply the budget by
@@ -353,6 +444,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        activation_reconciliation: nil,
        owner: nil,
        durable: nil,
+       drain: nil,
        # Concept: whether this owner is allowed to schedule the work it
        # recovered, and who may decide that.
        #
@@ -375,7 +467,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @impl GenServer
-  def handle_continue(:acquire_owner, state), do: advance_acquisition(state)
+  def handle_continue(:acquire_owner, state), do: acquisition_result(advance_acquisition(state))
 
   def handle_continue({:reply_prepared_transfer, from, reply}, state) do
     GenServer.reply(from, reply)
@@ -388,6 +480,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @impl GenServer
   def handle_call({:command, supplied_owner, command}, _from, state) do
     cond do
+      not is_nil(state.drain) ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
       state.phase != :ready ->
         {:reply, {:error, :owner_acquiring}, state}
 
@@ -408,6 +503,101 @@ defmodule Loopex.Runtime.SessionCoordinator do
           {:error, :runtime_unavailable} = error ->
             {:reply, error, state}
         end
+    end
+  end
+
+  def handle_call({:command_detailed, supplied_owner, command}, _from, state) do
+    cond do
+      not is_nil(state.drain) ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      state.phase != :ready ->
+        {:reply, {:error, :superseded_before_admission}, state}
+
+      supplied_owner != state.owner ->
+        {:reply, {:error, :superseded_before_admission}, state}
+
+      state.superseded ->
+        {:reply, {:error, :superseded_before_admission}, state}
+
+      true ->
+        case Control.current_owner(state.control, state.session_id, state.owner) do
+          :ok ->
+            state
+            |> fence_prepared_resume(command)
+            |> commit_command(command)
+            |> detailed_command_reply()
+
+          {:error, :superseded_owner} ->
+            {:reply, {:error, :superseded_before_admission}, superseded_owner(state)}
+
+          {:error, :runtime_unavailable} = error ->
+            {:reply, error, state}
+        end
+    end
+  end
+
+  def handle_call(
+        {:admit_quiesce_abort, supplied_owner, drain_id, phase_owner},
+        _from,
+        state
+      ) do
+    cond do
+      not is_nil(state.drain) ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      state.phase != :ready or supplied_owner != state.owner or state.superseded ->
+        drain = %{id: drain_id, phase_owner: phase_owner, status: :refused}
+
+        notify_quiesce_admission(
+          {:reply, {:error, :runtime_unavailable}, %{state | drain: drain}}
+        )
+
+      true ->
+        state = %{
+          state
+          | drain: %{id: drain_id, phase_owner: phase_owner, status: :admitting}
+        }
+
+        result =
+          case Control.current_owner(state.control, state.session_id, state.owner) do
+            :ok -> admit_quiesce_abort_once(state)
+            {:error, reason} -> drain_refusal(state, reason)
+          end
+
+        notify_quiesce_admission(result)
+    end
+  end
+
+  def handle_call(
+        {:release_quiesce_cleanup, supplied_owner, drain_id, supplied_phase_owner},
+        _from,
+        state
+      ) do
+    case state.drain do
+      %{
+        id: ^drain_id,
+        phase_owner: ^supplied_phase_owner,
+        status: :paused,
+        run_id: run_id
+      }
+      when supplied_owner == state.owner ->
+        case begin_cleanup(state, run_id, :abort) do
+          {:ok, next} ->
+            drain = %{next.drain | status: :released}
+            {:reply, :ok, %{next | drain: drain}}
+
+          {:error, reason} ->
+            drain = %{state.drain | status: {:error, reason}}
+            {:reply, {:error, reason}, %{state | drain: drain}}
+        end
+
+      %{id: ^drain_id, phase_owner: ^supplied_phase_owner, status: :already_admitted}
+      when supplied_owner == state.owner ->
+        {:reply, :ok, state}
+
+      _other ->
+        {:reply, {:error, :runtime_unavailable}, state}
     end
   end
 
@@ -658,7 +848,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @impl GenServer
   def handle_info(:retry_owner, %{phase: phase} = state)
       when phase in [:discovering, :acquiring, :recovering] do
-    advance_acquisition(state)
+    acquisition_result(advance_acquisition(state))
   end
 
   def handle_info(:advance_work, state), do: advance_work(state)
@@ -1154,11 +1344,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp discover_and_advance_owner(%{owner_command: owner_command} = state)
        when is_map(owner_command) do
     with {:ok, prior_tx_id, scanned} <- discover_prior_tx_id(state),
+         {:ok, durable, events} <- replay_acquisition_history(state, scanned),
          :ok <- prior_transaction_resolved(state, prior_tx_id),
          {:ok, head} <- ownership_head(state),
+         :ok <- recovery_head_matches(durable, head),
+         :ok <- recover_drain_identities(state, scanned, durable, head),
+         {:ok, confirmed_head} <- ownership_head(state),
+         :ok <- recovery_head_matches(durable, confirmed_head),
          {:ok, attempt_generation, expected_generation} <- owner_attempt_generation(state),
          {:ok, transaction, incarnation} <-
-           build_command_owner_candidate(state, head, attempt_generation),
+           build_command_owner_candidate(state, confirmed_head, attempt_generation),
          {:ok, stage} <-
            Store.stage_owner_attempt(
              Map.put(owner_command, :attempt_generation, attempt_generation),
@@ -1172,6 +1367,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           | phase: :acquiring,
             prior_tx_id: prior_tx_id,
             recovery_records: scanned,
+            recovery_events: events,
             transaction: transaction,
             incarnation: incarnation
         },
@@ -1185,14 +1381,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp discover_and_advance_owner(state) do
     with {:ok, prior_tx_id, scanned} <- discover_prior_tx_id(state),
+         {:ok, durable, events} <- replay_acquisition_history(state, scanned),
          :ok <- prior_transaction_resolved(state, prior_tx_id),
          {:ok, head} <- ownership_head(state),
-         {:ok, transaction, incarnation} <- build_owner_candidate(state, head) do
+         :ok <- recovery_head_matches(durable, head),
+         :ok <- recover_drain_identities(state, scanned, durable, head),
+         {:ok, confirmed_head} <- ownership_head(state),
+         :ok <- recovery_head_matches(durable, confirmed_head),
+         {:ok, transaction, incarnation} <- build_owner_candidate(state, confirmed_head) do
       transact_owner(%{
         state
         | phase: :acquiring,
           prior_tx_id: prior_tx_id,
           recovery_records: scanned,
+          recovery_events: events,
           transaction: transaction,
           incarnation: incarnation
       })
@@ -1285,19 +1487,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: a resume reads its session's journal once, not twice.
+  # Concept: acquisition replays the session before it chooses a successor.
   #
-  # Technical depth: discovery needs the last `owner_advanced` transaction id and
-  # recovery needs every row, and both used to scan from version zero. On a long
-  # session that doubled the read cost of every resume, and it made the rows
-  # between the two scans arrive twice for no benefit. Discovery now hands back
-  # the prefix it read and recovery continues from its tail. The prefix is a
-  # contiguous scan from the journal head, and the reducer still checks that each
-  # applied row is exactly one version past the last, so a prefix that is not
-  # contiguous with what follows is refused as invalid history rather than
-  # silently stitched.
-  defp discover_prior_tx_id(%{prior_tx_id: prior_tx_id}) when is_binary(prior_tx_id),
-    do: {:ok, prior_tx_id, []}
+  # Technical depth: acquisition needs both the last `owner_advanced`
+  # transaction id and the complete durable state. A retained prior transaction
+  # avoids deriving that identity again, but it cannot bypass replay: restart
+  # recovery must inspect the exact committed drain identities before ordinary
+  # succession. The one contiguous record scan therefore feeds both identity
+  # discovery and recovery, and the reducer refuses a missing or reordered row.
+  defp discover_prior_tx_id(%{prior_tx_id: prior_tx_id} = state) when is_binary(prior_tx_id) do
+    case load_all_records(state.store, state.session_id) do
+      {:ok, records} -> {:ok, prior_tx_id, records}
+      {:error, :store_unavailable} -> :retry
+      :unavailable -> :retry
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp discover_prior_tx_id(state) do
     case load_all_records(state.store, state.session_id) do
@@ -1333,6 +1538,203 @@ defmodule Loopex.Runtime.SessionCoordinator do
       :unavailable -> :retry
     end
   end
+
+  # Concept: an interrupted orderly stop is recovered before a replacement owner
+  # may write.
+  #
+  # Technical depth: the deterministic abort and fence identities occupy the
+  # current or immediately preceding owner epoch. Status alone cannot attribute a
+  # committed identity, so each terminal commit is matched against the replayed
+  # command binding or the exact `owner_advanced` record. A collision is not a
+  # drain result and leaves normal succession available; unavailable or
+  # incomplete durable evidence retries without advancing ownership. The second
+  # ownership-head read closes a concurrent change between attribution and the
+  # successor transaction.
+  defp replay_acquisition_history(state, records) do
+    case load_all_events(state.store, state.session_id) do
+      {:ok, events} ->
+        case SessionState.recover(state.session_id, records, events) do
+          {:ok, durable} -> {:ok, durable, events}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, :store_unavailable} ->
+        :retry
+
+      :unavailable ->
+        :retry
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp recovery_head_matches(durable, head) do
+    if durable.owner_epoch == head.owner_epoch and
+         durable.journal_version == head.journal_version,
+       do: :ok,
+       else: :retry
+  end
+
+  defp recover_drain_identities(_state, _records, _durable, %{owner_epoch: 0}), do: :ok
+
+  defp recover_drain_identities(state, records, durable, head) do
+    with :ok <- recover_drain_abort_identities(state, records, durable, head.owner_epoch),
+         :ok <- recover_drain_fence_identities(state, records, durable, head) do
+      :ok
+    end
+  end
+
+  defp recover_drain_abort_identities(state, records, durable, owner_epoch) do
+    case recover_drain_abort_identity(state, records, durable, owner_epoch) do
+      :next when owner_epoch > 0 ->
+        recover_drain_abort_identity(state, records, durable, owner_epoch - 1)
+        |> finish_drain_identity_search()
+
+      result ->
+        finish_drain_identity_search(result)
+    end
+  end
+
+  defp recover_drain_abort_identity(state, records, durable, owner_epoch) do
+    command_id = SessionState.drain_abort_command_id(state.session_id, owner_epoch)
+
+    case Store.transaction_status(state.store, state.session_id, @mutation_domain, command_id) do
+      :absent ->
+        :next
+
+      {:terminal, {:not_committed, _reason}} ->
+        :resolved
+
+      {:terminal, :committed} ->
+        case drain_abort_recovery_binding(records, durable, command_id, owner_epoch) do
+          :match -> :resolved
+          :collision -> :next
+          :missing -> :retry
+        end
+
+      :unavailable ->
+        :retry
+    end
+  end
+
+  defp drain_abort_recovery_binding(records, durable, command_id, owner_epoch) do
+    case SessionState.drain_abort_binding(durable, command_id) do
+      :match ->
+        case Enum.find(records, &record_command_id?(&1, command_id)) do
+          %{owner_epoch: ^owner_epoch} -> :match
+          _wrong_epoch_or_missing -> :collision
+        end
+
+      :collision ->
+        :collision
+
+      :absent ->
+        :missing
+    end
+  end
+
+  defp recover_drain_fence_identities(state, records, durable, head) do
+    case recover_drain_fence_identity(state, records, durable, head, head.owner_epoch) do
+      :next when head.owner_epoch > 0 ->
+        recover_drain_fence_identity(state, records, durable, head, head.owner_epoch - 1)
+        |> finish_drain_identity_search()
+
+      result ->
+        finish_drain_identity_search(result)
+    end
+  end
+
+  defp recover_drain_fence_identity(state, records, durable, head, owner_epoch) do
+    tx_id = drain_fence_transaction_id(state.session_id, owner_epoch)
+
+    case Store.transaction_status(state.store, state.session_id, @mutation_domain, tx_id) do
+      :absent ->
+        :next
+
+      {:terminal, {:not_committed, _reason}} ->
+        :resolved
+
+      {:terminal, :committed} ->
+        case drain_fence_recovery_binding(
+               records,
+               durable,
+               state.session_id,
+               tx_id,
+               owner_epoch
+             ) do
+          :match when head.owner_epoch == owner_epoch + 1 -> :resolved
+          :match -> :retry
+          :collision -> :next
+          :missing -> :retry
+        end
+
+      :unavailable ->
+        :retry
+    end
+  end
+
+  defp drain_fence_recovery_binding(records, durable, session_id, tx_id, owner_epoch) do
+    case Enum.find(records, &owner_transaction_id?(&1, tx_id)) do
+      nil ->
+        if SessionState.drain_abort_binding(durable, tx_id) == :absent,
+          do: :missing,
+          else: :collision
+
+      record ->
+        if drain_fence_record?(record, session_id, tx_id, owner_epoch),
+          do: :match,
+          else: :collision
+    end
+  end
+
+  defp drain_fence_record?(
+         %{
+           journal_version: journal_version,
+           owner_epoch: next_epoch,
+           owner_incarnation_id: incarnation,
+           payload:
+             %{
+               :kind => "owner_advanced",
+               "prior_owner_epoch" => owner_epoch,
+               "owner_epoch" => next_epoch,
+               "owner_incarnation_id" => incarnation,
+               "owner_transaction_id" => tx_id
+             } = payload
+         } = record,
+         session_id,
+         tx_id,
+         owner_epoch
+       )
+       when is_integer(journal_version) and journal_version > 1 and next_epoch == owner_epoch + 1,
+       do:
+         Map.keys(record) |> Enum.sort() ==
+           [:journal_version, :owner_epoch, :owner_incarnation_id, :payload] and
+           Map.keys(payload) |> Enum.sort() ==
+             [
+               :kind,
+               "owner_epoch",
+               "owner_incarnation_id",
+               "owner_transaction_id",
+               "prior_owner_epoch"
+             ] and
+           incarnation == drain_fence_incarnation_id(session_id, owner_epoch)
+
+  defp drain_fence_record?(_record, _session_id, _tx_id, _owner_epoch), do: false
+
+  defp finish_drain_identity_search(:resolved), do: :ok
+  defp finish_drain_identity_search(:next), do: :ok
+  defp finish_drain_identity_search(:retry), do: :retry
+
+  defp record_command_id?(%{payload: payload}, command_id) when is_map(payload),
+    do: Map.get(payload, "command_id") == command_id
+
+  defp record_command_id?(_record, _command_id), do: false
+
+  defp owner_transaction_id?(%{payload: payload}, tx_id) when is_map(payload),
+    do: Map.get(payload, "owner_transaction_id") == tx_id
+
+  defp owner_transaction_id?(_record, _tx_id), do: false
 
   defp ownership_head(state) do
     case Store.ownership_head(state.store, state.session_id, @mutation_domain) do
@@ -1397,7 +1799,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp recover_committed_owner(state) do
     with {:ok, records} <-
            load_all_records(state.store, state.session_id, state.recovery_records),
-         {:ok, events} <- load_all_events(state.store, state.session_id),
+         {:ok, events} <- recovery_events(state),
          {:ok, durable} <- SessionState.recover(state.session_id, records, events),
          true <- durable.owner_epoch == state.owner.owner_epoch,
          true <- durable.owner_incarnation_id == state.owner.owner_incarnation_id,
@@ -1409,6 +1811,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           transaction: nil,
           incarnation: nil,
           recovery_records: [],
+          recovery_events: nil,
           prepared: recovered_runs(state.prepared, durable)
       }
 
@@ -1432,6 +1835,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
       _other -> {:stop, :owner_recovery_failed, state}
     end
   end
+
+  defp recovery_events(%{recovery_events: events}) when is_list(events), do: {:ok, events}
+  defp recovery_events(state), do: load_all_events(state.store, state.session_id)
 
   # Concept: retrying is bounded, and running out of retries is an answer the
   # caller receives rather than a silence it waits through.
@@ -1458,6 +1864,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:noreply, %{state | acquisition_retries: retries}}
     end
   end
+
+  defp acquisition_result({:stop, :runtime_placement_mismatch, state}) do
+    GenServer.cast(
+      state.control,
+      {:owner_unavailable, self(), state.session_id, :runtime_placement_mismatch}
+    )
+
+    {:stop, :normal, state}
+  end
+
+  defp acquisition_result(result), do: result
 
   # Technical depth: doubling from the first delay, clamped at the ceiling.
   defp retry_delay(retries),
@@ -1486,6 +1903,247 @@ defmodule Loopex.Runtime.SessionCoordinator do
       transaction_id: state.transaction.tx_id
     }
   end
+
+  # Concept: a shutdown fence is a one-shot serial session owner whose only
+  # authority is to resolve the drain abort and move the durable owner epoch.
+  #
+  # Technical depth: it links to the private phase owner before handshaking,
+  # waits for Control's explicit authorization, checks the shared work deadline
+  # before every Store operation, and exits after one closed disposition. It
+  # owns its Store handle inside core; the phase owner sees only the pid, durable
+  # head projections, and the final disposition.
+  defp run_quiesce_fence(
+         control,
+         store,
+         session_id,
+         operation_ref,
+         phase_owner,
+         deadline,
+         abort_resolution
+       ) do
+    Process.link(phase_owner)
+    send(control, {:quiesce_fence_waiting, operation_ref, self()})
+
+    receive do
+      {:loopex_quiesce_fence_go, ^operation_ref, ^deadline} ->
+        if before_fence_deadline?(deadline) do
+          result =
+            try do
+              execute_quiesce_fence(
+                control,
+                store,
+                session_id,
+                operation_ref,
+                deadline,
+                abort_resolution
+              )
+            catch
+              _kind, _reason -> {:unknown, :no_head}
+            end
+
+          send(control, {:quiesce_fence_result, operation_ref, self(), result})
+        end
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) -> :ok
+    end
+  end
+
+  defp execute_quiesce_fence(
+         control,
+         store,
+         session_id,
+         operation_ref,
+         deadline,
+         abort_resolution
+       ) do
+    case resolve_quiesce_abort(store, session_id, deadline, abort_resolution) do
+      :proceed ->
+        fence_current_head(control, store, session_id, operation_ref, deadline)
+
+      disposition ->
+        disposition
+    end
+  end
+
+  defp resolve_quiesce_abort(_store, _session_id, _deadline, :known), do: :proceed
+
+  defp resolve_quiesce_abort(
+         store,
+         session_id,
+         deadline,
+         {:unknown,
+          %{
+            command_id: command_id,
+            head: head,
+            run_id: run_id
+          }}
+       ) do
+    if before_fence_deadline?(deadline) do
+      case Store.transaction_status(store, session_id, @mutation_domain, command_id) do
+        {:terminal, :committed} ->
+          reload_exact_drain_abort(store, session_id, command_id, head, run_id, deadline)
+
+        {:terminal, {:not_committed, _reason}} ->
+          :proceed
+
+        :absent ->
+          :proceed
+
+        :unavailable ->
+          {:unknown, :abort, head}
+      end
+    else
+      {:unknown, :abort, head}
+    end
+  end
+
+  defp resolve_quiesce_abort(_store, _session_id, _deadline, _unresolved),
+    do: {:unknown, :no_head}
+
+  defp reload_exact_drain_abort(store, session_id, command_id, head, run_id, deadline) do
+    if before_fence_deadline?(deadline) do
+      case Store.load_records(store, session_id, head.journal_version, 1) do
+        {:ok, [record]} ->
+          if SessionState.drain_abort_record?(record, command_id, head, run_id),
+            do: :proceed,
+            else: {:unknown, :abort, head}
+
+        _unavailable ->
+          {:unknown, :abort, head}
+      end
+    else
+      {:unknown, :abort, head}
+    end
+  end
+
+  defp fence_current_head(control, store, session_id, operation_ref, deadline) do
+    if before_fence_deadline?(deadline) do
+      case Store.ownership_head(store, session_id, @mutation_domain) do
+        {:ok, head} ->
+          send(control, {:quiesce_fence_head, operation_ref, self(), head})
+          present_quiesce_fence(store, session_id, head, deadline)
+
+        _unavailable ->
+          {:unknown, :no_head}
+      end
+    else
+      {:unknown, :no_head}
+    end
+  end
+
+  defp present_quiesce_fence(store, session_id, head, deadline) do
+    tx_id = drain_fence_transaction_id(session_id, head.owner_epoch)
+    incarnation = drain_fence_incarnation_id(session_id, head.owner_epoch)
+
+    with true <- before_fence_deadline?(deadline),
+         {:ok, transaction} <-
+           Store.advance_owner(
+             session_id,
+             @mutation_domain,
+             tx_id,
+             head.owner_epoch,
+             head.journal_version,
+             incarnation
+           ) do
+      lane = OwnerLane.new(store)
+      {outcome, lane} = OwnerLane.transact(lane, transaction)
+      resolve_quiesce_fence_outcome(outcome, lane, transaction, head, incarnation, deadline)
+    else
+      _unavailable -> {:unknown, :fence, head}
+    end
+  end
+
+  defp resolve_quiesce_fence_outcome(
+         {:committed, tx_id, receipt},
+         _lane,
+         %{tx_id: tx_id},
+         head,
+         incarnation,
+         _deadline
+       ) do
+    if valid_quiesce_fence_receipt?(receipt, incarnation),
+      do: :committed,
+      else: {:unknown, :fence, head}
+  end
+
+  defp resolve_quiesce_fence_outcome(
+         {:not_committed, reason},
+         _lane,
+         _transaction,
+         _head,
+         _incarnation,
+         _deadline
+       )
+       when reason in [:stale_owner_epoch, :stale_journal_version],
+       do: :superseded
+
+  defp resolve_quiesce_fence_outcome(
+         {:commit_unknown, tx_id},
+         lane,
+         %{tx_id: tx_id} = transaction,
+         head,
+         incarnation,
+         deadline
+       ) do
+    if before_fence_deadline?(deadline) do
+      {resolution, _lane} = OwnerLane.transact(lane, transaction)
+
+      resolve_quiesce_fence_replay(resolution, transaction, head, incarnation)
+    else
+      {:unknown, :fence, head}
+    end
+  end
+
+  defp resolve_quiesce_fence_outcome(
+         _outcome,
+         _lane,
+         _transaction,
+         head,
+         _incarnation,
+         _deadline
+       ),
+       do: {:unknown, :fence, head}
+
+  defp resolve_quiesce_fence_replay(
+         {:committed, tx_id, receipt},
+         %{tx_id: tx_id},
+         head,
+         incarnation
+       ) do
+    if valid_quiesce_fence_receipt?(receipt, incarnation),
+      do: :committed,
+      else: {:unknown, :fence, head}
+  end
+
+  defp resolve_quiesce_fence_replay(
+         {:not_committed, reason},
+         _transaction,
+         _head,
+         _incarnation
+       )
+       when reason in [:stale_owner_epoch, :stale_journal_version],
+       do: :superseded
+
+  defp resolve_quiesce_fence_replay(_resolution, _transaction, head, _incarnation),
+    do: {:unknown, :fence, head}
+
+  defp valid_quiesce_fence_receipt?(
+         %{
+           type: :advance_owner,
+           owner_incarnation_id: incarnation,
+           owner_epoch: owner_epoch,
+           journal_version: journal_version
+         },
+         incarnation
+       ),
+       do:
+         is_integer(owner_epoch) and owner_epoch > 0 and is_integer(journal_version) and
+           journal_version > 1
+
+  defp valid_quiesce_fence_receipt?(_receipt, _incarnation), do: false
+
+  defp before_fence_deadline?(deadline),
+    do: System.monotonic_time(:millisecond) < deadline
 
   defp owner_identity(namespace, succession_id, attempt) do
     bytes =
@@ -1571,6 +2229,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp answered_interaction(_state, _type, admit), do: admit.()
+
+  defp detailed_command_reply({:reply, reply, state}),
+    do: {:reply, {:result, reply}, state}
+
+  defp detailed_command_reply({:stop, reason, reply, state}),
+    do: {:stop, reason, {:result, reply}, state}
 
   defp command_field(command, key) do
     case Map.get(command, key, Map.get(command, Atom.to_string(key))) do
@@ -1695,6 +2359,214 @@ defmodule Loopex.Runtime.SessionCoordinator do
         else
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
+    end
+  end
+
+  # Concept: orderly shutdown durably admits the same abort an operator can
+  # submit, but holds cleanup until every session's admission is known.
+  #
+  # Technical depth: the deterministic command identity comes from durable
+  # owner state. The Store transaction is presented exactly once; an ambiguous
+  # answer is retained for the later fence phase instead of being re-presented
+  # through the ordinary command helper. A committed abort updates Control and
+  # pauses at the existing cleanup split.
+  defp admit_quiesce_abort_once(state) do
+    command_id =
+      SessionState.drain_abort_command_id(state.session_id, state.owner.owner_epoch)
+
+    command = %{type: :abort, command_id: command_id}
+    state = fence_prepared_resume(state, command)
+
+    Instrumentation.span(
+      [:command, :admit],
+      %{session_id: state.session_id, command_id: command_id, type: :abort},
+      fn ->
+        case SessionState.propose(state.durable, command) do
+          {:ok, proposal} -> commit_quiesce_abort(state, proposal, command_id)
+          {:replayed, reply} -> replayed_quiesce_abort(state, command_id, reply)
+          {:error, reason} -> drain_refusal(state, reason)
+        end
+      end,
+      &admission_category/1
+    )
+  end
+
+  defp commit_quiesce_abort(state, proposal, command_id) do
+    head = drain_head(state)
+    candidate = drain_abort_candidate(state, proposal.reply, command_id, head)
+    notify_quiesce_candidate(state, candidate)
+
+    with {:ok, transaction} <-
+           Store.session_commit(
+             state.session_id,
+             @mutation_domain,
+             proposal.tx_id,
+             state.owner.owner_epoch,
+             state.owner.owner_incarnation_id,
+             state.durable.journal_version,
+             proposal.records,
+             proposal.events
+           ) do
+      {outcome, lane} = resolve_quiesce_transaction(state.lane, transaction)
+      state = %{state | lane: lane}
+
+      case outcome do
+        {:committed, ^command_id, receipt} ->
+          finish_quiesce_abort_commit(state, proposal, receipt, command_id)
+
+        {:not_committed, reason} ->
+          drain_refusal(state, reason)
+
+        {:commit_unknown, ^command_id} ->
+          drain_unknown(state, command_id, head, proposal.reply)
+
+        {:fenced, :commit_unknown} ->
+          drain_unknown(state, command_id, head, proposal.reply)
+
+        _other ->
+          drain_refusal(state, :runtime_unavailable)
+      end
+    else
+      {:error, reason} -> drain_refusal(state, reason)
+    end
+  end
+
+  defp finish_quiesce_abort_commit(state, proposal, receipt, command_id) do
+    with {:ok, next} <- SessionState.commit_proposal(proposal, receipt),
+         :ok <-
+           Control.post_commit(
+             state.control,
+             state.session_id,
+             state.owner,
+             %{
+               journal_version: next.journal_version,
+               event_sequence: next.event_sequence
+             },
+             receipt
+           ) do
+      state = %{state | durable: next}
+
+      case {proposal.reply, SessionState.aborting_run(next)} do
+        {{:accepted, ^command_id}, run_id} when is_binary(run_id) ->
+          result = %{
+            command_id: command_id,
+            run_id: run_id,
+            cleanup_grace_ms: next.cleanup_grace_ms,
+            owner_epoch: state.owner.owner_epoch
+          }
+
+          drain = Map.merge(state.drain, %{status: :paused, run_id: run_id, result: result})
+          {:reply, {:admitted, result}, %{state | drain: drain}}
+
+        {{:error, :no_active_run}, nil} ->
+          drain =
+            Map.merge(state.drain, %{status: :no_active_run, result: :rejected_no_active_run})
+
+          {:reply, :rejected_no_active_run, %{state | drain: drain}}
+
+        _other ->
+          drain_refusal(state, :runtime_unavailable)
+      end
+    else
+      {:error, reason} -> drain_refusal(state, reason)
+    end
+  end
+
+  defp replayed_quiesce_abort(state, command_id, {:accepted, accepted_command_id})
+       when accepted_command_id == command_id do
+    case SessionState.aborting_run(state.durable) do
+      run_id when is_binary(run_id) ->
+        result = %{
+          command_id: command_id,
+          run_id: run_id,
+          cleanup_grace_ms: state.durable.cleanup_grace_ms,
+          owner_epoch: state.owner.owner_epoch
+        }
+
+        drain =
+          Map.merge(state.drain, %{status: :already_admitted, run_id: run_id, result: result})
+
+        {:reply, {:admitted, result}, %{state | drain: drain}}
+
+      _other ->
+        drain_refusal(state, :runtime_unavailable)
+    end
+  end
+
+  defp replayed_quiesce_abort(state, _command_id, {:error, :no_active_run}) do
+    drain = Map.merge(state.drain, %{status: :no_active_run, result: :rejected_no_active_run})
+    {:reply, :rejected_no_active_run, %{state | drain: drain}}
+  end
+
+  defp replayed_quiesce_abort(state, _command_id, _reply),
+    do: drain_refusal(state, :idempotency_conflict)
+
+  defp resolve_quiesce_transaction(lane, transaction) do
+    Instrumentation.span(
+      [:commit],
+      %{
+        session_id: Map.get(transaction, :session_id),
+        kind: Map.get(transaction, :type),
+        mutation_domain: Map.get(transaction, :mutation_domain)
+      },
+      fn -> OwnerLane.transact(lane, transaction) end,
+      &commit_category/1
+    )
+  end
+
+  defp drain_unknown(state, command_id, head, reply) do
+    result = drain_abort_candidate(state, reply, command_id, head)
+    drain = Map.merge(state.drain, %{status: {:unknown, head}, result: result})
+    {:reply, {:unknown, result}, %{state | drain: drain}}
+  end
+
+  defp drain_abort_candidate(state, reply, command_id, head) do
+    run_id =
+      case reply do
+        {:accepted, ^command_id} -> state.durable.active_run_id
+        {:error, :no_active_run} -> nil
+      end
+
+    %{command_id: command_id, head: head, run_id: run_id}
+  end
+
+  defp drain_refusal(state, reason) do
+    drain = Map.merge(state.drain, %{status: {:error, reason}})
+    {:reply, {:error, reason}, %{state | drain: drain}}
+  end
+
+  defp drain_head(state) do
+    %{
+      owner_epoch: state.owner.owner_epoch,
+      journal_version: state.durable.journal_version
+    }
+  end
+
+  defp notify_quiesce_admission({:reply, reply, state} = result) do
+    case state.drain do
+      %{id: drain_id, phase_owner: phase_owner} when is_pid(phase_owner) ->
+        send(
+          phase_owner,
+          {:loopex_quiesce_admission, drain_id, state.session_id, self(), reply}
+        )
+
+      _not_owned ->
+        :ok
+    end
+
+    result
+  end
+
+  defp notify_quiesce_candidate(state, candidate) do
+    case state.drain do
+      %{id: drain_id, phase_owner: phase_owner} when is_pid(phase_owner) ->
+        send(
+          phase_owner,
+          {:loopex_quiesce_candidate, drain_id, state.session_id, self(), candidate}
+        )
+
+      _not_owned ->
+        :ok
     end
   end
 
@@ -1827,7 +2699,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
             end
 
           run_id ->
-            resume_aborting_run(state, run_id)
+            case state.drain do
+              %{status: :paused, run_id: ^run_id} -> {:noreply, state}
+              _ordinary_or_released -> resume_aborting_run(state, run_id)
+            end
         end
 
       {:error, :superseded_owner} ->
@@ -2564,9 +3439,38 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # A run that has ended is no longer this owner's to adopt, and a session
       # that runs for a long time should not accumulate one identifier per run
       # it has finished.
-      {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
+      next = %{next | adopted: MapSet.delete(next.adopted, run_id)}
+      notify_quiesce_terminal(next, run_id)
+      {:noreply, next}
     else
       {:error, reason} -> {:stop, {:run_terminal_failed, reason}, state}
+    end
+  end
+
+  # Concept: the private drain owner may advance as soon as every released run
+  # has a committed terminal fact instead of sleeping through the full cleanup
+  # allowance.
+  #
+  # Technical depth: this is a transient hint, not durable truth. The phase
+  # owner validates the exact drain, session, coordinator, and run before using
+  # it, and the later status census still reads the committed cursor. No result,
+  # content, credential, or cleanup detail crosses this message.
+  defp notify_quiesce_terminal(state, run_id) do
+    case state.drain do
+      %{
+        id: drain_id,
+        phase_owner: phase_owner,
+        status: :released,
+        run_id: ^run_id
+      }
+      when is_pid(phase_owner) ->
+        send(
+          phase_owner,
+          {:loopex_quiesce_terminal, drain_id, state.session_id, run_id, self()}
+        )
+
+      _not_released ->
+        :ok
     end
   end
 
@@ -2831,9 +3735,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
       provider: inspect(module)
     }
 
+    owner_workers = state.owner_workers
+
     {:ok, guard} =
-      Task.Supervisor.start_child(state.owner_workers, fn ->
-        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms)
+      Task.Supervisor.start_child(owner_workers, fn ->
+        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms, owner_workers)
       end)
 
     task =
@@ -3105,7 +4011,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp guard_provider_call(coordinator, reference, cleanup_grace_ms) do
+  defp guard_provider_call(coordinator, reference, cleanup_grace_ms, owner_workers) do
     Process.flag(:trap_exit, true)
     coordinator_monitor = Process.monitor(coordinator)
 
@@ -3119,7 +4025,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           coordinator,
           coordinator_monitor,
           reference,
-          cleanup_grace_ms
+          cleanup_grace_ms,
+          owner_workers
         )
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
@@ -3136,7 +4043,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          coordinator,
          coordinator_monitor,
          reference,
-         cleanup_grace_ms
+         cleanup_grace_ms,
+         owner_workers
        ) do
     receive do
       {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress,
@@ -3158,7 +4066,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
                       options,
                       progress,
                       cleanup_grace_ms,
-                      identities
+                      identities,
+                      owner_workers
                     )
 
                   send(guard, {:loopex_provider_callback_result, reference, self(), result})
@@ -3209,9 +4118,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
          options,
          progress,
          cleanup_grace_ms,
-         identities
+         identities,
+         owner_workers
        ) do
     callback = self()
+
+    starter =
+      Loopex.Runtime.ProviderLifetime.Starter.new(fn child ->
+        Task.Supervisor.start_child(owner_workers, child,
+          restart: :temporary,
+          shutdown: :brutal_kill
+        )
+      end)
 
     ProviderLifetime.scoped(
       fn resource, stop_reference ->
@@ -3225,6 +4143,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           cleanup_grace_ms
         )
       end,
+      starter,
       fn ->
         Instrumentation.span([:model, :complete], identities, fn ->
           try do
@@ -4244,7 +5163,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     {:ok, relay} =
       StreamRelay.open(
         state.workers,
-        state.progress_to,
+        progress_sink(state),
         fn delta, sequence ->
           Map.merge(delta, %{
             turn_id: turn_id,
@@ -5961,7 +6880,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:ok, stream, progress} =
         ExecutorStream.open(
           state.workers,
-          state.progress_to,
+          progress_sink(state),
           work.job,
           state.durable.event_sequence,
           publish
@@ -7112,4 +8031,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:error, :invalid_store_page}
     end
   end
+
+  # Concept: a session-routed host receives each progress item with this
+  # session's identity; any other sink receives it as before.
+  defp progress_sink(%{progress_to: {:session, pid}, session_id: session_id}),
+    do: {pid, session_id}
+
+  defp progress_sink(%{progress_to: sink}), do: sink
 end

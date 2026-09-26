@@ -3125,9 +3125,9 @@ design documents consulted — lessons and evidence only; no code flows
   [request flow](https://github.com/lexlapax/allbert-assist/blob/main/docs/plans/archives/v1.1-request-flow.md)
   — the concurrency retrospective in which resource ownership, not fan-out
   logic, proved to be the systemic root of eight corrective rounds.
-- [v1.4 plan](https://github.com/lexlapax/allbert-assist/blob/main/docs/plans/v1.4-plan.md)
+- [v1.4 plan](https://github.com/lexlapax/allbert-assist/blob/main/docs/plans/archives/v1.4-plan.md)
   and
-  [request flow](https://github.com/lexlapax/allbert-assist/blob/main/docs/plans/v1.4-request-flow.md)
+  [request flow](https://github.com/lexlapax/allbert-assist/blob/main/docs/plans/archives/v1.4-request-flow.md)
   — the cost evidence for retrofitting a component boundary into a
   monolith: why Loopex is born as the boundary.
 - [delegate-agents.md](https://github.com/lexlapax/allbert-assist/blob/main/docs/developer/delegate-agents.md),

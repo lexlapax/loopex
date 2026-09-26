@@ -127,7 +127,7 @@ defmodule Loopex.Runtime.StreamRelay do
   `build` renders one item and its sequence into what crosses the plane; `close`
   renders the closing item.
   """
-  @spec open(Supervisor.supervisor(), pid() | nil, build(), closing()) ::
+  @spec open(Supervisor.supervisor(), pid() | {pid(), binary()} | nil, build(), closing()) ::
           {:ok, t()} | {:error, term()}
   def open(supervisor, sink, build, close)
       when is_function(build, 2) and is_function(close, 2) do
@@ -143,7 +143,7 @@ defmodule Loopex.Runtime.StreamRelay do
   @doc false
   @spec open_stateful(
           Supervisor.supervisor(),
-          pid() | nil,
+          pid() | {pid(), binary()} | nil,
           term(),
           stateful_build(),
           closing()
@@ -304,6 +304,11 @@ defmodule Loopex.Runtime.StreamRelay do
 
   defp deliver(sink, item) when is_pid(sink) do
     send(sink, {:loopex_progress, item})
+    :ok
+  end
+
+  defp deliver({sink, session_id}, item) when is_pid(sink) and is_binary(session_id) do
+    send(sink, {:loopex_progress, session_id, item})
     :ok
   end
 end

@@ -178,11 +178,12 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
   @tag timeout: 600_000
   @tag :real_provider
   test "one real-provider trace forces a credential-free tool survives an untrappable runtime-tree kill after receipt before fact reconciles one effect without redispatch preserves its fact and completes a second real call" do
+    # The credential is consumed here, as a host consumes it, and handed to
+    # each trace child on its standard input. It is not put back: the release
+    # check runs every real-provider case in a VM of its own, and a restored
+    # variable would leave this VM's environment naming it after the case.
     credential = System.fetch_env!("LOOPEX_PROVIDER_API_KEY")
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
-    # The umbrella runs every application's tests in one VM, so a credential
-    # removed here must come back for whoever runs next.
-    on_exit(fn -> System.put_env("LOOPEX_PROVIDER_API_KEY", credential) end)
 
     root =
       Path.join(

@@ -12,29 +12,7 @@ adapter joins a port, and the repository commands that hold the shape.
 <a id="technical-arch-applications"></a>
 ## Exact Inventory and the Checks That Hold It
 
-Concept: [The ten applications and one direction](architecture.md#concept-arch-applications).
-
-`LoopexComposition.with_runtime/2` brackets a caller operation with startup and
-confirmed cleanup of the reference runtime, Store, workspace lease and executor.
-Its private owner retains those process identities until shutdown is observed.
-Confirmation requires `Loopex.stop/1` to succeed and the directly owned executor,
-lease and Store to report orderly shutdown.
-A forced stop or missing confirmation produces a cleanup error rather than a
-successful operation result. After returning an unconfirmed-cleanup error, the
-private owner retains and monitors the remaining identities until shutdown is
-observed. Exceptions are re-raised after cleanup. This
-experimental host addition preserves `start/1`, adds no durable record and
-changes no core port. Returning to the prior host binary needs no data migration
-for this helper. The maintainer's exact approval is in the
-[implementation disposition](agent-context-map.md#disposition-m3-implementation-completion-2026-09-11).
-
-For prepared CLI recovery, the temporary runtime has no resource snapshot.
-The host prepares without activating recovered work, obtains the session's
-admitted manifest digest, abandons the preparation capability and completes cleanup.
-Only then does it load the snapshot at that exact retained digest and prepare the
-final runtime with the trusted provider and executor configuration. A missing or
-invalid retained snapshot withholds the resource class while ordinary recovery
-continues. Current workspace bytes never substitute for the admitted snapshot.
+Concept: [The eleven applications and one direction](architecture.md#concept-arch-applications).
 
 The umbrella's declared dependencies are the whole of the direction claim:
 
@@ -44,12 +22,13 @@ The umbrella's declared dependencies are the whole of the direction claim:
 | `loopex` | `:core` | `loopex_protocol`, `telemetry ~> 1.3` |
 | `loopex_store_local` | `:edge` | `loopex` |
 | `loopex_executor_local` | `:edge` | `loopex` |
-| `loopex_llm_reqllm` | `:edge` | `req_llm ~> 1.17.1`, `loopex`, `loopex_protocol` |
+| `loopex_llm_reqllm` | `:edge` | `req_llm ~> 1.24.0`, `loopex`, `loopex_protocol` |
 | `loopex_telemetry` | `:edge` | `loopex`, `telemetry ~> 1.3` |
-| `loopex_composition` | `:composition` | `loopex`, `loopex_store_local`, `loopex_llm_reqllm`, `loopex_executor_local` |
+| `loopex_composition` | `:composition` | `loopex`, `loopex_protocol`, `loopex_store_local`, `loopex_llm_reqllm`, `loopex_executor_local` |
 | `loopex_reference_client` | `:client` | `loopex`; the three edges `only: :test` |
-| `loopex_cli` | `:client` | `loopex`, `loopex_composition` |
+| `loopex_cli` | `:client` | `loopex`, `loopex_protocol`, `loopex_composition`, `loopex_daemon` |
 | `loopex_app_server` | `:client` | `loopex`, `loopex_protocol`, `loopex_composition` |
+| `loopex_daemon` | `:host` | `loopex`, `loopex_protocol`, `loopex_composition` |
 
 `Loopex.Checks.DepsBudget` is the one parser authority for both the direct
 pre-Mix entrypoint and `mix loopex.deps_budget`. It requires the physical project set to equal
@@ -68,22 +47,30 @@ The rules it applies per role, as the module states them:
 | `:core` | Depends on exactly the production in-umbrella `loopex_protocol`, plus at most one external dependency, which must be `:telemetry` pinned to exactly `~> 1.3` as a production dependency. Anything else is refused as "core admits exactly one external dependency". |
 | `:edge` | Exactly one production in-umbrella dependency on `loopex`, at most one on `loopex_protocol`, and no other internal application. |
 | `:composition` | One production `loopex` dependency, otherwise only contract and edge applications, all production and in-umbrella; no external dependency, no client, no other composition. |
-| `:client` | One production `loopex` dependency, at most one composition and at most one contract application, each production and in-umbrella; any other internal dependency must be an edge declared `only: :test`; no external dependency. |
+| `:client` | One production `loopex` dependency, at most one composition, at most one contract application, and at most one host, each production and in-umbrella; any other internal dependency must be an edge declared `only: :test`; no external dependency. |
+| `:host` | The client rule, and additionally no dependency on another host. |
 | `:extension` | Depends inward only on the production contract application. |
 
 External dependencies are compared as an exact set rather than counted. The
-admitted set is `{:req_llm, "~> 1.17.1"}` in `loopex_llm_reqllm` and
+admitted set is `{:req_llm, "~> 1.24.0"}` in `loopex_llm_reqllm` and
 `{:telemetry, "~> 1.3"}` in `loopex` and in `loopex_telemetry`; a different
 application declaring one of those names, a widened requirement, or any third
 name refuses. `:telemetry` is a pure-Erlang library with no dependencies of its
 own, admitted by [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept)
 and the recorded vision change, and it is resolved through the canonical
-`mix.lock` like ReqLLM. The client-to-contract production edge is what lets
-`loopex_app_server` declare the schema application it speaks, under
-[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept); the
-app server itself adds no external production dependency, and its only route
-to a session remains the `Loopex` facade. The role
-enumeration also declares `:extension`, which no application in the repository
+`mix.lock` like ReqLLM. The client-to-contract production edge lets
+`loopex_app_server` and `loopex_daemon` declare the schema application they
+speak, under
+[ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept). Both
+add no external production dependency. The app server calls only the `Loopex`
+facade. The daemon calls `Loopex.Runtime`, the module the facade delegates to,
+including host entries hidden from generated documentation —
+`create_session_detailed/3`, `resume_session_detailed/3`, `attach_for_holder/4`,
+`command_for_daemon/2`, `session_existence/2`, `release_holder/2` and
+`quiesce/1` among them — and never a coordinator or a Store directly. The
+client-to-host edge exists for one application: `loopex_cli` depends on
+`loopex_daemon` so `loopex daemon` can start it. The role enumeration also declares
+`:extension`, which no application in the repository
 carries today; a standalone extension retains the protocol-only shape
 [ADR 0003](../adr/0003-extension-contract-boundary.md#concept) fixed for it.
 
@@ -110,12 +97,15 @@ Concept: [One serial session owner](architecture.md#concept-arch-session-owner).
 ### The Supervision Tree
 
 `Loopex.Runtime.Supervisor` is the unnamed root of one runtime instance. Its
-children start under `:rest_for_one` in this order: the tool registry, runtime
-control, a `Task.Supervisor` for workers, a `DynamicSupervisor` for owner groups,
-a `DynamicSupervisor` for session coordinators, and the event dispatcher. The
-order encodes what must reset together — control and every coordinator resolve
-tools through the registry, while a dispatcher failure leaves coordinators alive
-because committed events can be re-read from the durable outbox.
+seven children start under `:rest_for_one` in this order: the tool registry
+(`Loopex.ToolRegistry`), runtime control (`Loopex.Runtime.Control`), a
+`Task.Supervisor` for workers, a `DynamicSupervisor` for owner groups, a
+`DynamicSupervisor` for session coordinators, the event dispatcher
+(`Loopex.Runtime.EventDispatcher`), and the trace-session owner
+(`Loopex.Trace`). The order encodes what must reset together — control and
+every coordinator resolve tools through the registry, while a dispatcher
+failure leaves coordinators alive because committed events can be re-read from
+the durable outbox, and a tracer failure disturbs nothing before it.
 `Loopex.Runtime` hands callers an opaque reference holding the root pid and an
 unforgeable runtime-local token, so a supervised restart never turns a stale
 child pid into the public identity.
@@ -257,9 +247,11 @@ match an expected value that is legitimately `nil`.
 **The owner-loss stop predicate.** `continue_after_owner_loss/1` stops the
 coordinator `:normal` only when it is superseded *and* its in-flight map, pending
 cleanup map, and stream map are empty and no pending fault is retained. Every
-site that learns it was superseded routes through this one predicate; a path that
-set the flag without re-evaluating it leaves a coordinator alive with nothing to
-do, which is a real defect this shape closed.
+site that learns it was superseded routes through this one predicate, because a
+path that set the flag without re-evaluating it would leave a coordinator alive
+with nothing to do. A cleanup whose model worker the supersession itself
+terminated is closed as abandoned at once, since a superseded owner commits
+nothing; an executor cleanup keeps its worker alive until it answers.
 
 **The cancellation bounds formula.** [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept)
 puts the formula in core so no caller invents a wait and no executor is asked for
@@ -297,13 +289,16 @@ kinds its replay filter accepts:
 
 | Kind | What it fixes |
 | --- | --- |
+| `session_genesis_v2` | The session's creation: its options and the runtime configuration it committed, written by the runtime-control creation transaction. |
 | `owner_advanced` | The succession that made this coordinator the current owner. |
+| `resource_command_v1` | One settled-session `admit_resources` or `activate_skill` outcome, including a retained stateful refusal. |
 | `prompt_admitted_v2` | One accepted prompt: its content, bounds, cleanup grace, and context ceiling, before any request stages. |
 | `command_admitted` | One admitted `steer`, `follow_up`, or `abort`, or a prompt the session refused at admission with its reason. |
 | `command_admission_refused_v1` | A command refused before admission because its own bytes exceed the Store's item ceiling. |
 | `context_admission_refused_v1` | A request refused at context admission: the dimension, the observed value, the limit, and the descriptor counts behind the digest. |
 | `deadline_staging_failed_v1` | A request whose derived deadline could not be staged: the clock domain or the overflow that refused it. |
 | `model_request_committed` | The exact staged request bytes, its `staged_request_digest`, the applied steer, and the context receipt. |
+| `model_request_committed_resources_v1` | The same for a session with resource admission, with a resource-aware receipt. |
 | `model_attempt_opened_v1` | `run_id`, `turn_id`, `operation_id`, `attempt`, `staged_request_digest`. |
 | `model_attempt_settled_v2` | Those five plus `transport`, `termination`, `conversation`, `next`, `result`, `accounting`; unreadable results retain explicit accounting evidence. |
 | `model_attempt_settled_v1` | Legacy settlement with the same root keys; accepted only before the first version-2 settlement and without ambiguous unreadable reported accounting. |
@@ -339,9 +334,13 @@ Legacy unreadable reported accounting refuses specifically as
 boundary are in
 [ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-decision).
 
-Public event kinds are `run.started`, `run.finished`, `user.message_appended`,
-`assistant.message_appended`, `tool.started`, `tool.finished`, `steer.resolved`,
-and `follow_up.resolved`. Each carries an `event_id` and receives an
+Public event kinds are `user.message_appended`, `run.started`,
+`assistant.message_appended`, `tool.started`, `tool.finished`, `run.finished`,
+`steer.resolved`, `follow_up.resolved`, `session.settled`,
+`interaction.requested`, `interaction.resolved`, `interaction.expired`, and
+`interaction.cancelled`. `session.settled` closes a run that promoted no queued
+follow-up, so a consumer can tell a session that is idle from one that moved
+straight to its next run. Each event carries an `event_id` and receives an
 `event_sequence` stamped by the Store.
 
 Two request digests exist and they are not interchangeable. A model request has
@@ -490,22 +489,21 @@ Concept: [Five replaceable boundaries](architecture.md#concept-arch-ports).
 | `Loopex.Policy` | `decide/1` |
 
 The ArtifactStore transfer triple is one optional capability, declared through
-`@optional_callbacks` and detected with `ArtifactStore.transfer_capable?/1`, so
-an adapter that predates
-[ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) stays conformant
-and the facade refuses the family rather than crashing on a missing function or
-falling back to an unbounded `fetch/2`.
+`@optional_callbacks` and detected with `Loopex.ArtifactStore.supports_transfer?/1`,
+so an adapter without it stays conformant and the facade refuses the family
+rather than crashing on a missing function or falling back to an unbounded
+`fetch/2` ([ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept)).
 
-`Loopex.Policy` keeps exactly one callback. ADR 0009 always declared
-`{:defer, request}` on it, and
-[ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept)
-activates that branch without widening the callback: `Loopex.Policy.decide/2`
-retains the one-shot projection of a defer to
-`{:deny, :interaction_unsupported}`, while the separately named
-`Loopex.Policy.evaluate/2` admits a validated defer for the session-owned
-interaction lifecycle. A host cannot tell which caller it is answering, and a
-defer outside the admitted question family is `policy_unavailable` rather than
-a malformed interaction.
+`Loopex.Policy` has exactly one callback, `decide/1`, whose answers are
+`{:allow, context}`, `{:deny, category}`, or `{:defer, request}`. Two core
+callers resolve it. The one-shot `Loopex.Policy.decide/2` projects a defer to
+`{:deny, :interaction_unsupported}`; `Loopex.Policy.evaluate/2`, which the
+session coordinator uses, admits a validated defer for the session-owned
+interaction lifecycle of
+[ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
+A host cannot tell which caller it is answering, and a defer outside the
+admitted question family is `policy_unavailable` rather than a malformed
+interaction.
 
 `transact/2` is the one Store mutation callback. The closed transaction maps bind
 their exact deterministic canonical bytes and raw SHA-256 digest before the
@@ -596,8 +594,10 @@ triple, validated arguments, effect class, idempotency class, and the workspace
 lease reference. It carries no pid, no credential, and no provider value, so a
 policy cannot be handed the authority it was supposed to be granting. A grant is
 minted only from an explicit allow in the bounded shape; every other observation,
-including a malformed allow, a category outside the declared enumeration, and the
-declared-but-refused `{:defer, request}`, resolves to a deny.
+including a malformed allow and a category outside the declared enumeration,
+resolves to a deny. A valid defer suspends the call on a durable question and
+mints nothing; only a later allow, evaluated with the committed answer
+attached, can lead to a grant.
 
 `Loopex.Executor.issue_grant/3` refuses without that allow, and the executor
 revalidates the ADR 0007 bindings at one serialized boundary immediately before
@@ -609,9 +609,13 @@ the lease ends the owned process group or abandons the filesystem effect, and th
 job is retained as unproven rather than complete. Exact duplicate jobs return the
 retained receipt without another start.
 
-Credentials stay at the provider boundary. The reference adapter reads only
-`LOOPEX_PROVIDER_API_KEY`; a short-lived sender materializes it after the
-configured companion has proved its protected entry and build identity. Neither
+Credentials stay at the provider boundary. The reference adapter reads no
+environment variable: the host reads `LOOPEX_PROVIDER_API_KEY` once, deletes it
+and holds it in a custody process beside a routing registry
+(`LoopexComposition.CredentialHost`), and the adapter, given an opaque
+`:credential_token` and that `:credential_registry`, resolves it per
+invocation; a short-lived sender materializes it after the configured
+companion has proved its protected entry and build identity. Neither
 the initial process image nor its arguments carry the credential. The companion
 uses it as a per-request option, with child diagnostics suppressed before ReqLLM
 starts. Its classified failures carry the literal `"model_call_failed"` and no
@@ -621,8 +625,12 @@ the companion's process group, including descendants, until cleanup is proved
 under the existing committed bounds. A terminal channel result alone is not
 cleanup proof. Missing configuration or mismatched worker bytes refuse before
 credential delivery; there is no shared-VM fallback. These boundaries are fixed
-by [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept).
+by [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) and
+[ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept);
+the host-facing custody API is in
+[Runtime and embedding](runtime-and-embedding.md#technical-embedding-composition).
 
+<a id="technical-arch-concerns"></a>
 ## Where Each Concern Lives
 
 | Concern | Path |
@@ -645,16 +653,16 @@ by [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept).
 | Telemetry spans, trace sessions, and bounded diagnostics admission | `apps/loopex/lib/loopex/instrumentation.ex`, `apps/loopex/lib/loopex/trace.ex`, `apps/loopex/lib/loopex/trace/`, `apps/loopex/lib/loopex/runtime/diagnostics_admission.ex` |
 | Canonical encoding, tool definitions, and the public session schema | `apps/loopex_protocol/lib/loopex_protocol/`, `apps/loopex_protocol/priv/` |
 | Edge implementations | `apps/loopex_store_local/lib/`, `apps/loopex_llm_reqllm/lib/`, `apps/loopex_executor_local/lib/`, `apps/loopex_telemetry/lib/` |
-| Reference stack and surfaces | `apps/loopex_composition/lib/`, `apps/loopex_cli/lib/`, `apps/loopex_reference_client/lib/`, `apps/loopex_app_server/lib/` |
+| Reference stack and surfaces | `apps/loopex_composition/lib/`, `apps/loopex_cli/lib/`, `apps/loopex_reference_client/lib/`, `apps/loopex_app_server/lib/`, `apps/loopex_daemon/lib/` |
 | Independent wire consumer | `clients/node/` |
-| Repository checks | `apps/loopex/lib/mix/tasks/` |
+| Repository checks | `apps/loopex/lib/mix/tasks/`, `scripts/` |
 
 `Loopex.Journal`, `Loopex.Session`, `Loopex.Coordinator`, and
-`Loopex.VmGeneration` are retained M0 feasibility modules. They keep their own
-evidence and stay separately callable, and they are not the current runtime path:
-the Store and the session coordinator replaced them rather than implementing
-them.
+`Loopex.VmGeneration` are retained feasibility modules. They keep their own
+tests and stay separately callable, and they are not the runtime path: the
+Store and the session coordinator do that work.
 
+<a id="technical-arch-checks"></a>
 ## Repository Checks
 
 Every check runs locally from a clean checkout with the toolchain in
@@ -663,8 +671,8 @@ same commands and never redefines or waives one.
 
 | Command | What it holds |
 | --- | --- |
-| `mix test --exclude real_provider` | The complete credential-free suite. |
-| `mix loopex.deps_budget` | The ten-application inventory, roles, the admitted external dependencies, and inward direction. |
+| `mix test` in one application | That application's credential-free suite; the test helpers exclude `real_provider`, `long_bound`, and the other release-only tags. |
+| `mix loopex.deps_budget` | The eleven-application inventory, roles, the admitted external dependencies, and inward direction. |
 | `mix loopex.core_only` | Core in a separate virtual machine, no adapter resolvable, no per-runtime state in application environment. |
 | `mix loopex.docs_check` | Compiled documentation read through `Code.fetch_docs/1` orders the depth sections on covered public code. |
 | `mix loopex.status` | Governance rows, index chains, link grammar, paired documents, and bound artifacts at every reachable revision. |
@@ -672,6 +680,7 @@ same commands and never redefines or waives one.
 | `mix loopex.matrix` | The running toolchain is one of the two validated `(Elixir, OTP)` pairs in `.tool-versions`. |
 | `mix loopex.version_train` | One version across the umbrella. |
 | `mix loopex.hook_registration` | Each named client hook is registered under the event and matcher that makes it run. |
+| `mix loopex.agent_bootstrap` | Development-client adapter structure routes to the canonical contract and skills. |
 
 `mix loopex.docs_check` proves ordering and presence only; whether a section
 explains anything stays a review obligation.

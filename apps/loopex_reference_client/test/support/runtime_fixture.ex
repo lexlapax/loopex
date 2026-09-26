@@ -85,7 +85,13 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       end)
 
     {model_options, sampling_options} =
-      model_configuration(model_module, model_options, root, not Keyword.has_key?(options, :root))
+      model_configuration(
+        model_module,
+        model_options,
+        root,
+        not Keyword.has_key?(options, :root),
+        Keyword.get(options, :credential)
+      )
 
     workspace = Path.join(root, "workspace")
     ledger = Path.join(root, "executor-ledger")
@@ -179,6 +185,11 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
     runtime_options = runtime_options ++ sampling_options
     {:ok, client} = ReferenceClient.start(runtime_options)
+
+    case Keyword.get(model_options, :tracing_capability) do
+      nil -> :ok
+      capability -> :ok = Loopex.Trace.Capability.bind(capability, client.runtime)
+    end
 
     %{
       root: root,
@@ -365,14 +376,33 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   # Technical depth: build before Store/executor startup; demo-only tool inputs
   # never enter the adapter's closed launch options. The deterministic branch
   # retains its existing options and max_tokens default without a build.
-  defp model_configuration(Loopex.LLM.ReqLLM, options, root, owns_root?) do
+  defp model_configuration(Loopex.LLM.ReqLLM, options, root, owns_root?, credential) do
     # Technical depth: an automatically named root has no outer cleanup owner
     # until start/4 returns. Exclusive creation makes pre-resource failure
     # cleanup safe; explicit trace roots remain their caller's responsibility.
     if owns_root?, do: File.mkdir!(root)
 
     try do
-      launch = Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root)
+      # The adapter resolves its credential per invocation from host custody
+      # and runs under a runtime-bound trace capability (ADR 0034), which this
+      # fixture composes as the reference composition does; the capability is
+      # bound to the runtime once it has started.
+      # The credential is consumed first, so a failed build cannot leave it
+      # in this VM's environment. A caller that already holds the value (a
+      # trace child reads it from standard input) passes it as `:credential`,
+      # and it goes straight to custody without touching the environment.
+      credential_options =
+        if credential,
+          do: Loopex.LLM.ReqLLM.ProviderBuildFixture.custody_options(credential),
+          else: provider_credential_options()
+
+      {:ok, capability_pid} = Loopex.Trace.Capability.start_link([])
+      {:ok, capability} = Loopex.Trace.Capability.handle(capability_pid)
+
+      launch =
+        Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root) ++
+          credential_options ++ [tracing_capability: capability]
+
       {launch, [sampling: %{"max_tokens" => Keyword.get(options, :max_tokens, 256)}]}
     rescue
       error ->
@@ -381,8 +411,24 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
     end
   end
 
-  defp model_configuration(_module, options, _root, _owns_root?),
+  defp model_configuration(_module, options, _root, _owns_root?, _credential),
     do: {Keyword.put_new(options, :max_tokens, 256), []}
+
+  @doc """
+  ## Concept
+
+  The credential options a real-provider fixture composes with. Composition
+  consumes the credential: once they are built, this VM's environment no
+  longer names it.
+
+  ## Technical depth
+
+  Reads and deletes `LOOPEX_PROVIDER_API_KEY` once through
+  `ProviderBuildFixture.consume_custody_options/0` and returns the opaque token
+  and registry handle routed to the custody process that holds the bytes.
+  """
+  def provider_credential_options,
+    do: Loopex.LLM.ReqLLM.ProviderBuildFixture.consume_custody_options()
 
   defp load_pages(loader, position, accumulated) do
     case loader.(position) do

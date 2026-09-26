@@ -1,7 +1,8 @@
 defmodule Loopex.LLM.ReqLLM.ProviderConfigurationTest do
   use ExUnit.Case, async: true
 
-  alias Loopex.LLM.ReqLLM.ProviderConfiguration
+  alias Loopex.LLM.ReqLLM.{CredentialRegistry, CredentialToken, ProviderConfiguration}
+  alias Loopex.Trace.Capability
 
   test "provider configuration requires explicit absolute paths and both exact digest forms" do
     assert {:ok, configuration} = ProviderConfiguration.validate(options())
@@ -35,6 +36,44 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfigurationTest do
         ] do
       assert {:error, :invalid_provider_configuration} = ProviderConfiguration.validate(invalid)
     end
+  end
+
+  test "managed credentials require the complete exact token registry and trace-capability trio" do
+    {:ok, registry_pid} = CredentialRegistry.start_link()
+    {:ok, registry} = CredentialRegistry.handle(registry_pid)
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    token = CredentialToken.new()
+
+    managed =
+      options() ++
+        [
+          credential_token: token,
+          credential_registry: registry,
+          tracing_capability: capability
+        ]
+
+    assert {:ok, configuration} = ProviderConfiguration.validate(managed)
+    assert configuration.credential_token == token
+
+    for key <- [:credential_token, :credential_registry, :tracing_capability] do
+      assert {:error, :invalid_provider_configuration} =
+               managed |> Keyword.delete(key) |> ProviderConfiguration.validate()
+    end
+
+    for {key, invalid} <- [
+          {:credential_token, :invalid},
+          {:credential_registry, :invalid},
+          {:tracing_capability, :invalid}
+        ] do
+      assert {:error, :invalid_provider_configuration} =
+               managed |> Keyword.put(key, invalid) |> ProviderConfiguration.validate()
+    end
+
+    GenServer.stop(registry_pid)
+
+    assert {:error, :invalid_provider_configuration} =
+             ProviderConfiguration.validate(managed)
   end
 
   test "managed cleanup uses the retained period and unmanaged cleanup requires an explicit value" do

@@ -1,27 +1,30 @@
 Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
-  alias Loopex.LLM.ReqLLM, as: Adapter
+  alias Loopex.LLM.ReqLLM.ProviderBridge
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
-  setup do
-    variable = Adapter.credential_variable()
-    previous = System.get_env(variable)
-    System.put_env(variable, "synthetic-retainer-boundary-credential")
+  # Technical depth: ExUnit's clock starts before `Fixture.new` compiles the
+  # synthetic worker (a watchdog of up to 50 s) and before the real child boots,
+  # while every wait below is bounded by its request's own deadline, 60 s or the
+  # fixture's 10 s default. This
+  # bound covers compile, deadline and cleanup, so the case's own deadlines,
+  # not ExUnit's, decide; it only catches a true hang.
+  @moduletag timeout: 150_000
 
-    on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
-    end)
-
-    :ok
-  end
-
+  # Technical depth: the case proves what a retainer's death stops, not a
+  # deadline, so its request budget of 60 s covers starting the companion on
+  # a loaded two-CPU runner, where the fixture's 10 s default did not.
   test "retainer death during actual credential delivery stops the busy owned writer and child" do
-    System.put_env(Adapter.credential_variable(), String.duplicate("k", 65_536))
-    fixture = Fixture.new(:credential_transfer, paused: true)
-    request = Fixture.request()
+    fixture =
+      Fixture.new(:credential_transfer,
+        paused: true,
+        credential: String.duplicate("k", 65_536)
+      )
+
+    request = Fixture.request(deadline_ms: 60_000)
     {retainer, retainer_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
     call = Fixture.managed(fixture, request, retainer)
     guardian = call.guardian
@@ -40,7 +43,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
       assert credential_proof(fixture, "bootstrap-reader-held", request) ==
                %{"actual_reader_suspended" => true, "private_socket" => true}
 
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
 
       assert_receive {:trace, ^guardian, :receive,
                       {:provider_sent, _bootstrap_sender, :bootstrap, :ok}},
@@ -56,6 +59,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
 
       assert Fixture.eventually(fn -> queued_ready(guardian) != nil end, remaining(request))
       {receiver, binding} = queued_ready(guardian)
+
+      [credential_sender] =
+        fixture.workers
+        |> Task.Supervisor.children()
+        |> Enum.reject(&(&1 == guardian))
+
+      credential_sender_monitor = Process.monitor(credential_sender)
       assert Enum.sort(Map.keys(binding)) == ["build_manifest_sha256", "nonce", "version"]
       assert binding["version"] == 2
       assert binding["build_manifest_sha256"] == fixture.options[:build_manifest_sha256]
@@ -76,7 +86,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
 
       :ok = :inet.setopts(socket, sndbuf: 1_024, high_watermark: 1_024, low_watermark: 512)
       receiver_monitor = Process.monitor(receiver)
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
 
       assert_receive {:trace, ^guardian, :receive,
                       {:provider_frame, ^receiver, {:ok, :ready, ^binding}}},
@@ -93,14 +103,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
       assert kind in [:credential, :invocation]
       writer_monitor = Process.monitor(writer)
 
-      # A successful send may enqueue bytes without the child consuming them.
-      # If that happened, the invocation writer is the next blocked helper;
-      # do not mislabel it as the credential sender. The actual child remains
-      # suspended before consuming its credential frame in either schedule.
+      # A successful credential send may enqueue all bytes without the child
+      # consuming them. In that schedule the separately supervised credential
+      # sender exits normally before the invocation writer becomes the blocked
+      # helper. Otherwise the blocked helper is that exact credential sender.
+      # The child remains suspended before consuming its credential frame in
+      # either schedule.
       if kind == :invocation do
-        assert_receive {:trace, ^guardian, :receive,
-                        {:provider_sent, _credential_sender, :credential, :ok}},
+        assert writer != credential_sender
+
+        assert_receive {:DOWN, ^credential_sender_monitor, :process, ^credential_sender, :normal},
                        remaining(request)
+      else
+        assert writer == credential_sender
       end
 
       assert Fixture.alive?(Fixture.pid(fixture))
@@ -117,6 +132,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
                      until(cooperative)
 
       assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :killed}, until(cooperative)
+
+      if kind == :credential do
+        assert_receive {:DOWN, ^credential_sender_monitor, :process, ^credential_sender, :killed},
+                       until(cooperative)
+      end
+
       assert_receive {:DOWN, ^receiver_monitor, :process, ^receiver, :killed}, until(cooperative)
 
       assert_receive {:completed, ^caller,
@@ -151,6 +172,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
     # inside it; a shorter one priced that boot on a loaded hosted runner, so
     # the port default stays and the case costs the whole of it.
     request = Fixture.request()
+    # The guardian's own mapping of the wall deadline to a monotonic instant,
+    # taken from the same frozen offset form just before it starts.
+    honoured =
+      ProviderBridge.invocation_deadline(request.deadline, System.time_offset(:native))
+
     {retainer, retainer_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
     call = Fixture.managed(fixture, request, retainer)
     guardian = call.guardian
@@ -181,12 +207,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
                      until(cooperative)
 
       # The guardian honours the deadline as a monotonic instant converted once
-      # from the wall-clock deadline the request carries; both clocks are read
-      # in whole milliseconds and the offset between them can move by a few
-      # during the wait, so the wall clock at the completion may read a few
-      # milliseconds before the deadline it honoured -- two, once, on the Mac.
-      # Five milliseconds is the tolerance; the deadline is ten thousand.
-      assert System.system_time(:millisecond) >= request.deadline - 5
+      # from the wall-clock deadline the request carries, so the completion is
+      # compared on that clock. The wall clock is not: macOS slews it by up to
+      # 500 ppm, which moved it six milliseconds against the monotonic clock
+      # during this ten-second wait on a Darwin floor run. The five
+      # milliseconds cover the two offset samples and millisecond rounding.
+      assert System.monotonic_time() >=
+               honoured - System.convert_time_unit(5, :millisecond, :native)
 
       # Concept: this is the cleanup interval, not a queued provider result.
       # Technical depth: the unchanged OS guard removes its namespace only in

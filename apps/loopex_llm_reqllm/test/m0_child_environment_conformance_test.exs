@@ -1,6 +1,8 @@
 Code.require_file("support/provider_build_fixture.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.M0ChildEnvironmentConformanceTest do
+  # These compatibility witnesses deliberately replace the VM-global PATH and
+  # one parent-only environment name, so this module remains serial.
   use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM.{ProviderBuildFixture, ProviderConfiguration, ProviderLauncher}

@@ -61,9 +61,75 @@ defmodule Loopex.Runtime.EventDispatcher do
   def start_link(options) when is_list(options), do: GenServer.start_link(__MODULE__, options)
 
   @doc false
-  @spec attach(pid(), reference(), binary(), keyword()) :: {:ok, map()} | {:error, term()}
-  def attach(dispatcher, token, session_id, options),
-    do: GenServer.call(dispatcher, {:attach, token, session_id, options}, :infinity)
+  @spec stage_attachment(pid(), pid(), reference(), map()) :: :ok
+  def stage_attachment(dispatcher, control, attach_ref, transaction)
+      when is_pid(dispatcher) and is_pid(control) and is_reference(attach_ref) and
+             is_map(transaction) do
+    send(dispatcher, {:stage_attachment, control, attach_ref, transaction})
+    :ok
+  end
+
+  @doc false
+  @spec authorize_attachment(pid(), reference(), pid(), reference(), binary(), binary()) :: :ok
+  def authorize_attachment(
+        dispatcher,
+        dispatcher_incarnation,
+        control,
+        attach_ref,
+        attachment_id,
+        incarnation_id
+      )
+      when is_pid(dispatcher) and is_reference(dispatcher_incarnation) and is_pid(control) and
+             is_reference(attach_ref) do
+    send(
+      dispatcher,
+      {:authorize_attachment, dispatcher_incarnation, control, attach_ref, attachment_id,
+       incarnation_id}
+    )
+
+    :ok
+  end
+
+  @doc false
+  @spec discard_staged_attachment(pid(), reference(), pid(), reference()) :: :ok
+  def discard_staged_attachment(dispatcher, dispatcher_incarnation, control, attach_ref)
+      when is_pid(dispatcher) and is_reference(dispatcher_incarnation) and is_pid(control) and
+             is_reference(attach_ref) do
+    send(
+      dispatcher,
+      {:discard_staged_attachment, dispatcher_incarnation, control, attach_ref}
+    )
+
+    :ok
+  end
+
+  @doc false
+  @spec remove_published_attachment(
+          pid(),
+          reference(),
+          pid(),
+          reference(),
+          binary(),
+          binary()
+        ) :: :ok
+  def remove_published_attachment(
+        dispatcher,
+        dispatcher_incarnation,
+        control,
+        attach_ref,
+        attachment_id,
+        incarnation_id
+      )
+      when is_pid(dispatcher) and is_reference(dispatcher_incarnation) and is_pid(control) and
+             is_reference(attach_ref) do
+    send(
+      dispatcher,
+      {:remove_published_attachment, dispatcher_incarnation, control, attach_ref, attachment_id,
+       incarnation_id}
+    )
+
+    :ok
+  end
 
   @doc false
   @spec validate(pid(), reference(), binary(), binary(), binary()) :: :ok | {:error, term()}
@@ -84,6 +150,42 @@ defmodule Loopex.Runtime.EventDispatcher do
     case RuntimeSupervisor.children(root) do
       {:ok, %{dispatcher: dispatcher}} -> GenServer.cast(dispatcher, {:invalidate, session_id})
       _other -> :ok
+    end
+  end
+
+  @doc false
+  @spec invalidate_session(pid(), binary()) :: {:ok, [map()]} | {:error, :dispatcher_unavailable}
+  def invalidate_session(dispatcher, session_id)
+      when is_pid(dispatcher) and is_binary(session_id) do
+    try do
+      GenServer.call(dispatcher, {:invalidate_session, session_id}, :infinity)
+    catch
+      :exit, _reason -> {:error, :dispatcher_unavailable}
+    end
+  end
+
+  @doc false
+  @spec release_attachment(pid(), binary(), binary()) :: :ok
+  def release_attachment(dispatcher, attachment_id, incarnation_id)
+      when is_pid(dispatcher) and is_binary(attachment_id) and is_binary(incarnation_id) do
+    try do
+      GenServer.call(
+        dispatcher,
+        {:release_attachment, attachment_id, incarnation_id},
+        :infinity
+      )
+    catch
+      :exit, _reason -> :ok
+    end
+  end
+
+  @doc false
+  @spec release_holder(pid(), pid()) :: :ok
+  def release_holder(dispatcher, holder) when is_pid(dispatcher) and is_pid(holder) do
+    try do
+      GenServer.call(dispatcher, {:release_holder, holder}, :infinity)
+    catch
+      :exit, _reason -> :ok
     end
   end
 
@@ -144,58 +246,68 @@ defmodule Loopex.Runtime.EventDispatcher do
   def init(options) do
     Process.flag(:trap_exit, true)
 
+    incarnation = make_ref()
+
     {:ok,
      %{
+       root: Keyword.fetch!(options, :root),
        token: Keyword.fetch!(options, :token),
+       status: :initializing,
+       incarnation: incarnation,
+       registration_worker: nil,
        store: Keyword.fetch!(options, :store),
        capacity: Keyword.fetch!(options, :attachment_capacity),
        progress_to: Keyword.fetch!(options, :progress_to),
        diagnostics_to: Keyword.fetch!(options, :diagnostics_to),
        attachments: %{},
-       pending_scans: %{},
+       holders: %{},
+       holder_monitors: %{},
+       staged_attachments: %{},
        pending_reads: %{},
        read_monitors: %{},
        acknowledged: %{},
-       counter: 0,
        admission: DiagnosticsAdmission.new(diagnostics_ceiling(options)),
        diagnostic_monitors: %{},
        drop_window_start: 0,
        artifact_store: Keyword.get(options, :artifact_store),
        transfer_limits: ArtifactStore.transfer_limits()
-     }}
+     }, {:continue, :register_dispatcher}}
   end
 
   @impl GenServer
-  def handle_call({:attach, token, session_id, options}, from, state) do
-    with true <- token == state.token,
-         true <- is_binary(session_id) do
-      scan_id = make_ref()
-      parent = self()
-      store = state.store
-      bound = scan_bound(state, session_id)
+  def handle_continue(:register_dispatcher, state) do
+    dispatcher = self()
+    root = state.root
+    token = state.token
+    incarnation = state.incarnation
 
-      worker =
-        spawn_link(fn ->
-          send(
-            parent,
-            {:attachment_scan_finished, scan_id,
-             scan_attachment(store, session_id, options[:after_event_sequence], bound)}
-          )
-        end)
+    worker =
+      spawn_link(fn ->
+        dispatcher_registration_worker(root, token, dispatcher, incarnation)
+      end)
 
-      pending = %{
-        from: from,
-        worker: worker,
-        caller_monitor: Process.monitor(elem(from, 0)),
-        session_id: session_id,
-        options: options
-      }
+    registration_worker = %{pid: worker, monitor: Process.monitor(worker)}
+    {:noreply, %{state | registration_worker: registration_worker}}
+  end
 
-      next = %{state | pending_scans: Map.put(state.pending_scans, scan_id, pending)}
-      {:noreply, next}
-    else
-      false -> {:reply, {:error, :invalid_attachment}, state}
-    end
+  @impl GenServer
+  def handle_call({:invalidate_session, session_id}, _from, state) do
+    {removed, next} = invalidate_session_state(state, session_id)
+    {:reply, {:ok, removed}, next}
+  end
+
+  def handle_call({:release_attachment, attachment_id, incarnation_id}, _from, state) do
+    next =
+      case Map.get(state.attachments, attachment_id) do
+        %{incarnation_id: ^incarnation_id} -> drop_attachment(state, attachment_id)
+        _other -> state
+      end
+
+    {:reply, :ok, next}
+  end
+
+  def handle_call({:release_holder, holder}, _from, state) do
+    {:reply, :ok, drop_holder(state, holder, :holder_released)}
   end
 
   def handle_call(
@@ -420,58 +532,265 @@ defmodule Loopex.Runtime.EventDispatcher do
     do: {:noreply, %{state | acknowledged: Map.delete(state.acknowledged, session_id)}}
 
   def handle_cast({:invalidate, session_id}, state) do
-    retained =
-      state.attachments
-      |> Enum.reject(fn {_id, attachment} -> attachment.session_id == session_id end)
-      |> Map.new()
-
-    {cancelled, pending_scans} =
-      Enum.reduce(state.pending_scans, {[], %{}}, fn {scan_id, pending},
-                                                     {cancelled, retained_scans} ->
-        if pending.session_id == session_id do
-          {[pending | cancelled], retained_scans}
-        else
-          {cancelled, Map.put(retained_scans, scan_id, pending)}
-        end
-      end)
-
-    Enum.each(cancelled, fn pending ->
-      Process.demonitor(pending.caller_monitor, [:flush])
-      Process.exit(pending.worker, :kill)
-      GenServer.reply(pending.from, {:error, :attachment_superseded})
-    end)
-
-    next = cancel_session_reads(state, session_id)
-    {:noreply, %{next | attachments: retained, pending_scans: pending_scans}}
+    {_removed, next} = invalidate_session_state(state, session_id)
+    {:noreply, next}
   end
 
   @impl GenServer
-  def handle_info({:attachment_scan_finished, scan_id, result}, state) do
-    case Map.pop(state.pending_scans, scan_id) do
-      {nil, _pending_scans} ->
+  def handle_info(
+        {:dispatcher_seed, worker, incarnation, registration_ref, seed},
+        %{
+          status: :initializing,
+          incarnation: incarnation,
+          registration_worker: %{pid: worker}
+        } = state
+      )
+      when is_reference(registration_ref) and is_map(seed) do
+    acknowledged =
+      Map.merge(state.acknowledged, seed, fn _session_id, current, seeded ->
+        max(current, seeded)
+      end)
+
+    send(worker, {:dispatcher_seeded, self(), incarnation, registration_ref})
+    {:noreply, %{state | acknowledged: acknowledged}}
+  end
+
+  def handle_info(
+        {:dispatcher_ready_token, worker, incarnation, registration_ref, ready_token, control},
+        %{
+          status: :initializing,
+          incarnation: incarnation,
+          registration_worker: %{pid: worker}
+        } = state
+      )
+      when is_reference(registration_ref) and is_reference(ready_token) and is_pid(control) do
+    send(
+      control,
+      {:dispatcher_ready, self(), incarnation, registration_ref, ready_token}
+    )
+
+    {:noreply, %{state | status: :ready}}
+  end
+
+  def handle_info(
+        {:dispatcher_registration_failed, worker, incarnation},
+        %{incarnation: incarnation, registration_worker: %{pid: worker}} = state
+      ) do
+    {:stop, :dispatcher_registration_failed, state}
+  end
+
+  def handle_info({:stage_attachment, control, attach_ref, transaction}, state) do
+    with true <- is_pid(control),
+         true <- state.status == :ready,
+         true <- is_reference(attach_ref),
+         %{
+           session_id: session_id,
+           holder: holder,
+           options: options,
+           id: id,
+           incarnation_id: incarnation_id,
+           dispatcher_incarnation: dispatcher_incarnation
+         } <- transaction,
+         true <- dispatcher_incarnation == state.incarnation,
+         true <- is_binary(session_id),
+         true <- is_pid(holder),
+         true <- is_list(options),
+         true <- is_binary(id),
+         true <- is_binary(incarnation_id),
+         true <- Process.alive?(holder),
+         false <- Map.has_key?(state.staged_attachments, attach_ref) do
+      parent = self()
+      scan_state = %{store: state.store, acknowledged: Map.take(state.acknowledged, [session_id])}
+      bound = scan_bound(state, session_id)
+      capacity = state.capacity
+
+      worker =
+        spawn_link(fn ->
+          result =
+            prepare_staged_scan(scan_state, transaction, bound, capacity)
+
+          send(parent, {:staged_attachment_scan_finished, attach_ref, self(), result})
+        end)
+
+      pending =
+        transaction
+        |> Map.merge(%{
+          attach_ref: attach_ref,
+          control: control,
+          worker: worker,
+          phase: :scanning
+        })
+
+      next =
+        state
+        |> register_holder_pending(holder, attach_ref)
+        |> Map.put(
+          :staged_attachments,
+          Map.put(state.staged_attachments, attach_ref, pending)
+        )
+
+      {:noreply, next}
+    else
+      _other ->
+        send(
+          control,
+          {:attachment_stage_failed, self(), state.incarnation, attach_ref, :holder_unavailable}
+        )
+
         {:noreply, state}
-
-      {pending, pending_scans} ->
-        Process.demonitor(pending.caller_monitor, [:flush])
-
-        {reply, next} =
-          install_attachment(%{state | pending_scans: pending_scans}, pending, result)
-
-        case reply do
-          {:ok, %{id: id} = installed} ->
-            call = %{
-              operation: {:attach, installed},
-              from: pending.from,
-              monitor: Process.monitor(elem(pending.from, 0))
-            }
-
-            {:noreply, start_read(next, Map.fetch!(next.attachments, id), call)}
-
-          error ->
-            GenServer.reply(pending.from, error)
-            {:noreply, next}
-        end
     end
+  end
+
+  def handle_info(
+        {:staged_attachment_scan_finished, attach_ref, worker, result},
+        state
+      ) do
+    case Map.get(state.staged_attachments, attach_ref) do
+      %{worker: ^worker, phase: :scanning} = pending ->
+        case result do
+          {:ok, attachment, response} ->
+            if holder_pending?(state, pending) do
+              staged =
+                pending
+                |> Map.put(:phase, :staged)
+                |> Map.put(:attachment, attachment)
+                |> Map.put(:response, response)
+
+              send(
+                pending.control,
+                {:attachment_staged, self(), state.incarnation, attach_ref, attachment.id,
+                 attachment.incarnation_id, response}
+              )
+
+              {:noreply,
+               %{
+                 state
+                 | staged_attachments: Map.put(state.staged_attachments, attach_ref, staged)
+               }}
+            else
+              send(
+                pending.control,
+                {:attachment_stage_failed, self(), state.incarnation, attach_ref,
+                 :holder_unavailable}
+              )
+
+              {:noreply, drop_staged_attachment(state, attach_ref)}
+            end
+
+          {:error, reason} ->
+            send(
+              pending.control,
+              {:attachment_stage_failed, self(), state.incarnation, attach_ref, reason}
+            )
+
+            {:noreply, drop_staged_attachment(state, attach_ref)}
+        end
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:authorize_attachment, dispatcher_incarnation, control, attach_ref, attachment_id,
+         incarnation_id},
+        state
+      ) do
+    case {dispatcher_incarnation == state.incarnation,
+          Map.get(state.staged_attachments, attach_ref)} do
+      {true,
+       %{
+         control: ^control,
+         phase: :staged,
+         id: ^attachment_id,
+         incarnation_id: ^incarnation_id
+       } = pending} ->
+        with true <- holder_pending?(state, pending),
+             {:ok, prepared} <- prepare_replacement(state, pending) do
+          attachment = pending.attachment
+
+          next =
+            prepared
+            |> Map.put(
+              :staged_attachments,
+              Map.delete(prepared.staged_attachments, attach_ref)
+            )
+            |> Map.put(
+              :attachments,
+              Map.put(prepared.attachments, attachment_id, attachment)
+            )
+            |> finish_holder_pending(pending.holder, attach_ref, attachment_id)
+
+          send(
+            control,
+            {:attachment_published, self(), state.incarnation, attach_ref, attachment_id,
+             incarnation_id, pending.response}
+          )
+
+          {:noreply, next}
+        else
+          false ->
+            send(
+              control,
+              {:attachment_stage_failed, self(), state.incarnation, attach_ref,
+               :holder_unavailable}
+            )
+
+            {:noreply, drop_staged_attachment(state, attach_ref)}
+
+          {:error, reason} ->
+            send(
+              control,
+              {:attachment_stage_failed, self(), state.incarnation, attach_ref, reason}
+            )
+
+            {:noreply, drop_staged_attachment(state, attach_ref)}
+        end
+
+      _other ->
+        send(
+          control,
+          {:attachment_stage_failed, self(), state.incarnation, attach_ref,
+           :attachment_superseded}
+        )
+
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:discard_staged_attachment, dispatcher_incarnation, control, attach_ref},
+        state
+      ) do
+    next =
+      case {dispatcher_incarnation == state.incarnation,
+            Map.get(state.staged_attachments, attach_ref)} do
+        {true, %{control: ^control}} -> drop_staged_attachment(state, attach_ref)
+        _other -> state
+      end
+
+    send(control, {:attachment_discarded, self(), state.incarnation, attach_ref})
+    {:noreply, next}
+  end
+
+  def handle_info(
+        {:remove_published_attachment, dispatcher_incarnation, control, attach_ref, attachment_id,
+         incarnation_id},
+        state
+      ) do
+    next =
+      case {dispatcher_incarnation == state.incarnation,
+            Map.get(state.attachments, attachment_id)} do
+        {true, %{incarnation_id: ^incarnation_id}} -> drop_attachment(state, attachment_id)
+        _other -> state
+      end
+
+    send(
+      control,
+      {:attachment_removed, self(), state.incarnation, attach_ref, attachment_id, incarnation_id}
+    )
+
+    {:noreply, next}
   end
 
   # Concept: one monitor per live sender on the asynchronous plane.
@@ -495,6 +814,17 @@ defmodule Loopex.Runtime.EventDispatcher do
     {:noreply, report_drops(state)}
   end
 
+  def handle_info(
+        {:DOWN, monitor, :process, worker, _reason},
+        %{registration_worker: %{pid: worker, monitor: monitor}} = state
+      ) do
+    if state.status == :ready do
+      {:noreply, %{state | registration_worker: nil}}
+    else
+      {:stop, :dispatcher_registration_failed, state}
+    end
+  end
+
   def handle_info({:DOWN, monitor, :process, pid, _reason}, state)
       when is_map_key(state.diagnostic_monitors, pid) do
     if Map.fetch!(state.diagnostic_monitors, pid) == monitor do
@@ -510,37 +840,45 @@ defmodule Loopex.Runtime.EventDispatcher do
     end
   end
 
-  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
-    case Enum.find(state.pending_scans, fn {_scan_id, pending} ->
-           pending.caller_monitor == monitor
-         end) do
-      nil ->
-        {:noreply, cancel_read_caller(state, monitor)}
-
-      {scan_id, pending} ->
-        Process.exit(pending.worker, :kill)
-        {:noreply, %{state | pending_scans: Map.delete(state.pending_scans, scan_id)}}
+  def handle_info({:DOWN, monitor, :process, holder, _reason}, state)
+      when is_map_key(state.holder_monitors, monitor) do
+    case Map.get(state.holder_monitors, monitor) do
+      ^holder -> {:noreply, drop_holder(state, holder, :holder_unavailable)}
+      _other -> {:noreply, state}
     end
   end
 
-  def handle_info({:EXIT, worker, _reason}, state) do
-    case Enum.find(state.pending_scans, fn {_scan_id, pending} -> pending.worker == worker end) do
-      nil ->
-        case Enum.find(state.pending_reads, fn {_id, pending} ->
-               pending.worker == worker
-             end) do
-          nil ->
-            {:noreply, state}
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
+    {:noreply, cancel_read_caller(state, monitor)}
+  end
 
-          {id, pending} ->
-            failed = disconnect(pending.attachment, :store_unavailable)
-            {:noreply, finish_read(state, id, pending, failed)}
+  def handle_info({:EXIT, worker, _reason}, state) do
+    case state.registration_worker do
+      %{pid: ^worker, monitor: monitor} ->
+        Process.demonitor(monitor, [:flush])
+
+        if state.status == :ready do
+          {:noreply, %{state | registration_worker: nil}}
+        else
+          {:stop, :dispatcher_registration_failed, state}
         end
 
-      {scan_id, pending} ->
-        Process.demonitor(pending.caller_monitor, [:flush])
-        GenServer.reply(pending.from, {:error, :store_unavailable})
-        {:noreply, %{state | pending_scans: Map.delete(state.pending_scans, scan_id)}}
+      _other ->
+        case Enum.find(state.staged_attachments, fn {_attach_ref, pending} ->
+               pending.worker == worker and pending.phase == :scanning
+             end) do
+          {attach_ref, pending} ->
+            send(
+              pending.control,
+              {:attachment_stage_failed, self(), state.incarnation, attach_ref,
+               :store_unavailable}
+            )
+
+            {:noreply, drop_staged_attachment(state, attach_ref)}
+
+          nil ->
+            finish_read_worker_exit(state, worker)
+        end
     end
   end
 
@@ -551,6 +889,17 @@ defmodule Loopex.Runtime.EventDispatcher do
 
       _other ->
         {:noreply, state}
+    end
+  end
+
+  defp finish_read_worker_exit(state, worker) do
+    case Enum.find(state.pending_reads, fn {_id, pending} -> pending.worker == worker end) do
+      nil ->
+        {:noreply, state}
+
+      {id, pending} ->
+        failed = disconnect(pending.attachment, :store_unavailable)
+        {:noreply, finish_read(state, id, pending, failed)}
     end
   end
 
@@ -688,18 +1037,6 @@ defmodule Loopex.Runtime.EventDispatcher do
     }
   end
 
-  defp cancel_session_reads(state, session_id) do
-    Enum.reduce(state.pending_reads, state, fn {id, pending}, current ->
-      if pending.session_id == session_id do
-        Process.exit(pending.worker, :kill)
-        reply_read(pending.current, {:error, :stale_attachment})
-        remove_read(current, id, pending)
-      else
-        current
-      end
-    end)
-  end
-
   defp cancel_read_caller(state, monitor) do
     case Map.fetch(state.read_monitors, monitor) do
       {:ok, id} ->
@@ -761,89 +1098,275 @@ defmodule Loopex.Runtime.EventDispatcher do
     end
   end
 
-  defp install_attachment(
-         state,
-         pending,
-         {:ok,
+  defp prepare_staged_scan(scan_state, transaction, bound, capacity) do
+    with {:ok,
           %{
             tail: tail,
             snapshot: %{session_id: session_id, event_sequence: anchor} = snapshot
-          } = result}
-       )
-       when session_id == pending.session_id and is_integer(tail) and tail >= anchor do
-    if is_integer(anchor) and anchor >= 0 do
-      counter = state.counter + 1
-      attachment_id = fresh_id("attachment", pending.session_id, counter)
-      incarnation_id = fresh_id("incarnation", pending.session_id, counter)
-
+          } = result} <-
+           scan_attachment(
+             scan_state.store,
+             transaction.session_id,
+             transaction.options[:after_event_sequence],
+             bound
+           ),
+         true <- session_id == transaction.session_id,
+         true <- is_integer(anchor) and anchor >= 0,
+         true <- is_integer(tail) and tail >= anchor do
       attachment = %{
-        id: attachment_id,
-        incarnation_id: incarnation_id,
+        id: transaction.id,
+        incarnation_id: transaction.incarnation_id,
+        holder: transaction.holder,
         open_interaction: Map.get(result, :open_interaction),
-        session_id: pending.session_id,
+        session_id: transaction.session_id,
         cursor: anchor,
         seen: anchor,
         replay_until: tail,
         queue: :queue.new(),
         queue_depth: 0,
         max_queue_depth: 0,
-        capacity: state.capacity,
+        capacity: capacity,
         status: :active,
-        metadata: transient_metadata(pending.options),
-        # The artifact transfers this attachment opened. Accepted ADR 0028 binds
-        # a transfer to the attachment that opened it, so detaching, replacement
-        # and overflow all release exactly what that attachment held and nothing
-        # another one is still reading.
+        metadata: transient_metadata(transaction.options),
         transfers: %{},
-        # What each open transfer has moved so far, for the lifecycle report a
-        # transfer owes when it ends. Kept beside the transfers rather than
-        # inside them, because the transfer term is the store's and is handed
-        # back to it on every read.
         transfer_progress: %{}
       }
 
-      # Concept: a replaced attachment's transfers end with it.
-      #
-      # Technical depth: accepted ADR 0028 releases every transfer the
-      # attachment opened when it goes away, and a replacement is one of the
-      # ways it goes away. Releasing here rather than waiting for the lifetime
-      # timer is what keeps a reconnecting caller from holding descriptors it
-      # can no longer read through.
-      {superseded, kept} =
-        Enum.split_with(state.attachments, fn {_id, existing} ->
-          existing.session_id == pending.session_id
-        end)
-
-      Enum.each(superseded, fn {_id, existing} -> release_transfers(state, existing) end)
-      retained = Map.new(kept)
-
-      next = %{
-        cancel_session_reads(state, pending.session_id)
-        | counter: counter,
-          attachments: Map.put(retained, attachment_id, attachment)
-      }
-
-      reply = %{
-        id: attachment_id,
-        incarnation_id: incarnation_id,
+      response = %{
+        id: transaction.id,
+        incarnation_id: transaction.incarnation_id,
         snapshot: snapshot,
         open_interaction: Map.get(result, :open_interaction)
       }
 
-      {{:ok, reply}, next}
+      {:ok, pump(scan_state, attachment), response}
     else
-      {{:error, :invalid_store_page}, state}
+      :unavailable -> {:error, :store_unavailable}
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_store_page}
     end
   end
 
-  defp install_attachment(state, _pending, :unavailable),
-    do: {{:error, :store_unavailable}, state}
+  defp register_holder_pending(state, holder, attach_ref) do
+    case Map.get(state.holders, holder) do
+      nil ->
+        monitor = Process.monitor(holder)
 
-  defp install_attachment(state, _pending, {:error, reason}),
-    do: {{:error, reason}, state}
+        entry = %{
+          monitor: monitor,
+          pending: MapSet.new([attach_ref]),
+          attachments: MapSet.new()
+        }
 
-  defp install_attachment(state, _pending, _result),
-    do: {{:error, :invalid_store_page}, state}
+        %{
+          state
+          | holders: Map.put(state.holders, holder, entry),
+            holder_monitors: Map.put(state.holder_monitors, monitor, holder)
+        }
+
+      entry ->
+        updated = %{entry | pending: MapSet.put(entry.pending, attach_ref)}
+        %{state | holders: Map.put(state.holders, holder, updated)}
+    end
+  end
+
+  defp drop_staged_attachment(state, attach_ref) do
+    case Map.pop(state.staged_attachments, attach_ref) do
+      {nil, _staged} ->
+        state
+
+      {pending, staged} ->
+        if Process.alive?(pending.worker), do: Process.exit(pending.worker, :kill)
+
+        state
+        |> Map.put(:staged_attachments, staged)
+        |> drop_holder_pending(pending.holder, attach_ref)
+    end
+  end
+
+  defp holder_pending?(state, pending) do
+    case Map.get(state.holders, pending.holder) do
+      %{pending: refs} -> MapSet.member?(refs, pending.attach_ref)
+      _other -> false
+    end
+  end
+
+  defp finish_holder_pending(state, holder, attach_ref, attachment_id) do
+    case Map.get(state.holders, holder) do
+      nil ->
+        state
+
+      entry ->
+        updated = %{
+          entry
+          | pending: MapSet.delete(entry.pending, attach_ref),
+            attachments: MapSet.put(entry.attachments, attachment_id)
+        }
+
+        %{state | holders: Map.put(state.holders, holder, updated)}
+    end
+  end
+
+  defp drop_holder_pending(state, holder, attach_ref) do
+    update_holder(state, holder, fn entry ->
+      %{entry | pending: MapSet.delete(entry.pending, attach_ref)}
+    end)
+  end
+
+  defp drop_holder_attachment(state, holder, attachment_id) do
+    update_holder(state, holder, fn entry ->
+      %{entry | attachments: MapSet.delete(entry.attachments, attachment_id)}
+    end)
+  end
+
+  defp update_holder(state, holder, update) do
+    case Map.get(state.holders, holder) do
+      nil ->
+        state
+
+      entry ->
+        updated = update.(entry)
+
+        if MapSet.size(updated.pending) == 0 and MapSet.size(updated.attachments) == 0 do
+          Process.demonitor(updated.monitor, [:flush])
+
+          %{
+            state
+            | holders: Map.delete(state.holders, holder),
+              holder_monitors: Map.delete(state.holder_monitors, updated.monitor)
+          }
+        else
+          %{state | holders: Map.put(state.holders, holder, updated)}
+        end
+    end
+  end
+
+  defp prepare_replacement(state, %{options: options, holder: holder, session_id: session_id}) do
+    case options[:replace_attachment_id] do
+      nil ->
+        {:ok, state}
+
+      attachment_id ->
+        case Map.get(state.attachments, attachment_id) do
+          %{holder: ^holder, session_id: ^session_id} ->
+            {:ok, drop_attachment(state, attachment_id)}
+
+          _other ->
+            {:error, :stale_attachment}
+        end
+    end
+  end
+
+  defp invalidate_session_state(state, session_id) do
+    staged_refs =
+      state.staged_attachments
+      |> Enum.filter(fn {_attach_ref, pending} -> pending.session_id == session_id end)
+      |> Enum.map(&elem(&1, 0))
+
+    state =
+      Enum.reduce(staged_refs, state, fn attach_ref, current ->
+        case Map.get(current.staged_attachments, attach_ref) do
+          %{control: control} ->
+            send(
+              control,
+              {:attachment_stage_failed, self(), current.incarnation, attach_ref,
+               :attachment_superseded}
+            )
+
+            drop_staged_attachment(current, attach_ref)
+
+          _other ->
+            current
+        end
+      end)
+
+    removed =
+      state.attachments
+      |> Enum.filter(fn {_id, attachment} -> attachment.session_id == session_id end)
+      |> Enum.map(fn {id, attachment} ->
+        %{
+          attachment_id: id,
+          attachment_incarnation: attachment.incarnation_id,
+          holder: attachment.holder,
+          cursor: attachment.cursor
+        }
+      end)
+
+    next =
+      Enum.reduce(removed, state, fn removed_attachment, current ->
+        drop_attachment(current, removed_attachment.attachment_id)
+      end)
+
+    {removed, next}
+  end
+
+  defp drop_holder(state, holder, reason) do
+    case Map.get(state.holders, holder) do
+      nil ->
+        state
+
+      entry ->
+        staged_refs =
+          state.staged_attachments
+          |> Enum.filter(fn {_attach_ref, pending} -> pending.holder == holder end)
+          |> Enum.map(&elem(&1, 0))
+
+        state =
+          Enum.reduce(staged_refs, state, fn attach_ref, current ->
+            case Map.get(current.staged_attachments, attach_ref) do
+              %{control: control} ->
+                send(
+                  control,
+                  {:attachment_stage_failed, self(), current.incarnation, attach_ref, reason}
+                )
+
+                drop_staged_attachment(current, attach_ref)
+
+              _other ->
+                current
+            end
+          end)
+
+        attachment_ids = MapSet.to_list(entry.attachments)
+
+        state =
+          Enum.reduce(attachment_ids, state, fn attachment_id, current ->
+            drop_attachment(current, attachment_id)
+          end)
+
+        Process.demonitor(entry.monitor, [:flush])
+
+        %{
+          state
+          | holders: Map.delete(state.holders, holder),
+            holder_monitors: Map.delete(state.holder_monitors, entry.monitor)
+        }
+    end
+  end
+
+  defp drop_attachment(state, attachment_id) do
+    case Map.pop(state.attachments, attachment_id) do
+      {nil, _attachments} ->
+        state
+
+      {attachment, attachments} ->
+        state = cancel_attachment_read(%{state | attachments: attachments}, attachment_id)
+        release_transfers(state, attachment)
+        drop_holder_attachment(state, attachment.holder, attachment_id)
+    end
+  end
+
+  defp cancel_attachment_read(state, attachment_id) do
+    case Map.get(state.pending_reads, attachment_id) do
+      nil ->
+        state
+
+      pending ->
+        Process.exit(pending.worker, :kill)
+        reply_read(pending.current, {:error, :stale_attachment})
+        remove_read(state, attachment_id, pending)
+    end
+  end
 
   defp enqueue_events(attachment, events) do
     Enum.reduce_while(events, {attachment, :complete}, fn event, {current, _disposition} ->
@@ -998,12 +1521,6 @@ defmodule Loopex.Runtime.EventDispatcher do
     Map.new([:request_id, :client_id, :attachment_key], fn key -> {key, options[key]} end)
   end
 
-  defp fresh_id(namespace, session_id, counter) do
-    bytes = :erlang.term_to_binary([namespace, session_id, counter, make_ref()], [:deterministic])
-    encoded = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
-    namespace <> "_" <> binary_part(encoded, 0, 30)
-  end
-
   # Concept: the artifact store this runtime was composed with, if any.
   #
   # Technical depth: a runtime without one refuses the transfer family as
@@ -1102,6 +1619,56 @@ defmodule Loopex.Runtime.EventDispatcher do
     end)
   end
 
+  defp dispatcher_registration_worker(root, token, dispatcher, incarnation) do
+    result =
+      with {:ok, control} <- RuntimeSupervisor.control(root),
+           {:ok, registration_ref, seed} <-
+             safe_control_call(
+               control,
+               {:begin_dispatcher_registration, token, dispatcher, incarnation}
+             ) do
+        send(
+          dispatcher,
+          {:dispatcher_seed, self(), incarnation, registration_ref, seed}
+        )
+
+        receive do
+          {:dispatcher_seeded, ^dispatcher, ^incarnation, ^registration_ref} ->
+            case safe_control_call(
+                   control,
+                   {:finalize_dispatcher_registration, token, dispatcher, incarnation,
+                    registration_ref}
+                 ) do
+              {:ok, ready_token} ->
+                send(
+                  dispatcher,
+                  {:dispatcher_ready_token, self(), incarnation, registration_ref, ready_token,
+                   control}
+                )
+
+                :ok
+
+              _other ->
+                :error
+            end
+        end
+      else
+        _other -> :error
+      end
+
+    if result != :ok do
+      send(dispatcher, {:dispatcher_registration_failed, self(), incarnation})
+    end
+  end
+
+  defp safe_control_call(control, message) do
+    try do
+      GenServer.call(control, message, :infinity)
+    catch
+      :exit, _reason -> {:error, :runtime_unavailable}
+    end
+  end
+
   defp release_transfers(state, attachment) do
     case artifact_store(state) do
       {:ok, store} ->
@@ -1198,6 +1765,7 @@ defmodule Loopex.Runtime.EventDispatcher do
 
   defp maybe_send(nil, _message), do: :ok
   defp maybe_send(pid, message) when is_pid(pid), do: send(pid, message)
+  defp maybe_send({:session, pid}, message) when is_pid(pid), do: send(pid, message)
 
   defp plain_transient?(value) do
     match?(

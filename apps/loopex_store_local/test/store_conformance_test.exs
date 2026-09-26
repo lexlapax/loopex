@@ -43,6 +43,10 @@ defmodule Loopex.Store.Local.ConformanceTest do
     Conformance.retained_resolutions()
   end
 
+  test "create-history projection binds exact options without mutating either Store" do
+    Conformance.create_history_projection()
+  end
+
   test "the durable local store survives process death with consecutive store-stamped history" do
     Conformance.durable_restart()
   end

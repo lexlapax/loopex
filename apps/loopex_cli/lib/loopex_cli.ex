@@ -34,8 +34,8 @@ defmodule LoopexCli do
   alias LoopexCli.Policy.AllowAll
   alias LoopexCli.Policy.ShellAllowlist
   alias LoopexCli.Interrupt
-  alias LoopexCli.Placement
-  alias LoopexCli.ProjectResources
+  alias LoopexComposition.Placement
+  alias LoopexComposition.ProjectResources
   alias LoopexCli.Render
 
   @doc """
@@ -50,8 +50,11 @@ defmodule LoopexCli do
   wrapping this command can tell success from failure.
   """
   @spec main([binary()]) :: no_return()
+  def main(["daemon" | arguments]), do: LoopexCli.Daemon.main(arguments)
+
   def main(argv) do
-    result = dispatch(argv)
+    unless composes_offline?(argv), do: LoopexComposition.CredentialHost.discard()
+    result = dispatch(argv, install_live_signals: true)
     release_placement()
     halt(result)
   end
@@ -68,14 +71,24 @@ defmodule LoopexCli do
   process to observe a flag would be testing the escript wrapper, not the
   behaviour the outcome names.
   """
-  @spec dispatch([binary()]) :: :ok | {:error, binary()}
+  @spec dispatch([binary()]) :: :ok | {:error, binary()} | {:detached, non_neg_integer()}
   def dispatch(argv), do: dispatch(argv, [])
 
   @doc false
-  @spec dispatch([binary()], keyword()) :: :ok | {:error, binary()}
-  def dispatch(["run" | rest], options), do: admitted("run", rest, &run(&1, options))
-  def dispatch(["sessions" | rest], _options), do: admitted("sessions", rest, &sessions/1)
-  def dispatch(["resume" | rest], options), do: admitted("resume", rest, &resume(&1, options))
+  @spec dispatch([binary()], keyword()) ::
+          :ok | {:error, binary()} | {:detached, non_neg_integer()}
+  def dispatch(["run" | rest], options),
+    do: offline_or_live("run", rest, options, &run(&1, options))
+
+  def dispatch(["sessions" | rest], options),
+    do: offline_or_live("sessions", rest, options, &sessions/1)
+
+  def dispatch(["resume" | rest], options),
+    do: offline_or_live("resume", rest, options, &resume(&1, options))
+
+  def dispatch(["attach" | rest], options),
+    do: LoopexCli.Live.command("attach", rest, live_options(options))
+
   def dispatch(["cancel" | rest], options), do: admitted("cancel", rest, &cancel(&1, options))
   def dispatch(["artifact" | rest], _options), do: admitted("artifact", rest, &artifact/1)
   def dispatch(["skill" | rest], options), do: admitted("skill", rest, &skill(&1, options))
@@ -83,10 +96,31 @@ defmodule LoopexCli do
   def dispatch([], _options),
     do:
       {:error,
-       "choose one command: run, sessions, resume, cancel, artifact, or skill\n\n" <> usage()}
+       "choose one command: run, sessions, resume, attach, cancel, artifact, or skill\n\n" <>
+         usage()}
 
   def dispatch([unknown | _rest], _options),
     do: {:error, "unknown command #{unknown}\n\n" <> usage()}
+
+  # Concept: only an offline command that composes a runtime needs the
+  # credential; every other command removes it before doing anything, so no
+  # child it starts can inherit it.
+  defp composes_offline?([command | rest]) when command in ~w(run resume cancel),
+    do: not LoopexCli.Live.daemon_form?(rest)
+
+  defp composes_offline?(_argv), do: false
+
+  # Concept: `--daemon` selects the live grammar before any offline flag is
+  # admitted, so the offline forms keep their released grammar untouched.
+  defp offline_or_live(name, arguments, options, command) do
+    if LoopexCli.Live.daemon_form?(arguments),
+      do: LoopexCli.Live.command(name, arguments, live_options(options)),
+      else: admitted(name, arguments, command)
+  end
+
+  # Concept: only the operating-system entry point owns the process's signals.
+  defp live_options(options),
+    do: [install_signals: Keyword.get(options, :install_live_signals, false)]
 
   @command_flags %{
     "run" =>
@@ -887,6 +921,12 @@ defmodule LoopexCli do
          "a live loopex process (pid #{owner}) owns this state root; " <>
            "cancel from that terminal, or stop it first"}
 
+      {:error, {:placement_unverifiable, _reason} = refusal} ->
+        {:error, placement_message(refusal)}
+
+      {:error, {:placement_lock_failed, _reason} = refusal} ->
+        {:error, placement_message(refusal)}
+
       # Concept: a refusal keeps the words it was refused in.
       #
       # Technical depth: the recovery pipeline reports configuration conflicts
@@ -968,9 +1008,11 @@ defmodule LoopexCli do
         bracket
 
       :error ->
-        &LoopexComposition.with_runtime/2
+        &with_hosted_runtime/2
     end
   end
+
+  @credential_host :"$loopex_cli_credential_host"
 
   @store_unreadable "its state store could not be opened or read"
 
@@ -1280,9 +1322,23 @@ defmodule LoopexCli do
         :persistent_term.put(@placement_key, lock)
         :ok
 
-      {:error, reason} ->
-        {:error, reason}
+      {:error, refusal} ->
+        {:error, placement_message(refusal)}
     end
+  end
+
+  defp placement_message({:placement_active, owner}) do
+    "another loopex process (pid #{owner}) is using this state root; " <>
+      "stop it, or pass --state-root to work somewhere else"
+  end
+
+  defp placement_message({:placement_unverifiable, reason}) do
+    "the placement owner could not be verified (#{probe_reason(reason)}); " <>
+      "establish that the recorded process is gone before changing the lock"
+  end
+
+  defp placement_message({:placement_lock_failed, reason}) do
+    "the placement lock could not be taken: #{inspect(reason, printable_limit: 256, limit: 64)}"
   end
 
   @doc """
@@ -1325,8 +1381,9 @@ defmodule LoopexCli do
     end
   end
 
-  defp runtime_options(flags, policy, _options, resource_manifest) do
-    with {:ok, workspace} <- workspace(flags),
+  defp runtime_options(flags, policy, options, resource_manifest) do
+    with :ok <- consume_credential(options),
+         {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
          {:ok, context} <- context_token_budget(flags),
@@ -1380,9 +1437,75 @@ defmodule LoopexCli do
 
   defp start_configured_runtime(composition_options, options) do
     options
-    |> Keyword.get(:runtime_starter, &LoopexComposition.start/1)
+    |> Keyword.get(:runtime_starter, &start_hosted/1)
     |> then(& &1.(composition_options))
     |> started()
+  end
+
+  # Concept: this command is the credential's host, so every runtime it
+  # composes borrows one custody instead of consuming the variable again.
+  #
+  # Technical depth: recovery composes twice, an inspection bracket and then
+  # the resumed runtime, while the variable exists only until the first read.
+  # The host is opened once per command process and each composition gets its
+  # own trace capability, which binds exactly one runtime.
+  defp start_hosted(composition_options) do
+    with {:ok, plane} <- hosted_plane() do
+      case LoopexComposition.start(Keyword.put(composition_options, :credential_plane, plane)) do
+        {:ok, runtime} ->
+          {:ok, runtime}
+
+        failure ->
+          LoopexComposition.CredentialHost.release_plane(plane)
+          failure
+      end
+    end
+  end
+
+  defp with_hosted_runtime(composition_options, function) do
+    with {:ok, plane} <- hosted_plane() do
+      try do
+        LoopexComposition.with_runtime(
+          Keyword.put(composition_options, :credential_plane, plane),
+          function
+        )
+      after
+        LoopexComposition.CredentialHost.release_plane(plane)
+      end
+    end
+  end
+
+  defp hosted_plane do
+    with {:ok, host} <- credential_host(),
+         do: LoopexComposition.CredentialHost.plane(host)
+  end
+
+  # Concept: the credential is taken into custody before this command starts
+  # any child process, so no discovery or probe child ever inherits it.
+  #
+  # Technical depth: an injected runtime starter composes nothing here, so a
+  # case that supplies one needs no credential.
+  defp consume_credential(options) do
+    if Keyword.has_key?(options, :runtime_starter) do
+      :ok
+    else
+      with {:ok, _host} <- credential_host(),
+           do: :ok,
+           else: ({:error, reason} -> {:error, reason})
+    end
+  end
+
+  defp credential_host do
+    case Process.get(@credential_host) do
+      nil ->
+        with {:ok, host} <- LoopexComposition.CredentialHost.open() do
+          Process.put(@credential_host, host)
+          {:ok, host}
+        end
+
+      host ->
+        {:ok, host}
+    end
   end
 
   @store_writer_refusal "another process is already writing this state root's store; " <>
@@ -1399,6 +1522,12 @@ defmodule LoopexCli do
   # contract says never happens. Every other start-up refusal is left exactly as
   # it was written.
   defp started({:error, {:store_writer_active, _path}}), do: {:error, @store_writer_refusal}
+
+  # Concept: a missing credential is refused in words that name the remedy.
+  defp started({:error, :provider_credential_required}),
+    do:
+      {:error,
+       "set LOOPEX_PROVIDER_API_KEY to the provider credential; it is read once and removed"}
 
   # Concept: a marker the store could not verify is not a live writer, and the
   # operator is told the difference and the remedy.
@@ -1593,6 +1722,11 @@ defmodule LoopexCli do
       loopex skill add <git-source> --rev <commit> --path <directory>
       loopex skill list
       loopex skill show <source-qualified-name>
+      loopex daemon [--state-root <directory>] [--socket <path>] ...
+      loopex run --daemon <socket> "describe the change"
+      loopex resume --daemon <socket> <session>
+      loopex sessions --daemon <socket> [--status | --limit <n> --after <session>]
+      loopex attach --daemon <socket> <session> [--observe | --take-over [--prompt <text>]]
 
     --policy is required for anything that runs tools. There is no default.
 
@@ -1603,6 +1737,7 @@ defmodule LoopexCli do
   end
 
   defp halt(:ok), do: System.halt(0)
+  defp halt({:detached, status}), do: System.halt(status)
 
   defp halt({:error, message}) do
     IO.puts(:stderr, "loopex: #{terminal_message(message)}")

@@ -8,9 +8,10 @@ policy labels public surfaces stable, release-candidate, or experimental once
 there are public surfaces to label. No public surface is labelled yet — see
 [compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
-No package is released or installable yet. The annotated tag `v0.0.0-m2` is
-defined as the exact integrated M2 source snapshot; it is not a package version,
-public API freeze, or compatibility label. Entries below the first package release record
+No installable package is published yet. The `0.1.0` entry records the
+source release tagged `v0.1.0`, and the annotated tag `v0.0.0-m2` is defined as
+the exact integrated M2 source snapshot; neither is a package version, public
+API freeze, or compatibility label. Entries below the first package release record
 repository, planning, and milestone implementation work, and carry no consumer
 compatibility meaning.
 
@@ -20,7 +21,325 @@ courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
 
 ## [Unreleased]
 
-Nothing since the `0.1.0` source version.
+Revise the operator and developer documentation to describe current behaviour
+rather than milestone history, correcting statements the code contradicted, and
+add an operator getting-started runbook and a paired developer getting-started
+guide. The root README now states what Loopex provides at `0.2.0`.
+
+Rename the exact foreground protocol generation from
+`loopex.session.v1-experimental` to `loopex.experimental/1`, matching the
+generation-one schema and vector manifests that shipped in `0.1.0`. The rename
+changes generation one's schema digest while leaving its methods, record
+families, error codes, limits, schema manifest and vector bytes unchanged. The
+foreground server and independent Node client now offer the same exact name.
+
+The daemon writes best-effort stop lines to standard error:
+
+- When core quiesce succeeds during an orderly stop, a JSON `daemon_stop`
+  record. It carries the drain label, both budgets, the three session counts,
+  and each unknown session's stage, encoded identity and, when one was read,
+  its head.
+- When a class latches, `loopex daemon fatal: <class>`. A teardown that fails
+  after quiesce attempts both lines, in no guaranteed order.
+
+Neither line is awaited, so a blocked standard error cannot delay the stop or
+change the exit status.
+
+A cleanup helper's answer is kept when its guard is slow to confirm the KILL.
+Once a KILL is delivered, the confirmation waits until the end of the probe's
+own bound instead of a fixed 250 ms. Previously a guard stalled on a loaded host turned an early,
+real answer into `:no_answer`, and so into an unconfirmed cleanup.
+
+A resource-pack import reads each Git data command's output through
+`Loopex.Executor.Local.command_output/1`. That removes the note the executor
+appends when it terminates a command's confirmed-cleaned process group, which
+happens on a loaded host whose quiescence probe misses its bound. Such an
+import previously refused as `git_identity_mismatch`, because the note broke
+the tree listing's terminator.
+
+Add `LoopexProtocol.Session.V2` as the daemon's distinct
+`loopex.experimental/2` metadata and negotiation contract. It retains the
+generation-one inventories and adds the four daemon methods, two daemon record
+families, twelve daemon refusal codes and seven advertised daemon limits that
+M5 requires. Its schema manifest pins every request, result, notification and
+error shape, and its literal vectors cover the new methods, every new refusal,
+both uncorrelated controller-loss forms and the generation-negotiation edges.
+
+Establish the daemon's Unix-domain listener boundary on OTP's `:socket`
+backend. It reclaims only a no-follow same-user Unix-socket pathname, binds a
+mode-`0600` listener without accepting clients, verifies the resulting owner,
+kind and permissions, and leaves the pathname in place when closed so only a
+later verified daemon owner can remove it. Accepted sockets use Darwin
+`LOCAL_PEERCRED` or Linux `SO_PEERCRED`; missing, malformed or mismatched peer
+credentials are refused before protocol input.
+
+Add the daemon's bounded provisional connection handoff. The connection
+registry charges a slot at accept time, owns the unchanged initialization
+deadline, starts and monitors an inert connection child, records the exact
+listener-to-connection socket transfer disposition, and releases capacity only
+after the real socket owner and child have been reaped. Fixed redacted lifecycle
+logs cover the registry and connection processes.
+
+Add the parked listener's readiness gate and nonblocking accept loop. Connected
+clients remain only in the kernel backlog until the exact startup reference is
+released; accepted sockets then reserve capacity, pass the same-user peer check,
+and transfer through the registry-owned handoff before becoming live. Listener
+death keeps the socket pathname for the next verified owner.
+
+Add the generation-two socket initialization boundary. The connection reads
+raw bytes without line normalization, bounds unterminated fragments, reuses the
+strict protocol frame decoder, refuses generation one without downgrade, and
+marks initialization complete only through the registry's unchanged
+accept-time deadline. Buffered client bytes and socket state are redacted from
+process diagnostics.
+
+Add strict generation-two request decoding for all twenty methods. Every
+method has one exact outer field set, optional `null` is refused unless the
+contract admits it, and identities, cursors, bytes, digests, resource inputs,
+artifact references and nested session options become bounded plain data
+before any daemon or runtime effect. Valid methods remain inert until their
+serving boundary lands.
+
+Add the daemon's lightweight admission-relay foundation. It authenticates and
+bounds connection-scoped request origins, orders worker dispatch after the
+executing transition, retains one selected result through worker reap, and
+turns the shutdown cut into one ref-tagged frozen set and absolute admission
+deadline. Connection loss reaps an executing request worker before the relay
+acknowledges that connection's retirement; fixed logs and process diagnostics
+contain no request data.
+
+Extend that ledger with pending and queued origins for all ten ticketed core
+mutations. Ticket rows share the connection and daemon origin ceilings, retain
+the session and lease-owner binding shape required by their class, and monitor
+the waiting request worker without dispatching core work. Shutdown or
+connection loss kills and reaps a queued worker before the origin and accepted
+connection can retire.
+
+Add authenticated registry promotion for create and attach tickets. The relay
+starts and monitors the core task before it acknowledges promotion, reaps the
+queued request worker before returning, keeps promoted work across connection
+loss, and retains the bounded result until the registry acknowledges its exact
+reservation or borrow settlement. Missing task results fail the relay closed;
+exact promotion retries start no second task.
+
+Coalesce exact repeated create and attach tickets onto the promoted primary.
+Each waiter keeps its own bounded origin and connection route, starts no second
+task, and receives the primary's internal result only after registry
+settlement. Losing a waiter connection removes only that waiter and leaves the
+primary task and reservation intact.
+
+Authenticate existing-session mutation tickets against one relay-registered
+lease-owner incarnation. Ordinary lease mutations promote only through that
+owner, while resume remains registry-promoted for activation accounting. Owner
+loss claims pending and queued mutations for exact daemon classification but
+leaves an already promoted task to return its real result.
+
+Add the daemon's bounded connection-output foundation. The registry owns each
+complete encoded queue and the daemon-wide output commitment; the connection
+process advances only nonblocking socket sends and releases a frame charge only
+after complete emission. Attachment succession reserves notice capacity plus
+one serially reusable reply slot inside the same four MiB connection ceiling.
+The reserve is derived from the maximal detached record and all 37 maximal
+legal predecessor replies: 496 notice bytes plus an 87,595-byte reply slot,
+for 88,091 bytes total. Literal lengths and frame digests pin every candidate.
+The connection registry now owns the exact reserve, charges it to the daemon
+aggregate before attachment work, converts it through notice and serial reply
+frames, and releases it only at a valid terminal phase or connection reap.
+
+Add the daemon transport-closing barrier. Its owner-authenticated first phase
+freezes connection admission and the exact provisional and uninitialized
+population; the post-listener phase closes and reaps only that population and
+emits one cut-reference acknowledgement. Initialized connections stay
+available for the later drain and stop record.
+
+Add the daemon's exact readiness-record encoder. It emits only the five
+ordered `daemon_ready` string fields as compact UTF-8 JSON, applies ordinary
+JSON escaping to paths and identifiers, and guarantees that its terminating LF
+is the line's only literal newline. Its startup arbiter performs the whole-line
+write in a monitored helper under one absolute deadline and releases the parked
+listener only after the exact owner authorization wins over stop, owner loss or
+startup failure. The daemon signal handler replaces OTP's default handler,
+routes only bare or tuple `SIGTERM` to that arbiter through the exact owner
+reference, and leaves every other event ignored without removing itself.
+
+Add the daemon session index's canonical bounded codec. It pins the exact JSONL
+header, sorted identity rows, SHA-256 trailer and all identity, row-count,
+line-size and file-size bounds without treating alternate JSON spellings as the
+same persisted image.
+
+Add the index filesystem foundation: verified owner-only directory and file
+modes, identity-stable bounded reads, fixed temporary recovery, and complete
+file-sync, close, rename and directory-sync publication with explicit retryable,
+poisoned and post-rename outcomes.
+
+Add the live session-index owner. It initializes only fresh roots, requires an
+explicit import for legacy roots, serializes durable monotonic rows, preserves
+placement binding, exposes bounded raw-byte cursor pages, reports the 4,096-row
+ceiling, and retains publication poison state without hiding existing rows.
+
+Add `loopex daemon`, which runs one daemon per state root in the foreground under
+a host dependency role, and `loopex daemon prepare-index`, which imports a
+released root's session directory strictly into the daemon index and refuses the
+whole import on any damaged entry. The daemon's orderly stop moves the admission
+relay through ordered lease-freeze, quiescing, seal and teardown barriers under
+fixed clocks; a closed connection's slot is freed only after the relay retires
+it and core releases its holder; an owner succession detaches attachments while
+keeping connections open; idle observers are evicted after ten minutes; and
+aggregate output pressure reclaims other clients' buffers before refusing a
+write. M5 keeps no resident window of encoded events.
+
+Add the live CLI forms `loopex run --daemon`, `loopex resume --daemon`,
+`loopex sessions --daemon` and `loopex attach`. They refuse every host flag,
+follow the protocol's exact request sequences, stream the answer as it is
+produced through per-session progress, recover a lost connection within one
+35-second clock without repeating or skipping a command or event, detach on a
+signal without aborting daemon-owned work, and print live queries as one ordered
+compact JSON record.
+
+Hold the provider credential in host custody. A reference host reads
+`LOOPEX_PROVIDER_API_KEY` once and removes it; the CLI lends one custody to every
+runtime a command composes, which fixes offline `loopex resume` and `cancel`
+refusing the credential on their second composition. Custody and its routing
+registry refuse unrecognized requests instead of crashing with an exit reason
+that carried their state, and composition validates a host-supplied credential
+plane exactly. Core's `progress_to` may be `{:session, pid}` to receive progress
+tagged with its session.
+
+Make a source archive buildable. `git archive` fills `SOURCE_IDENTITY` through
+`export-subst`; the CLI and provider builds resolve one source identity from a
+checkout or an archive and refuse a missing, malformed or changed one; and
+`scripts/source-archive-manifest.sh` describes an extraction for the release
+check's fresh-source lane. The independent Node client gains a generation-2
+socket connection and a cross-process takeover. The source `VERSION` moves to
+`0.2.0`.
+
+Run each real-provider release case in its own process. The release check reads
+an explicit manifest of eight cases, gives the credential only to those
+processes, runs every other lane with it removed, asserts an exact executed
+count per lane, and adds the daemon to the Node and long-bound lanes. On Linux
+it runs the daemon's two cross-user cases, which need a second user; elsewhere
+it ends `PASS (closure-incomplete: cross_uid not run)`. New developer pages
+describe the daemon's processes, orders and evidence.
+
+The release check now builds the candidate from a fresh source archive first
+and runs every lane inside that extraction, checking its source identity and
+`VERSION`; its Node lane includes the operator takeover, in which a killed CLI
+controller is replaced by a Node observer that takes over and aborts.
+
+Fix several daemon and live-command behaviours found while proving M5:
+
+- A connection reclaimed under aggregate output pressure now writes `detached`
+  with its session and last emitted cursor, best effort, before closing.
+- A Store marker that cannot be verified, and a Store log over its ceiling,
+  now end a daemon start with their own exit statuses (80 and 82) instead of
+  `composition_start_failed`, and `prepare-index` reports them the same way;
+  the lock's other failures are `store_writer_acquisition_failed` (81).
+- A live command whose run finished while it was reconnecting no longer
+  follows forever: after re-presenting unconfirmed work it checks whether that
+  work already ran and ends once history is shown.
+- A recovering controller waits for its own lease from its latest loss, with
+  a short margin for the daemon to resolve the expiry, instead of from its
+  first loss, which could make it report another client in control when there
+  was none.
+
+`Loopex.start_link/1` now returns only once the runtime's event dispatcher is
+ready. It had returned while the dispatcher was still registering, so a resume
+of an active session issued at once could be refused `runtime_unavailable`; if
+the runtime dies before it is ready, `start_link/1` now returns
+`{:error, :runtime_unavailable}`.
+
+The ReqLLM reference adapter now requires `req_llm ~> 1.24.0`; the
+releases from `1.18.0` were reviewed and the adapter's call and streaming paths
+are unchanged.
+
+A trace session now loads each module it names before installing its call
+patterns, so an adapter the runtime has not called yet is traced from its first
+call instead of silently not at all. `Loopex.trace/2` keeps its shape and
+refusals; a name no installed module answers to still traces nothing.
+
+The resource-pack Git import now runs its data commands (`rev-parse`,
+`cat-file`, `ls-tree` and `unpack-file`) as executor jobs of the shape
+`/bin/sh -c 'exec "$@" 2>/dev/null' loopex-git-data /usr/bin/env … git …`, so
+Git's standard error is discarded and only its standard output is parsed; a
+warning Git or a platform wrapper printed had been read as data and refused a
+legitimate import. `clone` keeps the previous job shape. A host policy that
+matches the job's argument vector sees the new shape.
+
+Make the daemon's orderly transport cut one absolute five-second deadline,
+begun before the relay cut, covering the relay acknowledgement, the connection
+registry's gate, the listener's exact exit and the sweep of connections that
+never initialized. A missing acknowledgement fail-stops as `relay_lost`,
+`connections_lost` or `listener_lost` instead of starting a fresh wait or
+continuing into the drain with the sweep unproved.
+
+Add the running daemon exit class `session_index_lost`, status `111`. Losing
+the session index now fail-stops the daemon and tells initialized clients
+`daemon.stopping` with `fatal:session_index_lost`, where the daemon previously
+stayed ready while create, list and status requests failed. The generation-two
+`daemon.stopping` reason set gains that value; the negotiated schema digest is
+unchanged.
+
+Changes to behaviour released in `0.1.0`:
+
+- The foreground server and the independent Node client offer the generation
+  name `loopex.experimental/1` instead of `loopex.session.v1-experimental`, so
+  a `0.1.0` client's offer is refused; generation one's schema digest changes
+  and its methods, records, errors, limits and vectors do not.
+- A reference host reads `LOOPEX_PROVIDER_API_KEY` once into private custody
+  and removes it from the environment: the CLI's offline `run`, `resume` and
+  `cancel` and `Loopex.AppServer.Host.serve/0` consume it, and every other CLI
+  command removes it unread. In `0.1.0` it stayed set for the adapter to read.
+- The ReqLLM adapter no longer reads the credential from the environment: a
+  host supplies an opaque credential token and routing-registry handle, and
+  `Loopex.LLM.ReqLLM.complete_prompt/3` takes both as options.
+- `Loopex.AppServer.Host.serve/0` refuses a missing credential, or one over
+  65,536 bytes, when composition takes custody rather than at launch
+  validation, still with status 3, and moves OTP's default log handler from
+  standard output to standard error before composing, refusing if it cannot.
+- `Loopex.start_link/1` returns only once the runtime's event dispatcher is
+  ready, and returns `{:error, :runtime_unavailable}` if the runtime dies
+  first; in `0.1.0` it could return before a resume could be served.
+- `Loopex.attach/3` no longer supersedes a session's other attachments: they
+  coexist, and one is replaced only when `replace_attachment_id:` names it for
+  the same holder.
+- `Loopex.trace/2` loads each module it names before installing call patterns,
+  so a module the runtime has not called yet is traced from its first call.
+- The resource-pack Git data jobs (`rev-parse`, `cat-file`, `ls-tree`,
+  `unpack-file`) run as `/bin/sh -c 'exec "$@" 2>/dev/null' loopex-git-data
+  /usr/bin/env … git …`, and host policy sees that argument vector; `clone` is
+  unchanged.
+- A resource-pack Git identity refusal names the check that failed instead of
+  "Git identity or selected skill directory did not match".
+- The ReqLLM reference adapter requires `req_llm ~> 1.24.0` instead of
+  `~> 1.17.1`.
+- The local Store answers `runtime_command` for a committed create command with
+  its session identifier, or `runtime_command_conflict` when the binding
+  differs, and the Store facade reads a malformed adapter answer as
+  `unavailable`.
+- The CLI and provider builds resolve one source identity from a Git checkout
+  or an archive's `SOURCE_IDENTITY` and refuse a missing, malformed or changed
+  one; a provider manifest built from an archive also records its
+  `source_digest`.
+- The CLI refuses a placement lock whose owner cannot be verified as "the
+  placement owner could not be verified (…)", naming the probe failure, and a
+  lock naming a live process whose record it cannot read as the ordinary
+  in-use refusal.
+- `Loopex.Executor.Local.cancel/2` answers `{:ok, :cleaned}` only after the
+  job's receipt recording confirmed cleanup is durably published; every other
+  ending answers `{:ok, :unconfirmed}`. In `0.1.0` a running job's cancel could
+  answer `cleaned` and its owner then be lost, leaving a receipt that said
+  `unconfirmed`. An answer may now be weaker than the receipt — a settlement
+  slower than the reply margin, which above a 7,000 ms cleanup period no
+  longer covers the whole receipt allowance — but never stronger.
+- A cancellation of an admitted job before it starts answers `cleaned` only
+  after its refusal is durable, as ADR 0016's clauses 5 and 7 require; in
+  `0.1.0` it answered at once.
+- A spilled output artifact holds only the bytes the command produced. The
+  executor's exit-status and process-group notes appear only in the
+  model-facing result and are no longer retained in the artifact, and the
+  truncation notice's "N of M bytes shown" counts only the command's bytes.
+- A process-group note now says only what was proved: that the group could not
+  be shown to hold only the command, and whether its cleanup was confirmed.
 
 ## [0.1.0] — 2026-09-19
 

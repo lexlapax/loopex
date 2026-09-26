@@ -83,16 +83,41 @@ machine with the pinned Node and a provider credential:
 LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
 ```
 
-It refuses without the credential, without the pinned Node, or on a dirty tree,
-and then runs a named list of release applications, each in its own VM with
-`--only real_provider --only node_client --include long_bound`: the
-real-provider coding workflows, the independent Node client against the shipped
-app server, and the fresh-source archive build, which prints the extracted
-revision and the archive's SHA-256. A final `--only long_bound` pass over
-`loopex` and `loopex_executor_local` runs the three real-duration proofs the
-fast check excludes. Every pass must execute at least one test. The credential
-reaches only the test processes; never put it in a command argument, log,
-fixture, or retained evidence. Two of the real-provider tests are attended:
+It refuses without the credential, without the pinned Node, or on a dirty tree, and raises its own open-file soft limit toward the hard limit, refusing below 4,096, because the maximum-population case holds both ends of 512 daemon connections in one VM.
+It first stages the candidate as a fresh source archive and builds it there
+(described below), then runs every test lane inside that extraction rather than
+in your checkout. Reference composition consumes the credential, so each of the nine
+real-provider cases runs from a named manifest (application, file and exact
+case name) in its own `mix test FILE:LINE` process and must execute exactly one
+test; the nine rows must each run once. The ninth is the operator takeover:
+`loopex daemon`, a CLI controller killed with `SIGKILL` and the Node observer
+taking over, each its own process, the observer's prompt answered by the real
+provider. Only those processes inherit the
+credential: every other lane runs under `env -u LOOPEX_PROVIDER_API_KEY`, which
+a self-check proves first by logging only `present` or `absent`. The
+independent Node client runs with `--only node_client` over
+`loopex_app_server`, `loopex_protocol`, `loopex_daemon` and `loopex_cli`, the
+last being the operator takeover: a killed CLI controller and a Node observer
+that takes over and aborts. The fresh-source lane that precedes them: from a
+hostile caller
+`umask 0777` it stages the exact commit with `git archive` under a scoped
+`umask 022`, retains the extraction's `scripts/source-archive-manifest.sh`
+manifest and the `git ls-files -z` inventory outside the extraction (set
+`LOOPEX_RELEASE_RETAIN` to choose where), proves with
+`scripts/source-archive-check.exs` that the extraction is exactly that commit,
+builds the command there with `mix deps.get` and the documented escript build,
+and proves the build changed nothing outside its declared outputs; it then
+requires the extraction's source identity to be the staged commit and its
+`VERSION` to be `0.2.0`, and prints both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
+`loopex_executor_local` and `loopex_daemon` runs the real-duration proofs the
+fast check excludes. On Linux the last lane runs the daemon's two
+`--only cross_uid` cases and requires exactly two to execute; it needs a second
+unprivileged user named in `LOOPEX_CROSS_UID_USER` that you may run a command
+as with `sudo -n`. Elsewhere that lane prints `cross_uid: not run (Darwin)` and
+the run ends `PASS (closure-incomplete: cross_uid not run)`; closure needs a
+Linux run ending in a plain `PASS`. Every lane prints its executed count and
+elapsed time. The credential never goes in a command argument, log, fixture
+or retained evidence. Two of the real-provider tests are attended:
 they prompt on the controlling terminal for the operator's trust decisions
 (`Type yes and press Enter.`), so run the command from a terminal.
 
@@ -144,13 +169,17 @@ that proves the floor still builds and passes. A Linux host needs
 ## Dependency Rules
 
 Every child project declares one literal `loopex_role`: `:contract`, `:core`,
-`:edge`, or `:client`. Contract carries no dependency; core depends on protocol
-and on exactly one external package, the `telemetry` event dispatcher the
-vision's dependency doctrine admits by name; store, model, executor and
-telemetry edges depend in production on core and may also depend on protocol;
-a client depends in production on core and the contract and composes concrete
-edges only in tests. `mix loopex.deps_budget` reads the literal dependency
-declarations of all ten applications and rejects any other edge, alternate
+`:edge`, `:composition`, `:client` or `:host`. Contract carries no dependency;
+core depends on protocol and on exactly one external package, the `telemetry`
+event dispatcher the vision's dependency doctrine admits by name; store, model,
+executor and telemetry edges depend in production on core and may also depend
+on protocol. The composition (`loopex_composition`) depends in production on
+core, protocol and the edges it wires together. A client (the CLI, the app
+server and the reference client) depends in production on core and may also
+depend on the contract, on at most one composition and on at most one host;
+it names any other edge only in tests. A host (`loopex_daemon`) obeys the client
+rules and may not depend on another host. `mix loopex.deps_budget` reads the literal dependency
+declarations of all eleven applications and rejects any other edge, alternate
 path or source-control dependency, or added external package.
 
 An OTP application is not a dependency in that sense, but it must still be
