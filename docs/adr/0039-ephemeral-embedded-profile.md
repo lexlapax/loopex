@@ -12,9 +12,10 @@ Technical depth: [Profile composition, adapters and proofs](0039-ephemeral-embed
     invocation runs in a separate provider BEAM, except a call to a provider
     that needs no credential in the ephemeral profile. 0019's technical
     companion says restoring shared-VM provider handling "requires a new
-    decision"; this is that decision, for credential-free providers only.
-    0019's other rule, `LOOPEX_PROVIDER_API_KEY` as the only credential source,
-    is unchanged in both profiles.
+    decision"; this is that decision, for credential-free providers in the
+    ephemeral profile only. The durable profile uses the companion for every
+    model, exactly as before. 0019's other rule, `LOOPEX_PROVIDER_API_KEY` as
+    the only credential source, is unchanged in both profiles.
   - It supersedes two clauses of
     [ADR 0025](0025-resource-packs-and-skill-admission.md#concept), in both
     profiles:
@@ -83,8 +84,8 @@ loop.
        through a new in-process adapter inside the host's VM;
      - a provider that needs one runs through the existing companion adapter,
        exactly as the durable profile does: a separate provider BEAM, the single
-       `LOOPEX_PROVIDER_API_KEY` handed off over the bootstrap channel, and the
-       built companion the host names;
+       `LOOPEX_PROVIDER_API_KEY` in ADR 0034's host custody and handed off over
+       the bootstrap channel, and the built companion the host names;
    - **the local executor**, pointed at a temporary root and a named workspace.
 
    The profile is assembled by composition, not by core: composing edges is
@@ -100,35 +101,53 @@ loop.
 - A caller that needs recovery composes the durable profile, and nothing is
   migrated between the two.
 
-**Credential rule.** No credential enters the host VM in either profile. The
-in-process adapter serves only providers that need none, and it refuses a
-credential-bearing provider rather than read a key. Every credential-bearing
-call keeps the companion's isolation, custody and trace exclusion unchanged, so
-the vision's structural exclusion of known credentials holds without a new
-mechanism.
+**Credential rule.** The ephemeral profile adds no new credential path:
+- **In-process calls carry no credential.** The in-process adapter serves only
+  providers that need none. It never reads a credential, never passes a key to
+  ReqLLM, and refuses a credential-bearing provider before calling ReqLLM. No
+  credential enters an ephemeral runtime's state or an in-process request.
+- **Credential-bearing calls use the accepted path unchanged.** They go
+  through the companion under ADR 0034, whose host custody, bootstrap handoff
+  and trace exclusion apply exactly as in the durable profile.
+- **The host's environment is the host's.** An embedding host that has
+  `LOOPEX_PROVIDER_API_KEY` in its environment and composes only an Ollama
+  model keeps it there untouched: the library consumes it, reading and removing
+  it as the durable composition already does, only when it opens the companion
+  path. The `ask` command, which owns its own VM, discards it unread when it
+  selects an Ollama model.
 
-**In-process calls own their whole process tree.** A provider call in the host
-VM creates processes inside ReqLLM that Loopex did not start: a stream server,
-an HTTP task and a metadata worker. Each call has one cleanup owner that stays
-responsive at every stage of the call. It finds every process the call created,
-ends them all, and acknowledges cleanup only after it has seen each one exit.
-If it cannot prove that, the kernel's existing unproved-cleanup path applies.
+**In-process calls leave nothing that can act on the request.** A provider
+call in the host VM creates processes inside ReqLLM that Loopex did not start: a
+stream server, an HTTP task, a metadata handle and a metadata worker. Each call
+has one cleanup owner that stays responsive at every stage of the call. On a
+stop, a deadline or completion it ends every one of those processes that holds
+the request or can act on it, and acknowledges cleanup only after it has seen
+each of them exit. One transient process can outlive the acknowledgement: an
+HTTP task that the task supervisor created but that never received its request,
+because its starter was ended first. It holds no request data, cannot perform
+the call, and exits on its own when it sees its starter gone. If the owner
+cannot prove the rest, the kernel's existing unproved-cleanup path applies.
 
 **Host hygiene.** The in-process adapter runs inside a host that may do other
 things, and ReqLLM loads a `.env` file when its application starts. So Loopex,
 not the OTP application graph, starts ReqLLM:
 - no Loopex application lists ReqLLM for automatic start, so it cannot start
   before hygiene is in place;
-- the first composition that needs ReqLLM turns off its automatic `.env`
-  loading and its unverified-model warning, then starts it, and records for the
-  life of the VM that Loopex started it;
-- a later composition finds that record and proceeds;
-- a ReqLLM that the host started itself is accepted only when the host declares
-  it and its `.env` loading is off; otherwise composition refuses.
+- before starting ReqLLM, composition turns off its automatic `.env` loading
+  as a persistent setting that no application load overwrites, and records
+  that Loopex made it;
+- a composition proceeds whenever ReqLLM is running with `.env` loading off and
+  either that record exists or the host declares that it started ReqLLM itself
+  that way;
+- a ReqLLM running with `.env` loading on, or started by the host undeclared,
+  is refused.
 
-The settings are VM-global and stay for the life of the VM, because ReqLLM
-reads them only at its start; that is named, not restored. Every in-process
-model is named inline, so no model catalog is consulted.
+Because the setting persists, a later stop and restart of ReqLLM also loads no
+`.env`, unless the host deliberately turns loading back on, which the next
+composition sees and refuses. The setting stays for the life of the VM and is
+not restored; that is named. Every in-process model is named inline, so no
+model catalog is consulted and no unverified-model warning arises, and Loopex
+changes no other ReqLLM setting.
 
 **Skills named by path.** Both profiles admit exactly the skill directories
 their caller names, beside the durable profile's existing installed and
@@ -151,7 +170,8 @@ discovered skills. The rules:
   recorded.
 - **Admitted, then each activated,** so ADR 0025's separation between admission
   and activation holds, and its limit of four selected skills applies. In the
-  durable profile the admitted content is journaled like any admitted skill's.
+  durable profile the admitted snapshot is retained under the state root and
+  the admission journaled, like any admitted pack's.
 
 **Authority rule.** Neither profile has a default host authority. The caller
 always names the policy:
@@ -171,10 +191,10 @@ credential-free call in the ephemeral profile they are answered as follows.
 1. **An adapter must not change the host's logger, group leaders or shared
    ReqLLM supervision.** The in-process adapter installs no logger filter or
    handler, changes no primary level and touches no group leader. Its one named
-   change to shared state is ReqLLM's start, under the host-hygiene rule. Each
-   call's own process silences its own logging.
+   change to shared state is ReqLLM's start and its `.env` setting, under the
+   host-hygiene rule. Each call's own process silences its own logging.
 2. **ReqLLM's asynchronous diagnostics cannot be proved delivered or clean.**
-   With no credential in the VM, what those diagnostics can carry is request
+   With no credential in the in-process request, what those diagnostics can carry is request
    data: prompts, tool output and the model's reply, which the host supplied or
    the host's own session produced. It can reach the host's logger and crash
    dumps, which the host owns. The developer guide says so, and the `ask`
@@ -209,14 +229,15 @@ it belongs to this decision as an experimental surface:
 - **Versioning:** a change to either, including a new member, is a new schema
   name under the 0.x policy.
 
-**Model selection.** A `provider:model` string selects the model. In M6 the
-in-process adapter serves `ollama:<model>`; any other provider the companion
-serves goes through the companion.
-- When none is given, the ephemeral profile uses `LOOPEX_MODEL`, and then the
-  local default `ollama:llama3.2`, so the profile works with no key and no
-  companion.
-- The durable profile keeps its pinned reference model unless a model is named,
-  and a named model must be served by its single credential.
+**Model selection.** A `provider:model` string selects the model.
+- **Ephemeral profile:** the in-process adapter serves `ollama:<model>`; any
+  other provider the companion serves goes through the companion. When none is
+  given, it uses `LOOPEX_MODEL`, and then the local default `ollama:llama3.2`,
+  so the profile works with no key and no companion.
+- **Durable profile:** the companion serves every model. It keeps its pinned
+  reference model unless a model is named, and a named model must be served by
+  its single credential. An `ollama:` model is refused there in M6, because
+  the durable profile has no in-process adapter.
 
 <a id="concept-adr-0039-consequences"></a>
 ### Observable Consequences
@@ -271,8 +292,10 @@ This is additive:
   - a call to a tool only `0.3` defines, such as `grep`, that is still pending
     when the root is resumed under `0.2`: the call is committed as a failed
     `unknown_tool` call and the run continues;
-  - a user skill admitted under `0.3`: its admitted content is already in the
-    journal, so it is replayed as recorded, but `0.2` cannot admit a new one.
+  - a user skill admitted under `0.3`: its snapshot is retained under the
+    state root by digest like any admitted pack's, and `0.2` reloads it by that
+    digest because its validation already accepts the `user:<name>` identity;
+    but `0.2` cannot admit a new one.
 
 ## Governance Record
 
