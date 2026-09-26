@@ -5,6 +5,17 @@
 
 Concept: [Milestones](milestones.md#concept).
 
+This companion holds the exact files, commands and checks behind each step of
+the milestone guide, in the same order: the plan pair, development
+conventions, the closure packet with its confinement rule, the canonical
+archive extraction, and the pre-tag release proofs.
+
+A **retained-output reference** is the maintainer-controlled stable locator or
+object name for one immutable complete output. Every retained-output reference
+is paired with the SHA-256 digest of that object. The evidence page is the
+reference carrier for closure outputs; the tag annotation is the reference
+carrier for release outputs.
+
 <a id="technical-milestones-agree"></a>
 ### Plan pair contents
 
@@ -12,21 +23,28 @@ Concept: [Agree](milestones.md#concept-milestones-agree).
 
 `docs/plans/NAME.md` starts with its `concept` anchor and `## Concept`,
 links to `NAME-technical.md#technical-depth`, and carries these sections:
-Purpose; Outcomes (a numbered table: number, outcome, the evidence class that
-will prove it); Scope and Non-Goals; Design Decisions (with the ADR each
-needs); Progress and Evidence (the numbered table, initially `Open` per row);
-Governance Records (Acceptance and Closure rows, `—` until decided).
+
+- Purpose;
+- Outcomes: a numbered table of number, outcome, and the evidence class that
+  will prove it;
+- Scope and Non-Goals;
+- Design Decisions, with the ADR each needs;
+- Progress and Evidence: the numbered table, initially `Open` per row;
+- Governance Records: Acceptance and Closure rows, `—` until decided.
 
 `docs/plans/NAME-technical.md` starts with its `technical-depth` anchor
-and `## Technical depth`, links back to `#concept`, and carries: Prerequisites
-(one `### Prerequisites and Acceptance Points` section naming, as links, the
-ADRs the milestone waits on and which outcome each blocks — the status check
-reads that section's ADR links, so a decision named only in prose declares
-nothing, and each one is accepted before the implementation that depends on it
-rather than before unrelated work); Verification (for each
-outcome, the test files or real-path proof, and whether the release check is
-needed); Ownership and Rejoin (only if workstreams run in parallel);
-Compatibility, Migration and Rollback; Packaging if any.
+and `## Technical depth`, links back to `#concept`, and carries:
+
+- Prerequisites: one `### Prerequisites and Acceptance Points` section naming,
+  as links, the ADRs the milestone waits on and which outcome each blocks. The
+  status check reads that section's ADR links, so a decision named only in
+  prose declares nothing. Each one is accepted before the implementation that
+  depends on it rather than before unrelated work.
+- Verification: for each outcome, the test files or real-path proof, and
+  whether the release check is needed.
+- Ownership and Rejoin, only if workstreams run in parallel.
+- Compatibility, Migration and Rollback.
+- Packaging, if any.
 
 Register: add `| \`NAME\` | Open | [concept](NAME.md) | [technical depth](NAME-technical.md) | — |`
 to the Milestone Register table in `docs/plans/README.md`. The register's Gate
@@ -38,19 +56,22 @@ contract and run `mix loopex.status`; it refuses until the capsule holds the
 derived values for an `Open` milestone. The task reports pass or failure; it
 does not print replacement bytes.
 
-Names: lowercase ASCII letters and digits separated by single hyphens, `M`
-followed by digits, or a version-shaped numeric slug such as `1.0` or `v0.1`;
-at most 64 ASCII bytes; unique under case folding; none of the reserved names
-the index lists.
+Names follow the Vocabulary section of the [plans index](../plans/README.md),
+which owns the rule: lowercase ASCII letters and digits separated by single
+hyphens, `M` followed by digits, or a version-shaped numeric slug such as `1.0`
+or `v0.1`; at most 64 ASCII bytes; unique under case folding; none of the
+reserved names the index lists.
 
 <a id="technical-milestones-develop"></a>
 ### Branches, worktrees and progress
 
 Concept: [Develop](milestones.md#concept-milestones-develop).
 
-- Branch per change, off `main`; commit titles `area(NAME): summary`, at
-  most 72 characters, no attribution trailers (`scripts/check-commit-messages.sh`
-  enforces both over `merge-base(origin/main, HEAD)..HEAD`).
+- Branch per change, off `main`; commit titles `area(NAME): summary` with the
+  milestone as the marker (the other markers AGENTS.md admits are `planning`
+  and `seed`), at most 72 characters, no attribution trailers
+  (`scripts/check-commit-messages.sh` enforces both over
+  `merge-base(origin/main, HEAD)..HEAD`).
 - A feature branch lives only while its pull request is open: nothing reaches
   `main` without a green CI run on the candidate and an independent review, and
   the branch and its worktree go once the merge lands.
@@ -97,32 +118,35 @@ At the **tested implementation commit**, which is the closure candidate:
    `docs/evidence/NAME-closure-runs.md` as an unfilled closure scaffold, indexed
    in `docs/evidence/README.md`. The scaffold has the final headings and fields,
    marks results pending, and claims no run that has not happened.
-4. The closure matrix, run **from** that commit: `bash scripts/check.sh` under
-   the floor pair with an absolute, pair-specific build root and the
-   higher-priority build-path variable removed
-   (replace `NAME` with the milestone name in
-   `env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/NAME-otp27-build"
-   mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`), and
-   `bash scripts/check-release.sh` once on
-   the current pair with the credential and pinned Node; CI already holds the
-   current-pair fast check for the candidate. Each run's revision, platform,
-   toolchain, result and measured duration is retained outside the repository
-   under a stable retained-output reference with a SHA-256 digest. For M5 and
-   later, the release check's fresh-source lane stages the tested SHA
-   with `git archive` into an empty extraction under the
+4. The closure matrix, run **from** that commit:
+   - `bash scripts/check.sh` under the floor pair with an absolute,
+     pair-specific build root and the higher-priority build-path variable
+     removed. Replace `NAME` with the milestone name in
+     `env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/NAME-otp27-build"
+     mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`.
+   - `bash scripts/check-release.sh` once on the current pair with the
+     credential and pinned Node.
+   - CI already holds the current-pair fast check for the candidate.
+
+   Each run's revision, platform, toolchain, result and measured duration is
+   retained outside the repository under a stable retained-output reference
+   with a SHA-256 digest. For M5 and later, the release check's fresh-source
+   lane stages the tested SHA with `git archive` into an empty extraction
+   under the
    [canonical archive-extraction rule](#technical-milestones-archive-extraction)
    and runs the M5-delivered producer
    `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"`
-   before the build, with `retained_manifest` outside `tree`. The
-   command writes only the canonical NUL-delimited manifest bytes to standard
-   output; the runner retains those exact bytes under their own stable
-   retained-output reference and SHA-256 digest. The
-   administrative commit fills the existing
+   before the build, with `retained_manifest` outside `tree`. The command
+   writes only the canonical NUL-delimited manifest bytes to standard output;
+   the runner retains those exact bytes under their own stable retained-output
+   reference and SHA-256 digest.
+
+   The administrative commit fills the existing
    `docs/evidence/NAME-closure-runs.md` scaffold with those identities and
    digests, including the tested archive manifest's retained-output reference
    and SHA-256 digest, and every plan-required outcome value whose final field
-   or row was predeclared `Pending` in the tested scaffold. The runs are *of* the tested commit, and that commit
-   cannot carry its own later results.
+   or row was predeclared `Pending` in the tested scaffold. The runs are *of*
+   the tested commit, and that commit cannot carry its own later results.
 5. An independent reviewer reads the candidate for outcome compliance,
    correctness, test honesty, public impact, security and rollback; blocking
    findings are fixed first. Retain the review report outside the repository
@@ -157,9 +181,7 @@ the plans register: for a gate-less milestone,
 `candidate <40-hex>; concept sha256:<64-hex>; technical sha256:<64-hex>`.
 It does **not** name the administrative SHA, for the reason
 the whole split exists: that row *is* the administrative commit's content, and
-a commit cannot contain its own hash. An earlier revision asked the row to
-name both, which is the same impossibility as asking one commit to carry runs
-of itself, one level down.
+a commit cannot contain its own hash.
 
 **The administrative SHA is located rather than written.** Two things point at
 it and neither is inside it: the register's transition to `Closed`, whose
@@ -180,13 +202,11 @@ named region within each path**:
 | `docs/evidence/<NAME>-closure-runs.md` | Only the scaffold's designated `Pending` value fields and placeholder rows. The tested candidate predeclares every label, heading and row slot that closure will fill, including the generic run identities, results, measured durations, retained-output references and SHA-256 digests of step 4; the tested archive manifest's retained-output reference and SHA-256 digest; the independent review result, retained-output reference and SHA-256 digest; and any plan-required outcome fact, review, demonstration identity, source inventory or measured observation. The administrative commit replaces only those `Pending` values or placeholder cells; it adds no label, heading, row or prose. Every non-placeholder byte remains unchanged |
 | `README.md` | Only the bytes between `<!-- loopex:readme-status:start -->` and `<!-- loopex:readme-status:end -->`, replaced by the complete `Closed` summary block the administrative commit supplies; `mix loopex.status` validates its semantic agreement with the register, and every byte outside the markers remains unchanged |
 
-and **nothing else in those files or the tree**. That is the whole rule; every other passage in this
-repository that bounds the administrative commit refers here rather than
-restating it, because three different formulations of it — "changes nothing
-the runs covered", "the register row, the Closure row and the context-map
-entry", "nothing outside `docs/`" — coexisted in five documents and disagreed
-about whether the evidence page had a home. The tested candidate creates and
-indexes that page; the administrative commit only fills it.
+and **nothing else in those files or the tree**. That is the whole rule; every
+other passage in this repository that bounds the administrative commit refers
+here rather than restating it, so that one formulation cannot drift from
+another. The tested candidate creates and indexes the evidence page; the
+administrative commit only fills it.
 
 Path membership is only the first half of confinement. Inspect the complete
 `git diff --no-ext-diff --unified=0 <tested>..<administrative> -- <the five
@@ -221,13 +241,15 @@ reassembled from a new implementation SHA.
 
 **The closure matrix runs once, from the tested implementation SHA**, and the
 administrative commit re-runs nothing. The pre-tag release proofs and their
-retention are in
-[Tags](#technical-milestones-release) — it belongs to the release decision,
-which is what creates a tag at all, and an earlier revision of this section
-put it here and made closure depend on a tag that closure authorizes.
+retention are in [Tags](#technical-milestones-release): they belong to the
+release decision, which is what creates a tag at all, so closure never depends
+on a tag that closure authorizes.
 
 <a id="technical-milestones-archive-extraction"></a>
 ### Canonical source-archive extraction
+
+This rule serves the closure run of [Close](milestones.md#concept-milestones-close)
+and the archive-identity proof of [Release](milestones.md#concept-milestones-release).
 
 The tested-SHA manifest retained by the closure run and the
 administrative-SHA manifest retained before the tag use one staging rule. Each
@@ -296,12 +318,6 @@ and SHA-256 digests and both validated `SOURCE_IDENTITY` values. The evidence
 page remains the closure record and is not amended with release proofs. This
 sequence adds no third commit, and no proof named by the tag can postdate the
 tag.
-
-A **retained-output reference** is the maintainer-controlled stable locator or
-object name for one immutable complete output. Every retained-output reference
-is paired with the SHA-256 digest of that object. The evidence page is the
-reference carrier for closure outputs; the tag annotation is the reference
-carrier for release outputs.
 
 Create `git tag -a vVERSION COMMIT` with that complete annotation, then push
 the tag on the maintainer's explicit decision. The source version
