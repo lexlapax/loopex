@@ -126,7 +126,7 @@ long-duration lane. The floor-pair value is filled from a separate floor-pair
 in `apps/loopex_daemon` at the tested revision, whose retained output and
 SHA-256 are recorded beside it. The run needs a soft open-file limit of at
 least 4,096, raised as `scripts/check-release.sh` raises it (`ulimit -Sn 65536`,
-or the hard limit when that is lower). The case holds both ends of 512
+or the hard limit when that is lower, and refusing below 4,096). The case holds both ends of 512
 connections in one VM, so under a stock 1,024 limit the listener's accept fails
 and the run is not evidence.
 

@@ -3842,7 +3842,9 @@ component stops. A stop that latches a fatal class is bounded by the prefix
 already spent plus the 35-second fail-stop watchdog, not by adding that watchdog
 to the whole successful expression. For a component killed at its deadline, that
 prefix includes the at most 5,000 ms post-kill reap, since the class is latched
-only after it.
+only after it. A successful step never adds that reap: it takes the post-kill
+branch only when its owner-reason `DOWN` is already in flight at the kill, and
+that local `DOWN` arrives at once.
 
 The transport work after the relay acknowledgement normally overlaps the
 admission wait, but the two clocks do not share a start instant. Charging both
@@ -4727,8 +4729,10 @@ No timeout infers a payload or reconstructs one from the daemon owner's maps.
    teardown_ms` — and every non-Store stop from step 4 through this one waits
    until that instant or until its exit arrives, whichever comes first, then
    kills. So a slow lease owner spends the same clock a slow executor would;
-   the worst case is `teardown_ms`, not `teardown_ms` multiplied by the number
-   of components. An earlier revision gave each component its own grace, which
+   the worst case is `teardown_ms` plus the at most 5,000 ms post-kill reap of
+   stop-rule step 2 for the one component killed at that instant, since the
+   first late step ends the orderly teardown; it is not `teardown_ms`
+   multiplied by the number of components. An earlier revision gave each component its own grace, which
    made the worst-case stop a sum nobody had written down.
 
    **The Store's stop is separate and fixed**, and the reason it is
@@ -4738,7 +4742,8 @@ No timeout infers a payload or reconstructs one from the daemon owner's maps.
    for at most 30 s, and usually finishes in milliseconds.
 
    **The residual is stated.** A Store whose stop has not completed within its 30 s
-   first latches `store_lost`, is killed, retains host placement through the
+   is killed, is awaited for at most the further 5,000 ms post-kill reap, then
+   latches `store_lost`, retains host placement through the
    non-zero halt, and may leave the marker behind. That is the same stale marker ADR
    0031's recovery rule already answers: the next daemon probes the marker's
    recorded holder and reclaims it where that holder is proved dead, refuses

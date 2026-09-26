@@ -65,7 +65,7 @@ the listener.
 | `quiescing` | a fresh 5 s | `relay_lost` |
 | `Loopex.Runtime.quiesce/1`, in an unlinked helper while the owner keeps consuming component exits | core's own clocks | `drain_failed` when the runtime is unavailable; a component lost meanwhile ends the stop with its own class |
 | `seal_after_quiesce`, one `daemon.stopping` per connection, `tearing_down` | one shared `teardown_ms` 30 s | `relay_lost` |
-| Collaboration, runtime and edges stop in reverse; Store last | 5 s each, Store 30 s | — |
+| Collaboration, runtime and edges stop in reverse; Store last | what remains of the shared `teardown_ms`; the Store its own 30 s; a component killed at its deadline is awaited for up to a further 5 s | the component's class (`runtime_lost` for the runtime, `store_lost` for the Store) |
 | Placement release | 5 s | — |
 
 While serving, each lease-operation step — a registry apply, pop or clear; a relay selection, settlement or owner-loss classification; a lease owner's resolution; a holder's close — has its own 5 s instant from when its request is sent. A late registry step is `connections_lost` and kills the registry; a late relay step is `relay_lost`; a late lease owner is killed and superseded, its session going through the ordinary owner-loss path; a late holder is killed and its monitored `DOWN` completes the close. Consuming the admission cut cancels every step instant; a holder close already sent is re-bound to the transport-cut deadline, and a relay-unanswered report is cleanup-only from then on.
