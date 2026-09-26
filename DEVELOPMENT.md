@@ -169,12 +169,16 @@ that proves the floor still builds and passes. A Linux host needs
 ## Dependency Rules
 
 Every child project declares one literal `loopex_role`: `:contract`, `:core`,
-`:edge`, or `:client`. Contract carries no dependency; core depends on protocol
-and on exactly one external package, the `telemetry` event dispatcher the
-vision's dependency doctrine admits by name; store, model, executor and
-telemetry edges depend in production on core and may also depend on protocol;
-a client depends in production on core and the contract and composes concrete
-edges only in tests. `mix loopex.deps_budget` reads the literal dependency
+`:edge`, `:composition`, `:client` or `:host`. Contract carries no dependency;
+core depends on protocol and on exactly one external package, the `telemetry`
+event dispatcher the vision's dependency doctrine admits by name; store, model,
+executor and telemetry edges depend in production on core and may also depend
+on protocol. The composition (`loopex_composition`) depends in production on
+core, protocol and the edges it wires together. A client (the CLI, the app
+server and the reference client) depends in production on core and may also
+depend on the contract, on at most one composition and on at most one host;
+it names any other edge only in tests. A host (`loopex_daemon`) obeys the client
+rules and may not depend on another host. `mix loopex.deps_budget` reads the literal dependency
 declarations of all eleven applications and rejects any other edge, alternate
 path or source-control dependency, or added external package.
 
