@@ -118,11 +118,12 @@ whose path or explicit fragment does not resolve.
 - [Tools and policy](operator/tools-and-policy.md#concept) — the four coding
   tools, what local execution reaches, host authority, artifacts and how to read
   one back, and what the local store keeps on disk.
-- [Runtime operations and first run](operator/runtime.md#concept) — current
-  source-tree features, exact working-loop demonstrations, credentials, events,
-  shutdown, and recovery.
-- [Operator getting started](operator/getting-started.md) — from a source
-  checkout to a first coding session, a daemon, and a clean stop.
+- [Runtime operations](operator/runtime.md#concept) — the embedded runtime, a
+  credential-free demonstration of the loop, lifecycle, credentials, and crash
+  recovery.
+- [Operator getting started](operator/getting-started.md) — build Loopex from
+  source, run and observe a first coding session, stop it cleanly, and run it
+  through a daemon.
 - [The daemon](operator/daemon.md#concept) — running the durable local daemon,
   connecting clients, observing and taking over a session, stopping it, and its
   exit statuses.
