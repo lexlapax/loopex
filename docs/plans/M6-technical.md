@@ -25,11 +25,11 @@ section, so a decision named only in prose declares nothing.
 | [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | Before the configuration layer, the default home or any lifecycle command is written | Outcomes 2 and 4: the schema, profiles and roles, the two credential reference forms, precedence, provenance, writes, the ADR 0003 amendment |
 | [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | Before any release build, manifest, launcher change or install lane is written; its build-environment section is filled with the retained toolchain build recipe and the allowed base-library set per platform first | Outcomes 1 and 5: the archive, the build environment, the launcher promotion, the companion placement, the manifest, the platforms and their minimum base, the install and rollback contract |
 
-**The closure prerequisite.** M5 must close first: the register admits M6 as
-an `Open` successor beside an `Accepted` M5 and refuses to accept M6 before M5
-is `Closed`. Every M6 fixture starts from the exact `0.2` root layout, daemon
-and workflow M5's tested candidate proves, so writing M6 code against an
-unclosed M5 would bind it to bytes that can still change.
+**The closure prerequisite, satisfied.** M5 closed on 2026-09-26 at the tested
+implementation `fe020e24b62504f6f2fbc6c81711f399803b6fa9` (administrative
+closure `3f81b04828901a6fb05b29e8b6bed211eed2d376`, tag `v0.2.0`). Every M6
+fixture starts from the exact `0.2` root layout, daemon and workflow that
+closed baseline proves.
 
 **Deferrals.** ADR 0035 remains Proposed and wholly deferred; no M6 outcome
 waits on it and M6 runs no part of it. Publication of `0.3.0` is a separate
