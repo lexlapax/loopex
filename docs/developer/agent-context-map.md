@@ -1,12 +1,30 @@
 # Agent Context Map
 
-This is the lazy-loaded routing map for development work. It points to the first
-documents to read when the active plan and local code are not enough. Each
-paired route starts with Concept and then identifies the exact Technical depth.
+This is the lazy-loaded routing map for development work. It tells a
+contributor, or a coding agent working for one, which documents to read first
+when the active plan and the local code are not enough, and it records the
+dated client facts and maintainer decisions that governance records cite.
+Every client adapter and repository skill loads it second, after `AGENTS.md`.
+
+It has five parts:
+
+1. [How to use it](#how-to-use) — the reading order.
+2. [Area routing](#area-routing) — for each subsystem, the Concept section to
+   read first and the exact Technical depth section behind it.
+3. [Checks and tests](#test-quick-reference) — the commands and test lanes, in
+   brief, with the page that owns each.
+4. [Development client guidance](#development-client-guidance) and
+   [version-specific guidance](#version-specific-technical-guidance) — client
+   facts, capability mappings and invocation, and any in-flight milestone
+   notes.
+5. [Retained authority dispositions](#disposition-index) — the durable record
+   of explicit maintainer decisions, with an index by period.
+
 Replace founding-document pointers with nearer accepted decisions as they land,
 and add code and test evidence pointers without changing the authority order in
 `AGENTS.md`.
 
+<a id="how-to-use"></a>
 ## How To Use
 
 1. Read `AGENTS.md` first.
@@ -26,20 +44,29 @@ Either member of the vision pair may be edited only under an explicit current
 maintainer or developer request naming a vision change; see `AGENTS.md` for the
 separate decision duty when a founding boundary or invariant would change.
 
+<a id="area-routing"></a>
 ## Area Routing
+
+The first group routes the development process; the rest route the product,
+starting from the founding vision and moving to the implemented subsystems.
 
 | Area | Concept | Technical depth | Notes |
 | --- | --- | --- | --- |
+| Getting started | [Developer documentation](README.md) | [DEVELOPMENT.md](../../DEVELOPMENT.md) | The developer index groups every page by reader; DEVELOPMENT.md has prerequisites, the toolchain pairs and the two check commands. |
+| Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
+| Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
+| Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
+| Architecture as implemented | [Architecture](architecture.md#concept) | [Architecture invariants and mechanics](architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
 | Ownership and trust boundaries | [Ownership](../vision.md#concept-vision-ownership-trust) | [Ownership mechanics](../vision-technical.md#technical-vision-ownership-trust) | Loopex/host/executor ownership, policy decisions, and grants. A host policy may also defer and be asked again: accepted [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) makes that question durable session state, and an answer is evidence for a new decision, never a grant. |
 | Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, one admitted `:telemetry` dependency in core, bootstrap floor. Accepted [ADR 0026](../adr/0026-development-floor-refresh.md#concept) owns the refreshed floor, Elixir 1.18.5 with OTP 27.3.4, and accepted [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) admits `:telemetry` in core and supersedes exactly the ADR 0001 clauses that required an empty core dependency list. The enforced inventory and the per-role rules are in the [architecture technical companion](architecture-technical.md#technical-arch-applications). |
 | Debugging a runtime, tracing, telemetry | [Observability](observability.md#concept) | [Observability contracts and inventory](observability-technical.md#technical-depth) | Diagnose through a runtime-scoped trace session and the telemetry inventory rather than inserted printing: both are bounded, both redact content, and neither changes the code under observation. Operator levels, ceilings and events are in the [runbook](../operator/observability.md#concept); accepted [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) fixes the emission inventory. |
 | Daemon, socket clients, controller lease | [Daemon](daemon.md#concept) and the [operator daemon page](../operator/daemon.md#concept) | [Daemon mechanics](daemon-technical.md#technical-depth) | The M5 daemon host: generation `loopex.experimental/2` over a Unix-domain socket, admission relay, controller lease and takeover, attachment residency and the orderly stop. Accepted [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept), [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept), [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept) and [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept). |
-| Serving a session over the wire | [App server protocol](app-server-protocol.md#concept) | [Protocol contract, records and limits](app-server-protocol-technical.md#technical-depth) | The experimental generation `loopex.experimental/1`: sixteen methods, seven record families, fifteen error codes, the wire encodings and the exact limits. Accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) is the deciding authority; the operator [runbook](../operator/app-server.md#concept) covers launching it. |
-| Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [M1 runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
+| Serving a session over the wire | [App server protocol](app-server-protocol.md#concept) | [Protocol contract, records and limits](app-server-protocol-technical.md#technical-depth) | The foreground stdio generation `loopex.experimental/1`: sixteen methods, seven record families, fifteen error codes, the wire encodings and the exact limits. Accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) is the deciding authority; the operator [runbook](../operator/app-server.md#concept) covers launching it. The daemon's generation 2 is in the daemon row above. |
+| Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction; use the [runtime and embedding guide](runtime-and-embedding.md#concept) for the implemented single-machine surface. |
 | Transactions, operations, recovery, cancellation | [Recovery truth](../vision.md#concept-vision-recovery-truth) | [Transaction and recovery mechanics](../vision-technical.md#technical-vision-recovery-truth) | `commit_unknown`, operation lifecycle, reconciliation, outcome algebra. |
-| Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
+| Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. The implemented turn machine, tool registry and bounds are in [agent loop and tools](agent-loop-and-tools.md#concept). |
 | Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries. Accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) fixes the headless protocol and accepted [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) puts durable interactions in core before any wire mapping; both are prerequisites of the Closed [`M4` plan](../plans/M4.md#concept). Read the wire reference in the [protocol pair](app-server-protocol.md#concept), the embedding contract in [durable interactions](runtime-and-embedding.md#technical-embedding-interactions), and the [M4 pre-acceptance choices](#disposition-m4-preacceptance-contract-choices-2026-09-13) for the exclusions the maintainer approved. |
 | Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. Accepted [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) adds the optional bounded transfer triple on the ArtifactStore port and its exact ceilings; use the [embedding contract](runtime-and-embedding.md#technical-embedding-transfers) for the facade family, ownership and refusals, and the [selected profile](#disposition-m4-preacceptance-contract-choices-2026-09-13) for how those limits were chosen. |
 | Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter and native sidecar. Accepted [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) and its [retirement mechanics](../adr/0027-provider-permit-retirement-technical.md#technical-adr-0027-decision) govern M3 provider-attempt retention. |
@@ -53,28 +80,35 @@ separate decision duty when a founding boundary or invariant would change.
 | Repository layout and ADR agenda | [Repository seed](../vision.md#concept-vision-repository-seed) | [Exact seed](../vision-technical.md#technical-vision-repository-seed) | Pair with the [ADR 0001 decision](../adr/0001-repository-and-application-layout.md#concept-adr-0001-decision) and its [technical mechanics](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision). |
 | Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. [M4](../plans/M4.md#concept) is Closed; the register carries the current M5 state. How a milestone is planned, run and closed is the [milestone guide](milestones.md#concept), and which checks a change must pass is the [verification guide](verification.md#concept). |
 | Serial barriers | [Ordering constraint](../vision.md#concept-vision-serial-barriers) | [Exact rejoin order](../vision-technical.md#technical-vision-serial-barriers) | A milestone may add barriers but cannot weaken the founding sequence. |
-| Verification, invariants, budgets | [Verification](../vision.md#concept-vision-verification) | [Exact evidence](../vision-technical.md#technical-vision-verification) | Claim-proportional tests and scope-specific minimalism budgets. |
-| Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. What is exposed today, with M4's experimental labels and the app server's exact-generation rule, is in [compatibility surfaces](compatibility-surfaces.md#concept); M4 moved the source `VERSION` to `0.1.0`, which ADR 0023 keeps separate from any package, tag, publication or freeze. |
+| Verification, invariants, budgets | [Verification](../vision.md#concept-vision-verification) | [Exact evidence](../vision-technical.md#technical-vision-verification) | Claim-proportional tests and scope-specific minimalism budgets. The day-to-day rule book is the [verification guide](verification.md#concept). |
+| Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. What is exposed today, with its experimental labels and the app server's exact-generation rule, is in [compatibility surfaces](compatibility-surfaces.md#concept). M4 moved the source `VERSION` to `0.1.0` and the checked-out source carries `0.2.0`; ADR 0023 keeps a source version separate from any package, tag, publication or freeze. |
 | Prior-system evidence | [Sources](../vision.md#concept-vision-sources) | [Source record](../vision-technical.md#technical-vision-sources) | Consulted sources are linked; independent implementation remains mandatory. |
-| Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 
+<a id="test-quick-reference"></a>
 ## Test Quick Reference
 
-Product tests run with `mix test` from the repository root. Repository checks
-are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`,
-`loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`,
-`loopex.hook_registration`, and `loopex.self_hosting`.
-`bash scripts/check-bootstrap.sh` runs the bootstrap aggregate.
-`bash scripts/check.sh` is the fast check each integration candidate runs
-once, in CI on the branch or locally before the merge, and
-`bash scripts/check-release.sh` is the slow check run once before closure; an
-unchanged-source release reuses that evidence and runs only its pre-tag
-administrative-SHA proofs. [DEVELOPMENT.md](../../DEVELOPMENT.md) describes
-both. The milestone
-gate runners they replaced are gone, and the gate files under `docs/plans/`
-are historical records of what those runs proved. The four repository skills
-are `open-milestone`, `close-milestone`, `adr`, and `mutant-hunt` as an
-optional technique; there is no `/gate`.
+[DEVELOPMENT.md](../../DEVELOPMENT.md) owns the commands and the
+[verification guide](verification.md#concept) owns which ones a change needs;
+this is the short form.
+
+- `bash scripts/check.sh` is the fast check each integration candidate runs
+  once, in CI on the branch or locally before the merge. Its structure step is
+  `bash scripts/check-bootstrap.sh`, the bootstrap aggregate.
+- `bash scripts/check-release.sh` is the slow check run once before closure;
+  an unchanged-source release reuses that evidence and runs only its pre-tag
+  administrative-SHA proofs.
+- Product tests run with `mix test` from the repository root or an
+  application directory.
+- Repository checks are Mix tasks. `mix loopex.status`,
+  `loopex.agent_bootstrap`, `loopex.docs_check`, `loopex.deps_budget` and
+  `loopex.version_train` run inside the fast check; `loopex.core_only`,
+  `loopex.matrix`, `loopex.format_scope`, `loopex.hook_registration` and
+  `loopex.self_hosting` are run directly, and several carry tests of their
+  own in the `loopex` suite. `mix help loopex.<task>` says what each proves.
+- The four repository skills are `open-milestone`, `close-milestone`, `adr`,
+  and `mutant-hunt` as an optional technique; there is no `/gate`. The
+  milestone gate runners the two checks replaced are gone, and the gate files
+  under `docs/plans/` are historical records of what those runs proved.
 
 Hosted CI — `.github/workflows/agent-bootstrap.yml` — runs
 `bash scripts/check.sh --select` on every push to `main` and every pull
@@ -89,6 +123,11 @@ durable-transition claims. Real-provider runs are a tagged, explicitly invoked
 lane — never part of the default suite, and so are the `long_bound`
 cases whose claim is a real duration: the `test_helper.exs` files exclude
 them and `scripts/check-release.sh` runs them in a pass of its own.
+
+### Gate-era routing notes
+
+These notes route readers of M3-era records; the retired gate machinery they
+describe no longer runs.
 
 M3's implementation used focused checks under the reviewed
 [end-only full-gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10),
@@ -117,7 +156,14 @@ replacement binding if the approved change reaches its bytes. The
 is the current example: the test file is not digest-bound, so no gate-generation
 transaction is needed for the approved assertion change.
 
+<a id="development-client-guidance"></a>
 ## Development Client Guidance
+
+Development clients are optional. Their files in `.claude/`, `.codex/` and
+`.agents/skills/` are adapters that defer to `AGENTS.md` and this map; the
+entries below record what the repository enforces about them, the dated
+maintainer decisions that shape them, the current capability mapping, and the
+current per-client compatibility and invocation facts.
 
 - `scripts/check-agent-bootstrap.sh`, `scripts/check-gitignore.sh`,
   `scripts/check-commit-messages.sh`, `scripts/check-repo-hygiene.sh`,
@@ -279,6 +325,7 @@ transaction is needed for the approved assertion change.
   the Claude hook is early feedback that calls it and must not be described as
   repository enforcement in its own right.
 
+<a id="version-specific-technical-guidance"></a>
 ## Version-Specific Technical Guidance
 
 This section holds temporary technical routing while a milestone is planned and
@@ -286,7 +333,40 @@ implemented. It never owns milestone status; read the
 [plans index](../plans/README.md) for that. Clear in-flight notes at milestone
 closeout, including for milestones such as M0 that produce no release.
 
-Revision-scoped milestone status is deliberately not repeated here.
+Revision-scoped milestone status is deliberately not repeated here. No
+in-flight note is recorded at this revision; the M5 subsystem routes are in
+the [daemon row](#area-routing) of the area table.
+
+<a id="disposition-index"></a>
+## Disposition Index
+
+The entries below this index are the retained record of explicit maintainer
+decisions. Each is immutable once written and true for the revision it names;
+a later decision is a new entry, and a milestone's administrative closure
+commit appends its closure disposition at the end of the file. Entries are in
+the order they were recorded, which is mostly but not strictly by date. This
+index groups them by period and links the entries that carry an anchor; it is
+navigation only, and an entry appended after it was written is found at the
+end of the file.
+
+| Period | Entries |
+| --- | --- |
+| Founding and M0, 2026-08-15 to 2026-08-21 | [Founding ADR acceptance](#disposition-founding-adrs-2026-08-15); [M0 plan pair and gate acceptance](#disposition-m0-acceptance-2026-08-17) with its [Amendment 1](#disposition-m0-amendment-1-2026-08-17), [Amendments 2 and 3](#disposition-m0-amendments-2-and-3-2026-08-17), [Amendment 4](#disposition-m0-amendment-4-2026-08-20), [closure](#disposition-m0-closure-2026-08-21) and [Amendment 5](#disposition-m0-amendment-5-2026-08-20); the seed bootstrap closure under "Retained Seed Bootstrap Evidence" |
+| M1, 2026-08-21 to 2026-08-26 | [Prerequisite ADRs](#disposition-m1-prerequisite-adrs-2026-08-21); [plan and gate acceptance](#disposition-m1-plan-acceptance-2026-08-22); [governance-only acceptance integration](#disposition-governance-acceptance-integration-2026-08-22); Amendments [1 and 2](#disposition-m1-amendments-1-and-2-2026-08-22), [3](#disposition-m1-amendment-3-2026-08-22), [4](#disposition-m1-amendment-4-2026-08-22), [5](#disposition-m1-amendment-5-2026-08-23) and [6](#disposition-m1-amendment-6-2026-08-23); [ADR 0008](#disposition-adr-0008-acceptance-2026-08-22); gate generations [7](#disposition-m1-gate-generation-7-2026-08-24) and [8](#disposition-m1-gate-generation-8-2026-08-26); the [gate-generation baseline exception](#disposition-m1-gate-generation-exception-2026-08-23) |
+| Cross-cutting, 2026-08-23 and 2026-09-01 | [Vision terminal algebra gains `bound_reached`](#disposition-bound-reached-vision-change-2026-08-23); [provider recovery requires proof before retry](#disposition-provider-recovery-proof-before-retry-2026-09-01) |
+| M2, 2026-08-24 to 2026-09-03 | [Prerequisite ADRs 0009–0011](#disposition-m2-prerequisite-adrs-2026-08-24); [plan pair and gate acceptance](#disposition-m2-plan-acceptance-2026-08-24); [inherited-gate enforcement](#disposition-m2-inherited-gate-enforcement-2026-08-27); gate amendments [1](#disposition-m2-gate-amendment-1-2026-08-25) through [9](#disposition-m2-gate-amendment-9-2026-09-03); ADRs [0012 and 0013](#disposition-adrs-0012-and-0013-acceptance-2026-08-29), [0014](#disposition-adr-0014-acceptance-2026-08-29) and [0015 through 0018](#disposition-adrs-0015-through-0018-acceptance-2026-09-01); [M2 closure](#disposition-m2-closure-2026-09-03) |
+| Between M2 and M3, 2026-09-07 and 2026-09-08 | [ADRs 0019–0021 and the repair implementation](#disposition-adrs-0019-0021-2026-09-07); [local executor Bash requirement](#disposition-local-executor-bash-2026-09-07); [M0 gate generation 6](#disposition-m0-gate-generation-6-2026-09-07); [ADR 0022](#disposition-adr-0022-acceptance-2026-09-08) |
+| M3, 2026-09-09 to 2026-09-13 | [CLI extension override](#disposition-m3-cli-extension-override-2026-09-09) and its [ratification](#override-disposition-m3-cli-extension-ratification-2026-09-10); [prerequisite ADRs 0025 and 0027](#disposition-m3-prerequisite-adrs-2026-09-10); [plan pair and gate acceptance](#disposition-m3-plan-acceptance-2026-09-10); [implementation gate cadence](#override-disposition-m3-implementation-gate-cadence-2026-09-10); commit-title [exception](#override-disposition-m3-commit-titles-2026-09-11) and [replacement](#override-disposition-m3-commit-title-replacement-2026-09-12); [ADR 0029](#disposition-adr-0029-acceptance-2026-09-11); Amendments [1](#disposition-m3-amendment-1-acceptance-2026-09-11), [2](#disposition-m3-amendment-2-acceptance-2026-09-12) and [3](#disposition-m3-amendment-3-acceptance-2026-09-12); [final validation scope](#override-disposition-m3-final-inherited-gates-waiver-2026-09-13); [M3 closure](#disposition-m3-closure-2026-09-13) |
+| M4 planning, 2026-09-11 to 2026-09-14 | [Planning-revision aggregate override](#override-disposition-m4-planning-aggregate-2026-09-11) and its [scope](#override-disposition-m4-planning-aggregate-scope-2026-09-11); [planning packet approval](#disposition-m4-planning-packet-approval-2026-09-11); [telemetry admitted to core](#disposition-m4-vision-core-telemetry-2026-09-13); [pre-acceptance contract choices](#disposition-m4-preacceptance-contract-choices-2026-09-13); ADRs [0023](#disposition-adr-0023-acceptance-2026-09-13), [0024](#disposition-adr-0024-acceptance-2026-09-13), [0026](#disposition-adr-0026-acceptance-2026-09-13), [0028](#disposition-adr-0028-acceptance-2026-09-13) and [0030](#disposition-adr-0030-acceptance-2026-09-13); [M4 plan acceptance](#disposition-m4-plan-acceptance-2026-09-14) |
+| M4 delivery, 2026-09-14 to 2026-09-19 | Inherited re-proof decisions ([before integration](#override-disposition-m4-inherited-evidence-before-integration-2026-09-14), [M1 and M2 waiver](#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14), [M0 deferral](#override-disposition-m4-m0-reproof-deferred-to-implementation-2026-09-14)); [commit-title exception](#override-disposition-m4-commit-titles-2026-09-15); [observability rule](#disposition-m4-observability-rule-2026-09-15); [the Node consumer](#disposition-m4-plan-amendment-node-consumer-2026-09-15); [closed-gate repair chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17); the gate generations recorded between 2026-09-12 and 2026-09-18; [closure schedule](#override-disposition-m4-closure-schedule-2026-09-19); [M4 closure](#disposition-m4-closure-2026-09-19) |
+| Post-M4 closure procedure, 2026-09-20 and 2026-09-21 | Six unanchored entries after the M4 closure: "Closure names two commits", "Closure and release evidence sequencing", "Administrative confinement is content confinement", "Closure candidate ownership and archive producer", "Administrative reconstruction and four release proofs" and "Archive extraction ignores the caller umask". The [milestone guide](milestones.md#concept) states the resulting procedure |
+| M5, from 2026-09-21 | [Plan pair and ADR 0031–0034 acceptance](#disposition-m5-acceptance-2026-09-21); [host application role](#disposition-m5-host-role-2026-09-22); [per-session progress routing](#disposition-m5-progress-routing-2026-09-22); [escript archive exclusion](#disposition-m5-escript-exclusion-2026-09-22); [no resident window](#disposition-m5-no-resident-window-2026-09-22); [residual proofs](#disposition-m5-residual-proofs-2026-09-22); [trace sessions load named modules](#disposition-m5-trace-loads-named-modules-2026-09-23); [closure-review decisions](#disposition-m5-closure-review-2026-09-23); [release-check attendance](#disposition-m5-driver-attendance-2026-09-23); [session-index loss](#disposition-m5-session-index-lost-2026-09-23); [non-blocking daemon components](#disposition-m5-nonblocking-components-2026-09-24); [executor cancellation and the risk packet](#disposition-m5-cleaned-implies-durable-2026-09-24) |
+
+Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
+names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
+[M4](#override-disposition-m4-commit-titles-2026-09-15) commit-title
+exceptions, and `apps/loopex_cli/test/cli_test.exs` names the
+[M3 CLI extension ratification](#override-disposition-m3-cli-extension-ratification-2026-09-10).
 
 ## Retained Authority Dispositions
 
