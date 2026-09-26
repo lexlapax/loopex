@@ -22,7 +22,10 @@ defmodule LoopexCli.Test.DaemonProxy do
   # client does, so a test can present a daemon answer it cannot easily cause.
 
   def start(daemon_path, cuts, rewrite \\ & &1) do
-    path = Path.join("/tmp", "ldp-#{System.unique_integer([:positive])}.sock")
+    # A random name: `unique_integer` restarts in every VM, so a socket a
+    # killed run left behind made a later bind fail with `:eaddrinuse`.
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+    path = Path.join("/tmp", "ldp-#{suffix}.sock")
     parent = self()
 
     pid =

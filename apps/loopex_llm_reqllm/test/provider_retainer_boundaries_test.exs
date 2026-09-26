@@ -3,6 +3,7 @@ Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
 defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
   use ExUnit.Case, async: true
 
+  alias Loopex.LLM.ReqLLM.ProviderBridge
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
   # Technical depth: ExUnit's clock starts before `Fixture.new` compiles the
@@ -171,6 +172,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
     # inside it; a shorter one priced that boot on a loaded hosted runner, so
     # the port default stays and the case costs the whole of it.
     request = Fixture.request()
+    # The guardian's own mapping of the wall deadline to a monotonic instant,
+    # taken from the same frozen offset form just before it starts.
+    honoured =
+      ProviderBridge.invocation_deadline(request.deadline, System.time_offset(:native))
+
     {retainer, retainer_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
     call = Fixture.managed(fixture, request, retainer)
     guardian = call.guardian
@@ -201,12 +207,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
                      until(cooperative)
 
       # The guardian honours the deadline as a monotonic instant converted once
-      # from the wall-clock deadline the request carries; both clocks are read
-      # in whole milliseconds and the offset between them can move by a few
-      # during the wait, so the wall clock at the completion may read a few
-      # milliseconds before the deadline it honoured -- two, once, on the Mac.
-      # Five milliseconds is the tolerance; the deadline is ten thousand.
-      assert System.system_time(:millisecond) >= request.deadline - 5
+      # from the wall-clock deadline the request carries, so the completion is
+      # compared on that clock. The wall clock is not: macOS slews it by up to
+      # 500 ppm, which moved it six milliseconds against the monotonic clock
+      # during this ten-second wait on a Darwin floor run. The five
+      # milliseconds cover the two offset samples and millisecond rounding.
+      assert System.monotonic_time() >=
+               honoured - System.convert_time_unit(5, :millisecond, :native)
 
       # Concept: this is the cleanup interval, not a queued provider result.
       # Technical depth: the unchanged OS guard removes its namespace only in
