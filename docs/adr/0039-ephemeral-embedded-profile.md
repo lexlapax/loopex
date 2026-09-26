@@ -6,10 +6,18 @@ Technical depth: [Profile composition, adapters and proofs](0039-ephemeral-embed
 - **Status:** Proposed
 - **Date:** 2026-09-26
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing. It adds a second composition profile beside the
-  durable one. [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept)
-  and [ADR 0019](0019-host-owned-provider-protection.md#concept) stay exactly
-  as accepted, and continue to govern every durable and daemon composition.
+- **Supersedes:** in part.
+  - It scopes [ADR 0019](0019-host-owned-provider-protection.md#concept)'s
+    rules to the durable profile. Those rules are: every provider invocation in
+    a separate provider BEAM, and `LOOPEX_PROVIDER_API_KEY` as the only
+    credential source. 0019's technical companion itself says restoring
+    shared-VM provider handling "requires a new decision"; this is that
+    decision, for the ephemeral profile only.
+  - It likewise scopes
+    [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept)'s
+    bootstrap-channel handoff to the durable profile.
+  - Both accepted records stay byte-for-byte as accepted. For every durable and
+    daemon composition they govern exactly as before.
 - **Prerequisite for:** M6 outcomes 1 to 4, accepted before the in-process
   model adapter, the memory store or the ephemeral composition is written
 
@@ -89,9 +97,48 @@ It also names every model inline, so no model catalog is consulted.
 
 **Authority rule.** Neither profile has a default host authority. The caller
 always names the policy:
-- in the API: `policy: :allow_all`, `:shell_allowlist`, `:refuse_all` or a
-  policy module;
-- on the command line: `--policy allow-all|shell-allowlist|refuse-all`.
+- **In the API:** a module implementing `Loopex.Policy`. Composition ships no
+  policy of its own, because host policy belongs to the host.
+- **On the command line:** `--policy allow-all|shell-allowlist|refuse-all`,
+  which the reference CLI maps to its own policy modules.
+
+<a id="concept-adr-0039-relation-0019"></a>
+### What Changes Relative to ADR 0019
+
+Technical depth: [Shared-state and diagnostic facts](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-relation-0019).
+
+ADR 0019 moved the provider out of the host VM for three reasons. The
+ephemeral profile answers each one as follows.
+
+1. **An adapter must not change the host's logger, group leaders or shared
+   ReqLLM supervision.** The in-process adapter changes none of them:
+   - it installs no logger filter or handler;
+   - it touches no group leader;
+   - it never restarts ReqLLM's supervision tree.
+
+   It does set two ReqLLM application settings before first starting ReqLLM:
+   automatic `.env` loading off, and the unverified-model warning off. That is a
+   visible, named change to the host's ReqLLM configuration, and it happens
+   only if the host has not already started ReqLLM.
+2. **ReqLLM's asynchronous diagnostics cannot be proved delivered or clean.**
+   ReqLLM's own failure paths can log inspected reasons, crash reports from its
+   stream and connection processes can carry request state, and a VM crash dump
+   can hold anything.
+   - The ephemeral profile accepts that these reach the host's logger and
+     crash-dump configuration, which the host owns.
+   - The adapter's witness drives each path with a canary credential and must
+     find it absent under the default logger configuration.
+   - The reference `ask` command closes the paths itself: logger off, its own
+     rendered lines, crash dumps disabled.
+   - A library host is told the same obligation in the developer guide.
+3. **`LOOPEX_PROVIDER_API_KEY` is the only credential source.** In the ephemeral
+   profile each provider has its own variable, read once at composition and
+   passed explicitly on every call. The durable profile keeps the single
+   source.
+
+What the ephemeral profile gives up is process isolation for the credential and
+for provider diagnostics. That trade is the point of the profile, and it is
+stated wherever the profile is offered.
 
 **Model selection.** A `provider:model` string selects the model:
 `ollama:<model>`, `openai:<model>`, `anthropic:<model>` or
@@ -127,7 +174,7 @@ Technical depth: [Compatibility mechanics](0039-ephemeral-embedded-profile-techn
 
 This is additive:
 - **Unchanged:** the durable profile, the public session protocol, the store
-  format, the executor protocol, the daemon and core's library.
+  format, the executor protocol, the daemon and core's runtime library.
 - **Experimental** under the 0.x policy: the embedded API and the `ask` command.
 - **New edge modules behind unchanged ports:** the memory store and the
   in-process adapter. Core's dependency budget is unchanged.
