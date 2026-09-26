@@ -3844,7 +3844,8 @@ to the whole successful expression. For a component killed at its deadline, that
 prefix includes the at most 5,000 ms post-kill reap, since the class is latched
 only after it. A successful step never adds that reap: it takes the post-kill
 branch only when its owner-reason `DOWN` is already in flight at the kill, and
-that local `DOWN` arrives at once.
+that local `DOWN` is delivered as soon as the owner is scheduled, well inside
+the bounded reap, which in any case caps the wait.
 
 The transport work after the relay acknowledgement normally overlaps the
 admission wait, but the two clocks do not share a start instant. Charging both
