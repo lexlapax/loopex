@@ -124,7 +124,11 @@ connections. The current-pair value is filled from this release check's
 long-duration lane. The floor-pair value is filled from a separate floor-pair
 `long_bound` run, `env -u MIX_BUILD_PATH MIX_BUILD_ROOT="/absolute/retained-work/M5-otp27-build" mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- mix test --only long_bound`
 in `apps/loopex_daemon` at the tested revision, whose retained output and
-SHA-256 are recorded beside it.
+SHA-256 are recorded beside it. The run needs a soft open-file limit of at
+least 4,096, raised as `scripts/check-release.sh` raises it (`ulimit -Sn 65536`,
+or the hard limit when that is lower). The case holds both ends of 512
+connections in one VM, so under a stock 1,024 limit the listener's accept fails
+and the run is not evidence.
 
 | Toolchain | Elapsed |
 | --- | --- |
