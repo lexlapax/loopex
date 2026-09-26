@@ -8,9 +8,11 @@ Technical depth: [Processes, orders, bounds and evidence](daemon-technical.md#te
 `loopex_daemon` is the host application that keeps one state root's sessions
 alive between separate operating-system processes. It composes the reference
 runtime once, listens on a Unix-domain socket inside that root, and serves the
-generation-2 session protocol to any number of clients. The
-[operator page](../operator/daemon.md#concept) says how to run it; this page is
-for changing it.
+generation-2 session protocol to any number of clients, so sessions keep
+running while no client is connected and several clients can watch one session.
+The [operator page](../operator/daemon.md#concept) says how to run it; this page
+is for changing it or building a client for it, whose wire contract is
+[the daemon's generation](app-server-protocol.md#concept-protocol-daemon).
 
 The daemon is not a second loop. Every session still has one serial
 coordinator in core, which is the only writer of its durable truth, and every
@@ -23,13 +25,16 @@ resources in one order.
 <a id="concept-daemon-host-role"></a>
 ## A Host, Not a Surface Over a Host
 
-The daemon has the host role, beside the app server and the reference CLI. It
-alone chooses the workspace, the provider launch, the policy and the
-credential, when it starts; a client can name none of them. That is what keeps
+The daemon holds the `host` application role: it is a client of core like the
+app server and the command, and additionally a long-lived owner of one root's
+resources. It alone chooses the workspace, the provider launch, the policy and
+the credential, when it starts; a client can name none of them. That is what keeps
 a connection from replacing host authority: the socket carries session
 commands, never composition. The reference CLI starts the daemon and is also
 one of its clients, but its live forms own no loop and no durable state — they
 render what the daemon sends and reconnect when the socket drops.
+
+Technical depth: [Processes](daemon-technical.md#technical-daemon-processes).
 
 <a id="concept-daemon-authority"></a>
 ## Controller Authority Lives Outside the Journal
@@ -45,6 +50,8 @@ can never rewrite history.
 Takeover waits for the holder to release or for the lease to lapse on the
 daemon's monotonic clock. Nothing forces a live holder off.
 
+Technical depth: [Leases and writer epochs](daemon-technical.md#technical-daemon-leases).
+
 <a id="concept-daemon-accounting"></a>
 ## Nothing Admitted Is Forgotten
 
@@ -57,6 +64,8 @@ registry holds the matching account for sockets, charging a slot from the
 kernel's accept until every process and socket owner of that connection is
 gone. A lost socket therefore never turns unfinished work into forgotten work,
 and a freed slot never hides a live process.
+
+Technical depth: [One connection's life](daemon-technical.md#technical-daemon-connection).
 
 <a id="concept-daemon-delivery"></a>
 ## Durable First, Transient Behind It
@@ -75,6 +84,8 @@ at its last completely written cursor rather than allowed to hold memory, and a
 fixed part of each attached connection's allowance is reserved so the notice
 that a session changed owner can always be delivered.
 
+Technical depth: [Output and progress](daemon-technical.md#technical-daemon-output).
+
 <a id="concept-daemon-lifecycle"></a>
 ## One Order In, the Reverse Order Out
 
@@ -90,6 +101,10 @@ lease operations, let admitted work reach core, drain the sessions through
 core, tell every client, then tear down. Each barrier has a fixed clock, so the
 stop has a bound an operator can plan a service-manager timeout around.
 
+Technical depth: [Startup order](daemon-technical.md#technical-daemon-startup).
+
+Technical depth: [Orderly stop](daemon-technical.md#technical-daemon-stop).
+
 <a id="concept-daemon-credential"></a>
 ## The Credential Is Read Once
 
@@ -100,6 +115,8 @@ capability to the custody rather than the value, and a second composition in
 the same operating-system process refuses rather than finding the variable
 again. See [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept).
 
+Technical depth: [Credential](daemon-technical.md#technical-daemon-credential).
+
 <a id="concept-daemon-discovery"></a>
 ## Discovery Is Not Existence
 
@@ -109,12 +126,16 @@ always asked of core, and adding or failing to add an index row never creates
 or reverses a session. A root written by an earlier release has no index, and
 the daemon refuses it until the operator runs the strict one-time import.
 
+Technical depth: [The session index](daemon-technical.md#technical-daemon-index).
+
 ## Related
 
 - [Operator guide to the daemon](../operator/daemon.md#concept).
 - [Architecture](architecture.md#concept) — where the host role sits.
-- [App server protocol](app-server-protocol.md#concept) — generation 1, which
-  generation 2 extends.
+- [App server protocol](app-server-protocol.md#concept) — the session protocol,
+  generation 1 and the generation 2 this daemon serves.
+- [Getting started](getting-started.md#concept) — a first client against a
+  running daemon.
 - [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept),
   [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) and
   [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept).

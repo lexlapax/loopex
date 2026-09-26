@@ -14,6 +14,8 @@ here.
 <a id="technical-daemon-processes"></a>
 ## Processes
 
+Concept: [A host, not a surface over a host](daemon.md#concept-daemon-host-role).
+
 | Process | Module | Owns |
 | --- | --- | --- |
 | Command sentinel | `LoopexDaemon.Sentinel`, `LoopexDaemon.StartupArbiter` | Signal routing, readiness arbitration, opening the parked listener, the exit status |
@@ -29,10 +31,36 @@ here.
 | Session index | `LoopexDaemon.SessionIndex` with `.Codec`, `.Storage` | The bounded durable discoverability image |
 
 No daemon process is registered by name; every reference is explicit and
-bound to the lifetime's incarnation.
+bound to the lifetime's incarnation. The daemon reaches sessions through
+`Loopex.Runtime`, including host entries hidden from generated documentation —
+`create_session_detailed/3`, `resume_session_detailed/3`, `attach_for_holder/4`,
+`command_for_daemon/2`, `release_holder/2`, and `quiesce/1` — and never through a
+coordinator or the Store directly.
+
+<a id="technical-daemon-leases"></a>
+## Leases and Writer Epochs
+
+Concept: [Controller authority lives outside the journal](daemon.md#concept-daemon-authority).
+
+`LoopexDaemon.LeaseOwner` serializes controller authority for one session. It
+grants at most one connection at a time, and each grant carries a fresh 128-bit
+opaque writer epoch. The lease term is 30 s on the daemon's monotonic clock; the
+holder renews by sending `session.acquire_control` again (the command does so
+every ten seconds), and an accepted mutation also renews it. Every mutation of
+an existing session must carry the current epoch. A client asking while the
+lease is held receives `control_held` or `control_pending` and asks again; the
+lease passes only on release or lapse. At most 512 sessions have a lease owner
+at once; beyond that an acquisition answers `control_capacity_reached`. A lease
+owner that
+overruns a step is replaced and its controller closed with
+`control_owner_lost`. Holder-changing grants, expiry, and release are proposals
+the collaboration owner acknowledges before any epoch becomes visible. The
+lease is never written to the journal, so a restarted daemon begins with none.
 
 <a id="technical-daemon-startup"></a>
 ## Startup Order
+
+Concept: [One order in, the reverse order out](daemon.md#concept-daemon-lifecycle).
 
 `Service` acquires nothing in `init/1`. It waits up to `owner_start_gate_ms`
 (5 s) for the sentinel's exact `{:go, owner_ref, sentinel}`, then runs each step
@@ -56,6 +84,8 @@ the listener.
 
 <a id="technical-daemon-stop"></a>
 ## Orderly Stop
+
+Concept: [One order in, the reverse order out](daemon.md#concept-daemon-lifecycle).
 
 | Phase | Clock | On a missed acknowledgement |
 | --- | --- | --- |
@@ -83,6 +113,8 @@ evidence records the measurement on each supported toolchain.
 <a id="technical-daemon-connection"></a>
 ## One Connection's Life
 
+Concept: [Nothing admitted is forgotten](daemon.md#concept-daemon-accounting).
+
 1. The listener accepts and charges a registry slot before anything else.
 2. `PeerCredential` decodes `SO_PEERCRED` on Linux or `LOCAL_PEERCRED` on
    Darwin and closes the socket unless the uid is the daemon's; an unreadable,
@@ -98,6 +130,8 @@ evidence records the measurement on each supported toolchain.
 
 <a id="technical-daemon-output"></a>
 ## Output and Progress
+
+Concept: [Durable first, transient behind it](daemon.md#concept-daemon-delivery).
 
 Output is complete encoded frames only. The per-connection allowance is 4 MiB,
 of which `SuccessionCapacity` reserves the exact bytes of one maximal
@@ -115,8 +149,9 @@ keeps at most 32 progress records and 512 KiB, written only when no durable
 output is waiting; excess progress is dropped.
 
 An attached connection idle for `idle_eviction_ms` (10 minutes) is evicted with
-`detached`; a connection holding a live lease is exempt while it holds it. M5
-keeps no resident window of encoded events.
+`detached`; a connection holding a live lease is exempt while it holds it. The
+daemon keeps no resident window of encoded events: every delivery is encoded
+from the runtime's stream.
 
 <a id="technical-daemon-succession"></a>
 ## Succession
@@ -129,6 +164,8 @@ deadline. The connection stays open.
 <a id="technical-daemon-credential"></a>
 ## Credential
 
+Concept: [The credential is read once](daemon.md#concept-daemon-credential).
+
 `loopex daemon` reads `LOOPEX_PROVIDER_API_KEY` at command entry, before it
 parses its arguments, and deletes it from the environment
 (`LoopexCli.Daemon.credential/1`); the offline commands read it through
@@ -139,6 +176,24 @@ and the registry answer unknown calls with `{:error, :unavailable}` and ignore
 unknown messages, so no crash report carries the value. A second composition
 in the same VM returns `provider_credential_required` without starting anything.
 
+<a id="technical-daemon-index"></a>
+## The Session Index
+
+Concept: [Discovery is not existence](daemon.md#concept-daemon-discovery).
+
+`LoopexDaemon.SessionIndex` is one unregistered process that holds the root's
+index rows in memory and replaces the complete durable image on each
+publication, through `SessionIndex.Codec` and `SessionIndex.Storage`. It holds
+at most 4,096 rows, keyed by raw session identity, and `session.list` pages
+through them at most 256 at a time; a full index still answers truthfully and
+reports `index_full`. A fresh root gets a persisted empty image. A root with a
+session directory but no image is refused at start as
+`session_index_upgrade_required` until `loopex daemon prepare-index`
+(`LoopexDaemon.PrepareIndex`) imports every recorded session strictly, refusing
+the whole root if any entry is damaged. A row that cannot be written leaves the
+session as it is and sends `daemon.notice` with `index_write_failed` to the
+client that caused it.
+
 <a id="technical-daemon-evidence"></a>
 ## Evidence
 
@@ -147,7 +202,7 @@ in the same VM returns `provider_credential_required` without starting anything.
 | Startup order, checkpoints, reverse cleanup | `service_lifecycle_test.exs`, `startup_arbiter_test.exs`, `readiness_test.exs` |
 | Relay tickets, barriers, retirement | `admission_relay_test.exs`, `owner_test.exs`, `collaboration_test.exs` |
 | Slots, retirement barrier, eviction, reclamation, succession | `connection_registry_test.exs`, `succession_capacity_test.exs`, `wire_records_test.exs`, `output_buffer_test.exs` |
-| Leases and takeover | `lease_owner_test.exs` |
+| Leases and takeover | `lease_owner_test.exs`, `lease_lifecycle_test.exs` |
 | Non-blocking components: per-step clocks, lease-owner replacement, the monitored holder close, held requests, the stop rule | `owner_test.exs`, `lease_owner_test.exs`, `socket_transport_test.exs` |
 | No blocking call between components through `:gen.call/4` while serving or stopping (T14); an orderly stop exits 0 with a lease owner's relay request unanswered past a step between the cut and the freeze (T21's owner and Service halves) | `service_lifecycle_test.exs` |
 | Socket, peer credential, framing and methods | `listener_test.exs`, `listener_socket_test.exs`, `peer_credential_test.exs`, `connection_protocol_test.exs`, `request_test.exs`, `request_ledger_test.exs`, `socket_transport_test.exs` |

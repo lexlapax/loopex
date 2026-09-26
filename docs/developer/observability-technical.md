@@ -12,6 +12,8 @@ enforces each, and the tests that hold them.
 <a id="technical-observability-inventory"></a>
 ## The Emission Inventory
 
+Concept: [Observability](observability.md#concept).
+
 Accepted [ADR 0030](../adr/0030-observability-tracing-and-telemetry-technical.md#technical-depth)
 fixes this set exactly. Every name emits `start`, `stop` and `exception`. Adding
 a name, removing one, or emitting a second span from one boundary is an ADR
@@ -35,6 +37,8 @@ Six coordinator transaction cuts:
 
 <a id="technical-observability-span"></a>
 ## `Loopex.Instrumentation` Is the Only Place a Span Opens
+
+Concept: [Why core emits and the edge handles](observability.md#concept-observability-emitting).
 
 Every emission goes through `Loopex.Instrumentation`. There is no second path,
 and that is enforced by review rather than by a compiler, so a change that emits
@@ -67,6 +71,8 @@ invisible to error handling.
 <a id="technical-observability-handler"></a>
 ## The Edge Handler
 
+Concept: [Why core emits and the edge handles](observability.md#concept-observability-emitting).
+
 `Loopex.Telemetry` in `loopex_telemetry` is the only Loopex-attached handler.
 
 - `attach/1` reads the runtime's diagnostics admission handle **once** and
@@ -82,6 +88,10 @@ invisible to error handling.
 
 <a id="technical-observability-trace"></a>
 ## Trace Session Domain
+
+Concept: [Neither is truth, and neither is authority](observability.md#concept-observability-not-truth).
+
+Concept: [Everything is bounded, and says so when it bounds](observability.md#concept-observability-bounded).
 
 `Loopex.Trace.Config.validate/1` is the whole domain. A supplied value is
 accepted when it is positive and no larger than the ceiling, and refused by name
@@ -140,6 +150,8 @@ not claimed as trace-session witnesses.
 
 <a id="technical-observability-redaction"></a>
 ## Redaction Rules
+
+Concept: [Redaction is a contract, not a filter](observability.md#concept-observability-redaction).
 
 `Loopex.Trace.Entry.redact/1` walks the term before rendering.
 

@@ -23,6 +23,8 @@ The founding decision is accepted
 emission inventory exactly, and the vision change that admits the single
 telemetry event dispatcher into core.
 
+Technical depth: [The emission inventory](observability-technical.md#technical-observability-inventory).
+
 <a id="concept-observability-not-truth"></a>
 ## Neither Is Truth, and Neither Is Authority
 
@@ -44,6 +46,8 @@ can start, change or stop a trace session or alter what a span reports. The only
 route in is the runtime reference the host holds, which is the same rule every
 other runtime operation follows.
 
+Technical depth: [Trace session domain](observability-technical.md#technical-observability-trace).
+
 <a id="concept-observability-emitting"></a>
 ## Why Core Emits and the Edge Handles
 
@@ -60,6 +64,10 @@ emitting a span pays for one map and one send.
 This is also why the dependency budget admits exactly one external dependency in
 core. The event dispatcher is named by the vision's dependency doctrine; nothing
 else gets in on the strength of being useful.
+
+Technical depth: [The only place a span opens](observability-technical.md#technical-observability-span).
+
+Technical depth: [The edge handler](observability-technical.md#technical-observability-handler).
 
 <a id="concept-observability-redaction"></a>
 ## Redaction Is a Contract, Not a Filter
@@ -87,6 +95,8 @@ proceed without that exclusion. Redaction by key would already hide a credential
 under a credential-named key; exclusion removes the need to trust that the value
 is always under one.
 
+Technical depth: [Redaction rules](observability-technical.md#technical-observability-redaction).
+
 <a id="concept-observability-bounded"></a>
 ## Everything Is Bounded, and Says So When It Bounds
 
@@ -98,10 +108,13 @@ its own entry. An operator is told what they did not see. A traced process is
 never delayed by being traced: the tracer never calls into one and never replies
 to one, so tracing cannot change the behaviour it is observing.
 
+Technical depth: [Trace session ceilings](observability-technical.md#technical-observability-trace).
+
 ## Related
 
 - [Architecture](architecture.md#concept) — truth planes and dependency direction.
 - [App server protocol](app-server-protocol.md#concept) — the wire surface's own bounded planes.
 - [Operator observability runbook](../operator/observability.md#concept) — turning it on and reading it.
+- [Getting started](getting-started.md#concept) — where diagnosing fits in a first contribution.
 
 Back to the [developer index](README.md).
