@@ -48,6 +48,16 @@ that its successor removes it on evidence rather than on a guess.
 | Persistence | Full-replay local log | The same log, 256 MiB ceiling, root retirement | The same log with a format marker, backup and restore, and the engine decision for its successor taken from measurement |
 | Verdict | Maintainer and developer usable | Source-operator usable | Ordinary local-operator usable |
 
+**Open reconciliations with M6** (refined before M7 opens):
+- **Provider selection.** M6's `provider:model` strings and per-provider
+  credential variables must be reconciled with this draft's provider profiles
+  and its `--provider`/`--role` selection.
+- **Default home.** This draft's default home interacts with M6's rule that
+  `ask` is ephemeral unless `--state-root` names a root, and with its
+  statement that `LOOPEX_HOME` never switches profiles. Whether a configured
+  home makes `ask` durable by default is a decision for M7.
+- **Capability table.** It gains an M6 (`0.3.0`) column.
+
 **Why this rung, and why now.** The roadmap projects a governed extension
 runtime as the next candidate, and it also says its labels are navigation
 aids and an accepted plan may resequence projected work beneath the vision's
@@ -157,12 +167,12 @@ to the local adapter's capacity behaviour; those follow in the successor
 under the same accepted decision.
 
 **Operator surface and documentation.** The lifecycle commands above, each
-with an exit class added to the M5 exit-status map; start-on-demand for the
+with an exit class added to the M5 exit-status map, beside M6's separate `ask` map; start-on-demand for the
 daemon under the M5 placement lock; and an operator guide that starts from a
 downloaded archive rather than a checkout. The developer documentation states
 what M7 changed for its reader.
 
-**Version.** `VERSION` moves from `0.2.0` to `0.4.0` in the tested candidate,
+**Version.** `VERSION` moves from `0.3.0` to `0.4.0` in the tested candidate,
 under the 0.x policy.
 
 <a id="concept-plan-non-goals"></a>
@@ -176,7 +186,7 @@ compaction, retention or history rewrite; the engine ADR 0036 selects is
 implemented by the successor. No trusted extension activation, extension
 source configuration, package acquisition or VM-global loading; those retain
 their vision barrier and their own milestone. No ADR 0035 evaluation, no
-second provider adapter, no model switching within a run. No protocol change:
+provider adapter beyond M6's companion and in-process pair, no model switching within a run. No protocol change:
 generation 2 is served unchanged and no generation 3 exists. No Hex packages,
 no Homebrew or distribution packages, no installer beyond extract-and-run, no
 install script, no service-manager units, no automatic updates, no

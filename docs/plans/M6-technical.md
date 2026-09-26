@@ -94,9 +94,8 @@ runtime library (`apps/loopex/lib` outside `mix/`) is unchanged by M6.
 | --- | --- | --- |
 | `:policy` | Required: a module implementing `Loopex.Policy`. Composition ships no policy of its own, because host policy belongs to the host. The `ask` command maps its policy names to the reference CLI's policy modules | none; composition refuses `{:composition, :host_policy_required}` |
 | `:model` | A `provider:model` string (ADR 0039) | `LOOPEX_MODEL`, else `"ollama:llama3.2"` |
-| `:tools` | `:coding` (`read`, `write`, `edit`, `bash`), `:read_only` (`read`, `grep`, `find`, `ls`), or a list of those names | `:coding` |
-| `:skills` | A list of skill directory paths; naming a path is the admission decision | `[]` |
-| `:system` | Extra system text, placed after the runtime's own system message | none |
+| `:tools` | A preset, `:coding` (`read`, `write`, `edit`, `bash`) or `:read_only` (`read`, `grep`, `find`, `ls`). Only presets are accepted, because tool projections count against ADR 0017's system-class limit, and each preset carries a measured witness that it fits | `:coding` |
+| `:skills` | At most four skill directory paths, ADR 0025's selection limit; admitted and activated under ADR 0039's rule | `[]` |
 | `:cwd` | The workspace root for every tool | `File.cwd!()` |
 | `:max_steps` | Mapped to the runtime bound `max_turns` | 16 |
 | `:deadline_ms` | Mapped to the runtime bound `deadline_ms` | 600_000 |
@@ -402,8 +401,17 @@ builds a resource manifest from named skill directories. What it does:
   admits. It is a naming, not a claim that the directory is in the project. The
   decision's `decision_source` `host_supplied` records that the host supplied
   it.
-- **Decision:** `decision_source` `host_supplied`, because naming the path is
-  the host's decision.
+- **Decision:** `decision_source` `host_supplied` with `trust_scope`
+  `project_skills`, bound to the executor's workspace, as ADR 0025's admission
+  record requires. ADR 0039 decides that naming the path is the host's
+  admission decision.
+- **Admission then activation.** After the session is created, the ephemeral
+  API and `ask` send the same two commands the CLI sends for installed skills
+  (`loopex_cli.ex:445-469`): `admit_resources` with that decision, then one
+  `activate_skill` per named skill. So ADR 0025's separation holds: only
+  activated skills enter context, and the selection limit of four applies. A
+  fifth directory refuses before composition as
+  `{:invalid_option, :too_many_skills}`.
 - **Workspace:** the manifest's `workspace_ref` is the executor's
   (`runtime.ex:921`).
 - **Durable profile:** under `ask --state-root`, the admitted content is
@@ -418,16 +426,24 @@ Concept: [Scope](M6.md#concept-plan-scope).
 **Grammar:**
 
 ```text
-loopex ask [--model SPEC] [--output text|json] [--skill DIR]... [--tools coding|read-only]
+loopex ask [--model SPEC] [--output text|json] [--skill-dir DIR]... [--tools coding|read-only]
            --policy allow-all|shell-allowlist|refuse-all
-           [--cwd DIR] [--max-steps N] [--deadline-ms N] [--system TEXT]
+           [--cwd DIR] [--max-steps N] [--deadline-ms N]
            [--state-root DIR] [--] [PROMPT...]
 loopex -p ...        # the same as `loopex ask ...`
 ```
 
 - The prompt is the remaining words, or standard input when none are given.
 - An empty prompt refuses.
-- `--skill` is repeatable. Every other flag may appear once.
+- `--skill-dir` is repeatable up to four times; every other flag may appear
+  once. It is named apart from `run`'s `--skill`, which selects an installed
+  skill by name.
+- **Credentials at dispatch.** `composes_offline?` (`loopex_cli.ex:108-111`)
+  includes `ask`, so `CredentialHost.discard/0` does not run before `ask`
+  chooses its profile.
+  - The durable profile then consumes `LOOPEX_PROVIDER_API_KEY` as `run` does.
+  - The ephemeral profile reads only the chosen provider's own variable, and
+    discards `LOOPEX_PROVIDER_API_KEY` from its environment unread.
 - `refuse-all` joins the existing policy names. It becomes selectable for `ask`
   only.
 - `ask` composes the ephemeral profile unless `--state-root` names a root.
@@ -477,8 +493,11 @@ from 127 and 130:
 | 4 | `outcome_unknown` |
 | 5 | `cancelled` |
 | 6 | No `run.finished` within the wait: the follow window for the durable profile, or the `:timeout` for the ephemeral profile. The command then stops the session in the ephemeral profile, or leaves it running in the durable profile, and says so on standard error |
-| 7 | A deferred interaction, which `ask` does not answer. The ephemeral session is aborted and stopped; the durable session is left open |
 | 130 | The interrupt backstop, unchanged |
+
+No `ask` policy defers: `allow-all` allows, and `shell-allowlist` and
+`refuse-all` only deny. So `ask` has no deferred-interaction status. A deferring
+policy is an API matter, surfaced there as `{:interaction_pending, _}`.
 
 `run` keeps its documented statuses. The existing CLI and daemon maps are not
 renumbered.
@@ -516,10 +535,17 @@ Concept: [Scope](M6.md#concept-plan-scope).
 | `mix loopex.closure.confine TESTED ADMIN --name NAME` | the M5 `confinement.py` | Enforces the milestone guide's [confinement](../developer/milestones-technical.md#technical-milestones-confinement) exactly: direct parent; exactly the five paths; ordinary blobs with unchanged modes; byte reconstruction of `docs/plans/README.md` and root `README.md`; the Closure row only; the context map append only; the scaffold `Pending` cells only. It prints one `PASS`/`FAIL` line per check and writes the zero-context patch to a path the caller names |
 | `scripts/stage-archive-manifest.sh SHA OUT` | the M5 inline staging | Stages `git archive SHA` under the [canonical rule](../developer/milestones-technical.md#technical-milestones-archive-extraction): a fresh directory, a subshell with `umask 022`, called from a caller that sets `umask 0777` and records both. It runs `scripts/source-archive-manifest.sh` with `OUT` outside the extraction, and copies `SOURCE_IDENTITY` beside `OUT` |
 | `mix loopex.closure.archive_compare TESTED_MANIFEST ADMIN_MANIFEST TESTED ADMIN` | the M5 `archive_compare.py` | NUL framing, no duplicates, sorted; each projection against its commit's `git ls-tree -r -t --full-tree`; tested and administrative projections identical; tuples identical after removing `docs/**`, `README.md` and `SOURCE_IDENTITY`; each `SOURCE_IDENTITY` names its own commit and committer date |
-| `scripts/floor-lane.sh SHA [--long-bound]` | the M5 `closure-lane.sh` | A fresh clone at `SHA` on the floor pair. It raises the soft open-file limit to 65_536 (or the hard limit) and refuses below 4_096. It refuses to run when `SIGHUP` is ignored in its own disposition, and prints the mask. It runs `LOOPEX_CHECK_ALONE=loopex_llm_reqllm bash scripts/check.sh`, then the `long_bound` run in `apps/loopex_daemon` when asked, and writes each log with `EXIT=` and `DURATION_S=` |
-| `scripts/attended-release.sh` | the M5 `loopex-release-driver.py` | Runs `scripts/check-release.sh` under the platform's `script(1)` so the attended cases have a terminal. It answers `yes` to each attended notice only after the exact notice text appears, redacts the credential from the retained log, and prints `RELEASE_EXIT=` and `ATTENDED_ANSWERS=`. It is shell and POSIX tools only; the driver-attendance disposition's terms are unchanged |
+| `scripts/floor-lane.sh SHA [--long-bound]` | the M5 `closure-lane.sh` | Makes a fresh clone at `SHA` on the floor pair. It raises the soft open-file limit to 65_536 (or the hard limit) and refuses below 4_096. It refuses to run when `SIGHUP` is ignored in its own disposition, read portably with `ps -o ignored= -p $$` (supported by both BSD and procps `ps`), and prints the mask. It runs `LOOPEX_CHECK_ALONE=loopex_llm_reqllm bash scripts/check.sh`, then the `long_bound` run in `apps/loopex_daemon` when asked, and writes each log with `EXIT=` and `DURATION_S=` |
+| `scripts/attended-release.sh` | the terminal the M5 `loopex-release-driver.py` provided | Runs `scripts/check-release.sh` under the platform's `script(1)`, so the attended cases have a terminal: BSD `script -q -F /dev/null …` on macOS, and util-linux `script -q -f -e -c "…" /dev/null` on Linux. **A person answers the attended notices by default**, exactly as the release check has always required. The M5 driver-attendance disposition (`agent-context-map.md#disposition-m5-driver-attendance-2026-09-23`) applied to the M5 closure candidates only. The script's automatic mode (`--answer-attended`) is refused unless the caller names a recorded maintainer disposition for the current milestone's closure (`--disposition ANCHOR`), and that anchor must exist in the context map. In automatic mode it feeds a FIFO and writes `yes` only after the exact notice text is matched in the terminal output, ignoring carriage returns and its own echo. It redacts every provider credential name from the retained log, and prints `RELEASE_EXIT=` and `ATTENDED_ANSWERS=` |
 
-Each command has a test against a fixture repository: `apps/loopex/test/closure_tooling_test.exs`, plus shell fixture tests run by `scripts/check.sh`. The fixture reproduces a passing and a failing case for every check. No Python, and no tool outside the toolchain baseline.
+Each command has a test against a fixture repository:
+- `apps/loopex/test/closure_tooling_test.exs`;
+- shell fixture tests run by `scripts/check.sh`.
+
+The fixture reproduces a passing and a failing case for every check. The fast
+check runs on both platforms at closure (hosted CI on Linux, and the Darwin floor
+run), so the macOS and Linux branches of `script(1)` and `ps` are both executed.
+Nothing uses Python or any tool outside the toolchain baseline.
 
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
@@ -533,8 +559,8 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
 | 1 | `apps/loopex_composition/test/ephemeral_api_test.exs` (new), with a scripted model adapter behind the same port | `run/2` answers; multi-turn `ask/3` keeps context; `{:error, {:run, :bound_reached, %{"bound" => "max_turns"}}}` at the step limit; a failed tool result reaches the next model call; `{:interaction_pending, _}` under a deferring policy, then `{:error, :run_open}` for the next `ask/3`; the command-to-run join choosing the right `run.finished`; `history/1` order and entry shapes; `stop_session/1` idempotent, aborting an open run, and confirming the executor's process groups are gone before removing its root; the owner doing the same when the caller exits | fast |
 | 2 | `apps/loopex_llm_reqllm/test/in_process_adapter_test.exs` (new), covering mapping, options, errors and deltas against a scripted ReqLLM transport. Also: the existing streaming conformance suite run against the new adapter; `apps/loopex_llm_reqllm/test/in_process_real_test.exs` (new, `real_provider`); the unchanged companion suites; `apps/loopex_executor_local/test/provider_environment_test.exs` (new) | Request and reply mapping, including tool calls, deltas, and identity from the inline model. `api_key`, `max_retries: 0` and `receive_timeout` are always passed. The `not_dispatched`/`dispatched_or_unknown` split. No catalog warning for any provider. `load_dotenv` is off, so a `.env` in the working directory is not loaded. A canary credential is absent from every record, event, progress item, diagnostic, trace entry, captured log line and `IO.warn` output on three driven paths: the stream-start failure, a stream-task crash and a provider error reply. The `ask` command's logger level and crash-dump setting. No provider variable reaches a `bash` child. Real calls to a local Ollama model and one hosted provider. The companion's behaviour is unchanged after the shared-mapping extraction | fast; release |
 | 3 | The store conformance suite with `:memory` bound to `Loopex.Store.Memory`; `apps/loopex_composition/test/ephemeral_profile_test.exs` (new) | The memory store passes every conformance case. The ephemeral profile refuses without a policy, creates its root `0700`, removes it on stop and on owner exit, composes no artifact store, and names its profile | fast |
-| 4 | `apps/loopex_cli/test/ask_command_test.exs` (new), `apps/loopex_cli/test/ask_exit_test.exs` (new), `apps/loopex_executor_local/test/read_only_tools_test.exs` (new), `apps/loopex_composition/test/skill_directories_test.exs` (new), an agent-delegation release lane | The grammar and refusals; `-p` identical to `ask`; a prompt from stdin; stdout carrying only the answer or only one JSON object; every exit status in the map; the ephemeral profile with no `LOOPEX_HOME`; `--state-root` selecting the durable profile; skill directories admitted by path and refused when malformed; `grep`/`find`/`ls` bounds, confinement and refusals; another process driving `loopex -p` and the app server and reading their results | fast; release |
-| 5 | The M5 suites and release lanes, unchanged; `mix loopex.deps_budget`; `git diff v0.2.0 -- apps/loopex/lib ':(exclude)apps/loopex/lib/mix'` empty at the tested candidate, and the only paths added under `apps/loopex/lib/mix/tasks/` being the two closure tasks | The durable profile, the companion, the daemon and both protocol generations unchanged; the durable composition's active tools still the four; core's runtime library and dependency list unchanged | fast; release |
+| 4 | `apps/loopex_cli/test/ask_command_test.exs` (new), `apps/loopex_cli/test/ask_exit_test.exs` (new), `apps/loopex_cli/test/ask_delegation_test.exs` (new), `apps/loopex_executor_local/test/read_only_tools_test.exs` (new), `apps/loopex_composition/test/skill_directories_test.exs` (new), `apps/loopex_composition/test/tool_preset_budget_test.exs` (new) | The grammar and refusals; `-p` identical to `ask`; a prompt from stdin; stdout carrying only the answer or only one JSON object; every exit status in the map, driven with a scripted model; the ephemeral profile with no `LOOPEX_HOME`; `--state-root` selecting the durable profile; the credential-discard order at dispatch; skill directories admitted and activated by path, refused when malformed, duplicated or more than four; `grep`/`find`/`ls` bounds, confinement and refusals; each tool preset's system-class projection measured under ADR 0017's limit; a separate OS process running `loopex -p` with a scripted model and reading its JSON, and driving the app server | fast |
+| 5 | The M5 suites and release lanes, unchanged except the version literal; `mix loopex.deps_budget`; `git diff v0.2.0 -- apps/loopex/lib ':(exclude)apps/loopex/lib/mix'` empty at the tested candidate, and the only paths added under `apps/loopex/lib/mix/tasks/` being the two closure tasks | The durable profile, the companion, the daemon and both protocol generations unchanged; the durable composition's active tools still the four; core's runtime library and dependency list unchanged. `VERSION` moving to `0.3.0` changes `Loopex.version()`, read from `VERSION` at compile time (`loopex.ex:28-42`), and with it the `daemon_ready` version and the durable `policy_identity` revision. The tests that assert the literal `"0.2.0"` read `Loopex.version()` instead. These are `readiness_test.exs:11-42`, `service_lifecycle_test.exs:139`, `daemon_command_test.exs:163,221` and `multi_client_workflow_test.exs:72`. This is the only change M6 makes to an M5 test's expectation | fast; release |
 | 6 | `apps/loopex/test/closure_tooling_test.exs` (new) and the shell fixture tests | Each closure command reproduces the M5 closure's checks on a fixture, with a failing case for each; M6's own closure uses only them | fast; closure |
 | — | An independent read-only security review of the ephemeral profile's credential path, naming the tested SHA | The credential rule and host hygiene hold, including in the logging paths | closure |
 
@@ -547,12 +573,12 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
   `docs/evidence/M6-closure-runs.md`, which the tested candidate creates and
   indexes as a scaffold.
 - **Release rows.** The manifest (`check-release.sh:135-157`) grows from nine
-  real-provider rows to twelve, and its header comment changes with it:
-  - row 10, the ephemeral profile against a local Ollama model;
-  - row 11, the ephemeral profile against the hosted provider the release
-    credential serves;
-  - row 12, the agent-delegation lane: a separate OS process runs `loopex -p`
-    against the local Ollama model and reads its JSON.
+  real-provider rows to eleven, and its header comment changes with it:
+  - row 10, the ephemeral profile against a local Ollama model, driven through
+    `loopex -p --output json` from a separate OS process, which is also the
+    real-provider agent-delegation case;
+  - row 11, the ephemeral profile's embedded API against Anthropic, the
+    provider the release credential serves.
 - **Release credentials.** The release credential stays
   `LOOPEX_PROVIDER_API_KEY`, an Anthropic key.
   - `with_credential` passes it to row 11 as `ANTHROPIC_API_KEY` for that row's
@@ -656,7 +682,7 @@ Concept: [Non-goals](M6.md#concept-plan-non-goals).
 | 2 | A host that already started ReqLLM with dotenv enabled has already loaded its `.env` | The adapter cannot undo another component's start; it records the state |
 | 3 | A hard VM kill leaves the ephemeral temporary root behind | The root is under the host's temporary directory, mode `0700`, and holds no committed truth (the store is in memory) |
 | 4 | The durable profile's `--model` must name a provider its single credential serves | Per-provider durable credentials belong to the M7 draft's configuration decision |
-| 5 | `ask` answers no deferred interaction (exit 7) | Answering needs a client that holds the question; the app server is that client |
+| 5 | `ask` offers no deferring policy; a deferred interaction is an API matter | Answering needs a client that holds the question; the app server and an embedding host are those clients |
 | 6 | The JSON result carries no usage or model identity | They are not public events; adding them is a protocol decision |
 | 7 | A library host's own logger, crash reports and crash-dump setting may capture request data from ReqLLM's failure paths | The host owns its VM's logging; the `ask` command closes these paths itself, and the developer guide names the host's obligation |
 | 8 | An ephemeral session's memory grows with its history, bounded per run but not across runs | Ephemeral sessions are meant to be short; stopping the session releases it |

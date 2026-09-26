@@ -89,6 +89,10 @@ loop.
   exception below.
 - **No key needed:** a provider that needs none, such as a local Ollama server,
   reads none.
+- **Missing key:** a provider whose variable is missing or empty refuses at
+  composition, naming the variable and never the value.
+- **Tool processes:** the local executor removes every provider credential name
+  from each tool process's environment, not only `LOOPEX_PROVIDER_API_KEY`.
 - **What the durable profile adds:** process isolation through the companion.
   The ephemeral profile states plainly that it does not have it.
 
@@ -98,6 +102,22 @@ may do other things. So before ReqLLM starts, it turns off:
 - ReqLLM's unverified-model warning.
 
 It also names every model inline, so no model catalog is consulted.
+
+**Skills named by path.** The ephemeral profile admits exactly the skill
+directories its caller names. The rules:
+- **No discovery.** It does no project discovery, so a headless caller is never
+  prompted.
+- **Naming a directory is the host's admission decision.** It is recorded as
+  ADR 0025's admission decision with `decision_source` `host_supplied`,
+  `trust_scope` `project_skills`, and the workspace binding.
+- **Admitted, then each activated,** so ADR 0025's separation between admission
+  and activation holds, and its limit of four selected skills applies.
+- **The pack's identity** is the local identity core already admits,
+  `project:<name>`. For a directory outside the workspace that label names a
+  local pack, not the project's own. The admission decision's `host_supplied`
+  source is what records where it came from, and the host path is never
+  recorded. A distinct host-supplied identity would need a core change, which
+  this decision does not make.
 
 **Authority rule.** Neither profile has a default host authority. The caller
 always names the policy:
@@ -179,7 +199,12 @@ Technical depth: [Compatibility mechanics](0039-ephemeral-embedded-profile-techn
 This is additive:
 - **Unchanged:** the durable profile, the public session protocol, the store
   format, the executor protocol, the daemon and core's runtime library.
-- **Experimental** under the 0.x policy: the embedded API and the `ask` command.
+- **Experimental** under the 0.x policy:
+  - the embedded API;
+  - the `ask` command;
+  - `ResourcePacks.read_directories/2`;
+  - the durable composition's optional model, bounds, sampling and active-tool
+    options, whose defaults reproduce M5.
 - **New edge modules behind unchanged ports:** the memory store and the
   in-process adapter. Core's dependency budget is unchanged.
 - **Rollback:** remove the profile. No durable byte depends on it.
