@@ -46,7 +46,7 @@ Technical depth: [Profile composition, adapters and proofs](0039-ephemeral-embed
 
 Technical depth: [Profile composition](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-decision).
 
-Technical depth: [The per-call process tree](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-tree).
+Technical depth: [The per-call process](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-tree).
 
 Loopex is meant to be a minimal coding harness on its own, and small enough to
 disappear inside a larger host. Every composition today is the durable one. It
@@ -118,12 +118,20 @@ loop.
 
 **Each in-process call is one process.** The in-process adapter makes a
 non-streaming call that ReqLLM, Req and Finch perform entirely inside the one
-process that asks for it, so no other process ever holds that call's request.
-Each call has a cleanup owner that stays responsive throughout. On a stop, a
-deadline or completion it ends that process and acknowledges cleanup only after
-it has seen it exit. If it cannot see that, the kernel's existing
-unproved-cleanup path applies. The model's reply arrives whole: an in-process
-call reports no streamed progress, which is transient and never session truth.
+process that asks for it. That holds under three preconditions, which Loopex
+checks and refuses to proceed without: the model's address is plain `http`, so
+no TLS connection processes exist; ReqLLM's connection pool speaks HTTP/1, so
+the request is not handed to a shared pool process; and Req's global default
+options do not redirect the request to another pool, adapter or process. Under
+them no other process holds the call's request. Each call has a cleanup owner
+that stays responsive throughout. On a stop or a deadline it kills that
+process; on completion the process exits by itself; either way the owner
+acknowledges cleanup, or returns the reply, only after it has seen that process
+exit. If it cannot see that, the kernel's existing unproved-cleanup path
+applies. The model's reply arrives whole: an in-process call reports no
+streamed progress, which is transient and never session truth. Telemetry
+handlers the host installs run in that process and may copy request data
+elsewhere; that is the host's own handler, as its logger is.
 
 **Host hygiene.** The in-process adapter runs inside a host that may do other
 things, and ReqLLM loads a `.env` file when its application starts. So Loopex,

@@ -36,7 +36,7 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
 `ReqLLM.model(%{provider: :ollama, id:, base_url:})`, and these options on every
 call:
 - `total_timeout: :infinity`, so ReqLLM's timeout budget calls `Req.request/1`
-  directly in the calling process (`timeout_budget.ex:47`) rather than in a
+  directly in the calling process (`timeout_budget.ex:48`) rather than in a
   task on the shared `ReqLLM.TaskSupervisor` (`:101-103`), whatever the host's
   `:req_llm` configuration says;
 - `receive_timeout` set to the time left before the request deadline, and
@@ -87,23 +87,49 @@ exactly two processes of its own:
 (`session_coordinator.ex:4627-4634`), or its deadline, the owner monitors the
 caller, kills it with `:kill`, waits for its `DOWN`, and only then acknowledges
 `{:loopex_provider_resource_stopped, stop, self()}` (`:4641`). On completion
-the owner waits for the caller's `DOWN` before it returns the reply. A `DOWN`
+the caller exits normally after sending its reply, and the owner waits for its
+`DOWN` before it returns the reply, killing it if the cooperative deadline
+passes first. A `DOWN`
 that does not arrive by the cooperative deadline leaves the acknowledgement
 unsent, and the coordinator's existing unproved-cleanup path applies
 (`:4646-4652`). When the caller dies, the pool that lent it a connection
-learns of it through NimblePool's checkout monitor (`nimble_pool.ex:196`) and
-closes or reclaims that connection; the pool is shared and is never killed.
+learns of it through NimblePool's checkout monitor (`nimble_pool.ex:578`,
+`:669-674`, `:786-793`) and closes that connection; the pool is shared and is
+never killed.
 
-**Pool protocol.** This holds for ReqLLM's default pool, which uses HTTP/1
-unless configured otherwise (`application.ex:4`, `:94-100`). An HTTP/2 pool
-instead performs the request inside the shared pool process on the caller's
-behalf. So the start step refuses `{:composition, :req_llm_pool_unsupported}`
-when `:req_llm`'s `:stream_pool_protocols` or its `:finch` pools configuration
-includes `:http2`.
+**Preconditions.** The one-process property holds only when all three hold,
+and each is checked where it can change:
+- **Plain `http`.** Over `https`, Mint's `:ssl` connection runs per-connection
+  TLS processes that carry the plaintext request. The in-process adapter
+  accepts only an `http://` base URL; any other refuses at composition as
+  `{:invalid_option, :base_url}`. Ollama's default is
+  `http://localhost:11434/v1`.
+- **An HTTP/1 pool.** ReqLLM's default pool uses HTTP/1 unless configured
+  otherwise (`application.ex:4`, `:94-100`); an HTTP/2 pool performs the
+  request inside the shared pool process on the caller's behalf. The start
+  step refuses `{:composition, :req_llm_pool_unsupported}` when `:req_llm`'s
+  `:stream_pool_protocols` or its `:finch` pools configuration includes
+  `:http2`.
+- **No redirecting Req defaults.** `Req.new/1` merges `:req`'s
+  `:default_options` into every request (`deps/req/lib/req.ex:475`,
+  `:1359-1361`), and ReqLLM builds its request with `Req.new/1`
+  (`provider/defaults.ex:267`) and keeps a `:finch` default
+  (`provider/defaults.ex:658-666`). A `:finch`, `:into`, `:adapter`, `:plug`
+  or `:connect_options` default could move the request to a host pool, Req's
+  asynchronous path (`deps/req/lib/req/finch.ex:273-274`, `:410-426`), or
+  another transport. Composition refuses
+  `{:composition, :req_default_options_unsupported}` when `:req`'s
+  `:default_options` sets any of them, and the caller checks again immediately
+  before each call, returning `{:not_dispatched, "model_call_failed"}` if one
+  has appeared since.
 
-**What the witness pins.** The witness counts the processes created during a
-call on both toolchain pairs and requires exactly the owner and the caller, so
-a ReqLLM update that moves the request into another process fails it.
+**What the witness pins.** On both toolchain pairs, after one call has warmed
+the pool for the test server's origin (the first request to an origin starts
+Finch's pool shards for it, `finch/lib/finch/pool/manager.ex:96-134`), a
+census of the processes that exist during a second call finds exactly the
+owner and the caller as new processes. A ReqLLM, Req or Finch update that moves
+the request into another process fails it; a first-call pool start is shared
+supervision, not a request holder.
 
 **Host hygiene.** `ReqLLM.Application.start/2` reads `:load_dotenv` (default
 `true`) and loads `.env` from the working directory (`application.ex:25-31`).
@@ -125,6 +151,8 @@ application configuration, which outlives any Loopex application's restart:
 | Running | `false` | neither | Refuse `{:composition, :req_llm_already_started}` |
 | Running | not `false` | any | Refuse `{:composition, :req_llm_dotenv_enabled}` |
 | Any | any | any, when `:req_llm`'s `:stream_pool_protocols` or `:finch` pools include `:http2` | Refuse `{:composition, :req_llm_pool_unsupported}` |
+| Any | any | any, when `:req`'s `:default_options` sets `:finch`, `:into`, `:adapter`, `:plug` or `:connect_options` | Refuse `{:composition, :req_default_options_unsupported}` |
+| Not running, and `Application.ensure_all_started(:req_llm)` returns an error | any | any | Refuse `{:composition, :req_llm_start_failed}`; ReqLLM's own start-time behaviour, such as the REPL server it adds when `TIDEWAVE_REPL` is set (`application.ex:43`, `:152-162`), is the host environment's |
 
 - **Concurrency.** Two compositions that both find ReqLLM not running write the
   same values and both call `Application.ensure_all_started/1`, which the
@@ -135,6 +163,11 @@ application configuration, which outlives any Loopex application's restart:
   the application (`Application.put_env/4`), so a host that stops and restarts
   ReqLLM restarts it with `.env` loading off. A host that turns loading back on
   changes the value the next composition reads, and is refused.
+- **A host declaration is trusted as given.** With `req_llm: :host_started`,
+  composition reads the current `:load_dotenv` and pool configuration, not the
+  values in force when the host started ReqLLM; a host that started it with
+  loading on and then turned the value off has made a false declaration, which
+  is the host's.
 - **Nothing else changes.** The inline model spec never reaches ReqLLM's
   unverified-model warning, which only the string lookup path emits
   (`req_llm.ex:735-750`), so Loopex leaves `warn_unverified_models` alone. The
@@ -155,6 +188,9 @@ table. All of these are VM-global and named, so one ReqLLM serves every user in
 the VM.
 
 **Paths that can carry request data into the host:**
+- a telemetry handler the host installs: Finch's events carry the request,
+  body included (`finch/http1/pool.ex:47-49`), and ReqLLM's carry payloads when
+  configured to; handlers run in the caller but may send data anywhere;
 - a log line ReqLLM, Req or Finch writes while handling the call: it is written
   in the caller, which sets `Logger.put_process_level(self(), :none)` first, so
   it is never emitted;
@@ -194,7 +230,7 @@ Concept: [Observable consequences](0039-ephemeral-embedded-profile.md#concept-ad
 | The memory store is a store | The store conformance suite's `:memory` kind is bound to `Loopex.Store.Memory` itself and passes unchanged |
 | The in-process adapter is a model | Mapping, option and error tests run against a scripted ReqLLM transport. The model streaming conformance suite runs against it. A real-provider lane calls a local Ollama model |
 | It serves only credential-free providers | Every non-Ollama provider refuses before ReqLLM is called; no `api_key` option is ever passed; an ephemeral runtime with an Ollama model opens no credential plane; with `LOOPEX_PROVIDER_API_KEY` set to a canary in the host environment, an in-process run leaves the canary in no plane, no runtime or adapter process state and no captured log event, and leaves the host variable unchanged |
-| Its cleanup ends the whole call | On both toolchain pairs, against a local test server that stalls before its response headers, mid-body and after the body: a stop, a deadline and a normal completion each leave no process created by the call alive, the owner answers while the caller is blocked in socket I/O, and the caller's `DOWN` precedes the acknowledgement or the returned reply. A process census taken during the call finds exactly the owner and the caller as new processes. The Finch pool is alive and serves the next call. A caller whose exit a test seam withholds takes the unproved path. Each pool refusal row of the start table refuses |
+| Its cleanup ends the whole call | On both toolchain pairs, against a local `http` test server that stalls before its response headers, mid-body and after the body: a stop, a deadline and a normal completion each leave no process created by the call alive, the owner answers while the caller is blocked in socket I/O, and the caller's `DOWN` precedes the acknowledgement or the returned reply. After one warming call, a census taken during a second call finds exactly the owner and the caller as new processes. The Finch pool is alive and serves the next call. A caller whose exit a test seam withholds takes the unproved path. An `https` base URL, an HTTP/2 pool setting and each redirecting Req default refuse; a Req default set after composition refuses the next call before dispatch |
 | The companion path is unchanged | Every companion suite passes after the shared mapping is extracted; an ephemeral runtime with a hosted model composes `CredentialPlane` exactly as the durable one does; the durable profile refuses an `ollama:` model |
 | Hygiene holds | `:req_llm` is started by no application start while the escript embeds its modules. A `.env` in the working directory is not loaded when composition starts ReqLLM. Each row of the start table; two concurrent first compositions starting it once; a second composition after a Loopex start proceeding; `loopex_composition` stopped and restarted, then a composition proceeding; ReqLLM stopped and restarted by the host with the persistent setting, loading no `.env`; the host turning loading back on, then refused; `warn_unverified_models` never written |
 | The profile is ephemeral and says so | After a proved stop, or its caller exiting, no file remains under the profile's temporary root. The session value and `result` carry `profile: :ephemeral`, and `ask`'s JSON carries `"profile"` |
