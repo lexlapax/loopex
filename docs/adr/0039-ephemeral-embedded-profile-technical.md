@@ -14,7 +14,7 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
 | --- | --- | --- |
 | `Loopex.Store` (six callbacks) | `Loopex.Store.Local` | `Loopex.Store.Memory`: a supervised process over `Loopex.Store.Local.State`, the conformance test wrapper `LoopexStoreLocalTest.Memory` promoted with its optional fault probe (active only when supplied, as `Loopex.Store.Local`'s is), so every conformance case proves it |
 | `Loopex.ArtifactStore` | `Loopex.Store.Local.Artifacts` | None; the runtime's existing `artifact_store: nil` behaviour (overflow truncated with the executor's notice, transfers unsupported) |
-| `Loopex.Model` (`complete/3`) | `Loopex.LLM.ReqLLM` through the companion bridge | `Loopex.LLM.ReqLLM.InProcess`. Its `complete/3` starts one provider child through the coordinator's provider-lifetime hook; that child calls `ReqLLM.stream_text/3` and drains the stream over the mapping it shares with the companion (`Loopex.LLM.ReqLLM.Mapping`) |
+| `Loopex.Model` (`complete/3`) | `Loopex.LLM.ReqLLM` through the companion bridge | `Loopex.LLM.ReqLLM.InProcess`. Its `complete/3` starts one provider child through the coordinator's provider-lifetime hook; that child calls `ReqLLM.stream_text/3` and a linked drainer drains the stream over the mapping it shares with the companion (`Loopex.LLM.ReqLLM.Mapping`) |
 | `Loopex.Executor` | `Loopex.Executor.Local`, ledger under the state root | `Loopex.Executor.Local`, ledger under the profile's temporary root |
 | `Loopex.Policy` | A named host policy | A policy module supplied by the host; the reference CLI maps `allow-all`, `shell-allowlist` and `refuse-all` to its own modules |
 
@@ -33,8 +33,8 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
 - **Before starting ReqLLM:** `load_dotenv: false` for `:req_llm` and `:llm_db`,
   and `warn_unverified_models: false`.
 - **Error classes:**
-  - A refusal raised before `ReqLLM.stream_text/3` is called is
-    `{:not_dispatched, "model_call_failed"}`. That covers model build,
+  - A refusal met before `ReqLLM.stream_text/3` is called is returned, never
+    raised, as `{:not_dispatched, "model_call_failed"}`. That covers model build,
     credential, context, tools and options, and an elapsed deadline.
   - Every return or raise from that call, `{:error, _}` included, is
     `{:dispatched_or_unknown, "model_call_failed"}`, as the companion

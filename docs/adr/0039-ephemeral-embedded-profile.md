@@ -168,6 +168,17 @@ What the ephemeral profile gives up is process isolation for the credential and
 for provider diagnostics. That trade is the point of the profile, and it is
 stated wherever the profile is offered.
 
+**The `ask` command's machine contract.** Other agents and scripts parse it, so
+it belongs to this decision as an experimental surface:
+- **JSON:** `--output json` writes exactly one JSON object, schema
+  `loopex.ask/1`, carrying the session and run ids, the profile, the outcome,
+  the final text, each tool's id and outcome, and the run's ending details.
+- **Exit status:** `0` completed; `1` refused before the run; `2` failed; `3`
+  bound reached; `4` outcome unknown; `5` cancelled; `6` no ending within the
+  wait; `130` the existing interrupt. The values avoid the daemon's 65–111 and
+  the launcher's 127.
+- **Versioning:** a change to either is a new schema name under the 0.x policy.
+
 **Model selection.** A `provider:model` string selects the model:
 `ollama:<model>`, `openai:<model>`, `anthropic:<model>` or
 `openrouter:<model>`.
