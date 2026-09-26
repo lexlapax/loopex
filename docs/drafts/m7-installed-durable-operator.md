@@ -49,9 +49,19 @@ that its successor removes it on evidence rather than on a guess.
 | Verdict | Maintainer and developer usable | Source-operator usable | Ordinary local-operator usable |
 
 **Open reconciliations with M6** (refined before M7 opens):
-- **Provider selection.** M6's `provider:model` strings and per-provider
-  credential variables must be reconciled with this draft's provider profiles
-  and its `--provider`/`--role` selection.
+- **Provider selection.** M6's `provider:model` strings and its ephemeral
+  credential custodian, which resolves per-provider references just in time,
+  must be reconciled with this draft's provider profiles, its credential
+  references and its `--provider`/`--role` selection.
+- **ADR 0028's transfer bound.** Accepted ADR 0028 counts artifact-transfer
+  concurrency per connection and adds 1 GiB of cumulative transfer work per
+  connection. The implementation since `0.1.0` counts two transfers per
+  attachment and enforces no allowance, a divergence disclosed on the operator
+  and developer pages. On 2026-09-26 the maintainer fixed the direction:
+  implement the accepted per-connection count and allowance, not amend the ADR.
+  The installed daemon serving several clients is where that bound starts to
+  matter, so M7 carries it as an outcome, with the daemon's `node_client` lane
+  and the operator page updated in the same change.
 - **Default home.** This draft's default home interacts with M6's rule that
   `ask` is ephemeral unless `--state-root` names a root, and with its
   statement that `LOOPEX_HOME` never switches profiles. Whether a configured
