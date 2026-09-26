@@ -107,7 +107,7 @@ root is the store adapter's and follows ADR 0036.
 | `loopex config set <pointer> <value>` | Validates the whole resulting document before writing; atomic replacement under a lock file beside `config.json` |
 | `loopex config validate [FILE]` | Exit `0` or one refusal line per error |
 | `loopex paths` | Every resolved path and its origin |
-| `loopex doctor` | The M6 diagnostic: home, file validity, selected profiles, credential reference resolvable or not, store format marker and whether the format is known, daemon status, release version, platform and minimum base |
+| `loopex doctor` | The M7 diagnostic: home, file validity, selected profiles, credential reference resolvable or not, store format marker and whether the format is known, daemon status, release version, platform and minimum base |
 | `loopex daemon status \| stop \| logs` | The M5 status record; the M5 drain then exit; the bounded redacted log the daemon writes under `logs/` |
 
 **Atomic write.** Write to `config.json.<random>` in the same directory, `fsync`,
@@ -161,7 +161,7 @@ flag-and-environment behaviour. No durable session truth lives in the file.
   project-resource decision is its intended basis.
 - *A setup wizard* was rejected for a line-oriented CLI; `init` takes flags
   and the demonstration configures a host in one command.
-- *Hot reload* adds a mutable path into a running composition for no M6
+- *Hot reload* adds a mutable path into a running composition for no M7
   outcome.
 - *XDG base directories* add a search path and a second answer to "where is my
   configuration"; one default and two explicit overrides are enough.

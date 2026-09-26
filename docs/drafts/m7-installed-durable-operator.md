@@ -1,0 +1,306 @@
+<a id="concept"></a>
+## Concept
+
+Technical depth: [Prerequisites, evidence, compatibility and packaging](m7-installed-durable-operator-technical.md#technical-depth).
+
+**Draft, not a registered plan.** This pair was the Open M6 plan until the
+maintainer's reframing of 2026-09-26, which made M6 the minimal runnable
+Loopex and moved this installed durable operator to M7. It is kept here to be
+refined, and it moves into `docs/plans/` as the Open lookahead when M6 closes.
+Its version labels moved one minor with it: `0.4.0` is this rung's candidate,
+and `0.3` is the M6 minimal release before it. Where it says the `0.2` root
+format, that format is still the local store's, unchanged by M6.
+
+<a id="concept-plan-purpose"></a>
+### Purpose
+
+Technical depth: [Prerequisites and acceptance points](m7-installed-durable-operator-technical.md#technical-plan-prerequisites).
+
+**M7 is the installed durable operator milestone, the `0.4.0` candidate.** Its
+product question is:
+
+> Can an operator download Loopex, configure it once, run the daemon without a
+> source checkout or an Elixir toolchain, preserve, back up and restore
+> sessions safely, and inspect exactly which configuration is in effect?
+
+That is one coherent loop, and the milestone is that loop end to end:
+install, configure, run, disconnect, restart, resume, back up, restore.
+
+Today Loopex is usable in the narrow sense and not in the ordinary one. The
+foreground loop works and M5 made it a daemon, but every capability sits on
+a source tree: the operator index says Loopex is not packaged or published for
+consumers, the coding-sessions guide calls the CLI a source-tree surface, the
+provider companion records absolute build-tree paths, the state root is a
+required environment variable with no default, the model is a constant in the
+adapter with no flag to change it, and the `0.2` store is a full-replay log
+that stops at 256 MiB and asks the operator to retire the root. M5 stated each
+of those limits truthfully and excludes their removal by name. M7 removes all
+of them except the store ceiling, which it measures and bounds by decision so
+that its successor removes it on evidence rather than on a guess.
+
+| Capability | Before M5 | `0.2.0` (M5, closed) | M7 target |
+| --- | --- | --- | --- |
+| Real coding work | Working foreground loop | Working daemon loop | The same loop from an installed artifact |
+| Installation | Build from a clean Git checkout | Build from a source archive | Download, verify, extract, run |
+| Runtime requirement | Git, Mix, Elixir/OTP | Mix, Elixir/OTP | None; the runtime system and its native libraries are bundled |
+| Session operation | Run, list, resume, cancel | Daemon, attach, takeover, reconnect | The same, with a daemon that starts on demand, stops on request, and has stable paths, logs and diagnostics |
+| Configuration | Flags and environment variables | More flags and environment fallbacks | Saved, typed, validated host configuration with named provider profiles and a visible effective view |
+| Persistence | Full-replay local log | The same log, 256 MiB ceiling, root retirement | The same log with a format marker, backup and restore, and the engine decision for its successor taken from measurement |
+| Verdict | Maintainer and developer usable | Source-operator usable | Ordinary local-operator usable |
+
+**Why this rung, and why now.** The roadmap projects a governed extension
+runtime as the next candidate, and it also says its labels are navigation
+aids and an accepted plan may resequence projected work beneath the vision's
+serial barriers. Two facts argue for inserting this rung before extensions.
+First, the operator questions above are answered by no other milestone, and
+every comparable coding agent answers them before it grows an extension
+ecosystem: a home directory, a saved configuration, a diagnostic command and
+an installable artifact are what let a second person use the thing at all.
+Second, governed extensions bring their own set of trust and durability
+problems: package acquisition, retained artifacts, VM-global loading,
+quiescence, state upgrade and downgrade, signing, activation and exact
+rollback. Combining those with a configuration schema, credential references
+and the first binary release would make one milestone carry three. So the
+sequence is M6, the minimal runnable Loopex; M7, this installed durable
+operator; M8, the store engine successor; and M9, the governed extension
+runtime. The serial barriers are respected: durable local
+truth and multi-client attachment precede this rung, and extension namespaces
+and activation proof still precede any public-protocol decision. The roadmap
+projection is updated when this plan is accepted, not before, and the
+projected version labels of the later rungs shift by one minor with it.
+
+**Why the store engine is decided here and built next.** M5 leaves the
+daemon-grade store to its successor by ADR 0031's own words. M7 takes the
+engine decision from a retained measured experiment, writes a format marker
+into every root so the first binary knows its own storage boundary, and ships
+backup and restore, because those are cheap and an operator needs them before
+any migration exists. The engine adapter, the explicit migration and the
+definite capacity refusal are the successor's implementation scope: they are
+the largest and the only durability-touching workstream in the original
+shape of this plan, and an unfilled engine cell is a poor thing to start a
+release on. The store format is private, migration is explicit either way,
+and publication is separately gated, so shipping `0.4.0` on the `0.2` log
+solidifies nothing. If the experiment shows the `0.2` log fails the operator
+bound ADR 0036 states, the maintainer may pull the adapter into M7 at
+acceptance by amending this plan; the default is deferral.
+
+**What is deliberately not in M7.** No trusted extension activation, no typed
+decision models or ADR 0035 evaluation seams, no live model switching within
+a run, no protocol v1, no Hex publication, no service-manager installation,
+no automatic updates, no desktop or rich terminal UI, no multi-user identity,
+no isolated hands, no remote workers, no persistent credential store, and no
+new store engine, migration or capacity refusal.
+
+**The baseline.** M7 starts from the closed M6 minimal release, which itself
+starts from the closed M5 durable service (`v0.2.0`). Every M7 outcome starts
+from the local store's unchanged `0.2` root format, the M5 daemon and
+workflow, and M6's profiles and command forms.
+
+<a id="concept-plan-outcomes"></a>
+### Outcomes
+
+Technical depth: [Evidence obligations and mapping](m7-installed-durable-operator-technical.md#technical-plan-evidence).
+
+| # | Outcome | Proved by |
+| --- | --- | --- |
+| 1 | **Installed distribution.** One platform-specific release archive per supported platform, with the runtime system and every native library it needs bundled or resolved from the platform's base system alone, the existing `loopex` launcher promoted as the one installed command, the protected provider companion inside it discovered relatively and verified by digest, and a manifest with source commit, toolchain, platform and its minimum base, file digests and archive checksum | A clean supported host with no Git, Mix, Elixir, Erlang or third-party OpenSSL installed verifies, extracts and runs the exact archive through a real provider call; the shipped native libraries are shown to resolve nowhere outside the archive and the base set; the manifest verifies from inside the installation |
+| 2 | **Host configuration.** A versioned closed-schema `config.json` under a default home, named provider profiles each with a default model, optional role aliases and a credential reference to an environment variable or a protected file, an explicit policy selection, one precedence rule, per-value provenance, atomic writes and a redacted effective view | An empty temporary home is initialized, configured, validated, restarted and shown to produce the same effective configuration; a second profile is selected for one run by flag; a file credential rotates without a daemon restart; every refusal names its exact path |
+| 3 | **Store readiness.** The ADR 0036 engine experiment run and retained on both toolchain pairs so its engine cell is filled, a format marker written into every root the `0.4` binary opens, the reader boundary that refuses a format it does not know, and `store backup` and `store restore` on the closed `0.2` root | The retained experiment record and its digest; the marker, boundary, backup and restore tests on the local adapter; the backup and restore demonstration inside the installed-artifact lane |
+| 4 | **Operator lifecycle.** `version`, `paths`, `init`, `config`, `doctor`, `store backup`, `store restore`, `daemon status`, `daemon stop` and `daemon logs` beside the existing session commands, a daemon that starts on demand when a session command finds none, each command with a stable exit class | An operator diagnoses a missing configuration, a bad path, an unresolvable credential reference, a store fault, an unknown store format, a daemon that is not running and a version mismatch from the command output alone, never from internal files; two clients that start the daemon at once get one daemon |
+| 5 | **Packaged workflow.** The M5 daemon collaboration workflow driven entirely through the installed artifact | A real provider session, detach, observer attach, takeover, daemon restart, list, resume and completion, from the installed command on both supported platforms |
+| 6 | **Upgrade and rollback.** An exact reader boundary and recovery procedure between the `0.2` and `0.4` binaries over the unchanged root format | The `0.4` binary opens every `0.2` root unchanged and the `0.2` binary opens a root `0.4` has written; the `0.4` binary refuses a root whose marker names a format it does not know, by name, writing nothing; a backup taken under `0.4` restores under the previous release and serves the sessions it held |
+
+**The single acceptance demonstration** begins with an empty temporary home
+and the released archive on each supported platform: verify the artifact and
+its native linkage, initialize the configuration with a provider profile, a
+credential reference and a policy in one command, run `doctor`, run a session
+command that starts the daemon on demand, complete real work, disconnect and
+reattach, stop and restart the daemon, list and resume the session, then back
+up the root, switch to the previous release and restore it. It proves that
+nothing is written outside the selected home, the workspace and the
+explicitly selected temporary locations.
+
+<a id="concept-plan-scope"></a>
+### Scope
+
+Technical depth: [Ownership and rejoin](m7-installed-durable-operator-technical.md#technical-plan-ownership).
+
+**Distribution.** A `mix release` of the umbrella per supported platform,
+macOS on Apple silicon and Linux on x86-64, with ERTS included, built from a
+release toolchain whose native libraries link statically or ship inside the
+archive, inside a build environment ADR 0038 fixes per platform with its
+minimum base system. The launcher gains one branch to find the release beside
+itself and otherwise keeps its interrupt contract verbatim. The provider build
+task writes release-relative paths and the launch configuration resolves them
+once at start. A manifest and a checksum file accompany every archive.
+`loopex version` reads the manifest; `loopex version --verify` recomputes it.
+The source archive M5 produces still builds the same release. Publication is
+not scope; retaining the built artifact with its evidence is.
+
+**Configuration.** One module family in the reference host that reads,
+validates, resolves and writes `config.json` and produces the composition
+options the existing composition already validates. The default home is
+`~/.loopex`; `LOOPEX_HOME` and `--state-root` override it in that order of
+precedence, below flags. Six closed domains: paths, daemon, runtime,
+providers, policy, diagnostics. A provider profile names a default model,
+optional role aliases and a credential reference, to an environment variable
+or to a file the operator protects; `--provider` and `--role` select among
+saved profiles for one invocation. No policy and no credential has a
+permissive default. A change takes effect at the next daemon start.
+
+**Store readiness.** The ADR 0036 experiment harness and its retained record;
+a format marker file written beside the log and ignored by `0.2`; the reader
+boundary on the `0.4` binary; `loopex store backup` and `loopex store restore`
+on the closed local root, each producing or consuming one archive with a
+digest manifest. No new adapter application, no `store migrate` and no change
+to the local adapter's capacity behaviour; those follow in the successor
+under the same accepted decision.
+
+**Operator surface and documentation.** The lifecycle commands above, each
+with an exit class added to the M5 exit-status map; start-on-demand for the
+daemon under the M5 placement lock; and an operator guide that starts from a
+downloaded archive rather than a checkout. The developer documentation states
+what M7 changed for its reader.
+
+**Version.** `VERSION` moves from `0.2.0` to `0.4.0` in the tested candidate,
+under the 0.x policy.
+
+<a id="concept-plan-non-goals"></a>
+### Non-Goals
+
+Technical depth: [Deferral acceptance points](m7-installed-durable-operator-technical.md#technical-plan-prerequisites).
+
+No change to core and no new core dependency. No new store adapter, no store
+migration, no change to the local adapter's capacity behaviour and no
+compaction, retention or history rewrite; the engine ADR 0036 selects is
+implemented by the successor. No trusted extension activation, extension
+source configuration, package acquisition or VM-global loading; those retain
+their vision barrier and their own milestone. No ADR 0035 evaluation, no
+second provider adapter, no model switching within a run. No protocol change:
+generation 2 is served unchanged and no generation 3 exists. No Hex packages,
+no Homebrew or distribution packages, no installer beyond extract-and-run, no
+install script, no service-manager units, no automatic updates, no
+self-update command. No persistent credential store, keychain integration or
+credential bytes in any file Loopex writes; a credential is a reference to an
+environment variable or to an operator-protected file in `0.4.0`, and the
+command-form reference every comparable agent offers waits on its own trust
+decision. No project-local configuration until a project-trust rule exists;
+the M3 project-resource trust decision is the intended basis for that rule.
+No hot reload of configuration. No setup wizard: `init` takes flags. No
+multi-user identity, tenancy, isolated hands or remote workers. No platform
+beyond the two named; a build that succeeds elsewhere is not a supported
+platform.
+
+<a id="concept-plan-decisions"></a>
+### Design Decisions
+
+Technical depth: [Prerequisites and acceptance points](m7-installed-durable-operator-technical.md#technical-plan-prerequisites).
+
+Three decisions are proposed with this plan. Each is accepted before the
+implementation that depends on it, not before unrelated work, and none may be
+outstanding at closure.
+
+| Decision | What it settles | Outcomes that wait on it |
+| --- | --- | --- |
+| [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept) | The selection procedure and criteria for the daemon-grade store engine behind the unchanged private ports, with the engine cell filled from a retained measured experiment before acceptance; the format marker and reader boundary; backup and restore as the rollback; the explicit, offline, idempotent migration that converges when interrupted and the definite survivable capacity refusal, both implemented by the successor under this decision. Supersedes ADR 0031's selection | 3, 6 |
+| [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept) | The default home resolved by the reference host's launcher and configuration layer only, as a narrow amendment to ADR 0003; one closed versioned schema in six domains; provider profiles with a default model, role aliases and environment or file credential references and no credential bytes; one precedence rule; per-value provenance; atomic conservative writes; an immutable snapshot at composition with no hot reload | 2, 4 |
+| [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) | One platform-specific OTP release archive with ERTS bundled as the binary release, built in a fixed per-platform build environment whose native libraries link statically or ship inside the archive; the existing launcher promoted as the one installed command; the provider companion inside the release, discovered relatively and verified by digest; the manifest and checksum; the two supported platforms with their minimum base systems; the install, upgrade, rollback and uninstall contract; publication as a separate maintainer decision gated on name clearance | 1, 5 |
+
+**Decisions settled here rather than in an ADR**, because each is internal
+structure, host behaviour or a naming choice that no accepted decision binds:
+
+- The release's application list is drawn from the umbrella's role table, so
+  a future adapter joins the release by the same reviewed change that admits
+  it to the dependency budget.
+- The configuration layer lives in `apps/loopex_cli`, beside the launcher and
+  the command grammar, and produces exactly the keyword list
+  `LoopexComposition.start/1` validates; nothing below the reference host
+  reads the file or the home.
+- Every new command's exit classes extend the M5 exit-status map from the
+  next free value, keeping the map contiguous and injective.
+- The daemon starts on demand. When `run --daemon`, `resume --daemon` or
+  `attach` finds no daemon answering on the configured socket, the client
+  starts one detached from its terminal and waits for the M5 readiness
+  record; the M5 placement lock resolves two concurrent starts to one daemon
+  and the loser attaches to the winner. ADR 0032 fixes the daemon's lifecycle
+  once it exists and describes restart as an operator action; it does not
+  bind who starts the process, so this is host behaviour the plan may settle
+  and the maintainer may strike at acceptance. `daemon stop` performs the M5
+  drain; `daemon logs` prints the bounded redacted log.
+- The configuration file stays JSON. Comments are the only thing lost and
+  `config set` covers them; every comparable agent that chose JSON5 or YAML
+  then needed a second file or a migration command for it.
+
+**Prerequisites that are not ADRs.** M5 closure is satisfied (2026-09-26);
+public-name clearance completes before any artifact is published, which is
+after closure and outside this plan.
+
+<a id="concept-plan-verification"></a>
+### How Each Outcome Is Verified
+
+Technical depth: [Evidence obligations and mapping](m7-installed-durable-operator-technical.md#technical-plan-evidence).
+
+Verification is the current suite plus the two check commands. The fast check
+proves the configuration layer, the launcher's release branch, the format
+marker and reader boundary, the backup and restore mechanics against
+fixtures, the daemon's start-on-demand race, and every exit class,
+credential-free. The release check gains one installed-artifact lane per
+supported platform, run on a host of that platform with no toolchain and no
+third-party OpenSSL on it, which first proves the archive's native linkage
+and then performs the single acceptance demonstration end to end with the
+real provider and retains its output, manifest and digests outside the
+repository. The ADR 0036 experiment is run once on each toolchain pair and
+its record retained before that decision is accepted. Closure follows the
+two-commit procedure the milestone guide fixes from M5 onward.
+
+<a id="concept-plan-rollout"></a>
+### Rollout and Compatibility
+
+Technical depth: [Compatibility](m7-installed-durable-operator-technical.md#technical-plan-compatibility).
+
+Technical depth: [Migration and rollback](m7-installed-durable-operator-technical.md#technical-plan-migration).
+
+Technical depth: [Packaging](m7-installed-durable-operator-technical.md#technical-plan-packaging).
+
+`0.4.0` is a minor release under the 0.x policy. It creates two experimental
+surfaces, the configuration schema and the released archive contents, and no
+store migration: every `0.2` root opens unchanged under `0.4`, gains a format
+marker that `0.2` ignores, and a backup taken under either release restores
+under either. The reader boundary `0.4` adds is what makes the successor's
+migration safe to introduce. The public protocol, the embedded API and the
+executor protocol are unchanged. The source tree keeps working as before for
+developers; the released offline commands keep their flag and environment
+behaviour when no home is initialized. On acceptance the roadmap names this
+rung the `v0.4` candidate and moves the governed extension runtime and the
+rungs after it later by the same amount.
+
+## Workstreams
+
+Four workstreams with non-overlapping ownership, one integrator, rejoin in
+the order the technical plan fixes: distribution, configuration and lifecycle
+commands, store readiness, operator and developer documentation. The single
+acceptance demonstration is written first as a failing script and turned
+green as each workstream lands.
+
+## Progress and Evidence
+
+Once registered, the register in [docs/plans/README.md](../plans/README.md)
+owns M7's lifecycle state, and each transition records exactly one thing, as
+the M5 plan states for the two-commit closure procedure this plan inherits.
+Every row reads `Open` while the draft is unregistered or `Open`.
+
+| # | State | Evidence |
+| --- | --- | --- |
+| 1 | Open | No release build, manifest or relocatable companion exists; the launcher finds only the escript; the current pair's crypto NIF links a third-party OpenSSL on macOS and the Linux host's glibc is newer than most targets, measured 2026-09-21 |
+| 2 | Open | No configuration file, schema, default home, provenance or effective view exists; `LOOPEX_HOME` is required with no default; the model is a constant in the adapter |
+| 3 | Open | No experiment record, format marker, reader boundary, backup or restore exists; the `0.2` local adapter is the only store and its log's magic prefix is the only version byte |
+| 4 | Open | No `version`, `paths`, `init`, `config`, `doctor`, `store` or `daemon status`, `stop`, `logs` command exists; the daemon is started only by hand |
+| 5 | Open | No installed-artifact workflow exists; the M5 workflow runs from a source tree |
+| 6 | Open | No reader boundary or rollback proof exists between the `0.2` and `0.4` binaries |
+
+## Governance Records
+
+| Decision | Authority | Authority evidence | Bound bytes |
+| --- | --- | --- | --- |
+| Acceptance | — | — | — |
+| Closure | — | — | — |

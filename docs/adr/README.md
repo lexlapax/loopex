@@ -48,6 +48,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0036 | Daemon-grade store engine and migration | Proposed | [Decision](0036-daemon-grade-store-engine-and-migration.md#concept) | [Technical depth](0036-daemon-grade-store-engine-and-migration-technical.md#technical-depth) |
 | 0037 | Host configuration and path discovery | Proposed | [Decision](0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
 | 0038 | Installed distribution and release artifact | Proposed | [Decision](0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
+| 0039 | Ephemeral embedded profile | Proposed | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -193,14 +194,20 @@ credential token per provider where 0034 fixes one per **composed model
 configuration** — bound at composition, resolved per call. No part of it
 runs inside M5.
 
-0036 to 0038 are the three Proposed M6 prerequisites, proposed with the Open
-M6 plan on 2026-09-21: the daemon-grade store engine and its explicit `0.2`
+0036 to 0038 were proposed on 2026-09-21 with the plan that was then M6. The
+maintainer's reframing of 2026-09-26 moved that plan to the M7 draft, and
+0036's successor half to the M8 draft. They are: the daemon-grade store engine and its explicit `0.2`
 migration, backup and restore, which supersedes 0031's selection once
 accepted and fills its engine cell from a retained measured experiment
 first; host configuration and path discovery, with the default home
 resolved by the reference host's launcher and configuration layer only, as
 a narrow amendment to 0003; and the installed distribution, one
 platform-specific OTP release archive with the runtime system bundled and
-the existing launcher promoted. They accept nothing, each is accepted
-before the M6 outcome that depends on it, and none can be accepted before
-M5 closes.
+the existing launcher promoted. They accept nothing, and each is accepted
+before the M7 or M8 outcome that depends on it.
+
+0039 is the one Proposed M6 prerequisite, proposed with the M6 plan on
+2026-09-26. It adds an ephemeral composition profile beside the durable one,
+over the same kernel: a memory store, an in-process model adapter with a
+per-provider credential rule, and the local executor on a temporary root.
+It leaves 0019 and 0034 unchanged for every durable and daemon composition.

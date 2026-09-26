@@ -83,7 +83,7 @@ next run in each case.
 
 **Reader boundary.** The root carries a format version file written last. A
 `0.2` reader that opens a `0.3` root refuses with `store_format_unsupported`,
-a class M5's exit-status map does not carry and M6 adds; it writes nothing.
+a class M5's exit-status map does not carry and M7 adds; it writes nothing.
 The `0.3` reader opens `0.2` roots read-only for `loopex doctor` and the
 listing, and refuses to serve sessions from one until migrated.
 
@@ -103,7 +103,7 @@ The vision's migration list is discharged item by item in the technical plan
 of the milestone that ships the engine: source and target versions, forward
 migration, interrupted detection and recovery, backup/restore as downgrade
 policy, the previous-binary boundary, and the packaged rollback procedure.
-M6's technical plan discharges the items that apply to `0.3.0`'s unchanged
+M7's technical plan discharges the items that apply to `0.4.0`'s unchanged
 format and marks the rest not applicable until then. Extension-state fixtures
 do not apply; no extension state exists.
 

@@ -10,7 +10,7 @@ Technical depth: [Schema, precedence, provenance and write mechanics](0037-host-
   its technical clause that no Loopex application reads a user home directory,
   narrowed as stated below; every other ADR 0003 clause stands, including that
   host policy owns the configuration naming extension sources
-- **Prerequisite for:** M6 outcomes 2 and 4, accepted before the configuration
+- **Prerequisite for:** M7 outcomes 2 and 4 (draft; this was M6 before the maintainer's reframing of 2026-09-26), accepted before the configuration
   layer, the default home or any `loopex config`, `paths`, `init` or `doctor`
   command is written
 
@@ -113,7 +113,7 @@ byte, so a later minor release may change it with a migration note. Nothing in
 the file is durable session truth; deleting it loses saved profiles and
 nothing else, which is the rollback. Credential bytes are excluded by
 construction; a persistent credential store is a separate trust decision this
-pair does not make and M6 does not need.
+pair does not make and M7 does not need.
 
 ## Governance Record
 

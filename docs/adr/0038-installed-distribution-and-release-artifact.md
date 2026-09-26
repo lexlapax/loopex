@@ -10,7 +10,7 @@ Technical depth: [Artifact contents, companion placement and smoke proofs](0038-
   rule that a minimal runtime distribution carries no compiler, and
   [ADR 0019](0019-host-owned-provider-protection.md#concept)'s separate
   protected provider companion, to an installed artifact
-- **Prerequisite for:** M6 outcomes 1 and 5, accepted before any release
+- **Prerequisite for:** M7 outcomes 1 and 5 (draft; this was M6 before the maintainer's reframing of 2026-09-26), accepted before any release
   build, manifest or install script is written
 
 <a id="concept-adr-0038-decision"></a>
@@ -91,7 +91,7 @@ minimal runtime distribution carries no compiler.
 8. **Publication is a separate maintainer decision** after closure, gated on
    the public-name clearance the vision's name section already requires and
    on the macOS signing decision the companion records. Building and
-   retaining the artifact is M6 scope; publishing it is not.
+   retaining the artifact is M7 scope; publishing it is not.
 
 <a id="concept-adr-0038-consequences"></a>
 ### Observable Consequences
@@ -116,7 +116,7 @@ This creates the vision's surface 7, released package contents, which is inert
 until publication and permanent afterward. The archive's contents are
 therefore fixed by this decision, not by convenience: one archive contains the
 whole reference host and nothing that is a separately versioned library. Hex
-packages are not published by M6. Rollback of the binary is switching
+packages are not published by M7. Rollback of the binary is switching
 directories; rollback of storage is ADR 0036's; the two are proved together in
 one demonstration so that "restart the old binary" is never mistaken for a
 plan.

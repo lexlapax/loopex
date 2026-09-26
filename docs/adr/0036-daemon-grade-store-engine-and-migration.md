@@ -10,7 +10,7 @@ Technical depth: [Selection procedure, migration contract and candidate evidence
   for the store selection only, once this pair is accepted; ADR 0031's local
   adapter, its documented ceilings and its root-retirement procedure remain
   the `0.2` record and the `0.3` migration source
-- **Prerequisite for:** M6 outcomes 3 and 6, accepted before any format
+- **Prerequisite for:** M7 outcomes 3 and 6 (draft; this was M6 before the maintainer's reframing of 2026-09-26, and the successor is the M8 draft), accepted before any format
   marker, reader boundary, backup or restore code is written; the engine
   adapter, the migration and the capacity refusal it fixes are implemented by
   the successor milestone under this same decision

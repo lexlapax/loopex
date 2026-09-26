@@ -20,6 +20,7 @@ is the index of what exists.
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
 | [evidence/](evidence/README.md) | Retained check-run and demonstration evidence, named by the revision it was taken at. |
+| [drafts/](drafts/README.md) | Draft milestone plan pairs (M7, M8, M9) not yet in the register; each moves into `plans/` when the milestone before it closes. |
 | [archive/](archive/README.md) | Non-normative historical inputs, retained for provenance. |
 
 Every directory under `docs/` carries a `README.md` describing its contents and
@@ -89,6 +90,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0036 — daemon-grade store engine and migration | [Decision](adr/0036-daemon-grade-store-engine-and-migration.md#concept) | [Technical depth](adr/0036-daemon-grade-store-engine-and-migration-technical.md#technical-depth) |
 | 0037 — host configuration and path discovery | [Decision](adr/0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](adr/0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
 | 0038 — installed distribution and release artifact | [Decision](adr/0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](adr/0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
+| 0039 — ephemeral embedded profile | [Decision](adr/0039-ephemeral-embedded-profile.md#concept) | [Technical depth](adr/0039-ephemeral-embedded-profile-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
@@ -101,7 +103,9 @@ whose path or explicit fragment does not resolve.
 
 - [M3 foundations](plans/M3.md#concept) and [technical plan](plans/M3-technical.md#technical-depth) — project skills and core repairs; Closed with retained evidence in the plan.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, the floor refresh, observability, and the experimental session protocol driven by an independent Node consumer in plain JavaScript; Closed, with its runs in [M4 closure runs](evidence/M4-closure-runs.md).
-- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4. The [plans register](plans/README.md) carries its current state.
+- [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4.; Closed, with its runs in [M5 closure runs](evidence/M5-closure-runs.md).
+- [M6 minimal runnable Loopex](plans/M6.md#concept) and [technical plan](plans/M6-technical.md#technical-depth) — the embedded ephemeral API, the in-process model adapter and memory store, the standalone command for shells and agents, full Loopex unchanged, and closure tooling in the repository. The [plans register](plans/README.md) carries its current state.
+- Draft milestones, not yet registered: [M7 installed durable operator](drafts/m7-installed-durable-operator.md#concept) ([technical](drafts/m7-installed-durable-operator-technical.md#technical-depth)), [M8 store engine successor](drafts/m8-store-engine-successor.md#concept) ([technical](drafts/m8-store-engine-successor-technical.md#technical-depth)) and [M9 governed extension runtime](drafts/m9-governed-extension-runtime.md#concept) ([technical](drafts/m9-governed-extension-runtime-technical.md#technical-depth)).
 - [M6 installed durable operator](plans/M6.md#concept) and [technical plan](plans/M6-technical.md#technical-depth) — the `0.3.0` candidate: one platform-specific release archive with the runtime bundled, saved and validated host configuration under a default home, a daemon-grade store with explicit migration, backup and restore, and the operator lifecycle commands, all proved from an installed artifact; Open beside the accepted M5 and not acceptable before M5 closes.
 
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,

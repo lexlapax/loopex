@@ -22,9 +22,9 @@ its last `Closed` row identifies the last closed product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M5` — 2026-09-26 |
-| Blockers | `M6` is open and not accepted; the maintainer must accept its plan pair; `M6` waits on ADR 0036, ADR 0037, and ADR 0038 before the outcomes that depend on them |
+| Blockers | `M6` is open and not accepted; the maintainer must accept its plan pair; `M6` waits on ADR 0039 before the outcomes that depend on it |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Accept or reject the `M6` plan pair; disposition [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept), [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept), and [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept) |
+| Next maintainer decision | Accept or reject the `M6` plan pair; disposition [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) |
 | Next transition | Record the acceptance governance row and move `M6` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
