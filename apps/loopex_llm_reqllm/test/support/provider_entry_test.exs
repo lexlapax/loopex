@@ -353,7 +353,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     down = queued_message(guardian, &match?({:DOWN, _, :process, ^retainer, :killed}, &1))
     {:messages, messages} = Process.info(guardian, :messages)
     assert Enum.find_index(messages, &(&1 == terminal)) < Enum.find_index(messages, &(&1 == down))
-    assert :erlang.resume_process(guardian)
+    assert Fixture.resume_guardian(guardian)
     monitor = call.monitor
     assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 2_500
 
@@ -383,7 +383,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     assert {_output, 0} = System.cmd("/bin/kill", ["-STOP", Integer.to_string(pid)])
 
     try do
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
 
       assert Fixture.eventually(
                fn -> {:status, :waiting} == Process.info(caller, :status) end,
@@ -444,7 +444,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
       assert [{_request, true}] = Fixture.events(fixture)
       assert {_, 0} = System.cmd("/bin/kill", ["-STOP", Integer.to_string(pid)])
       started = System.monotonic_time(:millisecond)
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
       refute_receive {:completed, ^caller, _}, 100
 
       assert_receive {:completed, ^caller,

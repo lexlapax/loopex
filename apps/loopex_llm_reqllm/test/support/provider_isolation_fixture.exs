@@ -437,6 +437,22 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   def reached?(fixture, name), do: File.regular?(marker(fixture, name))
   def release(fixture), do: File.write!(marker(fixture, "release"), "release")
 
+  # Concept: resume a guardian a case held, so that it runs again.
+  #
+  # Technical depth: on OTP 29.0.5 a process suspended while it waits in
+  # `receive ... after` can lose that timeout on resume and then wait forever.
+  # The guardian polls accept and checks its deadline only from its `after 10`,
+  # so a hosted current-pair run left one stranded until the request deadline
+  # (run 36199494299). A standalone loop reproduced it within a few dozen
+  # suspend/resume cycles on 29.0.5, and never in 4,500 cycles on 27.3.4. One
+  # message, which the guardian's loop ignores, restarts that receive and its
+  # timer. Production suspends a guardian only immediately before killing it.
+  def resume_guardian(guardian) do
+    true = :erlang.resume_process(guardian)
+    send(guardian, :loopex_test_resume_nudge)
+    true
+  end
+
   def canaries(fixture), do: length(methods(fixture))
 
   def methods(fixture) do

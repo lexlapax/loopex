@@ -728,7 +728,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
                    )
 
             assert :erlang.suspend_process(sender)
-            assert :erlang.resume_process(guardian)
+            assert Fixture.resume_guardian(guardian)
             assert Fixture.eventually(fn -> queued(sender) == 1 end, 5_000)
             assert :erlang.suspend_process(guardian)
             assert System.system_time(:millisecond) < request.deadline
@@ -739,7 +739,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
                            2_000
 
             assert sent_frames(socket) == written
-            assert :erlang.resume_process(guardian)
+            assert Fixture.resume_guardian(guardian)
             assert_receive {:trace, ^guardian, :call, {ProviderBridge, :expire, 1}}, 2_000
           after
             :erlang.trace_pattern({ProviderBridge, :expire, 1}, false, [:local])

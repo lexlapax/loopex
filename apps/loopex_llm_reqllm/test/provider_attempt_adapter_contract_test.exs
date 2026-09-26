@@ -509,7 +509,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       assert Enum.find_index(messages, &(&1 == terminal)) <
                Enum.find_index(messages, &(&1 == down))
 
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
     end
 
     assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 2_500
@@ -549,7 +549,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert {_output, 0} = System.cmd("/bin/kill", ["-STOP", Integer.to_string(pid)])
 
     try do
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
 
       assert Fixture.eventually(
                fn ->

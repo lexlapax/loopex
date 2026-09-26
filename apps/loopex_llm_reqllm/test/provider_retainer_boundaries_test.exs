@@ -42,7 +42,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
       assert credential_proof(fixture, "bootstrap-reader-held", request) ==
                %{"actual_reader_suspended" => true, "private_socket" => true}
 
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
 
       assert_receive {:trace, ^guardian, :receive,
                       {:provider_sent, _bootstrap_sender, :bootstrap, :ok}},
@@ -85,7 +85,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderRetainerBoundariesTest do
 
       :ok = :inet.setopts(socket, sndbuf: 1_024, high_watermark: 1_024, low_watermark: 512)
       receiver_monitor = Process.monitor(receiver)
-      assert :erlang.resume_process(guardian)
+      assert Fixture.resume_guardian(guardian)
 
       assert_receive {:trace, ^guardian, :receive,
                       {:provider_frame, ^receiver, {:ok, :ready, ^binding}}},
