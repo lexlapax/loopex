@@ -181,8 +181,10 @@ discovered skills. The rules:
   durable session through the durable composition's API and `ask --state-root`,
   and the offline `loopex resume` reloads them by digest. The daemon is
   unchanged in M6: it composes only the workspace's discovered project skills,
-  so a session with a user skill that is later resumed through the daemon has
-  that skill's context withheld rather than silently replaced.
+  so a session with a user skill that is later resumed through the daemon
+  cannot match its admitted snapshot, and resumes with all of its skill
+  context withheld, project skills included, rather than silently replaced. The
+  offline `loopex resume` restores it.
 
 **Authority rule.** Neither profile has a default host authority. The caller
 always names the policy:
@@ -304,15 +306,19 @@ This is additive:
 - **Rollback** to `0.2`: remove the profile. No durable byte depends on it, and
   a `0.2` binary opens and resumes every root `0.3` writes, with two named
   exceptions that each leave a truthful record:
-  - a call to a tool only `0.3` defines, such as `grep`, that is still pending
-    when the root is resumed under `0.2`: the call is committed as a failed
-    `unknown_tool` call and the run continues;
+  - a call to a tool only `0.3` defines, such as `grep`, that was not yet
+    dispatched when the root is resumed under `0.2`: the call is committed as a
+    failed `unknown_tool` call and the run continues; one already dispatched is
+    never run under `0.2`, which defines no such tool, and ends as recovery
+    decides: its receipt admitted, a failed `unknown_tool` call, or
+    `outcome_unknown`;
   - a user skill admitted under `0.3`: its snapshot is retained under the
     state root by digest like any admitted pack's. `0.2`'s offline
     `loopex resume` reloads it by that digest, because its validation already
     accepts the `user:<name>` identity. `0.2`'s daemon, which composes only the
-    workspace's discovered project skills, resumes the session with that
-    skill's context withheld, as core does for any snapshot it cannot match.
+    workspace's discovered project skills, resumes the session with all of its
+    skill context withheld, project skills included, as core does for any
+    snapshot it cannot match.
     `0.2` cannot admit a new one.
 
 ## Governance Record

@@ -236,7 +236,7 @@ Concept: [Observable consequences](0039-ephemeral-embedded-profile.md#concept-ad
 | The profile is ephemeral and says so | After a proved stop, or its caller exiting, no file remains under the profile's temporary root. The session value and `result` carry `profile: :ephemeral`, and `ask`'s JSON carries `"profile"` |
 | No default authority | Composition without `:policy` refuses with `host_policy_required` |
 | Skills are truthfully named | A `.agents/skills/<name>` directory in the workspace is `project:<name>`; a directory outside is `user:<name>` with its content digest; any other workspace directory refuses; a shared name admits the project skill and reports the user skill as shadowed; the same holds under `ask --state-root` |
-| Rollback holds as stated | A durable root with a pending interaction written by the candidate recovers and is answered under `v0.2.0`, and the reverse; a pending call to `loopex.grep` resumed under `v0.2.0` is committed as `unknown_tool` and the run continues; a completed `loopex.grep` call in history replays under `v0.2.0`; a root with an admitted user skill, written by the candidate, resumes under `v0.2.0`'s offline `loopex resume` with the skill's retained snapshot reloaded by digest, and under `v0.2.0`'s daemon with the session resumed and that skill's context withheld |
+| Rollback holds as stated | A durable root with a pending interaction written by the candidate recovers and is answered under `v0.2.0`, and the reverse; a `loopex.grep` call not yet dispatched, resumed under `v0.2.0`, is committed as `unknown_tool` and the run continues; a completed `loopex.grep` call in history replays under `v0.2.0`; a root with an admitted user skill, written by the candidate, resumes under `v0.2.0`'s offline `loopex resume` with the skill's retained snapshot reloaded by digest, and under `v0.2.0`'s daemon with the session resumed and all of that session's skill context withheld, project skills included; a `loopex.grep` call already dispatched when the root is rolled back is never run under `v0.2.0`, and the lane records whether recovery admits its receipt, commits a failed `unknown_tool` call or ends `outcome_unknown` |
 | Core is unchanged | `git diff v0.2.0 -- apps/loopex/lib` is empty outside `apps/loopex/lib/mix/`, and `mix loopex.deps_budget` passes unchanged |
 
 <a id="technical-adr-0039-compatibility"></a>
@@ -263,21 +263,30 @@ leave a pending interaction suspended across an upgrade or a rollback. The
 revision changes only when the reference policies' behaviour changes, and that
 change is its own compatibility decision.
 
-**Rollback exceptions.** A pending call is re-resolved against the active tool
-set on recovery (`session_coordinator.ex:6602`), and `0.2` answers an unknown
+**Rollback exceptions.** A call not yet dispatched is re-resolved against the
+active tool set on recovery (`session_coordinator.ex:6602`; the other
+resolution points are dispatch, `:5609`, and the post-policy continuation,
+`:6401`), and `0.2` answers an unknown
 name with `{:error, {:unknown_tool, name}}` (`:6844`), which it commits as a
-failed tool call (`:6625-6626`). A user skill's admission is journaled as a
+failed tool call (`:6625-6626`). A call already dispatched cannot be run by `0.2`, whose executor defines no
+such tool; recovery admits its receipt, commits a failed `unknown_tool` call
+or ends `outcome_unknown`, and the rollback lane records which. A user skill's admission is
+journaled as a
 reference, digest, decision and selections (`session_state.ex:4898`), and its
 snapshot is retained under the state root by digest and reloaded through core
 validation (`resource_packs.ex:333-380`), exactly as for a project pack. Its
 `source_id` `user:<name>` and nil Git provenance are both accepted by `0.2`'s
 core validation (`resource_pack.ex:203-216`, `:343-348`). `0.2`'s offline
 `loopex resume` reads the session's admitted digest and reloads that snapshot
-before resuming (`loopex_cli.ex:944-990`), so it gets the skill back. `0.2`'s
+before resuming (`loopex_cli.ex:944-1003`), so it gets the skill back. `0.2`'s
 daemon instead composes the manifest it discovers in the workspace at start
-(`daemon.ex:239-242`), which never contains a user pack, so core declines the
-session's admitted binding (`resource_pack.ex:497-505`) and withholds that
-skill's context while the session itself resumes. A user skill has nil Git
+(`daemon.ex:239-242`), which never contains a user pack. A session's resource
+binding covers one whole manifest digest (`session_state.ex:4898-4909`), so the
+daemon's snapshot never matches it: core reports `binding_changed`
+(`runtime/resource_snapshot.ex:112-121`), stages no resource entries
+(`:136-140`, `runtime/resource_context.ex:38-47`), and so withholds all of
+that session's skill context, project skills and catalog included, while the
+session itself resumes. A user skill has nil Git
 provenance, so it gets no separate provenance record
 (`resource_packs.ex:1584`); its retained manifest carries its identity and
 bytes, which is all `load/2` needs.
