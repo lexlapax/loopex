@@ -8,31 +8,52 @@ Concept: [Ephemeral embedded profile](0039-ephemeral-embedded-profile.md#concept
 
 Concept: [Context and decision](0039-ephemeral-embedded-profile.md#concept-adr-0039-decision).
 
-The kernel's ports are unchanged, and the profile only chooses what fills each one:
+The kernel's ports are unchanged; the profile chooses what fills each one:
 
 | Port | Durable profile | Ephemeral profile |
 | --- | --- | --- |
-| `Loopex.Store` (six callbacks) | `Loopex.Store.Local` | `Loopex.Store.Memory`, new, promoted from the core test fixture `Loopex.M1RuntimeTestStore` and held to `store_conformance_helper` |
-| `Loopex.ArtifactStore` | `Loopex.Store.Local.Artifacts` | The memory store's artifact half, bounded by the same ceilings |
-| `Loopex.Model` (`complete/3`) | `Loopex.LLM.ReqLLM` through the companion bridge | An in-process ReqLLM adapter in `apps/loopex_llm_reqllm` that maps the committed request's `messages`, `tools` and `sampling` to ReqLLM, and the response to `%{text, tool_calls, usage, identity, delta_count, streamed, canonical_request_bytes, staged_request_digest}`, reporting deltas through the progress function |
-| `Loopex.Executor` | `Loopex.Executor.Local` | `Loopex.Executor.Local`, with its ledger root under the profile's temporary directory |
-| `Loopex.Policy` | A named host policy | A named host policy; the presets are `allow_all`, `refuse_all` and `ask` |
+| `Loopex.Store` (six callbacks) | `Loopex.Store.Local` | `Loopex.Store.Memory`: a supervised process over `Loopex.Store.Local.State`, the conformance test wrapper `LoopexStoreLocalTest.Memory` promoted without its fault probe |
+| `Loopex.ArtifactStore` | `Loopex.Store.Local.Artifacts` | None; the runtime's existing `artifact_store: nil` behaviour (overflow truncated with the executor's notice, transfers unsupported) |
+| `Loopex.Model` (`complete/3`) | `Loopex.LLM.ReqLLM` through the companion bridge | `Loopex.LLM.ReqLLM.InProcess`, calling `ReqLLM.stream_text/3` in the coordinator's model attempt over the mapping it shares with the companion (`Loopex.LLM.ReqLLM.Mapping`) |
+| `Loopex.Executor` | `Loopex.Executor.Local`, ledger under the state root | `Loopex.Executor.Local`, ledger under the profile's temporary root |
+| `Loopex.Policy` | A named host policy | A named host policy: `allow_all`, `shell_allowlist`, `refuse_all` or a module |
 
 **The in-process adapter:**
+- **Placement:** it lives in `apps/loopex_llm_reqllm`, the one edge application
+  that carries ReqLLM.
+- **Selection:** composition selects exactly one of the two adapters per
+  runtime, by profile. The companion adapter keeps refusing any in-VM fallback,
+  as ADR 0034 fixed.
 
-- It lives beside the companion adapter, so ReqLLM stays inside the one edge application that already carries it.
-- It does not replace the companion adapter. Composition selects exactly one of the two per runtime, by profile.
-- It refuses to start under a durable composition.
-- The companion adapter keeps refusing any in-VM fallback, as ADR 0034 fixed.
+**Call options and hygiene** (ReqLLM 1.24.0):
+- **Every call:** `api_key:`, `max_retries: 0`, and `receive_timeout` set to the
+  time left before the request deadline.
+- **Inline model:** the model is built inline as
+  `ReqLLM.model(%{provider:, id:, base_url:})`.
+- **Before starting ReqLLM:** `load_dotenv: false` for `:req_llm` and `:llm_db`,
+  and `warn_unverified_models: false`.
+- **Error classes:**
+  - Everything before `stream_text/3` returns `{:ok, _}` is
+    `{:not_dispatched, "model_call_failed"}`.
+  - Everything after is `{:dispatched_or_unknown, "model_call_failed"}`.
+  - A stream is not a success until its metadata shows no `:error`, no status
+    of 400 or more, and no `finish_reason` of `:incomplete`, `:cancelled` or
+    `:error`.
 
-**Credential variables.** `ollama` reads none and uses `OLLAMA_BASE_URL`, defaulting to `http://localhost:11434`. `openai` reads `OPENAI_API_KEY`, `anthropic` reads `ANTHROPIC_API_KEY`, and `openrouter` reads `OPENROUTER_API_KEY`. A provider whose variable is missing or empty refuses at composition with `provider_credential_required` naming the variable, never the value. The value is read once, held only in the adapter process's state, and passed to ReqLLM per call. It is never logged, journaled, rendered or placed in an event, a progress item, a diagnostic or a job.
+**Credential variables:**
 
-**The ephemeral composition** (`LoopexComposition.ephemeral/1`, or an equivalent single entry):
+| Prefix | Credential variable |
+| --- | --- |
+| `ollama:` | None |
+| `openai:` | `OPENAI_API_KEY` |
+| `anthropic:` | `ANTHROPIC_API_KEY` |
+| `openrouter:` | `OPENROUTER_API_KEY` |
 
-- **Temporary root.** It creates one temporary directory under the host's temporary location, owned only by the composition and removed when the runtime stops.
-- **Workspace.** It takes the workspace from `:cwd`, defaulting to the current directory.
-- **Required options.** It requires `:policy`, and accepts `:model`, `:tools`, `:skills`, `:system`, `:max_steps`, `:tool_timeout_ms` and `:req_llm`.
-- **Mapping.** It maps these onto the existing runtime options: bounds, context budget, sampling, and resource admission of the named skill directories.
+- A missing or empty variable refuses at composition with
+  `provider_credential_required`, naming the variable and never the value.
+- The library does not delete the host's variable. The `ask` command does,
+  after reading it.
+- The executor's `bash` environment is constructed with the credential unset.
 
 <a id="technical-adr-0039-proofs"></a>
 ### Adapters and Proofs
@@ -41,13 +62,15 @@ Concept: [Observable consequences](0039-ephemeral-embedded-profile.md#concept-ad
 
 | Obligation | Witness |
 | --- | --- |
-| The memory store is a store | The existing store conformance suite runs against `Loopex.Store.Memory` unchanged, including transaction, ownership-head, fencing and record-order cases |
-| The in-process adapter is a model | The model streaming conformance suite runs against it with a scripted ReqLLM stub; a real-provider lane calls a local Ollama model and at least one hosted provider |
-| Credentials stay out of every plane | A canary credential value is set, a full run with tool calls and a failure is driven, and the value is searched for in every committed record, event, progress item, diagnostic and log line and must be absent |
-| The profile is ephemeral and says so | After the VM stops, no file remains under the profile's temporary root, no durable listing names the session, and the effective options name the profile |
-| No default authority | Composition without `:policy` refuses with `host_policy_required`; `policy: :allow_all` is accepted |
-| Durable is unchanged | The M5 lanes run unchanged; the companion adapter still refuses in-VM operation |
-| Core is unchanged | `mix loopex.deps_budget` passes with core's dependency list still `:telemetry` alone |
+| The memory store is a store | The store conformance suite's `:memory` kind is bound to `Loopex.Store.Memory` itself and passes unchanged |
+| The in-process adapter is a model | Mapping, option and error tests run against a scripted ReqLLM transport. The model streaming conformance suite runs against it. Real-provider lanes call a local Ollama model and one hosted provider |
+| The companion is unchanged | Every companion suite passes after the shared mapping is extracted |
+| Credentials stay out of every plane | A canary credential value is set. A run with tool calls, a provider failure and a stream-start failure is driven. The value must be absent from every committed record, event, progress item, diagnostic, trace entry, captured log line and `IO.warn` output |
+| Hygiene holds | A `.env` in the working directory is not loaded, and no unverified-model warning is printed |
+| The profile is ephemeral and says so | After the runtime stops, or its caller exits, no file remains under the profile's temporary root, and the effective options name the profile |
+| No default authority | Composition without `:policy` refuses with `host_policy_required` |
+| Core is unchanged | `git diff v0.2.0 -- apps/loopex/lib` is empty, and `mix loopex.deps_budget` passes unchanged |
+| Independent review | A read-only security review of the ephemeral credential path names the tested SHA before closure |
 
 <a id="technical-adr-0039-compatibility"></a>
 ### Compatibility Mechanics
@@ -55,9 +78,18 @@ Concept: [Observable consequences](0039-ephemeral-embedded-profile.md#concept-ad
 Concept: [Compatibility and rollback](0039-ephemeral-embedded-profile.md#concept-adr-0039-compatibility).
 
 **New surfaces**, all experimental under the 0.x policy:
+- `LoopexComposition.Ephemeral`;
+- `ResourcePacks.read_directories/2`;
+- the `ask` command and its `-p` alias;
+- the `provider:model` grammar.
 
-- **API:** `Loopex.run/2`, `start_session/1`, `ask/2`, `history/1` and `stop_session/1`, thin wrappers over `create_session`, `attach`, `command` and `next_event`.
-- **Command:** the `loopex -p` form and its flags.
-- **Model strings:** the ephemeral profile's `provider:model` grammar.
+**Additive options.** The durable `LoopexComposition.start/1` gains `:model`,
+`:bounds`, `:sampling` and `:active_tools`, whose defaults reproduce M5.
 
-**Unchanged:** the store format, the public protocol generations 1 and 2, the executor protocol, the daemon and the durable composition's required options and refusals. Removing the profile deletes two edge modules, one composition entry and one command form, and touches no durable byte.
+**Unchanged:** the store format, the public protocol generations 1 and 2, the
+executor protocol, the daemon and core's library.
+
+**Removal.** Removing the profile deletes these and touches no durable byte:
+- two edge modules and the ephemeral composition;
+- the `ask` command;
+- the directory-reading function.
