@@ -234,8 +234,9 @@ active entry for the session until it is resumed, so the client:
 1. sends `initialize`;
 2. sends `session.resume` with the known session ID and a fresh command ID,
    and waits for its result (an error means the session did not resume);
-3. attaches to the session, and receives the recovered pending question in its
-   snapshot at the same cursor;
+3. attaches to the session. Resuming re-arms the recovered question, and the
+   attachment's snapshot is anchored rather than live, so if the snapshot does
+   not yet show the question, the client attaches again until it does;
 4. answers it with the identity the question carried. The policy is
 then asked again, exactly as it would have been in the original process.
 

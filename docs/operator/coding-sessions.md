@@ -396,9 +396,13 @@ started and rendered to its end exits `0` whatever the run's outcome: a run
 that failed, stopped at a bound, stopped with an effect's outcome unknown, or
 ended any other way still exits `0`. Scripts must read the run's ending line on
 standard error rather than the exit status to learn the outcome: `loopex: done`
-is the only successful ending, and `loopex: failed …`,
-`loopex: stopped at the … bound …` and
-`loopex: stopped, but the effect's outcome is unknown` are the others. An unrecognised subcommand, or no
+is the only successful ending. The others are `loopex: failed …`,
+`loopex: stopped at the … bound …`,
+`loopex: stopped, but the effect's outcome is unknown`, and `loopex: <outcome>`
+for any other ending, such as `loopex: cancelled` or `loopex: denied`. If no
+ending arrives within the command's follow window, it prints
+`loopex: stopped following this run; it may still be running`, still exits
+`0`, and `loopex resume` continues reading from the durable record. An unrecognised subcommand, or no
 arguments at all, prints the usage text and exits `1`. The interrupt backstop
 exits `130`. The launcher exits `127` when it finds no escript. The live forms
 and `loopex daemon` add their own statuses, listed on the
