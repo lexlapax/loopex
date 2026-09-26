@@ -56,7 +56,10 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
 - The executor's `bash` environment removes `LOOPEX_PROVIDER_API_KEY`,
   `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY` explicitly.
 - The adapter installs no logger filter or handler, changes no group leader,
-  and never restarts ReqLLM's supervision tree. Its only change to shared state
+  and never restarts ReqLLM's supervision tree. It sets
+  `Logger.put_process_level(self(), :none)` only for its own model-attempt
+  process, so ReqLLM's stream-start error line, which is written in that
+  process, is never emitted. Its only change to shared state
   is the two ReqLLM application settings it makes before first starting ReqLLM.
 
 <a id="technical-adr-0039-relation-0019"></a>

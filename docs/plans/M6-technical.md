@@ -82,6 +82,7 @@ runtime library (`apps/loopex/lib` outside `mix/`) is unchanged by M6.
 @type reason ::
         {:run, :failed | :bound_reached | :outcome_unknown | :cancelled, map()}
         | {:interaction_pending, map()}
+        | :run_open
         | :timeout
         | {:composition, atom()}
         | {:invalid_option, atom()}
@@ -141,7 +142,8 @@ runtime library (`apps/loopex/lib` outside `mix/`) is unchanged by M6.
   - `%{role: :assistant, text:}` from `assistant.message_appended`;
   - `%{role: :tool, tool_id:, outcome:}` from `tool.finished`.
 - **`stop_session/1`** is idempotent. If a run is open, it sends an abort
-  command and waits for that run's `run.finished` (`cancelled`) for at most the
+  command and waits for that run's `run.finished`, whatever its outcome (an abort
+  can end `cancelled` or `outcome_unknown`), for at most the
   session's `cleanup_grace_ms` plus 5_000 ms. It then calls `Loopex.stop/1`,
   whose runtime shutdown runs the local executor's existing termination of the
   process groups it owns, and removes the temporary root only after the
@@ -269,18 +271,33 @@ before success: `:error`, a status of 400 or more, or `finish_reason` in
   - an `erl_crash.dump`.
 
   The profile answers them as follows:
-  - **The `ask` command** closes all three. Before composing, it sets the
-    primary logger level to `:none`. It renders its own lines to standard error.
-    The launcher exports `ERL_CRASH_DUMP=/dev/null` when its first argument is
-    `ask` or `-p`.
-  - **A library host** owns its own logger and crash-dump configuration. The
-    developer guide states that obligation, and ADR 0039 records it as an
-    accepted gap.
+  - **The stream-start log line** is written in the calling process, the
+    adapter's model attempt. The adapter sets `Logger.put_process_level(self(),
+    :none)` for the attempt's process, which is a process-scoped level, not a
+    logger filter or handler and not a change to the host's configuration. That
+    line is therefore never emitted, in either profile.
+  - **The `ask` command** closes the other two paths for its own process:
+    - before composing, it sets the primary logger level to `:none` and renders
+      its own lines to standard error;
+    - it sets `ERL_CRASH_DUMP=/dev/null` in its own environment at start;
+    - the launcher also exports it when its first argument is `ask` or `-p`.
+    The witness proves on both platforms that a crash dump is not written when
+    the escript is run directly as well as through the launcher. If one
+    platform's emulator ignores a variable set after start, direct escript use
+    on that platform is named as a limitation.
+  - **A library host** owns its own logger, crash reports and crash dumps.
+    Crash reports from ReqLLM's own stream and Finch processes are an accepted
+    gap for a library host. The developer guide states the host's obligation,
+    and ADR 0039 records the gap.
   - **The canary witness** drives three paths with a canary credential: the
     stream-start failure, a crash of the stream task, and a provider error
-    reply. Under the default logger configuration the value must be absent from
-    all captured log output. If it is present, the adapter must remove it on
-    that path before M6 can close.
+    reply.
+    - The value must be absent from every committed plane in both profiles.
+    - It must be absent from the stream-start log path in both profiles.
+    - It must be absent from all captured log and crash output under `ask`.
+    - Under a library host's default logger configuration, the crash-report
+      path is recorded, not required: the witness retains what it observes, and
+      the security review judges it against the accepted gap.
 
 <a id="technical-plan-store"></a>
 ### The Memory Store Contract
@@ -296,10 +313,11 @@ test wrapper `LoopexStoreLocalTest.Memory`
 - linked with `start_link`;
 - it keeps the wrapper's GenServer state shape, so the conformance helper's
   `store_snapshot` (`store_conformance_helper.exs:1625`) reads it unchanged;
-- it keeps an inert optional `:fault_probe` option, exactly as
-  `Loopex.Store.Local.start_link(path:, fault_probe:)` already does (`:1043`),
-  so the fault-injected cases (`each_store_with_unknown`, `:1017-1030`) run
-  against the shipped module. No composition passes a probe.
+- it keeps an optional `:fault_probe` option. The option is active only when
+  supplied, and follows the same checkpoint protocol as
+  `Loopex.Store.Local.start_link(path:, fault_probe:)` (`local.ex:183`,
+  `:242-257`), so the fault-injected cases (`each_store_with_unknown`,
+  `:1017-1030`) exercise the shipped module. No composition passes a probe.
 
 The core test fixture `Loopex.M1RuntimeTestStore` is not used: it is unlinked,
 fault-instrumented, and grows without bound.
@@ -375,6 +393,15 @@ builds a resource manifest from named skill directories. What it does:
   project skill. A directory may lie outside the workspace.
 - **Refusals:** two directories with the same skill name refuse as
   `{:composition, :duplicate_skill}`.
+- **No project discovery:** the ephemeral profile and `ask` never discover or
+  admit project resources. There is no `AGENTS.md` prompt and no
+  `.agents/skills` walk, because a headless caller cannot answer a prompt. Only
+  the directories named are admitted, so a named skill can never clash with a
+  discovered one.
+- **Provenance label:** the `project:` prefix is the only local identity core
+  admits. It is a naming, not a claim that the directory is in the project. The
+  decision's `decision_source` `host_supplied` records that the host supplied
+  it.
 - **Decision:** `decision_source` `host_supplied`, because naming the path is
   the host's decision.
 - **Workspace:** the manifest's `workspace_ref` is the executor's

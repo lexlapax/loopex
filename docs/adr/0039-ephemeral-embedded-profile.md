@@ -81,8 +81,12 @@ loop.
   only in the adapter's configuration inside the runtime.
 - **Passing:** the adapter passes it explicitly on every call, so ReqLLM's own
   ambient key lookup is never used.
-- **Never written:** the value never enters a journal record, a public event,
-  progress, a diagnostic, a trace, a log line, a fixture or an executor job.
+- **Never written by Loopex:** the value never enters a journal record, a
+  public event, progress, a diagnostic, a trace, a log line Loopex emits, a
+  fixture or an executor job. The adapter also suppresses ReqLLM's stream-start
+  error line for its own attempt process. Crash reports from ReqLLM's own
+  processes, and crash dumps, belong to the host's logging and are the accepted
+  exception below.
 - **No key needed:** a provider that needs none, such as a local Ollama server,
   reads none.
 - **What the durable profile adds:** process isolation through the companion.
