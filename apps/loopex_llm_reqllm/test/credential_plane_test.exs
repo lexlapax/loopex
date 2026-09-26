@@ -87,7 +87,10 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
   test "actual version two companion refuses version one bootstrap before readiness or credential" do
     fixture = Fixture.new()
-    path = Path.join(System.tmp_dir!(), "v1-#{System.unique_integer([:positive])}.sock")
+    # A random name: `unique_integer` restarts in every VM, so a socket a
+    # killed run left behind would fail this bind with `:eaddrinuse`.
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+    path = Path.join(System.tmp_dir!(), "v1-#{suffix}.sock")
 
     {:ok, listener} =
       :gen_tcp.listen(0, [:binary, active: false, packet: :raw, ifaddr: {:local, path}])

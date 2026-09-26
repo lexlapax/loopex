@@ -23,7 +23,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderCompanionEntryTest do
     on_exit(fn -> File.rm_rf(root) end)
 
     launch = ProviderBuildFixture.options!(root)
-    path = Path.join("/tmp", "lce-#{System.unique_integer([:positive])}.sock")
+    # A random name, as in the CLI daemon proxy: `unique_integer` restarts in
+    # every VM, so a socket a killed run left behind would fail this bind.
+    path =
+      Path.join(
+        "/tmp",
+        "lce-#{Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)}.sock"
+      )
+
     on_exit(fn -> File.rm(path) end)
 
     {:ok, listener} = :gen_tcp.listen(0, [:binary, {:ifaddr, {:local, path}}, active: false])
