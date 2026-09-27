@@ -281,7 +281,7 @@ scoped values. Recording those values is not evidence by itself. For each
 archive, a NUL-aware source projection reads that commit with
 `git ls-tree -rz -r -t --full-tree`, restricts it to paths present in the unexcluded archive
 manifest, and maps Git modes `100644`, `100755`, `120000` and `040000` to the
-producer tuples `f/644`, `f/755`, `l/0` and `d/755`. Every manifest path must
+producer tuples `f/644`, `f/755`, `l/0` and `d/0`. Every manifest path must
 have one matching source kind and canonical mode; an absent path, unsupported
 Git mode or mismatch fails. This independent comparison catches two broken
 runners that both inherit `0777` and therefore still agree with each other.

@@ -18,6 +18,9 @@ cp "$source_root/scripts/source-archive-manifest.sh" "$repo/scripts/source-archi
 cp "$source_root/SOURCE_IDENTITY" "$repo/SOURCE_IDENTITY"
 cp "$source_root/.gitattributes" "$repo/.gitattributes"
 printf 'committed bytes\n' >"$repo/README.md"
+printf 'backslash-name bytes\n' >"$repo/back\\slash"
+printf 'newline-name bytes\n' >"$repo/line"$'\n'"name"
+ln -s $'target\n\n' "$repo/newline-link"
 git -C "$repo" init -q
 git -C "$repo" add .
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm fixture
@@ -41,6 +44,30 @@ cmp -s "$work/expected" "$out" || fail 'manifest differs from exact executed arc
 cmp -s "$work/expected-tree/SOURCE_IDENTITY" "$out.source-identity" ||
   fail 'sidecar differs from exact archive bytes'
 grep -q "^commit $sha$" "$out.source-identity" || fail 'sidecar does not name archived commit'
+
+# Command substitution must not trim bytes from link targets, and a hashing
+# utility must not escape a file's name into its digest field.
+link_seen=0
+backslash_seen=0
+newline_seen=0
+while IFS= read -r -d '' kind && IFS= read -r -d '' mode &&
+      IFS= read -r -d '' path && IFS= read -r -d '' value; do
+  if [ "$path" = newline-link ]; then
+    [ "$kind" = l ] && [ "$mode" = 0 ] && [ "$value" = $'target\n\n' ] ||
+      fail 'trailing symlink-target newlines changed'
+    link_seen=1
+  elif [ "$path" = 'back\slash' ]; then
+    [ "$kind" = f ] && [[ "$value" =~ ^[0-9a-f]{64}$ ]] ||
+      fail 'backslash filename escaped its digest'
+    backslash_seen=1
+  elif [ "$path" = $'line\nname' ]; then
+    [ "$kind" = f ] && [[ "$value" =~ ^[0-9a-f]{64}$ ]] ||
+      fail 'newline filename escaped its digest'
+    newline_seen=1
+  fi
+done <"$out"
+[ "$link_seen" -eq 1 ] && [ "$backslash_seen" -eq 1 ] && [ "$newline_seen" -eq 1 ] ||
+  fail 'special-name archive records were not inspected'
 
 (cd "$repo" && bash "$stage" "$sha" '-dash-manifest') >"$work/dash.stdout" 2>"$work/dash.stderr" ||
   fail 'relative output beginning with a dash failed'

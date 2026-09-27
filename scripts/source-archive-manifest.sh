@@ -30,9 +30,9 @@ else
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256() { sha256sum "$1" | awk '{print $1}'; }
+  sha256() { sha256sum <"$1" | awk '{print $1}'; }
 else
-  sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+  sha256() { shasum -a 256 <"$1" | awk '{print $1}'; }
 fi
 
 paths=$(mktemp "${TMPDIR:-/tmp}/loopex-manifest-paths.XXXXXX")
@@ -46,8 +46,11 @@ while IFS= read -r -d '' entry; do
   path=${entry#./}
 
   if [ -L "$entry" ]; then
-    target=$(readlink "$entry") ||
+    # Both BSD and GNU readlink -n emit exact target bytes. The sentinel
+    # prevents command substitution from stripping any target LFs.
+    target=$(readlink -n "$entry" && printf '.') ||
       { echo "source-archive-manifest: unreadable link" >&2; exit 1; }
+    target=${target%.}
     printf 'l\0000\000%s\000%s\000' "$path" "$target" >>"$records"
   elif [ -d "$entry" ]; then
     printf 'd\0000\000%s\000\000' "$path" >>"$records"

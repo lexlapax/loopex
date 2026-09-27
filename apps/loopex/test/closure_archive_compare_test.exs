@@ -28,7 +28,11 @@ defmodule Loopex.ClosureArchiveCompareTest do
     git!(repo, ["init", "-q"])
     git!(repo, ["config", "user.name", "Loopex Test"])
     git!(repo, ["config", "user.email", "loopex-test@example.invalid"])
-    File.write!(Path.join(repo, ".gitattributes"), "SOURCE_IDENTITY export-subst\n")
+
+    File.write!(
+      Path.join(repo, ".gitattributes"),
+      "SOURCE_IDENTITY export-subst\nignored.txt export-ignore\n"
+    )
 
     File.write!(
       Path.join(repo, "SOURCE_IDENTITY"),
@@ -38,6 +42,8 @@ defmodule Loopex.ClosureArchiveCompareTest do
     File.write!(Path.join(repo, "README.md"), "tested\n")
     File.write!(Path.join(repo, "docs/README.md"), "tested\n")
     File.write!(Path.join(repo, "source.txt"), "unchanged source\n")
+    File.write!(Path.join(repo, "ignored.txt"), "tracked but not archived\n")
+    File.ln_s!("target\n", Path.join(repo, "newline-link"))
 
     producer = Path.join(LoopexTest.Repo.root(), "scripts/source-archive-manifest.sh")
     File.cp!(producer, Path.join(repo, "scripts/source-archive-manifest.sh"))
@@ -68,6 +74,7 @@ defmodule Loopex.ClosureArchiveCompareTest do
   end
 
   test "real staged archives accept only the governed documentation difference", fixture do
+    assert :nomatch == :binary.match(File.read!(fixture.tested_path), "ignored.txt")
     assert :ok == compare(fixture)
   end
 
@@ -86,6 +93,18 @@ defmodule Loopex.ClosureArchiveCompareTest do
     digest = Base.encode16(:crypto.hash(:sha256, "unchanged source\n"), case: :lower)
     assert :binary.match(bytes, digest) != :nomatch
     File.write!(path, String.replace(bytes, digest, String.duplicate("0", 64)))
+
+    assert {:error, "archive tuples outside the exclusions differ"} =
+             compare(%{fixture | admin_path: path})
+  end
+
+  test "a trailing newline change in a shipped link target is detected", fixture do
+    path = copy_manifest(fixture)
+    bytes = File.read!(path)
+    before = Enum.join(["l", "0", "newline-link", "target\n", ""], <<0>>)
+    after_target = Enum.join(["l", "0", "newline-link", "target\n\n", ""], <<0>>)
+    assert :binary.match(bytes, before) != :nomatch
+    File.write!(path, :binary.replace(bytes, before, after_target))
 
     assert {:error, "archive tuples outside the exclusions differ"} =
              compare(%{fixture | admin_path: path})

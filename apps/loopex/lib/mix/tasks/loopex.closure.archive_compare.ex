@@ -14,7 +14,8 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
   Both inputs are the exact NUL-delimited output of the archive's manifest
   producer. Their adjacent `.source-identity` files are ordinary files whose
   bytes must match the corresponding Git commit and manifest entry. Complete
-  kind/mode/path projections must match independent Git trees and each other;
+  kind/mode/path projections must match independent Git trees restricted to the
+  archived paths, then match each other;
   only then are content tuples compared after the documented exclusions. No
   archive or evidence file is written by this task.
   """
@@ -78,9 +79,10 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
            end),
          {:ok, _} <-
            step("complete archive projections", fn ->
-             if projection(tested) == tested_tree and projection(admin) == admin_tree,
-               do: {:ok, :matched},
-               else: {:error, "an archive kind/mode/path projection differs from its commit"}
+             if projection_matches_tree?(tested, tested_tree) and
+                  projection_matches_tree?(admin, admin_tree),
+                do: {:ok, :matched},
+                else: {:error, "an archive kind/mode/path projection differs from its commit"}
            end),
          {:ok, _} <-
            step("source identities", fn ->
@@ -196,10 +198,7 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
         [metadata, path] when path != "" ->
           case :binary.split(metadata, " ", [:global]) do
             [mode, _type, _object] ->
-              case git_mode(mode) do
-                {:ok, projected} -> {:cont, {:ok, Map.put(acc, path, projected)}}
-                error -> {:halt, error}
-              end
+              {:cont, {:ok, Map.put(acc, path, mode)}}
 
             _ ->
               {:halt, {:error, "Git tree has malformed metadata"}}
@@ -219,6 +218,15 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
 
   defp projection(records),
     do: Map.new(records, fn {kind, mode, path, _} -> {path, {kind, mode}} end)
+
+  defp projection_matches_tree?(records, tree) do
+    Enum.all?(records, fn {kind, mode, path, _} ->
+      case Map.fetch(tree, path) do
+        {:ok, git_entry_mode} -> git_mode(git_entry_mode) == {:ok, {kind, mode}}
+        :error -> false
+      end
+    end)
+  end
 
   defp identity_matches(records, sidecar, sha) do
     with {:ok, output} <- git(["show", "-s", "--format=commit %H%ncommitter-date %cI", sha]),
