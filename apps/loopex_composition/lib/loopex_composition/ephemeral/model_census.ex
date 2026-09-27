@@ -144,6 +144,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
         proof: nil,
         stop_ref: nil,
         stage: nil,
+        stage_ref: nil,
         stage_issued: false,
         seen_refs: MapSet.new([elem(envelope, 1)])
       }
@@ -190,6 +191,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
           proxy_monitor: proxy_monitor,
           candidate_start_monitor: candidate_monitor,
           stage: {envelope, staging_ref},
+          stage_ref: staging_ref,
           seen_refs: MapSet.put(pending.seen_refs, elem(envelope, 1))
       }
 

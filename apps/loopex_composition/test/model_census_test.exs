@@ -209,6 +209,8 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
 
     assert_receive {:custody_committed, ^candidate, staging_ref}
     assert is_reference(staging_ref)
+    send(owner, {:inspect, self()})
+    assert_receive {:census_state, %{pending: %{stage_ref: ^staging_ref}}}
 
     assert {:ok, _} =
              SessionAdmission.request(
@@ -346,6 +348,92 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert :atomics.get(cell, 2) == 1
     send(candidate, :stop)
     assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}
+  end
+
+  test "callback death after recorded empty retirement does not seal a held candidate" do
+    owner = self()
+    generation = make_ref()
+    cell = :atomics.new(2, [])
+    call = make_ref()
+    proof = make_ref()
+    start_ref = make_ref()
+    stop_ref = make_ref()
+    callback = spawn(fn -> receive do: (:stop -> :ok) end)
+    {proxy, proxy_monitor} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^proxy_monitor, :process, ^proxy, :normal}
+
+    {candidate, candidate_start_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, ^start_ref, staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, ^generation, ^call, _candidate, ^proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+
+            receive do
+              :retire ->
+                operation = {:retire_model, call, self(), proof}
+
+                send(
+                  owner,
+                  {:loopex_session_admission, self(), make_ref(), generation, operation,
+                   deadline()}
+                )
+
+                receive do: (:stop -> :ok)
+            end
+        end
+      end)
+
+    state = ModelCensus.new(generation, cell)
+    begin = {:begin_model, callback, call}
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:loopex_session_admission, callback, make_ref(), generation, begin, deadline()}
+      )
+
+    start_proof =
+      {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, candidate,
+       candidate_start_monitor}
+
+    stage = {:stage_model, call, candidate, proof, stop_ref, start_proof}
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:loopex_session_admission, callback, make_ref(), generation, stage, deadline()}
+      )
+
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof} = custody
+    state = ModelCensus.handle(state, custody)
+    assert state.pending.stage_issued
+
+    send(candidate, :retire)
+
+    assert_receive {:loopex_session_admission, ^candidate, _, ^generation,
+                    {:retire_model, ^call, ^candidate, ^proof}, _} = retirement
+
+    state = ModelCensus.handle(state, retirement)
+    assert state.pending.phase == :retired_wait_down
+    assert :atomics.get(cell, 2) == 1
+
+    callback_monitor = state.pending.callback_monitor
+    send(callback, :stop)
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal} = callback_down
+    state = ModelCensus.handle(state, callback_down)
+    assert state.pending.timer == nil
+    assert :atomics.get(cell, 1) == 0
+
+    candidate_owner_monitor = state.pending.candidate_monitor
+    send(candidate, :stop)
+
+    assert_receive {:DOWN, ^candidate_owner_monitor, :process, ^candidate, :normal} =
+                     candidate_down
+
+    state = ModelCensus.handle(state, candidate_down)
+    assert state.pending == nil
+    assert :atomics.get(cell, 2) == 0
   end
 
   test "callback loss retains no arbitrary exit value and keeps pending until proof" do
