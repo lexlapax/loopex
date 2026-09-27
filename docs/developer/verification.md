@@ -104,7 +104,6 @@ credential or pinned Node only when the selected cases need it. A selected
 says `selection-only`, never full closure PASS. Each executed test lane retains
 its complete output and final status record with a SHA-256 digest, including
 failed lanes. No options still run the complete closure matrix.
-Technical depth: [Selector grammar and retained lane results](verification-technical.md#technical-verification-selection).
 
 Hosted CI's green run on the candidate is the fast-check evidence for that
 merge; a local full run of the same bytes is not required as well.
