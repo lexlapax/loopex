@@ -21,6 +21,7 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
   use Mix.Task
 
   @max_patch_bytes 32 * 1024 * 1024
+  @max_source_bytes 8 * 1024 * 1024
   @git_env [
     {"GIT_NO_LAZY_FETCH", "1"},
     {"GIT_NO_REPLACE_OBJECTS", "1"},
@@ -32,7 +33,9 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
   def run(args) do
     case parse(args) do
       {:ok, tested, administrative, name, patch} ->
-        case check(File.cwd!(), tested, administrative, name, patch) do
+        root = repository_root(File.cwd!())
+
+        case check(root, tested, administrative, name, patch) do
           {:ok, lines} ->
             Enum.each(lines, fn line -> Mix.shell().info(line) end)
 
@@ -55,7 +58,8 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
   ## Technical depth
 
   `root` is a Git repository. Results list one `PASS` or `FAIL` line for each
-  check reached, in order. The patch has a 32 MiB ceiling and an exclusive
+  check reached, in order. The ten source blobs have a combined 8 MiB ceiling
+  before a patch is generated. The patch has a 32 MiB ceiling and an exclusive
   destination; a failed write removes only the file this invocation created.
   """
   @spec check(Path.t(), String.t(), String.t(), String.t(), Path.t()) ::
@@ -110,6 +114,13 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
 
       _ ->
         :error
+    end
+  end
+
+  defp repository_root(directory) do
+    case git(directory, ["rev-parse", "--show-toplevel"]) do
+      {:ok, root} -> String.trim(root)
+      _ -> directory
     end
   end
 
@@ -186,6 +197,7 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
     with {:ok, tested} <- tree_entries(c, c.tested),
          {:ok, administrative} <- tree_entries(c, c.administrative),
          true <- Enum.all?(five(c), &ordinary_unchanged?(&1, tested, administrative)),
+         true <- source_bounded?(c, tested, administrative),
          {:ok, raw} <-
            git(c.root, [
              "diff",
@@ -200,7 +212,9 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
          true <- raw_changes?(raw, five(c)) do
       {:ok, c}
     else
-      _ -> {:error, "a path is not an unchanged-mode ordinary blob or raw metadata differs"}
+      _ ->
+        {:error,
+         "a path is not an unchanged-mode ordinary blob, source exceeds the bound, or raw metadata differs"}
     end
   end
 
@@ -212,7 +226,7 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
           |> String.split(<<0>>, trim: true)
           |> Enum.map(fn entry ->
             case Regex.run(~r/\A([0-7]{6}) (blob|tree|commit) ([0-9a-f]{40,64})\t(.+)\z/s, entry) do
-              [_, mode, type, _oid, path] -> {path, {mode, type}}
+              [_, mode, type, oid, path] -> {path, {mode, type, oid}}
               _ -> {entry, :invalid}
             end
           end)
@@ -226,9 +240,30 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
 
   defp ordinary_unchanged?(path, tested, administrative) do
     case {Map.get(tested, path), Map.get(administrative, path)} do
-      {{mode, "blob"}, {mode, "blob"}} when mode in ["100644", "100755"] -> true
+      {{mode, "blob", _}, {mode, "blob", _}} when mode in ["100644", "100755"] -> true
       _ -> false
     end
+  end
+
+  defp source_bounded?(c, tested, administrative) do
+    [tested, administrative]
+    |> Enum.flat_map(&Map.values/1)
+    |> Enum.reduce_while(0, fn {_mode, "blob", oid}, total ->
+      case git(c.root, ["cat-file", "-s", oid]) do
+        {:ok, bytes} ->
+          case Integer.parse(String.trim(bytes)) do
+            {size, ""} when size >= 0 and total + size <= @max_source_bytes ->
+              {:cont, total + size}
+
+            _ ->
+              {:halt, :over_bound}
+          end
+
+        _ ->
+          {:halt, :over_bound}
+      end
+    end)
+    |> is_integer()
   end
 
   defp raw_changes?(raw, expected) do
@@ -306,9 +341,8 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
 
     length(cells) == 6 and
       Enum.all?(Enum.slice(cells, 1, 4), &(String.trim(&1) != "")) and
-      String.contains?(row, "`#{tested}`") and
-      String.contains?(row, "concept `sha256:#{concept_digest}`") and
-      String.contains?(row, "technical `sha256:#{technical_digest}`")
+      String.trim(Enum.at(cells, 4)) ==
+        "candidate `#{tested}`; concept `sha256:#{concept_digest}`; technical `sha256:#{technical_digest}`"
   end
 
   defp context_append(c) do
@@ -325,8 +359,8 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
            binary_part(after_bytes, byte_size(before), byte_size(after_bytes) - byte_size(before)),
          [_, date] <- Regex.run(pattern, appended),
          {:ok, _date} <- Date.from_iso8601(date),
-         true <- length(Regex.scan(~r/^(?:#|##|###) /m, appended)) == 1,
-         true <- length(Regex.scan(~r/^<a id=/m, appended)) == 1,
+         true <- length(Regex.scan(~r/^ {0,3}[#]{1,6}(?:[ \t]|$)/m, appended)) == 1,
+         true <- length(Regex.scan(~r/^ {0,3}<a id=/m, appended)) == 1,
          true <- String.ends_with?(appended, "\n") do
       {:ok, c}
     else
@@ -356,23 +390,47 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
       Enum.zip(old_lines, new_lines)
       |> Enum.all?(fn {old, new} ->
         cond do
+          old == new ->
+            true
+
           not String.contains?(old, "Pending") ->
             old == new
 
-          not String.starts_with?(old, "|") ->
+          not (String.starts_with?(old, "|") and String.ends_with?(old, "|")) ->
             false
 
           true ->
-            pattern =
-              "\\A" <>
-                (old |> Regex.escape() |> String.replace("Pending", "([^|\\r\\n]+)")) <> "\\z"
+            old_cells = String.split(old, "|", trim: false)
+            new_cells = String.split(new, "|", trim: false)
 
-            case Regex.run(Regex.compile!(pattern), new, capture: :all_but_first) do
-              nil -> false
-              replacements -> Enum.all?(replacements, &(String.trim(&1) not in ["", "Pending"]))
-            end
+            length(old_cells) == length(new_cells) and
+              Enum.zip(old_cells, new_cells)
+              |> Enum.with_index()
+              |> Enum.all?(fn {{old_cell, new_cell}, index} ->
+                fixed? = index <= 1 or index == length(old_cells) - 1
+
+                if fixed?,
+                  do: old_cell == new_cell,
+                  else: evidence_value_cell?(old_cell, new_cell)
+              end)
         end
       end)
+  end
+
+  defp evidence_value_cell?(old, new) do
+    cond do
+      old == new ->
+        true
+
+      String.trim(old) == "Pending" ->
+        String.trim(new) not in ["", "Pending"] and not String.contains?(new, ["\r", "\n"])
+
+      String.trim(old) == "sha256:Pending" ->
+        Regex.match?(~r/\Asha256:[0-9a-f]{64}\z/, String.trim(new))
+
+      true ->
+        false
+    end
   end
 
   defp readme(c) do
@@ -416,8 +474,14 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
   defp replace_row(before, after_bytes, prefix, replacement) do
     with row when is_binary(row) <- unique_row(before, prefix),
          new_row when is_binary(new_row) <- unique_row(after_bytes, prefix),
-         {:ok, ^new_row} <- replacement.(row) do
-      {:ok, String.replace(before, row, new_row, global: false)}
+         {:ok, ^new_row} <- replacement.(row),
+         offset when is_integer(offset) <- row_offset(before, row) do
+      suffix_at = offset + byte_size(row)
+
+      {:ok,
+       binary_part(before, 0, offset) <>
+         new_row <>
+         binary_part(before, suffix_at, byte_size(before) - suffix_at)}
     else
       _ -> :error
     end
@@ -438,11 +502,27 @@ defmodule Mix.Tasks.Loopex.Closure.Confine do
          [{end_at, _}] <- :binary.matches(bytes, end_marker),
          true <- start_at < end_at,
          row when is_binary(row) <- unique_row(bytes, prefix),
-         {row_at, _} <- :binary.match(bytes, row),
+         row_at when is_integer(row_at) <- row_offset(bytes, row),
          true <- start_at < row_at and row_at < end_at do
       true
     else
       _ -> false
+    end
+  end
+
+  defp row_offset(bytes, row) do
+    cond do
+      String.starts_with?(bytes, row <> "\n") ->
+        0
+
+      bytes == row ->
+        0
+
+      true ->
+        case :binary.match(bytes, "\n" <> row) do
+          {at, _} -> at + 1
+          :nomatch -> nil
+        end
     end
   end
 
