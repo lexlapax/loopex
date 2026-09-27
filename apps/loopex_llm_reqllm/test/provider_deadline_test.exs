@@ -1,7 +1,7 @@
 defmodule Loopex.LLM.ReqLLM.ProviderDeadlineTest do
   use ExUnit.Case, async: true
 
-  alias Loopex.LLM.ReqLLM.{ProviderBridge, ProviderCodec}
+  alias Loopex.LLM.ReqLLM.{Deadline, ProviderBridge, ProviderCodec}
 
   test "one offset preserves the wall deadline despite separated-sample time and fractional native offsets" do
     # Fixed clock coordinates, not expectations copied from the implementation:
@@ -14,6 +14,33 @@ defmodule Loopex.LLM.ReqLLM.ProviderDeadlineTest do
           {0, -1_000_250, 1_000_250}
         ] do
       assert ProviderBridge.invocation_deadline(wall_ms, native(offset_us)) == native(expected_us)
+      assert Deadline.invocation_deadline(wall_ms, native(offset_us)) == native(expected_us)
+    end
+  end
+
+  test "one positive native tick remains usable and unsigned-64-bit deadlines stay arithmetic" do
+    assert Deadline.remaining_timeout(1, 0) == 1
+    assert Deadline.remaining_timeout(0, 0) == 0
+    assert Deadline.remaining_timeout(-1, 0) == 0
+
+    maximum = 18_446_744_073_709_551_615
+    offset = native(-1_000_250)
+    converted = Deadline.invocation_deadline(maximum, offset)
+    assert converted == System.convert_time_unit(maximum, :millisecond, :native) - offset
+    assert Deadline.remaining_timeout(converted, -offset) == maximum
+
+    {:ok, request} =
+      Loopex.Model.request(
+        Loopex.LLM.ReqLLM.default_model(),
+        [%{"role" => "user", "content" => "maximum deadline"}],
+        sampling: %{"max_tokens" => 32},
+        deadline: maximum
+      )
+
+    assert {:ok, options} = Loopex.LLM.ReqLLM.call_options(request, "credential", [])
+
+    for key <- [:total_timeout, :stream_idle_timeout, :receive_timeout] do
+      assert Keyword.fetch!(options, key) == :infinity
     end
   end
 

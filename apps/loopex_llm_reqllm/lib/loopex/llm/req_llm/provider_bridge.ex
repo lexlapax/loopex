@@ -1806,7 +1806,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   @doc false
   def invocation_deadline(wall_milliseconds, native_offset)
       when is_integer(wall_milliseconds) and is_integer(native_offset) do
-    System.convert_time_unit(wall_milliseconds, :millisecond, :native) - native_offset
+    Loopex.LLM.ReqLLM.Deadline.invocation_deadline(wall_milliseconds, native_offset)
   end
 
   defp now, do: System.monotonic_time(:millisecond)

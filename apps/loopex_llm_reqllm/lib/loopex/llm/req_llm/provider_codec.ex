@@ -196,19 +196,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
   @doc false
   def remaining_timeout(deadline, sampled_now)
       when is_integer(deadline) and is_integer(sampled_now) do
-    remaining = deadline - sampled_now
-
-    if remaining <= 0 do
-      0
-    else
-      milliseconds = System.convert_time_unit(remaining, :native, :millisecond)
-
-      if System.convert_time_unit(milliseconds, :millisecond, :native) < remaining do
-        milliseconds + 1
-      else
-        milliseconds
-      end
-    end
+    Loopex.LLM.ReqLLM.Deadline.remaining_timeout(deadline, sampled_now)
   end
 
   defp decode_payload(kind, bytes) do

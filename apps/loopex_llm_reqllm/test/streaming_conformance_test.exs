@@ -882,21 +882,10 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
   end
 
   test "the transport is bounded by the run's committed deadline and not by a library default" do
-    # Concept: nothing bounds a real provider call except what the run declared.
-    #
-    # Technical depth: the streaming client applies its own 30-second receive
-    # timeout when a call supplies none, and this adapter supplied none. That is
-    # precisely the independent per-call timeout the committed absolute deadline
-    # exists to replace: undeclared, absent from the journal, invisible to the
-    # operator, and shorter than the bound the run actually chose. Under load it
-    # fired with minutes of the declared deadline remaining, failing an attempt
-    # for a reason nobody selected and nothing recorded -- which is how it was
-    # found, as a gate lane that went red while two lanes on the same bytes went
-    # green.
-    #
-    # The bound handed to the transport is now the remaining time on the run's
-    # own deadline, so there is one bound rather than two and it is the declared
-    # one.
+    # Concept: the committed deadline remains the one authority for the call.
+    # Technical depth: the pre-dispatch check refuses an elapsed deadline;
+    # relative dependency timers are infinite, including at uint64 maximum.
+    # The coordinator spends that committed deadline through bounded slices.
     deadline = System.system_time(:millisecond) + 120_000
 
     {:ok, request} =
@@ -916,8 +905,9 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
     # And it is what a real call is actually made with.
     assert {:ok, options} = Loopex.LLM.ReqLLM.call_options(request, "credential", [])
-    assert {:ok, expected_bound} = Loopex.LLM.ReqLLM.transport_bound(request)
-    assert Keyword.fetch!(options, :receive_timeout) == expected_bound
+    assert Keyword.fetch!(options, :receive_timeout) == :infinity
+    assert Keyword.fetch!(options, :total_timeout) == :infinity
+    assert Keyword.fetch!(options, :stream_idle_timeout) == :infinity
 
     # Every other option a call carries is a declared value too, so a bound this
     # adapter never chose cannot re-enter through one of them.
