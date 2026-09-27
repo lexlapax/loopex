@@ -62,8 +62,8 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
     # Concept: credentials enter through host-owned custody only.
     # Technical depth: the worker still reads its non-secret crash policy and
     # the launcher enumerates names solely to scrub the first child image.
-    # The call-owned pool's accepted SSLKEYLOGFILE guard reads only that literal
-    # non-secret variable immediately before creating its HTTP/TLS subtree.
+    # Pool creation and shared guard checks read only the named non-secret
+    # settings. Neither is an exception for provider-key or ambient reads.
     for path <- Path.wildcard(Path.join(__DIR__, "../lib/**/*.ex")) do
       source = File.read!(path)
 
@@ -82,6 +82,9 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
 
           "loopex/llm/req_llm/in_process/pool_lifecycle.ex" ->
             ["\"SSLKEYLOGFILE\""]
+
+          "loopex/llm/req_llm/in_process/guards.ex" ->
+            ["\"TIDEWAVE_REPL\"", "\"SSLKEYLOGFILE\""]
 
           _ ->
             []

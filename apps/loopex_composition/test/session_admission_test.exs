@@ -189,6 +189,55 @@ defmodule LoopexComposition.SessionAdmissionTest do
     assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}
   end
 
+  test "a matching grant queued after expiry is refused by a still-live requester" do
+    {owner, owner_monitor} = responder(:silent)
+    generation = make_ref()
+    handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+    test = self()
+
+    {borrower, borrower_monitor} =
+      spawn_monitor(fn ->
+        deadline = System.monotonic_time() + System.convert_time_unit(100, :millisecond, :native)
+        result = SessionAdmission.request(handle, {:begin_model, self(), make_ref()}, deadline)
+        send(test, {:queued_grant_result, self(), result})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(borrower), do: Process.exit(borrower, :kill)
+    end)
+
+    assert_receive {:observed, ^owner, ^borrower, reference, ^generation, operation, expiry}
+    assert :erlang.suspend_process(borrower)
+    wait_until(expiry)
+    send(owner, :late_grant)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+    token = {:session_grant, generation, :begin_model, borrower, reference, expiry}
+
+    assert {:messages, messages} = Process.info(borrower, :messages)
+
+    assert {:loopex_session_admission_result, owner, reference, generation, operation, expiry,
+            {:ok, token}} in messages
+
+    assert Process.alive?(borrower)
+    assert :erlang.resume_process(borrower)
+    assert_receive {:queued_grant_result, ^borrower, {:error, :session_admission_closed}}
+    assert Process.alive?(borrower)
+    refute_receive {:queued_grant_result, ^borrower, _}
+    send(borrower, :stop)
+    assert_receive {:DOWN, ^borrower_monitor, :process, ^borrower, :normal}
+  end
+
+  defp wait_until(deadline) do
+    if System.monotonic_time() < deadline do
+      Process.sleep(1)
+      wait_until(deadline)
+    end
+  end
+
   defp responder(mode) do
     test = self()
 

@@ -425,19 +425,7 @@ defmodule LoopexComposition.ReqLLMStarter do
   end
 
   defp guards do
-    cond do
-      System.get_env("SSLKEYLOGFILE") != nil ->
-        {:error, :ssl_key_log_enabled}
-
-      Application.get_env(:req, :default_options, []) != [] ->
-        {:error, :req_default_options_unsupported}
-
-      System.get_env("TIDEWAVE_REPL") == "true" ->
-        {:error, :req_llm_tidewave_enabled}
-
-      true ->
-        :ok
-    end
+    Loopex.LLM.ReqLLM.InProcess.Guards.pre_start()
   end
 
   defp provenance do
