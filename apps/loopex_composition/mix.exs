@@ -13,6 +13,7 @@ defmodule LoopexComposition.MixProject do
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
+      test_ignore_filters: ["test/support/req_llm_start_fixture.ex"],
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]

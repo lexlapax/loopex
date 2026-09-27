@@ -18,7 +18,8 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
       test_ignore_filters: [
         "test/support/provider_build_fixture.exs",
         "test/support/provider_isolation_fixture.exs",
-        "test/support/provider_phase_diagnostic.exs"
+        "test/support/provider_phase_diagnostic.exs",
+        "test/support/in_process_tls_fixture.ex"
       ],
       start_permanent: Mix.env() == :prod,
       escript: [
