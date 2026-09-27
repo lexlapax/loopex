@@ -32,6 +32,90 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
   end
 
+  test "an authoritative failed proxy start and normal DOWN clear a no-candidate call" do
+    generation = make_ref()
+    cell = :atomics.new(2, [])
+    {owner, owner_monitor} = census_owner(generation, cell)
+    handle = SessionAdmission.handle(owner, generation, cell)
+    call = make_ref()
+    start_ref = make_ref()
+    {proxy, proxy_monitor} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^proxy_monitor, :process, ^proxy, :normal}
+
+    assert {:ok, _} = SessionAdmission.request(handle, {:begin_model, self(), call}, deadline())
+
+    proof =
+      {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, :not_started,
+       {:error, :unavailable}}
+
+    assert {:error, :session_admission_closed} =
+             SessionAdmission.request(
+               handle,
+               {:cancel_model, call,
+                {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, :not_started,
+                 {:ok, self()}}},
+               deadline()
+             )
+
+    assert :atomics.get(cell, 2) == 1
+    assert {:ok, _} = SessionAdmission.request(handle, {:cancel_model, call, proof}, deadline())
+    assert :atomics.get(cell, 2) == 0
+    assert :atomics.get(cell, 1) == 0
+    send(owner, :stop)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+  end
+
+  test "retirement proof cannot reuse any admission message reference" do
+    generation = make_ref()
+    cell = :atomics.new(2, [])
+    {owner, owner_monitor} = census_owner(generation, cell)
+    call = make_ref()
+    begin_ref = make_ref()
+    begin = {:begin_model, self(), call}
+    send(owner, {:loopex_session_admission, self(), begin_ref, generation, begin, deadline()})
+
+    assert_receive {:loopex_session_admission_result, ^owner, ^begin_ref, ^generation, ^begin, _,
+                    {:ok, _}}
+
+    {proxy, proxy_monitor} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^proxy_monitor, :process, ^proxy, :normal}
+    test = self()
+
+    candidate =
+      spawn(fn ->
+        receive do
+          {:model_custody_prepare, _, _, _, _} -> send(test, :unexpected_custody)
+          :stop -> :ok
+        end
+      end)
+
+    candidate_monitor = Process.monitor(candidate)
+    on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
+    start_ref = make_ref()
+    stop_ref = make_ref()
+    stage_ref = make_ref()
+
+    for bad_proof <- [begin_ref, stage_ref] do
+      stage =
+        {:stage_model, call, candidate, bad_proof, stop_ref,
+         {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, candidate,
+          candidate_monitor}}
+
+      send(owner, {:loopex_session_admission, self(), stage_ref, generation, stage, deadline()})
+
+      assert_receive {:loopex_session_admission_result, ^owner, ^stage_ref, ^generation, ^stage,
+                      _, {:error, :session_admission_closed}}
+
+      refute_receive :unexpected_custody, 10
+    end
+
+    assert :atomics.get(cell, 2) == 1
+    send(candidate, :stop)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}
+    send(owner, :stop)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+  end
+
   test "a cached work grant cannot be replayed after the lifecycle closes" do
     for lifecycle <- [1, 2, 3] do
       generation = make_ref()
@@ -169,7 +253,6 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
            {:model_cleanup_custody, ^owner, ^generation, ^call, candidate, ^proof} = custody} ->
             assert candidate == self()
             assert expiry > System.monotonic_time()
-            send(owner, {:model_custody_prepared, self(), make_ref(), generation, call, proof})
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
             send(callback, {:custody_committed, self(), staging_ref})
 
@@ -200,17 +283,28 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     start_proof =
       {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, candidate, candidate_monitor}
 
-    assert {:ok, _} =
+    assert {:ok, {:session_grant, ^generation, :stage_model, ^callback, staging_ref, _}} =
              SessionAdmission.request(
                handle,
                {:stage_model, call, candidate, proof, stop_ref, start_proof},
                deadline()
              )
 
-    assert_receive {:custody_committed, ^candidate, staging_ref}
+    assert_receive {:custody_committed, ^candidate, ^staging_ref}
     assert is_reference(staging_ref)
     send(owner, {:inspect, self()})
     assert_receive {:census_state, %{pending: %{stage_ref: ^staging_ref}}}
+
+    collided_register = {:register_model, call, candidate, proof}
+    collided_expiry = deadline()
+
+    send(
+      owner,
+      {:loopex_session_admission, self(), proof, generation, collided_register, collided_expiry}
+    )
+
+    assert_receive {:loopex_session_admission_result, ^owner, ^proof, ^generation,
+                    ^collided_register, ^collided_expiry, {:error, :session_admission_closed}}
 
     assert {:ok, _} =
              SessionAdmission.request(
@@ -294,6 +388,73 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert state.pending == nil
     assert :atomics.get(cell, 2) == 0
     assert :atomics.get(cell, 1) == 0
+  end
+
+  test "identical custody replay is inert but a conflicting replay seals only this session" do
+    owner = self()
+
+    {candidate, candidate_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
+    {state, cell, generation, call, proof} = direct_staging(candidate, candidate_monitor)
+
+    assert_receive {:model_custody_prepared, ^candidate, staging_ref, ^generation, ^call, ^proof} =
+                     custody
+
+    state = ModelCensus.handle(state, custody)
+    assert state.pending.phase == :provisional
+    state = ModelCensus.handle(state, custody)
+    assert state.pending.phase == :provisional
+    assert :atomics.get(cell, 1) == 0
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:model_custody_prepared, candidate, staging_ref, generation, call, make_ref()}
+      )
+
+    assert state.pending.phase == :unproved
+    assert :atomics.get(cell, 1) == 3
+    assert :atomics.get(cell, 2) == 1
+    send(candidate, :stop)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}
+  end
+
+  test "conflicting custody acknowledgement before stage grant seals without permission" do
+    owner = self()
+
+    {candidate, candidate_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, _start_ref, _staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
+            send(owner, {:model_custody_prepared, self(), make_ref(), generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
+    {state, cell, generation, call, proof} = direct_staging(candidate, candidate_monitor)
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof} = bad_ack
+    state = ModelCensus.handle(state, bad_ack)
+    assert state.pending.phase == :unproved
+    assert :atomics.get(cell, 1) == 3
+    assert :atomics.get(cell, 2) == 1
+
+    assert_receive {:loopex_session_admission_result, ^owner, _, ^generation,
+                    {:stage_model, ^call, ^candidate, ^proof, _, _}, _,
+                    {:error, :session_admission_closed}}
+
+    send(candidate, :stop)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}
   end
 
   test "late custody delivery cannot enable a fresh register request" do
@@ -436,6 +597,214 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert :atomics.get(cell, 2) == 0
   end
 
+  test "live callback proves registrar was not entered around genuine candidate DOWN" do
+    for order <- [:down_first, :cancel_first] do
+      owner = self()
+
+      {candidate, candidate_start_monitor} =
+        spawn_monitor(fn ->
+          receive do
+            {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+             {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
+              send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+              receive do: (:stop -> :ok)
+          end
+        end)
+
+      {state, cell, generation, call, proof} = direct_staging(candidate, candidate_start_monitor)
+
+      assert_receive {:model_custody_prepared, ^candidate, staging_ref, ^generation, ^call,
+                      ^proof} = custody
+
+      state = ModelCensus.handle(state, custody)
+      assert state.pending.stage_issued
+
+      assert_receive {:loopex_session_admission_result, ^owner, stage_ref_from_grant, ^generation,
+                      {:stage_model, ^call, ^candidate, ^proof, _, _}, _,
+                      {:ok, {:session_grant, ^generation, :stage_model, ^owner, grant_ref, _}}}
+
+      assert stage_ref_from_grant == staging_ref
+      assert grant_ref == stage_ref_from_grant
+
+      operation =
+        {:cancel_model, call,
+         {:registrar_not_entered, stage_ref_from_grant, candidate, candidate_start_monitor,
+          :normal}}
+
+      request =
+        {:loopex_session_admission, owner, make_ref(), generation, operation, deadline()}
+
+      state =
+        if order == :cancel_first do
+          state = ModelCensus.handle(state, request)
+          assert state.pending.phase == :cancelling
+
+          refute_receive {:loopex_session_admission_result, ^owner, _, ^generation, ^operation, _,
+                          _},
+                         10
+
+          state
+        else
+          state
+        end
+
+      owner_monitor = state.pending.candidate_monitor
+      send(candidate, :stop)
+      assert_receive {:DOWN, ^candidate_start_monitor, :process, ^candidate, :normal}
+      assert_receive {:DOWN, ^owner_monitor, :process, ^candidate, :normal} = down
+      state = ModelCensus.handle(state, down)
+
+      state =
+        if order == :down_first do
+          wrong =
+            {:cancel_model, call,
+             {:registrar_not_entered, staging_ref, candidate, candidate_start_monitor, :killed}}
+
+          state =
+            ModelCensus.handle(
+              state,
+              {:loopex_session_admission, owner, make_ref(), generation, wrong, deadline()}
+            )
+
+          assert_receive {:loopex_session_admission_result, ^owner, _, ^generation, ^wrong, _,
+                          {:error, :session_admission_closed}}
+
+          ModelCensus.handle(state, request)
+        else
+          state
+        end
+
+      assert_receive {:loopex_session_admission_result, ^owner, _, ^generation, ^operation, _,
+                      {:ok, _}}
+
+      assert state.pending == nil
+      assert :atomics.get(cell, 1) == 0
+      assert :atomics.get(cell, 2) == 0
+    end
+  end
+
+  test "accepted no-registrar proof survives callback death before candidate DOWN" do
+    owner = self()
+    generation = make_ref()
+    cell = :atomics.new(2, [])
+    call = make_ref()
+    proof = make_ref()
+    start_ref = make_ref()
+    stop_ref = make_ref()
+    callback = spawn(fn -> callback_loop(owner) end)
+    {proxy, proxy_monitor} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^proxy_monitor, :process, ^proxy, :normal}
+
+    {candidate, candidate_start_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, ^start_ref, staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, ^generation, ^call, _candidate, ^proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(callback), do: Process.exit(callback, :kill) end)
+    on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
+    state = ModelCensus.new(generation, cell)
+    begin = {:begin_model, callback, call}
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:loopex_session_admission, callback, make_ref(), generation, begin, deadline()}
+      )
+
+    start_proof =
+      {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, candidate,
+       candidate_start_monitor}
+
+    stage = {:stage_model, call, candidate, proof, stop_ref, start_proof}
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:loopex_session_admission, callback, make_ref(), generation, stage, deadline()}
+      )
+
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof} = custody
+    state = ModelCensus.handle(state, custody)
+    assert state.pending.stage_issued
+
+    operation =
+      {:cancel_model, call,
+       {:registrar_not_entered, state.pending.stage_ref, candidate, candidate_start_monitor,
+        :normal}}
+
+    send(callback, {:send_cancel, generation, operation})
+    assert_receive {:loopex_session_admission, ^callback, _, ^generation, ^operation, _} = request
+    state = ModelCensus.handle(state, request)
+    assert state.pending.phase == :cancelling
+
+    callback_monitor = state.pending.callback_monitor
+    send(callback, :stop)
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal} = callback_down
+    state = ModelCensus.handle(state, callback_down)
+    assert state.pending.callback_down
+
+    candidate_owner_monitor = state.pending.candidate_monitor
+    send(candidate, :stop)
+    assert_receive {:DOWN, ^candidate_start_monitor, :process, ^candidate, :normal}
+
+    assert_receive {:DOWN, ^candidate_owner_monitor, :process, ^candidate, :normal} =
+                     candidate_down
+
+    state = ModelCensus.handle(state, candidate_down)
+    assert state.pending == nil
+    assert :atomics.get(cell, 1) == 0
+    assert :atomics.get(cell, 2) == 0
+  end
+
+  test "missing candidate DOWN seals by the earlier cancellation expiry" do
+    owner = self()
+
+    {candidate, candidate_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
+    {state, cell, generation, call, proof} = direct_staging(candidate, candidate_monitor)
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof} = custody
+    state = ModelCensus.handle(state, custody)
+
+    assert_receive {:loopex_session_admission_result, ^owner, stage_ref, ^generation,
+                    {:stage_model, ^call, ^candidate, ^proof, _, _}, _, {:ok, _}}
+
+    operation =
+      {:cancel_model, call,
+       {:registrar_not_entered, stage_ref, candidate, candidate_monitor, :normal}}
+
+    expiry = System.monotonic_time() + System.convert_time_unit(350, :millisecond, :native)
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:loopex_session_admission, owner, make_ref(), generation, operation, expiry}
+      )
+
+    assert state.pending.phase == :cancelling
+    assert {_, token} = state.pending.timer
+    assert_receive {:model_census_lost_callback, ^token} = timeout, 650
+    state = ModelCensus.handle(state, timeout)
+    assert state.pending.phase == :unproved
+    assert :atomics.get(cell, 1) == 3
+    assert :atomics.get(cell, 2) == 1
+    send(candidate, :stop)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}
+  end
+
   test "callback loss retains no arbitrary exit value and keeps pending until proof" do
     generation = make_ref()
     cell = :atomics.new(2, [])
@@ -552,6 +921,24 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert state.pending.start_ref == start_ref
     assert state.pending.stop_ref == stop_ref
     {state, cell, generation, call, proof}
+  end
+
+  defp callback_loop(owner) do
+    receive do
+      {:send_cancel, generation, operation} ->
+        send(
+          owner,
+          {:loopex_session_admission, self(), make_ref(), generation, operation, deadline()}
+        )
+
+        callback_loop(owner)
+
+      :stop ->
+        :ok
+
+      _other ->
+        callback_loop(owner)
+    end
   end
 
   defp await_callback_down(owner) do
