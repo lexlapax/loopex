@@ -4,7 +4,7 @@ defmodule Loopex.Checks.DepsBudget do
 
   Enforces ADR 0001's application roles and inward dependency direction from
   the repository's actual umbrella inventory. The contract stays independent,
-  core stays protocol-only, concrete edges point inward, clients compose edges
+  core keeps its admitted protocol and telemetry budget, concrete edges point inward, clients compose edges
   only in tests, and the repository contains only its planned application
   identities. Standalone extension checks retain ADR 0003's protocol-only shape.
 
@@ -20,7 +20,8 @@ defmodule Loopex.Checks.DepsBudget do
   A project declaration must expose literal application and role identities,
   exact internal or Hex dependency records, and owned literal compile roots.
   The repository overlay permits only the planned identities and only the
-  ReqLLM edge's exact direct external requirement. Before the complete planned
+  ReqLLM edge's exact load-only ReqLLM, Req and Finch declarations, plus the
+  separately admitted telemetry declarations. Before the complete planned
   inventory is present, that one edge retains its inherited protocol-only
   internal shape; the complete inventory requires its runtime edge like every
   other concrete edge. External requirements resolve through the candidate's canonical
@@ -57,6 +58,11 @@ defmodule Loopex.Checks.DepsBudget do
   # a project file.
   @core_external %{telemetry: "~> 1.3"}
   @reqllm_requirement "~> 1.24.0"
+  @load_only_edge_dependencies [
+    {:req_llm, @reqllm_requirement, [runtime: false]},
+    {:req, "== 0.7.4", [runtime: false]},
+    {:finch, "== 0.23.0", [runtime: false]}
+  ]
   @floor_elixir_version Version.parse!("1.18.5")
 
   @locked_aliases [
@@ -604,11 +610,13 @@ defmodule Loopex.Checks.DepsBudget do
   # Concept: the exact set of external dependencies this repository declares,
   # and the roots the lock closure is computed from.
   #
-  # Technical depth: two names are admitted and no others: ReqLLM in its edge,
+  # Technical depth: ReqLLM, Req and Finch are load-only roots in their edge,
   # and `:telemetry`, which accepted ADR 0030 admits for core and for the
   # telemetry edge. The set is compared as a set rather than counted, so an
   # application declaring a name it may not, or a requirement other than the
-  # pinned one, refuses here exactly as a third dependency would.
+  # pinned one, refuses here exactly as an unapproved dependency would. Presence
+  # of the complete edge set is proved by the declaration oracle, not this
+  # materializer's subset authorization check.
   defp external_materialization_roots(records) do
     internal =
       records
@@ -623,12 +631,19 @@ defmodule Loopex.Checks.DepsBudget do
 
     telemetry_requirement = Map.fetch!(@core_external, :telemetry)
 
+    edge_roots =
+      Enum.map(@load_only_edge_dependencies, fn {name, requirement, options} ->
+        {:loopex_llm_reqllm, name, requirement, options}
+      end)
+
     admitted =
-      MapSet.new([
-        {:loopex_llm_reqllm, :req_llm, @reqllm_requirement, []},
-        {:loopex, :telemetry, telemetry_requirement, []},
-        {:loopex_telemetry, :telemetry, telemetry_requirement, []}
-      ])
+      MapSet.new(
+        edge_roots ++
+          [
+            {:loopex, :telemetry, telemetry_requirement, []},
+            {:loopex_telemetry, :telemetry, telemetry_requirement, []}
+          ]
+      )
 
     if declared != [] and MapSet.subset?(MapSet.new(declared), admitted) do
       roots =
@@ -1253,6 +1268,13 @@ defmodule Loopex.Checks.DepsBudget do
     if valid_requirement?(requirement), do: {:ok, name, requirement, []}, else: :error
   end
 
+  defp dependency({:{}, _metadata, [name, requirement, [runtime: false]]})
+       when is_atom(name) and is_binary(requirement) and requirement != "" do
+    if valid_requirement?(requirement),
+      do: {:ok, name, requirement, [runtime: false]},
+      else: :error
+  end
+
   defp dependency(_other), do: :error
 
   defp internal_dependency_options?(options) do
@@ -1547,14 +1569,15 @@ defmodule Loopex.Checks.DepsBudget do
         end)
 
       case {record.app, external} do
-        {:loopex_llm_reqllm, [{:req_llm, @reqllm_requirement, []}]} ->
-          []
-
         {:loopex_llm_reqllm, found} ->
-          [
-            "#{record.path}: ReqLLM edge must declare exactly external dependency " <>
-              "{:req_llm, #{inspect(@reqllm_requirement)}}; found #{inspect(found)}"
-          ]
+          if Enum.sort(found) == Enum.sort(@load_only_edge_dependencies) do
+            []
+          else
+            [
+              "#{record.path}: ReqLLM edge must declare exactly external dependency " <>
+                "set #{inspect(@load_only_edge_dependencies)}; found #{inspect(found)}"
+            ]
+          end
 
         # Concept: core and the telemetry edge each declare exactly the one
         # external dependency the vision admits by name, and nothing else.

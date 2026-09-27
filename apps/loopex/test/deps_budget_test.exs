@@ -6,6 +6,11 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
   @fixture "scripts/fixtures/deps-budget-invalid/mix.exs"
   @reqllm_requirement "~> 1.24.0"
+  @load_only_edge_dependencies [
+    {:req_llm, @reqllm_requirement, [runtime: false]},
+    {:req, "== 0.7.4", [runtime: false]},
+    {:finch, "== 0.23.0", [runtime: false]}
+  ]
   # The one external dependency accepted ADR 0030 admits for core and for the
   # telemetry edge, pinned here exactly as the oracle pins it.
   @telemetry_requirement "~> 1.3"
@@ -412,26 +417,36 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
        end},
       {"complete-legacy-reqllm", "require exactly one production loopex dependency",
        fn root ->
-         write_child(root, "loopex_llm_reqllm", :edge, [
-           {:loopex_protocol, [in_umbrella: true]},
-           {:req_llm, @reqllm_requirement}
-         ])
+         write_child(
+           root,
+           "loopex_llm_reqllm",
+           :edge,
+           [
+             {:loopex_protocol, [in_umbrella: true]}
+           ] ++ @load_only_edge_dependencies
+         )
        end},
       {"another-external", "must declare exactly external dependency",
        fn root ->
-         write_child(root, "loopex_llm_reqllm", :edge, [
-           {:loopex, [in_umbrella: true]},
-           {:loopex_protocol, [in_umbrella: true]},
-           {:req_llm, @reqllm_requirement},
-           {:external_probe, "~> 1.0"}
-         ])
+         write_child(
+           root,
+           "loopex_llm_reqllm",
+           :edge,
+           [
+             {:loopex, [in_umbrella: true]},
+             {:loopex_protocol, [in_umbrella: true]},
+             {:external_probe, "~> 1.0"}
+           ] ++ @load_only_edge_dependencies
+         )
        end},
       {"wrong-requirement", "must declare exactly external dependency",
        fn root ->
          write_child(root, "loopex_llm_reqllm", :edge, [
            {:loopex, [in_umbrella: true]},
            {:loopex_protocol, [in_umbrella: true]},
-           {:req_llm, "~> 1.19"}
+           {:req_llm, "~> 1.19", [runtime: false]},
+           {:req, "== 0.7.4", [runtime: false]},
+           {:finch, "== 0.23.0", [runtime: false]}
          ])
        end}
     ]
@@ -445,6 +460,154 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       assert {:error, reasons} = Budget.check_repository(root)
       assert Enum.any?(reasons, &String.contains?(&1, expected_reason))
     end
+  end
+
+  test "load-only declarations require the exact edge set independently of order", %{dir: dir} do
+    root = Path.join(dir, "load-only-positive")
+    write_repository_inventory(root)
+
+    write_child(
+      root,
+      "loopex_llm_reqllm",
+      :edge,
+      [{:loopex, [in_umbrella: true]}, {:loopex_protocol, [in_umbrella: true]}] ++
+        Enum.reverse(@load_only_edge_dependencies)
+    )
+
+    track!(root)
+    assert Budget.check_repository(root) == :ok
+
+    for {removed, _requirement, _options} <- @load_only_edge_dependencies do
+      negative = Path.join(dir, "missing-#{removed}")
+      write_repository_inventory(negative)
+
+      write_child(
+        negative,
+        "loopex_llm_reqllm",
+        :edge,
+        [{:loopex, [in_umbrella: true]}, {:loopex_protocol, [in_umbrella: true]}] ++
+          Enum.reject(@load_only_edge_dependencies, &(elem(&1, 0) == removed))
+      )
+
+      track!(negative)
+      assert {:error, reasons} = Budget.check_repository(negative)
+      assert Enum.any?(reasons, &String.contains?(&1, "ReqLLM edge must declare exactly"))
+    end
+  end
+
+  test "load-only declaration syntax is literal unique and false only", %{dir: dir} do
+    malformed = [
+      "{:req_llm, \"~> 1.24.0\", [runtime: true]}",
+      "{:req_llm, \"~> 1.24.0\", []}",
+      "{:req_llm, \"~> 1.24.0\", [runtime: false, only: :test]}",
+      "{:req_llm, \"~> 1.24.0\", [runtime: false, runtime: false]}",
+      "{:req_llm, \"~> 1.24.0\", [runtime: false | :bad_tail]}",
+      "{String.to_atom(\"req_llm\"), \"~> 1.24.0\", [runtime: false]}",
+      "{:req_llm, requirement(), [runtime: false]}",
+      "{:req_llm, \"~> 1.24.0\", options()}",
+      "{:req_llm, \"not a requirement\", [runtime: false]}"
+    ]
+
+    for {declaration, index} <- Enum.with_index(malformed) do
+      path = Path.join(dir, "malformed-#{index}.exs")
+      source = child_project("loopex_llm_reqllm", :edge, [])
+      source = String.replace(source, "defp deps, do: []", "defp deps, do: [#{declaration}]")
+      File.write!(path, source)
+      assert {:error, reasons} = DepsBudget.check_mix_exs(path)
+
+      assert Enum.any?(
+               reasons,
+               &String.contains?(
+                 &1,
+                 "deps must be one unambiguous record of unique literal dependency data"
+               )
+             ),
+             "#{declaration}: #{inspect(reasons)}"
+    end
+
+    duplicate = Path.join(dir, "duplicate.exs")
+
+    File.write!(
+      duplicate,
+      child_project(
+        "loopex_llm_reqllm",
+        :edge,
+        @load_only_edge_dependencies ++ [hd(@load_only_edge_dependencies)]
+      )
+    )
+
+    assert {:error, reasons} = DepsBudget.check_mix_exs(duplicate)
+    assert Enum.any?(reasons, &String.contains?(&1, "unique literal dependency data"))
+  end
+
+  test "load-only declarations do not authorize other applications or versions", %{dir: dir} do
+    for {app, role} <- [
+          {"loopex_executor_local", :edge},
+          {"loopex", :core},
+          {"loopex_composition", :composition},
+          {"loopex_cli", :client}
+        ] do
+      root = Path.join(dir, "unauthorized-#{app}")
+      write_repository_inventory(root)
+
+      write_child(
+        root,
+        app,
+        role,
+        [{:loopex_protocol, [in_umbrella: true]}] ++
+          @load_only_edge_dependencies
+      )
+
+      track!(root)
+      assert {:error, reasons} = Budget.check_repository(root)
+      refute Enum.any?(reasons, &String.contains?(&1, "unambiguous record"))
+
+      assert Enum.any?(
+               reasons,
+               &(String.contains?(&1, "external") or
+                   String.contains?(&1, "core applications"))
+             )
+    end
+
+    for {changed, requirement} <- [
+          {:req_llm, "~> 1.23.0"},
+          {:req, "~> 0.7.4"},
+          {:finch, "~> 0.23.0"},
+          {:extra, "== 1.0.0"}
+        ] do
+      root = Path.join(dir, "wrong-#{changed}")
+      write_repository_inventory(root)
+
+      dependencies =
+        List.keydelete(@load_only_edge_dependencies, changed, 0) ++
+          [{changed, requirement, [runtime: false]}]
+
+      write_child(
+        root,
+        "loopex_llm_reqllm",
+        :edge,
+        [{:loopex, [in_umbrella: true]}, {:loopex_protocol, [in_umbrella: true]}] ++ dependencies
+      )
+
+      track!(root)
+      assert {:error, reasons} = Budget.check_repository(root)
+      assert Enum.any?(reasons, &String.contains?(&1, "ReqLLM edge must declare exactly"))
+    end
+
+    root = Path.join(dir, "automatic-start")
+    write_repository_inventory(root)
+
+    write_child(root, "loopex_llm_reqllm", :edge, [
+      {:loopex, [in_umbrella: true]},
+      {:loopex_protocol, [in_umbrella: true]},
+      {:req_llm, @reqllm_requirement},
+      {:req, "== 0.7.4"},
+      {:finch, "== 0.23.0"}
+    ])
+
+    track!(root)
+    assert {:error, reasons} = Budget.check_repository(root)
+    assert Enum.any?(reasons, &String.contains?(&1, "ReqLLM edge must declare exactly"))
   end
 
   test "the planned inventory admits exactly eleven applications with their declared roles",
@@ -655,14 +818,18 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
   } do
     write_inventory(dir)
 
-    write_child(dir, "loopex_llm_reqllm", :edge, [
-      {:loopex_protocol, [in_umbrella: true]},
-      {:req_llm, @reqllm_requirement}
-    ])
+    write_child(
+      dir,
+      "loopex_llm_reqllm",
+      :edge,
+      [
+        {:loopex_protocol, [in_umbrella: true]}
+      ] ++ @load_only_edge_dependencies
+    )
 
     # The lock names every external dependency the repository declares, which
     # now includes core's own.
-    write_lock!(dir, [{:req_llm, "1.24.0"}, {:telemetry, "1.3.0"}])
+    write_lock!(dir, edge_lock_entries() ++ [{:telemetry, "1.3.0"}])
     core = Path.join(dir, "apps/loopex/mix.exs")
 
     File.write!(
@@ -901,10 +1068,14 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       child_project("loopex", :core, [{:loopex_protocol, [in_umbrella: true]}])
     )
 
-    write_child(dir, "loopex_llm_reqllm", :edge, [
-      {:loopex_protocol, [in_umbrella: true]},
-      {:req_llm, @reqllm_requirement}
-    ])
+    write_child(
+      dir,
+      "loopex_llm_reqllm",
+      :edge,
+      [
+        {:loopex_protocol, [in_umbrella: true]}
+      ] ++ @load_only_edge_dependencies
+    )
 
     git!(dir, ["add", "apps/loopex/mix.exs", "apps/loopex_llm_reqllm/mix.exs"])
 
@@ -1226,11 +1397,15 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:loopex_protocol, [in_umbrella: true]}
     ])
 
-    write_child(root, "loopex_llm_reqllm", :edge, [
-      {:loopex, [in_umbrella: true]},
-      {:loopex_protocol, [in_umbrella: true]},
-      {:req_llm, @reqllm_requirement}
-    ])
+    write_child(
+      root,
+      "loopex_llm_reqllm",
+      :edge,
+      [
+        {:loopex, [in_umbrella: true]},
+        {:loopex_protocol, [in_umbrella: true]}
+      ] ++ @load_only_edge_dependencies
+    )
 
     write_child(root, "loopex_executor_local", :edge, [
       {:loopex, [in_umbrella: true]}
@@ -1276,8 +1451,11 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       {:loopex_composition, [in_umbrella: true]}
     ])
 
-    write_lock!(root, [{:req_llm, "1.24.0"}, {:telemetry, "1.3.0"}])
+    write_lock!(root, edge_lock_entries() ++ [{:telemetry, "1.3.0"}])
   end
+
+  defp edge_lock_entries,
+    do: [{:req_llm, "1.24.0"}, {:req, "0.7.4"}, {:finch, "0.23.0"}]
 
   defp write_child(root, directory, role, dependencies) do
     directory_path = Path.join([root, "apps", directory])
@@ -1359,11 +1537,18 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     archive_sha = :crypto.hash(:sha256, File.read!(archive_path)) |> Base.encode16(case: :lower)
 
-    File.write!(Path.join(root, "mix.lock"), """
-    %{
-      "req_llm": {:hex, :req_llm, "1.24.0", "#{checksum}", [:mix], [], "hexpm", "#{archive_sha}"}
-    }
-    """)
+    other_entries =
+      for {name, version} <- [{"req", "0.7.4"}, {"finch", "0.23.0"}] do
+        write_package_archive!(root, cache, package(name, version, [:mix], "~> 1.17", []))
+      end
+
+    reqllm_entry =
+      ~s("req_llm": {:hex, :req_llm, "1.24.0", "#{checksum}", [:mix], [], "hexpm", "#{archive_sha}"})
+
+    File.write!(
+      Path.join(root, "mix.lock"),
+      "%{\n" <> Enum.join([reqllm_entry | other_entries], ",\n") <> "\n}\n"
+    )
 
     git!(root, ["add", "mix.lock"])
   end
@@ -1378,6 +1563,8 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       package("req_llm", "1.24.0", [:mix], "~> 1.17", [
         lock_dependency("bridge", "~> 2.0")
       ]),
+      package("req", "0.7.4", [:mix], "~> 1.17", []),
+      package("finch", "0.23.0", [:mix], "~> 1.17", []),
       package("bridge", "2.0.0", [:mix], ">= 1.17.0", [
         lock_dependency("leaf", "~> 3.0")
       ]),

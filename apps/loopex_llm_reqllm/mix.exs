@@ -34,7 +34,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   end
 
   def application do
-    [extra_applications: [:crypto]]
+    [extra_applications: [:crypto, :logger]]
   end
 
   # Concept: companion artifacts stay inside the caller's isolated build root.
@@ -51,7 +51,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
 
   # Concept: the reference model adapter named in the vision. It depends outward
   # on ReqLLM for provider transport and inward on core's Model behaviour; the
-  # edge runs one way, and nothing in the umbrella depends on this application.
+  # edge runs one way: composition depends on this adapter, never core.
   #
   # Technical depth: the range is pinned rather than open so a provider-library
   # change is a decision instead of a refetch. `mix loopex.deps_budget` reads the
@@ -60,7 +60,9 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   # in the core lane.
   defp deps do
     [
-      {:req_llm, "~> 1.24.0"},
+      {:req_llm, "~> 1.24.0", runtime: false},
+      {:req, "== 0.7.4", runtime: false},
+      {:finch, "== 0.23.0", runtime: false},
       {:loopex, in_umbrella: true},
       {:loopex_protocol, in_umbrella: true}
     ]
