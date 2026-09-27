@@ -387,8 +387,10 @@ defmodule Loopex.Executor.Local.ReadOnlyTools do
             # The final observed byte is the witness, never line content.
             bytes = binary_part(bytes, 0, byte_size(bytes) - 1)
 
-            {staged, _carry, _number, invalid?} =
+            {staged, carry, _number, invalid?} =
               chunk(staged, path, carry <> bytes, line_number, invalid?)
+
+            invalid? = invalid? or not valid_utf8_prefix?(carry)
 
             consumed = %{consumed | truncated: true, halt: true}
             staged = %{staged | truncated: true, halt: true}
@@ -407,6 +409,35 @@ defmodule Loopex.Executor.Local.ReadOnlyTools do
             read_lines(consumed, staged, handle, path, size, carry, line_number, invalid?)
         end
     end
+  end
+
+  # Concept: a byte cap can cut a valid scalar, but cannot hide malformed bytes.
+  # Technical depth: completed lines were checked by chunk/5. Validate its
+  # unfinished carry as a prefix; an incomplete suffix is admitted only when a
+  # canonical continuation could complete it. OTP also labels impossible
+  # overlong, surrogate and out-of-range prefixes incomplete before full width.
+  defp valid_utf8_prefix?(bytes) do
+    case :unicode.characters_to_binary(bytes, :utf8, :utf8) do
+      valid when is_binary(valid) -> true
+      {:error, _, _} -> false
+      {:incomplete, _, suffix} -> valid_incomplete_scalar?(suffix)
+    end
+  end
+
+  defp valid_incomplete_scalar?(<<0xE0>>), do: true
+  defp valid_incomplete_scalar?(<<0xF0>>), do: true
+
+  defp valid_incomplete_scalar?(<<leading, _::binary>> = suffix) do
+    width =
+      cond do
+        leading in 0xC2..0xDF -> 2
+        leading in 0xE0..0xEF -> 3
+        leading in 0xF0..0xF4 -> 4
+        true -> 0
+      end
+
+    width > byte_size(suffix) and
+      String.valid?(suffix <> :binary.copy(<<0x80>>, width - byte_size(suffix)))
   end
 
   defp chunk(state, path, bytes, number, invalid?) do

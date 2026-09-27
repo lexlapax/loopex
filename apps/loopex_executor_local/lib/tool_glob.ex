@@ -55,13 +55,23 @@ defmodule Loopex.Executor.Local.ToolGlob do
 
   defp class_members([value | rest], members), do: class_members(rest, [{value, false} | members])
 
-  defp class_source([{first, _}, {"-", false}, {last, _} | rest]) when first != "-" do
+  # Concept: only the class's original first and last hyphens can be literals.
+  # Technical depth: range consumption carries original-position state, so a
+  # leftover interior hyphen cannot become literal at a recursive suffix's start.
+  defp class_source(members), do: class_source(members, true)
+
+  defp class_source([{first, first_quoted?}, {"-", false}, {last, last_quoted?} | rest], first?) do
+    if (first == "-" and not first_quoted? and not first?) or
+         (last == "-" and not last_quoted? and rest != []),
+       do: throw(:invalid_glob)
+
     if first > last, do: throw(:invalid_glob)
-    class_literal(first) <> "-" <> class_literal(last) <> class_source(rest)
+    class_literal(first) <> "-" <> class_literal(last) <> class_source(rest, false)
   end
 
-  defp class_source([{value, _} | rest]), do: class_literal(value) <> class_source(rest)
-  defp class_source([]), do: ""
+  defp class_source([{"-", false} | rest], false) when rest != [], do: throw(:invalid_glob)
+  defp class_source([{value, _} | rest], _), do: class_literal(value) <> class_source(rest, false)
+  defp class_source([], _), do: ""
   defp class_literal(value) when value in ["-", "]", "[", "^", "\\"], do: "\\" <> value
   defp class_literal(value), do: value
 end

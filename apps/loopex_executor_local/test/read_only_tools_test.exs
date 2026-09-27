@@ -71,6 +71,27 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
     refute ReadOnlyTools.encode("%09") == ReadOnlyTools.encode("\t")
   end
 
+  test "glob classes refuse leftover interior unescaped hyphens after a range" do
+    for pattern <- ["[a-b-c]", "[a-b--]", "[a-b--c]", "[^a-b-c]"] do
+      assert {:error, :invalid_glob} = ToolGlob.compile(pattern)
+    end
+
+    for {pattern, values} <- [
+          {"[-a]", ["-", "a"]},
+          {"[a-]", ["-", "a"]},
+          {"[a-b-]", ["-", "a", "b"]},
+          {"[a\\-c]", ["-", "a", "c"]},
+          {"[--a]", ["-", "0", "A", "a"]},
+          {"[---]", ["-"]},
+          {"[\\--a]", ["-", "0", "A", "a"]},
+          {"[a-bc-d]", ["a", "b", "c", "d"]}
+        ] do
+      assert {:ok, matcher} = ToolGlob.compile(pattern)
+      for value <- values, do: assert(Regex.match?(matcher, value))
+      refute Regex.match?(matcher, "z")
+    end
+  end
+
   test "real FIFO socket and symlinks are entries and grep never opens them", %{root: root} do
     fifo = Path.join(root, "fifo")
     assert {_, 0} = System.cmd("mkfifo", [fifo])
@@ -328,6 +349,84 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
     assert {:completed,
             "N\tskipped\tinvalid_name=0\ttoo_large=0\tinvalid_utf8=1\tchanged=0\tunreadable=0\nN\ttruncated\n"} =
              execute(root, "grep", %{"pattern" => "z"})
+  end
+
+  test "aggregate truncation detects malformed UTF-8 in an unfinished line and discards only that file",
+       %{
+         root: root
+       } do
+    write_aggregate_prefix!(root, 64)
+
+    for suffix <- [
+          <<255>>,
+          <<0x80>>,
+          <<0xC0>>,
+          <<0xF5>>,
+          <<0xE0, 0x80>>,
+          <<0xED, 0xA0>>,
+          <<0xF0, 0x80>>,
+          <<0xF4, 0x90>>,
+          <<0xE2, 0x28>>,
+          <<0xC2, 0x80, 255>>
+        ] do
+      prefix = "staged\n" <> String.duplicate("a", 57 - byte_size(suffix)) <> suffix
+      assert byte_size(prefix) == 64
+      File.write!(Path.join(root, "z"), prefix <> "x")
+
+      assert {:completed,
+              "M\t00\t1\tkeep\nN\tskipped\tinvalid_name=0\ttoo_large=0\tinvalid_utf8=1\tchanged=0\tunreadable=0\nN\ttruncated\n"} =
+               execute(root, "grep", %{"pattern" => "keep|staged"})
+    end
+  end
+
+  test "aggregate cap accepts a valid incomplete scalar prefix and excludes its witness byte", %{
+    root: root
+  } do
+    write_aggregate_prefix!(root, 64)
+
+    for {suffix, witness} <- [
+          {"", <<255>>},
+          {<<0xC2>>, <<0xA9>>},
+          {<<0xE0>>, <<0xA0>>},
+          {<<0xE0, 0xA0>>, <<0x80>>},
+          {<<0xE2>>, <<0x82>>},
+          {<<0xE2, 0x82>>, <<0xAC>>},
+          {<<0xED>>, <<0x9F>>},
+          {<<0xED, 0x9F>>, <<0xBF>>},
+          {<<0xF0>>, <<0x90>>},
+          {<<0xF0, 0x90>>, <<0x80>>},
+          {<<0xF0, 0x90, 0x80>>, <<0x80>>},
+          {<<0xF1>>, <<0x80>>},
+          {<<0xF1, 0x80>>, <<0x80>>},
+          {<<0xF1, 0x80, 0x80>>, <<0x80>>},
+          {<<0xF4>>, <<0x8F>>},
+          {<<0xF4, 0x8F>>, <<0xBF>>},
+          {<<0xF4, 0x8F, 0xBF>>, <<0xBF>>},
+          {<<0xE2, 0x82, 0xAC>>, <<255>>}
+        ] do
+      prefix = "staged\n" <> String.duplicate("a", 57 - byte_size(suffix)) <> suffix
+      assert byte_size(prefix) == 64
+      File.write!(Path.join(root, "z"), prefix <> witness)
+
+      assert {:completed, "M\t00\t1\tkeep\nM\tz\t1\tstaged\nN\ttruncated\n"} =
+               execute(root, "grep", %{"pattern" => "keep|staged"})
+    end
+  end
+
+  defp write_aggregate_prefix!(root, remaining) do
+    full = String.duplicate(String.duplicate("a", 8191) <> "\n", 128)
+    assert byte_size(full) == 1_048_576
+
+    File.write!(Path.join(root, "00"), "keep\n" <> binary_part(full, 5, byte_size(full) - 5))
+
+    for number <- 1..14,
+        do:
+          File.write!(
+            Path.join(root, String.pad_leading(Integer.to_string(number), 2, "0")),
+            full
+          )
+
+    File.write!(Path.join(root, "15"), binary_part(full, 0, byte_size(full) - remaining))
   end
 
   test "inspected entry limit admits entry 10000 and refuses entry 10001", %{root: root} do
