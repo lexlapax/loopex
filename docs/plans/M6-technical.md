@@ -111,7 +111,7 @@ Concept: [Scope](M6.md#concept-plan-scope).
 | Workstream | Owns | Depends on | Rejoin order |
 | --- | --- | --- | --- |
 | 0. Governance prerequisite | P2's `AGENTS.md` and verification-guide selected unattended release lanes | Plan acceptance | Before any provider-touching merge |
-| A. Model and store | In-process adapter, per-call cleanup owner, one-shot HTTP/1 adapter, shared mapper and two-consumer deadline arithmetic in `loopex_llm_reqllm`; load-only dependencies; promoted memory store | ADR 0039 | Foundation; either order with B |
+| A. Model and store | In-process adapter, per-call cleanup owner, one-shot HTTP/1 adapter, shared mapper and two-consumer deadline arithmetic in `loopex_llm_reqllm`; load-only dependencies and their literal parser and exact edge-check/materialization whitelist plus negative vectors; promoted memory store | ADR 0039 | Foundation; either order with B |
 | B. Local executor | Three read-only tools, session-cell/admission dispatch check and direct nonce-bound process-group drain proof in `loopex_executor_local` | ADR 0039 for session containment; otherwise independent of A | Foundation; either order with A |
 | C. Composition | Embedded API, one-worker application bootstrap, `:one_for_one` application tree with `ReqLLMStarter` and owner DynamicSupervisor siblings, owner activation proxy, private session subtree, durable added options/policy revision, skill helper | A and B for ephemeral profile; neither for durable options | After A and B |
 | D. Command | Ask/-p grammar, rendering, interrupts, launcher latch, escript command-aware bootstrap | C | After C |
@@ -875,7 +875,7 @@ pairs and the same order independent of input keyword enumeration.
      and every recorded per-session child are DOWN; a granted startup phase
      without an exact return remains unknown even if known parents are DOWN;
   5. the outstanding model record is cleared by its exact cancellation or
-     registered-retirement proof and cleanup-owner DOWN, every recorded call
+     provisional-or-managed retirement proof and cleanup-owner DOWN, every recorded call
      process is DOWN and both tagged registry entries are absent; a pending or
      unproved record blocks closure even when its parent has ended;
   6. only then, an owned root has a successful bounded removal and owner-side
@@ -1085,11 +1085,15 @@ pool-supervisor PID, requiring
 `[{1, owned_pid, :worker, [Finch.HTTP1.Pool]}]`, and requires the full
 duplicate-key registry lookup to be exactly
 `[{owned_pid, Finch.HTTP1.Pool}]`, while the unique
-`Req.Finch.SupervisorRegistry` lookup is exactly one entry for the recorded pool
-supervisor and expected pool configuration, before the caller starts and again
-at the dispatch grant. Tests compare the exact caller-supplied pool option list;
-the stored Finch configuration contains those three transport retention options
-and nil key-log device in addition to Finch's cast defaults (finch.ex:533-560). The dispatch-time check is a command to this same
+`Req.Finch.SupervisorRegistry` lookup is exactly
+`[{pool_supervisor_pid, {Finch.HTTP1.Pool, 1, expected_pool_config}}]`, before
+the caller starts and again at the dispatch grant. Derive `expected_pool_config`
+once from the actual `Finch.Pool.child_spec/1` start tuple, validate its complete
+fixed projection as ADR 0039 specifies, then compare the entire stored map.
+A subset/containment check is insufficient. Tests separately compare the exact
+caller-supplied option list, including the three HTTPS retention options;
+Finch's expanded map also includes the nil key-log device and cast defaults
+(finch.ex:533-560). The dispatch-time check is a command to this same
 registered lifecycle root, not a new helper. If that check does not return, the
 owner remains responsive, withholds dispatch and success, and takes the
 unproved-cleanup path unless cooperative root teardown completes. Complete
@@ -1185,9 +1189,34 @@ resolved credential, and sends only a mapped reply or fixed error class to the
 The runtime's `model` field stays the `provider:model` string, as
 `runtime.ex:1170-1171` requires. The adapter rebuilds the inline model from it
 on every call and uses it for both the reply's `identity` (provider, model id,
-base URL as endpoint) and dispatch. No catalog lookup or unverified-model
-warning occurs, which matters because Ollama models are absent from the pinned
-catalog.
+base URL as endpoint) and dispatch. Inline construction bypasses selected-model
+catalog resolution and the string resolver's unverified-model warning, which
+matters for uncatalogued Ollama models. It does not bypass Anthropic's metadata
+lookup. Both planning (`request_plan/diagnostic.ex:84-109`) and generation
+translate options (`provider/options.ex:399-402`) through
+`providers/anthropic.ex:853-865,1494-1524` and
+`model_helpers.ex:94-123,159-174`. The fallback calls `LLMDB.model/2` to determine
+adaptive thinking. With the exact M6 list and no thinking option it changes no
+option, but still loads shared catalog metadata if absent.
+
+LLMDB retains a snapshot, epoch and load options in `:llm_db_store`
+(`llm_db/catalog.ex:64,91-94`). A preloaded snapshot is used unchanged; cold
+loading reads host settings (`catalog.ex:107-123,305-319`). Default `:packaged`
+plus existing `compile_embed: true` uses the compiled snapshot without runtime
+files or downloads (`config/config.exs:23`, `llm_db/packaged.ex:58-69`). Loopex
+neither changes sources, filters, overlays or `:skip_packaged_load`, nor clears
+metadata on cleanup. Host-selected `{:file, path}` or `{:github_releases, ...}`
+can instead read disk or fetch/cache snapshots through ordinary Req, potentially
+using `GH_TOKEN`/`GITHUB_TOKEN` (`llm_db/loader.ex:580-606`,
+`llm_db/snapshot/release_store.ex:275-289,675-684,902-953`). Such trusted-host
+catalog effects are outside the call-owned model transport guarantee.
+Reply identity is built from the retained inline model, not the existing durable
+`identity/1` string resolver (`req_llm.ex:181-188` in the adapter application).
+Under this list, synchronous Ollama, OpenAI and OpenRouter preparation/decoding
+do not query the catalog. OpenAI Responses retains the attached model before
+its deep-research fallback (`providers/openai.ex:707`, `step/usage.ex:47-52`,
+`providers/openai/responses_api.ex:1644-1677`). The named request-body witnesses
+pin dependency normalization; no new dependency policy is introduced.
 
 | Prefix | Credential variable | Default base URL (ReqLLM 1.24.0) | POST route |
 | --- | --- | --- | --- |
@@ -1225,7 +1254,7 @@ and user information are nil.
 Before credential resolution, the caller binds one `route_fingerprint` to the
 tag and owner: `%{provider: provider, surface: surface, method: :post,
 base_url: normalized_base, path: final_path, query: nil}`. For Anthropic and
-OpenAI it obtains the surface through credential- and network-free
+OpenAI it obtains the surface through credential-free
 `ReqLLM.plan(model_spec, :chat, planning_options)`
 (`deps/req_llm/lib/req_llm.ex:420-423`). The planning options are exactly, in
 this order,
@@ -1233,6 +1262,9 @@ this order,
 `receive_timeout: :infinity`, `max_retries: 0`, `base_url` and the complete
 `req_http_options` stated above; no `api_key`, `operation` or `cache` member is
 present. The literal `:chat` matches the `generate_text/3` path.
+Planning is network-free with default compiled metadata or a preloaded
+non-fetching snapshot. A host-selected cold remote catalog can perform the
+separate host-owned effects above before any selected provider key is read.
 The generation options are byte-for-byte the same keyword list for Ollama and,
 for a hosted provider, that list with only `api_key: resolved_value` prepended
 immediately after the final guard and token verification. Thus planning and
@@ -1283,6 +1315,8 @@ an OpenAI surface change can pass the final boundary.
   behaviours with one implementation and no new actor, shared imported edge
   behaviour, global scheduler or core change.
   Operations are `{:begin_model, callback_pid, call_ref}`,
+  `{:stage_model, call_ref, candidate_pid, proof_ref, stop_ref,
+  pre_activation_proof}`,
   `{:register_model, call_ref, cleanup_owner_pid, proof_ref}`,
   `{:record_model_resources, call_ref, cleanup_owner_pid, revision, entries}`,
   `{:tool_grant, executor_pid, instance_ref, dispatch_ref}`,
@@ -1295,12 +1329,46 @@ an OpenAI surface change can pass the final boundary.
   PID/call or dispatch reference/generation/expiry and are one-use. Unknown,
   forged, stale, malformed and replayed tokens refuse.
 
-  After exact managed core registration, the callback allocates a fresh
-  retirement `proof_ref`, distinct from every admission message reference.
-  Cleanup-only preparation supplies it and the session handle to the candidate
-  before the registration request carries it. The session owner stores it
-  against that exact call and cleanup owner. Lost registration acknowledgement
-  cannot leave a committed owner unable to retire its census.
+  **Cleanup custody precedes the core registrar.** After reconciling the exact
+  candidate/start return and normal proxy DOWN, callback allocates a fresh
+  retirement `proof_ref`, distinct from every admission message reference,
+  and sends stage_model. Its proof binds that exact returned candidate and
+  proxy/PID/monitor/normal-DOWN pair; unknown starts cannot be staged as known.
+  The session owner records these identities and stop_ref, installs the exact
+  candidate monitor, and sends directly to that candidate
+  `{:model_custody_prepare, start_ref, staging_ref, cleanup_deadline,
+  cleanup_handle}`. cleanup_handle is exactly
+  `{:model_cleanup_custody, session_owner_pid, generation, call_ref,
+  candidate_pid, proof_ref}`. start_ref is the constructor's private reference
+  from the reconciled start proof, not newly asserted identity. Candidate
+  requires it, its own PID, a live bounded control expiry and exact tuple shape;
+  it binds that session route once and echoes staging_ref/generation/call/proof
+  in its direct acknowledgement. This cleanup-only handle has no cell, request,
+  token or work authority. Candidate records it and acknowledges directly to
+  the session owner with the exact staging reference. Only that acknowledgement
+  permits the owner's staging acknowledgement to callback. Both messages bind
+  the exact sender/PID/generation/call/reference; a conflicting replay seals.
+  Candidate monitors that session owner as well. Missing or late delivery never
+  permits registrar entry. Lost callback acknowledgement cannot strand the
+  candidate's retirement identity.
+
+  Record phases are `:begun`, `:staging`, `:provisional`, `:managed`,
+  `:active`, `:cancelling`, `:retiring`, `:retired_wait_down` and `:unproved`. Staging stores
+  cleanup identity; provisional means candidate acknowledged it; managed means
+  exact core return and live activation registration were validated; active
+  means the first resource-recording request after the candidate accepted begin
+  was acknowledged. The candidate owns its local begin transition; no unstated
+  begin notification to the session owner is required. All progression is correlated to this single
+  pending record. register_model changes provisional to managed, never creates
+  custody or a record. Only managed/active records can acquire call resources.
+  A known staging or provisional record can retire its empty census without
+  register_model. Possession of the exact delivered cleanup handle suffices for
+  cleanup-only retirement even if the direct custody acknowledgement was lost
+  or expired. It does not promote staging to registrar permission. Accepting
+  retirement suppresses every later staging/register acknowledgement and grant.
+  Retirement/cancel accepts the cleanup-only handle; work operations require
+  the full admission handle and live managed grant. No cleanup operation can
+  return an activation token. Completion tokens remain correlated acknowledgements.
   Resource recording appends to the same pending record before each child
   receives authority to progress. Revisions start at 1 and increase by one;
   an identical revision/entry replay acknowledges without changing the record,
@@ -1328,12 +1396,11 @@ an OpenAI surface change can pass the final boundary.
   of 1,000 ms and that cleanup-control request's deadline. Expiry seals the
   affected session and withholds proof. Grants and retirement never block that
   loop or prevent stop handling.
-  If prepared-owner retirement arrives before the exact registration transition
-  is processed, the owner retains one bounded pending retirement rather than
-  treating the begin-model record as clean. The later registration must bind
-  the same call reference, cleanup-owner PID and proof_ref before proof succeeds.
-  No cross-sender ordering is assumed. Missing commitment by that same cleanup-
-  control deadline withholds proof and seals only the affected session.
+  Retirement accepts the exact known staging, provisional or managed record and its reached
+  census. It does not await a register_model request that may never have been
+  sent, may have expired, or may have lost its acknowledgement. No cross-sender
+  ordering is assumed. Unknown identity, conflicting census or missing reached
+  resource proof withholds acknowledgement and seals only this session.
   No missing owner message or parent termination substitutes for those facts.
   A private test dispatcher can defer handling selected genuine monitor DOWN
   tuples while still handling retirement and stop, then release those tuples.
@@ -1342,18 +1409,38 @@ an OpenAI surface change can pass the final boundary.
   Before creating the provider proxy, callback asks begin_model with no
   request/options/credential; owner reserves its record, monitors callback and
   sets slot2=1. Candidate remains authority-free until managed core registration.
-  It then receives only cleanup custody, including the fresh proof reference
-  and session handle, and acknowledges preparation. The callback sends
-  register_model afterward; its exact acknowledgement is required before call
-  inputs, root, pool or caller grant. Actual registration commitment transfers
-  death authority from callback to cleanup owner, even if its reply is lost: normal callback
-  return/DOWN before core's later resource-stop must not falsely seal the call.
-  Pre-registration callback loss without exact no-authority proxy/candidate DOWN
-  proof, or registered cleanup-owner loss without clean retirement, retains the
-  pending record and sets lifecycle3 before conservative reply/notification.
-  Successful registration transfers callback failure authority exactly once;
-  queued callback DOWN after register_model commitment cannot seal or revert
-  that registered-owner record. Unknown loss cannot clear slot2.
+  Cleanup-only stage_model precedes registration_pending and core register/2.
+  Actual provisional commitment transfers failure custody from callback to the
+  candidate, even if its acknowledgement is lost. Callback DOWN thereafter
+  disables activation and triggers cleanup; it is not evidence of unproved
+  cleanup. After exact managed core return, preparation may supply the cell,
+  retainer and one-use activation token. register_model's exact live
+  acknowledgement is still required before call inputs, root, pool or caller
+  grant. An expired or absent activation record leaves provisional retirement
+  available; it cannot falsely seal a routine registered abort.
+
+  During staging, candidate DOWN before any staging acknowledgement was issued
+  to callback proves no registrar permission was released. With the reconciled
+  start/proxy proof and exact candidate DOWN, owner can cancel that empty record;
+  it sends no stale staging acknowledgement. After provisional commitment,
+  candidate must record retirement before exit on callback loss before
+  registration_pending, including its original start-deadline expiry after
+  custody delivery. After registration_pending, callback DOWN permanently
+  disables begin and triggers immediate bounded empty-census retirement, but
+  does not permit candidate exit. It retains the accepted retirement identity
+  and waits for exact core stop or session-subtree teardown. A later core stop
+  is acknowledged only after that recording, then candidate exits. If guard
+  registration never committed, no core stop exists: subtree teardown may end
+  the already-retired inert candidate, and its genuine DOWN clears outstanding
+  with any reason. Never wait for a nonexistent stop before recording retirement.
+  Missing staged-candidate proof
+  or candidate loss without recorded retirement keeps pending. Owner reconciles
+  genuine reordered DOWN and matching retirement/cancellation for at most the
+  existing 1,000 ms control bound before sealing3; grants stay withheld throughout.
+  Callback DOWN with only a begun record reconciles any already-submitted
+  staging/control message within the bounded cleanup-control wait before
+  classifying missing proof; it never invents an absent child from parent DOWN.
+  Unknown loss cannot clear slot2.
   Pre-registration cancel carries exact recorded
   proxy/candidate monitors and their DOWN results; a known-parent DOWN does not
   prove an undisclosed child absent, whose authority-free constructor still
@@ -1363,6 +1450,26 @@ an OpenAI surface change can pass the final boundary.
   authoritative exact returned start error. Missing result/candidate report is
   never :not_started. A no-proxy refusal cancels only its exact no-grant record;
   wrong-call, stale, mixed-proxy or unknown-start proof cannot clear pending.
+  For an exact registrar return `:unmanaged` or
+  `{:error, :provider_resource_refused}`, cancel_model first records that
+  authoritative no-registration result and sets the provisional record to
+  cancelling before callback may kill the known candidate. Owner then awaits
+  its own exact candidate DOWN and records the empty-census cancellation before
+  replying. This request stays pending in the responsive loop; callback uses
+  an exact cancellation-prepared notification before kill, then waits for both
+  real DOWN and final clean-cancel acknowledgement within the single control
+  bound. Lost final acknowledgement grants no clean adapter result but cannot
+  reinterpret an already-recorded cancellation as unexplained owner death.
+  Candidate DOWN before a cancellation request is processed is reconciled as
+  pending evidence, not immediately sealed, within that same bound; it still
+  requires the exact no-registration result. Guard-unavailable, raised or
+  malformed return proves no such result and never takes this clean lane.
+  Candidate loss after staging acknowledgement but before registrar entry can
+  cancel only with the live callback's exact
+  `{:registrar_not_entered, stage_ref, candidate_pid, monitor_ref, down_reason}`
+  proof, bound to the staged record and its actual DOWN. The callback checks
+  candidate liveness before entering register/2. Once registrar entry began,
+  this proof is unavailable; a dead candidate is not assumed unregistered.
 
   At core's resource-stop, cleanup owner first proves applicable processes/tags,
   sends retire_model with its exact private proof reference and waits for owner
@@ -1370,7 +1477,7 @@ an OpenAI surface change can pass the final boundary.
   Session owner clears record/slot2 only after exact cleanup-owner DOWN, with
   any exit reason, and recorded clean retirement. A core-enforced `:killed`
   after its acknowledged stop is not unproved (`session_coordinator.ex:4656-4677`).
-  Registration/resource-recording/cancel/retirement remain admissible
+  Staging/resource-recording/cancel/retirement remain admissible
   in lifecycle1/3 solely for cleanup; begin_model/tool_grant require lifecycle0
   with no conflicting record. Later grants query the owner, reconciling queued
   exact DOWNs first. Pending grants remain bounded state in the ordinary owner
@@ -1378,7 +1485,11 @@ an OpenAI surface change can pass the final boundary.
   The requesting edge waits in sliced receives for at most 1,000 ms while the
   owner reconciles clean-retired owner DOWN rather than falsely failing or
   bypassing pending census while notification is unprocessed. Missing proof
-  returns the private closed error; model maps by actual dispatch boundary and
+  returns the private closed error; before managed lifetime registration the
+  model maps by actual dispatch boundary, but after managed registration any
+  activation/admission refusal exits with the fixed private
+  `:provider_lifetime_registration_failed` reason and leaves settlement to
+  core, never inventing a retryable adapter `not_dispatched` result. The
   executor returns fixed pre-effect admission failure, with no new public
   composition code. Existing serial core prevents concurrent model/tool
   dispatch within a session; separate sessions may overlap. Unproved cleanup
@@ -1386,13 +1497,18 @@ an OpenAI surface change can pass the final boundary.
   session cleanup and removal may set2.
   Begin/register and every work-activation grant use the live model deadline;
   tool grants use the executor's effect deadline. Resource recording, retirement
-  and clean cancellation use their cleanup-control deadline, never an expired
+  staging and clean cancellation use their cleanup-control deadline, never an expired
   model-call deadline. A returned child PID is recorded even if setup expired
   before its return; recording grants cleanup custody, not work. At core
   stop that is the supplied cooperative monotonic-millisecond deadline converted
   to native units; otherwise the private reap/control bound is 1,000 ms from
   request creation. Every wait still caps at 1,000 ms. Expired activation cannot
   grant work even when a cleanup-control request remains admissible.
+  Once retired, queued register/begin/resource messages cannot recreate the
+  record or reopen activation. Retain the last retired call identity until the
+  next live begin; other old calls do not match the current record. begin rejects
+  a dead requester, including a delayed request from the old callback. No
+  unbounded completed-call history is retained.
 - Ambient keys are allowed with every preset. The executor retains released
   child-environment behavior, including its existing LOOPEX_PROVIDER_API_KEY
   removal. M6 adds no per-provider scrub, presence probe or false promise that a
@@ -1458,6 +1574,9 @@ table once:
   `req_llm` (`apps/loopex_llm_reqllm/mix.exs:63`), so without this, starting
   either would start ReqLLM and load `.env`
   (`deps/req_llm/lib/req_llm/application.ex:25-31`) before any Loopex code ran;
+  update the stale dependency-direction comment at
+  `apps/loopex_llm_reqllm/mix.exs:54` in that implementation change: composition
+  already depends on this adapter, and core still does not;
 - the escript and every build that carries the adapter still carry ReqLLM,
   Req and Finch code. The adapter's `application/0` explicitly lists
   `extra_applications: [:crypto, :logger]` (`apps/loopex_llm_reqllm/mix.exs:36-39`).
@@ -1508,7 +1627,8 @@ table once:
   `{LoopexComposition.ReqLLMStarter, :initializer}` is absent or exactly
   `{:preparing, initializer_pid, initialization_ref}`, and is written only for
   an actual admitted start. Origin at
-  `{LoopexComposition.ReqLLMStarter, :provenance}` is absent or `:started`;
+  `{LoopexComposition.ReqLLMStarter, :provenance}` is absent or
+  `{:started, req_llm_supervisor_pid, initialization_ref}`;
   there is no `:starting` intent that can later masquerade as completion.
   A stopped-state validation that permits startup returns a correlated request
   for start authority. The service retains the initializer identity **before**
@@ -1524,10 +1644,22 @@ table once:
   A stopped application with prior positive Loopex provenance also requires
   `load_dotenv: false`; if host code changed it to true, startup refuses.
   Only an exact `{:ok, applications}` containing `:req_llm` permits the worker
-  itself to publish `:started` before sending its result. An empty started list,
+  itself to publish that PID-bound tuple before sending its result. It captures
+  the registered `ReqLLM.Supervisor` PID (`application.ex:45-46`) and requires
+  it live with dotenv still off. An empty started list,
   error, raise, exit, intent or DOWN alone never establishes origin. A declared
   host start does not write Loopex provenance. Both a matching result and normal
   worker DOWN are required for success; service waits remain responsive.
+- Running reuse requires the currently registered ReqLLM.Supervisor to equal
+  the exact live PID in that positive tuple, or a fresh explicit host declaration.
+  Service monitors the recorded live incarnation, and each validation cohort
+  rechecks the registered PID before success. Old positive provenance remains
+  history for the stopped-instance restart rule, not authority over a new PID.
+  A host stop/restart between creations therefore requires declaration unless
+  a new admitted Loopex start publishes the new incarnation. Never promote a
+  host restart merely from prior Loopex history. A host racing stop/restart
+  between ensure_all_started return and PID capture can interfere with
+  attribution; the trusted host owns that race, not an exclusion mechanism.
 - A recreated service first monitors a retained initializer before admitting
   another operation. A live predecessor receives no second grant and is awaited
   through exact DOWN; the new service does not await a result sent to its dead
@@ -1614,7 +1746,10 @@ and dispatch grant checks the same session-local lifecycle cell.
   means the candidate accepts normal proxy `DOWN` only after that notice; every
   earlier, abnormal or mismatching proxy `DOWN` ends it without work. The callback
   also requires exact normal proxy `DOWN`, then sends `registration_pending` with
-  the exact private `stop_reference` that later core registration will use. The
+  the exact private `stop_reference` that later core registration will use. Before
+  that message it must complete cleanup-only stage_model as specified above:
+  session census commitment, direct candidate custody acknowledgement, then
+  exact staging acknowledgement to callback. The
   candidate validates and stores it before acknowledging. That acknowledgement
   cancels the short expiry but grants no request, credential, root, pool,
   caller or dispatch authority.
@@ -1636,13 +1771,16 @@ and dispatch grant checks the same session-local lifecycle cell.
   is not yet queued. Core kills the callback before sending resource stop
   (`session_coordinator.ex:4573-4576`, `:4627-4634`), so a zero-wait exit would
   falsely make registered cleanup unproved. With no admitted resources, the
-  candidate acknowledges that exact stop and exits if cleanup preparation never
-  arrived. A prepared candidate always requests retirement with its held handle
-  and proof_ref, regardless of whether any registration reply or begin arrived.
+  candidate uses its already-staged cleanup-only handle and proof_ref to retire
+  the empty staging/provisional census on callback loss, regardless of whether a managed return,
+  preparation, register_model request or begin ever arrived.
   It obtains the session owner's exact retirement acknowledgement for the empty
-  census under the supplied cleanup-control deadline, then acknowledges core
-  and exits. The session owner reconciles any still-queued matching registration;
-  missing actual commitment or proof remains
+  census under a fresh bounded cleanup-control deadline. It stays alive with
+  activation permanently disabled until exact core stop or subtree teardown.
+  On exact core stop, accepted retirement is already recorded; otherwise it
+  finishes recording under the supplied cooperative deadline before acknowledging
+  core and exiting. The session owner requires the earlier known cleanup commitment,
+  not a later activation registration; missing reached resource proof remains
   unproved. If guard registration did not commit, core may report its
   pre-registration model result with no registered provider-resource obligation
   before the authority-free candidate takes its
@@ -1652,15 +1790,35 @@ and dispatch grant checks the same session-local lifecycle cell.
   exists. It remains a child of the session worker supervisor, so the complete
   session-subtree proof still reaps it before public session cleanup can be
   proved.
+  The inert candidate does not trap exits: an abnormal session-worker-supervisor
+  exit ends it. After activation the responsive owner traps ordinary exits for
+  cooperative teardown and handles a parent exit as a permanent stop, never
+  ignores it or continues work. Parent shutdown cannot reopen a retired record;
+  the applicable exact child/census proof still governs public cleanup.
+  At task entry it records the concrete Task.Supervisor parent from its
+  inherited OTP ancestry and verifies the parent link before any input arrives.
+  It distinguishes that exact parent's EXIT from its known caller's EXIT;
+  arbitrary EXIT-shaped messages cannot select a process to kill.
+  Caller creation is atomic linked-plus-monitored spawn, while this active
+  owner traps exits and the caller never does. Immediately after spawn, the
+  remaining owner loop runs inside a lexical try/after capturing that exact
+  caller PID. The after clause always issues its kill, including unexpected
+  normal return or catchable exit; normal completion/stop must already have
+  awaited exact caller DOWN before releasing proof. Untrappable owner kill
+  bypasses after but propagates the non-normal link exit to caller. Link signals
+  and kill requests are not termination proof; the independent session census
+  still requires exact caller DOWN. EXIT reasons are processed by shape only.
 
   Only exact `{:managed, retainer_pid, cleanup_grace_ms}` returned from
   `ProviderLifetime.register/2` permits cleanup-only `activation_prepare` with
-  that tuple, one-use token, fresh retirement proof reference and session
+  that tuple, one-use token, the already-staged retirement proof reference and session
   handle/cell. The candidate validates and records them, monitors the retainer
   and acknowledges preparation while remaining inert. No request, root, pool,
   caller, credential or dispatch grant is supplied. The callback next sends
   register_model carrying that same proof reference and waits for the exact
-  session-owner acknowledgement. Only then does it send distinct `begin`;
+  session-owner acknowledgement, changing provisional custody to managed
+  activation under the live model deadline. An expired transition grants no
+  work but leaves cleanup custody intact. Only then does it send distinct `begin`;
   only the first exact token receipt authorizes root, pool, caller,
   credential or dispatch work, and the owner acknowledges before accepting call
   inputs. Callback `DOWN` before `begin` follows the inert stop-wait rule above; after
@@ -1680,7 +1838,8 @@ and dispatch grant checks the same session-local lifecycle cell.
   only that request-free, self-fencing path; when next scheduled, the proxy's
   callback monitor makes it retire. Late messages are ignored. A returned
   `:unmanaged` or `{:error, :provider_resource_refused}` from `register/2` plus
-  exact candidate `DOWN` plus session-owner cancel_model acknowledgement is clean
+  session-owner cancellation preparation, exact candidate `DOWN` and final
+  cancel_model acknowledgement is clean
   `not_dispatched`; missing candidate `DOWN`
   first seals that session cell to 3.
   On `{:error, :provider_guard_unavailable}`, a registrar raise or malformed
@@ -1696,10 +1855,13 @@ and dispatch grant checks the same session-local lifecycle cell.
   After the start proof, the adapter monitors the candidate through registration
   and starts no pool, caller or credential read until the exact managed return
   arrives. Exact `:unmanaged`
-  or `{:error, :provider_resource_refused}` sends the candidate's
+  or `{:error, :provider_resource_refused}` first submits the exact
+  no-registration result to cancel_model and obtains its correlated
+  cancellation-prepared notification, then sends the candidate's
   untrappable `:kill` and awaits its exact monitor `DOWN` for at most 1,000 ms.
   No cleanup grace exists until registration succeeds, and the start-blocked
-  candidate has no resource or session grant yet, so this is a private reap bound
+  candidate has only provisional cleanup custody, not a resource or session
+  work grant, so this is a private reap bound
   rather than a cooperative cleanup deadline. Exact `DOWN` returns fixed
   `not_dispatched` only after the exact clean-cancel acknowledgement. If `DOWN`
   or that acknowledgement is absent, `complete/3` returns fixed conservative
@@ -1708,6 +1870,10 @@ and dispatch grant checks the same session-local lifecycle cell.
   remain start-blocked until scheduled; no pool, caller, credential read or
   dispatch can occur from it. Guard-unavailable, raised or malformed registration uses
   the fixed private exit above, never a returned adapter `not_dispatched` value.
+  If cancellation preparation/final acknowledgement is lost, callback still
+  kills the known no-input candidate and awaits its real DOWN within the same
+  absolute control bound. Missing final acknowledgement remains conservative;
+  no second full wait or forgotten inert candidate is permitted.
 After the direct HTTP/1 worker call returns, the one-shot adapter waits while
 the owner has the lifecycle root stop its anonymous supervisor gracefully. That
 is an early cleanup path, not the only one: once the lifecycle root exists,
@@ -1737,7 +1903,8 @@ request/6 returns (finch/http1/pool.ex:314-328; nimble_pool.ex:445,462), so
 owned pool teardown closes that returned connection. During a freshly checked-out
 request, caller cancellation causes NimblePool to remove the resource and invoke
 termination. Finch's cancel handler only updates bookkeeping and returns `:ok`
-(`finch/http1/pool.ex:287-293`); `terminate_worker/3` requests connection close.
+(`finch/http1/pool.ex:295-302`); `terminate_worker/3` requests connection close
+(`:287-293`).
 Neither handler return is itself
 proof that transport or a TLS controller has already ended. Asynchronous check-in
 and cancellation can race graceful root shutdown. Cleanup therefore does not claim that the checked-out socket or its OTP
@@ -3153,7 +3320,21 @@ The certificates include the fixture endpoint's SAN; verification remains on,
 with no extra production connection option or global Req default.
 The TLS resumption witness separately proves TLS 1.2 resumption
 with Mint's defaults and TLS 1.3 resumption with an explicit ticket-enabled
-control against the same respective servers, including observed ticket issuance.
+control against the same respective servers. The TLS 1.3 fixture server enables
+`session_tickets: :stateful` for both that control and production-client
+comparison. Server defaults are also disabled, floor `ssl.erl:4277-4309`, current
+`ssl_config.erl:991-1025`. The first TLS 1.3 control uses
+`session_tickets: :manual`. Its socket-owning process must receive
+`{:ssl, :session_ticket, ticket}` with a map ticket within the fixture deadline.
+It uses that exact ticket in exactly one second connection with
+`session_tickets: :manual, use_ticket: [ticket]`; client or relayed accepted-server
+`:ssl.connection_information(socket, [:session_resumption])` must report
+`session_resumption: true`. Missing/malformed ticket, timeout or non-resumption
+fails or is unavailable evidence; no reconnect retry manufactures a pass.
+The fixture never logs the ticket. This pins the actual OTP implementation,
+not the stale nested-ticket example in floor ssl.erl documentation:
+floor `tls_gen_connection_1_3.erl:361-400`, current `:371-410`; resumption
+information floor `ssl_gen_statem.erl:1971-1977`, current `:1934-1940`.
 It keeps production client versions unchanged and restricts only each server's
 protocol. TLS 1.3 relies on explicitly disabled client tickets. The TLS 1.2
 positive control waits for matching asynchronous client and server session-cache
@@ -3188,15 +3369,41 @@ every `:code.get_path/0` entry lies under the extracted or OTP roots.
 A compiled test driver calls the public `Ephemeral.run/2` with fixture origins:
 HTTP for Ollama, HTTPS for each hosted provider, synthetic selected keys and
 the fixture CA. It replaces no runtime startup, adapter or mapper. Every full
-synchronous response and cleanup must succeed. Require
-`:persistent_term.get(:llm_db_store, nil)` absent before guarded startup and
-after each call. The project uses `compile_embed: true` (`config/config.exs:23`),
-so absent priv alone is not proof: a positive `LLMDB.load/0` control afterward
-must populate that same key with nonempty embedded catalog data, including a
-known provider/model from the build's packaged snapshot. An empty fallback does
-not pass (`llm_db.ex:157-180`). Inline model enrichment
+synchronous response and cleanup must succeed. Use a fresh VM for each
+catalog-state expectation, with the default compiled source and no host overlays.
+Require `:persistent_term.get(:llm_db_store, nil)` absent before guarded startup.
+Ollama, both OpenAI routes and OpenRouter must leave it absent through the reply.
+Anthropic must leave a nonempty embedded snapshot after the full run and
+retain its identical content/epoch through a subsequent call and cleanup.
+The focused private-constructor adapter test, not a new public run option,
+checks before-plan/after-plan/after-generation state inside the actual caller
+and reports only fixed Boolean assertions. Its test-only observer is wired
+through the private constructor; it does not replace ReqLLM or use external
+tracing of the sensitive process. Packaged public run needs no observer.
+
+Pin fixture models `ollama:loopex-fixture:latest`, `openai:gpt-3.5-turbo`
+for Chat, `openai:gpt-4o-mini` for Responses,
+`openrouter:anthropic/claude-haiku-4-5`, `anthropic:claude-haiku-4-5` and
+`anthropic:loopex-catalog-miss`, with routes from the table above. Every fixture
+asserts the complete normalized request body, including absent thinking and
+reasoning members, stream:false, omitted empty tools and the token-limit field
+under the exact M6 option list. Responses uses max_output_tokens; the other
+routes use max_tokens. Anthropic known-model and
+catalog-miss vectors both succeed; no unknown-model reconstruction is needed.
+
+The project uses `compile_embed: true` (`config/config.exs:23`), so absent priv
+alone is not proof. After each non-Anthropic absent-state case, a positive
+`LLMDB.load/0` control must populate that same key with nonempty embedded data
+containing a known model. For every default-source load, compare snapshot
+identity/content to the exact catalog embedded in the build input, not a
+hardcoded future catalog version. An empty fallback does not pass
+(`llm_db.ex:157-180`). Negative controls with `:skip_packaged_load` and an
+explicit empty catalog show that successful fixture replies alone cannot prove
+packaged metadata. A separate preloaded-host snapshot case remains byte-for-byte
+unchanged through the call; production never clears or replaces it.
+Inline model enrichment
 is local (`req_llm.ex:313-329`, `llm_db/engine/enrich.ex:73-77`), explicit address
-skips the lazy catalog default (`provider/options.ex:1147-1153`) and synchronous
+skips the lazy catalog base-URL default (`provider/options.ex:1147-1153`) and synchronous
 generation retains that model (`generation.ex:109-133,464-470`). This witness
 proves packaged code, not an unstated CLI base-URL flag. Actual CLI local ask
 and the actual companion bootstrap through ready are separate entrypoint
@@ -3206,6 +3413,48 @@ Finch itself has no application callback (`deps/finch/mix.exs:28-31`). Its
 named shared infrastructure belongs to Req's callback
 (`deps/req/lib/req/application.ex:7-14`) and ReqLLM's callback; packaging does
 not depend on a nonexistent `Finch.Application` module.
+
+**Host-selected catalog witnesses.**
+`apps/loopex_llm_reqllm/test/in_process_catalog_test.exs` runs isolated fresh
+VMs with no preloaded catalog. One case sets `:llm_db :snapshot_source` to
+`{:file, fixture_path}` containing a schema-valid snapshot with a unique
+identity, plus a schema-valid `:custom` overlay with a uniquely named
+non-selected model. The actual Anthropic call must load that snapshot and
+overlay. Compare the configured source/custom/filter/preference settings
+before and after the call, and retain the exact loaded metadata/epoch through
+call cleanup and a subsequent call. Forcing packaged metadata, skipping the
+overlay or clearing the catalog must fail these assertions.
+
+The cold remote case sets `snapshot_source` to
+`{:github_releases, %{ref: :latest, repo: "loopex-fixture/catalog",
+cache_dir: fixture_cache, req_opts: [adapter: fixture_adapter]}}`, with an
+empty temporary cache and no snapshot-index override. The fixture adapter is
+a test-only Req request/response function, not a new dependency or global
+`:req :default_options`. It services the actual ReleaseStore release-list,
+index and snapshot-download steps: one non-draft `catalog-index-fixture`
+release with matching `snapshot-index-fixture.json` and `latest-fixture.json`
+asset names, an index containing the fixture snapshot id and download URL,
+then the canonical snapshot document with that same id. It refuses every
+unexpected route. Loader forwards the overrides (`loader.ex:608-628`);
+ReleaseStore retains req_opts (`release_store.ex:931-938`) and resolves those
+steps (`:128-148,174-202,262-305,850-860`). No external request is made.
+
+Use a synthetic GitHub token distinct from the synthetic provider key. Run
+both `GH_TOKEN` and fallback `GITHUB_TOKEN` cases, clearing both inherited
+variables before setting only the selected synthetic one. The fixture checks the API
+Bearer header internally and reports only a fixed Boolean, never a request
+or token. Begin with the selected provider variable absent; block the first
+catalog request, then let the fixture parent set that provider variable and
+release the catalog response. The real model path must use the newly supplied
+key and complete, pinning catalog-before-key-resolution ordering without a
+new public observer option. No catalog fixture option enters the owned model
+request. Assert the source options stay unchanged, the catalog and cache
+survive call cleanup, and the next call does not fetch again. Those host-owned
+effects are not per-session files or owned-pool obligations. All paths and
+values are isolated fixtures; the model transport and release provider lanes
+remain unchanged. Mutants forcing :packaged or deleting host metadata/cache
+must fail. These cases run in the fast adapter lane, separately from the
+no-priv packaging witness.
 
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
@@ -3221,11 +3470,12 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
 | 1 | `apps/loopex_composition/test/ephemeral_stop_contract_test.exs` (new) | Prove run-ending/effect/group/subtree obligations before removal. Missing terminal omits unevaluated effect proof; outcome_unknown keeps effects unproved. Race every public method and grant around cell0→1/3; non-stop calls refuse and lost failure notifications cannot reopen; proved-closed2 remains absorbing under delayed failure/cancel notifications. Pin direct executor-PID/instance/nonce certificate before runtime shutdown, reject forged/replayed/wrong-session certificates, retain accepted proof across subtree-only retry. Exact DOWN controls every serial phase/replacement/removal worker. Pin reached-failure combinations and fresh retry deadline, irrecoverable proof remaining unproved, successful later retry setting2 and idempotent stop. A separate session still asks and uses tools after failure | fast |
 | 1 | `apps/loopex_composition/test/ephemeral_lifecycle_test.exs` and `ephemeral_cleanup_test.exs` (new) | The owner traps exits before linking helpers and correlates every `EXIT`, `DOWN`, PID and reference. The `FacadeClient` operation, ready, dispatch-with-deadline and cancel messages are suspended independently: missing ready takes the 1,000 ms handshake cancellation path; stop or borrower loss before grant gets a matching cancellation acknowledgement under its separate bound and cannot reach core; after grant a prompt or answer is conservatively possibly admitted regardless of actor scheduling. A second ask before the first grant returns `run_open`; a second answer returns `invalid_interaction_answer`; neither queues or starts a wait deadline, and exact pre-grant refusal or cancellation releases the one mutation slot. Pre-ready, ready-before-grant, granted poll and granted prompt/answer stop cases prove that stop cancels only ungranted work, waits granted work to its operation/cleanup bound, and reuses the live actor for abort. Forged, stale and reordered messages never move the boundary. Timeout-to-question, `last_result`, `run_open`, all four concurrent-stop/creator-exit admission-and-proof branches and terminal-wins races take their fixed forms. Separate process-group, runtime-stop and subtree-stop workers are faulted at result, `finish`, `EXIT` and `DOWN`; each has the 500 ms operation cutoff and 1,000 ms total slot. Refusal, malformed return, raise, throw, exit or timeout with exact worker `DOWN` records that phase and still attempts the next independent phase, while missing `DOWN` prevents a successor and retains `:session_subtree`. Accepted process-group proof is nonce-bound and reused; a retry after an actor-blocked first attempt reaches the previously unevaluated process-group phase, while no reached unproved process-group phase repeats. Every retry receives its fresh deadline. A root-removal-only retry proves any prior removal worker gone and starts no phase worker. Every helper is reaped or the exact reached obligation remains unproved | fast |
 | 2 | `apps/loopex_llm_reqllm/test/mapping_test.exs`, `provider_route_test.exs` and `in_process_adapter_test.exs` (new); companion mapping suites plus the dependency-visible correction cases | Cross-adapter vectors pin byte-identical request and valid bounded application-call reply mapping for all four providers. Planning receives the exact ordered credential-free option list; generation receives the same list with only a hosted `api_key` prepended. Response-header capture is provider-exact, deleted on every return/raise/throw/exit and supplies the mapped metadata. A non-nil response error and finish reasons `:error`, `:incomplete` and `:cancelled` fail. Buffered `ToolCall` fixtures cover valid `{}`, invalid text, `null`, arrays, incomplete but repairable JSON, visible atom/string error metadata, provider-executed builtin and provider-native markers, missing or empty visible id/name and multiple-call ordering; any invalid or non-application visible member rejects the whole call list as post-dispatch failure and no local tool executes. Separate provider-builder vectors pin the earlier generated id, normalized missing/nil/empty/unsupported arguments, forced function type, omitted malformed call and stripped error metadata; they prove the mapper makes no impossible refusal claim for an erased field while separately proving visible non-application markers remain rejected. Paired 401, 429, 5xx, transport error, raise, throw and exit cases assert the same public two-class error and fixed text without claiming identical private streaming/direct diagnostics. Route vectors cover provider defaults, omitted ports, explicit default and non-default ports, canonical IPv4, lowercase DNS, uppercase DNS input and normalized paths; they reject uppercase schemes, IPv6, Unicode or percent-encoded hosts, userinfo, empty or malformed authority, non-canonical ports, ports 0 and 65,536, query, fragment, dot segments and every disallowed path before a root or credential read. The effective HTTPS pool options reaching Mint contain the exact nested `conn_opts`/`transport_opts` retention controls, while HTTP omits them | fast |
-| 2 | `apps/loopex_llm_reqllm/test/in_process_adapter_test.exs`, `in_process_cleanup_test.exs` and `in_process_guard_test.exs` (new); model streaming conformance; companion suites; exact manifested `apps/loopex_composition/test/ephemeral_real_test.exs` provider case | All four providers use the inline model, canonical explicit address, `total_timeout: :infinity`, `receive_timeout: :infinity`, no cache and `max_retries: 0`. Anthropic and OpenAI planning passes literal `:chat` plus the exact credential-free generation-option list; generation takes the same chat path and adds only the hosted credential. Deadline vectors map the committed absolute system-millisecond instant with one frozen native offset; cover separated clock samples, positive and negative offsets, uint64 maximum, one positive native tick rounded up to 1 ms, zero/negative remainder, the 1,000 ms cap, in-time and late queued result timestamps and the zero-wait expiry race; and prove no full uint64 or native remainder reaches an OTP or Finch timer. Owner-candidate start proves exact unmanaged starter acquisition creates no proxy or candidate, while the managed path passes the opaque starter only to the unlinked proxy and permutes ready/grant, proxy result, candidate report, `finish`, `proxy_retiring`, proxy `DOWN`, `registration_pending`, activation preparation and `begin`; it faults every missing, late, duplicated, replayed, malformed, mismatching and abnormal form and covers wrong stop reference and retainer tuple. Callback death is injected before disclosure, after disclosure, during registration, after managed return and on both sides of `begin`; core stop is injected before and after managed return. With the locked owner `Task.Supervisor` suspended, expiry kills the proxy and seals only its session; resuming it may materialize an undisclosed request-free candidate, which receives no `begin` and exits on its first scheduled dead-proxy, dead-callback or expired-deadline step without root, caller, credential read or dispatch. The worker-retained/guard-unregistered witness lets model settlement precede candidate `DOWN` and proves no registered provider-resource obligation exists. After registration_pending, genuine callback DOWN disables activation but leaves the candidate responsive for the later exact core stop. Fault core-managed return, cleanup-only preparation, actual census commitment before reply delivery and acknowledgement before begin. After census commitment the prepared proof reference permits empty-resource retirement, core acknowledgement and owner DOWN without provider_cleanup_unproved. No branch uses a registration fallback timer or invents adapter `not_dispatched`. Exact `:unmanaged` or `{:error, :provider_resource_refused}` from registration with candidate `DOWN` remains clean `not_dispatched`; a missing candidate `DOWN` seals the session to 3 and returns conservative `dispatched_or_unknown`, never clean `not_dispatched`. `{:error, :provider_guard_unavailable}`, raised and malformed registration retain core's conservative result. The selected hosted credential is read only by the sensitive caller; absent, empty, 65,536/65,537-byte, exact-value echo, ambient/global/address/provider/final-route and response-overflow/encoding cases map to their fixed public class without leaking private sentinels. A runtime trace session naming the exact one-MFA inventory plus dependency call sites sees the credential-free pre-exclusion call and a non-excluded control canary, but no raw trace message or entry from the sensitive caller after exact exclusion carries the credential canary; exclusion refusal reads no credential. Forced retry, redirect, 429/529 and upload-close cases receive at most one grant, accepted connection and request-start marker through the recorded HTTP/1 worker; a body over 64 KiB succeeds. Every setup and dispatch phase registers before progress. After exact managed registration, normal, stop, deadline, partial setup and caller/root/owner failure either prove every registered process `DOWN` and both tagged entries absent before success or acknowledgement, or take the unproved path; no missing registered-owner or child `DOWN` becomes fixed `not_dispatched`. TLS 1.2/1.3 non-resumption with deterministic cache-readiness and ticket-enabled controls and distinct concurrent pools hold in fast cases. The isolated 5,000 ms socket/controller drain is proved only by the separately named release witness. Real Ollama and hosted calls pass; valid mapping stays byte-identical, malformed binary arguments visible at the buffered `ToolCall` seam take the named correction, and dependency-normalized cases remain pinned | fast; release |
+| 2 | `apps/loopex_llm_reqllm/test/in_process_adapter_test.exs`, `in_process_cleanup_test.exs` and `in_process_guard_test.exs` (new); model streaming conformance; companion suites; exact manifested `apps/loopex_composition/test/ephemeral_real_test.exs` provider case | All four providers use the inline model, canonical explicit address, `total_timeout: :infinity`, `receive_timeout: :infinity`, no cache and `max_retries: 0`. Anthropic and OpenAI planning passes literal `:chat` plus the exact credential-free generation-option list; Anthropic before-plan/after-plan/after-generation Boolean phase checks prove default compiled-catalog initialization and unchanged no-thinking body; generation takes the same chat path and adds only the hosted credential. Deadline vectors map the committed absolute system-millisecond instant with one frozen native offset; cover separated clock samples, positive and negative offsets, uint64 maximum, one positive native tick rounded up to 1 ms, zero/negative remainder, the 1,000 ms cap, in-time and late queued result timestamps and the zero-wait expiry race; and prove no full uint64 or native remainder reaches an OTP or Finch timer. Owner-candidate start proves exact unmanaged starter acquisition creates no proxy or candidate, while the managed path passes the opaque starter only to the unlinked proxy and permutes ready/grant, proxy result, candidate report, `finish`, `proxy_retiring`, proxy `DOWN`, stage_model commitment, direct custody delivery/acknowledgement, `registration_pending`, activation registration/preparation and `begin`; it faults every missing, late, duplicated, replayed, malformed, mismatching and abnormal form and covers wrong stop reference and retainer tuple. Callback death is injected before disclosure, after disclosure, during registration, after managed return and on both sides of `begin`; core stop is injected before and after managed return. With the locked owner `Task.Supervisor` suspended, expiry kills the proxy and seals only its session; resuming it may materialize an undisclosed request-free candidate, which receives no `begin` and exits on its first scheduled dead-proxy, dead-callback or expired-deadline step without root, caller, credential read or dispatch. The worker-retained/guard-unregistered witness lets model settlement precede candidate `DOWN` and proves no registered provider-resource obligation exists. When custody was staged, genuine pre-begin callback DOWN must record empty retirement immediately while the candidate remains alive; session-subtree termination then produces the real candidate DOWN, clears slot 2 and permits successful public stop_session/1 with root removal. A dropped direct custody acknowledgement still permits empty retirement without granting registrar or work authority; a late acknowledgement cannot reopen the record. After registration_pending, genuine callback DOWN disables activation but leaves the candidate responsive for the later exact core stop. Stage cleanup-only custody before core register. Fault staging delivery/ack loss, callback death before/after provisional commitment, exact core guard commitment before managed return, missing preparation/register_model, expired queued register_model and acknowledgement loss before begin. Every registered empty abort retires the earlier provisional census, acknowledges core and proves candidate DOWN without false sealing. Fault cancellation-prepared/final ack delivery and genuine candidate DOWN ordering; exact no-registration refusal cancels cleanly, unknown registration never does. Queued begin cannot recreate a retired call. No branch uses a registration fallback timer or invents adapter `not_dispatched`. Exact `:unmanaged` or `{:error, :provider_resource_refused}` from registration with candidate `DOWN` remains clean `not_dispatched`; a missing candidate `DOWN` seals the session to 3 and returns conservative `dispatched_or_unknown`, never clean `not_dispatched`. `{:error, :provider_guard_unavailable}`, raised and malformed registration retain core's conservative result. The selected hosted credential is read only by the sensitive caller; absent, empty, 65,536/65,537-byte, exact-value echo, ambient/global/address/provider/final-route and response-overflow/encoding cases map to their fixed public class without leaking private sentinels. A runtime trace session naming the exact one-MFA inventory plus dependency call sites sees the credential-free pre-exclusion call and a non-excluded control canary, but no raw trace message or entry from the sensitive caller after exact exclusion carries the credential canary; exclusion refusal reads no credential. Forced retry, redirect, 429/529 and upload-close cases receive at most one grant, accepted connection and request-start marker through the recorded HTTP/1 worker; a body over 64 KiB succeeds. Every setup and dispatch phase registers before progress. After exact managed registration, normal, stop, deadline, partial setup and caller/root/owner failure either prove every registered process `DOWN` and both tagged entries absent before success or acknowledgement, or take the unproved path; no missing registered-owner or child `DOWN` becomes fixed `not_dispatched`. TLS 1.2/1.3 non-resumption with deterministic cache-readiness and ticket-enabled controls and distinct concurrent pools hold in fast cases. The isolated 5,000 ms socket/controller drain is proved only by the separately named release witness. Real Ollama and hosted calls pass; valid mapping stays byte-identical, malformed binary arguments visible at the buffered `ToolCall` seam take the named correction, and dependency-normalized cases remain pinned | fast; release |
 | 2 | `apps/loopex_composition/test/session_containment_test.exs` and `apps/loopex_executor_local/test/provider_environment_test.exs` (new) | Hosted and Ollama models admit none/coding/read-only with all supported variables present; no composition/tool-dispatch presence refusal. Same lifecycle cell reaches model cleanup owner/caller and executor; suspend notifications and prove cell3 rejects later grants. Missing process/registry proof seals3 before conservative result. Callback-DOWN races before/after registration transfer failure authority exactly once; clean-retirement recording ack precedes core ack, exact retired-owner DOWN clears pending, and missing/lost retirement keeps later edge admission closed even before DOWN is handled. Delay independently delivered resource DOWN past retire_model arrival: pending retirement reconciles in the responsive loop, succeeds within its cleanup-control bound, and never blocks stop; expiry seals only that session. Expired model deadlines still permit resource recording and bounded cleanup, not activation. Delay registry removal after exact process DOWN; bounded 10 ms polls reconcile it before proof, and stale poll references are ignored. After recorded retirement, exact cleanup-owner DOWN with any reason, including killed, clears the record. Final closure refuses every pending model record/slot2 or surviving exact tag even when parents are DOWN. Census-revision replays, mixed roles/tags and lost record acknowledgements cannot grant progress or retire unknown resources. Model→tool clean reconciliation is bounded1,000ms and succeeds; wrong-session/replayed/expired tokens cannot change any record. A separate session still calls providers/tools after failure. A deliberately authorized trusted tool reads a supported ambient key and returns it: ordinary tool content may appear in journal, public events and model context. A following provider reply repeating the selected key takes fixed post-dispatch model_call_failed, and repeated echoes can keep failing while context remains; a nonmatching reply stays valid and proved cleanup does not seal the session. Adapter injection witnesses exclude this deliberate host-authorized copy. OS child environment is released M5 behavior; no new scrubbing, same-user secret isolation or cross-call/tool exclusion is promised | fast |
-| 1–4 | `apps/loopex_composition/test/application_bootstrap_test.exs` and `req_llm_start_test.exs` (new); escript/companion/host release inventory fixtures | Bootstrap one authority-free worker success/error/malformed/late/DOWN/deadline/controller-late-completion and concurrent-start cases; every requester returns within5,000+1,000ms and existing handles never bootstrap. ReqLLMStarter admits one non-secret worker, concurrent requesters join, expiry removes only waiter, no cancellation/peer teardown, later completed start succeeds without VM restart. Fault temporary service recreation with live/dying/ended admitted initializer; no second start before exact predecessor DOWN. Kill the service more than three times in five seconds and retain identical live application/session supervisor and session PIDs. No automatic service restart consumes parent intensity; later creation recreates it boundedly. Validation-only creation writes no persistent keys; absent-origin running state requires host declaration, and existing waiters fail fixed on service/worker loss. Pin startup refusal precedence, host declarations/current dotenv settings, fresh .env non-load and Tidewave guard. Built escript app:nil admits no project start for invalid ask; ephemeral stalls take bounded bootstrap; durable helper arbitrary errors produce fixed code; legacy commands preserve former start/error behavior. runtime:false code and explicit logger.app/Logger BEAMs remain embedded in both escripts. Actual packaged guarded dependency startup and companion bootstrap to ready must succeed; fixture OTP release :load leaves req_llm/req/finch stopped until guarded start | fast |
+| 1–4 | `apps/loopex_composition/test/application_bootstrap_test.exs` and `req_llm_start_test.exs` (new); escript/companion/host release inventory fixtures | Bootstrap one authority-free worker success/error/malformed/late/DOWN/deadline/controller-late-completion and concurrent-start cases; every requester returns within5,000+1,000ms and existing handles never bootstrap. ReqLLMStarter admits one non-secret worker, concurrent requesters join, expiry removes only waiter, no cancellation/peer teardown, later completed start succeeds without VM restart. Fault temporary service recreation with live/dying/ended admitted initializer; no second start before exact predecessor DOWN. Kill the service more than three times in five seconds and retain identical live application/session supervisor and session PIDs. No automatic service restart consumes parent intensity; later creation recreates it boundedly. Validation-only creation writes no persistent keys; absent-origin or different-supervisor-PID running state requires host declaration, and existing waiters fail fixed on service/worker loss. Stop a positively recorded instance and host-restart it; old provenance cannot authorize the new PID. Pin startup refusal precedence, host declarations/current dotenv settings, fresh .env non-load and Tidewave guard. Built escript app:nil admits no project start for invalid ask; ephemeral stalls take bounded bootstrap; durable helper arbitrary errors produce fixed code; legacy commands preserve former start/error behavior. runtime:false code and explicit logger.app/Logger BEAMs remain embedded in both escripts. Actual packaged guarded dependency startup and companion bootstrap to ready must succeed; fixture OTP release :load leaves req_llm/req/finch stopped until guarded start | fast |
 | 2 | `apps/loopex_llm_reqllm/test/in_process_transport_drain_test.exs` (new), one isolated `long_bound` transport-census case on both toolchain pairs | Warm shared Req/SSL only; stall HTTP/TLS calls, then exercise normal completion, stop and deadline. Require ordinary owned-process/tag proof independently, plus server-observed EOF and every call-created TLS controller gone within 5,000 ms of caller DOWN under isolated release conditions. Record the full interval and process/port census; no fixed count or heap-erasure claim. A withheld or late controller fails this release-only case and is never represented as a runtime cleanup acknowledgement condition | current release long_bound; floor --long-bound |
-| 1–4 | `apps/loopex_llm_reqllm/test/in_process_packaging_test.exs` (new), actual CLI/companion archive inventory and extracted-code fixture | Both real escripts include logger.app/Logger BEAMs. Packaged code with no priv or host dependency paths executes guarded startup and all four actual synchronous provider paths against HTTP/TLS fixtures with synthetic keys; each returns a valid reply and proved cleanup. Catalog persistent key stays absent until a deliberately executed embedded-catalog positive control. No nonexistent Finch application callback is required. Actual CLI ask and real companion ready-bootstrap remain separately covered by entrypoint release lanes | fast; entrypoint release |
+| 2 | `apps/loopex_llm_reqllm/test/in_process_catalog_test.exs` (new), cold host-selected catalog fixtures | Actual Anthropic preparation/generation preserves configured file/remote source, overlay/filter/preference settings and the loaded metadata/epoch. A cold latest-release fixture goes through ReleaseStore's own Req calls with source-local adapter options, synthetic GitHub-token header checks, no global Req defaults and no external network. Setting the selected provider key only after the blocked catalog request proves that newly supplied value reaches the actual model call. Host cache/metadata survive cleanup; the next call does not refetch; source adapter options never reach the model route. Forced-packaged, omitted-overlay and deleted-state/cache negative controls fail the respective assertions. This does not replace the actual model transport or real-provider lanes | fast |
+| 1–4 | `apps/loopex_llm_reqllm/test/in_process_packaging_test.exs` (new), actual CLI/companion archive inventory and extracted-code fixture | Both real escripts include logger.app/Logger BEAMs. Packaged code with no priv or host dependency paths executes guarded startup and all four actual synchronous provider paths against HTTP/TLS fixtures with synthetic keys; each returns a valid reply and proved cleanup. Separate fresh VMs cover both OpenAI routes, Ollama, OpenRouter, known/missing Anthropic models and exact request bodies. Non-Anthropic catalog remains absent until positive load control; Anthropic planning initializes the nonempty embedded snapshot and generation/cleanup retain it. Empty/skipped-loading negative controls and unchanged host-preloaded metadata distinguish execution success from packaged-catalog proof. No nonexistent Finch application callback is required. Actual CLI ask and real companion ready-bootstrap remain separately covered by entrypoint release lanes | fast; entrypoint release |
 | 1, 3, 4 | `apps/loopex_composition/test/application_bootstrap_test.exs` (new), one-worker lifecycle cases | Requester death is faulted during controller call and after reported result; matching result/timestamp and exact normal worker DOWN are each withheld, malformed and reordered. Only both prove success. Every requester timeout is bounded by its decision/reap deadlines; an already-submitted controller request or authority-free worker may finish shared initialization later but cannot create a root/session or bypass the next full precedence pass | fast |
 | 1, 4 | Built-escript application inventory assertions in `apps/loopex_cli/test/ask_command_test.exs` (new) | Mix starts its embedded Elixir base before `main/1`; every no-start claim in this plan means no Loopex project application. Invalid `ask` and `-p` forms prove that no Loopex `.app` is started, valid ephemeral forms prove `:loopex_cli` stays stopped until the bounded composition path starts its own graph, and durable/legacy forms prove their distinct helpers start the exact M6 CLI graph with ReqLLM, Req and Finch still load-only | fast; release |
 | 2 | `apps/loopex_composition/test/owner_start_fault_test.exs` (new) | Withhold proxy result/DOWN, suspend start child, permute child report/retiring notice/normal DOWN and activation. No begin means no inputs/root even when delayed supervisor start materializes a child. Existing session remains live. After begin, owner death yields only bare unavailable and possible unnamed root; no replacement cleanup owner or invented cleanup map | fast |
@@ -3241,8 +3491,8 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
 | 4 | `apps/loopex_cli/test/ask_interrupt_test.exs` and launcher fixtures (new) | Exact ask-mode installation precedes worker start, is bounded at 1,000 ms and returns the exact `:erl_signal_server` manager PID. Install refusal, malformed return, duplicate active-handler claim, manager replacement or manager loss stop the new session, emit the fixed install diagnostic or real retained-root line, write zero stdout and exit 1; manager `DOWN` admits only an already-queued matching worker result before taking that path. Forged, stale, old-manager and replayed same-reference notices are ignored. Direct `SIGTERM`, `SIGHUP` and `SIGQUIT`, plus terminal `SIGINT` forwarded by the launcher as `SIGTERM`, each exercise the same ask-notice path. A provisional ordinary worker result starts the exact 1,000 ms reap deadline; in-time `DOWN` proceeds to mandatory stop, an absent `DOWN` gets one kill and zero-wait receive, and a still-absent `DOWN` hard-halts status 1 with no output or cleanup claim. Signals before, during and after mandatory stop race the exact 1,000 ms `finish_ask/2` call; manager serialization returns exactly `:ordinary` or `:interrupted`, and only the winner renders. Missing, malformed, late or mismatched finish reply and manager loss yield status 1, zero stdout and only the applicable fixed or retained-root diagnostic. The exact signal-manager PID/reference notice starts one orderly stop; exact finish and main `DOWN` disarm the backstop. A second handled signal or backstop expiry in `stopping` hard-halts, while one first signal never does. The monitored ask worker is suspended before owner registration, registered before grant and after grant; each branch performs one stop and at most one render, and the pre-registration branch invents no observation. After interrupt stop, queued result-before-`DOWN`, `DOWN` without result and neither queued are faulted; the exact worker is killed and reaped within 1,000 ms, while withheld `DOWN` takes the no-output status-130 hard halt. Launcher fixtures deliver each signal before child assignment and after assignment but before handler install; the latch forwards `TERM`, no signal is lost, the child is reaped and its platform status is preserved without a Loopex-130 assertion | fast |
 | 5 | `apps/loopex_composition/test/durable_options_test.exs` (new), exercised through `start/1`, `with_runtime/2` and `start_edges/2`; `apps/loopex_llm_reqllm/test/provider_deadline_test.exs` | All four added options and defaults share one validator: first-colon model parsing including an id with another colon; admitted and refused provider cases; complete and partial bounds at 1, uint64 maximum and maximum plus one; sampling at 1 and 1,000,000 and outside; every active-id combination, duplicate/unknown refusal and the explicit empty-definition workaround. Paired released-0.2 and candidate entrypoint vectors show each of the four keys ignored in 0.2 but validated in M6; valid candidate values apply, while `model: "ollama:x"` and malformed values refuse. Outer-list, other-unknown-key and first-duplicate conventions remain released behavior. Combined faults pin the released validation chain followed by model→bounds→sampling→active-tools, including every adjacent pair, and no invalid added value starts an edge. Named directories are not a raw fifth option. Companion total, stream-idle and receive waits are infinite; the unchanged sliced coordinator deadline remains authoritative at uint64 maximum and for a short stalled call | fast |
 | 5 | `apps/loopex_cli/test/durable_ask_workflow_test.exs` (new) | The helper completes before root identity; placement and runtime id precede one credential-plane acquisition; one exact composition-option bundle retains the manifest once; and create→track→attach→admit→catalog→ordered activation→status→interrupt→prompt occurs exactly, with the empty-manifest path skipping resource commands. Create id bounds, the attachment struct, active status plus positive-uint64 cleanup grace, exact command replies, every catalog mismatch, and the catalog-to-`resource_admission_failed` diagnostic are pinned. Every boundary fails independently and in the stated combined-fault precedence. Create-reply loss, tracking failure before publication and after publication-before-fsync, each post-track failure and the legacy `interrupt-` id/uncorrelated accepted reply are exercised without retry or stronger recovery claims. The private monotonic-clock seam fixes prompt acceptance, reader return and expiry instants, including saturation and the zero-wait deadline race. The single `FollowReader` owns a replay attachment from the callback's accepted cursor and requires exact PID/ref/deadline/cursor acknowledgements. Pre-join events, another run's events, a matching `user.message_appended` command id, a duplicate or conflicting join and expiry before join prove that the prompt command id freezes exactly one run id and only that run enters the projection. On terminal, error, deadline and callback raise/throw/exit, exact `DOWN` proves reap; a deliberately withheld `DOWN` instead discards the projection, returns only `follow_reader_cleanup_unconfirmed`, emits no callback output and may briefly leave the killed, unlinked reader with no mutation or output route. An event consumed only by its disposable attachment remains replayable from the unchanged durable cursor in both branches. `with_runtime/2` cleanup replacement discards any callback projection, plane and placement release in order, and only the surviving value renders once afterward | fast |
-| 5 | The complete M5 suites and retained release lanes; `mix loopex.deps_budget`; `git diff v0.2.0 -- apps/loopex/lib ':(exclude)apps/loopex/lib/mix'` empty at the tested candidate, with only the two closure tasks added under `apps/loopex/lib/mix/tasks/` | Valid durable behavior, daemon and both protocol generations remain unchanged; a companion malformed binary argument still visible at the buffered `ToolCall` seam now fails closed before tool execution, visible provider-executed and provider-native calls fail rather than becoming local requests, dependency-normalized erased cases remain pinned, and the named timer-safety change leaves the coordinator deadline authoritative. The dependency budget and core runtime library are unchanged. Expected test-data changes are enumerated rather than called unchanged: running-build version assertions become version-derived; the exact definition inventory moves from four to seven while a separate assertion keeps the default active ids at the original four; visible malformed-binary and non-application fixtures change from flattening to fixed post-dispatch failure; dependency-normalization fixtures keep the locked behavior; `release_version` and developer text move to `0.3.0`; and the release manifest adds the two M6 provider rows plus the separate rollback lane. The durable default `policy_identity` remains literal `"0.2.0"`; pure encoder version-vector tests remain unchanged | fast; release |
-| 5 | `apps/loopex_cli/test/rollback_test.exs` (new), separate real-provider-credential-free rollback release lane; fixture-paired v0.2.0/candidate builds | External test driver extracts v0.2.0 and candidate into isolated trees, compiles each CLI with non-secret scripted launch file in LOOPEX_BUILD_PROVIDER_CONFIG and invokes Mix.Tasks.Escript.Build.run([]) directly; it bypasses build_pair/1, which overwrites launch input with real companion configuration. The same released scripted worker bootstrap/manifest/request/reply/cleanup protocol config is explicitly passed to daemon --provider-launch. These are declared fixture-paired compatibility builds; operator packaging is separately proved unchanged-source. Both directions recover/answer pending interactions with revision0.2.0; candidate M6-only tool pending-not-dispatched commits unknown_tool under0.2; dispatched work never runs again and matching receipt is admitted or work remains pending; completed history replays. User skill snapshot reloads by digest offline, while0.2 daemon resumes with all skill context withheld. Every released CLI/daemon invocation receives only the fixed public inert LOOPEX_PROVIDER_API_KEY=loopex-rollback-inert-not-a-provider-key, satisfying CredentialHost.open/0 and daemon credential/1 (credential_host.ex:51-60; daemon.ex:225-236). Real provider keys remain unset; the scripted worker asserts this literal in its separate credential frame and never contacts a provider. Missing-variable invocations must fail as negative startup controls, not count as rollback proof. Build pairing sources: cli/mix.exs:36-94, provider_launch.ex:9-24, daemon.ex:180-196, provider_configuration.ex:9-44 A fresh released-0.2 daemon session with an external user-skill directory has no user tuple in its catalog; after successful project admission, activation of that absent user tuple through the released protocol returns resource_not_found, while project activation succeeds as control. This proves released CLI/daemon discovery limits, not arbitrary embedding manifests. | release |
+| 5 | The complete M5 suites and retained release lanes; `mix loopex.deps_budget`; `git diff v0.2.0 -- apps/loopex/lib ':(exclude)apps/loopex/lib/mix'` empty at the tested candidate, with only the two closure tasks added and the existing dependency check's literal parser and exact edge-declaration/materialization oracles updated under `apps/loopex/lib/mix/tasks/` | Valid durable behavior, daemon and both protocol generations remain unchanged; a companion malformed binary argument still visible at the buffered `ToolCall` seam now fails closed before tool execution, visible provider-executed and provider-native calls fail rather than becoming local requests, dependency-normalized erased cases remain pinned, and the named timer-safety change leaves the coordinator deadline authoritative. The core dependency budget, locked package closure and core runtime library are unchanged. `apps/loopex/test/deps_budget_test.exs` proves the exact three load-only edge tuples and all refused variants named under Packaging; fresh-source materialization exercises those roots. Expected test-data changes are enumerated rather than called unchanged: running-build version assertions become version-derived; the exact definition inventory moves from four to seven while a separate assertion keeps the default active ids at the original four; visible malformed-binary and non-application fixtures change from flattening to fixed post-dispatch failure; dependency-normalization fixtures keep the locked behavior; `release_version` and developer text move to `0.3.0`; and the release manifest adds the two M6 provider rows plus the separate rollback lane. The durable default `policy_identity` remains literal `"0.2.0"`; pure encoder version-vector tests remain unchanged | fast; release |
+| 5 | `apps/loopex_cli/test/rollback_test.exs` (new), separate real-provider-credential-free rollback release lane; fixture-paired v0.2.0/candidate builds | The outer release runner supplies both exact pristine archives to the isolated build procedure below. One test-owned scripted worker speaks the released bootstrap/manifest/request/reply/cleanup protocol; the same fixture launch configuration is captured in each rebuilt CLI and explicitly passed to daemon --provider-launch. The public embedding subcase uses the shipped deferring Loopex.AppServer.Policy.Ask and default revision0.2.0 in both directions, without an identity override, and proves the recovered question is answered and the run advances. M6-only pending-not-dispatched work commits unknown_tool under0.2; dispatched work is never redispatched: matching receipt is admitted, absent/unresolved/settling commits outcome_unknown, and in-flight or declined evidence stays pending. Completed history replays. Offline user-skill reload by digest and daemon-wide withholding of that session's skill context are observed. Invocations of binaries rebuilt from released0.2 source receive only the public inert LOOPEX_PROVIDER_API_KEY=loopex-rollback-inert-not-a-provider-key; real provider keys remain unset and the worker asserts the exact separate credential frame. Missing-variable invocations are negative startup controls. A fresh fixture-paired0.2 daemon cannot discover/activate an external user tuple and returns resource_not_found, while project activation succeeds. This proves released-source compatibility and discovery, not published-binary packaging or arbitrary embedding-host manifests | release |
 | 6 | `apps/loopex/test/closure_tooling_test.exs` (new); `scripts/test/stage-archive-manifest-test.sh`, `scripts/test/floor-lane-test.sh`, `scripts/test/attended-release-test.sh` (new); `bash scripts/check.sh --docs` | Every command's exact grammar, mandatory argument, preflight, PASS/FAIL line and exit rule is exercised. Existing outputs never overwrite; missing parents create nothing; partial writes remove only their own temporary files; failed executed lanes retain complete logs. Archive comparison refuses missing, non-ordinary and malformed exact sidecars and proves NUL framing, tuple projections and source identity. Automatic attendance refuses a missing anchor, wrong milestone, wrong tested SHA, non-descendant authority SHA and absent authorization, and accepts only the recorded combination. P1's exact charter exception list, P2's selected unattended pre-merge lanes, P3's retained complete output plus SHA and P4's milestone-branch rejoin-main rule are present. A retained semantic review covers `README.md`, `docs/operator/getting-started.md`, `docs/operator/runtime.md`, `docs/operator/tools-and-policy.md`, `docs/developer/getting-started.md`, `docs/developer/getting-started-technical.md`, `docs/developer/runtime-and-embedding.md` and `docs/developer/compatibility-surfaces.md`; the documentation check passes. M6 closure invokes only these repository commands | fast; closure |
 | 1–4 | `scripts/m6-demonstration.sh`, the single acceptance demonstration, run from a clean checkout with no `LOOPEX_HOME` on macOS and on Linux | Its four steps in order, each printing its own `PASS` or `FAIL` line and the elapsed time; the complete output of each platform's run retained with its reference and SHA-256 digest in `docs/evidence/M6-closure-runs.md` | closure |
 | 2 | Independent read-only in-process credential/security review of tested SHA; immutable complete output retained outside repository | `docs/evidence/M6-closure-runs.md` reserves Pending result, tested SHA, retained-output reference and SHA-256 fields before candidate commit. Administrative child fills only reserved fields; no new review document after testing. Review verifies transport, adapter-injected-value rejection, direct cleanup proofs, hosted tool use, ambient-key acceptance including deliberate trusted-tool disclosure, session-local seals, recoverable startup, all seven amendment texts and release-only socket/TLS5,000ms bound. No arbitrary heap erasure, global key-free runtime claim or same-user tool isolation. Load-only packaging and persisted dotenv off are checked | closure |
@@ -3269,12 +3519,83 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
   - row 11, `loopex_composition|test/ephemeral_real_test.exs|the embedded API
     answers in-process from Anthropic with the release credential`. The
     ephemeral profile's embedded API runs an Anthropic model in-process.
-- **Transport-drain execution.** Reuse `:long_bound`, excluded alongside
-  `:real_provider` in `apps/loopex_llm_reqllm/test/test_helper.exs`. One case in
+- **Rollback build and staging.** This lane proves compatibility using pristine
+  source rebuilds paired with a fixture provider, not published binaries.
+  While still in the clean Git checkout, before entering the fresh-source lanes,
+  `check-release.sh` resolves `v0.2.0^{commit}` and requires
+  `3f81b04828901a6fb05b29e8b6bed211eed2d376`. It stages exact `git archive`
+  bytes for that commit and the tested candidate SHA to separate exclusive
+  files outside the candidate extraction. It passes their absolute paths and
+  commit identities to the rollback driver. Retain each archive reference and
+  SHA-256 plus complete staging output. The driver does not need `.git`, does
+  not consult the checkout and does not reuse the candidate's already-built
+  fresh-source tree. It extracts each archive under a separate scoped-umask
+  root, validates SOURCE_IDENTITY against the supplied commit and independently
+  verified Git-tree projection, then resolves its own locked dependencies with
+  `mix deps.get` from that extraction under `without_credential`. No shared or
+  symlinked `deps`, `_build`, inherited build-path override or fixture source
+  mutation is allowed. The outer runner supplies the separately verified tree
+  projections alongside the archives so validation needs no Git repository.
+  Keep acquisition/build outputs in the rollback log.
+
+  From each isolated `apps/loopex_cli` directory, with `launch` bound to its
+  absolute test-owned scripted launch file, run this direct Mix task recipe:
+
+  ```sh
+  MIX_ENV=prod LOOPEX_BUILD_PROVIDER_CONFIG="$launch" mix run --no-start -e '
+  tasks = ["compile", "compile.all", "compile.protocols"] ++
+    Enum.map(Mix.Project.config()[:compilers] || Mix.compilers(), &"compile.#{&1}")
+  Enum.each(tasks, &Mix.Task.reenable/1)
+  Mix.Task.run("compile", ["--force", "--warnings-as-errors"])
+  Mix.Tasks.Escript.Build.run([])
+  '
+  ```
+
+  The credential-clearing wrapper encloses dependency acquisition and this
+  command. Forced recompilation captures that launch file; the direct task
+  bypasses `build_pair/1`, which would overwrite it with real-companion settings
+  (`apps/loopex_cli/mix.exs:25,32-89`, `provider_launch.ex:9-40`). Every version
+  invocation is a fresh OS process, after its predecessor/daemon DOWN. Reuse
+  only the retained durable root/workspace and explicitly retained identities.
+  The pending-interaction subcase is a public embedding case, not a CLI-policy
+  case. From each isolated `apps/loopex_app_server`, run a test-owned driver with
+  `MIX_ENV=prod mix run --no-start DRIVER.exs ...`. It consults the same fixture
+  launch file and passes it as `provider_launch:` to
+  `LoopexComposition.with_runtime/2`, with the shipped
+  `Loopex.AppServer.Policy.Ask`, the same state_root/workspace/runtime_id and
+  no policy_identity override. Both source versions must derive the same
+  module id and default revision `"0.2.0"` (`loopex_composition.ex:249-261`);
+  Ask really defers (`policy/ask.ex:53-80`). CLI allow-all/shell-allowlist cannot
+  produce this proof (`loopex_cli.ex:229-233`).
+
+  Writer calls `Loopex.create_session(runtime, %{}, command_id: "rollback-create")`,
+  attaches from sequence0, sends one prompt to read the fixture file, and
+  retains the committed `interaction.requested` id without answering. Return
+  from with_runtime/2 and require successful bracket cleanup of every owned
+  edge plus child-process exit before the next OS process
+  (`runtime_owner.ex:120-145`). Runtime.stop preserves durable Store history
+  (`runtime.ex:122-139`), leaving the pending interaction recoverable.
+  Reader in the other source calls `Loopex.prepare_resume_session/3`, attaches
+  before activation, checks `Loopex.Attachment.open_interaction/1` for the
+  identical pending id, then `Loopex.activate_resume/1` and a single command
+  `%{type: :interaction_answer, command_id: answer_id,
+  interaction_id: retained_id, choice_id: "allow"}`. Require committed
+  interaction resolution, exactly one completed tool and completed run.
+  Public entrypoints are `loopex.ex:87-95,133-152,497-544`, pending view
+  `attachment.ex:59-73`. Repeat each direction on a separate durable root.
+  The fixture worker is history-sensitive: issue one released loopex.read call
+  until its tool result appears in context, then final text. A restarted
+  per-process counter cannot drive this recovery witness. The CLI/daemon
+  fixture-paired binaries separately prove unknown-tool and skill behavior,
+  using allow-all where no pending question is claimed.
+- **Transport-drain execution.** Reuse `:long_bound`. Implementation adds its
+  exclusion alongside the existing `:real_provider` exclusion in
+  `apps/loopex_llm_reqllm/test/test_helper.exs:36`. One case in
   `test/in_process_transport_drain_test.exs` drives all HTTP/TLS normal, stop
   and deadline vectors in an isolated VM, using synthetic fixture keys only.
-  Add `loopex_llm_reqllm` to the current release and floor `--long-bound`
-  application lists. The current fresh-extraction command is
+  Add exactly one dedicated step to each of the current release and floor
+  `--long-bound` runners. Do not add this application to either generic
+  long-bound application loop. The current fresh-extraction command is
   `lane long-bound-loopex_llm_reqllm loopex_llm_reqllm 1 without_credential mix
   test test/in_process_transport_drain_test.exs --only long_bound`; it is not
   an extra manifest row. The lane helper streams this complete output directly
@@ -3339,7 +3660,7 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 | Surface | M6 change | Label |
 | --- | --- | --- |
 | Core runtime library (`apps/loopex/lib` outside `mix/`) | None | Unchanged |
-| Core Mix tasks (`apps/loopex/lib/mix/tasks/`) | Two closure tasks added beside the existing checks | Development tooling |
+| Core Mix tasks (`apps/loopex/lib/mix/tasks/`) | Two closure tasks added; the existing dependency check's literal parser and edge-declaration and materialization-root oracles recognize the three exact load-only declarations | Development tooling; core runtime budget and locked package closure unchanged |
 | `LoopexComposition.Ephemeral` | New | Experimental |
 | `loopex_composition` application tree | Application callback owns temporary ReqLLMStarter and temporary-owner DynamicSupervisor siblings; the starter is recreated on demand without automatic restart-intensity accounting | Shared startup failures are recoverable infrastructure failures; no cross-session exclusion, persistent refusal state or explicit peer teardown |
 | `LoopexComposition.start/1`, `with_runtime/2` and `start_edges/2` (M4/M5 rework) | Optional `:model`, `:bounds`, `:sampling` and `:active_tools`; defaults reproduce M5 exactly; released outer-list/error/duplicate-key conventions stay unchanged; these four previously ignored keys become recognized and validated; named directories use the public helper, released `:resource_manifest` option and ADR 0025 session commands; the default policy revision is fixed at `"0.2.0"` | Experimental additions with four-key validation tightening; the revision keeps `0.2` recovery exact |
@@ -3366,9 +3687,9 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 | Supported source and target versions | `0.2` roots open unchanged under `0.3`; there is no new root format |
 | Forward migration | None |
 | Migration between profiles | None; an ephemeral session is never promoted to a durable one |
-| Backup and restore or downgrade policy | Unchanged from `0.2`; the `0.2` binary opens and resumes every root `0.3` writes, with the three stated rollback limitations below |
-| Pending interactions across versions | The default policy revision is `"0.2.0"` in both releases, so a pending interaction recovers and can be answered after an upgrade or a rollback |
-| Exception: a call to an M6-only tool | A call not yet dispatched is re-resolved against the active tool set on recovery (`session_coordinator.ex:5609-5614`); `0.2` answers `{:error, {:unknown_tool, name}}` (`:6846`) and commits it as a failed tool call (same dispatch_effect error branch), and the run continues; its effect never ran, and the model sees the failure. A call already dispatched follows core's dispatched-effect recovery unchanged (`session_coordinator.ex:2789-2796`): `0.2` queries the executor, admits a matching receipt, and otherwise leaves the work pending for reconciliation; `0.2`'s executor defines no such tool, so it never runs it again |
+| Backup and restore or downgrade policy | Unchanged from `0.2`; the `0.2` binary opens and resumes every root `0.3` writes, subject to the same-policy pending-interaction boundary and three stated rollback limitations below |
+| Pending interactions across versions | Host-selected policy module identity must match exactly. Composition's default identity revision remains `"0.2.0"`; the fixture supplies shipped Loopex.AppServer.Policy.Ask in both source builds and omits only the identity override. Identity includes `inspect(policy)` and revision (`loopex_composition.ex:259-261`). This proves the same-policy host, not an arbitrary `0.2` CLI policy |
+| Exception: a call to an M6-only tool | A call not yet dispatched is re-resolved against the active tool set on recovery (`session_coordinator.ex:5609-5614`); `0.2` answers `{:error, {:unknown_tool, name}}` (`:6846`) and commits it as a failed tool call (same dispatch_effect error branch), and the run continues; its effect never ran, and the model sees the failure. A call already dispatched follows core's dispatched-effect recovery unchanged (`session_coordinator.ex:2789-2796`): activation queries the executor once and never redispatches (`:7651-7736,7800-7847`): a matching receipt is validated/admitted; `:absent`, `:effect_unresolved` or `:effect_settling` commits `outcome_unknown`; `:effect_in_flight`, malformed/mismatching evidence, another executor error or failed store commit declines and leaves work pending for a fresh host query; `0.2`'s executor defines no such tool, so it never runs it again |
 | Exception: an admitted user skill | Its admission is journaled as a reference, digest, decision and selections (`session_state.ex:4898`) and its snapshot retained under the state root by digest (`resource_packs.ex:333-380`), as for any pack. `0.2`'s offline `loopex resume` reloads it by digest through core validation, which accepts its `user:<name>` identity (`resource_pack.ex:203-216`, `:343-348`). `0.2`'s daemon composes only discovered project skills (`daemon.ex:239-242`), whose manifest can never match the session's one admitted digest, so the session resumes with all of its skill context withheld, project skills included (`runtime/resource_snapshot.ex:112-121`, `runtime/resource_context.ex:38-47`). |
 | Exception: a new user skill | `0.2`'s released CLI/daemon discover project skills only, so they cannot newly admit or activate an external `user:<name>` skill. No claim is made about arbitrary embedding-host manifests. This is distinct from offline reloading of an already retained user snapshot |
 | Proof | The `rollback` lane proves both directions and the stated rollback limitations |
@@ -3391,9 +3712,32 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
     application gains `LoopexComposition.Application` and the `mix.exs` `mod:`
     entry that owns the one-for-one startup-service/owner-supervisor siblings;
   - the command is in `loopex_cli`.
-- **Dependency budget:** `mix loopex.deps_budget` changes nowhere. The CLI
-  reaches the ephemeral profile only through composition, as the client rules
-  require.
+- **Dependency budget:** update only the literal external-declaration parser,
+  the edge-declaration oracle in
+  `external_dependency_reasons/2` and the edge roots in
+  `external_materialization_roots/1` of
+  `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`. `dependency/1` currently
+  parses only two-element declaration ASTs; add the literal three-element AST
+  `{:{}, metadata, [name, requirement, [runtime: false]]}` with an atom name
+  and nonempty valid binary requirement, without evaluating expressions.
+  Keep contextual authorization in the exact edge oracles. They currently admit only
+  `{:req_llm, "~> 1.24.0", []}`. The new permitted edge set is exactly
+  `{:req_llm, "~> 1.24.0", [runtime: false]}`,
+  `{:req, "== 0.7.4", [runtime: false]}` and
+  `{:finch, "== 0.23.0", [runtime: false]}` in `loopex_llm_reqllm`, with
+  no duplicate declaration or additional option. Declaration order carries no
+  meaning. Preserve every inward-direction, core/telemetry budget, package
+  lock/version/source and materialization-closure check; Req and Finch already
+  belong to that locked closure. `apps/loopex/test/deps_budget_test.exs` adds
+  the exact passing set and failing vectors for a missing or duplicate tuple,
+  wrong version, auto-starting dependency, extra option, extra package and
+  the same declaration in an unauthorized repository application. Parser-level
+  negatives cover computed names/requirements/options, duplicate option keys,
+  improper lists and every option shape other than literal `[runtime: false]`;
+  preserve all existing two-element external and internal-dependency rules.
+  Fresh-source evidence
+  exercises the new exact roots. The CLI still reaches the ephemeral profile
+  only through composition, as the client rules require.
 - **Escript:** the existing build pair still embeds `loopex_composition`, its
   application callback and the companion used by `ask --state-root`, but its
   Mix escript configuration now sets `app: nil`. The generated wrapper therefore

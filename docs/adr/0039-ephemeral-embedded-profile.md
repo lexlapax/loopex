@@ -277,6 +277,17 @@ activation token. Only reconciled candidate/proxy identities, exact normal
 proxy termination, managed core registration and the callback's one-use
 activation release call authority.
 
+Before entering core's synchronous registrar, the session owner records the
+exact candidate and supplies its cleanup-only route and retirement identity.
+The candidate acknowledges custody directly to that owner. This provisional
+record conveys no session cell or work grant. If core subsequently registers
+the candidate, an abort can retire its empty record even when the managed
+return, preparation or activation-registration acknowledgement never arrives.
+Cleanup never requires a live model deadline or a later activation record.
+On pre-activation callback loss, empty retirement is recorded first; the inert
+candidate stays alive for core's later stop or subtree teardown. Lost custody
+acknowledgement cannot prevent cleanup or grant registrar permission.
+
 An unknown queued start or missing candidate/proxy termination seals only the
 attempted session and remains conservative failure; it never becomes clean
 `not_dispatched`. A queued Task.Supervisor start may later materialize only an
@@ -330,22 +341,38 @@ key, activation or effect authority. A waiter has a 5,000 ms bound; timeout or
 requester death does not cancel shared application-controller work. The
 service retains startup provenance for later reconciliation; uncertainty is a
 fixed startup refusal for that waiter, not a persistent poison or VM lockout.
-Only a positively completed Loopex start establishes provenance. A service
+Only a positively completed Loopex start establishes provenance for the exact
+recorded `ReqLLM.Supervisor` incarnation. A host stop/restart creates a new
+incarnation and needs a fresh host declaration or admitted Loopex start. A service
 crash is not automatically restarted and cannot consume the session parent's
 restart budget; a later creation recreates it within its existing startup bound.
 An admitted unlinked initializer survives service loss. An indeterminate
 running application without positive provenance requires the host declaration,
 not inferred ownership from a stale start intent.
 Already-running ReqLLM is accepted only with .env loading off and retained
-Loopex startup provenance or the host's explicit declaration. Shared-service
+Loopex startup provenance for the current live PID or the host's explicit
+declaration. Shared-service
 outages are reported honestly and may affect sessions using that service.
 
 Loopex persists `load_dotenv: false` before its admitted ReqLLM start, including
-overriding a stopped application's `load_dotenv: true`, and does
+overriding a stopped application's `load_dotenv: true` on its first start, and does
 not restore the setting or stop reference-counted dependencies. The host owns
 later mutations, false declarations, preexisting listener/file opens and
-shared infrastructure. Inline models avoid catalog lookup; no other ReqLLM
-setting changes. Embedded and escript startup use the same guards. The escript
+shared infrastructure. A stopped prior Loopex-started instance whose host
+reenabled dotenv instead refuses with `req_llm_dotenv_enabled`.
+
+Inline construction avoids resolving the selected model through the catalog
+and its unverified-model warning. Anthropic still reads LLMDB's thinking
+metadata during planning and generation, even without a thinking option.
+The existing default compiled catalog needs no runtime snapshot file or
+download; its lazy metadata load is shared VM state and survives call cleanup.
+Loopex does not preload, replace or clear host catalog state or change its
+settings. Host-selected files, remote snapshot sources, overlays and their
+side effects remain trusted-host dependency behavior outside the owned model
+transport guarantee. Remote loading may use the host's GitHub credentials and
+ordinary Req transport; hosts requiring no such effects keep the default
+compiled source or preload non-fetching metadata. No dependency change is
+proposed. Embedded and escript startup use the same guards. The escript
 uses `app: nil`: invalid ask forms start no Loopex application, valid
 ephemeral forms call the bounded composition bootstrap, durable ask uses its
 fixed-diagnostic start helper, and legacy commands preserve the former startup
@@ -738,7 +765,9 @@ This adds the profile and narrowly reworks two private companion mechanics:
 - **Durable policy revision:** the durable composition's default policy
   identity keeps the revision it had in `0.2`, fixed rather than derived from
   the release version, so a pending interaction recorded under either release
-  recovers under the other.
+  recovers under the other when the successor host supplies the same policy
+  module identity. The witness uses the shipped deferring Ask policy; it does
+  not claim an arbitrary CLI policy can answer another host's question.
 - **Rollback** to `0.2`: remove the profile. No durable byte depends on it, and
   a `0.2` binary opens and resumes every root `0.3` writes, with the stated
   rollback limitations and a truthful record:
@@ -746,8 +775,10 @@ This adds the profile and narrowly reworks two private companion mechanics:
     dispatched when the root is resumed under `0.2`: the call is committed as a
     failed `unknown_tool` call and the run continues. One already dispatched
     follows core's dispatched-effect recovery unchanged: `0.2` queries the
-    executor, admits a matching receipt, and otherwise leaves the work pending
-    for reconciliation; it is never run again;
+    executor once and never redispatches. A matching receipt is admitted;
+    absence, unresolved or settling effects commit `outcome_unknown`; an
+    in-flight answer or declined evidence leaves work pending for a fresh
+    host reconciliation query;
   - a user skill admitted under `0.3`: its snapshot is retained under the
     state root by digest like any admitted pack's. `0.2`'s offline
     `loopex resume` reloads it by that digest, because its validation already
