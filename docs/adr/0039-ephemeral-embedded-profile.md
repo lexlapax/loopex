@@ -245,7 +245,9 @@ configuration could change what the call does or where it goes:
   It requests identity encoding and records the private
   `model_response_encoding_unsupported` sentinel for an encoded response rather
   than risking unbounded decompression. Both become the public
-  `model_call_failed` result.
+  `model_call_failed` result. The ceiling bounds body bytes, not response-header
+  allocation in Finch/Mint before the collector; a deadline bounds elapsed time,
+  not header memory.
 - **Dependency-visible tool calls.** The shared response mapper validates the
   buffered `%ReqLLM.ToolCall{}` that locked ReqLLM exposes and accepts only a
   non-empty id and name with a binary JSON object decoded without repair.
@@ -285,7 +287,24 @@ the candidate, an abort can retire its empty record even when the managed
 return, preparation or activation-registration acknowledgement never arrives.
 Cleanup never requires a live model deadline or a later activation record.
 On pre-activation callback loss, empty retirement is recorded first; the inert
-candidate stays alive for core's later stop or subtree teardown. Lost custody
+candidate stays alive for core's later stop or the empty-invocation settlement
+barrier: the matching run terminal followed by a serialized public status call
+on the coordinator epoch pinned once during attachment initialization before
+handle return, within the existing startup deadline. Status initialization
+failure uses attach_failed/{:attach, :failed} and rollback; no per-prompt status
+read changes short ask timeouts. This orders core's completed stop handling;
+it does not prove cleanup. Only the empty retirement and candidate's actual
+DOWN clear the one outstanding record before another ask. Until that happens,
+terminal exposure remains pending across waiting and background API paths;
+the original wait deadline is unchanged. A failed continuation barrier with a
+valid retained terminal enters stop: proved cleanup returns that terminal to
+any waiting caller and closes the handle; unproved cleanup carries the real
+ending in cleanup_unproved. A prior timeout receives no second reply.
+A public stop bypasses continuing-session
+release and proves the retired candidate DOWN through subtree cleanup instead.
+No resource-bearing
+candidate uses this release. Unavailable settlement evidence instead takes
+session cleanup, retaining the existing conservative outcome. Lost custody
 acknowledgement cannot prevent cleanup or grant registrar permission.
 
 An unknown queued start or missing candidate/proxy termination seals only the
@@ -293,11 +312,13 @@ attempted session and remains conservative failure; it never becomes clean
 `not_dispatched`. A queued Task.Supervisor start may later materialize only an
 inert candidate. Before `registration_pending` it exits on callback/proxy loss
 or expiry. After acknowledging that phase it cancels its expiry and stays inert
-on callback loss, awaiting core's exact stop or session-subtree teardown. In the
+on callback loss, awaiting core's exact stop, that settlement barrier, or
+session-subtree teardown. In the
 locked worker-retained/guard-unregistered interval,
 core may settle before that authority-free candidate's termination; this
 proves no registered provider-resource obligation or released authority, not
-candidate termination. Complete session-subtree proof still reaps it. If
+candidate termination. Empty-candidate release restores same-session liveness;
+complete session-subtree proof is the failure fallback. If
 registration committed first, the missing stop handshake is unproved cleanup.
 
 Each admitted call has a responsive, sensitive cleanup owner, one sensitive
@@ -372,7 +393,13 @@ side effects remain trusted-host dependency behavior outside the owned model
 transport guarantee. Remote loading may use the host's GitHub credentials and
 ordinary Req transport; hosts requiring no such effects keep the default
 compiled source or preload non-fetching metadata. No dependency change is
-proposed. Embedded and escript startup use the same guards. The escript
+proposed. Embedded and escript startup use the same guards, and both spend the
+model deadline on any cold shared catalog
+initialization, including its VM-wide load lock. A planning load failure before
+key resolution/model dispatch takes fixed not_dispatched/model_call_failed
+with owned cleanup, not a raw loader diagnostic. This host-selected catalog
+trust scope is explicitly proposed for acceptance below, not already approved.
+The escript
 uses `app: nil`: invalid ask forms start no Loopex application, valid
 ephemeral forms call the bounded composition bootstrap, durable ask uses its
 fixed-diagnostic start helper, and legacy commands preserve the former startup
@@ -594,6 +621,11 @@ credential rule. The paired vision files change with its acceptance:
   admission; no shared gate, lease, quarantine or VM-restart lockout exists.
   Shared dependency outages remain possible and are not disguised as an
   independent-session availability guarantee.
+  A host-selected cold catalog source can independently use ambient GitHub
+  credentials, ordinary Req transport and persistent cache/shared metadata;
+  those host dependency effects are outside the selected-provider-key and
+  one-shot model-transport guarantees. The default compiled source makes no
+  such fetch. Catalog configuration and those effects are host-owned.
 - **Host resolution.** Vision §6.1 gives the host credential resolution. Here
   the host resolves by placing the value in a variable it names in its own
   environment; the adapter reads that host-supplied value at the model
@@ -630,6 +662,19 @@ credential rule. The paired vision files change with its acceptance:
   from tools. A credential-free local alternative needs a host and tool audience
   that have no access to those values. A later decision may add a companion path
   to the ephemeral profile.
+
+**Additional proposed acceptance decision: host-selected catalog effects.**
+Accepting ADR 0039 would permit the unchanged host catalog configuration to
+load metadata with ordinary Req, ambient GH_TOKEN/GITHUB_TOKEN and persistent
+cache outside the per-call model pool. This also permits cold Anthropic
+initialization to contend on the shared load lock and spend the model deadline.
+This is proposed, not one of the maintainer's earlier design approvals.
+The recommendation is to retain this host-owned behavior: the compiled default
+and preloaded non-fetching metadata need neither fetch nor new dependency.
+Alternatives are to refuse every cold fetching source (restricting existing host
+configuration) or own/replace the catalog loader (a larger adapter and trust
+boundary). Either alternative requires a new decision before implementation.
+All seven prospective amendment placements include this explicit exception.
 
 <a id="concept-adr-0039-consequences"></a>
 ### Observable Consequences
