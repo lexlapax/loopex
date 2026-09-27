@@ -171,8 +171,9 @@ A milestone runs in four steps; the
    from `In progress` to `In review`. From that candidate run the closure matrix the
    [verification guide](docs/developer/verification.md#concept-verification-stages)
    states once: `bash scripts/check.sh` under the floor toolchain pair and
-   `bash scripts/check-release.sh` once, counting the current-pair CI run the
-   candidate already produced rather than repeating it. From M5 onward, the
+   `bash scripts/check-release.sh` once, counting a current-pair fast check of
+   that exact candidate from CI or a local run with its complete output and
+   exact SHA retained rather than repeating it. From M5 onward, the
    release check's fresh-source lane retains outside its extraction the exact
    NUL-delimited bytes emitted by `scripts/source-archive-manifest.sh` for the
    tested archive staged under the milestone guide's
@@ -267,7 +268,8 @@ repository's checks are two commands, described in
 - `bash scripts/check.sh` — the fast check: structure, formatting, warning-free
   compilation, dependency direction, documentation ordering, current-tree
   status, and the credential-free test suite, one application per VM. It runs
-  once per integration candidate, in CI; `--docs` runs compilation,
+  once per integration candidate, in CI or locally with complete output and
+  exact SHA retained when that local run is used as evidence; `--docs` runs compilation,
   formatting, the structure checks and the documentation check for a
   prose-only change and skips the suite, and `--select` — what CI runs —
   chooses that mode on its own when every changed path is Markdown outside

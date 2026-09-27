@@ -161,9 +161,11 @@ mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh
 Do not activate a version manager inside the checkout; invoke the pair
 explicitly. OTP 27 cannot read a beam written by OTP 29, so clear `_build`
 when switching between the pairs, or give each pair its own `MIX_BUILD_PATH`.
-Hosted CI proves the current pair on every change; milestone closure runs
-`scripts/check.sh` once under the floor pair as well, which is the only run
-that proves the floor still builds and passes. A Linux host needs
+Hosted CI normally proves the current pair. A local fast check counts for an
+integration candidate only when its complete output and exact tested SHA are
+retained. Milestone closure runs `scripts/check.sh` once under the floor pair
+as well, which is the only run that proves the floor still builds and passes.
+A Linux host needs
 `LANG=C.UTF-8` and `LC_ALL=C.UTF-8` exported.
 
 ## Dependency Rules
