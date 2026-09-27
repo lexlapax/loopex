@@ -3605,7 +3605,17 @@ defmodule LoopexCliTest do
 
   test "the runtime measures exact staged system and tool bytes while the provider facing base stays under one thousand tokens" do
     definitions = Loopex.Executor.Local.CodingTools.definitions()
-    assert length(definitions) == 4
+
+    assert Enum.sort(Enum.map(definitions, & &1["tool_id"])) ==
+             [
+               "loopex.bash",
+               "loopex.edit",
+               "loopex.find",
+               "loopex.grep",
+               "loopex.ls",
+               "loopex.read",
+               "loopex.write"
+             ]
 
     fixture = fixture(script: [%{text: "done"}], tools: definitions)
     {session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "measure it")

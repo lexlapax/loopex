@@ -1776,7 +1776,8 @@ defmodule Loopex.Executor.Local do
            }),
          true <- job.executor_identity == state.identity,
          true <- job.origin_executor_epoch == state.epoch,
-         {:ok, arguments} <- validate_arguments(tool, job.validated_arguments) do
+         {:ok, arguments} <- validate_arguments(tool, job.validated_arguments),
+         :ok <- Loopex.Executor.Local.ReadOnlyTools.validate_path(lease.path, arguments) do
       {:ok, tool, lease_pid, lease.path, arguments}
     else
       :error -> refused_before_effect(:workspace_lease_not_held)
@@ -2481,6 +2482,10 @@ defmodule Loopex.Executor.Local do
 
   defp validate_arguments(%{id: @write_tool}, arguments),
     do: write_arguments(arguments, 0)
+
+  defp validate_arguments(%{coding: %{"tool_id" => id}}, arguments)
+       when id in ["loopex.grep", "loopex.find", "loopex.ls"],
+       do: Loopex.Executor.Local.ReadOnlyTools.arguments(id, arguments)
 
   defp validate_arguments(%{id: @wait_write_tool}, %{
          "relative_path" => path,
@@ -3493,7 +3498,7 @@ defmodule Loopex.Executor.Local do
          _progress,
          _identity
        )
-       when kind in [:read, :write, :edit] do
+       when kind in [:read, :write, :edit, :grep, :find, :ls] do
     remaining = fence_remaining(deadline)
 
     if remaining <= 0 do
@@ -3601,10 +3606,16 @@ defmodule Loopex.Executor.Local do
   defp abandoned_outcome(_cause, _arguments, false), do: :outcome_unknown
   defp abandoned_outcome(:workspace_lease_lost, _arguments, true), do: :outcome_unknown
   defp abandoned_outcome(:effect_owner_lost, _arguments, true), do: :outcome_unknown
-  defp abandoned_outcome(:worker_stopped, %{kind: :read}, true), do: :failed
+
+  defp abandoned_outcome(:worker_stopped, %{kind: kind}, true)
+       when kind in [:read, :grep, :find, :ls], do: :failed
+
   defp abandoned_outcome(:worker_stopped, _arguments, true), do: :outcome_unknown
   defp abandoned_outcome(:guardian_stopped, _arguments, _stopped), do: :outcome_unknown
-  defp abandoned_outcome(:deadline, %{kind: :read}, true), do: :failed
+
+  defp abandoned_outcome(:deadline, %{kind: kind}, true)
+       when kind in [:read, :grep, :find, :ls], do: :failed
+
   defp abandoned_outcome(:deadline, _arguments, true), do: :outcome_unknown
 
   defp abandoned_message(cause, arguments, stopped, detail) do
@@ -3629,11 +3640,18 @@ defmodule Loopex.Executor.Local do
       detail_text <> stop_text <> " " <> effect_text(cause, arguments, stopped) <> "]"
   end
 
-  defp effect_text(:deadline, %{kind: :read}, true), do: "Nothing was read."
-  defp effect_text(:worker_stopped, %{kind: :read}, true), do: "Nothing was returned."
+  defp effect_text(:deadline, %{kind: kind}, true)
+       when kind in [:read, :grep, :find, :ls], do: "Nothing was read."
+
+  defp effect_text(:worker_stopped, %{kind: kind}, true)
+       when kind in [:read, :grep, :find, :ls], do: "Nothing was returned."
 
   defp effect_text(_cause, %{kind: kind}, _stopped),
     do: "Whether #{kind} changed the workspace is unproven."
+
+  defp filesystem_effect(workspace, %{kind: kind} = arguments, limits)
+       when kind in [:grep, :find, :ls],
+       do: Loopex.Executor.Local.ReadOnlyTools.execute(workspace, arguments, limits.output)
 
   defp filesystem_effect(workspace, %{kind: :read, path: path}, limits) do
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
@@ -4849,10 +4867,20 @@ defmodule Loopex.Executor.Local do
         |> then(&(@max_receipt_bytes - &1))
       end
 
-    case Enum.min(capacities) do
-      limit when limit > 0 -> {:ok, limit}
-      _no_capacity -> refused_before_effect(:receipt_record_shape_too_large)
-    end
+    limit = Enum.min(capacities)
+
+    # Concept: encoded inspection notices must fit before a walk is admitted.
+    # Technical depth: the three read-only walkers reserve exactly 107 bytes
+    # for complete notices. A narrower host or receipt cap cannot be widened or
+    # satisfied by cutting a record, so it refuses before Ledger.admit/3.
+    notices_fit? =
+      if tool.id in ["loopex.grep", "loopex.find", "loopex.ls"],
+        do: min(effective_output_limits(job, tool).output, limit) >= 107,
+        else: true
+
+    if limit > 0 and notices_fit?,
+      do: {:ok, limit},
+      else: refused_before_effect(:receipt_record_shape_too_large)
   end
 
   defp receipt_environment(%{coding: _definition}, arguments),

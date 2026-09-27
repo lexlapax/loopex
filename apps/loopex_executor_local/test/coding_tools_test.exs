@@ -832,9 +832,78 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     end)
   end
 
-  defp effect_class_of("loopex.read"), do: "read_only"
+  defp effect_class_of(id) when id in ["loopex.read", "loopex.grep", "loopex.find", "loopex.ls"],
+    do: "read_only"
+
   defp effect_class_of("loopex.bash"), do: "process"
   defp effect_class_of(_other), do: "workspace_write"
+
+  defp observe_read_only_effects(executor, callback) do
+    functions = [
+      {Loopex.Executor.Local.ReadOnlyTools, :execute, 3},
+      {Local, :filesystem_effect, 3},
+      {Ledger, :admit, 3}
+    ]
+
+    tracer = spawn(fn -> read_only_trace_loop([], []) end)
+    owners = [self(), executor]
+    for function <- functions, do: :erlang.trace_pattern(function, true, [:local])
+
+    for owner <- owners,
+        do: :erlang.trace(owner, true, [:call, :procs, :set_on_spawn, {:tracer, tracer}])
+
+    result =
+      try do
+        {:returned, callback.()}
+      catch
+        kind, reason -> {:raised, kind, reason, __STACKTRACE__}
+      end
+
+    barrier = :erlang.trace_delivered(:all)
+
+    receive do
+      {:trace_delivered, :all, ^barrier} -> :ok
+    after
+      5000 -> flunk("read-only admission trace was not delivered")
+    end
+
+    reference = make_ref()
+    send(tracer, {:finish, self(), reference})
+
+    {calls, children} =
+      receive do
+        {^reference, calls, children} -> {calls, children}
+      after
+        5000 -> flunk("read-only admission tracer did not finish")
+      end
+
+    for owner <- Enum.uniq(owners ++ children),
+        Process.alive?(owner),
+        do: :erlang.trace(owner, false, [:call, :procs, :set_on_spawn])
+
+    for function <- functions, do: :erlang.trace_pattern(function, false, [:local])
+
+    case result do
+      {:returned, value} -> {value, calls}
+      {:raised, kind, reason, stack} -> :erlang.raise(kind, reason, stack)
+    end
+  end
+
+  defp read_only_trace_loop(calls, children) do
+    receive do
+      {:trace, _pid, :call, {module, function, args}} ->
+        read_only_trace_loop([{module, function, length(args)} | calls], children)
+
+      {:trace, _pid, :spawn, child, _mfa} ->
+        read_only_trace_loop(calls, [child | children])
+
+      {:finish, caller, reference} ->
+        send(caller, {reference, calls, children})
+
+      _ ->
+        read_only_trace_loop(calls, children)
+    end
+  end
 
   test "read returns bounded chunked content and reports truncation" do
     root = workspace()
@@ -1154,7 +1223,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           Map.has_key?(definition["parameter_schema"]["properties"], "path"),
           do: definition["tool_id"]
 
-    assert Enum.sort(filesystem_tools) == ["loopex.edit", "loopex.read", "loopex.write"]
+    assert Enum.sort(filesystem_tools) == [
+             "loopex.edit",
+             "loopex.find",
+             "loopex.grep",
+             "loopex.ls",
+             "loopex.read",
+             "loopex.write"
+           ]
 
     for {described, path} <- vectors, tool <- filesystem_tools do
       arguments =
@@ -1162,21 +1238,34 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           "loopex.read" -> %{"path" => path}
           "loopex.write" -> %{"path" => path, "content" => "planted"}
           "loopex.edit" -> %{"path" => path, "old" => "not yours", "new" => "mine now"}
+          "loopex.grep" -> %{"path" => path, "pattern" => "."}
+          "loopex.find" -> %{"path" => path, "pattern" => "**"}
+          "loopex.ls" -> %{"path" => path}
         end
 
-      assert {:ok, %{outcome: :failed, output: refusal}} = run(root, tool, arguments),
-             "#{tool} did not refuse #{described}"
-
-      # A self-referential link is an unresolvable path rather than a resolved
-      # one that landed outside, so it is refused for a reason of its own. Every
-      # other vector resolves to somewhere outside the root and says so.
-      if path == "loop" do
-        refute refusal =~ "not yours", "#{tool} followed #{described} to the outside file"
+      if tool in ["loopex.grep", "loopex.find", "loopex.ls"] do
+        if path in ["leak", "relative", "loop"] do
+          assert {:ok, %{outcome: :completed, output: output}} = run(root, tool, arguments)
+          assert output == if(tool == "loopex.grep", do: "", else: "P\t#{path}\n")
+        else
+          assert {:error, {:refused_before_effect, :invalid_tool_arguments}} =
+                   run(root, tool, arguments)
+        end
       else
-        assert refusal =~ "outside the workspace",
-               "#{tool} refused #{described} without naming the escape: #{refusal}"
+        assert {:ok, %{outcome: :failed, output: refusal}} = run(root, tool, arguments),
+               "#{tool} did not refuse #{described}"
 
-        refute refusal =~ "not yours", "#{tool} returned the outside file's content"
+        # A self-referential link is an unresolvable path rather than a resolved
+        # one that landed outside, so it is refused for a reason of its own. Every
+        # other vector resolves to somewhere outside the root and says so.
+        if path == "loop" do
+          refute refusal =~ "not yours", "#{tool} followed #{described} to the outside file"
+        else
+          assert refusal =~ "outside the workspace",
+                 "#{tool} refused #{described} without naming the escape: #{refusal}"
+
+          refute refusal =~ "not yours", "#{tool} returned the outside file's content"
+        end
       end
 
       # The refusal is checked in the filesystem too, in both directories a
@@ -1190,6 +1279,151 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                "#{tool} created something outside the workspace through #{described}"
       end
     end
+  end
+
+  test "read-only tools run through the bounded executor and encode complete ordered records" do
+    root = workspace()
+    File.mkdir!(Path.join(root, "a"))
+    File.write!(Path.join(root, "a/x"), "é\tmatch\r\nmatch match\n")
+    File.write!(Path.join(root, "a-"), "match\n")
+    File.write!(Path.join(root, ".hidden%"), "match")
+
+    assert {:ok, %{outcome: :completed, output: output, artifacts: []}} =
+             run(root, "loopex.grep", %{"pattern" => "match"})
+
+    assert output ==
+             "M\t.hidden%25\t1\tmatch\nM\ta-\t1\tmatch\nM\ta/x\t1\t%C3%A9%09match%0D\nM\ta/x\t2\tmatch match\n"
+
+    assert {:ok, %{outcome: :completed, output: "P\ta/x\n"}} =
+             run(root, "loopex.find", %{"pattern" => "**/x"})
+
+    assert {:ok, %{outcome: :completed, output: "P\t.hidden%25\nP\ta/\nP\ta-\n"}} =
+             run(root, "loopex.ls", %{})
+
+    assert {:ok, %{outcome: :completed, output: "P\t.hidden%25\nP\ta/\nP\ta-\nP\ta/x\n"}} =
+             run(root, "loopex.ls", %{"recursive" => true})
+  end
+
+  test "read-only arguments reject extra fields, invalid patterns, aliases and exact maximum plus one" do
+    root = workspace()
+
+    for {tool, arguments} <- [
+          {"loopex.grep", %{}},
+          {"loopex.find", %{}},
+          {"loopex.grep", %{"pattern" => "["}},
+          {"loopex.grep", %{"pattern" => 1}},
+          {"loopex.find", %{"pattern" => false}},
+          {"loopex.grep", %{"pattern" => ".", "glob" => ""}},
+          {"loopex.grep", %{"pattern" => ".", "glob" => nil}},
+          {"loopex.grep", %{"pattern" => ".", "glob" => String.duplicate("x", 4097)}},
+          {"loopex.grep", %{"pattern" => ".", "glob" => "a/**b"}},
+          {"loopex.find", %{"pattern" => "a//b"}},
+          {"loopex.ls", %{"recursive" => "true"}},
+          {"loopex.ls", %{"path" => "", "recursive" => false}},
+          {"loopex.ls", %{"path" => String.duplicate("x", 4097)}},
+          {"loopex.grep", %{"pattern" => String.duplicate("x", 4097)}},
+          {"loopex.find", %{"pattern" => "*", "path" => <<255>>}},
+          {"loopex.grep", %{"pattern" => <<0>>}},
+          {"loopex.ls", %{"extra" => true}}
+        ] do
+      assert {:error, {:refused_before_effect, :invalid_tool_arguments}} =
+               run(root, tool, arguments)
+    end
+
+    for args <- [%{path: "."}, %{"path" => ".", :path => "."}, %{1 => "."}] do
+      assert {:error, :invalid_tool_arguments} =
+               Loopex.Executor.Local.ReadOnlyTools.arguments("loopex.ls", args)
+    end
+
+    assert {:ok, _} =
+             Loopex.Executor.Local.ReadOnlyTools.arguments("loopex.find", %{
+               "pattern" => String.duplicate("x", 4096),
+               "path" => String.duplicate("y", 4096)
+             })
+  end
+
+  test "read-only output capacity refuses before admission and admits the exact 107-byte reservation" do
+    root = workspace()
+    File.write!(Path.join(root, "x"), <<255>>)
+
+    for {tool, arguments} <- [
+          {"loopex.grep", %{"pattern" => "."}},
+          {"loopex.find", %{"pattern" => "**"}},
+          {"loopex.ls", %{}}
+        ],
+        cap <- [1, 11, 106] do
+      {executor, lease_id, _lease, ledger} = executor_lease_ledger_with_options(root, [])
+
+      {result, calls} =
+        observe_read_only_effects(executor, fn ->
+          run(root, tool, arguments, %{
+            executor: executor,
+            lease_id: lease_id,
+            resource_budgets: %{"max_output_bytes" => cap}
+          })
+        end)
+
+      assert {:error, {:refused_before_effect, :receipt_record_shape_too_large}} = result
+      assert calls == []
+
+      {:ok, prepared} = Ledger.prepare(ledger, "executor-local", 5_000)
+      assert {:ok, []} = Ledger.with_claim(prepared, &Ledger.open_snapshot/1)
+
+      records =
+        for file <- Path.wildcard(Path.join(ledger, "**/*")),
+            File.regular?(file),
+            do: File.read!(file)
+
+      refute Enum.any?(records, &String.contains?(&1, "local_effect_admission_v1"))
+    end
+
+    {executor, lease_id} = executor_for(root)
+
+    {result, calls} =
+      observe_read_only_effects(executor, fn ->
+        run(root, "loopex.grep", %{"pattern" => "."}, %{
+          executor: executor,
+          lease_id: lease_id,
+          resource_budgets: %{"max_output_bytes" => 107}
+        })
+      end)
+
+    assert {:ok, %{outcome: :completed, output: output, artifacts: []}} = result
+    assert {Loopex.Executor.Local.ReadOnlyTools, :execute, 3} in calls
+    assert {Local, :filesystem_effect, 3} in calls
+    assert {Ledger, :admit, 3} in calls
+
+    assert output ==
+             "N\tskipped\tinvalid_name=0\ttoo_large=0\tinvalid_utf8=1\tchanged=0\tunreadable=0\n"
+
+    assert {:ok, %{outcome: :completed, output: "N\ttruncated\n", artifacts: []}} =
+             run(root, "loopex.find", %{"pattern" => "**"}, %{
+               resource_budgets: %{"max_output_bytes" => 107}
+             })
+  end
+
+  test "read-only requested roots fail while descendant skips retain bounded notices" do
+    root = workspace()
+    File.write!(Path.join(root, "bad"), <<255>>)
+    File.write!(Path.join(root, "large"), String.duplicate("x", 1_048_577))
+    File.write!(Path.join(root, "ok"), "match\n")
+
+    for {tool, args} <- [
+          {"grep", %{"pattern" => "."}},
+          {"find", %{"pattern" => "**"}},
+          {"ls", %{}}
+        ] do
+      assert {:ok, %{outcome: :failed, output: output}} =
+               run(root, "loopex." <> tool, Map.put(args, "path", "missing"))
+
+      assert output == "#{tool} failed: requested path unavailable"
+    end
+
+    assert {:ok, %{outcome: :completed, output: output}} =
+             run(root, "loopex.grep", %{"pattern" => "."})
+
+    assert output ==
+             "M\tok\t1\tmatch\nN\tskipped\tinvalid_name=0\ttoo_large=1\tinvalid_utf8=1\tchanged=0\tunreadable=0\n"
   end
 
   test "bash emits real progress before completion with exact identity sequence offsets and receipt count" do

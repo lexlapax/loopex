@@ -2,7 +2,7 @@ defmodule Loopex.Executor.Local.CodingTools do
   @moduledoc """
   ## Concept
 
-  The four tools an operator actually needs: `read`, `write`, `edit`, and
+  The coding tools include `read`, `write`, `edit`, and
   `bash`. They act on a real workspace, and the three that take a path are
   confined to it.
 
@@ -159,10 +159,53 @@ defmodule Loopex.Executor.Local.CodingTools do
     }
   ]
 
+  @search_definitions (for {name, properties, required} <- [
+                             {"grep",
+                              %{
+                                "pattern" => %{"type" => "string"},
+                                "path" => %{"type" => "string"},
+                                "glob" => %{"type" => "string"}
+                              }, ["pattern"]},
+                             {"find",
+                              %{
+                                "pattern" => %{"type" => "string"},
+                                "path" => %{"type" => "string"}
+                              }, ["pattern"]},
+                             {"ls",
+                              %{
+                                "path" => %{"type" => "string"},
+                                "recursive" => %{"type" => "boolean"}
+                              }, []}
+                           ] do
+                         %{
+                           "tool_id" => "loopex." <> name,
+                           "tool_version" => "1.0.0",
+                           "name" => name,
+                           "description" =>
+                             "Inspect workspace entries with bounded, encoded records.",
+                           "parameter_schema" => %{
+                             "type" => "object",
+                             "properties" => properties,
+                             "required" => required
+                           },
+                           "result_shape" => %{
+                             "content_type" => "text",
+                             "description" => "Complete encoded records and bounded notices."
+                           },
+                           "effect_class" => "read_only",
+                           "idempotency_class" => "safe_retry",
+                           "budgets" => %{
+                             "wall_time_ms" => 30_000,
+                             "output_bytes" => 16_384,
+                             "artifact_bytes" => 1
+                           }
+                         }
+                       end)
+
   @doc """
   ## Concept
 
-  The four shipped coding tool definitions.
+  The seven shipped coding tool definitions.
 
   ## Technical depth
 
@@ -171,12 +214,12 @@ defmodule Loopex.Executor.Local.CodingTools do
   reserved identifier only through a runtime's configured tool set.
   """
   @spec definitions() :: [map()]
-  def definitions, do: @definitions
+  def definitions, do: @definitions ++ @search_definitions
 
   @doc """
   ## Concept
 
-  Whether this tool identifier is one of the four.
+  Whether this tool identifier is shipped.
 
   ## Technical depth
 
@@ -184,7 +227,7 @@ defmodule Loopex.Executor.Local.CodingTools do
   rather than falling through to a default handler.
   """
   @spec known?(binary()) :: boolean()
-  def known?(tool_id), do: Enum.any?(@definitions, &(&1["tool_id"] == tool_id))
+  def known?(tool_id), do: Enum.any?(definitions(), &(&1["tool_id"] == tool_id))
 
   @doc """
   ## Concept
