@@ -363,6 +363,57 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
   end
 
+  test "the live session owner and request helper complete exact no-registration cancellation" do
+    generation = make_ref()
+    cell = :atomics.new(2, [])
+    {owner, owner_monitor} = census_owner(generation, cell)
+    handle = SessionAdmission.handle(owner, generation, cell)
+    call = make_ref()
+    proof = make_ref()
+    start_ref = make_ref()
+    {proxy, proxy_monitor} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^proxy_monitor, :process, ^proxy, :normal}
+
+    {candidate, candidate_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, ^start_ref, staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, ^generation, ^call, _candidate, ^proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    assert {:ok, _} = SessionAdmission.request(handle, {:begin_model, self(), call}, deadline())
+
+    start_proof =
+      {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, candidate, candidate_monitor}
+
+    assert {:ok, _} =
+             SessionAdmission.request(
+               handle,
+               {:stage_model, call, candidate, proof, make_ref(), start_proof},
+               deadline()
+             )
+
+    operation =
+      {:cancel_model, call,
+       {:registration_refused, {:error, :provider_resource_refused}, candidate, candidate_monitor}}
+
+    assert {:ok, {:session_grant, ^generation, :cancel_model, _, _, _}} =
+             SessionAdmission.request(handle, operation, deadline())
+
+    refute Process.alive?(candidate)
+    assert :atomics.get(cell, 1) == 0
+    assert :atomics.get(cell, 2) == 0
+
+    assert {:ok, _} =
+             SessionAdmission.request(handle, {:begin_model, self(), make_ref()}, deadline())
+
+    send(owner, :stop)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+  end
+
   test "candidate death after sending custody but before its delivery clears an ungranted call" do
     owner = self()
 
@@ -681,6 +732,178 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
       assert :atomics.get(cell, 1) == 0
       assert :atomics.get(cell, 2) == 0
     end
+  end
+
+  test "exact registrar refusal prepares cancellation and grants only after its own candidate DOWN" do
+    owner = self()
+
+    {candidate, candidate_start_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    {state, cell, generation, call, proof} = direct_staging(candidate, candidate_start_monitor)
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof} = custody
+    state = ModelCensus.handle(state, custody)
+
+    assert_receive {:loopex_session_admission_result, ^owner, _, ^generation,
+                    {:stage_model, ^call, ^candidate, ^proof, _, _}, _, {:ok, _}}
+
+    operation =
+      {:cancel_model, call,
+       {:registration_refused, {:error, :provider_resource_refused}, candidate,
+        candidate_start_monitor}}
+
+    reference = make_ref()
+    expiry = deadline()
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:loopex_session_admission, owner, reference, generation, operation, expiry}
+      )
+
+    assert state.pending.phase == :cancelling
+
+    assert_receive {:loopex_session_admission_cancellation_prepared, ^owner, ^reference,
+                    ^generation, ^operation, ^expiry, ^candidate}
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:loopex_session_admission, owner, reference, generation, operation, expiry}
+      )
+
+    refute_receive {:loopex_session_admission_cancellation_prepared, ^owner, ^reference,
+                    ^generation, ^operation, ^expiry, ^candidate},
+                   10
+
+    refute_receive {:loopex_session_admission_result, ^owner, ^reference, ^generation, ^operation,
+                    ^expiry, _},
+                   10
+
+    candidate_owner_monitor = state.pending.candidate_monitor
+    send(candidate, :stop)
+    assert_receive {:DOWN, ^candidate_start_monitor, :process, ^candidate, :normal}
+    assert_receive {:DOWN, ^candidate_owner_monitor, :process, ^candidate, :normal} = down
+    state = ModelCensus.handle(state, down)
+
+    assert_receive {:loopex_session_admission_result, ^owner, ^reference, ^generation, ^operation,
+                    ^expiry, {:ok, _}}
+
+    assert state.pending == nil
+    assert :atomics.get(cell, 1) == 0
+    assert :atomics.get(cell, 2) == 0
+  end
+
+  test "registrar cancellation refuses unproved results and mismatched candidate identity" do
+    owner = self()
+
+    {candidate, candidate_start_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    {state, cell, generation, call, proof} = direct_staging(candidate, candidate_start_monitor)
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof} = custody
+    state = ModelCensus.handle(state, custody)
+
+    assert_receive {:loopex_session_admission_result, ^owner, _, ^generation,
+                    {:stage_model, ^call, ^candidate, ^proof, _, _}, _, {:ok, _}}
+
+    for result <- [
+          {:registration_refused, {:error, :provider_guard_unavailable}, candidate,
+           candidate_start_monitor},
+          {:registration_refused, :unmanaged, self(), candidate_start_monitor},
+          {:registration_refused, :unmanaged, candidate, make_ref()},
+          {:registration_refused, :unmanaged, candidate, :not_a_monitor}
+        ] do
+      operation = {:cancel_model, call, result}
+      reference = make_ref()
+      expiry = deadline()
+
+      next =
+        ModelCensus.handle(
+          state,
+          {:loopex_session_admission, owner, reference, generation, operation, expiry}
+        )
+
+      assert_receive {:loopex_session_admission_result, ^owner, ^reference, ^generation,
+                      ^operation, ^expiry, {:error, :session_admission_closed}}
+
+      assert next.pending.phase == :provisional
+      assert :atomics.get(cell, 2) == 1
+
+      refute_receive {:loopex_session_admission_cancellation_prepared, ^owner, ^reference,
+                      ^generation, ^operation, ^expiry, _},
+                     10
+    end
+
+    send(candidate, :stop)
+    assert_receive {:DOWN, ^candidate_start_monitor, :process, ^candidate, :normal}
+    Process.demonitor(state.pending.candidate_monitor, [:flush])
+  end
+
+  test "candidate DOWN before exact registrar refusal is reconciled without an invented acknowledgement" do
+    owner = self()
+
+    {candidate, candidate_start_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+           {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    {state, cell, generation, call, proof} = direct_staging(candidate, candidate_start_monitor)
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof} = custody
+    state = ModelCensus.handle(state, custody)
+
+    assert_receive {:loopex_session_admission_result, ^owner, _, ^generation,
+                    {:stage_model, ^call, ^candidate, ^proof, _, _}, _, {:ok, _}}
+
+    candidate_owner_monitor = state.pending.candidate_monitor
+    send(candidate, :stop)
+    assert_receive {:DOWN, ^candidate_start_monitor, :process, ^candidate, :normal}
+    assert_receive {:DOWN, ^candidate_owner_monitor, :process, ^candidate, :normal} = down
+    state = ModelCensus.handle(state, down)
+    assert state.pending.phase == :provisional
+    assert :atomics.get(cell, 2) == 1
+
+    operation =
+      {:cancel_model, call,
+       {:registration_refused, :unmanaged, candidate, candidate_start_monitor}}
+
+    reference = make_ref()
+    expiry = deadline()
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:loopex_session_admission, owner, reference, generation, operation, expiry}
+      )
+
+    assert_receive {:loopex_session_admission_cancellation_prepared, ^owner, ^reference,
+                    ^generation, ^operation, ^expiry, ^candidate}
+
+    assert_receive {:loopex_session_admission_result, ^owner, ^reference, ^generation, ^operation,
+                    ^expiry, {:ok, _}}
+
+    assert state.pending == nil
+    assert :atomics.get(cell, 1) == 0
+    assert :atomics.get(cell, 2) == 0
   end
 
   test "accepted no-registrar proof survives callback death before candidate DOWN" do

@@ -320,6 +320,45 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
   end
 
   defp transition(
+         %__MODULE__{
+           pending:
+             %{
+               phase: :provisional,
+               callback: requester,
+               call: call,
+               candidate: candidate,
+               candidate_start_monitor: candidate_monitor,
+               stage_issued: true,
+               callback_down: nil,
+               cancel: nil
+             } = pending
+         } = state,
+         {requester, reference,
+          {:cancel_model, call,
+           {:registration_refused, registration, candidate, candidate_monitor}} = operation,
+          expiry} = envelope
+       )
+       when registration == :unmanaged or
+              registration == {:error, :provider_resource_refused} do
+    pending = %{
+      pending
+      | phase: :cancelling,
+        cancel: envelope,
+        seen_refs: MapSet.put(pending.seen_refs, reference)
+    }
+
+    state = %{state | pending: pending}
+
+    send(
+      requester,
+      {:loopex_session_admission_cancellation_prepared, self(), reference, state.generation,
+       operation, expiry, candidate}
+    )
+
+    finish_no_registrar_cancel(state)
+  end
+
+  defp transition(
          %__MODULE__{pending: %{phase: :begun, callback: requester, call: call}} = state,
          {requester, _reference,
           {:cancel_model, call,
@@ -462,6 +501,25 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
                  envelope,
              candidate_down: true,
              candidate_down_reason: reason
+           }
+         } = state
+       ) do
+    if live_envelope?(envelope) do
+      grant(clear_pending(state), envelope)
+    else
+      lost_candidate(state)
+    end
+  end
+
+  defp finish_no_registrar_cancel(
+         %__MODULE__{
+           pending: %{
+             phase: :cancelling,
+             cancel:
+               {_callback, _reference,
+                {:cancel_model, _call, {:registration_refused, _result, _candidate, _monitor}},
+                _expiry} = envelope,
+             candidate_down: true
            }
          } = state
        ) do

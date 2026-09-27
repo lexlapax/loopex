@@ -51,7 +51,29 @@ defmodule LoopexComposition.SessionAdmission do
           {:loopex_session_admission, self(), reference, generation, operation, deadline}
         )
 
-        await(owner, monitor, reference, generation, operation, deadline)
+        case operation do
+          {:cancel_model, _call,
+           {:registration_refused, registration, candidate, candidate_monitor}}
+          when registration == :unmanaged or
+                 registration == {:error, :provider_resource_refused} ->
+            if is_pid(candidate) and is_reference(candidate_monitor) do
+              await_registrar_cancel(
+                owner,
+                monitor,
+                reference,
+                generation,
+                operation,
+                deadline,
+                candidate,
+                candidate_monitor
+              )
+            else
+              closed()
+            end
+
+          _ ->
+            await(owner, monitor, reference, generation, operation, deadline)
+        end
       after
         Process.demonitor(monitor, [:flush])
       end
@@ -101,6 +123,184 @@ defmodule LoopexComposition.SessionAdmission do
       end
     else
       closed()
+    end
+  end
+
+  # Concept: the caller cannot report a clean registrar refusal until its
+  # candidate is actually gone and the session owner independently agrees.
+  # Technical depth: only exact owner-origin preparation authorizes this
+  # helper to kill the candidate. Missing preparation spends at most half the
+  # control deadline; the model callback owns fallback reaping with its
+  # already-held candidate monitor, not this generic admission helper.
+  defp await_registrar_cancel(
+         owner,
+         owner_monitor,
+         reference,
+         generation,
+         operation,
+         deadline,
+         candidate,
+         candidate_monitor
+       ) do
+    now = System.monotonic_time()
+    preparation_deadline = now + div(max(deadline - now, 0), 2)
+
+    prepared? =
+      await_cancellation_prepared(
+        owner,
+        owner_monitor,
+        reference,
+        generation,
+        operation,
+        deadline,
+        candidate,
+        preparation_deadline
+      )
+
+    if prepared? do
+      Process.exit(candidate, :kill)
+
+      await_cancellation_completion(
+        owner,
+        owner_monitor,
+        reference,
+        generation,
+        operation,
+        deadline,
+        candidate,
+        candidate_monitor,
+        false,
+        nil
+      )
+    else
+      closed()
+    end
+  end
+
+  defp await_cancellation_prepared(
+         owner,
+         owner_monitor,
+         reference,
+         generation,
+         operation,
+         deadline,
+         candidate,
+         preparation_deadline
+       ) do
+    if System.monotonic_time() < preparation_deadline do
+      receive do
+        {:loopex_session_admission_cancellation_prepared, ^owner, ^reference, ^generation,
+         ^operation, ^deadline, ^candidate} ->
+          true
+
+        {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+          false
+      after
+        remaining_slice(preparation_deadline) ->
+          await_cancellation_prepared(
+            owner,
+            owner_monitor,
+            reference,
+            generation,
+            operation,
+            deadline,
+            candidate,
+            preparation_deadline
+          )
+      end
+    else
+      false
+    end
+  end
+
+  defp await_cancellation_completion(
+         owner,
+         owner_monitor,
+         reference,
+         generation,
+         operation,
+         deadline,
+         candidate,
+         candidate_monitor,
+         candidate_down?,
+         result
+       ) do
+    cond do
+      candidate_down? and result != nil and System.monotonic_time() < deadline ->
+        result
+
+      System.monotonic_time() >= deadline ->
+        closed()
+
+      true ->
+        receive do
+          {:DOWN, ^candidate_monitor, :process, ^candidate, _reason} ->
+            await_cancellation_completion(
+              owner,
+              owner_monitor,
+              reference,
+              generation,
+              operation,
+              deadline,
+              candidate,
+              candidate_monitor,
+              true,
+              result
+            )
+
+          {:loopex_session_admission_result, ^owner, ^reference, ^generation, ^operation,
+           ^deadline, final_result} ->
+            final_result =
+              validate_result(final_result, generation, reference, operation, deadline)
+
+            result =
+              cond do
+                result == nil -> final_result
+                result == final_result -> result
+                true -> closed()
+              end
+
+            await_cancellation_completion(
+              owner,
+              owner_monitor,
+              reference,
+              generation,
+              operation,
+              deadline,
+              candidate,
+              candidate_monitor,
+              candidate_down?,
+              result
+            )
+
+          {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+            await_cancellation_completion(
+              owner,
+              owner_monitor,
+              reference,
+              generation,
+              operation,
+              deadline,
+              candidate,
+              candidate_monitor,
+              candidate_down?,
+              result
+            )
+        after
+          remaining_slice(deadline) ->
+            await_cancellation_completion(
+              owner,
+              owner_monitor,
+              reference,
+              generation,
+              operation,
+              deadline,
+              candidate,
+              candidate_monitor,
+              candidate_down?,
+              result
+            )
+        end
     end
   end
 

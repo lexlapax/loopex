@@ -189,6 +189,246 @@ defmodule LoopexComposition.SessionAdmissionTest do
     assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}
   end
 
+  test "an exact registrar refusal reaps the existing candidate monitor before returning its final grant" do
+    for order <- [:down_first, :final_first] do
+      test = self()
+
+      {candidate, candidate_monitor} =
+        spawn_monitor(fn ->
+          receive do
+            :unexpected -> send(test, :candidate_survived)
+          end
+        end)
+
+      generation = make_ref()
+      call = make_ref()
+
+      operation =
+        {:cancel_model, call, {:registration_refused, :unmanaged, candidate, candidate_monitor}}
+
+      {owner, owner_monitor} =
+        spawn_monitor(fn ->
+          receive do
+            {:loopex_session_admission, requester, reference, ^generation, ^operation, expiry} ->
+              send(
+                requester,
+                {:loopex_session_admission_cancellation_prepared, self(), reference, generation,
+                 operation, expiry, candidate}
+              )
+
+              token = {:session_grant, generation, :cancel_model, requester, reference, expiry}
+
+              result =
+                {:loopex_session_admission_result, self(), reference, generation, operation,
+                 expiry, {:ok, token}}
+
+              if order == :final_first, do: send(requester, result)
+
+              monitor = Process.monitor(candidate)
+
+              receive do
+                {:DOWN, ^monitor, :process, ^candidate, _} ->
+                  send(test, {:candidate_reaped, order})
+              end
+
+              if order == :down_first, do: send(requester, result)
+          end
+        end)
+
+      handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+
+      assert {:ok, {:session_grant, ^generation, :cancel_model, _, _, _}} =
+               SessionAdmission.request(handle, operation, future())
+
+      assert_receive {:candidate_reaped, ^order}
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+      refute_receive :candidate_survived
+    end
+  end
+
+  test "a lost or mismatched preparation leaves the candidate to its owning callback" do
+    for mode <- [:lost, :wrong_candidate] do
+      test = self()
+      unrelated = spawn(fn -> receive do: (:stop -> :ok) end)
+      on_exit(fn -> if Process.alive?(unrelated), do: Process.exit(unrelated, :kill) end)
+
+      {candidate, candidate_monitor} =
+        spawn_monitor(fn -> receive do: (:stop -> :ok) end)
+
+      generation = make_ref()
+      call = make_ref()
+
+      operation =
+        {:cancel_model, call, {:registration_refused, :unmanaged, candidate, candidate_monitor}}
+
+      {owner, owner_monitor} =
+        spawn_monitor(fn ->
+          receive do
+            {:loopex_session_admission, requester, reference, ^generation, ^operation, expiry} ->
+              if mode == :wrong_candidate do
+                send(
+                  requester,
+                  {:loopex_session_admission_cancellation_prepared, self(), reference, generation,
+                   operation, expiry, unrelated}
+                )
+              end
+
+              monitor = Process.monitor(candidate)
+
+              receive do
+                {:DOWN, ^monitor, :process, ^candidate, _} ->
+                  send(test, {:candidate_reaped_without_preparation, mode})
+              end
+
+              token = {:session_grant, generation, :cancel_model, requester, reference, expiry}
+
+              send(
+                requester,
+                {:loopex_session_admission_result, self(), reference, generation, operation,
+                 expiry, {:ok, token}}
+              )
+          end
+        end)
+
+      handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+
+      assert {:error, :session_admission_closed} =
+               SessionAdmission.request(handle, operation, future())
+
+      assert Process.alive?(candidate)
+      assert Process.alive?(unrelated)
+      Process.exit(candidate, :kill)
+      assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}
+      assert_receive {:candidate_reaped_without_preparation, ^mode}
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+      send(unrelated, :stop)
+    end
+  end
+
+  test "duplicate preparation and a final acknowledgement without candidate DOWN never substitute for proof" do
+    candidate = spawn(fn -> receive do: (:stop -> :ok) end)
+    on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
+    fake_monitor = make_ref()
+    generation = make_ref()
+    call = make_ref()
+
+    operation =
+      {:cancel_model, call, {:registration_refused, :unmanaged, candidate, fake_monitor}}
+
+    {owner, owner_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:loopex_session_admission, requester, reference, ^generation, ^operation, expiry} ->
+            prepared =
+              {:loopex_session_admission_cancellation_prepared, self(), reference, generation,
+               operation, expiry, candidate}
+
+            send(requester, prepared)
+            send(requester, prepared)
+            token = {:session_grant, generation, :cancel_model, requester, reference, expiry}
+
+            send(
+              requester,
+              {:loopex_session_admission_result, self(), reference, generation, operation, expiry,
+               {:ok, token}}
+            )
+        end
+      end)
+
+    handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+    short = System.monotonic_time() + System.convert_time_unit(50, :millisecond, :native)
+
+    assert {:error, :session_admission_closed} =
+             SessionAdmission.request(handle, operation, short)
+
+    assert System.monotonic_time() >= short
+    refute Process.alive?(candidate)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+  end
+
+  test "missing final acknowledgement remains conservative after a real candidate DOWN" do
+    test = self()
+    {candidate, candidate_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
+    generation = make_ref()
+    call = make_ref()
+
+    operation =
+      {:cancel_model, call, {:registration_refused, :unmanaged, candidate, candidate_monitor}}
+
+    {owner, owner_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:loopex_session_admission, requester, reference, ^generation, ^operation, expiry} ->
+            send(
+              requester,
+              {:loopex_session_admission_cancellation_prepared, self(), reference, generation,
+               operation, expiry, candidate}
+            )
+
+            monitor = Process.monitor(candidate)
+
+            receive do
+              {:DOWN, ^monitor, :process, ^candidate, _} -> send(test, :candidate_gone)
+            end
+
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+    short = System.monotonic_time() + System.convert_time_unit(50, :millisecond, :native)
+
+    assert {:error, :session_admission_closed} =
+             SessionAdmission.request(handle, operation, short)
+
+    assert System.monotonic_time() >= short
+    assert_receive :candidate_gone
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}
+  end
+
+  test "a malformed final acknowledgement cannot be repaired by a duplicate grant" do
+    {candidate, candidate_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
+    generation = make_ref()
+    call = make_ref()
+
+    operation =
+      {:cancel_model, call, {:registration_refused, :unmanaged, candidate, candidate_monitor}}
+
+    {owner, owner_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:loopex_session_admission, requester, reference, ^generation, ^operation, expiry} ->
+            send(
+              requester,
+              {:loopex_session_admission_result, self(), reference, generation, operation, expiry,
+               {:ok, :malformed}}
+            )
+
+            token = {:session_grant, generation, :cancel_model, requester, reference, expiry}
+
+            send(
+              requester,
+              {:loopex_session_admission_result, self(), reference, generation, operation, expiry,
+               {:ok, token}}
+            )
+
+            send(
+              requester,
+              {:loopex_session_admission_cancellation_prepared, self(), reference, generation,
+               operation, expiry, candidate}
+            )
+        end
+      end)
+
+    handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+
+    assert {:error, :session_admission_closed} =
+             SessionAdmission.request(handle, operation, future())
+
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+  end
+
   test "a matching grant queued after expiry is refused by a still-live requester" do
     {owner, owner_monitor} = responder(:silent)
     generation = make_ref()
