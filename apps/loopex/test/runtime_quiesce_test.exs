@@ -913,13 +913,14 @@ defmodule Loopex.RuntimeQuiesceTest do
 
     started_at = System.monotonic_time(:millisecond)
 
-    assert {:ok, result} =
-             Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token, bounds)
+    quiesce =
+      Task.async(fn -> Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token, bounds) end)
 
-    elapsed_ms = System.monotonic_time(:millisecond) - started_at
     assert Map.keys(receive_probe_calls(:admit, session_ids)) |> Enum.sort() == session_ids
     assert Map.keys(receive_probe_calls(:release, session_ids)) |> Enum.sort() == session_ids
     assert Map.keys(receive_probe_calls(:status, session_ids)) |> Enum.sort() == session_ids
+    assert {:ok, result} = Task.await(quiesce, 3_000)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
     assert result.unsettled == session_ids
     assert result.settled == []
     assert result.absent == []
@@ -1367,7 +1368,13 @@ defmodule Loopex.RuntimeQuiesceTest do
       Map.new(1..count, fn index ->
         suffix = index |> Integer.to_string() |> String.pad_leading(2, "0")
         session_id = "bound-#{mode}-#{suffix}"
-        coordinator = spawn(fn -> quiesce_probe(observer, session_id, mode) end)
+
+        coordinator =
+          spawn(fn ->
+            send(observer, {:quiesce_probe_ready, self(), session_id})
+            quiesce_probe(observer, session_id, mode)
+          end)
+
         on_exit(fn -> if Process.alive?(coordinator), do: Process.exit(coordinator, :kill) end)
 
         owner = %{
@@ -1377,6 +1384,13 @@ defmodule Loopex.RuntimeQuiesceTest do
 
         {session_id, %{status: :active, coordinator: coordinator, owner: owner}}
       end)
+
+    # Concept: measured shutdown begins with every injected coordinator ready.
+    # Technical depth: all probes start before these acknowledgements are read;
+    # the measured phases retain their full population and unchanged cutoffs.
+    Enum.each(rows, fn {session_id, %{coordinator: coordinator}} ->
+      assert_receive {:quiesce_probe_ready, ^coordinator, ^session_id}, 5_000
+    end)
 
     :sys.replace_state(control, fn state ->
       %{
