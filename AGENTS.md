@@ -362,8 +362,37 @@ streams output as it happens.
   Less-trusted code crosses the narrow executor protocol into OS isolation.
 - **Credentials and context.** Host credentials remain references and never
   enter journals, public/progress/diagnostic planes, fixtures, or ordinary jobs
-  beyond an approved scoped ephemeral hand secret. Injected context is
-  provenance-typed, budgeted, exactly staged, receipt-journaled data—not a grant.
+  beyond an approved scoped ephemeral hand secret.
+
+  > ADR 0039's ephemeral profile uses a host-VM provider path. The host
+  > environment and host-made copies have host-owned lifetimes and audiences.
+  > During a call, the sensitive caller, provider HTTP/TLS state, crash reports,
+  > crash dumps and host-installed telemetry/logger handlers can observe the
+  > selected credential. Loopex proves its caller and tagged pool subtree gone
+  > before a provider result or successful cleanup acknowledgement. A checked-out
+  > socket and OTP TLS controller may drain asynchronously afterward, without a
+  > result route. The isolated release witness requires them gone within 5,000 ms
+  > of caller DOWN; runtime cleanup does not wait for or prove that threshold.
+  > TLS reuse, tickets and secret retention are disabled; credential-bearing
+  > endpoints are HTTPS-only. Hosted and local tools are permitted with ambient
+  > credential variables. A host-authorized tool or trusted host code may read,
+  > copy or disclose those values, including through ordinary tool-result planes;
+  > this profile provides no structural secrecy from that audience. Loopex does
+  > not inject provider credentials into jobs or its own diagnostics, and rejects
+  > the exact selected value from a mapped provider reply before publication.
+  > Cleanup uncertainty seals only the affected session; there is no VM gate,
+  > lease, quarantine or VM-restart lockout. Shared-service outages remain
+  > possible. The durable profile retains its separate-process credential rules.
+  > Host-selected cold catalog loading may independently use GH_TOKEN/GITHUB_TOKEN,
+  > ordinary Req transport, persistent cache and shared metadata outside the
+  > selected-provider-key and one-shot model-transport guarantees. Those host
+  > dependency effects and catalog configuration remain host-owned; the default
+  > compiled source needs no fetch. Cold-load lock contention spends the model
+  > deadline. This additional trust scope requires explicit acceptance with this
+  > amendment and is not an earlier recorded maintainer design approval.
+
+  Injected context is provenance-typed, budgeted, exactly staged,
+  receipt-journaled data—not a grant.
 - **The smallest sufficient system wins.** Production code, tests, fixtures,
   helpers, public surface, and abstractions all carry cost. Prefer direct OTP and
   the smallest clear implementation; delete or reuse before adding. Every new

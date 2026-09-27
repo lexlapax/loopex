@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M6` is open; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M6` is accepted; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M5` — 2026-09-26 |
-| Blockers | `M6` is open and not accepted; the maintainer must accept its plan pair; `M6` waits on ADR 0039 before the outcomes that depend on it |
-| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Accept or reject the `M6` plan pair; disposition [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) |
-| Next transition | Record the acceptance governance row and move `M6` to Accepted |
+| Blockers | None; `M6` is accepted and implementation may proceed |
+| Authorized work | Implementation inside the accepted `M6` plan pair, landing on `main` in small reviewed changes |
+| Next maintainer decision | None until `M6` is ready for independent review |
+| Next transition | Move `M6` to In progress and implement the accepted outcomes with `bash scripts/check.sh` green; the completed tested commit then moves it to In review |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -138,7 +138,7 @@ representable.
 | `M3` | Closed | [concept](M3.md) | [technical depth](M3-technical.md) | [gate](M3-gate.md) |
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
 | `M5` | Closed | [concept](M5.md) | [technical depth](M5-technical.md) | — |
-| `M6` | Open | [concept](M6.md) | [technical depth](M6-technical.md) | — |
+| `M6` | Accepted | [concept](M6.md) | [technical depth](M6-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact

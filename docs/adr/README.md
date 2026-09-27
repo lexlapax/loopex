@@ -28,13 +28,13 @@ a decision adds a new record rather than rewriting the old one.
 | 0016 | Configured cancellation observation | Accepted | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
 | 0017 | Durable context and record admission budgets | Accepted (partially superseded by 0025) | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
 | 0018 | Provider attempt authority and recovery | Accepted (partially superseded by 0021 and 0027) | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
-| 0019 | Host-owned provider protection | Accepted (partially superseded by 0029 and 0034) | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
+| 0019 | Host-owned provider protection | Accepted (partially superseded by 0029 and 0034; scoped to the durable profile by 0039) | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
 | 0020 | Explicit prepared handoff | Accepted | [Decision](0020-explicit-prepared-handoff.md#concept) | [Technical depth](0020-explicit-prepared-handoff-technical.md#technical-depth) |
 | 0021 | Compacted provider-accounting provenance | Accepted | [Decision](0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
 | 0022 | Local executor supervision shell | Accepted | [Decision](0022-local-executor-supervision-shell.md#concept) | [Technical depth](0022-local-executor-supervision-shell-technical.md#technical-depth) |
 | 0023 | Experimental public session protocol | Accepted | [Decision](0023-experimental-public-session-protocol.md#concept) | [Technical depth](0023-experimental-public-session-protocol-technical.md#technical-depth) |
 | 0024 | Durable interaction lifecycle and host-policy authority | Accepted | [Decision](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
-| 0025 | Resource packs and skill admission | Accepted | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
+| 0025 | Resource packs and skill admission | Accepted (source and name-order clauses superseded by 0039 for named skill directories) | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
 | 0026 | Development floor refresh | Accepted | [Decision](0026-development-floor-refresh.md#concept) | [Technical depth](0026-development-floor-refresh-technical.md#technical-depth) |
 | 0027 | Provider permit retirement | Accepted | [Decision](0027-provider-permit-retirement.md#concept) | [Technical depth](0027-provider-permit-retirement-technical.md#technical-depth) |
 | 0028 | Bounded artifact retrieval | Accepted | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
@@ -43,12 +43,12 @@ a decision adds a new record rather than rewriting the old one.
 | 0031 | Daemon store selection for `0.2.0` | Accepted | [Decision](0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
 | 0032 | Daemon attachment residency and replay | Accepted | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
 | 0033 | Collaboration: controller lease and takeover | Accepted | [Decision](0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
-| 0034 | Provider credential handoff over the bootstrap channel | Accepted | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
+| 0034 | Provider credential handoff over the bootstrap channel | Accepted (scoped to the durable profile by 0039) | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
 | 0035 | Typed decision models as policy inputs | Proposed | [Decision](0035-typed-decision-models-as-policy-inputs.md#concept) | [Technical depth](0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth) |
 | 0036 | Daemon-grade store engine and migration | Proposed | [Decision](0036-daemon-grade-store-engine-and-migration.md#concept) | [Technical depth](0036-daemon-grade-store-engine-and-migration-technical.md#technical-depth) |
 | 0037 | Host configuration and path discovery | Proposed | [Decision](0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
 | 0038 | Installed distribution and release artifact | Proposed | [Decision](0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
-| 0039 | Ephemeral embedded profile | Proposed | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
+| 0039 | Ephemeral embedded profile | Accepted | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -206,10 +206,13 @@ platform-specific OTP release archive with the runtime system bundled and
 the existing launcher promoted. They accept nothing, and each is accepted
 before the M7 or M8 outcome that depends on it.
 
-0039 is the one Proposed M6 prerequisite, proposed with the M6 plan on
-2026-09-26. It adds an ephemeral composition profile beside the durable one,
-over the same kernel: a memory store, a model adapter chosen by credential (an
-in-process adapter for credential-free local models, the companion for every
-other), and the local executor on a temporary root. It narrows 0019 only for
-credential-free providers in the ephemeral profile, leaves 0034 unchanged, and
-supersedes 0025's source and name-order clauses for named skill directories.
+0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on
+2026-09-27. It adds an ephemeral composition profile beside the durable one,
+over the same kernel: a memory store, one in-process ReqLLM model path for
+local and hosted providers, and the local executor on a temporary root.
+0019 and 0034 are scoped to the durable profile by 0039; 0025's source and
+name-order clauses are superseded for named skill directories. Its scoped
+host-VM credential exposure, host-authorized tool audience and host-selected
+catalog effects are applied in all seven affected vision/AGENTS placements.
+The [acceptance disposition](../developer/agent-context-map.md#disposition-m6-adr-0039-acceptance-2026-09-27)
+binds the exact reviewed candidate and both pairs' digests.

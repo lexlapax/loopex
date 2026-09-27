@@ -3,7 +3,7 @@
 
 Technical depth: [Profile composition, adapters and proofs](0039-ephemeral-embedded-profile-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-26
 - **Decision owner:** Maintainer
 - **Supersedes:** in part.
@@ -843,4 +843,4 @@ This adds the profile and narrowly reworks two private companion mechanics:
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m6-adr-0039-acceptance-2026-09-27) | candidate `d97b40eda200e693d1e37db239aa9ff80d4d1b44`; concept `sha256:3e4b0c09de27acd1142e7600e44042061c532a7a67ede824361bd70ce1849056`; technical `sha256:8671701614db90e7c8c0ead5f862abef5e66d332e9687995669a0d86710f22c8` |

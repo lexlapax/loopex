@@ -336,7 +336,7 @@ Concept: [Ownership and trust boundaries](vision.md#concept-vision-ownership-tru
 | Runtime control ledger | Owns create/fork/stop mappings and runtime configuration | Supplies or selects store and retention | No access |
 | Session ordering and journal | Owns per-session command and operation truth | Supplies or selects store | No access unless explicitly granted |
 | Model/provider conversion | Defines adapter contract | Selects model and credential reference | None |
-| Credential custody | Stores references only | Owns encryption, resolution, rotation | Receives only scoped ephemeral values when required |
+| Credential custody | Stores references only | Owns encryption, resolution, rotation; resolves an environment-held value just in time at the approved model boundary | Receives only scoped ephemeral values when required |
 | User/tenant identity | Carries bounded opaque references | Owns | Validates scoped grant audience only |
 | Authorization and confirmation | Suspends and transports results | Owns decisions and grants | Validates grant fail-closed |
 | Tool mechanics | Defines schema and effect metadata | Approves exposure | Performs declared effect |
@@ -350,6 +350,36 @@ Concept: [Ownership and trust boundaries](vision.md#concept-vision-ownership-tru
 | Objectives/orchestration | Does not own | Owns and composes sessions | None |
 | Trusted code and extension selection | VM-global manager owns executable generations; runtimes own non-conflicting contribution selection | Owns admission/signing and trust-domain placement | May validate hand packages |
 | Audit/retention | Supplies facts and references | Owns obligations and storage policy | Supplies receipts and diagnostics |
+
+> ADR 0039's ephemeral profile uses a host-VM provider path. The host
+> environment and host-made copies have host-owned lifetimes and audiences.
+> During a call, the sensitive caller, provider HTTP/TLS state, crash reports,
+> crash dumps and host-installed telemetry/logger handlers can observe the
+> selected credential. Loopex proves its caller and tagged pool subtree gone
+> before a provider result or successful cleanup acknowledgement. A checked-out
+> socket and OTP TLS controller may drain asynchronously afterward, without a
+> result route. The isolated release witness requires them gone within 5,000 ms
+> of caller DOWN; runtime cleanup does not wait for or prove that threshold.
+> TLS reuse, tickets and secret retention are disabled; credential-bearing
+> endpoints are HTTPS-only. Hosted and local tools are permitted with ambient
+> credential variables. A host-authorized tool or trusted host code may read,
+> copy or disclose those values, including through ordinary tool-result planes;
+> this profile provides no structural secrecy from that audience. Loopex does
+> not inject provider credentials into jobs or its own diagnostics, and rejects
+> the exact selected value from a mapped provider reply before publication.
+> Cleanup uncertainty seals only the affected session; there is no VM gate,
+> lease, quarantine or VM-restart lockout. Shared-service outages remain
+> possible. The durable profile retains its separate-process credential rules.
+> Host-selected cold catalog loading may independently use GH_TOKEN/GITHUB_TOKEN,
+> ordinary Req transport, persistent cache and shared metadata outside the
+> selected-provider-key and one-shot model-transport guarantees. Those host
+> dependency effects and catalog configuration remain host-owned; the default
+> compiled source needs no fetch. Cold-load lock contention spends the model
+> deadline. This additional trust scope requires explicit acceptance with this
+> amendment and is not an earlier recorded maintainer design approval.
+
+[Section 12.7](#technical-vision-credentials-sensitive-content) owns credential
+lifetime and audience.
 
 ### 6.2 Planes
 
@@ -365,6 +395,37 @@ Loopex is easiest to reason about as four planes:
    dashboards, and generated SDKs.
 4. **Diagnostics plane.** Metrics, traces, crash detail, health, extension
    activation diagnostics, backpressure state, and operator evidence.
+
+> ADR 0039's ephemeral profile uses a host-VM provider path. The host
+> environment and host-made copies have host-owned lifetimes and audiences.
+> During a call, the sensitive caller, provider HTTP/TLS state, crash reports,
+> crash dumps and host-installed telemetry/logger handlers can observe the
+> selected credential. Loopex proves its caller and tagged pool subtree gone
+> before a provider result or successful cleanup acknowledgement. A checked-out
+> socket and OTP TLS controller may drain asynchronously afterward, without a
+> result route. The isolated release witness requires them gone within 5,000 ms
+> of caller DOWN; runtime cleanup does not wait for or prove that threshold.
+> TLS reuse, tickets and secret retention are disabled; credential-bearing
+> endpoints are HTTPS-only. Hosted and local tools are permitted with ambient
+> credential variables. A host-authorized tool or trusted host code may read,
+> copy or disclose those values, including through ordinary tool-result planes;
+> this profile provides no structural secrecy from that audience. Loopex does
+> not inject provider credentials into jobs or its own diagnostics, and rejects
+> the exact selected value from a mapped provider reply before publication.
+> Cleanup uncertainty seals only the affected session; there is no VM gate,
+> lease, quarantine or VM-restart lockout. Shared-service outages remain
+> possible. The durable profile retains its separate-process credential rules.
+> Host-selected cold catalog loading may independently use GH_TOKEN/GITHUB_TOKEN,
+> ordinary Req transport, persistent cache and shared metadata outside the
+> selected-provider-key and one-shot model-transport guarantees. Those host
+> dependency effects and catalog configuration remain host-owned; the default
+> compiled source needs no fetch. Cold-load lock contention spends the model
+> deadline. This additional trust scope requires explicit acceptance with this
+> amendment and is not an earlier recorded maintainer design approval.
+
+Host provider crash, telemetry and logger copies remain host diagnostics.
+Host-authorized tool disclosures follow the ordinary tool planes and their
+existing retention.
 
 Only the data plane is Loopex’s architectural center. The other planes connect
 through explicit ports and protocols. Presentation and diagnostics never become
@@ -1405,12 +1466,16 @@ Tool results are byte-bounded toward the model. Overflow becomes an artifact
 that a suitable tool can read back. Files and artifacts are state; the context
 window is not a durable object store.
 
+<a id="technical-vision-credentials-sensitive-content"></a>
 ### 12.7 Credentials and sensitive content
+
+Concept: [Durable sessions, context, and storage](vision.md#concept-vision-sessions-storage).
 
 The host owns credential custody. Loopex persists credential references, never
 resolved API keys, access tokens, private keys, cookies, or vault values.
 Resolution occurs just in time at the approved model or executor boundary and
-uses the narrowest possible lifetime and audience.
+uses the narrowest possible lifetime and audience. For an environment-held
+value, that environment's lifetime and audience are the host's.
 
 Host-resolved known credential material is structurally excluded from:
 
@@ -1419,6 +1484,36 @@ Host-resolved known credential material is structurally excluded from:
 - progress or diagnostics;
 - executor jobs except an explicitly scoped ephemeral hand secret;
 - artifacts, test fixtures, crash reports, or sandbox logs.
+
+> ADR 0039's ephemeral profile uses a host-VM provider path. The host
+> environment and host-made copies have host-owned lifetimes and audiences.
+> During a call, the sensitive caller, provider HTTP/TLS state, crash reports,
+> crash dumps and host-installed telemetry/logger handlers can observe the
+> selected credential. Loopex proves its caller and tagged pool subtree gone
+> before a provider result or successful cleanup acknowledgement. A checked-out
+> socket and OTP TLS controller may drain asynchronously afterward, without a
+> result route. The isolated release witness requires them gone within 5,000 ms
+> of caller DOWN; runtime cleanup does not wait for or prove that threshold.
+> TLS reuse, tickets and secret retention are disabled; credential-bearing
+> endpoints are HTTPS-only. Hosted and local tools are permitted with ambient
+> credential variables. A host-authorized tool or trusted host code may read,
+> copy or disclose those values, including through ordinary tool-result planes;
+> this profile provides no structural secrecy from that audience. Loopex does
+> not inject provider credentials into jobs or its own diagnostics, and rejects
+> the exact selected value from a mapped provider reply before publication.
+> Cleanup uncertainty seals only the affected session; there is no VM gate,
+> lease, quarantine or VM-restart lockout. Shared-service outages remain
+> possible. The durable profile retains its separate-process credential rules.
+> Host-selected cold catalog loading may independently use GH_TOKEN/GITHUB_TOKEN,
+> ordinary Req transport, persistent cache and shared metadata outside the
+> selected-provider-key and one-shot model-transport guarantees. Those host
+> dependency effects and catalog configuration remain host-owned; the default
+> compiled source needs no fetch. Cold-load lock contention spends the model
+> deadline. This additional trust scope requires explicit acceptance with this
+> amendment and is not an earlier recorded maintainer design approval.
+
+Runtime state stays reference-only; selected-key resolution remains just in
+time and the mapped-provider-reply check precedes publication.
 
 User prompts and tool output can themselves contain sensitive data, and Loopex
 cannot guarantee detection of every unknown secret. Hosts therefore supply a
@@ -2723,6 +2818,38 @@ The following should become named, continuously enforced properties:
   grant authority.
 - Workspace references remain opaque to core.
 - Known credential material never appears in prohibited planes.
+
+> ADR 0039's ephemeral profile uses a host-VM provider path. The host
+> environment and host-made copies have host-owned lifetimes and audiences.
+> During a call, the sensitive caller, provider HTTP/TLS state, crash reports,
+> crash dumps and host-installed telemetry/logger handlers can observe the
+> selected credential. Loopex proves its caller and tagged pool subtree gone
+> before a provider result or successful cleanup acknowledgement. A checked-out
+> socket and OTP TLS controller may drain asynchronously afterward, without a
+> result route. The isolated release witness requires them gone within 5,000 ms
+> of caller DOWN; runtime cleanup does not wait for or prove that threshold.
+> TLS reuse, tickets and secret retention are disabled; credential-bearing
+> endpoints are HTTPS-only. Hosted and local tools are permitted with ambient
+> credential variables. A host-authorized tool or trusted host code may read,
+> copy or disclose those values, including through ordinary tool-result planes;
+> this profile provides no structural secrecy from that audience. Loopex does
+> not inject provider credentials into jobs or its own diagnostics, and rejects
+> the exact selected value from a mapped provider reply before publication.
+> Cleanup uncertainty seals only the affected session; there is no VM gate,
+> lease, quarantine or VM-restart lockout. Shared-service outages remain
+> possible. The durable profile retains its separate-process credential rules.
+> Host-selected cold catalog loading may independently use GH_TOKEN/GITHUB_TOKEN,
+> ordinary Req transport, persistent cache and shared metadata outside the
+> selected-provider-key and one-shot model-transport guarantees. Those host
+> dependency effects and catalog configuration remain host-owned; the default
+> compiled source needs no fetch. Cold-load lock contention spends the model
+> deadline. This additional trust scope requires explicit acceptance with this
+> amendment and is not an earlier recorded maintainer design approval.
+
+The ephemeral-profile proof includes the selected-key model canaries,
+session-only failure containment, host-authorized tool-audience disclosure and
+the separate 5,000 ms release transport-drain witness.
+
 - Generated, tenant, or arbitrary project code never loads into a brain VM.
 - Native distribution connects trusted gateways only.
 - No effectful unknown is blindly retried.

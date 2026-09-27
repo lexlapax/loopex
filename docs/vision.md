@@ -233,9 +233,10 @@ and versions follow declared compatibility rules.
 <a id="concept-vision-sessions-storage"></a>
 ### 12. Durable sessions, context, and storage
 
-A session’s durable history, queues, lineage, operation state, and projections
-survive process and client lifetimes. Store implementations satisfy private
-ports; none defines the public data model by accident.
+For profiles represented as durable, a session's history, queues, lineage,
+operation state and projections survive process and client lifetimes. Store
+implementations satisfy private ports; none defines the public data model by
+accident.
 
 Technical depth: [Store ports, canonical history, forks, compaction, artifacts, and sensitive content](vision-technical.md#technical-vision-sessions-storage)
 
@@ -243,6 +244,39 @@ Branches and compaction retain lineage and replay meaning. Large outputs become
 content-addressed artifacts. Credentials remain host-owned references, and
 sensitive material is excluded from journals, public events, diagnostics, and
 fixtures unless a narrowly approved ephemeral hand requires it.
+
+> ADR 0039's ephemeral profile uses a host-VM provider path. The host
+> environment and host-made copies have host-owned lifetimes and audiences.
+> During a call, the sensitive caller, provider HTTP/TLS state, crash reports,
+> crash dumps and host-installed telemetry/logger handlers can observe the
+> selected credential. Loopex proves its caller and tagged pool subtree gone
+> before a provider result or successful cleanup acknowledgement. A checked-out
+> socket and OTP TLS controller may drain asynchronously afterward, without a
+> result route. The isolated release witness requires them gone within 5,000 ms
+> of caller DOWN; runtime cleanup does not wait for or prove that threshold.
+> TLS reuse, tickets and secret retention are disabled; credential-bearing
+> endpoints are HTTPS-only. Hosted and local tools are permitted with ambient
+> credential variables. A host-authorized tool or trusted host code may read,
+> copy or disclose those values, including through ordinary tool-result planes;
+> this profile provides no structural secrecy from that audience. Loopex does
+> not inject provider credentials into jobs or its own diagnostics, and rejects
+> the exact selected value from a mapped provider reply before publication.
+> Cleanup uncertainty seals only the affected session; there is no VM gate,
+> lease, quarantine or VM-restart lockout. Shared-service outages remain
+> possible. The durable profile retains its separate-process credential rules.
+> Host-selected cold catalog loading may independently use GH_TOKEN/GITHUB_TOKEN,
+> ordinary Req transport, persistent cache and shared metadata outside the
+> selected-provider-key and one-shot model-transport guarantees. Those host
+> dependency effects and catalog configuration remain host-owned; the default
+> compiled source needs no fetch. Cold-load lock contention spends the model
+> deadline. This additional trust scope requires explicit acceptance with this
+> amendment and is not an earlier recorded maintainer design approval.
+
+ADR 0039's declared non-durable history ends with its runtime. It has no
+recovery/migration surface or durable listing, consistent with Technical
+§12.2's existing in-memory embedding posture.
+
+Technical depth: [Credential lifetime and audience](vision-technical.md#technical-vision-credentials-sensitive-content).
 
 <a id="concept-vision-model-boundary"></a>
 ### 13. Model and context boundary
@@ -305,6 +339,35 @@ Project resources are canonicalized, bounded, provenance-typed, and admitted
 under host policy. Multi-tenant brains do not load tenant code. Observability
 uses references and redaction rather than capturing secrets or unrestricted
 payloads.
+
+> ADR 0039's ephemeral profile uses a host-VM provider path. The host
+> environment and host-made copies have host-owned lifetimes and audiences.
+> During a call, the sensitive caller, provider HTTP/TLS state, crash reports,
+> crash dumps and host-installed telemetry/logger handlers can observe the
+> selected credential. Loopex proves its caller and tagged pool subtree gone
+> before a provider result or successful cleanup acknowledgement. A checked-out
+> socket and OTP TLS controller may drain asynchronously afterward, without a
+> result route. The isolated release witness requires them gone within 5,000 ms
+> of caller DOWN; runtime cleanup does not wait for or prove that threshold.
+> TLS reuse, tickets and secret retention are disabled; credential-bearing
+> endpoints are HTTPS-only. Hosted and local tools are permitted with ambient
+> credential variables. A host-authorized tool or trusted host code may read,
+> copy or disclose those values, including through ordinary tool-result planes;
+> this profile provides no structural secrecy from that audience. Loopex does
+> not inject provider credentials into jobs or its own diagnostics, and rejects
+> the exact selected value from a mapped provider reply before publication.
+> Cleanup uncertainty seals only the affected session; there is no VM gate,
+> lease, quarantine or VM-restart lockout. Shared-service outages remain
+> possible. The durable profile retains its separate-process credential rules.
+> Host-selected cold catalog loading may independently use GH_TOKEN/GITHUB_TOKEN,
+> ordinary Req transport, persistent cache and shared metadata outside the
+> selected-provider-key and one-shot model-transport guarantees. Those host
+> dependency effects and catalog configuration remain host-owned; the default
+> compiled source needs no fetch. Cold-load lock contention spends the model
+> deadline. This additional trust scope requires explicit acceptance with this
+> amendment and is not an earlier recorded maintainer design approval.
+
+Loopex-owned provider observability still excludes its selected key.
 
 <a id="concept-vision-extensions"></a>
 ### 17. Trusted extensions and generated code

@@ -78,7 +78,7 @@ starting from the founding vision and moving to the implemented subsystems.
 | Embedded API, transports, clients, ACP | [API and transports](../vision.md#concept-vision-api-transports) | [Transport mechanics](../vision-technical.md#technical-vision-api-transports) | One semantic contract, JSONL RPC first, reference surfaces. The first non-Elixir surface is the foreground app server: read the [protocol pair](app-server-protocol.md#concept), the [operator runbook](../operator/app-server.md#concept), and the independent consumers in [`clients/`](../../clients/README.md). |
 | Hosts and wrappers | [Hosts](../vision.md#concept-vision-hosts) | [Host mechanics](../vision-technical.md#technical-vision-hosts) | Expected consumers, secured sample host, independent implementation. |
 | Repository layout and ADR agenda | [Repository seed](../vision.md#concept-vision-repository-seed) | [Exact seed](../vision-technical.md#technical-vision-repository-seed) | Pair with the [ADR 0001 decision](../adr/0001-repository-and-application-layout.md#concept-adr-0001-decision) and its [technical mechanics](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision). |
-| Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. [M4](../plans/M4.md#concept) is Closed; the register carries the current M5 state. How a milestone is planned, run and closed is the [milestone guide](milestones.md#concept), and which checks a change must pass is the [verification guide](verification.md#concept). |
+| Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. [M5](../plans/M5.md#concept) is Closed and [M6](../plans/M6.md#concept) is Accepted; the register owns subsequent transitions. How a milestone is planned, run and closed is the [milestone guide](milestones.md#concept), and which checks a change must pass is the [verification guide](verification.md#concept). |
 | Serial barriers | [Ordering constraint](../vision.md#concept-vision-serial-barriers) | [Exact rejoin order](../vision-technical.md#technical-vision-serial-barriers) | A milestone may add barriers but cannot weaken the founding sequence. |
 | Verification, invariants, budgets | [Verification](../vision.md#concept-vision-verification) | [Exact evidence](../vision-technical.md#technical-vision-verification) | Claim-proportional tests and scope-specific minimalism budgets. The day-to-day rule book is the [verification guide](verification.md#concept). |
 | Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. What is exposed today, with its experimental labels and the app server's exact-generation rule, is in [compatibility surfaces](compatibility-surfaces.md#concept). M4 moved the source `VERSION` to `0.1.0` and the checked-out source carries `0.2.0`; ADR 0023 keeps a source version separate from any package, tag, publication or freeze. |
@@ -361,6 +361,7 @@ end of the file.
 | M4 delivery, 2026-09-14 to 2026-09-19 | Inherited re-proof decisions ([before integration](#override-disposition-m4-inherited-evidence-before-integration-2026-09-14), [M1 and M2 waiver](#override-disposition-m4-m1-m2-inherited-reproof-waiver-2026-09-14), [M0 deferral](#override-disposition-m4-m0-reproof-deferred-to-implementation-2026-09-14)); [commit-title exception](#override-disposition-m4-commit-titles-2026-09-15); [observability rule](#disposition-m4-observability-rule-2026-09-15); [the Node consumer](#disposition-m4-plan-amendment-node-consumer-2026-09-15); [closed-gate repair chain](#override-disposition-closed-gate-repair-chain-v2-2026-09-17); the gate generations recorded between 2026-09-12 and 2026-09-18; [closure schedule](#override-disposition-m4-closure-schedule-2026-09-19); [M4 closure](#disposition-m4-closure-2026-09-19) |
 | Post-M4 closure procedure, 2026-09-20 and 2026-09-21 | Six unanchored entries after the M4 closure: "Closure names two commits", "Closure and release evidence sequencing", "Administrative confinement is content confinement", "Closure candidate ownership and archive producer", "Administrative reconstruction and four release proofs" and "Archive extraction ignores the caller umask". The [milestone guide](milestones.md#concept) states the resulting procedure |
 | M5, from 2026-09-21 | [Plan pair and ADR 0031–0034 acceptance](#disposition-m5-acceptance-2026-09-21); [host application role](#disposition-m5-host-role-2026-09-22); [per-session progress routing](#disposition-m5-progress-routing-2026-09-22); [escript archive exclusion](#disposition-m5-escript-exclusion-2026-09-22); [no resident window](#disposition-m5-no-resident-window-2026-09-22); [residual proofs](#disposition-m5-residual-proofs-2026-09-22); [trace sessions load named modules](#disposition-m5-trace-loads-named-modules-2026-09-23); [closure-review decisions](#disposition-m5-closure-review-2026-09-23); [release-check attendance](#disposition-m5-driver-attendance-2026-09-23); [session-index loss](#disposition-m5-session-index-lost-2026-09-23); [non-blocking daemon components](#disposition-m5-nonblocking-components-2026-09-24); [executor cancellation and the risk packet](#disposition-m5-cleaned-implies-durable-2026-09-24) |
+| M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27) |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -5944,3 +5945,46 @@ Decisions recorded with this closure:
   - the closure-candidate branch.
 
 This record grants no integration to `main`, no tag, no release and no publication.
+
+<a id="disposition-m6-adr-0039-acceptance-2026-09-27"></a>
+### M6 plan pair and ADR 0039 acceptance — 2026-09-27
+
+The maintainer was asked whether to accept ADR 0039 and the M6 plan pair at
+`d97b40eda200e693d1e37db239aa9ff80d4d1b44`, including the seven proposed vision/AGENTS
+amendments and the host-owned remote-catalog exception. The maintainer replied:
+
+> I accept. get ready to implement.
+
+This records acceptance of the exact [M6 Concept](../plans/M6.md#concept) and
+[Technical depth](../plans/M6-technical.md#technical-depth) pair and
+[ADR 0039 Concept](../adr/0039-ephemeral-embedded-profile.md#concept) and
+[Technical depth](../adr/0039-ephemeral-embedded-profile-technical.md#technical-depth)
+pair at that candidate. An independent read-only reviewer inspected the exact
+committed candidate and returned readiness PASS before this administrative
+transition; no runtime witness was run or claimed. Their bound digests are:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| M6 Concept | `14cd07cb8e454eb766398cfd5339a3554e353a2a046dcf68a6b556400c762d03` |
+| M6 Technical depth | `e5bbf9746d20e399965d9903970c6c992da80c94864372961e3d765051a75532` |
+| ADR 0039 Concept | `3e4b0c09de27acd1142e7600e44042061c532a7a67ede824361bd70ce1849056` |
+| ADR 0039 Technical depth | `8671701614db90e7c8c0ead5f862abef5e66d332e9687995669a0d86710f22c8` |
+
+Acceptance includes ADR 0039's exact common credential exception in Concept
+vision §§12 and 16, Technical vision §§6.1, 6.2, 12.7 and 23, and AGENTS.md's
+credential/context rule. It also accepts the explicitly proposed host-selected
+catalog effects outside the owned model-transport guarantee. The four earlier
+design choices remain unchanged. ADRs 0019 and 0034 retain their accepted bytes
+and govern the durable profile; ADR 0025's accepted bytes remain, with only its
+named-directory source and name-order clauses superseded in the index.
+
+M6 is Accepted, not In progress. Its six outcomes remain Open; this preparation
+claims no runtime implementation or executed closure proof. The first work is
+P2's governance prerequisite and the demonstration driver, followed by the
+foundation workstreams under the accepted
+[ownership and rejoin sequence](../plans/M6-technical.md#technical-plan-ownership).
+The kernel runtime library stays unchanged. ADR 0028's remediation remains
+in M7, and ADRs 0035–0038 and M7–M9 are not accepted by this disposition.
+No integration to main, tag, release, publication or implementation witness is
+approved or claimed here. Implementation authority is confined to the accepted
+M6 pair; this request prepares that work without starting runtime code.

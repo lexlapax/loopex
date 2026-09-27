@@ -122,8 +122,26 @@ provides. The protocol still remains experimental.
 
 Technical depth: [Durable-service candidate proof](roadmap-technical.md#technical-roadmap-durable-service)
 
+<a id="concept-roadmap-minimal-runnable"></a>
+#### Minimal runnable Loopex — v0.3 candidate
+
+Can a host or another agent run the same kernel without assembling the durable
+stack? The accepted [M6 plan](plans/M6.md#concept) answers this through one-call
+ephemeral embedding, the standalone `loopex ask` command, and the full durable
+profile. It adds three read-only tools and named skill directories, while
+leaving core's runtime library unchanged. [ADR 0039](adr/0039-ephemeral-embedded-profile.md#concept)
+governs the ephemeral profile's host-VM credential scope and cleanup limits.
+Acceptance authorizes implementation, not a release or a public-surface freeze.
+
+The subsequent draft sequence is M7's installed durable operator, M8's store
+engine successor, and M9's governed extension runtime. Those
+[drafts](drafts/README.md) are not accepted plans; their scope and release
+versions remain decisions for their own acceptance.
+
+Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technical-roadmap-minimal-runnable)
+
 <a id="concept-roadmap-governed-extension-runtime"></a>
-#### Governed extension runtime — v0.3 candidate
+#### Governed extension runtime — v0.4 candidate
 
 Can reviewed and promoted trusted behavior evolve without changing session
 truth, weakening authority, or pretending executable code is runtime-local?
@@ -133,7 +151,7 @@ candidates only through a separate accepted decision after the proof.
 Technical depth: [Governed-extension candidate proof](roadmap-technical.md#technical-roadmap-governed-extension-runtime)
 
 <a id="concept-roadmap-isolated-hands"></a>
-#### Isolated hands — v0.4 candidate
+#### Isolated hands — v0.5 candidate
 
 Can generated and less-trusted work execute outside the brain through the same
 effect contract? Only proven local and isolated transports can support an
@@ -142,7 +160,7 @@ executor-protocol claim.
 Technical depth: [Isolated-hands candidate proof](roadmap-technical.md#technical-roadmap-isolated-hands)
 
 <a id="concept-roadmap-remote-ecosystem"></a>
-#### Remote ecosystem — v0.5 candidate
+#### Remote ecosystem — v0.6 candidate
 
 Can the same contract span workers and materially different hosts without
 turning Loopex into a fleet or policy platform? Only proven mappings and remote
