@@ -181,6 +181,17 @@ defmodule LoopexCompositionTest do
     refute Keyword.has_key?(Map.fetch!(defaults, Loopex), :cleanup_grace_ms)
     refute Keyword.has_key?(Map.fetch!(defaults, Loopex.Executor.Local), :cleanup_grace_ms)
     refute Keyword.has_key?(Map.fetch!(defaults, Loopex.Executor.Local), :process_probe)
+
+    runtime_defaults = Map.fetch!(defaults, Loopex)
+
+    assert Keyword.fetch!(runtime_defaults, :active_tools) ==
+             ["loopex.read", "loopex.write", "loopex.edit", "loopex.bash"]
+
+    assert runtime_defaults
+           |> Keyword.fetch!(:tools)
+           |> Enum.map(& &1["tool_id"])
+           |> Enum.sort() ==
+             ~w(loopex.bash loopex.edit loopex.find loopex.grep loopex.ls loopex.read loopex.write)
   end
 
   test "required host inputs are validated before the first effect" do

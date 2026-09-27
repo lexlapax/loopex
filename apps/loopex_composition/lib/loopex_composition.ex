@@ -229,7 +229,7 @@ defmodule LoopexComposition do
                          credential_plane.model_options
                    }
                  ] ++
-                 [active_tools: Enum.map(tools, & &1["tool_id"])] ++
+                 [active_tools: ~w(loopex.read loopex.write loopex.edit loopex.bash)] ++
                  context_token_budget(options) ++
                  served_artifacts(options, spill) ++
                  Keyword.take(options, @host_supplied)
