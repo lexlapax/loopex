@@ -232,6 +232,7 @@ defmodule LoopexComposition.SessionAdmissionTest do
               end
 
               if order == :down_first, do: send(requester, result)
+              receive do: (:stop -> :ok)
           end
         end)
 
@@ -241,6 +242,7 @@ defmodule LoopexComposition.SessionAdmissionTest do
                SessionAdmission.request(handle, operation, future())
 
       assert_receive {:candidate_reaped, ^order}
+      send(owner, :stop)
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
       refute_receive :candidate_survived
     end
@@ -303,6 +305,43 @@ defmodule LoopexComposition.SessionAdmissionTest do
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
       send(unrelated, :stop)
     end
+  end
+
+  test "owner death after final grant but before candidate DOWN cannot grant clean cancellation" do
+    {candidate, candidate_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
+    generation = make_ref()
+    call = make_ref()
+
+    operation =
+      {:cancel_model, call, {:registration_refused, :unmanaged, candidate, candidate_monitor}}
+
+    {owner, owner_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:loopex_session_admission, requester, reference, ^generation, ^operation, expiry} ->
+            send(
+              requester,
+              {:loopex_session_admission_cancellation_prepared, self(), reference, generation,
+               operation, expiry, candidate}
+            )
+
+            token = {:session_grant, generation, :cancel_model, requester, reference, expiry}
+
+            send(
+              requester,
+              {:loopex_session_admission_result, self(), reference, generation, operation, expiry,
+               {:ok, token}}
+            )
+        end
+      end)
+
+    handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+
+    assert {:error, :session_admission_closed} =
+             SessionAdmission.request(handle, operation, future())
+
+    refute Process.alive?(candidate)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
   end
 
   test "duplicate preparation and a final acknowledgement without candidate DOWN never substitute for proof" do

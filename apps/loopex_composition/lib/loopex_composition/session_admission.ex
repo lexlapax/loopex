@@ -227,7 +227,7 @@ defmodule LoopexComposition.SessionAdmission do
        ) do
     cond do
       candidate_down? and result != nil and System.monotonic_time() < deadline ->
-        result
+        if Process.alive?(owner), do: result, else: closed()
 
       System.monotonic_time() >= deadline ->
         closed()
@@ -284,7 +284,7 @@ defmodule LoopexComposition.SessionAdmission do
               candidate,
               candidate_monitor,
               candidate_down?,
-              result
+              closed()
             )
         after
           remaining_slice(deadline) ->
