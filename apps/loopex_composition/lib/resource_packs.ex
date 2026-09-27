@@ -2,8 +2,8 @@ defmodule LoopexComposition.ResourcePacks do
   @moduledoc """
   ## Concept
 
-  Discovers and imports the one supported resource class: project skills beneath
-  `.agents/skills`. Installation makes a pack inspectable. It does not trust,
+  Discovers and imports project skills beneath `.agents/skills` and reads named
+  project or user skill directories. Installation makes a pack inspectable. It does not trust,
   select, or execute any of the installed content.
 
   ## Technical depth
@@ -61,6 +61,330 @@ defmodule LoopexComposition.ResourcePacks do
   ]
 
   @type refusal :: {:error, {atom(), binary()}}
+
+  @typedoc """
+  ## Concept
+
+  Closed refusal vocabulary for host-selected skill directories.
+
+  ## Technical depth
+
+  Shape checks precede workspace resolution and serial named-pack inspection.
+  """
+  @type read_directories_reason ::
+          :invalid_paths
+          | :invalid_options
+          | :workspace_unusable
+          | :skill_directory_unusable
+          | :unclassified_skill_directory
+          | :duplicate_skill
+          | :skill_manifest_invalid
+  @typedoc """
+  ## Concept
+
+  Identity of a user skill omitted because its project counterpart won.
+
+  ## Technical depth
+
+  Exactly the omitted pack's `user:<name>` source id.
+  """
+  @type shadowed_skill_id :: String.t()
+  @typedoc """
+  ## Concept
+
+  The selected immutable manifest and identities of omitted user skills.
+
+  ## Technical depth
+
+  The manifest is normalized by core; shadowed identities are unique and bytewise sorted.
+  """
+  @type read_directories_result :: %{manifest: map(), shadowed_skills: [shadowed_skill_id()]}
+
+  @doc """
+  ## Concept
+
+  Reads only the skill directories named by the host, without discovering others.
+  Project skills win over user skills of the same name.
+
+  ## Technical depth
+
+  `paths` is a proper list of zero to four unique nonempty UTF-8 paths of at most
+  65,536 bytes without NUL. Options contain exactly one `:workspace` path in the
+  same domain. Path shape, option shape and existing workspace resolution precede
+  serial inspection in bytewise expanded-path order. Exactly workspace-local
+  `.agents/skills/<name>` directories are project skills; outside directories are
+  user skills. Other workspace directories refuse. Traversal never follows content
+  links. Each pack admits depth 32, 256 directories including its root, 4,096
+  entries, 1 MiB of cumulative root-relative path bytes, 64 regular files and
+  1 MiB of content. Every raw entry contributes before its name or type is checked.
+  Equality passes; the first exceeded cap returns `:skill_manifest_invalid`.
+  One portable directory listing is materialized before counting its entries.
+  Paths enter neither the normalized manifest nor its sorted, unique shadowed
+  `user:<name>` ids. Relative paths are joined to the verified workspace before
+  lexical normalization, including a literal leading `~`.
+  """
+  @spec read_directories(term(), term()) ::
+          {:ok, read_directories_result()} | {:error, read_directories_reason()}
+  def read_directories(paths, options) do
+    with :ok <- named_paths(paths, []),
+         {:ok, workspace} <- named_options(options),
+         {:ok, root, reference} <- named_workspace(workspace),
+         {:ok, packs, shadows} <- named_packs(paths, root),
+         {:ok, _, manifest} <-
+           Loopex.ResourcePack.digest(%{
+             "version" => @version,
+             "workspace_ref" => reference,
+             "revision" => nil,
+             "packs" => packs
+           }) do
+      {:ok, %{manifest: manifest, shadowed_skills: shadows}}
+    else
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+      {:error, _, _} -> {:error, :skill_manifest_invalid}
+    end
+  end
+
+  defp named_paths([], _seen), do: :ok
+
+  defp named_paths([path | rest], seen) when length(seen) < 4 do
+    if named_path?(path) and path not in seen,
+      do: named_paths(rest, [path | seen]),
+      else: {:error, :invalid_paths}
+  end
+
+  defp named_paths(_, _), do: {:error, :invalid_paths}
+
+  defp named_path?(path) when is_binary(path),
+    do: byte_size(path) in 1..65_536 and String.valid?(path) and not String.contains?(path, <<0>>)
+
+  defp named_path?(_), do: false
+
+  defp named_options(workspace: workspace) do
+    if named_path?(workspace), do: {:ok, workspace}, else: {:error, :invalid_options}
+  end
+
+  defp named_options(_), do: {:error, :invalid_options}
+
+  defp named_workspace(workspace) do
+    alias LoopexComposition.WorkspaceIdentity
+
+    with {:ok, reference} <- WorkspaceIdentity.reference(workspace),
+         {:ok, resolved} <- WorkspaceIdentity.resolve_path(workspace),
+         {:ok, root} <- fixed_directory(resolved, nil),
+         true <- WorkspaceIdentity.from_verified_root(root.path, root.identity) == reference do
+      {:ok, root, reference}
+    else
+      _ -> {:error, :workspace_unusable}
+    end
+  end
+
+  defp named_packs(paths, root) do
+    paths
+    |> Enum.map(fn path ->
+      if Path.type(path) == :absolute,
+        do: Path.expand(path),
+        else: Path.expand(Path.join(root.path, path))
+    end)
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, %{}}, fn path, {:ok, packs} ->
+      with {:ok, resolved} <- LoopexComposition.WorkspaceIdentity.resolve_path(path),
+           {:ok, directory} <- fixed_directory(resolved, nil),
+           {:ok, kind, name} <- named_class(directory.path, root.path),
+           false <- Map.has_key?(packs, {kind, name}),
+           {:ok, pack} <- named_pack(directory, name, kind) do
+        {:cont, {:ok, Map.put(packs, {kind, name}, pack)}}
+      else
+        true ->
+          {:halt, {:error, :duplicate_skill}}
+
+        {:error, reason}
+        when reason in [
+               :unclassified_skill_directory,
+               :skill_manifest_invalid,
+               :skill_directory_unusable
+             ] ->
+          {:halt, {:error, reason}}
+
+        _ ->
+          {:halt, {:error, :skill_directory_unusable}}
+      end
+    end)
+    |> case do
+      {:ok, packs} ->
+        {selected, shadows} =
+          Enum.reduce(packs, {[], []}, fn
+            {{:user, name}, pack}, {selected, shadows} ->
+              if Map.has_key?(packs, {:project, name}),
+                do: {selected, [pack["source_id"] | shadows]},
+                else: {[pack | selected], shadows}
+
+            {_, pack}, {selected, shadows} ->
+              {[pack | selected], shadows}
+          end)
+
+        {:ok, selected, Enum.sort(shadows)}
+
+      refusal ->
+        refusal
+    end
+  end
+
+  defp named_class(path, workspace) do
+    name = Path.basename(path)
+
+    cond do
+      path == Path.join([workspace, ".agents", "skills", name]) -> {:ok, :project, name}
+      not contained?(path, workspace) -> {:ok, :user, name}
+      true -> {:error, :unclassified_skill_directory}
+    end
+  end
+
+  @named_limits %{
+    directories: 256,
+    entries: 4_096,
+    path_bytes: 1_048_576,
+    files: @max_files,
+    content_bytes: @max_pack_bytes
+  }
+
+  # Concept: one named-pack walk accounts for every candidate before retaining it.
+  # Technical depth: raw entry paths count even when their names or types refuse;
+  # root depth is zero and its initial directory count is one. All cap comparisons
+  # admit equality. This transition is private in shipped code.
+  defp named_transition(counts, increments, depth) do
+    next = Map.merge(counts, increments, fn _key, old, increment -> old + increment end)
+
+    if depth <= 32 and Enum.all?(@named_limits, fn {key, limit} -> next[key] <= limit end),
+      do: {:ok, next},
+      else: {:error, :skill_manifest_invalid}
+  end
+
+  defp named_pack(root, name, kind) do
+    counts = %{directories: 1, entries: 0, path_bytes: 0, files: 0, content_bytes: 0}
+
+    with :ok <- validate_skill_name(name),
+         {:ok, files, _counts} <- named_walk(root, root, "", 0, [], counts),
+         {:ok, metadata} <- parse_skill(frontmatter_file(files)),
+         :ok <- require_matching_name(metadata, name),
+         identity = %{local_identity(name) | "source_id" => Atom.to_string(kind) <> ":" <> name},
+         {:ok, pack} <-
+           normalize_pack(
+             Map.merge(identity, %{
+               "name" => name,
+               "description" => metadata["description"],
+               "manual_only" => metadata["disable-model-invocation"] == true,
+               "files" => files
+             })
+           ) do
+      {:ok, pack}
+    else
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+      _ -> {:error, :skill_manifest_invalid}
+    end
+  end
+
+  defp named_walk(root, directory, prefix, depth, files, counts) do
+    with :ok <- verify_directory(directory),
+         {:ok, entries} <- :file.list_dir_all(String.to_charlist(directory.path)),
+         :ok <- verify_directory(directory) do
+      entries
+      |> Enum.map(&named_raw_entry/1)
+      |> Enum.sort()
+      |> Enum.reduce_while({:ok, files, counts}, fn entry, {:ok, files, counts} ->
+        label = if prefix == "", do: entry, else: prefix <> "/" <> entry
+
+        with {:ok, counts} <-
+               named_transition(counts, %{entries: 1, path_bytes: byte_size(label)}, depth + 1),
+             {:ok, ^label} <- safe_relative_path(label),
+             {:ok, stat} <- File.lstat(Path.join(directory.path, entry)),
+             {:ok, files, counts} <-
+               named_entry(root, directory, entry, label, depth + 1, stat, files, counts) do
+          {:cont, {:ok, files, counts}}
+        else
+          {:error, reason}
+          when is_atom(reason) and reason in [:skill_manifest_invalid, :skill_directory_unusable] ->
+            {:halt, {:error, reason}}
+
+          {:error, {_reason, _detail}} ->
+            {:halt, {:error, :skill_manifest_invalid}}
+
+          _ ->
+            {:halt, {:error, :skill_directory_unusable}}
+        end
+      end)
+      |> case do
+        {:ok, files, counts} ->
+          with :ok <- verify_directory(directory), do: {:ok, files, counts}
+
+        refusal ->
+          refusal
+      end
+    else
+      _ -> {:error, :skill_directory_unusable}
+    end
+    |> case do
+      {:error, {_reason, _detail}} -> {:error, :skill_directory_unusable}
+      result -> result
+    end
+  end
+
+  # Concept: every raw directory member spends the named-pack traversal budget.
+  # Technical depth: list_dir_all preserves invalid native byte names as binaries;
+  # translated Unicode charlists become UTF-8. Count these bytes before validating
+  # the label, rather than letting File.ls discard or refuse an invalid entry.
+  defp named_raw_entry(entry) when is_binary(entry), do: entry
+  defp named_raw_entry(entry), do: List.to_string(entry)
+
+  defp named_entry(
+         root,
+         directory,
+         entry,
+         label,
+         depth,
+         %File.Stat{type: :directory},
+         files,
+         counts
+       ) do
+    with {:ok, counts} <- named_transition(counts, %{directories: 1}, depth),
+         {:ok, child} <- fixed_directory(Path.join(directory.path, entry), root) do
+      named_walk(root, child, label, depth, files, counts)
+    else
+      {:error, :skill_manifest_invalid} = refusal -> refusal
+      _ -> {:error, :skill_directory_unusable}
+    end
+  end
+
+  defp named_entry(
+         root,
+         _directory,
+         _entry,
+         label,
+         depth,
+         %File.Stat{type: :regular},
+         files,
+         counts
+       ) do
+    with {:ok, counts} <- named_transition(counts, %{files: 1}, depth),
+         {:ok, content} <- read_contained_file(root, label),
+         {:ok, counts} <- named_transition(counts, %{content_bytes: byte_size(content)}, depth) do
+      file = %{
+        "label" => label,
+        "size" => byte_size(content),
+        "digest" => Canonical.digest_bytes(content),
+        "content" => content,
+        "contained" => true
+      }
+
+      {:ok, [file | files], counts}
+    else
+      {:error, :skill_manifest_invalid} = refusal -> refusal
+      {:error, {:pack_byte_limit, _detail}} -> {:error, :skill_manifest_invalid}
+      _ -> {:error, :skill_directory_unusable}
+    end
+  end
+
+  defp named_entry(_root, _directory, _entry, _label, _depth, _stat, _files, _counts),
+    do: {:error, :skill_manifest_invalid}
 
   @doc """
   ## Concept
