@@ -62,6 +62,8 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
     # Concept: credentials enter through host-owned custody only.
     # Technical depth: the worker still reads its non-secret crash policy and
     # the launcher enumerates names solely to scrub the first child image.
+    # The call-owned pool's accepted SSLKEYLOGFILE guard reads only that literal
+    # non-secret variable immediately before creating its HTTP/TLS subtree.
     for path <- Path.wildcard(Path.join(__DIR__, "../lib/**/*.ex")) do
       source = File.read!(path)
 
@@ -71,10 +73,18 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
         |> Enum.map(fn [_match, argument] -> String.trim(argument) end)
 
       expected =
-        case Path.basename(path) do
-          "provider_worker.ex" -> ["\"ERL_CRASH_DUMP\"", "\"ERL_CRASH_DUMP_SECONDS\""]
-          "provider_launcher.ex" -> [""]
-          _ -> []
+        case Path.relative_to(Path.expand(path), Path.expand(Path.join(__DIR__, "../lib"))) do
+          "loopex/llm/req_llm/provider_worker.ex" ->
+            ["\"ERL_CRASH_DUMP\"", "\"ERL_CRASH_DUMP_SECONDS\""]
+
+          "loopex/llm/req_llm/provider_launcher.ex" ->
+            [""]
+
+          "loopex/llm/req_llm/in_process/pool_lifecycle.ex" ->
+            ["\"SSLKEYLOGFILE\""]
+
+          _ ->
+            []
         end
 
       assert reads == expected

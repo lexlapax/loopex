@@ -169,6 +169,12 @@ defmodule Loopex.LLM.ReqLLM do
   it is about to call — and an ordinary test can prove the pinned spec still
   resolves — without spending a token. An unresolvable specification is an
   error, never a guessed identity.
+
+  Identity starts no provider application and writes no provider registry.
+  An explicit model endpoint takes precedence. Otherwise, when that registry
+  is empty, Anthropic, OpenAI, OpenRouter and Ollama use their builtin modules'
+  default endpoints. A populated host registry owns module selection, including
+  omitted providers whose endpoint stays unknown.
   """
   @spec identity(String.t()) ::
           {:ok, identity()} | {:error, {:unresolved_model, String.t(), term()}}
@@ -844,9 +850,32 @@ defmodule Loopex.LLM.ReqLLM do
   defp provider_default_endpoint(provider) do
     case ReqLLM.provider(provider) do
       {:ok, module} -> default_base_url(module)
-      _other -> @unknown_endpoint
+      _other -> cold_provider_default_endpoint(provider)
     end
   end
+
+  # Concept: pre-start identity can observe admitted builtin defaults without
+  # starting provider applications or replacing host registry choices.
+  # Technical depth: only an empty registry permits this fixed module lookup.
+  # A populated registry's omission remains unknown; no registry is initialized
+  # or mutated and model resolution continues to use the selected catalog.
+  defp cold_provider_default_endpoint(provider) do
+    case ReqLLM.Providers.list() do
+      [] -> builtin_provider_default_endpoint(provider)
+      _providers -> @unknown_endpoint
+    end
+  end
+
+  defp builtin_provider_default_endpoint(:anthropic),
+    do: default_base_url(ReqLLM.Providers.Anthropic)
+
+  defp builtin_provider_default_endpoint(:openai), do: default_base_url(ReqLLM.Providers.OpenAI)
+
+  defp builtin_provider_default_endpoint(:openrouter),
+    do: default_base_url(ReqLLM.Providers.OpenRouter)
+
+  defp builtin_provider_default_endpoint(:ollama), do: default_base_url(ReqLLM.Providers.Ollama)
+  defp builtin_provider_default_endpoint(_provider), do: @unknown_endpoint
 
   defp default_base_url(module) do
     case Code.ensure_loaded?(module) and function_exported?(module, :default_base_url, 0) do
