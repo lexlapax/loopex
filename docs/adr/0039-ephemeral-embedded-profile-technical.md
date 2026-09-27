@@ -60,10 +60,19 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
   chat path passes into its `Req.new/1` (`providers/anthropic.ex:199-229`,
   `providers/openai.ex:435-473`, `provider/defaults.ex:259-267` for Ollama and
   OpenRouter), so no redirect is followed. `pool` is a fixed keyword list of
-  Finch pool options with no `:name`:
-  - hosted providers: `[protocols: [:http2], count: 1,
+  Finch pool options with no `:name`, chosen by the scheme of the explicit
+  `base_url`, not by the provider:
+  - `https`: `[protocols: [:http2], count: 1,
     http2: [max_connection_age: 300_000, max_connection_age_jitter: 30_000]]`;
-  - Ollama: `[protocols: [:http1], size: 8, count: 1]`.
+  - `http`: `[protocols: [:http1], size: 8, count: 1]`.
+
+  An HTTP/2-only pool has no ALPN fallback (`finch.ex:24-27`), so an `https`
+  endpoint that does not offer `h2` fails the call with a connection error,
+  classified as any error from the call is; Anthropic's, OpenAI's and
+  OpenRouter's default endpoints offer it. A plain `http` endpoint, such as a
+  local Ollama server or an OpenAI-compatible local server named by
+  `:base_url`, would need HTTP/2 prior knowledge, which such servers commonly
+  do not offer, so it gets the HTTP/1 list.
 
   ReqLLM keeps a name-less `finch:` list as given
   (`provider/defaults.ex:650-667`), and Req, given pool options and no name,
@@ -71,10 +80,14 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
   a hash of those options (`deps/req/lib/req/finch.ex:545-612`). So each fixed
   list names exactly one pool that Loopex alone configures, independent of
   `ReqLLM.Finch`, of `:req_llm`'s `:finch` and `:stream_pool_protocols`
-  settings, and of how a host-started `ReqLLM.Finch` was configured. A pool
-  listing both protocols would negotiate by ALPN without multiplexing
-  (`finch.ex:25-27`), so hosted calls name `:http2` alone; Ollama is plain
-  `http`, where HTTP/2 needs prior knowledge that its server does not offer;
+  settings, and of how a host-started `ReqLLM.Finch` was configured. The
+  per-call `pool_timeout` ReqLLM adds is a request option, split off before the
+  hash (`req/finch.ex:154`, `:570`), so it never creates another pool. The name
+  is public and deterministic (`req/finch.ex:604-613`): host code that
+  registers a Finch under it first, or adds a pool to that instance with
+  `Finch.start_pool/3`, is trusted host code, which the guards do not defend
+  against. A pool listing both protocols would negotiate by ALPN without
+  multiplexing (`finch.ex:25-27`), so `https` calls name `:http2` alone;
 - no `:cache` option, so ReqLLM's response cache is disabled
   (`cache.ex:125-128`).
 
@@ -172,9 +185,24 @@ infrastructure, not the call's, and they behave differently by protocol:
   sent without indexing and not stored; `x-api-key`, which Anthropic uses
   (`providers/anthropic.ex:511`), is not in that table, so its value is added
   to the connection's dynamic table (`hpax.ex:320-322`) and stays in the
-  connection's state until evicted or until the connection ends. Loopex's
-  HTTP/2 pool ends each connection within `max_connection_age` plus jitter,
-  330 seconds at most (`finch.ex:133-150`).
+  connection's state until evicted or until the connection ends. When
+  `max_connection_age` plus jitter (at most 330 seconds, `finch.ex:133-150`)
+  expires, an idle connection stops at once, but one with streams in flight
+  drains them first, until each finishes or its own timer fires
+  (`finch/http2/pool.ex:523-531`, `:604-624`, `:671-695`). So the key stays
+  until the later of 330 seconds after the connection opened and the deadline
+  of the last call sent on it, which is bounded by that call's
+  `receive_timeout`, the time left before its deadline.
+- **In-flight request metadata.** While a stream is in flight the HTTP/2 pool
+  keeps the whole `%Finch.Request{}`, headers and key included, in its
+  telemetry metadata and emits it in `[:finch, :send, :start]`
+  (`finch/http2/pool.ex:699-710`); for a killed caller that lasts until the
+  call's deadline.
+- **Retries below Loopex's view.** Finch re-dispatches a request refused by a
+  draining connection before its headers are written
+  (`finch.ex:830`, `finch/http2/pool.ex:582-583`, `:744-745`), so the request
+  is still sent once on the wire; `max_retries: 0` governs every other
+  retry.
 
 Nothing these processes hold can reach the session: the result path ended with
 the caller, and the call is already `dispatched_or_unknown`. Their residual
@@ -183,10 +211,11 @@ exposure the vision amendment names.
 
 **What the witness pins.** On both toolchain pairs, after one call has warmed
 the pool for the test server's origin (the first request to an origin starts
-Finch's pool shards, `finch/lib/finch/pool/manager.ex:96-134`), a census during
-a second plain-`http` call finds exactly the owner and the caller as new
-processes. A ReqLLM, Req or Finch update that moves the call into a new
-per-call process fails it.
+Finch's pool shards, `finch/lib/finch/pool/manager.ex:96-134`), a census
+during a second call finds exactly the owner and the caller as new processes,
+once over plain `http` with the HTTP/1 pool and once over TLS with the HTTP/2
+pool. A ReqLLM, Req or Finch update that moves the call into a new per-call
+process on either path fails it.
 
 **Host hygiene.** `ReqLLM.Application.start/2` reads `:load_dotenv` (default
 `true`) and loads `.env` from the working directory (`application.ex:25-31`).
@@ -270,8 +299,9 @@ context:
   VM; there a resolved credential exists in the calling process and in the
   provider library's HTTP and TLS processes for one call, and, where the
   provider's HTTP/2 header compression stores it, in the pooled connection
-  until that connection is replaced within a fixed maximum age, so their crash
-  reports, a crash dump and host-installed telemetry handlers can observe it.
+  until that connection is retired, at the later of its fixed maximum age and
+  the deadline of the last call sent on it, so their crash reports, a crash
+  dump and host-installed telemetry handlers can observe it.
   The reference-only runtime state, resolution at the model boundary, the
   calling process's trace exclusion and sensitive flag, and every other listed
   exclusion still hold, and a host that needs structural exclusion composes a
