@@ -33,9 +33,9 @@ defmodule LoopexComposition do
   """
 
   alias Loopex.{Executor.Local, LLM.ReqLLM, Store}
-  alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
+  alias Loopex.Executor.Local.WorkspaceLease
   alias Loopex.Store.Local.{Artifacts, Transfers}
-  alias LoopexComposition.{Edges, RuntimeOwner, WorkspaceIdentity}
+  alias LoopexComposition.{DurableOptions, Edges, RuntimeOwner, WorkspaceIdentity}
 
   require Logger
 
@@ -72,6 +72,14 @@ defmodule LoopexComposition do
   that only spills and later retrieves through `artifacts/1` wants: a runtime
   that named a store but held no transfer owner would refuse every transfer
   under a second, less obvious name instead.
+
+  `:model` selects a hosted `provider:model` string; Ollama is refused by this
+  credential-backed durable profile. `:bounds` accepts positive unsigned-64-bit
+  `:max_turns`, `:token_budget` and `:deadline_ms` members. `:sampling` accepts
+  exactly `%{"max_tokens" => n}` for 1 through 1,000,000. `:active_tools` accepts
+  unique defined tool ids, including an empty list; omission keeps the four
+  coding tools active. Default policy identity retains revision `"0.2.0"` for
+  recovery compatibility; hosts may supply their own `:policy_identity`.
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) when is_list(options) do
@@ -150,6 +158,7 @@ defmodule LoopexComposition do
          :ok <- provider_launch(options),
          :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
          :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
+         :ok <- DurableOptions.validate(options),
          do: {:ok, {options, root, workspace, id, policy}}
   end
 
@@ -207,8 +216,6 @@ defmodule LoopexComposition do
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, spill} <- artifact_placement(root, options),
          {:ok, executor} <- open_executor(root, workspace, options, spill) do
-      tools = CodingTools.definitions()
-
       with {:ok, runtime} <-
              start_edge(
                Loopex,
@@ -218,18 +225,18 @@ defmodule LoopexComposition do
                  policy: policy,
                  policy_identity: policy_identity(options, policy),
                  executor: executor,
-                 tools: tools
+                 tools: DurableOptions.definitions(options)
                ] ++
                  [
                    model: %{
                      module: ReqLLM,
-                     model: ReqLLM.default_model(),
+                     model: Keyword.get(options, :model, ReqLLM.default_model()),
                      options:
                        Keyword.get(options, :provider_launch, []) ++
                          credential_plane.model_options
                    }
                  ] ++
-                 [active_tools: ~w(loopex.read loopex.write loopex.edit loopex.bash)] ++
+                 DurableOptions.runtime_options(options) ++
                  context_token_budget(options) ++
                  served_artifacts(options, spill) ++
                  Keyword.take(options, @host_supplied)
@@ -249,16 +256,13 @@ defmodule LoopexComposition do
   # Technical depth: accepted ADR 0024 compares this identity when a recovered
   # owner resumes an interaction, so the runtime refuses a launch that names a
   # policy without one. This reference host names its own: the module an
-  # embedder chose, paired with the build that ran it. The pairing is what makes
-  # the comparison useful, because a build can change what a policy module does
-  # while keeping its name, and a revision that never moved would compare equal
-  # across that change. An embedder that knows better passes its own and this
-  # defers to it.
+  # embedder chose, paired with the fixed 0.2.0 revision ADR 0039 requires for
+  # upgrade and rollback. A host-supplied identity takes precedence.
   defp policy_identity(_options, nil), do: nil
 
   defp policy_identity(options, policy) do
     Keyword.get(options, :policy_identity) ||
-      %{"id" => inspect(policy), "revision" => Loopex.version()}
+      %{"id" => inspect(policy), "revision" => "0.2.0"}
   end
 
   defp store_options(root, options),
