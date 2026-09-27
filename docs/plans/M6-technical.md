@@ -1219,7 +1219,13 @@ catalog effects are outside the call-owned model transport guarantee.
 Cold initialization and callers waiting for it share LLMDB's VM-wide
 `:global.trans` load lock (`catalog.ex:305-306`); that wait and fetch consume
 each call's existing deadline. A loaded snapshot bypasses it. Loopex adds no
-catalog scheduler or timeout. Catalog load failure can raise inside metadata loading
+catalog scheduler or timeout. A failed cold load installs no snapshot or cached failure;
+a later independent or already-waiting call can run the host loader again
+(`llm_db/catalog.ex:107-122`, `llm_db.ex:152-162,540-549`). That is dependency
+loading, not an internal retry of the failed adapter invocation. Separately,
+unchanged core may admit another proved not_dispatched attempt within its
+two-attempt limit; a failed catalog invocation creates no model dispatch or
+blind replay authority. Catalog load failure can raise inside metadata loading
 (`catalog.ex:126-130,206-209`). ReqLLM.plan normally rescues translation failures
 and returns a sanitized error (`request_plan/diagnostic.ex:40-41,106-115`,
 `req_llm.ex:422-423`). The sensitive caller normalizes that error and catches
@@ -3460,7 +3466,10 @@ Server init creates an unnamed protected ETS table owned by the real server
 cache process, stores {:cache, default_initial_tree}, and returns {:server, table}.
 Server lookup/size read the current tree and delegate to ssl_server_session_cache_db;
 update/delete delegate, replace {:cache, new_tree} in that table and return :ok.
-terminate delegates then deletes that table. Default immutable operations are
+OTP never invokes server terminate/1 (floor `ssl_server_session_cache.erl:202-203`,
+current `:203-204`); the holder has no heir and disappears with its real owning
+cache process. Client terminate/1 delegates to the client default.
+Default immutable operations are
 floor `ssl_server_session_cache_db.erl:45-46,52-58,64-72,77-81`, current
 `:47-48,54-60,66-74,79-82`. Readiness follows successful replacement and an
 internal lookup proving the just-updated entry is present. After the matching
@@ -3479,7 +3488,16 @@ server operations persist the replacement immutable tree in their probe-owned
 mutable holder because OTP ignores the custom callback's returned tree. foldl/select_session
 are client-only optional callbacks (floor `ssl_session_cache_api.erl:120-158`),
 not calls to nonexistent server functions. The fixture explicitly exercises
-initial role binding and this actual roleless re-initialization.
+initial role binding and this actual roleless re-initialization in a separate
+fresh VM. Arm a one-shot client-only size/1 exception on genuine handshake-triggered
+cache registration; clear its fault marker before raising so recovery cannot
+rearm it. Keep the bound role plus a credential-free observer/nonce in that
+same real manager's process dictionary. OTP catches the exception, terminates
+the old cache, invokes roleless init/1 and resets its order (floor
+`ssl_manager.erl:510-533`, current `:514-545`). Require that real recovery and
+successful delegation to the fresh client cache. The positive-resumption
+control VM never arms this fault: a recovery resets the cache and cannot stand
+in for resumption readiness.
 
 **Packaged startup and catalog witness.**
 `apps/loopex_llm_reqllm/test/in_process_packaging_test.exs` inspects both actual
@@ -3543,13 +3561,48 @@ The real-core case lives in
 `apps/loopex_composition/test/session_containment_test.exs`, which depends inward
 on the model edge and can call public Ephemeral.ask/3. The adapter suite owns
 isolated protocol tests, not a reverse test dependency on composition.
-The composition case parks callback at an adapter
-seam just before register/2 after registration_pending acknowledgement. Test-only
-inspection of the real coordinator's in_flight entry obtains exact worker/guard
+The composition case parks callback just before register/2 after
+registration_pending acknowledgement through an edge-owned test-only hook.
+Compile this private hook only under MIX_ENV=test; production compiles that
+site to :ok without a lookup or observer. The composition test explicitly
+requires the model edge's test/support rendezvous helper, which arms an entry
+in a fixture-owned named public ETS table with no heir, keyed by the exact
+session atomics-cell reference
+already available through the private constructor. The composition fixture
+obtains that same cell from its real private handle in test-only code, not a
+new public handle or admission-token representation. This named rendezvous exists
+only in the test VM; it is not application/runtime truth or public configuration.
+The fixture runs async: false and owns/deletes the table; entries bind exact
+cells so no other session can consume the arm. The entry carries only the
+fixture PID and a fresh nonce. With no table or matching entry the hook is a
+no-op. The test-only public access permits the callback to atomically take
+only its exact cell entry with :ets.take/2. On a match it consumes the arm,
+monitors that fixture PID and reports
+{:before_provider_register, nonce, callback_pid, call_ref, candidate_pid} to
+that fixture. It waits for the exact {:continue_provider_register, nonce},
+matching fixture DOWN or a fixed fixture deadline, then demonitor/flushes.
+Only the matching continue releases the park; fixture loss or expiry fails the
+test invocation rather than silently proceeding into register/2. The rendezvous entry and handshake
+carry no call input or credential. It arms only this invocation; the second
+ask is unhooked. The hook adds no model option: its fixture PID, nonce and
+handshake messages never enter model options, a staged request, journal or
+public result. The existing session cell remains a transient private model
+option, not a new test-hook option. The test/support helper is not packaged;
+add its exact .exs path to the edge's test_ignore_filters list
+(`apps/loopex_llm_reqllm/mix.exs:18-22`) and explicitly require it in its consumer,
+without ignoring any *_test.exs selector. No production dependency points from
+the adapter back to composition.
+Test-only inspection of the real coordinator's in_flight entry obtains exact worker/guard
 PIDs from the actual in_flight value
 `%{task_ref => {:model, run_id, worker_pid, %{guard: guard_pid,
 reference: provider_reference, cleanup_grace_ms: grace}}}`
-(`session_coordinator.ex:3777-3787`). Suspend that worker, release the callback
+(`session_coordinator.ex:3777-3787`). This deliberately couples a private test
+to the locked kernel's in_flight shape; a kernel refactor must update and
+re-prove the harness, never silently skip the race or expose a new public API.
+Model options as a container are not journaled: core passes them to complete/3
+(`session_coordinator.ex:3713,4150`), while request staging extracts only the
+existing semantic max_tokens projection (`:3523-3531,3083-3087`). No test-hook
+value is placed in either path. Suspend that worker, release the callback
 seam, and observe its exact queued offer
 `{:loopex_provider_resource_offered, provider_reference, callback_pid,
 candidate_pid, stop_ref, offer_ref}`. Suspend callback before resuming
@@ -3558,13 +3611,36 @@ worker, observe its real acknowledgement
 `{:loopex_provider_resource_retained_by_worker, provider_reference, offer_ref,
 worker_pid}` queued to the still-suspended callback. Require the worker's actual
 Process.info(worker_pid, :monitors) includes {:process, candidate_pid}; the
-callback's earlier monitor is not worker-retention evidence. Guard cannot have received
-registration. Trigger a real public abort through a fixture-owned command
+callback's earlier monitor is not worker-retention evidence. Require successful
+live-process messages/dictionary snapshots, not nil treated as absence. The
+callback mailbox must contain that exact worker retention ACK; the guard
+mailbox must contain no matching
+{:loopex_provider_resource_register, provider_reference, callback_pid,
+candidate_pid, stop_ref, _}, and its dictionary must lack
+{{Loopex.Runtime.SessionCoordinator, :provider_resource}, provider_reference}
+(`session_coordinator.ex:4175-4187,4250-4259`). These assertions pin the actual
+worker-retained/guard-unregistered window rather than assuming it. Trigger a real public abort through a fixture-owned command
 attachment, or let the committed deadline expire. Follow actual callback DOWN,
 empty retirement, terminal, status and release/DOWN, then run the second public
-ask in that same session. No fake registrar, fabricated signal or production
-introspection is used. try/after releases only the exact fixture processes it
-suspended. The ordinary FacadeClient remains the sole event reader; the test
+ask in that same session. While the correlated release is withheld in the
+existing release-fault variant, require a second public ask to return
+{:error, :run_open}, the one record and slot2 still held, and no second model
+invocation or work grant; only actual candidate DOWN permits the next
+successful ask. The existing private test dispatcher defers only that exact
+release send, without blocking the session owner's receive loop or the sole
+facade reader. Deliver the original release within its unchanged 1,000 ms
+bound, then require genuine DOWN, cleared slot2 and the successful later ask.
+If withholding exhausts the bound, require conservative session cleanup,
+never successful reuse or a deadline extension. No fake registrar, fabricated signal
+or production introspection is used. try/after deletes any remaining rendezvous
+arm, releases only the exact hook nonce and resumes only fixture processes it
+suspended. Catch only the expected badarg from resume_process for an already
+dead or no-longer-suspended PID; an alive? check cannot close that race, and
+other failures remain test failures. Abort can race the guard's worker-DOWN
+handler against coordinator stop: assert the public cancelled or deadline
+bound_reached outcome and conservative dispatched_or_unknown settlement,
+not which guard branch or exit reason won (`session_coordinator.ex:5859-5871`).
+The ordinary FacadeClient remains the sole event reader; the test
 command attachment only submits abort. A blocked-status variant proves terminal
 alone cannot release. Lost release acknowledgement with genuine DOWN remains
 proved; missing DOWN does not. Registered stop winning first uses its exact ACK.
@@ -3613,7 +3689,25 @@ fixed not_dispatched/model_call_failed after teardown, with no model connection,
 selected-provider-key read or sentinel in Loopex results, progress, trace or retained owner/runtime
 state. A blocked remote load with a second cold caller pins shared-lock waiting
 against their existing deadlines; deadline expiry kills owned callers, invents
-no retry, and does not claim cancellation of host-owned cache effects. All paths and
+no retry, and does not claim cancellation of host-owned cache effects. A failed
+cold load installs no catalog snapshot, so a later independent or waiting call can
+load again (`llm_db/catalog.ex:107-122`, `llm_db.ex:152-162,540-549`). This is
+ordinary dependency loading, not a retry of the failed Loopex model call. In a
+separate fail-then-success remote fixture case, drive two direct edge
+complete/3 invocations through the existing managed ProviderLifetime fixture
+pattern (`apps/loopex_llm_reqllm/test/provider_bridge_test.exs:167-215`), with the required session-local
+admission fixture and real teardown, not composition or public ask. Count
+loader requests with no snapshot/cache hit, fail the first invocation's load
+and supply a valid fixture for the second invocation after proved cleanup.
+Require the first invocation to return its fixed failure once, the second to
+perform its own load and succeed, and no extra load or model dispatch within
+the failed invocation. Real core may separately retry a proved not_dispatched
+attempt within its unchanged two-attempt limit
+(`session_coordinator.ex:7052-7054`, `session_state.ex:1332-1333`,
+`provider_attempt.ex:105,120-121`); this edge-level witness does not falsely
+claim the first public ask must fail or that its whole run has only one load.
+Do not infer a loader count from
+successful-cache reuse or count ordinary catalog traffic as model dispatch. All paths and
 values are isolated fixtures; the model transport and release provider lanes
 remain unchanged. Mutants forcing :packaged or deleting host metadata/cache
 must fail. These cases run in the fast adapter lane, separately from the
@@ -3731,9 +3825,20 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
   its question. No build/dependency work occurs between committed question and
   answer. Retain its interaction id and stored expires_at unchanged;
   policy expiry is min(five minutes after committed creation, run deadline)
-  (`policy/ask.ex:27-39`, `session_coordinator.ex:6525-6541,6753-6767`). Reader
-  checks that stored expiry before activation/answering, and the witness requires
-  the answer committed before it. Expiry fails or is unavailable evidence, never
+  (`policy/ask.ex:27-39`, `session_coordinator.ex:6525-6541,6753-6767`). Both
+  writers explicitly put bounds: %{deadline_ms: 600_000} on the original
+  public prompt command, matching the released default (`runtime.ex:946`) and
+  its command-bound merge (`session_coordinator.ex:3540-3543`). Do not rely on
+  the :bounds composition option that 0.2 ignores. This does not change the
+  five-minute interaction expiry.
+  This leaves room for proved writer teardown and fresh reader VM startup;
+  neither step starts a new expiry clock. The reader computes the remaining
+  budget from that stored expires_at and the same wall-clock basis used by
+  Ask. Require at least 120_000 ms remaining before activation/answering and
+  retain that measured budget; insufficient headroom is unavailable evidence,
+  not a reason to extend, recreate or retry the question. Require the actual
+  answer commit before the unchanged expiry even after this admission check.
+  Expiry fails or is unavailable evidence, never
   a new question, extension or retry. Both source versions must derive the same
   module id and default revision `"0.2.0"` (`loopex_composition.ex:249-261`);
   Ask really defers (`policy/ask.ex:53-80`). CLI allow-all/shell-allowlist cannot
@@ -3778,8 +3883,27 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
   the pinned floor pair and absolute pair-specific build root used by its fast
   step. Change the release lane() helper to stream directly into its retained
   `$retain/$label.log`, judge that same file and retain command/tee statuses,
-  executed count and measured duration before any failure exit. Save both pipe
-  statuses immediately; failed retention is unavailable evidence, never PASS.
+  executed count and measured duration before any failure exit. Disable errexit
+  only around the pipeline and capture its complete PIPESTATUS array as the
+  immediately following command, before restoring errexit. Guard summary
+  extraction with a guarded `if` around the command substitution running
+  `bash scripts/suite-summary.sh "$retain/$label.log" --count`, recording its
+  status and either a numeric count or the fixed unavailable marker; no failed
+  substitution may trigger an early set -e exit. After the stream closes,
+  append command, tee and summary statuses, count and measured duration to
+  that same lane log. Emit its final retained path and SHA-256 in the release
+  transcript, for every lane including failed lanes. Reuse the existing digest
+  helper (`check-release.sh:102-103`), not just its two fresh-source-file digest
+  calls. Only after those records are retained may the helper enforce
+  command/tee/summary statuses and expected case count.
+  No log is changed after its digest. Missing log, count or digest is unavailable
+  evidence, never PASS. A scripts/test/floor-lane-test.sh fixture plus a
+  release-lane-helper fixture in scripts/test/attended-release-test.sh must
+  drive a failing executed command and a failed count parser, and require the
+  retained status/count-or-unavailable/duration and SHA-256 line before nonzero
+  exit. A failing command whose summary parser refuses is not claimed to have
+  a numeric count. These fixtures execute the candidate's actual lane helper,
+  not a copied implementation of it.
   EXIT cleanup removes only disposable extractions/scratch, not retained logs.
   The current temporary-log helper (`check-release.sh:34,118-122`) cannot satisfy
   this without that explicit change. It retains

@@ -940,11 +940,23 @@ server callback OTP discards returned replacement trees (floor
 `ssl_server_session_cache.erl:235-245`, current `:236-246`): the test probe therefore
 keeps the default server gb_tree inside its own unnamed protected ETS holder,
 owned by the real server cache process. update/delete delegate and replace that
-stored tree; lookup/size read it, and terminate removes it. Emit server readiness
+stored tree; lookup/size read it. OTP never calls the server callback's
+terminate/1 (floor `ssl_server_session_cache.erl:202-203`, current `:203-204`);
+its holder has no heir and disappears automatically when that owning cache
+process exits. Client terminate/1 still delegates to the client default.
+Emit server readiness
 only after replacement and successful internal lookup of the updated entry.
 No session/key/tree leaves the callback. Optional foldl/select_session are
 client-only. The M6
-fixture exercises that actual re-init shape.
+fixture exercises that actual re-init shape in a separate fresh VM: arm a
+one-shot client-only size/1 exception for genuine handshake-triggered cache
+registration, clear its fault marker before raising, and preserve the role and
+credential-free observer/nonce in the real manager's process dictionary. The
+manager catches the exception, terminates the old cache and calls roleless
+init/1 (floor `ssl_manager.erl:510-533`, current `:514-545`). Observe that actual
+recovery and successful delegation to the same role's fresh cache. Do not arm
+this fault in the positive-resumption control VM; recovery resets its cache
+and is not resumption-readiness evidence.
 Missing readiness or a non-resuming control fails or is unavailable evidence;
 no repeated handshake retries manufacture a pass. Two concurrent same-origin calls prove distinct tags and that cleaning
 one does not disturb the other.

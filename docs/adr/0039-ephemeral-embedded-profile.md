@@ -295,8 +295,10 @@ failure uses attach_failed/{:attach, :failed} and rollback; no per-prompt status
 read changes short ask timeouts. This orders core's completed stop handling;
 it does not prove cleanup. Only the empty retirement and candidate's actual
 DOWN clear the one outstanding record before another ask. Until that happens,
-terminal exposure remains pending across waiting and background API paths;
-the original wait deadline is unchanged. A failed continuation barrier with a
+terminal exposure remains pending across waiting and background API paths:
+last_result retains its prior observation and another ask returns run_open.
+The original waiting-call deadline is unchanged and may return a timeout while
+bounded background reconciliation completes. A failed continuation barrier with a
 valid retained terminal enters stop: proved cleanup returns that terminal to
 any waiting caller and closes the handle; unproved cleanup carries the real
 ending in cleanup_unproved. A prior timeout receives no second reply.
@@ -397,7 +399,10 @@ proposed. Embedded and escript startup use the same guards, and both spend the
 model deadline on any cold shared catalog
 initialization, including its VM-wide load lock. A planning load failure before
 key resolution/model dispatch takes fixed not_dispatched/model_call_failed
-with owned cleanup, not a raw loader diagnostic. This host-selected catalog
+with owned cleanup, not a raw loader diagnostic. A failed cold load installs
+no catalog snapshot or cached failure; a later call may load again, including
+core's unchanged second attempt after proved not_dispatched. No possibly sent
+model request is retried. This host-selected catalog
 trust scope is explicitly proposed for acceptance below, not already approved.
 The escript
 uses `app: nil`: invalid ask forms start no Loopex application, valid
