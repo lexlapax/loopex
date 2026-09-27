@@ -220,10 +220,16 @@ defmodule Loopex.ClosureConfineTest do
   end
 
   test "the closure row binds both tested plan bytes, not plausible-looking digests", c do
+    correct = digest(tested_files()["docs/plans/M6.md"])
+    wrong_first = if String.starts_with?(correct, "0"), do: "1", else: "0"
+    wrong_digest = wrong_first <> binary_part(correct, 1, 63)
+
     wrong =
       fixture_admin(c, fn files ->
         Map.update!(files, "docs/plans/M6.md", fn plan ->
-          String.replace(plan, "concept `sha256:", "concept `sha256:0", global: false)
+          String.replace(plan, "concept `sha256:#{correct}`", "concept `sha256:#{wrong_digest}`",
+            global: false
+          )
         end)
       end)
 
