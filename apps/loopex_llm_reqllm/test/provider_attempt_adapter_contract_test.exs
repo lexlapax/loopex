@@ -890,6 +890,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     ~S"""
     {:ok, model} = ReqLLM.model(request.model)
     {:ok, identity} = Loopex.LLM.ReqLLM.identity(request.model)
+    {:module, Loopex.LLM.ReqLLM.Mapping} = Code.ensure_loaded(Loopex.LLM.ReqLLM.Mapping)
     clean = %{finish_reason: :stop, status: 200, headers: []}
     text = [ReqLLM.StreamChunk.text("control")]
     broken_calls = [
@@ -922,16 +923,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       collector = spawn_link(fn ->
         loop = fn recur, {count, unexpected} ->
           receive do
-            {:trace, ^caller, :call, {Loopex.LLM.ReqLLM, :failure_pair, 2}, :normalization_match} ->
+            {:trace, ^caller, :call, {Loopex.LLM.ReqLLM.Mapping, :failure_pair, 2}, :normalization_match} ->
               recur.(recur, {min(count + 1, 2), unexpected})
-            {:trace, ^caller, :call, {Loopex.LLM.ReqLLM, :failure_pair, 2}, :unexpected_normalization} ->
+            {:trace, ^caller, :call, {Loopex.LLM.ReqLLM.Mapping, :failure_pair, 2}, :unexpected_normalization} ->
               recur.(recur, {count, min(unexpected + 1, 2)})
             {:collect, reference} -> send(caller, {reference, {count, unexpected}})
           end
         end
         loop.(loop, {0, 0})
       end)
-      target = {Loopex.LLM.ReqLLM, :failure_pair, 2}
+      target = {Loopex.LLM.ReqLLM.Mapping, :failure_pair, 2}
       true = :erlang.trace_pattern(target, [{[stage, class], [], [{:message, :normalization_match}]},
         {[:_, :_], [], [{:message, :unexpected_normalization}]}], [:local]) > 0
       1 = :erlang.trace(self(), true, [:call, :arity, {:tracer, collector}])
