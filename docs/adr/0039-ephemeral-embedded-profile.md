@@ -131,7 +131,11 @@ narrows:
   secrecy guarantee this profile supplies. Before a mapped provider reply can leave the caller, every
   provider-controlled binary in it—including assistant text, tool-call fields
   and `provider_response_id`—is checked for the exact resolved value; a match
-  discards the reply and returns a fixed failure. The calling process is
+  discards the reply and returns a fixed failure. If a host-authorized tool
+  put that key into model context, repeated provider echoes can keep failing as
+  `model_call_failed` while the context remains. The guard has no tool-copy
+  exemption and performs no context cleansing; proved failed-call cleanup does
+  not itself seal the session. The host owns its tool/context choice. The calling process is
   excluded from Loopex trace sessions and marked sensitive, so Loopex tracing
   omits it and ordinary crash-dump process detail is suppressed.
 - **Not structurally excluded from the host VM.** The host environment keeps
@@ -276,8 +280,10 @@ activation release call authority.
 An unknown queued start or missing candidate/proxy termination seals only the
 attempted session and remains conservative failure; it never becomes clean
 `not_dispatched`. A queued Task.Supervisor start may later materialize only an
-inert candidate. Without activation it exits when it observes callback/proxy
-loss or expiry. In the locked worker-retained/guard-unregistered interval,
+inert candidate. Before `registration_pending` it exits on callback/proxy loss
+or expiry. After acknowledging that phase it cancels its expiry and stays inert
+on callback loss, awaiting core's exact stop or session-subtree teardown. In the
+locked worker-retained/guard-unregistered interval,
 core may settle before that authority-free candidate's termination; this
 proves no registered provider-resource obligation or released authority, not
 candidate termination. Complete session-subtree proof still reaps it. If
@@ -297,13 +303,13 @@ withholds success or a stop acknowledgement. The owner remains alive until
 core's registered-resource stop handshake finishes. The model reply is whole;
 there is no streamed progress.
 
-The session's existing opaque lifecycle cell is also its explicit private
+M6 adds an opaque lifecycle cell for each session as its explicit private
 admission seal: open `0`, stopping `1`, closed `2`, cleanup-unproved `3`.
 A second private atomic slot is idle `0` or provider-attempt outstanding `1`.
 Before any proxy/candidate, the callback requests begin-model custody from the
 responsive session owner, which reserves that slot and records its reference/
 monitor. Model and executor edges use inward private admission behaviours with
-one composition implementation over that existing owner; no new global actor
+one composition implementation over that M6 owner; no new global actor
 or secret-bearing message is introduced. No pre-registration child
 receives the cell. Every model/tool grant requires open and a bounded correlated
 session-owner reconciliation of any prior outstanding attempt. A managed call
@@ -318,17 +324,24 @@ inspection survives only where the M6 API explicitly permits it.
 **Host hygiene.** ReqLLM, Req and Finch are compile-time/code dependencies but
 not automatically started runtime dependencies. Before an explicit start,
 composition requires empty Req defaults, no `SSLKEYLOGFILE` and
-`TIDEWAVE_REPL != "true"`. A restartable `ReqLLMStarter` service serializes
+`TIDEWAVE_REPL != "true"`. A temporary `ReqLLMStarter` service serializes
 startup under M6's shared-start protocol. Its worker contains no session input,
 key, activation or effect authority. A waiter has a 5,000 ms bound; timeout or
 requester death does not cancel shared application-controller work. The
 service retains startup provenance for later reconciliation; uncertainty is a
 fixed startup refusal for that waiter, not a persistent poison or VM lockout.
+Only a positively completed Loopex start establishes provenance. A service
+crash is not automatically restarted and cannot consume the session parent's
+restart budget; a later creation recreates it within its existing startup bound.
+An admitted unlinked initializer survives service loss. An indeterminate
+running application without positive provenance requires the host declaration,
+not inferred ownership from a stale start intent.
 Already-running ReqLLM is accepted only with .env loading off and retained
 Loopex startup provenance or the host's explicit declaration. Shared-service
 outages are reported honestly and may affect sessions using that service.
 
-Loopex persists `load_dotenv: false` before its admitted ReqLLM start and does
+Loopex persists `load_dotenv: false` before its admitted ReqLLM start, including
+overriding a stopped application's `load_dotenv: true`, and does
 not restore the setting or stop reference-counted dependencies. The host owns
 later mutations, false declarations, preexisting listener/file opens and
 shared infrastructure. Inline models avoid catalog lookup; no other ReqLLM
@@ -742,7 +755,8 @@ This adds the profile and narrowly reworks two private companion mechanics:
     workspace's discovered project skills, resumes the session with all of its
     skill context withheld, project skills included, as core does for any
     snapshot it cannot match.
-    `0.2` cannot admit a new one.
+    Its released CLI/daemon cannot discover a new external user skill. This
+    does not constrain arbitrary embedding-host manifests.
 
 ## Governance Record
 
