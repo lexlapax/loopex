@@ -17,7 +17,7 @@ only in prose declares nothing.
 
 | Decision | Acceptance point | What its acceptance settles |
 | --- | --- | --- |
-| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Before the in-process model adapter, the memory store, the ephemeral composition, named skill directories or the fixed policy revision is written. Outcome 6, the read-only tools and the durable composition's model, bounds, sampling and active-tool options do not wait on it | Outcomes 1 to 5: the two profiles, the memory store's truth statement, one in-process ReqLLM adapter for every provider with credentials read at the model boundary, its guards, one-shot dispatch, call-owned tagged transport and cleanup, the paired vision amendment, the ReqLLM start step, the default model, the skill rule with its two ADR 0025 supersessions, the fixed durable policy revision and its two rollback exceptions, the authority rule, and `ask`'s machine contract |
+| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Before the in-process model adapter, the memory store, the ephemeral composition, named skill directories or the fixed policy revision is written. Outcome 6, the read-only tools and the durable composition's model, bounds, sampling and active-tool options do not wait on it | Outcomes 1 to 5: the two profiles, the memory store's truth statement, one in-process ReqLLM adapter for every provider with credentials read at the model boundary, its guards, one-shot dispatch, call-owned tagged transport and cleanup, the paired vision amendment, the ReqLLM start step, the default model, the skill rule with its two ADR 0025 supersessions, the fixed durable policy revision and its stated rollback limitations, the authority rule, and `ask`'s machine contract |
 
 **The closure prerequisite, satisfied.** M5 closed on 2026-09-26 at the tested
 implementation `fe020e24b62504f6f2fbc6c81711f399803b6fa9` (administrative
@@ -41,22 +41,20 @@ amendment states.
   superseding ADR 0025's source and name-order clauses explicitly;
 - the durable profile may activate the new read-only tools, and the rollback
   claim is narrowed to name what `0.2` does with them;
-- the in-process call and result path are non-streaming and run in one caller,
-  while a call-owned tagged pool carries the connection; this is the selected
-  M6 implementation boundary and replaces the earlier choices recorded below;
 - model calls use HTTP/1, and HTTP/2 is future work gated on Finch.
 
-**The earlier choices, and why they were replaced:** on 2026-09-26 the
-maintainer first chose that cleanup walk the call's linked streaming process
-tree. Reviews showed that Task startup and teardown leave request-bearing
-processes briefly unreachable from any link, so the ReqLLM call became
-non-streaming in one caller. A later shared HTTP/1 pool relied on
-`Connection: close`; review showed that a request header cannot force peer
-closure and that OTP may retain TLS resumption state after a response. The
-selected M6 design keeps the one caller but gives every call a unique tagged
-HTTP/1 pool, an owner-side one-shot dispatch fence, explicit TLS retention
-controls and local pool teardown. The reply still arrives whole, with no
-progress deltas. Plan and ADR acceptance remain separate maintainer decisions.
+**Maintainer decisions, 2026-09-27:** the maintainer selected the non-streaming,
+sensitive-caller path with one uniquely tagged HTTP/1 Finch pool and one-shot Req
+dispatch adapter per call. Hosted ephemeral models may use the same coding or
+read-only tool presets as Ollama; supported credential variables may already be
+set in the host environment. A failed call or unproved cleanup seals only its
+session. There is no cross-session exclusion or VM restart requirement. These
+are proposed-plan decisions; accepting ADR 0039 and this plan pair remains separate.
+
+The tagged pool and one-shot fence replace the shared-pool and
+`Connection: close` approach: a request header cannot force peer closure or
+prevent retained TLS session state. One owned pool gives local teardown an exact
+target; the request remains in the sensitive caller. HTTP/2 stays future work.
 
 **At acceptance of ADR 0039,** the acceptance change also:
 - makes the vision amendment ADR 0039's technical companion states, in all
@@ -93,7 +91,7 @@ contract.
 | What can a caller supply or observe? | The embedded API and command sections give closed grammars, value domains, return and exit algebras, precedence rules, bounds and profile-specific mappings |
 | Which process owns each mutable fact and cleanup obligation? | The API, adapter, composition and failure-boundary sections name the owner, supervision or monitoring relationship, registration point, stop order, retry state and unproved state for every actor |
 | Can the locked dependencies perform the design without an unstated route? | The composition bootstrap, adapter and compatibility sections pin OTP application startup plus the ReqLLM, Req, Finch, Mint and NimblePool call paths, options, timers, retry fence, final route and escript/release behavior used by M6 |
-| Are trust and credential transitions complete? | ADR 0039 and the adapter contract name every participant, capability, guard boundary, credential read, value check, release proof, poison transition and admitted nonparticipant |
+| Are trust and credential transitions complete? | ADR 0039 and the adapter contract name every participant, capability, guard boundary, credential read, value check, session containment, bounded initialization recovery and trusted host limit |
 | Can every promised outcome be demonstrated? | The evidence table binds every outcome and boundary to named tests, fixtures, real-provider lanes, retained reviews or demonstrations, including failure injection and exact boundary values |
 | Can M6 land without an implicit compatibility decision? | The compatibility, migration, rollback and packaging sections enumerate every M1–M5 rework, retained default, version change, rollback exception and release artifact |
 
@@ -111,12 +109,14 @@ Concept: [Scope](M6.md#concept-plan-scope).
 
 | Workstream | Owns | Depends on | Rejoin order |
 | --- | --- | --- | --- |
-| 0. Governance prerequisite | P2's `AGENTS.md` and verification-guide rule for selected unattended release lanes before provider, credential, wire-protocol or daemon merges | Plan acceptance | Before A and before any provider-touching merge |
-| A. Model and store | `Loopex.LLM.ReqLLM.InProcess`, its cleanup owner and `OneShotHTTP1` Req adapter, the model-side gate behaviour, the pure mapping it shares with the companion and the shared two-consumer `Deadline` arithmetic, in `apps/loopex_llm_reqllm/lib/loopex/llm/`; ReqLLM's removal from automatic start in `apps/loopex_llm_reqllm/mix.exs`; `Loopex.Store.Memory` in `apps/loopex_store_local/lib/loopex/store/`; the conformance runs for both | ADR 0039 | Foundation; may rejoin before or after B |
-| B. Local executor | Every M6 change under `apps/loopex_executor_local`: the executor-side inward gate-client behaviour, ephemeral init-registration and process-proof integration, environment hardening, and `loopex.grep`, `loopex.find` and `loopex.ls`, with their focused tests | ADR 0039 for the private gate contract; otherwise independent of A | Foundation; may rejoin before or after A |
-| C. Composition | `LoopexComposition.Ephemeral` (the embedded API, bounded application bootstrap and composition), `LoopexComposition.Application` plus the `mix.exs` `mod:` entry for its one-for-all tree and `prep_stop/1`/`stop/1` handshake, the ReqLLM start step, the composition-side implementation of the model and executor inward gate-client behaviours, the durable `LoopexComposition.start/1`, `with_runtime/2` and `start_edges/2` options `:model`, `:bounds`, `:sampling` and `:active_tools` and their fixed policy revision, and `LoopexComposition.ResourcePacks.read_directories/2`, all in `apps/loopex_composition` | A and B for the ephemeral profile; neither for the durable options | After both foundations |
-| D. Command | The `ask` subcommand and its `-p` alias, output modes, exit map, correlated ask-mode interrupt API, pre-child signal latch, escript `app: nil` setting and command-aware application bootstrap in `apps/loopex_cli` | C | After C |
-| E. Closure tooling and documentation | `mix loopex.closure.confine`, `mix loopex.closure.archive_compare` (in `apps/loopex/lib/mix/tasks/`, beside the existing checks), `scripts/stage-archive-manifest.sh`, `scripts/floor-lane.sh` and `scripts/attended-release.sh` with their fixture tests; P1, P3 and P4; `README.md`, `docs/operator/getting-started.md`, `runtime.md`, `tools-and-policy.md`, `docs/developer/getting-started.md` and its technical companion, `runtime-and-embedding.md`, `compatibility-surfaces.md`; the closure evidence scaffold | Outcome 6 tooling is independent; product documentation follows A through D | Last |
+| 0. Governance prerequisite | P2's `AGENTS.md` and verification-guide selected unattended release lanes | Plan acceptance | Before any provider-touching merge |
+| A. Model and store | In-process adapter, per-call cleanup owner, one-shot HTTP/1 adapter, shared mapper and two-consumer deadline arithmetic in `loopex_llm_reqllm`; load-only dependencies; promoted memory store | ADR 0039 | Foundation; either order with B |
+| B. Local executor | Three read-only tools, session-cell/admission dispatch check and direct nonce-bound process-group drain proof in `loopex_executor_local` | ADR 0039 for session containment; otherwise independent of A | Foundation; either order with A |
+| C. Composition | Embedded API, one-worker application bootstrap, `:one_for_one` application tree with `ReqLLMStarter` and owner DynamicSupervisor siblings, owner activation proxy, private session subtree, durable added options/policy revision, skill helper | A and B for ephemeral profile; neither for durable options | After A and B |
+| D. Command | Ask/-p grammar, rendering, interrupts, launcher latch, escript command-aware bootstrap | C | After C |
+| E. Closure tooling and documentation | Two Mix tasks, three scripts/fixtures; P1/P3/P4, operator/developer pages, indexed closure scaffold | Tooling independent; product docs follow A–D | Last |
+
+
 
 One integrator owns rejoin, conflicts and post-rejoin verification. Parallel
 writers use one worktree each with non-overlapping paths. The integrator writes
@@ -214,7 +214,7 @@ runtime library (`apps/loopex/lib` outside `mix/`) is unchanged by M6.
         root_ownership: :owned | :unknown,
         pending: [
           :run_ending | :effect_cleanup | :process_groups | :session_subtree
-          | :gate_release | :root_removal
+          | :root_removal
         ],
         ending:
           {:ok, result()}
@@ -286,15 +286,7 @@ runtime library (`apps/loopex/lib` outside `mix/`) is unchanged by M6.
         :composition_application_start_failed
         | :host_policy_required
         | :unknown_provider
-        | :hosted_tools_unsupported
-        | :ambient_provider_credentials
-        | :credential_preflight_failed
-        | :credential_tool_gate_unavailable
-        | :ephemeral_admission_closed
-        | :ephemeral_admission_poisoned
         | :ephemeral_owner_start_failed
-        | :ephemeral_owner_registration_failed
-        | :credential_call_active
         | :workspace_unusable
         | :temporary_root_unusable
         | :temporary_root_creation_failed
@@ -361,12 +353,12 @@ claim; every ordinary startup or stop failure therefore keeps that value. It is
 have pre-existed and the error is a diagnostic, never authorization to remove
 it. `unproved.pending` is a non-empty, duplicate-free subset emitted in this fixed
 order: `:run_ending`, `:effect_cleanup`, `:process_groups`,
-`:session_subtree`, `:gate_release`, `:root_removal`. It names every cleanup
+`:session_subtree`, `:root_removal`. It names every cleanup
 obligation the owner reached and could not prove in that attempt; it does not
 name a downstream phase that its prerequisites prevented it from entering.
-`gate_release` is therefore present only after items 1 through 4 below were
-proved and the final gate exchange failed, and `root_removal` is present only
-after gate release was proved and removal was not. They never occur together.
+Root removal is reached only after the run, effect, process-group and subtree
+obligations are proved; a failed prerequisite omits downstream obligations.
+
 Its `ending` describes the current public operation, never an earlier completed
 run. It is the exact observed
 `{:ok, result}` or `{:error, run_error}` when that run reached a terminal event.
@@ -407,7 +399,7 @@ starts.
 | `:policy` | Required non-nil module atom that loads and exports `decide/1`, the `Loopex.Policy` callback, and whose `inspect/1` result is valid UTF-8 from 1 through 256 bytes so the derived policy identity is constructible in core's released domain. A non-atom, unloadable module, module without `decide/1` or longer derived identity returns `{:invalid_option, :policy}`. Composition ships no policy of its own, because host policy belongs to the host. The `ask` command maps its policy names to the reference CLI's policy modules | none; omission refuses `{:composition, :host_policy_required}` |
 | `:model` | Valid UTF-8 `provider:model` string of 1 to 512 bytes, split at its first colon, with a non-empty provider prefix and non-empty remainder as the model id; later colons belong to the id, so `ollama:name:tag` is valid. The later provider guard admits the four prefixes ADR 0039 names and returns `{:composition, :unknown_provider}` for any other well-shaped prefix | `LOOPEX_MODEL`, else `"ollama:llama3.2"`; the selected default is validated identically |
 | `:req_llm` | Exactly `:host_started`, declaring that the host started ReqLLM itself with `.env` loading off; explicit `nil` is invalid | omitted, so Loopex performs the guarded start |
-| `:tools` | Exactly `:none`, `:coding` (`read`, `write`, `edit`, `bash`) or `:read_only` (`read`, `grep`, `find`, `ls`). Only presets are accepted because their projections carry the ADR 0017 system-class witness. A credential-bearing hosted model accepts only `:none`; either active preset refuses `{:composition, :hosted_tools_unsupported}`. With credential-free Ollama, an active preset additionally requires all three supported hosted-provider variables unset, or refuses `{:composition, :ambient_provider_credentials}` | `:coding` |
+| `:tools` | Exactly `:none`, `:coding` (`read`, `write`, `edit`, `bash`) or `:read_only` (`read`, `grep`, `find`, `ls`). Only presets are accepted because their projections carry the ADR 0017 system-class witness. Every admitted provider accepts each preset. Supported host credential variables may be set; OS child environments retain released behavior, with no new scrub or same-user isolation promise. | `:coding` |
 | `:skills` | Proper list of zero to four non-empty valid UTF-8 path strings, each at most 65,536 bytes and containing no NUL, reusing the named-resource path ceiling (`resource_packs.ex:27`, `:957-964`); paths are expanded relative to the validated `:cwd`, then the named-directory rules validate and classify them. Five or more returns `{:invalid_option, :too_many_skills}` | `[]` |
 | `:cwd` | Non-empty valid UTF-8 path string of at most 65,536 bytes with no NUL, reusing the same path ceiling and resolving to an existing directory; workspace root for every tool and for skill classification | the result of `File.cwd/0`; inability to read or resolve it refuses `{:composition, :workspace_unusable}` |
 | `:max_steps` | Positive unsigned 64-bit integer, mapped to the runtime bound `max_turns`; composition deliberately narrows core's wider integer domain so every public option and retained bound is bounded | 16 |
@@ -437,34 +429,14 @@ current interaction and offered choices. `last_result/1`, `history/1` and
 These orders also govern combinations of errors; no branch chooses by map or
 keyword enumeration order.
 
-After value validation, `start_session/1` and `run/2` apply composition checks
-in this exact order, and the first failure wins: resolve and verify `:cwd`;
-invoke the named-directory helper on the complete `:skills` list; split and
-admit the model's provider prefix; map it through the fixed prefix-to-expected-
-module table; apply the hosted-tools rule and the pre-start Req default-options,
-`SSLKEYLOGFILE` and Tidewave guards; run the bounded
-`loopex_composition` application bootstrap and obtain its exact live gate;
-complete the ReqLLM-start hygiene decision;
-verify that the now-initialized registry maps the prefix to that exact module;
-select the explicit `:base_url` or call that verified module's
-`default_base_url/0`, then normalize it; reserve, start and exchange the still-root-blocked owner
-at the scheduling gate; for an active Ollama preset acquire its tools lease and
-then run the sensitive ambient-variable preflight; repeat the global, provider
-and address guards; obtain the gate-issued root-start token; then create the
-root and private subtree. A later phase never runs after an earlier refusal.
-Any failure after owner exchange uses the bounded no-root cancellation handshake
-until the gate issues that token. Combined-fault tests cover every adjacent
-pair—including pre-start guard versus application bootstrap and application
-bootstrap versus ReqLLM hygiene—and policy omission together with bad prompt,
-skill, provider and hygiene inputs.
-
-A hosted model needs its provider's own credential variable set in the host's
-environment, which the calling process reads at each call, and the `:none` tool
-preset. For Ollama, either active preset also requires every supported hosted
-provider variable unset. Within the ephemeral composition's participants, no
-active-tool session overlaps its owned credential caller or pool; the durable,
-direct-executor, trusted-host and post-quarantine transport limits are stated
-below.
+After value validation, creation checks in fixed order: resolve `:cwd`; read
+the complete named skill list; split/admit model prefix; map its expected built-in
+module; check empty Req defaults, unset SSLKEYLOGFILE and Tidewave guard; bootstrap
+the composition application; perform or join the bounded ReqLLM initialization;
+verify the initialized provider registry's exact module; select/normalize the
+explicit or built-in address; activate a temporary owner. Each first failure wins,
+and no credential is read during composition. Combined-fault fixtures pin adjacent
+pairs and the same order independent of input keyword enumeration.
 
 **Semantics:**
 
@@ -497,7 +469,7 @@ below.
      owner makes the following stop bare-unavailable, `run/2` preserves the
      first cleanup map, which is the only public value that names the root;
   4. otherwise a bare-unavailable stop overrides the earlier value as the bare
-     `:session_unavailable`, except for the proved-cleanup case below; and
+     `:session_unavailable`; and
   5. after an ordinary successful stop, the first result is returned, with a
      pending interaction mapped to `interaction_requires_session`.
 
@@ -529,25 +501,33 @@ below.
   may read about the session comes from a terminal observation, `history/1`
   and `last_result/1`: every terminal observation carries `session_id` and
   `profile`. The opaque
-  handle also contains one private `:atomics` cell, initially open. It is
-  neither boundary data nor global state and carries no request or credential.
+  handle also contains one private session-local `:atomics` two-slot cell: slot 1 is 0 open, 1
+  stopping, 2 proved closed, 3 cleanup unproved; slot 2 is 0 no pending model,
+  1 pending model/call cleanup. The owner passes this same cell
+  explicitly through private model and executor constructors. It carries no
+  credential or durable truth. Grant checks admit only 0; 1, 2 and 3 refuse new
+  work. Stop uses compare-exchange 0→1; a containment failure compare-exchanges
+  only 0 or 1 to 3, preserving an existing 3 and never overwriting proved-closed 2
+  before its result or notification. State 2 is absorbing; late failure notices
+  cannot revoke its exact proof. No code changes 1 or 3 back to 0. Only
+  proved session cleanup and root removal may set 2, including a successful
+  later stop retry. A lost notification cannot undo the shared containment state.
+  Public lifecycle mapping reads slot 1: at 2, stop is idempotently successful
+  and other calls return `session_closed`; at 1 or 3 a live owner accepts only
+  stop for bounded proof completion or retry, while non-stop calls return
+  `session_unavailable`. An absent owner at 0, 1 or 3 is unavailable, never proved closed.
   The application DynamicSupervisor starts each owner with
   `restart: :temporary`, so neither a successful stop nor a crash creates a
   replacement owner for the same handle.
-- **Scheduling-subtree lifetime.** Before creating a temporary root, every
-  owner records and monitors the exact gate, application supervisor and owner
-  DynamicSupervisor PIDs supplied through its start handoff. It retains those
-  monitors for its whole lifetime and never rediscovers a replacement by name.
-  An `EXIT` or `DOWN` from any of the three, or a gate reply whose incarnation no
-  longer matches, closes admission, rejects new API work, performs the same
-  bounded session-failure cleanup and exits unmarked; waiting callers receive
-  the applicable admission-state result and later handle calls are unavailable.
-  A retained root is host-logged when no waiter can receive it. Thus killing the
-  shared owner DynamicSupervisor cannot leave a scheduled owner deliberately
-  running without its gate capability. A suspended owner may not process the
-  monitor before the startup refusal returns; its untrappable kill or monitor-
-  driven cleanup completes when it is scheduled, while the poisoned gate and
-  required VM restart prevent new ephemeral work.
+- **Session supervision.** Each temporary owner monitors the exact owner
+  DynamicSupervisor supplied at activation. Supervisor loss ends that owner's
+  available lifecycle; it does not create a replacement owner. The composition
+  application's initializer is a `:one_for_one` sibling, not an ancestor of a
+  session: its failure never instructs existing owners to stop. A private
+  session-subtree failure seals the shared session cell to 3, rejects new API,
+  model and executor grants, and performs that session's bounded cleanup. A
+  retained root is logged when no waiter can receive it.
+
 - **Core client actor.** The owner never makes a potentially unbounded public
   facade call itself. Before it creates any linked helper, the owner sets
   `Process.flag(:trap_exit, true)` and retains that setting for its lifetime.
@@ -838,242 +818,104 @@ below.
   at that instant, and resumes its scheduled drain. It neither calls
   `next_event/1` nor creates a second attachment reader, and it never waits for
   the current run to finish.
-- **`stop_session/1`** coalesces concurrent stops at the owner. Acceptance of
-  the first stop atomically enters `stopping`. Every later stop joins that one
-  cleanup attempt and receives the same selected return. Every non-stop API
-  request serialized after the transition is answered immediately with
-  `{:error, :session_unavailable}`; it never queues behind cleanup or starts
-  work. A request serialized before the transition completes under its ordinary
-  rule, including the admission-specific resolution below for an already
-  registered ask or answer. After successful
-  cleanup and root removal, the owner atomically marks the
-  handle stopped immediately before replying `:ok`, then exits; a later stop
-  reads that cell and returns `:ok` without a tombstone process. Other API calls
-  on it return `:session_closed`. A dead owner whose cell is still open is an
-  unexpected crash and returns `:session_unavailable`, never false success.
-  Stop first marks every caller-facing result for the current ask or answer as
-  closed, but it does not make a granted actor result inadmissible. An ungranted
-  operation is canceled and acknowledged. For a granted event poll, prompt or
-  answer, stop waits only to the earlier of that operation's existing deadline
-  and the cleanup deadline. A returned poll is interpreted normally; a returned
-  prompt or answer is validated as accepted or refused solely to update the
-  run-admission state. No result is delivered to the superseded borrower. A
-  refusal with no prior run proceeds directly to cleanup; acceptance or an
-  already-open run proceeds to abort. An operation timeout, malformed return or
-  actor `DOWN` sends the actor an untrappable kill and waits only to the cleanup
-  deadline. A missing `DOWN` preserves both the corresponding possible-run and
-  `:session_subtree` obligations; it does not start a replacement actor or claim
-  that abort ran. The creator-`DOWN` path uses this same state machine.
-  Thus an ordinary stop never destroys the sole command attachment before it
-  has used that attachment for any required abort. The abort/run-ending and
-  core-actor phase must finish by `cleanup_started_at + cleanup_grace_ms`; the
-  fixed additional 5,000 ms is reserved for the bounded phases below.
+- **`stop_session/1`** coalesces concurrent stops. The first stop changes the
+  shared cell from 0 to 1 (a prior 3 remains sealed), records one saturating
+  monotonic deadline `now + cleanup_grace_ms + 5_000`, and closes new API, model
+  and executor grants. Every later stop joins the same attempt; non-stop calls
+  immediately return `session_unavailable`. Neither stopping nor unproved state
+  can become open again.
+  An ungranted facade operation receives correlated cancel; its acknowledgement
+  proves no admission. An already granted operation is allowed to return only
+  until the earlier of its existing deadline and cleanup deadline, solely to
+  resolve admission state or observe its ending. It is never delivered as a
+  new question after stop. A lost/malformed return is conservatively possibly
+  admitted. If a run is open, the owner sends one fresh bounded abort id, requires
+  exact `{:accepted, same_id}`, and follows only that run to a validated ending.
+  Missing terminal identity or malformed numeric fields leave `:run_ending`
+  unproved. A valid `outcome_unknown` ending leaves `:effect_cleanup` unproved
+  (`session_coordinator.ex:6000-6006`); any other named terminal ending proves
+  that run's applicable effect cleanup. No run makes both obligations vacuous.
 
-  If a run is open, stop sends the complete `%{type: :abort, command_id:}` with a
-  fresh bounded id, requires exact `{:accepted, same_id}` to classify it as
-  admitted, and waits for that run's `run.finished`, whatever its outcome. A
-  refused, malformed, mismatched, lost or actor-failed reply follows the same
-  pre-/post-`:dispatching` admission algebra as prompt and answer. The
-  terminal event may win the race before the abort is admitted; an admitted
-  abort can end `cancelled` or `outcome_unknown`. It waits for at most the
-  session's committed `cleanup_grace_ms` plus 5_000 ms. The owner records that
-  one saturating monotonic deadline when cleanup begins; abort, process-group
-  proof, runtime stop, subtree stop and worker reap all consume the same budget
-  in slices no longer than 1,000 ms. It never calls the locked
-  `Loopex.stop/1` or `Supervisor.stop/3` synchronously, because both may wait
-  without a finite caller timeout. After the last required attachment event or
-  an actor timeout, it ends and awaits the core client actor first within that
-  same deadline; loss of that actor before `run.finished` leaves `:run_ending`
-  unproved, and missing actor `DOWN` prevents every later cleanup phase in that
-  attempt. Only after actor `DOWN` does the exit-trapping owner run an explicit
-  ordered phase set: `:process_groups` when an executor exists and that phase
-  has never been reached, then `:runtime_stop` while the
-  runtime is live, then `:subtree_stop` while the private subtree is live. An
-  already proved process-group phase is queried from the gate and not run
-  again; a previously reached but unproved process-group phase is permanent and
-  is also not rerun.
+  The abort/ending and facade-client reap finish within cleanup grace. The owner
+  then runs process-group proof, runtime stop, private subtree stop, and root
+  removal serially under the same remaining deadline. It never calls the locked
+  potentially infinite `Loopex.stop/1`, supervisor stop or filesystem removal in
+  its receive loop. The fixed additional 5,000 ms covers three at-most-1,000 ms
+  phase slots and a root-removal slot; absent phases are skipped. Each phase
+  uses one linked, monitored non-trapping worker, with a 500 ms operation cutoff
+  and exact normal DOWN required within its 1,000 ms slot. Result PID, reference,
+  phase and completion timestamp must match. An in-time result is provisional
+  until the worker accepts the owner's correlated finish and then exact normal
+  DOWN; the owner sends finish only for the matching validated in-time result.
+  Failure or expiry sends untrappable kill and makes
+  one zero-wait receive at the slot deadline. Only one phase worker exists at a
+  time. A single persistent cleanup worker would mix a previous infinite API
+  call with the next phase after timeout; separate operation-scoped workers and
+  exact DOWN prevent that concrete overlap. This is one reused worker function,
+  not a helper module or retained supervisor for every phase.
 
-  Each present phase gets its own request-free, credential-free, linked and
-  monitored non-trapping worker; no worker calls more than one blocking API. A
-  phase occupies at most one 1,000 ms slot under the common deadline. Its
-  operation cutoff is 500 ms after that phase starts or the common deadline,
-  whichever is earlier; an in-time provisional result must be validated,
-  followed by correlated `finish` and exact normal `DOWN` within the remainder
-  of the slot. At the operation cutoff, a missing, malformed or late result
-  causes an untrappable kill; the owner awaits exact `DOWN` in bounded receives
-  until the slot ends and performs one zero-wait receive there. A caught return,
-  refusal, raise, throw or exit whose exact worker `DOWN` is proved records that
-  phase's failure and still starts the next independent phase. A timed-out
-  worker whose exact `DOWN` is proved likewise leaves its phase unproved and
-  permits the next phase. Missing worker `DOWN` retains that monitor and
-  `:session_subtree`, prevents every later phase in that attempt and forbids
-  success or root removal, because the blocking call may still be active.
+  The owner receives and retains the exact executor-PID/instance/session/nonce
+  certificate directly before runtime shutdown. It accepts a worker's drain
+  result only after that certificate and exact worker DOWN. Once proved, group
+  cleanup is never repeated, even after executor DOWN. A returned group failure
+  may leave `:process_groups` pending while independent runtime/subtree stop
+  still runs. No-executor rollback is the only vacuous group proof. A missing
+  worker DOWN prevents every later blocking phase in that attempt and retains
+  `:session_subtree`; the exact monitor must be reaped before any replacement.
+  The same rule applies to the facade client. The owner trusts recorded
+  child/root monitors, not a worker's assertion that a subtree ended.
 
-  The three phase slots, final gate exchange and root removal consume at most
-  the fixed additional 5,000 ms; absent phases are skipped rather than slept.
-  The owner remains responsive and trusts only the gate's bound process-group
-  proof and the child/root monitors recorded during startup, never a worker's
-  cleanup claim. Owner death sends the same kills through the workers' links.
-  The owner correlates every worker `EXIT` and `DOWN`; an abnormal exit is not
-  cleanup proof, and a forced kill cannot terminate the owner before it samples
-  the retained monitors and selects the result.
+  Cleanup is proved only when:
+  1. the current open run has a structurally valid matching ending, or no run
+     existed;
+  2. that ending proves effect cleanup, or no run existed;
+  3. every applicable executor process group has its retained direct certificate;
+  4. facade client, phase worker, SessionRoot, RuntimeHolder, private supervisor
+     and every recorded per-session child are DOWN; a granted startup phase
+     without an exact return remains unknown even if known parents are DOWN;
+  5. only then, an owned root has a successful bounded removal and owner-side
+     absence check.
+  A removal worker carries only the exact root, links to the trapping owner,
+  and must have its exact DOWN observed. Unknown ownership never authorizes
+  deletion. Missing removal DOWN is retained and a later stop reaps it before
+  starting another. Removal failure names `:root_removal`; a prerequisite
+  failure never claims that removal ran.
 
-  Every accepted caller retry, and the creator-exit final retry, records a fresh
-  saturating monotonic deadline `now + cleanup_grace_ms + 5_000`; it never
-  reuses the expired first-attempt deadline. A retry constructs its phase set
-  from retained reached/proved state. It never requests a reached process-group
-  proof again after failure or after the executor or subtree may have ended. If
-  a prior phase worker is still missing `DOWN`, the owner first reissues its
-  untrappable kill and awaits that exact retained monitor in bounded slices. If
-  the recorded core client actor is still missing `DOWN`, it does the same for
-  that actor. No later phase or removal worker starts until every retained actor
-  and phase-worker monitor is proved `DOWN`; a missing `DOWN` keeps item 4
-  pending as `:session_subtree`. Once those processes are proved down, the owner
-  recomputes the ordered set. It first runs `:process_groups` when an executor
-  exists, the proof is absent and that phase was never reached because the actor
-  or an earlier phase worker blocked it; it then runs the still-pending runtime
-  and subtree phases with the same per-phase protocol. If only
-  `:root_removal` is pending, no cleanup phase worker starts. The gate keeps an accepted
-  proof nonce and its executor-PID, instance and lease binding queryable after
-  worker, executor and subtree `DOWN`. It deletes that
-  record only as part of the gate's acknowledged, correlated
-  final-cleanup-disposition commit; owner `DOWN` before that commit converts the
-  registration and its children to orphan obligations rather than deleting
-  them.
-  This lets the owner validate the nonce after its phase worker ends and lets a
-  subtree-only retry preserve the already-proved group fact. The owner attempts recursive
-  root removal only after every phase worker and recorded child and
-  subtree root are `DOWN`, and returns `:ok` only when all five cleanup
-  obligations are proved and removal succeeds:
-  1. the open run's structurally valid, matching `run.finished` arrived; this
-     requires the fixed event identity and every public terminal member to pass
-     the observation-boundary validation above, and is vacuously proved when
-     the session never had an open run. An absent or malformed event leaves
-     only `:run_ending` pending and prevents item 2 from being evaluated;
-  2. the observed ending is `completed`, `failed`, `bound_reached` or
-     `cancelled`: each is a clean ending emitted only after the run's applicable
-     provider and executor work ended. An admitted abort with unconfirmed
-     cleanup ends `outcome_unknown` (`session_coordinator.ex:6000-6006`), which
-     leaves this item unproved. This rule uses the observed ending rather than
-     whether the abort command won the race. This item is also vacuously proved
-     when the session never had a run;
-  3. every process group the local executor owned is proved empty through its
-     private gate-proof handshake. The executor freezes new dispatch after the
-     run-ending wait, drains every still-unproved group with its existing
-     process-table check (`executor.ex:6335-6377`), and sends the gate an
-     instance- and lease-bound proof before runtime shutdown. The owner never
-     learns a group from tool output or synthesizes that proof;
-  4. the core client actor and every cleanup phase worker,
-     `SessionRoot`, `RuntimeHolder`, the private supervisor and every recorded
-     child of that per-session subtree are `DOWN`. The supervised termination
-     releases the workspace lease and ends the store, executor and any
-     already-stopped runtime before the filesystem can be removed. A startup
-     phase whose grant lacks an exact return remains unproved even when every
-     known parent is `DOWN`, because an unreported child may exist. A worker
-     deadline with any child or root still live is `:session_subtree`; killing
-     the worker is never itself proof that the subtree ended. A removal worker
-     does not exist until after item 5 and is owned exclusively by the later
-     root-removal obligation.
-  5. after items 1 through 4, the owner sends the gate one correlated final
-     cleanup disposition carrying its owner identity and any accepted process-
-     group proof nonce. The gate requires every registered preflight, local or
-     hosted call, caller, subtree PID and registry tag gone; atomically removes
-     the owner registration, lease, inactive-executor capability and retained
-     proof; and replies with the exact release acknowledgement. Only that reply
-     proves `:gate_release`. A refused, malformed, late or missing reply commits
-     the one-way poison latch before return, leaves `:gate_release` pending and
-     is permanent for that VM. It never becomes success from owner or gate
-     `DOWN`.
+  A reached unproved obligation seals cell 3 before any return or failure
+  notification. It returns `cleanup_unproved` with exact root/ownership and a
+  duplicate-free pending list in order `run_ending,effect_cleanup,process_groups,
+  session_subtree,root_removal`, naming only reached failures. An absent ending
+  omits unevaluated effect cleanup. Missing facade-client DOWN omits unreached
+  group phases and names subtree; independent reached group/subtree failures
+  combine. No result or missing notification can reopen the shared cell.
+  The map's ending is the current validated terminal, the current possibly
+  admitted request's bounded no-ending snapshot, the last pending interaction
+  when no later request was admitted, or none. It never substitutes an earlier
+  run. A waiting request before admission receives bare unavailable after proved
+  cleanup, or cleanup_unproved with ending none; after possible admission without
+  a terminal it receives cleanup_unproved retaining the current no-ending
+  snapshot. A terminal arriving during stop wins for that request, while stop
+  still returns its own cleanup disposition.
 
-  After item 5 is proved, an `:owned` root lets the owner start one separate
-  linked and monitored removal worker carrying only the exact temporary-root
-  path. An `:unknown` root claim never starts this worker and remains
-  `:root_removal` unproved. The worker
-  performs recursive deletion; the owner never calls filesystem removal
-  synchronously. It consumes the same remaining cleanup deadline, and the
-  trapping owner correlates its `EXIT` and exact `DOWN`. Success requires both a
-  successful removal return and a subsequent owner-side absence check. A raised,
-  exited, malformed or hung removal, a root still present after success, or
-  expiry makes the owner send the worker an untrappable kill and perform one
-  zero-wait receive. It retains the root and names `:root_removal`; when exact
-  `DOWN` is absent it also retains the worker monitor, and a retry waits for that
-  prior worker before starting another. A root-removal-only retry starts a new
-  removal worker only after the old one is proved gone and no cleanup phase worker is
-  needed. A suspended removal worker may temporarily outlive a bounded return or
-  owner exit until its already-sent kill is scheduled; it can only continue the
-  attempted removal of the retained exact root.
+  A surviving caller-visible failed-stop owner with only subtree or owned-root
+  removal pending accepts only a later stop retry. An unproved ending, effect
+  or executor certificate that cannot be recovered conservatively retains the
+  root, exits unavailable and does not expose a false retry-success path.
+  Each retry gets a fresh common cleanup deadline, reaps exact retained monitors
+  first, reuses accepted certificates and resumes only outstanding safe proof
+  phases. It never manufactures a terminal, redrains a proved group or calls an
+  ended executor to reconstruct a missing certificate. An irrecoverable missing
+  run/effect/certificate remains unproved and the root remains retained. A
+  successful retry proving all obligations and removal sets cell 2, replies
+  `:ok` and ends the owner. Repeated stops then return `:ok`; other calls on
+  cell 2 return `session_closed`. An unexpected owner death with cell 0/1/3 is
+  unavailable, never cleanup success.
+  One-shot and no-waiter paths expose no retry handle: they log retained roots
+  when permitted and end after the bounded attempt. Creator exit performs the
+  same cleanup; if an owner stays alive in failed-stop state, creator exit makes
+  one final bounded retry and then exits. None of these outcomes blocks a new
+  session or terminates a peer.
 
-  When `ask/3` or `answer/3` has a waiting caller, stop leaves that caller
-  registered while the owner performs this sequence. If a pending interaction
-  was observed before stop serialized, the waiting call was already replied to
-  and is no longer registered. Once stop wins serialization, it never publishes
-  a question that the ensuing abort would make stale. Before the owner replies
-  to stop or enters a failed-stop state, it resolves each still-waiting call by
-  that request's admission state. A terminal event for its run returns the exact
-  terminal result or run error. Before possible prompt or answer admission,
-  proved cleanup returns bare `{:error, :session_unavailable}` and unproved
-  cleanup returns the shared `cleanup_unproved` value with `ending: :none`.
-  After possible admission but before a terminal event, the run-ending
-  obligation is necessarily unproved. The caller receives `cleanup_unproved`,
-  whose `ending` is the current bounded
-  `{:error, {:session_unavailable, snapshot}}`; that no-ending value is not a
-  direct proved-cleanup return. If a terminal event arrives during stop, the
-  first rule above returns that terminal value instead.
-  These are replies to public API callers, not additional attachment readers.
-
-  Otherwise it keeps the root, returns
-  `{:error, {:cleanup_unproved, %{root: path, root_ownership: :owned,
-  pending: [...], ending: observed_ending, cause: nil}}}`
-  naming every reached item that failed proof (`:run_ending`,
-  `:effect_cleanup`, `:process_groups`, `:session_subtree` or `:gate_release`
-  for items 1 to 5), plus `:root_removal` when the first five obligations were
-  proved but recursive removal failed. An item whose prerequisites failed is
-  not reached and is not appended merely because it remains downstream:
-  absence of `run.finished` does not also name `:effect_cleanup`; a missing
-  actor `DOWN` prevents the cleanup phases and names
-  `:session_subtree`, not an unevaluated process group; any failure among items
-  1 through 4 prevents and omits `:gate_release`; and a gate failure prevents
-  and omits `:root_removal`. The worker still attempts every later phase that
-  does not depend on the failed proof, so independently observed failures among
-  items 1 through 4 are combined in the fixed public order. `observed_ending`
-  is the exact terminal
-  result or run error when one was seen, the exact no-ending error returned to
-  a waiting call after possible prompt or answer admission, the exact pending
-  interaction that was the last public value of the current run when stop began,
-  or `:none` when the current operation has no observation because the session
-  never had a run, startup failed before one, or the owner registered a
-  validated ask or answer that failed before possible admission; it is never a
-  prior run's result after that marker exists. A request rejected at the public
-  boundary never creates the marker, so a later stop still uses the owner's
-  current run observation. The pending list
-  uses the public type's fixed order with no duplicates. It writes nothing
-  else. A later
-  `stop_session/1` on the same session first reaps any still-live recorded actor
-  and retained phase worker, then starts one bounded worker for each still-
-  pending reached phase, including a never-reached process-group phase before
-  the still-live runtime or subtree when item 4 was pending, and
-  retries through the removal worker when only `:root_removal` was pending. It
-  never retries an unproved gate release or repeats a proved process-group
-  drain.
-  This retry state exists only when that `stop_session/1` returned the error to
-  a caller while the session handle survives. The one-shot `run/2`, creator-exit
-  and post-timeout background-drain paths log any retained root and exit
-  unmarked after their bounded cleanup attempt; they cannot promise a later
-  retry without a surviving caller contract.
-  Items 1 to 3 and item 5, once unproved, stay unproved for the life of the VM; the owner
-  never relies on a stale process-group identifier after the executor ends, so
-  the root then stays for the host to remove. After returning such a permanent
-  failure, the owner logs nothing (the caller received the path), exits without
-  marking the handle stopped, and every later API call, including another stop,
-  returns `:session_unavailable`. When only item 4 or `:root_removal` is pending,
-  the owner enters a terminal retry state tied to the process that called
-  `start_session/1`: only `stop_session/1` retries the outstanding proof; every
-  other API call returns `:session_unavailable`. If that caller process exits,
-  the owner performs one final bounded retry, logs a still-kept root and pending
-  obligation, and exits unmarked. If a retry proves cleanup and removal, it
-  marks the handle stopped and the ordinary idempotent-stop rules apply.
-  One-shot `run/2` returns the error, logs the retained path and ends the failed
-  owner because it exposes no session handle.
 - **One session per `start_session/1`.** Each call composes its own runtime and
   root. Concurrent sessions are separate runtimes, and no session shares a
   root.
@@ -1104,7 +946,7 @@ before exiting. A
 even when only the subtree or root remains: creator lifetime ended. When no
 registered waiter remains, the owner logs a kept root and exact pending
 obligations once before it exits unmarked. The owner is not linked back to the
-creator: an owner or gate failure therefore leaves other host processes alive
+creator: an owner failure therefore leaves other host processes alive
 to receive the monitored request failure or make a later handle call. There is
 no recovery, and none is claimed.
 
@@ -1119,8 +961,9 @@ host's VM for every provider the ephemeral profile serves: `ollama`, `openai`,
 `Loopex.LLM.ReqLLM`, which the durable composition always uses; the durable
 composition refuses an `ollama:` model with
 `{:composition, :durable_model_unsupported}`, because the companion requires a
-credential. A credential-bearing in-process model also refuses unless
-`:tools` is `:none`, before any per-session root or tool process exists.
+credential. Every in-process provider admits `:none`, `:coding` and
+`:read_only`. Ambient credential variables do not refuse composition or tools;
+the proposed vision amendment names the trusted tool audience.
 
 **Shared mapping.** The companion's exact pure request-side, reply and error
 closure moves into one module both adapters call,
@@ -1218,7 +1061,7 @@ credential-free private context
 credential-free provider, surface, POST method, admitted base URL, relative
 route and nil-query expectation defined below. A credential-bearing provider requires `https`; only
 Ollama may use `http`. Before the caller starts, its owner directly
-`spawn_monitor`s a start-blocked lifecycle root, records it with the gate, and
+`spawn_monitor`s a start-blocked lifecycle root, records its exact monitor, and
 then lets that root start a user-managed pool under an anonymous supervisor,
 with `protocols: [:http1]`,
 `size: 1`, `count: 1` and no metrics. HTTPS alone adds exactly
@@ -1231,7 +1074,7 @@ supervisor start, `DynamicSupervisor.start_child/2`, inspection and later gracef
 teardown while the cleanup owner stays in its receive loop. It owns the
 anonymous supervisor, synchronously registers every returned PID with the owner
 before proceeding, traps ordinary exits, monitors the cleanup owner and begins
-the same unwind on owner `DOWN` or a gate message, and derives the exact HTTP/1 worker PID from the returned
+the same unwind on owner `DOWN` or an exact stop message, and derives the exact HTTP/1 worker PID from the returned
 pool-supervisor PID, requiring
 `Supervisor.which_children/1` to be exactly
 `[{1, owned_pid, :worker, [Finch.HTTP1.Pool]}]`, and requires the full
@@ -1239,7 +1082,9 @@ duplicate-key registry lookup to be exactly
 `[{owned_pid, Finch.HTTP1.Pool}]`, while the unique
 `Req.Finch.SupervisorRegistry` lookup is exactly one entry for the recorded pool
 supervisor and expected pool configuration, before the caller starts and again
-at the dispatch grant. The dispatch-time check is a command to this same
+at the dispatch grant. Tests compare the exact caller-supplied pool option list;
+the stored Finch configuration contains those three transport retention options
+and nil key-log device in addition to Finch's cast defaults (finch.ex:533-560). The dispatch-time check is a command to this same
 registered lifecycle root, not a new helper. If that check does not return, the
 owner remains responsive, withholds dispatch and success, and takes the
 unproved-cleanup path unless cooperative root teardown completes. Complete
@@ -1247,7 +1092,7 @@ setup must answer before the earlier of 1,000
 ms and the call deadline. Stop can request and await cooperative unwind during
 every setup phase. The lifecycle root exits only after every registered
 descendant is `DOWN`; if a dependency call prevents that proof, no provider
-result or successful acknowledgement returns and the gate remains fail-closed.
+result or successful acknowledgement returns and only this session remains sealed.
 The owner requires both Loopex-created registry entries gone before replying. It never uses `Finch.find_pool/2`,
 whose duplicate-entry path can choose at random, and never permits a later
 lookup to select or start a replacement. The three
@@ -1263,13 +1108,17 @@ samples `System.monotonic_time(:native)`, uses the shared upward-rounded
 remaining milliseconds and is capped at 1,000 ms. At final dispatch the pool
 checkout timeout is that same value capped at 1,000; zero refuses before the
 transport grant. The caller returns
-`{caller_pid, ref, result, finished_at_native}` before normal exit. A result is
+`{caller_pid, ref, result, finished_at_native}` before blocking until its owner
+ends it and proves DOWN. A result is
 admissible only when its timestamp is no later than the mapped deadline. When
 the owner first observes expiry, one zero-wait receive lets an already-queued,
 matching, in-time result win; otherwise expiry makes every result inadmissible
 and the owner kills the caller. The converted native instant may be an arbitrary-
 precision integer; only capped slices reach OTP or Finch, so no unsigned-64-bit
-duration or native remainder reaches a relative timer.
+duration or native remainder reaches a relative timer. Finch casts an omitted
+connect timeout to 5,000 ms (finch.ex:16,537); the cleanup owner's committed
+call deadline is still authoritative and kills the caller if that earlier
+deadline wins during DNS, connect, TLS handshake or I/O.
 
 `OneShotHTTP1` validates the final route fingerprint and the absence of an
 external `into` or compression request, removes its private Req-only context,
@@ -1282,8 +1131,11 @@ already encoded non-streaming body with
 `Finch.HTTP1.Pool.request/6` directly on that PID, literal name argument
 `Req.Finch`, and the exact option list
 `[pool_timeout: bounded, receive_timeout: :infinity, request_timeout:
-:infinity]`. The final Req validation requires those same timeout values and
-refuses `:pool_strategy` or any other Finch request/build option. It never calls
+:infinity]`. Final Req validation requires the explicit receive timeout and
+nested pool timeout; an absent `:request_timeout` normalizes to `:infinity`,
+Req's default. An explicit value must also be `:infinity`. It
+refuses `:pool_strategy`, `:inet6`, `:pool_max_idle_time`, `:unix_socket`,
+`:finch_request` and any other Finch request/build or connection-routing option. It never calls
 `Req.Finch.run/1` or any Finch request or stream entry point that performs the
 auto-starting registry lookup. A dead or restarted worker therefore fails the
 call; a replacement never receives the request. The adapter implements the
@@ -1394,452 +1246,157 @@ recorded worker PID. A mismatch is the conservative pre-network
 `dispatched_or_unknown` refusal. Thus neither same-origin path substitution nor
 an OpenAI surface change can pass the final boundary.
 
-**Credentials.**
-- The runtime's model options carry the provider's credential variable name
-  and the base URL, never a value.
-- Composition validates only the fixed provider-to-variable reference and the
-  no-tools rule; it never reads the value. The sensitive calling process alone
-  resolves and checks the variable immediately before each call, naming the
-  variable and never the value, and returns the fixed public
-  `{:not_dispatched, "model_call_failed"}` failure when it is absent, empty or
-  larger than 65,536 bytes. A private test sentinel may distinguish the guard;
-  it never crosses the model port.
-- The library never deletes a host variable, because each call reads it.
-- A hosted ephemeral session requires `active_tools: []`.
-- `LoopexComposition.Ephemeral.CredentialToolGate` is one VM-wide GenServer
-  under the composition application's one-for-all supervisor, before the
-  DynamicSupervisor that owns ephemeral session owners. It grants any number
-  of monitored `:tools` leases or any number of monitored `:credential_call`
-  leases, never both modes at once. Acquisition and mode transition are one
-  serialized call. The gate is host-edge admission state, not session truth:
-  composition passes its explicit capability to the model adapter and executor,
-  while no runtime looks it up by name and it stores no policy, request or
-  credential. Every gate `init/1` creates a fresh private generation and writes
-  exact `{:unclean, generation}` to `:persistent_term`; absence means a first
-  healthy VM start, while any prior value makes that incarnation start
-  poisoned. A replacement always overwrites the old generation before serving
-  a message, so a clean-stop proof from an earlier gate can never erase the
-  replacement's marker. Before every ephemeral owner start, including a tool-free
-  local session, the API atomically reserves owner admission at the gate. The
-  gate monitors the starting process. The new `restart: :temporary` owner must
-  synchronously exchange that reservation for its own PID registration before
-  it creates a root or acquires a lease; child-start refusal, explicit
-  cancellation or the starting process's `DOWN` releases only an unexchanged
-  reservation. Owner `DOWN` removes a registration only when it has no lease,
-  registered preflight, subtree, executor or local-call obligation. Otherwise
-  the gate converts it to an orphan obligation, triggers every registered local
-  lifecycle root to unwind, kills registered callers, retains child monitors and
-  registry tags, and permanently poisons both modes for that VM. Later proofs
-  can close and remove the orphan records, but they cannot clear the one-way
-  latch or make admission resume before VM restart. The gate never discards
-  child records with their parent registration.
+**Credentials and session containment.**
+- Model options contain only the fixed provider variable name (or nil), admitted
+  base URL, runtime trace-capability handle, private session-admission handle and
+  the same session-local lifecycle cell. They contain no credential value. The sensitive caller reads exactly its
+  provider's variable immediately before generation; absent, empty or >65,536-byte
+  values refuse without dispatch. Composition never probes environment values.
+- Each admitted provider may use none, coding or read-only tools. Tools and model
+  calls may coexist in the host VM. This profile is trusted same-VM execution,
+  not a secret-isolation boundary; the amended vision names the caller, transport,
+  host environment and host-made diagnostics. There is no global exclusion,
+  lease, cross-session timing exclusion or admission state.
+- **Session-local admission and pending-call census.** Atomic lifecycle state
+  alone cannot prove a cleanup owner did not die just before another grant.
+  The existing responsive session owner therefore retains at most one pending
+  model record, never request data. The model edge owns private
+  `InProcess.Admission`; the executor owns `Local.EphemeralAdmission`;
+  composition's `SessionAdmission` implements both. A thin asynchronous
+  request helper provides
+  `request(module, opaque_handle, operation, native_deadline)` returning exact
+  `{:ok, token}` or `{:error, :session_admission_closed}`. Each edge's private
+  dispatch wrapper is request/4 (module, handle, operation, native deadline);
+  the behaviour callback and composition implementation are request/3 (handle,
+  operation, deadline). They dynamically invoke the supplied module's request/3,
+  so neither implementation imports the other edge or composition. The handle
+  carries exact session owner PID, private generation and shared two-slot cell.
+  Token is exactly `{:session_grant, generation, operation_tag, requester_pid,
+  operation_ref, expires_at_native}`; completion operations return the same
+  correlated token for their fresh request, not an expired activation token or
+  an unbounded term. This is two inward
+  behaviours with one implementation and no new actor, shared imported edge
+  behaviour, global scheduler or core change.
+  Operations are `{:begin_model, callback_pid, call_ref}`,
+  `{:register_model, call_ref, cleanup_owner_pid}`,
+  `{:record_model_resources, call_ref, cleanup_owner_pid, revision, entries}`,
+  `{:tool_grant, executor_pid, instance_ref, dispatch_ref}`,
+  `{:retire_model, call_ref, cleanup_owner_pid, proof_ref}` and
+  `{:cancel_model, call_ref, pre_activation_proof}`.
+  Every request carries requester PID, fresh message reference, native expiry
+  and session generation; the owner monitors the exact requester. Replies echo
+  the exact tuple and operation. Duplicate references are idempotent and never
+  extend expiry; expired dequeue performs no transition. Tokens bind recorded
+  PID/call or dispatch reference/generation/expiry and are one-use. Unknown,
+  forged, stale, malformed and replayed tokens refuse.
 
-  The two inward edge applications do not import a composition module.
-  `loopex_llm_reqllm` owns a private
-  `Loopex.LLM.ReqLLM.InProcess.GateClient` behaviour for provider-call
-  registration, acquisition, child registration, release and poison.
-  `loopex_executor_local` owns a private
-  `Loopex.Executor.Local.EphemeralGateClient` behaviour for lease validation,
-  probe registration, process-group proof, release and poison. One module in
-  `loopex_composition`, which already depends inward on both applications,
-  implements both behaviours. Composition passes each edge the corresponding
-  `{client_module, opaque_handle}` through its private constructor; the handle
-  contains no function and never enters a public, durable or diagnostic plane.
-  Each edge invokes only its own behaviour dynamically and has no compile-time
-  dependency on composition. The callback implementation is a bounded encoder
-  and receiver for the asynchronous gate protocol, not a second owner or state
-  store.
+  The registration request's fresh message reference is the retirement
+  `proof_ref`. The session owner stores it against that exact call and cleanup
+  owner; activation supplies it to the cleanup owner without request data.
+  Resource recording appends to the same pending record before each child
+  receives authority to progress. Revisions start at 1 and increase by one;
+  an identical revision/entry replay acknowledges without changing the record,
+  while a conflicting replay seals the session. There are at most five process
+  entries `{:process, role, pid}` for `:root`, `:anonymous_supervisor`,
+  `:pool_supervisor`, `:http1_worker` and `:caller`, and two registry entries
+  `{:registry, kind, pool_identity}` for `:worker` and `:supervisor`.
+  `pool_identity` is the admitted credential-free `{scheme, host, port, tag}`;
+  all entries bind the recorded call, generation and cleanup owner. PIDs and
+  tags never change under a role. The owner installs exact process monitors
+  before acknowledging; lost recording acknowledgement authorizes no progress.
+  Partial-start obligations remain in this bounded census. Retirement uses the
+  recorded registration reference and is accepted only after the recorded
+  process monitors are DOWN and both recorded tagged registry lookups are empty.
+  The retirement reference is an identity, not an expiring dispatch grant.
+  The owner retains a pending retirement in its ordinary responsive receive
+  loop while those independently delivered DOWN messages are outstanding;
+  it does not reject merely because they are queued or in flight. It processes
+  the exact signals and empty lookups before acknowledging, within the earlier
+  of 1,000 ms and that cleanup-control request's deadline. Expiry seals the
+  affected session and withholds proof. Grants and retirement never block that
+  loop or prevent stop handling.
+  No missing owner message or parent termination substitutes for those facts.
+  A private test dispatcher can defer handling selected genuine monitor DOWN
+  tuples while still handling retirement and stop, then release those tuples.
+  The delayed-DOWN witness uses that seam, never fabricated successful signals.
 
-  **Gate message discipline.** No participant uses an unbounded
-  `GenServer.call/3`. Every gate operation is an asynchronous capability
-  message carrying a fresh request reference, requester PID, absolute monotonic
-  expiry, operation and bounded payload; the only accepted reply repeats that
-  exact reference and carries the operation's closed result. The requester
-  monitors the gate, ignores stale or mismatched replies and sends an
-  idempotent same-reference cancel on timeout. The gate rejects an expired
-  request, records a canceled reference through its expiry and makes repeated
-  references return the recorded result without a second transition. Erlang's
-  same-sender ordering plus that expiry means a suspended gate cannot later
-  turn an abandoned reserve, exchange or acquisition into live state.
+  Before creating the provider proxy, callback asks begin_model with no
+  request/options/credential; owner reserves its record, monitors callback and
+  sets slot2=1. Candidate remains authority-free until managed core registration;
+  it then obtains exact register_model acknowledgement binding cleanup-owner PID
+  before any call input, root, pool or caller grant. Successful registration
+  transfers death authority from callback to cleanup owner: normal callback
+  return/DOWN before core's later resource-stop must not falsely seal the call.
+  Pre-registration callback loss without exact no-authority proxy/candidate DOWN
+  proof, or registered cleanup-owner loss without clean retirement, retains the
+  pending record and sets lifecycle3 before conservative reply/notification.
+  Successful registration transfers callback failure authority exactly once;
+  queued callback DOWN after register_model acknowledgement cannot seal or revert
+  that registered-owner record. Unknown loss cannot clear slot2.
+  Pre-registration cancel carries exact recorded
+  proxy/candidate monitors and their DOWN results; a known-parent DOWN does not
+  prove an undisclosed child absent, whose authority-free constructor still
+  self-exits without begin.
+  Its closed proof records call reference, exact proxy PID/monitor/normal DOWN,
+  and either candidate PID/monitor/DOWN or :not_started paired with that proxy's
+  authoritative exact returned start error. Missing result/candidate report is
+  never :not_started. A no-proxy refusal cancels only its exact no-grant record;
+  wrong-call, stale, mixed-proxy or unknown-start proof cannot clear pending.
 
-  Every reserve, exchange, acquisition, PID registration, caller creation,
-  caller-token verification, lease check, proof submission, proof query and
-  release round trip ends at the earlier of 1,000 ms and its enclosing startup,
-  model-call, tool-call or cleanup deadline. Participants compare one absolute
-  deadline and receive in bounded slices; they do not put an admitted uint64
-  into an OTP timer. Session and cleanup owners keep the pending reference in
-  their normal receive loop so stop and `DOWN` messages remain answerable.
-  Other waiters remain start-blocked and have read no credential or started no
-  OS effect. A missing, late, malformed or gate-`DOWN` reply never authorizes
-  progress. Reservation failure maps by the fixed admission reasons below; a
-  live-gate owner-exchange timeout or malformed reply is
-  `ephemeral_owner_registration_failed`, while gate `DOWN` is
-  `credential_tool_gate_unavailable`. A credential-call failure maps to the
-  fixed model failure. A tool-dispatch lease-check failure returns the fixed
-  tool refusal before an OS child. A lost registration or cleanup proof takes
-  the unproved and poison path. The credential caller applies the same rule to
-  its token verification and exits without reading the environment on failure.
-  `prep_stop/1` uses its separately fixed 1,000 ms bound. Late replies cannot
-  change an owner result already selected.
+  At core's resource-stop, cleanup owner first proves applicable processes/tags,
+  sends retire_model with its exact private proof reference and waits for owner
+  recording acknowledgement, then sends core stop acknowledgement and exits.
+  Session owner clears record/slot2 only after exact cleanup-owner DOWN and
+  recorded clean retirement. Registration/resource-recording/cancel/retirement remain admissible
+  in lifecycle1/3 solely for cleanup; begin_model/tool_grant require lifecycle0
+  with no conflicting record. Later grants query the owner, reconciling queued
+  exact DOWNs first. Pending grants remain bounded state in the ordinary owner
+  receive loop; no selective wait may block stop or clean-retirement handling.
+  The requesting edge waits in sliced receives for at most 1,000 ms while the
+  owner reconciles clean-retired owner DOWN rather than falsely failing or
+  bypassing pending census while notification is unprocessed. Missing proof
+  returns the private closed error; model maps by actual dispatch boundary and
+  executor returns fixed pre-effect admission failure, with no new public
+  composition code. Existing serial core prevents concurrent model/tool
+  dispatch within a session; separate sessions may overlap. Unproved cleanup
+  sets lifecycle3 before result; it never returns to0. Only later proved
+  session cleanup and removal may set2.
+  Begin/register/resource activation uses the live model deadline; tool grants
+  use the executor's effect deadline. Retirement and clean cancellation use
+  their cleanup-control deadline, never an expired model-call deadline. At core
+  stop that is the supplied cooperative monotonic-millisecond deadline converted
+  to native units; otherwise the private reap/control bound is 1,000 ms from
+  request creation. Every wait still caps at 1,000 ms. Expired activation cannot
+  grant work even when a cleanup-control request remains admissible.
+- Ambient keys are allowed with every preset. The executor retains released
+  child-environment behavior, including its existing LOOPEX_PROVIDER_API_KEY
+  removal. M6 adds no per-provider scrub, presence probe or false promise that a
+  trusted same-user tool cannot read a key. A host-authorized tool copy is
+  ordinary tool content and may enter records, public events and model context;
+  adapter credential-injection exclusions do not apply to that deliberate copy.
 
-  Each opaque handle also contains a private one-way `:atomics` poison latch
-  created and owned by the gate tree. A session-bound participant that cannot
-  prove a registration, release or *gate-scope helper* `DOWN` commits poison
-  locally by an atomic zero-to-one transition before it reports the failure.
-  Through the owner's prepared acknowledgement, the synchronous entrypoint is
-  the sole detector and poison committer for owner-start helper proof: the guard reports its bounded
-  evidence to that entrypoint, and a dead, silent or malformed guard is detected
-  by the entrypoint's own monitor. Gate-scope helpers are exactly an owner-start
-  guard or worker, a pre-root credential
-  preflight actor, a ReqLLM-hygiene worker, or a gate-registered provider-call
-  cleanup owner, lifecycle root or caller whose missing end could retain a
-  lease, registration or dispatch capability. The session's `FacadeClient`,
-  phase-selective cleanup workers and root-removal worker are not gate-scope
-  helpers: their missing `DOWN` values remain the retryable
-  `:session_subtree` or `:root_removal` obligations above and do not poison by
-  themselves.
+- **Private process-group proof.** No executor protocol member changes. Each
+  ephemeral executor receives its exact session-owner PID, instance reference
+  and lifecycle cell. It keeps at most one serially owned unproved group; only
+  the existing process-table check (`executor.ex:6335-6377`) removes it.
+  After run-ending wait, the bounded cleanup worker calls
+  `drain_process_groups(executor_pid, instance_ref, owner_pid, nonce, deadline)`.
+  The executor verifies the recorded owner/instance, closes dispatch, drains and
+  checks its groups, then sends `{executor_pid, instance_ref, nonce, :groups_empty}`
+  directly to the owner before returning `{:ok, nonce}` to the worker. The owner
+  accepts only its previously generated nonce and exact live executor PID/instance.
+  Success requires both that direct certificate and the worker's matching result
+  plus normal DOWN. Neither worker testimony nor an ended executor fabricates
+  proof. The owner retains the accepted certificate before runtime stop, so a
+  subtree-only retry never calls the ended executor or repeats a proved drain.
+  Refusal, malformed result, missed deadline, executor death, mismatched certificate
+  or remaining group leaves `:process_groups` unproved and seals only the session.
+  A tools-none executor also proves its group set empty while alive; startup
+  without any executor is the sole vacuous case. Independent runtime/subtree stop
+  may still run after an observed group failure. This is a private host-edge API.
 
-  Poison may originate in the session owner itself—for example after an
-  unproved final gate acknowledgement or an owner-held preflight proof. That
-  owner first commits the atomic latch and creates one poison reference. It
-  atomically enters the applicable startup-rollback or session-cleanup state
-  and closes new facade admission. Before the owner can acknowledge its
-  post-exchange preparation, it has already recorded the one session cleanup
-  grace; no preflight, root or dependency phase is yet authorized. It therefore
-  creates the ordinary `now + cleanup_grace_ms + 5_000` deadline or joins an
-  existing cleanup deadline without extending it. It computes the selection-notification
-  deadline as 1,000 ms after the later of
-  the active cleanup deadline and that origin instant, using saturating
-  arithmetic, and sends the gate the exact correlated `poison_watch` control.
-  It does not wait for the acknowledgement: message ordering from this owner
-  puts the watch before either later control, while the live owner remains the
-  independent deadline fallback. It then finishes every still-independent
-  cleanup phase under that cleanup deadline while the gate can
-  grant nothing, atomically stores the complete cleanup result, freezes the
-  recipient-results set and sends exact `poison_delivery_started` with one new
-  aggregate delivery deadline 1,000 ms ahead. Only that second control starts
-  result delivery. A live gate already monitors the owner and records each
-  control when it arrives; owner `DOWN` or either applicable deadline makes it
-  terminate the shared tree. An unresponsive gate cannot grant after it resumes
-  because every transition rechecks the already-set latch, while the live owner
-  terminates the tree at the applicable deadline. Owner `DOWN` after the latch
-  but before result selection makes the gate kill the tree and leaves only the
-  named bare-unavailable owner-loss result. Thus a poison delivery deadline
-  never preempts discovery of the complete reached-phase cleanup result.
 
-  Poison otherwise closes authority before it tears down a selected reporting
-  path. A session-bound detector other than the session owner records one poison
-  reference and sends it only through its owner-bound private capability to the
-  registered owner; it sends no preliminary gate message and does not start a
-  result-delivery deadline. It waits at most 1,000 ms for exact custody. In the
-  owner's serial receive loop, accepting custody atomically commits poison and
-  enters the existing `stopping`/session-failure state if cleanup has not begun:
-  new facade admission closes, previously serialized operations keep their
-  stated admission rules, and later stop calls join that one cleanup attempt.
-  It records a fresh `now + cleanup_grace_ms + 5_000` cleanup deadline. If stop
-  or creator loss already entered that state, custody joins the existing attempt
-  and deadline rather than extending it.
 
-  Before doing cleanup work, the owner computes a distinct selection-
-  notification deadline exactly 1,000 ms after the cleanup deadline, using
-  saturating arithmetic, and sends the exact correlated `poison_watch` control
-  to the gate. Only an exact gate acknowledgement received within the detector's
-  1,000 ms custody wait permits the owner to acknowledge custody; that
-  acknowledgement names the owner, poison reference and selection deadline.
-  The detector then sends its correlated retirement notice and exits normally;
-  the owner must observe that exact detector `DOWN`. Cleanup may continue beyond
-  that initial custody interval. At its cleanup deadline the owner performs the
-  final zero-wait receives, samples proof state and atomically stores the
-  complete reached-phase result before leaving that serialized transition.
-  Missing gate or owner custody, detector `DOWN` before retirement, owner
-  `DOWN`, a mismatched message or failure to send exact
-  `poison_delivery_started` by the later selection deadline makes the detector,
-  owner or gate terminate the exact shared tree. During the fixed post-cleanup
-  margin the owner freezes the already stored recipient values and sends
-  `poison_delivery_started` with one new aggregate absolute delivery deadline
-  1,000 ms ahead; only that message starts result delivery.
-
-  A reporting session owner freezes one immutable, capability-bound
-  `recipient_results` set before that delivery-start message. The set contains
-  every still-live waiter and that waiter's already selected bounded value;
-  values need not be equal. Thus an ask waiter may retain its terminal value
-  while a concurrent stop waiter receives the later `cleanup_unproved` value.
-  The owner sends all entries without serial waits and collects exact
-  acknowledgements only until the aggregate delivery deadline. Each receiving
-  wrapper accepts only its own capability and acknowledges before returning its
-  already validated value; if reporter `DOWN` wins, it performs one zero-wait
-  receive for an already queued matching handoff. A session owner with no
-  waiter, or any unacknowledged retained-root path, writes the retained-root
-  diagnostic to the host logger before teardown. The detector has already
-  retired; the owner sends exact `poison_handoff_complete` to the gate
-  immediately before sending the gate and its exact one-for-all supervisor an
-  untrappable termination signal. Missing or mismatched delivery start or completion, or expiry of the
-  one aggregate delivery deadline, takes the same gate fallback. Completion is
-  only the takeover boundary, not cleanup or delivery proof; there is no per-
-  recipient interval.
-
-  While it remains live, the gate is the reporting actor for an admitted
-  ReqLLM-hygiene cohort. It
-  creates the same one aggregate deadline, freezes a recipient-to-
-  `req_llm_start_failed` set, performs the same concurrent handoff and
-  acknowledgement collection, then terminates the tree. Every admitted hygiene
-  requester also monitors that exact gate. If gate `DOWN` wins, the external
-  requester—not a replacement gate—selects fixed `req_llm_start_failed`,
-  ignores every later reply and returns by the same 7,000 ms outer deadline;
-  no owner, root, credential read or effect exists to clean. The synchronous
-  `start_session/1` entrypoint is a separate direct-return case, not a wrapper
-  or a process in the shared tree: it keeps the host creator identity, owns its
-  fixed owner-start refusal on its call stack, and is the sole detector and
-  poison committer for owner-start helper proof through the owner's prepared
-  acknowledgement. The guard may
-  report a missing worker proof, but it cannot commit poison or transfer result
-  custody; a silent, malformed or dead guard is instead detected through the
-  entrypoint's existing monitor and deadline. The entrypoint atomically commits
-  poison, directs and bounds the existing shared-tree termination/reap branch,
-  and only then returns its caller-held refusal. There is therefore no pre-owner
-  custody message, private result handoff or `poison_handoff_complete`. Once
-  exchange succeeds and the owner acknowledges its prepared state, every
-  detector uses the registered-owner protocol above; a detector with no live
-  registered owner terminates the tree at once. None of these paths
-  creates a second cleanup owner or retry path.
-
-  The gate checks the latch before and after any potentially blocking work and
-  immediately before every authority-bearing transition or grant. Once set, it
-  refuses reservation, owner exchange, root-token issue, lease acquisition or
-  release, PID or tag registration, caller creation or token verification,
-  process-group proof submission and final session disposition. Exactly three
-  non-authorizing control transitions remain admissible: (1) `poison_watch`
-  records the exact owner PID, poison reference and selection deadline and may
-  return its correlated acknowledgement; (2) `poison_delivery_started` for that
-  tuple records one aggregate delivery deadline without storing any recipient
-  value; and (3) `poison_handoff_complete` for the same tuple orders immediate
-  tree termination. The gate may create the same internal watch and delivery
-  states when it is the hygiene reporter. An identical replay returns the
-  already recorded acknowledgement and never extends a deadline or repeats a
-  side effect. A stale, mismatching, reordered or conflicting control message
-  is refused, cannot change the recorded tuple and cannot postpone the existing
-  fallback. At either deadline the gate performs one zero-wait receive for an
-  already queued exact message, then terminates the tree if the next required
-  transition is absent. These transitions cannot clear poison, release an
-  obligation or authorize runtime, credential or effect work. The gate does not autonomously exit before the applicable selection or
-  delivery deadline while an
-  exact reporting session owner remains live, because that would destroy the
-  selected result path. The reporting actor, direct-return entrypoint or the
-  no-reporter/deadline fallback above terminates the tree. Thus a
-  suspended gate cannot later commit queued admission when it resumes, a
-  caller-visible reached `:gate_release` failure can be handed off before its
-  owner dies, an admitted hygiene cohort receives its fixed failure before the
-  gate dies, and a replacement sees the already-retained unclean marker and
-  starts poisoned. Other sessions ended by the ensuing shared-tree failure use
-  the separately named bare-unavailable limitation; they do not borrow the
-  reporting session's cleanup map. The clean-stop census requires the latch to
-  remain zero. Only trusted code holding the private capability can set it;
-  resetting it is impossible short of VM restart.
-
-  The composition application callback's `prep_stop/1` is the only erasure
-  authorization path, and `stop/1` is the only commit path. Callback state
-  retains the application supervisor PID. `prep_stop/1` never calls a
-  supervisor child-enumeration API or the gate synchronously. It starts one
-  unlinked, monitored, non-trapping resolver worker bound to the application-
-  supervisor PID, a fresh reference and one absolute 1,000 ms deadline. The
-  worker resolves and verifies the current gate and owner-DynamicSupervisor
-  children, asks that exact gate to atomically seal owner, lease and ReqLLM-
-  hygiene admission under the same reference and expiry, sends one provisional
-  result and waits for `finish`. On a structurally valid, in-time result the
-  callback sends exact `{callback_pid, ref, :finish}` and accepts the proof only
-  after the worker's exact normal `DOWN` within the same absolute deadline; it otherwise
-  sends an untrappable kill, performs one zero-wait receive at the deadline and
-  returns no proof. The worker can neither erase a marker nor start an owner,
-  and a late request or result is refused by the reference and expiry. A gate
-  sealed by a worker whose result is lost stays fail-closed while OTP stops the
-  tree, with both markers retained. The gate returns an empty-census proof
-  bound to the nonce, application-supervisor PID, owner-DynamicSupervisor PID,
-  exact gate PID and exact persistent marker generation
-  only when it already has no reservation, registered owner, lease, poisoned
-  obligation, admitted hygiene cohort, hygiene worker or outstanding
-  controller-mutation obligation; the hygiene marker is not `:starting`; and
-  the verified DynamicSupervisor already has no children. Requests queued but
-  not admitted are refused after the seal. It never waits for an active session
-  or hygiene decision and never erases either marker; a non-empty census returns
-  no proof and lets OTP continue stopping the tree with both markers intact.
-
-  `prep_stop/1` places only that proof in the callback state passed to `stop/1`.
-  After OTP has ended the application supervisor, `stop/1` verifies that the
-  proof names the same supervisor and child incarnations. With the application
-  tree and every possible marker writer already gone, it compare-and-erases
-  only exact `{:unclean, proof_generation}` as the final clean-stop commit; a
-  missing, malformed or different value returns without erasure. It never
-  erases the separate ReqLLM hygiene marker.
-  A timeout, missing or replaced child, gate death
-  before reply, callback failure, non-empty or contradictory census, absent
-  proof or failure before commit leaves the scheduling marker and the hygiene
-  marker unchanged. Once commit occurs, the
-  application tree and all admission paths are already gone. The gate's
-  `terminate/2`, ordinary child shutdown and supervisor termination never clear
-  it. A gate or supervising-subtree crash
-  stops every ephemeral owner under the one-for-all tree but leaves the
-  scheduling marker.
-  A replacement gate is poisoned and refuses both modes until a VM restart;
-  every handle for a session stopped by the failure returns
-  `session_unavailable`.
-  This is explicit host-edge admission state, not hidden per-runtime truth;
-  trusted host code can erase it and is outside the guarantee.
-- An Ollama session with an active preset acquires a `:tools` lease before any
-  root. The owner has already recorded the one 5,000 ms session-start deadline
-  that later covers the root and every private-edge phase. It releases only
-  after every registered sensitive preflight, its complete per-session subtree
-  and every executor process group are proved down or empty. An active
-  credential-call mode refuses composition as
-  `credential_call_active`; an unavailable gate refuses
-  `credential_tool_gate_unavailable`. After acquisition, the owner starts one
-  linked and monitored raw preflight process, registers its PID beneath the
-  tools lease before granting it work, marks it sensitive and requires it to set
-  its process logger level to `:none`. The grant carries the owner PID and a
-  fresh reference. The process checks only whether `OPENAI_API_KEY`,
-  `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` is set, sends exactly
-  `{probe_pid, ref, :clear | {:present, variable_name}}`, then exits. The owner
-  accepts a result only from that PID/reference and only after the same process's
-  exact normal `DOWN`, which follows its send. The remaining session-start
-  deadline bounds both. On expiry, creator/owner loss, malformed result,
-  abnormal `DOWN`, result without `DOWN` or `DOWN` without a result, the owner or
-  gate sends an untrappable kill. Exact `DOWN` returns
-  `credential_preflight_failed` and releases the lease; missing `DOWN` returns
-  the same no-root error, retains the registered obligation and poisons both
-  modes until VM restart. A present variable, including an empty or oversized
-  value, returns `ambient_provider_credentials` only after normal `DOWN` and
-  releases the lease. Before starting the executor, the owner registers the
-  private subtree root with the gate. From then on, owner death does not release
-  the lease. Before root registration, owner death still waits for every
-  registered preflight PID; after registration, an unproved process group or a
-  missing process-group proof poisons both lease modes for the rest of the VM.
-  The value never leaves the short-lived process, though the host environment
-  itself keeps it.
-- A tool-free owner acquires no mode lease. Before the executor phase grant it
-  allocates a fresh instance reference and places that reference, its owner
-  registration and the inward gate-client handle in the private
-  `Executor.Local` child options. The new executor process knows its own PID:
-  its `init/1` performs the bounded gate registration as its first effect,
-  before ledger preparation, state construction, definition exposure or
-  dispatch. The gate binds an `:inactive_executor` proof capability to that PID,
-  instance and owner and returns it in the exact registration reply. That
-  capability admits no tool definition or dispatch and participates in neither
-  lease mode; it exists only so cleanup can obtain a gate-bound proof that the
-  executor's private process-group set stayed empty. Exact refusal makes
-  `init/1` stop and the executor phase return its fixed start failure. A missing,
-  malformed or gate-loss reply takes the existing poison path before `init/1`
-  stops, because registration may have committed. Registration starts a
-  process-group proof obligation even though the executor exposes no tools.
-  Only an accepted proof nonce followed by the owner's final acknowledged
-  disposition removes that capability. Owner or executor `DOWN` before the
-  proof is accepted leaves `:process_groups` pending and poisons both modes;
-  subtree `DOWN` alone never discharges it.
-- Every ephemeral owner also receives an instance-bound local-call capability.
-  It grants neither lease mode and cannot authorize a credential read. A
-  credential-free Ollama cleanup owner registers itself and then its
-  start-blocked lifecycle root, pool children and caller beneath the enclosing
-  owner through this capability. The cleanup owner directly `spawn_monitor`s
-  the generic caller only after exact pool setup; the caller monitors both that
-  owner and the gate and cannot start until the gate records its PID and returns
-  a one-use local token. This permits the default Ollama call to run while its
-  session holds a `:tools` lease, but keeps every call process in the gate's
-  owner census. Normal local-call release requires every registered PID `DOWN`
-  and both tagged registry entries absent, with no credential quarantine. An
-  unproved local call poisons later ephemeral admission until VM restart.
-- For a hosted provider, after core has registered the cleanup owner and before that owner creates a
-  lifecycle root, pool or caller, the owner acquires and holds a
-  `:credential_call` lease. An active tool lease produces fixed public
-  `{:not_dispatched, "model_call_failed"}` without reading the variable or
-  starting a pool. After exact pool setup, the owner asks the gate to create a
-  generic request-free caller. In one serialized gate turn, the gate spawns it
-  start-blocked, records and monitors its PID under the lease, and returns a
-  one-use start token. The caller also monitors that gate and exits without a
-  credential read if the gate dies before delivering the token. The owner
-  monitors the returned PID and only then sends call inputs; the caller verifies
-  the token, lease capability and PID-bound registration immediately before it
-  reads the selected value. The owner retains the lease through its core stop
-  handshake and registers the lifecycle root and each pool-subtree PID as they
-  appear. Gate failure during caller creation therefore leaves either no caller
-  or a blocked caller that self-terminates, never an unregistered credential
-  reader. Normal release requires every registered PID
-  `DOWN` and starts a 5,000 ms quarantine at caller `DOWN` before a tool lease
-  can be granted. That interval matches the isolated transport-drain witness;
-  it does not observe or prove transport `DOWN`, and a slower drain is the named
-  residual exposure. Cleanup-owner death never releases directly: the gate
-  tells the registered lifecycle root to unwind, kills a still live registered
-  caller, waits for every registered PID, and applies the same
-  quarantine. The owner created and registered the start-blocked lifecycle root
-  before setup, so no partial subtree can exist behind an unknown root PID.
-- Before every local tool dispatch in an active ephemeral session, the executor
-  runs the same PID/reference, result-before-normal-`DOWN` sensitive probe under
-  the earlier of 1,000 ms and the job's existing absolute effective deadline.
-  It registers the probe beneath the tools lease before granting the check. Any
-  present variable, timeout, malformed result, abnormal or missing `DOWN`
-  returns the existing fixed
-  `{:refused_before_effect, :effect_start_authority_unavailable}` without
-  starting an OS process; the missing-`DOWN` branch also freezes later executor
-  dispatch and retains a gate obligation that poisons both modes. Exact normal
-  `DOWN` is required before a clear result permits effect admission. Same-VM host code can still
-  change the environment after either check or inspect another process; that is
-  trusted host interference, not a structural isolation claim. A durable
-  composition or directly constructed executor in the same VM is also not a
-  gate participant. The gate proves only that the ephemeral composition does
-  not schedule its credential-bearing call path beside its own active-tool
-  path; a host needing exclusion from every in-VM executor gives this profile a
-  dedicated VM.
-- The executor's `bash` environment is constructed as `PATH=/usr/bin:/bin` and
-  today removes only `LOOPEX_PROVIDER_API_KEY` after its snapshot of the
-  environment (`executor.ex:5241-5258`); core's receipt validation rejects only
-  that name (`session_state.ex:139`, `:3941`), and core is unchanged, so M6
-  has only an executor instance carrying the explicit ephemeral tool-lease
-  capability rework `spawn_environment` to remove `OPENAI_API_KEY`,
-  `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY` explicitly as well. Durable and
-  directly constructed instances without that capability preserve the M5
-  environment behavior. The gate and dispatch check are
-  the Loopex scheduling proof; scrubbing prevents ordinary inheritance but is
-  not same-user isolation.
-- **Private process-group proof.** M6 adds no executor-protocol member. Each
-  ephemeral `Executor.Local` receives an explicit gate proof capability: the
-  tool-lease capability for an active preset or the inactive-executor capability
-  for `:tools :none`. It
-  keeps a private set of group identities whose emptiness has not yet been
-  proved. With serial tool execution it contains at most one: a group is
-  discarded only after the existing process-table check proves it empty, and
-  an interrupted or failed check remains and refuses later dispatch. After the
-  run-ending wait, the process-groups phase worker calls
-  `drain_process_groups(executor_pid, instance_ref, proof_capability,
-  absolute_deadline)`. The absolute deadline is the owner's one monotonic
-  cleanup deadline, not a relative timer. The call atomically refuses new
-  dispatch, drains and checks that set, and returns exactly `{:ok, proof_nonce}`
-  only after the gate has accepted a proof bound to that executor PID, instance
-  reference, proof capability and fresh nonce; its only ordinary failure is
-  `{:error, :process_groups_unproved}`. The owner validates the same nonce by a
-  read-only capability call to the gate after the worker is `DOWN`. A malformed
-  return, raise, exit, missed deadline, executor death, invalid proof or any
-  remaining group leaves `:process_groups` pending. Once accepted, the gate
-  retains the nonce and its complete binding through worker, executor and
-  subtree `DOWN` and lease release; it remains queryable until the monitored
-  session owner acknowledges its final cleanup disposition or dies. A later
-  subtree-only cleanup retry therefore neither calls the ended executor nor
-  replaces that proof. The worker then attempts
-  runtime and subtree stop even when this proof failed, so a proof failure does
-  not manufacture a live subtree; a deadline may leave both
-  `:process_groups` and `:session_subtree` pending. For every ephemeral executor,
-  the owner allocates the instance reference before the phase grant and
-  `Executor.Local.init/1` registers `self()` under the session owner's admission
-  as its first effect. For `:tools :none`, the exact reply issues an
-  `:inactive_executor` proof capability rather than a tools lease. For an active
-  preset it validates and binds the already-held tools lease. The executor
-  accepts no definition or dispatch before that exact reply; an inactive one
-  accepts none afterward and proves
-  its private group set stayed empty; the gate binds the accepted nonce to the
-  owner registration, executor PID and instance. No-executor startup rollback
-  is the only proof that needs no executor handshake. Every registered
-  executor, including `:tools :none`, must submit and have its nonce validated
-  while it is alive; only afterward may subtree shutdown produce its `DOWN`.
-  The gate releases a tool lease only after its
-  proof and subtree `DOWN`; owner or worker testimony is insufficient. This is
-  a private host-edge API, not a public `Loopex.Executor` callback or durable
-  record.
 - The ephemeral private subtree owns one `Loopex.Trace.Capability`, as the
   durable composition does through its credential plane. It starts before the
   runtime, supplies its handle to the model options, and is bound to the exact
@@ -1847,8 +1404,8 @@ an OpenAI surface change can pass the final boundary.
   from Loopex trace sessions (`trace.ex:56`).
 - The in-process adapter owns exactly one credential-bearing adapter MFA:
   `{Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1}`. Its initial argument is the
-  bounded credential-free call specification. After its start token and gate
-  capability are verified, that function calls
+  bounded credential-free call specification. After its start token and open session
+  cell are verified, that function calls
   `Loopex.Trace.exclude_self(tracing_capability,
   functions: [{Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1}])` and requires
   exact `:ok` before the hosted branch reads the environment. An unavailable
@@ -1858,7 +1415,8 @@ an OpenAI surface change can pass the final boundary.
   already-excluded process. Ollama uses the same exclusion path without ever
   reading a credential.
 - Before sending a mapped result to the owner, the caller recursively checks
-  every provider-controlled binary in the mapped reply, including assistant
+  binary map keys and values as well as every nested list/member in the mapped
+  reply, including decoded tool arguments and assistant
   text, tool-call fields and `provider_response_id`, for the exact resolved
   value. A match is discarded and becomes the fixed
   `dispatched_or_unknown` failure. The plan makes no claim to recognize an
@@ -1883,74 +1441,80 @@ table once:
   stopped until that step;
 - the companion worker already starts ReqLLM explicitly after its own settings
   (`provider_worker.ex:43`, `:78-79`) and is unchanged;
-- the credential/tool gate serializes the start step in its receive loop; M6
-  does not call `:global.trans/3`, whose lock acquisition is unbounded. The gate
-  records one absolute decision deadline 5,000 ms ahead before any application-
-  controller interaction, sets `trap_exit: true`, starts one linked and
-  monitored non-trapping hygiene worker and remains responsive. The gate owns
-  table evaluation and every marker write; the worker performs all potentially
-  blocking application-state reads, `Application.put_env/4` and
-  `Application.ensure_all_started/1`. It first sends the exact running/config
-  snapshot and waits start-blocked for a correlated row directive. For row 4 or
-  5 the gate writes persistent `:starting` before directing the first mutating
-  configuration request. The worker and gate use the one decision deadline
-  throughout, regardless of any later timeout internal to an application-
-  controller call. The worker sends provisional
-  `{worker_pid, ref, result, finished_at}` and remains blocked for a correlated
-  `finish`. A matching result stamped no later than the decision deadline may
-  win; at that deadline the gate performs one zero-wait receive before choosing
-  the result. The gate then sets the reap deadline to the earlier of 1,000 ms
-  after that choice and 6,000 ms after the decision began. For an in-time
-  provisional result it sends `finish`; for a missing, malformed, late or
-  otherwise unproved result it sends an untrappable kill. In either case it
-  remains responsive and waits in bounded receives for the worker's exact
-  `DOWN`, correlating both `EXIT` and `DOWN`, followed by one zero-wait receive
-  at the reap deadline. Only an in-time valid result followed by exact normal
-  `DOWN` permits the gate to replace
-  `:starting` with exact `:started` for accepted success or restore the row's
-  prior marker state for a returned error; the latter is
-  `req_llm_start_failed`. Concurrent requests join the
-  active decision under the same 7,000 ms outer bound, then re-evaluate the
-  table; a returned failure answers the whole current cohort without an
-  immediate second start. Two first compositions can therefore start ReqLLM
-  only once. Exact gate `DOWN` makes each admitted external requester select the
-  fixed failure under its gate monitor as stated above; no dead gate is assigned
-  result ownership. A read or configuration timeout, malformed result, abnormal worker
-  loss, or failure to observe exact normal worker `DOWN` after an in-
-  time snapshot or result makes the decision unproved. After the reap interval,
-  the surviving gate atomically poisons both ephemeral modes, fixes
-  `req_llm_start_failed` for every requester in the admitted cohort, completes
-  the aggregate poison-result handoff by the absolute 7,000 ms outer deadline
-  and only then terminates the shared tree. Before a row-4/5 mutation directive
-  it preserves the
-  exact prior hygiene marker—absent or `:started`—rather than inventing
-  `:starting`; after that directive every uncertain or late result retains
-  `:starting` because controller mutation may have continued. A missing matching
-  `DOWN` is logged without extending the outer bound or rolling the marker back.
-  A read failure before mutation and exact normal
-  worker `DOWN` returns the same fixed failure without changing the marker or
-  poisoning the gate. The scheduling-gate poison makes every later composition
-  refuse until VM restart even when the hygiene marker remained absent or
-  `:started`; a retained `:starting` also survives an application restart. No
-  owner reservation, root, credential read or effect exists at this phase.
-  Requester death does not cancel an admitted start: the
-  gate completes or bounds the decision and retains its result for later table
-  evaluation. The `.env` setting and exact completed marker outlive a clean stop
-  and restart of the Loopex application and any later restart of ReqLLM. A later
-  composition therefore proceeds after a hygiene success only when the
-  scheduling gate's separate unclean marker was erased by the exact
-  `prep_stop/1`/`stop/1` handshake; a crash restart remains poisoned until VM
-  restart. A host that turns loading back on is refused. The step never writes
-  `warn_unverified_models`.
+- `ReqLLMStarter` serializes shared initialization in its own responsive
+  receive loop. It is a `:one_for_one` sibling of the owner DynamicSupervisor,
+  and grants at most one linked, monitored initialization worker authority.
+  A new worker starts inert with a fresh initialization reference, monitors the
+  exact creating service and expires after 1,000 ms without activation. Before
+  a one-use begin, the service retains
+  `{:preparing, initializer_pid, initialization_ref}` under the fixed VM-local
+  `:persistent_term` key `{LoopexComposition.ReqLLMStarter, :initializer}`.
+  That identity is separate from the existing origin record at
+  `{LoopexComposition.ReqLLMStarter, :provenance}`; preparation never overwrites
+  prior `:started` or admitted start-intent provenance.
+  The worker receives no application-controller authority before that write.
+  A service loss in the pre-write interval can leave only an inert child that
+  exits on creator loss/expiry; it cannot initialize or gain a late begin.
+  The worker
+  receives no session, prompt, model, path or credential value. Each requester
+  sends a fresh reference, PID and absolute 5,000 ms expiry and monitors the exact
+  starter. Expired dequeued requests start nothing. While initialization is
+  active, concurrent requesters with the same omitted-versus-`:host_started`
+  declaration join it. Different declarations remain bounded queued requests
+  and get a fresh validation operation after the predecessor's exact DOWN;
+  one waiter's declaration never authorizes another. Each requester's expiry returns fixed
+  `req_llm_start_failed` and removes that waiter, but never kills the shared
+  initializer or any session. No caller uses an unbounded GenServer call.
+- The worker alone performs potentially blocking application-controller reads,
+  configuration writes and `ensure_all_started(:req_llm)`. It first checks the
+  three pre-start guards and current running/configuration/provenance state.
+  Already-running applications proceed only with persisted Loopex provenance or
+  an explicit host declaration and `load_dotenv: false`; declaration while
+  stopped refuses `req_llm_host_declaration_invalid`; running with loading
+  enabled refuses `req_llm_dotenv_enabled`; unknown running provenance refuses
+  `req_llm_already_started`. For a Loopex-owned start it first completes
+  persistent `load_dotenv: false`, then records recoverable `:starting`
+  provenance and calls `ensure_all_started`. Only an exact successful return
+  followed by normal worker DOWN records `:started` for an actual Loopex start
+  and replies success. Accepting a declared host start does not manufacture
+  Loopex-originated provenance; a later undeclared caller still refuses it.
+- `:starting` records a potentially continuing startup, not a refusal latch.
+  A requester timeout does not cancel initialization. The worker sends its
+  correlated result and exits; the starter waits for exact DOWN before beginning
+  another operation. Returned failure plus DOWN permits a later request to
+  re-read current state and retry with dotenv still disabled. Abnormal worker
+  death or starter restart re-evaluates current running/configuration/provenance
+  before retry. A still-live old worker is retained and never replaced until
+  exact DOWN. The initializer identity is absent or
+  `{:preparing, initializer_pid, initialization_ref}` and remains retained
+  through the admitted worker's lifetime. Origin provenance is absent,
+  `:started` or `{:starting, initializer_pid, initialization_ref}`.
+  The worker writes starting provenance only after persisted dotenv-off
+  succeeds; starting alone records admitted controller-start intent.
+  A restarting service first monitors the retained initializer PID before
+  reading origin or starting a replacement. A live PID is observed
+  until exact DOWN, never replaced or granted a second begin. The new service
+  does not await a result sent only to its dead predecessor. After exact DOWN,
+  it starts one validation worker to re-read actual application/configuration
+  state. A missing result does not make it wait forever. Running with prior
+  starting intent and dotenv:false reconciles to started; an initializer
+  identity alone never proves Loopex started an application. Without retained
+  origin it requires the ordinary host declaration if now running. Stopped
+  state may retry safely. The service clears initializer identity only after
+  exact DOWN; it never clears prior origin merely to prepare another worker.
+  Malformed provenance refuses fixed req_llm_start_failed until host correction,
+  not VM restart or peer teardown.
+  Provenance is credential-free host-edge infrastructure state and stores no
+  session truth. Same-VM host tampering is trusted interference.
+- A stalled application controller can leave the shared initialization unavailable:
+  every creation request still returns at its own 5,000 ms bound. Once the real
+  operation resolves, later requests may succeed without VM restart. No startup
+  error or missing result deliberately terminates unrelated sessions. Loopex never
+  stops shared ReqLLM on requester loss, never restores dotenv to true, and never
+  changes llm_db or warn_unverified_models. Host-start declarations describe the
+  current setting and are trusted, not proof of what was true at the original start.
 
-  The request that asks the gate to perform or join this decision uses the
-  gate's fresh-reference, requester PID, absolute-expiry, idempotent-cancel and
-  replay protocol with the same 7,000 ms outer deadline. The gate acknowledges
-  start or join before controller work. Expiry or cancellation before admission
-  performs no read, configuration or start, and a late dequeued request records
-  fixed `req_llm_start_failed` without beginning work. Once admitted, requester
-  death or a joiner's timeout does not cancel the shared cohort, but no stale
-  reply can revive the abandoned composition.
+
 
 **Errors.** The boundary is the call to `ReqLLM.generate_text/3` itself,
 matching where the companion places its own call
@@ -1986,17 +1550,16 @@ an authority-free owner candidate that becomes the cleanup owner only after
 exact managed core registration; the registered owner-created, monitored,
 start-blocked pool-lifecycle root; the start-blocked sensitive caller, the only
 process that can return the result; and an anonymous monitored supervisor
-holding only the tagged user-managed pool. For a hosted call the gate creates
-and registers that caller under its credential lease. For Ollama the registered
-cleanup owner creates it and the gate registers it under the enclosing owner's
-local-call capability, without a credential lease or quarantine. Both paths
-register the lifecycle root and every pool child before work.
+holding only the tagged user-managed pool. For every provider the registered cleanup owner creates and monitors that caller.
+It registers the lifecycle root and every pool child before work, and every start
+and dispatch grant checks the same session-local lifecycle cell.
 
   In the callback process, `complete/3` first calls
   `ProviderLifetime.starter/0` (`provider_lifetime.ex:35-45`). Exact `:unmanaged`
-  returns fixed `not_dispatched` without a proxy, child, credential read, pool or
-  poison. Only
-  `{:managed, starter}` proceeds. The callback retains a fresh one-use activation
+  returns fixed `not_dispatched` without a proxy, child, credential read or pool. Only
+  `{:managed, starter}` proceeds. Before proxy creation it obtains the session
+  owner's exact begin_model token/pending-call record via its private admission
+  port; a closed refusal has no proxy or credential read and maps not_dispatched. The callback retains a fresh one-use activation
   token and passes the opaque starter to one **unlinked**, monitored start proxy
   with a private reference and absolute start deadline equal to the earlier of
   the model-call deadline and 1,000 ms from start. The proxy monitors the
@@ -2019,7 +1582,7 @@ register the lifecycle root and every pool child before work.
   also requires exact normal proxy `DOWN`, then sends `registration_pending` with
   the exact private `stop_reference` that later core registration will use. The
   candidate validates and stores it before acknowledging. That acknowledgement
-  cancels the short expiry but grants no request, credential, gate, root, pool,
+  cancels the short expiry but grants no request, credential, root, pool,
   caller or dispatch authority.
 
   The callback alone enters the locked process-local
@@ -2050,10 +1613,12 @@ register the lifecycle root and every pool child before work.
 
   Only exact `{:managed, retainer_pid, cleanup_grace_ms}` returned from
   `ProviderLifetime.register/2` converts the candidate into the cleanup owner and
-  permits `activation_prepare` with the one-use token and that exact tuple. The
+  permits a correlated register_model transition at the session owner, then
+  `activation_prepare` with the one-use token and that exact tuple. No inputs or
+  resource grant precedes exact owner acknowledgement of the registered PID. The
   owner validates it, monitors the retainer, records the token and acknowledges
   preparation while remaining inert. The callback then sends distinct `begin`;
-  only the first exact token receipt authorizes gate, root, pool, caller,
+  only the first exact token receipt authorizes root, pool, caller,
   credential or dispatch work, and the owner acknowledges before accepting call
   inputs. Callback `DOWN` before `begin` follows the zero-wait rule above; after
   `begin`, the registered owner enters ordinary cleanup. A missing, late or
@@ -2063,20 +1628,21 @@ register the lifecycle root and every pool child before work.
   An exact returned start error plus normal proxy `DOWN` and no candidate report
   is clean `not_dispatched`. A missing, late, malformed or mismatching report,
   abnormal or missing proxy `DOWN`, or start expiry is unknown. The callback
-  commits the shared poison latch first, withholds activation, kills every known
+  seals the session cell to 3 first, withholds activation, kills every known
   proxy or candidate and waits at most 1,000 ms for known `DOWN` values before
-  returning fixed `not_dispatched`. A killed proxy cannot retract a queued
+  returning fixed conservative `dispatched_or_unknown`. A killed proxy cannot retract a queued
   `Task.Supervisor.start_child/3` request. An undisclosed candidate that appears
   later sees dead proxy or callback, or the expired deadline, and exits without
-  gate authority or a model request. Callback `DOWN` while the proxy is blocked leaves
+  session authority or a model request. Callback `DOWN` while the proxy is blocked leaves
   only that request-free, self-fencing path; when next scheduled, the proxy's
   callback monitor makes it retire. Late messages are ignored. A returned
   `:unmanaged` or `{:error, :provider_resource_refused}` from `register/2` plus
-  exact candidate `DOWN` is clean `not_dispatched`; missing candidate `DOWN`
-  first poisons admission.
+  exact candidate `DOWN` plus session-owner cancel_model acknowledgement is clean
+  `not_dispatched`; missing candidate `DOWN`
+  first seals that session cell to 3.
   On `{:error, :provider_guard_unavailable}`, a registrar raise or malformed
   return, the callback kills and awaits the known candidate under the same
-  1,000 ms proof and poison-on-missing-`DOWN` rule, then exits with fixed private
+  1,000 ms proof and session-seal-on-missing-`DOWN` rule, then exits with fixed private
   reason `:provider_lifetime_registration_failed`. That exit remains outside the
   adapter's returned-error mapping; locked core catches and discards it as
   `{:error, :provider_call_failed}` (`session_coordinator.ex:4149-4152`), which
@@ -2090,11 +1656,12 @@ register the lifecycle root and every pool child before work.
   or `{:error, :provider_resource_refused}` sends the candidate's
   untrappable `:kill` and awaits its exact monitor `DOWN` for at most 1,000 ms.
   No cleanup grace exists until registration succeeds, and the start-blocked
-  candidate has no resource or gate grant yet, so this is a private reap bound
+  candidate has no resource or session grant yet, so this is a private reap bound
   rather than a cooperative cleanup deadline. Exact `DOWN` returns fixed
-  `not_dispatched`. If it is still absent, `complete/3` returns the same fixed
-  result, logs the PID/monitor without its exit reason, poisons both ephemeral
-  gate modes until VM restart and admits that the authority-free candidate may
+  `not_dispatched` only after the exact clean-cancel acknowledgement. If `DOWN`
+  or that acknowledgement is absent, `complete/3` returns fixed conservative
+  `dispatched_or_unknown`, logs only the PID/monitor shape, seals its session to 3
+  and admits that the authority-free candidate may
   remain start-blocked until scheduled; no pool, caller, credential read or
   dispatch can occur from it. Guard-unavailable, raised or malformed registration uses
   the fixed private exit above, never a returned adapter `not_dispatched` value.
@@ -2107,24 +1674,30 @@ the lifecycle root, anonymous supervisor, pool supervisor and exact recorded
 worker `DOWN` and both tagged registry entries absent before releasing the
 adapter or any pre-adapter result. On normal completion it then ends and awaits
 the blocked caller before sending its mapped reply to the waiting `complete/3`
-callback. The registered owner stays alive while that callback returns. It
-acknowledges the coordinator's subsequent provider-resource stop only after the
-already-proved cleanup, and exits after the acknowledgement; this
+callback. The registered owner stays alive while that callback returns.
+On the coordinator's subsequent provider-resource stop, it first obtains the exact
+session owner's clean-retirement recording acknowledgement for its call/PID/proof
+reference, then sends core's stop acknowledgement and exits; this
 reply-before-stop order keeps the registered resource alive for core's exact
 handshake.
 On a stop or deadline it first makes any reply inadmissible, kills and awaits
-the caller, then cooperatively tears down and proves the pool before acknowledging
+the caller, then cooperatively tears down and proves the pool, obtains that same exact
+session-local retirement-recording acknowledgement, and only then acknowledges
 `{:loopex_provider_resource_stopped, stop, self()}`
 (`session_coordinator.ex:4641`). It never kills the lifecycle root or pool
 supervisor. A missing proof withholds the reply or acknowledgement, and the coordinator's existing
 forced-stop and unproved-cleanup path applies (`:4646-4652`).
 
 The caller performs HTTP/1 socket I/O, so killing it ends the only result path.
-NimblePool sends check-in asynchronously
-(`deps/nimble_pool/lib/nimble_pool.ex:461-471`) and closes a checked-out worker
-only after it processes the caller's cancellation (`:669-675`, `:770-794`;
-`deps/finch/lib/finch/http1/pool.ex:287-293`). Root shutdown can race either
-message. Cleanup therefore does not claim that the checked-out socket or its OTP
+On normal completion Finch transfers the socket to the NimblePool process before
+request/6 returns (finch/http1/pool.ex:314-328; nimble_pool.ex:445,462), so
+owned pool teardown closes that returned connection. During a freshly checked-out
+request, caller cancellation causes NimblePool to remove the resource and invoke
+termination. Finch's cancel handler only updates bookkeeping and returns `:ok`
+(`finch/http1/pool.ex:287-293`); `terminate_worker/3` requests connection close.
+Neither handler return is itself
+proof that transport or a TLS controller has already ended. Asynchronous check-in
+and cancellation can race graceful root shutdown. Cleanup therefore does not claim that the checked-out socket or its OTP
 TLS controller has finished when the owned caller and pool are proved gone.
 Under isolated release conditions, server-observed EOF and every call-created
 TLS controller must drain within 5,000 ms of caller `DOWN`; runtime cleanup does
@@ -2162,7 +1735,13 @@ test wrapper `LoopexStoreLocalTest.Memory`
   supplied, and follows the same checkpoint protocol as
   `Loopex.Store.Local.start_link(path:, fault_probe:)` (`local.ex:183`,
   `:242-257`), so the fault-injected cases (`each_store_with_unknown`,
-  `:1017-1030`) exercise the shipped module. No composition passes a probe.
+  `:1017-1030`) exercise the shipped module. The promoted module implements its
+  own private library-side `checkpoint/3` using the existing Local transition
+  validation and correlated `loopex_store_fault_point` / `loopex_store_fault_action`
+  protocol (local.ex:274-305), with a 5,000 ms probe wait. It calls no test module,
+  including LoopexStoreLocalTest.FaultProbe. Every Store-port GenServer.call uses
+  the library's 30,000 ms timeout (local.ex:65,112-141), not the wrapper's implicit
+  5,000 ms default. No composition passes a probe.
 
 The core test fixture `Loopex.M1RuntimeTestStore` is not used: it is unlinked,
 fault-instrumented, and grows without bound.
@@ -2191,48 +1770,31 @@ had with `artifact_store: nil`.
 
 Concept: [Scope](M6.md#concept-plan-scope).
 
-After closed option and prompt validation, workspace and skill resolution,
-provider admission and the pre-start Req, SSL and Tidewave guards, but before
-ReqLLM hygiene or owner admission, `start_session/1`, and `run/2` through it,
-ensure `:loopex_composition` is started. This placement is the single precedence chain
-above: a workspace, skill, provider or pre-start guard refusal wins without an
-application side effect, while bootstrap failure wins over every later hygiene
-or lifecycle fault. Because `Application.ensure_all_started/1` can block in the
-application controller, the entrypoint starts one unlinked, monitored
-`ApplicationBootstrapGuard`. The guard monitors the requesting process, traps
-exits only from its one linked, monitored, non-trapping bootstrap worker and
-owns that worker's lifetime. Neither process receives model, credential,
-workspace or root input.
-
-The guard and requester share one absolute 5,000 ms decision deadline and one
-further 1,000 ms reap deadline. The worker sends its
-PID/reference/timestamp/result tuple to the guard and waits for correlated
-`finish`; the guard validates and forwards that provisional tuple to the
-requester. A requester `finish` goes through the guard to the worker. Only an
-in-time `{:ok, started_apps}`, exact normal worker `DOWN`, the guard's correlated
-reap acknowledgement and exact normal guard `DOWN` permit gate lookup. If the
-requester dies or either deadline expires, the guard sends the worker an
-untrappable kill, waits only to the reap deadline for exact `DOWN` and exits;
-the guard's only normal exit follows exact worker `DOWN` and its reap
-acknowledgement, and every earlier guard exit is non-normal so the link kills a
-still-live non-trapping worker. A live requester
-whose guard does not finish by the reap deadline kills the guard and performs
-one zero-wait matching receive before returning failure. An exact returned
-error, malformed or late result, abnormal exit, timeout, missing proof or either
-missing `DOWN` returns `{:composition,
-:composition_application_start_failed}`. An already submitted OTP controller
-request may still finish after either process is killed; it has no session or
-effect authority. A later session-creation entrypoint therefore calls
-`ensure_all_started/1` again and accepts the controller's idempotent already-
-started result. Concurrent first calls may each have a guard and worker, but OTP
-serializes the one application start. The
-generated `loopex_composition.app` omits ReqLLM, Req and Finch from its automatic
-application set under the `runtime: false` declarations below, so this bootstrap
-cannot precede the hygiene decision with a ReqLLM or `.env` start.
+After pure/workspace/skill/provider checks and pre-start guards, creation ensures
+`:loopex_composition` is started before ReqLLM initialization or owner activation.
+The entrypoint uses one unlinked monitored bootstrap worker because
+`Application.ensure_all_started/1` may block in the application controller.
+The worker receives only its requester PID and reference, no model, credential,
+workspace, root or session input. The requester records a 5,000 ms absolute
+decision deadline and a further 1,000 ms reap deadline. The worker sends its
+PID/reference/result/completion timestamp, then exits. Only a matching in-time
+success plus exact normal DOWN permits continuation. At the decision deadline
+one zero-wait receive admits an already queued in-time result; otherwise the
+requester kills the worker and waits only to the reap deadline, then returns
+`composition_application_start_failed`. Returned errors, malformed/late values,
+abnormal exit or missing proof select the same fixed failure.
+Requester death may leave this authority-free worker or an already queued OTP
+start finishing shared initialization. Neither can create a root or session.
+Later creation safely re-evaluates OTP's idempotent start. Concurrent bootstrap
+workers serialize at OTP; no wrapper guard is needed for work with no session
+authority. The composition application has a one-for-one supervisor whose
+independent children are ReqLLMStarter and the temporary-owner DynamicSupervisor.
+It has no credential scheduling or persistent failure state. ReqLLM, Req and
+Finch remain load-only so bootstrap cannot load dotenv.
 
 `ask/3`, `answer/3`, `last_result/1`, `history/1` and `stop_session/1` consume an
 existing opaque handle and never run this bootstrap. Their lifecycle check keeps
-the precedence fixed above: application, gate or owner loss makes the handle
+the precedence fixed above: application or owner loss makes the handle
 closed or unavailable, and a handle call never restarts a new application tree.
 
 The packaged escript sets `escript: [app: nil, ...]`. Its generated wrapper
@@ -2267,444 +1829,130 @@ application start cannot occur outside the bound for valid ephemeral `ask`, an
 invalid ask cannot race application startup, and no released command silently
 loses its former application startup.
 
-**The ephemeral profile** (`LoopexComposition.Ephemeral`) starts, in order:
-1. It completes the pure/workspace checks above through model prefix admission,
-   the fixed expected-module lookup and the hosted-tools rule without a gate.
-   It checks Req defaults, `SSLKEYLOGFILE` and Tidewave, runs the bounded
-   application bootstrap, and only then obtains the composition application's
-   explicit credential/tool-gate capability for the bounded ReqLLM hygiene
-   decision. Only after that decision has either started ReqLLM or
-   verified the host declaration does it query ReqLLM's initialized registry,
-   require the exact expected module, select the explicit base URL or call that
-   module's `default_base_url/0`, normalize the address and repeat the global
-   guards. An unknown prefix therefore wins every later fault; for a known
-   prefix, a replaced module wins an explicit or default-address fault. It
-   acquires no mode lease and has no owner or root at this phase.
-2. It reserves owner admission, completes the bounded temporary-owner start and
-   exchanges that reservation for the still-root-blocked owner exactly as the
-   owner-start protocol below states. Before acknowledging its post-exchange
-   prepared state, and before any preflight, root token or dependency phase,
-   the owner obtains `Loopex.Executor.default_cleanup_grace_ms/0` once and
-   records that positive unsigned-64-bit cleanup grace. Only that registered
-   owner may acquire a lease or later receive a root-start token.
-3. Immediately after exchange the registered owner records one 5,000 ms
-   absolute session-start deadline. For an active Ollama preset it atomically
-   acquires a `:tools` lease before the sensitive preflight or temporary root;
-   an active
-   credential-call mode refuses `credential_call_active`, and an unavailable
-   gate refuses `credential_tool_gate_unavailable`. A hosted or tool-free owner
-   carries the capability but acquires no lease at composition. The active-
-   Ollama preflight uses the registered PID/reference/result-before-normal-
-   `DOWN` protocol above to prove all supported hosted-provider variables unset
-   within that deadline and exits. The ordinary composition process validates fixed variable names but
-   never reads a value. It then repeats the host-global, provider and address
-   guards. `:loopex`,
-   `:loopex_store_local` and `:loopex_executor_local` were already started with
-   the composition application, and ReqLLM was handled by step 1. If the host
-   already started Req, this cannot undo an
-   earlier key-log file open, but it still prevents the call-owned pool from
-   opening or appending while the variable is set.
-4. After the gate issues the one-use root-start token, the granted
-   `SessionRoot` startup actor creates the temporary root. Its first
-   `candidate_prepare` grant permits only side-effect-free path preparation,
-   not filesystem mutation. Under that grant it obtains one result from
-   `System.tmp_dir!()`. The root
-   helper has a private constructor-supplied zero-arity seam for that lookup and
-   one-arity seam for entropy; production supplies only `&System.tmp_dir!/0` and
-   `&:crypto.strong_rand_bytes/1`, and no public option or application setting
-   can replace them. Tests use the same helper with injected values. A raise,
-   throw, exit, non-binary result or invalid complete path from that lookup maps
-  to `{:composition, :temporary_root_unusable}` before creation. The actor then
-   obtains exactly 32 bytes from `:crypto.strong_rand_bytes/1` through a private
-   injectable entropy seam and proposes `loopex-<nonce>`, where `<nonce>` is all
-   64 lowercase hex characters. An entropy raise, throw, exit or result other
-   than an exact 32-byte binary maps to
-   `{:composition, :temporary_root_creation_failed}`. Before creation, the
-   complete path must be valid UTF-8, contain no NUL and be at most 65,536 bytes;
-   otherwise composition refuses `{:composition, :temporary_root_unusable}`
-   without creating it. `File.mkdir/1` is the exclusive claim; `:eexist`
-   consumes a new nonce, at most 16 attempts. Sixteen collisions or any other
-   mkdir return, raise, throw or exit maps to
-   `{:composition, :temporary_root_creation_failed}`. Immediately after a
-   successful claim and before any child or file starts, the actor applies mode
-   `0700`, `lstat`s the path and requires an ordinary directory owned by the
-   current OS user, exact permission bits `0700` and an empty entry list. A
-   chmod, lstat or listing failure, raise, throw, exit or mismatch uses startup
-   cause `{:composition, :temporary_root_creation_failed}` and enters rollback.
-   Proved removal returns that cause; inability to prove removal returns the
-   ordinary `cleanup_unproved` root-removal case carrying it. Before each
-   `mkdir`, the actor reports the candidate and waits for the owner to record and
-   grant that exact claim. If the candidate-preparation grant has no exact
-   candidate return by the startup deadline, the owner sends an untrappable kill
-   and waits within that deadline. Exact actor `DOWN` returns
-   `{:composition, :temporary_root_creation_failed}` with no root. Missing
-   `DOWN` returns the same no-root failure, poisons both gate modes until VM
-   restart and logs the retained monitor: the actor never received a mutation
-   grant and cannot call `mkdir`; after owner loss it cannot obtain one. A grant
-   for a recorded candidate with no exact mkdir return is
-   `root_claim_unknown`: the path may have pre-existed, so Loopex does not remove
-   it. After the actor is proved down and the final gate disposition is exactly
-   acknowledged, it returns `cleanup_unproved` naming that possible path with
-   `root_ownership: :unknown`, `pending: [:root_removal]`, `ending: :none` and
-   `cause: {:composition, :temporary_root_creation_failed}`. A failed reached
-   gate exchange instead returns the same map with only `:gate_release`, under
-   the reached-phase rule; an unproved actor or subtree returns the same map with
-   only `:session_subtree` and never reaches the exchange. The path is
-   diagnostic only; the host is not told to remove or retry it. Before such a
-   grant, actor loss cannot have changed the filesystem. The name is never
-   accepted from the caller and a symlink or pre-existing path is never
-   followed.
-5. `Loopex.Store.Memory`.
-6. `WorkspaceLease` on `:cwd`.
-7. `Executor.Local`, with its ledger root at `<tmp>/receipts`, no artifact
-   store and the explicit gate proof capability: the tools lease for an active
-   preset, or the gate's owner-bound inactive-executor capability for
-   `:tools :none`. An active executor uses it for the lease and presence check
-   before every tool dispatch; an inactive executor has no definitions and
-   cannot dispatch.
-8. `Loopex.Trace.Capability`. `SessionRoot` starts it under the private
-   supervisor, registers and monitors the returned PID, obtains and validates
-   its exact handle, and passes only that handle into the model options below.
-   A returned start, handle or validation failure maps to
-   `trace_capability_start_failed` after proved rollback.
-9. The `RuntimeHolder` and runtime, with:
-   - `runtime_id: "ephemeral-<id>"`, where `<id>` is the first 32 lowercase hex
-     characters of SHA-256 of the successful root nonce. It is generated once
-     for this runtime, is 42 bytes, changes with a collision retry and is
-     supplied explicitly to the unchanged required runtime option. Tests replace
-     only the private entropy seam;
-   - `store`;
-   - `model`:
-     `%{module: Loopex.LLM.ReqLLM.InProcess, model: "<provider:model>", options: [base_url: url, credential_variable: name_or_nil, tracing_capability: handle, credential_tool_gate: gate, provider_call_capability: owner_bound_capability]}`;
-   - `executor`;
-   - for `:tools` `:none`, both `tools: []` and `active_tools: []`;
-   - for `:coding` or `:read_only`, `tools: CodingTools.definitions()` and the
-     preset's exact active ids. This explicit empty-definition case is required
-     because core interprets an empty active list beside non-empty definitions
-     as all definitions during option inheritance;
-   - `policy` and `policy_identity` (`%{"id" => inspect(policy), "revision" => "0.2.0"}`, the durable composition's default, fixed below);
-   - `bounds`, `sampling`, `context_token_budget`, and the explicit committed
-     previously recorded `cleanup_grace_ms` returned once by
-     `Loopex.Executor.default_cleanup_grace_ms/0` (5,000 ms in the locked
-     kernel);
-   - `resource_manifest` from `:skills`.
+**The ephemeral profile** starts in this fixed order:
+1. Validate options and workspace/skills/provider; run pre-start guards and bounded
+   composition bootstrap; join ReqLLMStarter with a 5,000 ms requester bound.
+   After success verify the exact provider module, select its explicit or built-in
+   base URL, normalize it and repeat host-global guards. There is no credential
+   read, session owner or temporary root during these shared-infrastructure steps.
+2. Activate one temporary session owner using the authority-free proxy protocol
+   below. The owner records cleanup grace once from
+   `Loopex.Executor.default_cleanup_grace_ms/0` (5,000 ms in locked core),
+   creates its session-local cell and installs its creator monitor.
+3. On the exact one-use begin token, the owner records one absolute 5,000 ms
+   session-start deadline and starts a linked monitored SessionRoot actor.
+   It reports ready and performs no path lookup, root mutation or dependency
+   start until the owner's matching phase grant. The same cell is passed to
+   model/executor private constructors; no public option supplies a different one.
+4. Under `candidate_prepare`, SessionRoot obtains System.tmp_dir! through a
+   private zero-arity seam and 32 entropy bytes through a private one-arity seam.
+   Production supplies only the actual functions. It proposes
+   `loopex-` plus all 64 lowercase nonce hex bytes; complete path is UTF-8,
+   no NUL, at most 65,536 bytes. Invalid tmp result/lookup maps to
+   temporary_root_unusable; malformed entropy maps to temporary_root_creation_failed.
+   It reports the candidate before the owner grants exclusive File.mkdir.
+   Up to 16 eexist collisions take fresh entropy; other failure or exhausted
+   collisions take temporary_root_creation_failed. A successful claim is chmod
+   0700, lstat-verified ordinary directory owned by current OS user with exact
+   permission bits and empty listing before any file or child starts.
+   A lost candidate-prepare result gives no mutation authority: known actor is
+   killed/reaped within startup deadline; missing DOWN is logged and no root is
+   named or deleted. A lost mkdir result names an ownership-unknown possible
+   path, never deletes it and returns cleanup_unproved with root_removal pending
+   after actor proof, or session_subtree while actor proof remains missing.
+5. SessionRoot becomes the lifetime parent of a zero-restart-intensity private
+   one-for-all supervisor. It reports its exact PID and waits for owner monitor
+   acknowledgement before any child. It then starts memory store, workspace
+   lease on cwd, executor, runtime trace capability, and RuntimeHolder/runtime
+   in that order. Before each potentially blocking call it sends
+   `{phase_ready, root_pid, ref, phase}`; only the recorded owner grant permits
+   the phase. Every exact returned child/handle is registered and acknowledged
+   before the next phase. Lost granted returns remain start_unknown: known
+   parent DOWN cannot prove an unreported child absent.
+6. Executor receives ledger root `<tmp>/receipts`, no artifact store, exact
+   owner PID/fresh instance/cell and the private session admission handle. Tools none has both empty definitions and empty active ids; active
+   presets use all definitions with the literal selected ids. Both hosted and
+   Ollama models permit every preset. No environment presence preflight runs.
+7. Trace capability starts before runtime. RuntimeHolder is itself registered
+   start-blocked before a separate grant to
+   `Loopex.Runtime.start_link/1`; it stays runtime's OTP parent, so no disposable
+   starter becomes a surviving edge's parent. Runtime uses:
+   - runtime_id `ephemeral-` plus first 32 lowercase SHA-256 hex bytes of the
+     successful root nonce, 42 bytes total; entropy seam pins vectors;
+   - memory store, executor, named policy and identity revision `"0.2.0"`;
+   - in-process adapter model string plus private base_url, credential variable
+     name or nil, trace handle and session cell, never a credential value;
+   - requested bounds/sampling/context budget; runtime's unchanged token_budget
+     default 1,000,000 when not explicitly supplied;
+   - exact committed cleanup_grace_ms and normalized skill resource_manifest.
+8. Owner grants trace bind under the same deadline, requiring exact
+   `Loopex.Trace.Capability.bind(handle, runtime) == :ok`. Missing granted bind
+   reply is start_unknown and seals the session; returned failure maps to
+   trace_capability_bind_failed after proved rollback.
+9. SessionRoot reports one prepared tuple and remains blocked until owner commit.
+   Only then may the linked monitored FacadeClient create with surface embedded,
+   exact command id create, attach at sequence zero, admit the manifest and
+   activate every ordered selection. Empty manifest submits no resource command.
+   All steps must succeed before returning a handle or admitting any prompt.
 
-10. After the exact runtime handle is registered, the owner grants one
-    `trace_capability_bind` phase under the same startup deadline.
-    `SessionRoot` calls `Loopex.Trace.Capability.bind(handle, runtime)` and
-    requires exact `:ok`; it never retries a missing reply. A returned error is
-    `trace_capability_bind_failed` after proved rollback. A deadline, actor loss
-    or missing, malformed or late return after the grant is `start_unknown`,
-    collapses the complete private subtree and retains the owned root with
-    `:session_subtree` unproved. Only an exact bind return permits the prepared
-    tuple and startup commit, so no session, prompt or model call can use an
-    unbound capability.
+Production hard-codes the model-port builder; tests inject only the scripted
+unchanged model port via a private constructor, not API/configuration. Adapter
+suites and the acceptance demo exercise the production builder.
 
-The owner constructor has one private model-port builder dependency. Production
-hard-codes the exact `Loopex.LLM.ReqLLM.InProcess` value above; API callers,
-application configuration and session options cannot replace it. Composition
-tests inject only a scripted implementation of the unchanged `Loopex.LLM` port
-through that constructor seam, so API lifecycle and failure witnesses exercise
-the real composition without network timing. The adapter's own suites and the
-acceptance demonstration exercise the production builder.
+**Owner activation.** The entrypoint alone retains a fresh begin token and starts
+one unlinked monitored authority-free proxy with creator PID, reference,
+absolute 1,000 ms start expiry and owner DynamicSupervisor PID. The proxy
+monitors the creator, calls DynamicSupervisor.start_child only on its exact
+initial grant, reports the exact return provisionally and awaits correlated
+`finish`. The child closure captures
+only creator/proxy PIDs, reference and expiry—no token, session options, model,
+credential, workspace or root. A temporary child reports its PID directly,
+monitors creator/proxy and remains blocked. Only matching candidate/proxy PID
+reports let the entrypoint install the candidate monitor and send `finish`.
+The proxy sends the candidate exact `proxy_retiring` before exiting normally.
+Those matching reports plus exact normal proxy DOWN permit the entrypoint's activation
+prepare/begin handshake. Until begin, proxy loss is accepted as authorized
+retirement only after the exact retiring notice; otherwise the candidate exits
+without work. The entrypoint installs its owner monitor before begin and grants
+validated composition input only after matching activation acknowledgement.
+A lost/malformed return, timeout, abnormal or missing proxy DOWN withholds begin,
+kills known helper/candidate and awaits exact known monitors at most 1,000 ms,
+then returns ephemeral_owner_start_failed with no root. A queued supervisor
+start may later create an undisclosed child; it has no inputs or begin token and
+exits on its first expired-deadline/dead-creator/dead-proxy step. This uncertainty
+does not stop or disable a peer session. Only the admitted session owner may
+create a root, and no entrypoint becomes a replacement cleanup owner.
 
-**Refusals** name the step: `{:composition, reason}`.
+**Startup rollback.** Every returned named phase failure carries its fixed
+startup cause after proved cleanup: named composition child, session_create,
+client_start, attach, resource_admission or skill_activation. Missing or
+malformed granted dependency/bind return is start_unknown, seals cell 3 and
+keeps the owned root with session_subtree unproved even if known parents later
+go DOWN. It returns no handle and never upgrades unknown starts to proof from
+parent DOWN. Before mkdir grant no root can exist. After a lost mkdir reply,
+ownership stays unknown and the path is diagnostic, never deletion authority.
+Owner death before begin leaves no root; afterward its SessionRoot monitor
+prevents more grants and collapses that session subtree, but the entrypoint may
+only return bare session_unavailable and cannot name an unreported root.
 
-**Owner admission and start.** After option validation and before a temporary
-root, the entrypoint asks the gate for an owner reservation bound to the
-creating process. A stopping gate returns
-`{:composition, :ephemeral_admission_closed}`; a gate carrying the persistent
-poison returns `{:composition, :ephemeral_admission_poisoned}`; an absent,
-dead, exiting or malformed gate reply returns
-`{:composition, :credential_tool_gate_unavailable}`. On a reservation, the
-entrypoint starts the `restart: :temporary` owner under the owner
-DynamicSupervisor. Owner `init/1` creates only its creator and guard monitors,
-then returns `{:ok, start_blocked_state}` immediately; it does not use
-`handle_continue/2` or wait inside `init/1`. That return is what lets
-`DynamicSupervisor.start_child/2` return the owner PID. In its ordinary receive
-loop the owner remains start-blocked: it creates no root, lease, application or
-session and accepts no public request. A returned child-start failure or raise synchronously cancels
-the reservation and returns `{:composition,
-:ephemeral_owner_start_failed}`.
+Rollback uses ordinary stop's single cleanup-grace-plus-5,000 ms deadline,
+facade-client reap, serial phase workers, direct executor certificate,
+recorded child/root DOWN and exact root-removal/absence proof. Only reached
+failures appear in the ordered pending list. No run makes ending/effect phases
+vacuous. If executor may have started, a certificate is required while it is
+alive; unknown/unproved group or subtree retains the root. No phase retries
+after uncertain dispatch of that phase, and no prompt/provider/tool can run
+before startup commit. Shared applications, initialized dotenv setting and
+ReqLLMStarter lie outside the private subtree. Their real outages are shared
+infrastructure failures, never deliberate peer-session termination.
 
-The entrypoint does not call the locked, potentially unbounded
-`DynamicSupervisor.start_child/2` itself. It starts and monitors, but does not
-link to, one `owner_start_guard`, then starts and monitors one non-trapping
-`owner_start_worker`. Before that link can form, the guard sets
-`Process.flag(:trap_exit, true)`; it monitors the creator and worker and
-correlates both worker `EXIT` and `DOWN`. The worker links to the
-guard, reports its PID to both guard and entrypoint and remains start-blocked;
-only after both processes and monitors are known does the entrypoint send the
-guard a correlated start grant. The guard relays that grant, and the worker
-alone calls `start_child/2`. The responsive guard never enters that call. It
-receives the exact return, records and monitors any returned owner PID, relays
-the result to the entrypoint, and keeps custody until commit or cancellation.
-The child specification gives the new owner the creator PID, guard PID,
-reservation reference and expiry. The already-returned owner's post-`init/1`
-receive loop accepts only the correlated private exchange, commit, cancellation
-and monitored-lifetime messages until commit. Guard `DOWN`, creator `DOWN` or
-expiry before a committed exchange makes it exit.
+The private one-for-all supervisor has restart intensity zero and never
+restarts a memory store, lease, executor, trace capability or runtime in place.
+Its first unexpected child loss collapses the subtree and closes only that
+owner's lifecycle. SessionRoot and RuntimeHolder remain lifetime parents;
+FacadeClient remains the sole public attachment holder and reader.
 
-Creator `DOWN` for any reason makes the responsive guard send untrappable kills
-to the worker and any returned owner, consume the worker's correlated `EXIT`,
-await both exact `DOWN` messages, cancel the reservation and exit. The gate's independent creator monitor also releases
-an unexchanged reservation. Unexpected guard death kills the linked,
-non-trapping worker and makes a returned start-blocked owner exit through its
-guard monitor. The entrypoint's monitor-only relationship means its own timeout
-kill cannot propagate back into the host caller. A normal entrypoint path cannot
-end before it has explicitly committed or canceled the handoff and reaped the
-guard, worker and, on refusal, owner.
 
-The guard treats a worker `EXIT` or `DOWN` before it has recorded an exact
-`start_child/2` return as `start_result_unknown`; it does not infer that no
-request was queued. It reports that correlated state to the entrypoint and
-remains alive for cancellation. The worker's result send precedes its normal
-exit signal to the same guard, so a recorded result followed by normal `DOWN`
-is not reclassified. A guard `DOWN` before its commit acknowledgement is also
-unknown to the entrypoint. Either unknown state takes the same shared-supervisor
-kill, poison, cancellation and reap branch as expiration below, returning
-`ephemeral_owner_start_failed`. This covers loss before the call, while it is
-blocked and after an owner may have returned but before the guard relayed it.
-
-After the guard relays the owner PID, the entrypoint monitors it and uses the
-correlated gate protocol to exchange the reservation for that exact PID. A
-stopping or poisoned gate keeps the corresponding reason above; gate loss keeps
-`credential_tool_gate_unavailable`; a live-gate timeout, token/PID mismatch or
-malformed exchange returns `ephemeral_owner_registration_failed`. On every
-failed exchange the entrypoint tells the guard to cancel. The guard kills and
-awaits the still-blocked owner and worker, sends the correlated reservation
-cancellation and acknowledges only after both exact `DOWN` messages; the
-entrypoint then awaits the guard's `DOWN` before returning. The gate rejects or
-expires any late exchange. Gate loss invokes the one-for-all failure path, and
-the entrypoint still requires owner, worker and guard `DOWN`; no root existed,
-so none of these forms is `cleanup_unproved`.
-
-If the guard does not relay a result, reports `start_result_unknown`, or dies
-before commit, the entrypoint cannot know whether a
-`start_child/2` request is queued. It kills the owner DynamicSupervisor, which
-forces the one-for-all subtree through the already-poisoned application-failure
-path, sends the worker and guard untrappable kills, cancels the reservation and
-waits a second 1,000 ms reap bound. The unknown-start branch always leaves the
-gate poisoned and requires VM restart, even when the owner DynamicSupervisor,
-worker and guard monitors all report `DOWN`. In that case it returns
-`{:composition, :ephemeral_owner_start_failed}` with no known residual helper.
-A child whose PID never reached the guard may remain start-blocked until it is
-scheduled and receives the dead-supervisor or expired-token signal; the plan
-does not claim its synchronous `DOWN`, but it cannot create a root or effect. If
-any known `DOWN` is still absent, the entrypoint returns the same error, leaves the
-unclean marker and the gate poisoned for both modes, and records the missing
-monitor in the host log. The already-sent untrappable kills may remain pending
-until the suspended process is scheduled; neither process holds a live gate
-capability, and any child started from the queued request receives an expired
-token and exits from its start block without creating a root. This is the sole
-startup-refusal case that may temporarily outlive the return, and it admits no
-handle, root, credential read or effect. A VM restart is required before another
-ephemeral session after every unknown-start branch. The entrypoint does not
-exit the host caller. Only after an acknowledged gate exchange does the
-entrypoint send a matching start-commit to the guard. The guard relays it to the
-  owner. The owner validates it, obtains
-  `Loopex.Executor.default_cleanup_grace_ms/0` exactly once, requires a positive
-  unsigned-64-bit integer, records it, enters `commit_prepared` and replies
-  `start_prepared`; it remains root-blocked and keeps its guard monitor. An
-  impossible invalid locked-kernel value takes the same poisoned no-root
-  `ephemeral_owner_start_failed` branch instead of authorizing preparation. The guard
-relays that acknowledgement. The entrypoint then sends `retire_guard`; the guard
-tells the owner it is retiring, the owner marks that exact retirement authorized
-and removes its guard monitor while remaining root-blocked, and the guard relays
-`guard_retired` before exiting normally. Messages from the guard reach the
-entrypoint in send order, so its acknowledgement precedes its `DOWN`.
-
-The entrypoint requires the guard and worker exact `DOWN` messages within the
-remaining startup bound. Missing helper proof takes the same supervisor-kill,
-poison and no-root refusal branch above. Only after both helpers are proved gone
-does the entrypoint request a one-use release token from the exact gate
-incarnation that exchanged the owner registration. The gate binds that token to
-the reservation, owner PID and creator PID and sends it to the entrypoint; token
-issuance is the release boundary. The entrypoint forwards only that token, and
-the owner accepts it once only from its still-live monitored creator with the
-exact binding. A gate `DOWN` delivered before its token—signals from that one
-sender retain order—or creator loss before token issuance makes the owner exit
-without a root. Once the gate issued the token, later gate loss is an ordinary
-post-release application failure whether or not the creator managed to forward
-it; if the owner received it, the bounded rollback below applies, while an owner
-killed by the gate's one-for-all failure has the separately named unmarked-owner
-root-retention limitation. The entrypoint never synthesizes a token from stored
-gate identity or `Process.alive?/1`. Thus no guard, worker or cross-sender
-`release_start` race can produce a no-root refusal after root creation.
-
-**Startup completion and rollback.** `start_session/1` starts its supervised
-owner and installs the creator monitor before creating the temporary root.
-It reuses the one 5,000 ms absolute session-start deadline recorded immediately
-after owner exchange, before any active-Ollama preflight, root lookup or private
-process start. It starts one linked and
-monitored, non-restarting `Ephemeral.SessionRoot` raw actor, which also monitors
-the owner, reports a correlated `ready` before any dependency call and waits for
-the owner's grant. The owner remains in its receive loop throughout startup.
-The actor first executes the temporary-root protocol above through grant-gated
-phases. It then becomes the lifetime OTP parent of an initially empty
-`:one_for_all`, zero-restart-intensity private supervisor. It starts that
-supervisor, reports its exact PID, and waits until the owner has installed its
-own monitor and acknowledged it before any child start.
-
-Store, workspace lease, executor, runtime trace capability and
-`RuntimeHolder`/runtime then start in that fixed order; the post-runtime trace
-bind follows before preparation.
-Before each potentially blocking supervisor or runtime-start call, `SessionRoot`
-sends `{phase_ready, root_pid, ref, phase}` and waits for a correlated owner
-grant. Sending that grant is the phase's possible-start boundary. Every returned
-child PID is sent to the owner and must be monitored and acknowledged before the
-next phase. Before the executor grant the owner supplies the fresh instance
-reference and private gate-client registration options. `Executor.Local.init/1`
-registers its own PID with the gate before any other executor initialization;
-the supervisor call cannot return a usable child until the exact capability
-reply is installed. A lost supervisor return therefore remains the ordinary
-granted-phase `start_unknown` case, while the gate and private supervisor retain
-the self-registered PID for rollback. Because `Loopex.Runtime.start_link/1` returns a runtime handle only
-after its own infinite readiness control call, the supervisor first starts one
-side-effect-free, start-blocked `RuntimeHolder` child and registers its PID with
-the owner. On a separate grant that holder calls `Loopex.Runtime.start_link/1`,
-reports the handle and remains the runtime supervisor's OTP parent for the
-session lifetime. No temporary starter becomes the parent of a surviving edge.
-All phase messages carry the same root PID/reference and are ignored otherwise.
-
-After every exact PID and runtime handle is registered and the trace capability
-is exactly bound, `SessionRoot` sends one prepared tuple and remains blocked.
-Only the owner's correlated commit moves it
-to its lifetime loop and permits the linked and monitored core `FacadeClient`
-actor to start. That client creates the session and attaches after event
-sequence zero, remains the attachment holder and executes every later facade
-operation under the bounded actor protocol above.
-When the manifest has packs, it must then complete the admission and activation
-state machine specified under **Skills by path**. An empty manifest submits no
-resource command. Only successful attachment plus successful admission and all
-activations may return a handle. No prompt, provider call or tool effect can
-dispatch before that point.
-
-Any failure from root creation through the last activation makes results
-inadmissible and records exactly one `startup_cause`: the fixed composition
-step, `{:composition, :dependency_start_failed}` for `SessionRoot` or private-
-supervisor bootstrap before a named child phase,
-`{:composition, :trace_capability_start_failed}` for a returned capability
-start, handle or validation failure,
-`{:composition, :trace_capability_bind_failed}` for an exact returned bind
-failure,
-`{:client_start, :failed}` when the core client actor cannot be created,
-`{:session_create, :failed}`, `{:attach, :failed}`, the first refused,
-malformed, raised, exited or mismatching admission/catalog step as
-`{:resource_admission, :failed}`, or the first such activation as
-`{:skill_activation, :failed}`. Admission or earlier accepted activation
-commands may already exist in the memory store, but no prompt can observe them;
-rollback destroys that store rather than trying to compensate with more
-commands.
-
-The 5,000 ms startup deadline is sliced and never passed whole to a BEAM timer.
-A returned phase error remains that phase's fixed failure when the owner records
-the exact return before the deadline and subsequently proves every applicable
-known process `DOWN`. The side-effect-free candidate-preparation phase is the
-one exception to the root-bearing rule: loss after its grant but before an exact
-candidate report makes the owner kill the actor. Exact actor `DOWN` proves no
-root exists, keeps the fixed phase error and permits the ordinary final gate
-disposition; missing `DOWN` prevents that exchange and poisons both modes.
-Once a candidate is recorded, loss after the
-mkdir grant is the ownership-unknown branch. After an exact successful claim,
-a deadline, malformed or lost dependency-phase return, creator loss,
-or `SessionRoot`, private-supervisor, trace-capability process or
-`RuntimeHolder` loss after a phase grant, or loss of the trace-bind reply after
-its grant, before the exact phase return is `start_unknown`: even if every known monitor
-later reports `DOWN`, an unreported child may exist. The owner makes results
-inadmissible, sends untrappable kills to the exact known actor, supervisor and
-holder PIDs, and enters rollback, but it never upgrades that branch to proved
-cleanup from parent `DOWN`. It retains the owned temporary root and
-`:session_subtree` obligation and returns no handle. If executor start might
-have occurred, release of an active tool lease additionally requires the
-existing process-group proof; inability to obtain it poisons both gate modes.
-No prompt, provider call or tool dispatch is possible before the prepared
-startup commits.
-
-The preceding rollback branch assumes the owner remains alive. If the owner
-itself dies at any time after the successful reservation exchange and before a
-handle is returned, the entrypoint cannot act as a second session owner or
-construct a cleanup map from state it does not own. Its owner monitor returns
-the bare `{:error, :session_unavailable}`. Before the gate issues the root-start
-token, no root can exist; the gate turns any registered preflight, lease or
-owner obligation into its orphan-cleanup state and poisons both modes if that
-release is unproved. After token issue, `SessionRoot`'s owner monitor prevents
-later phase grants and collapses the private subtree; the gate retains every
-already registered subtree, process-group or local-call obligation and poisons
-both modes when their release is unproved. A post-token root can remain unnamed
-under the existing unexpected-owner limitation. No process substitutes for the
-dead owner, retries a phase or reports cleanup proved.
-
-Rollback uses the same single monotonic `cleanup_grace_ms + 5_000` deadline as
-`stop_session/1`. It first kills and awaits the linked, monitored core client
-actor when one exists; a blocked create, attach, admission or activation cannot
-survive rollback, and failure to observe its `DOWN` is `:session_subtree`. It
-then uses the same ordered one-worker-per-phase protocol and 500 ms operation/
-1,000 ms total phase slots for process-group proof, runtime stop and subtree
-stop. The locked `Loopex.stop/1` or an infinite-shutdown child specification can
-block only its own worker while the owner remains responsive. A phase worker
-proved `DOWN` after failure permits the next independent phase; missing `DOWN`
-prevents it. The owner checks every recorded child/root monitor and verifies any
-started executor through the gate-bound process-group proof. After the actor,
-every phase worker, every child and subtree root are `DOWN`,
-an owner whose reservation was exchanged submits the same correlated final
-gate disposition as ordinary stop and requires its exact acknowledgement. Only
-after that acknowledgement does it start the exact separate removal worker and
-require the owner-side absence check. A live actor, child or root returns
-`cleanup_unproved` with `pending: [:session_subtree]`; an unproved executor
-group uses `:process_groups`; a refused, malformed, late or missing final gate
-acknowledgement uses permanent `:gate_release`, flips the poison latch and keeps
-any possible root; a raised, exited, malformed, hung or ineffective removal uses
-`:root_removal`.
-The pending list uses the reached-phase rule above. Independently observed
-process-group and subtree failures combine in that order; either prevents the
-final gate exchange, so `:gate_release` is omitted. A failed final gate exchange
-is reached only after those proofs and therefore appears alone; it prevents and
-omits `:root_removal`. Root removal is reached only after the acknowledgement
-and therefore also appears alone. A no-root actor failure that prevents the
-final exchange returns its fixed phase error and poisons admission; it does not
-misreport an exchange that was never attempted.
-An abrupt VM exit is the separately named hard-kill limitation. Global
-applications and the ReqLLM settings are not part of that subtree and retain
-the VM lifetime stated below.
-
-The private subtree is a `:one_for_all` supervisor with restart intensity zero,
-owned for its lifetime by `SessionRoot`; the owner monitors both. No memory
-store, lease, executor, trace capability, runtime or
-session edge is restarted in place. The first unexpected child exit therefore
-collapses the complete subtree; its `DOWN` makes the owner answer any still
-waiting call through the session-failure cleanup path, perform the same cleanup
-proof, and exit unmarked. With no registered waiter it follows the no-waiter
-rule: no observation is invented, any retained root and obligations are logged,
-and later calls through the open handle cell return bare `session_unavailable`.
-A crash can never substitute an empty memory store or a new edge beneath an
-existing session handle.
-
-A proved returning startup failure leaves no per-session process, gate
-registration, lease or
-root and maps its cause to the corresponding fixed `{:composition, reason}`:
-the named root/dependency/store/lease/executor/trace-capability/runtime reason,
-or `client_start_failed`, `session_create_failed`, `attach_failed`,
-`resource_admission_failed` or `skill_activation_failed` for those five causes.
-If process-group, subtree, final gate-release or
-recursive-removal proof fails, the API instead returns
-`{:error, {:cleanup_unproved, unproved}}` with the applicable ordered pending
-members, `ending: :none`, the fixed failing-step `cause`, and the retained root.
-When no root or possible root ever existed, an unproved final gate release has
-no truthful `cleanup_unproved.root`; it poisons both modes, logs the fixed gate
-failure without a path and returns
-`{:error, {:composition, :credential_tool_gate_unavailable}}` instead.
-There is no session handle to retry. The host owns a root marked `:owned`; an
-`:unknown` possible path is named for investigation and must not be removed on
-Loopex's authority. If the caller exits
-during startup, the owner performs the same rollback and logs the root and
-cause only when removal fails. For an active-tool composition, rollback before
-root registration can submit the final disposition only after the sensitive
-preflight is down. After registration it can submit only after the complete
-private subtree root is `DOWN` and the owner proves every executor process group
-empty. In both cases only the gate's exact acknowledgement releases the owner
-record and lease; failure poisons both modes for the VM. Root removal is never
-the lease boundary.
 
 **The durable profile** gains four optional composition options. The existing
 `LoopexComposition.start/1`, `with_runtime/2` and `start_edges/2` entrypoints
@@ -2734,19 +1982,30 @@ The durable profile keeps the companion adapter and the single
 draft) may add per-provider credentials.
 
 **Durable added-option grammar.** These three entrypoints preserve their
-released outer option behavior. A non-list still returns
-`{:error, :invalid_composition_options}`. Within the documented `keyword()`
+released outer option behavior. `start/1` and `with_runtime/2` return
+`{:error, :invalid_composition_options}` for a non-list. `start_edges/2`
+returns `{:error, :invalid_composition_options, %{}}` for a non-list options
+or lifecycle argument. Every `start_edges/2` failure is
+`{:error, reason, partial_edges}`; validation failures have an empty map,
+while an edge-start failure names the edges already started
+(`edges.ex:79-91`). Within the documented `keyword()`
 contract, an unknown key remains ignored and a repeated key keeps its first
 value through the existing `Keyword.get/3` and `Keyword.fetch/2` semantics.
 M6 does not impose the ephemeral API's closed-list rules on these released
 entrypoints. Existing recognized values keep their released validation. Each
 added option has the closed value grammar below; an invalid first value returns
-`{:error, {:invalid_composition_option, key}}` before an edge starts:
+`{:error, {:invalid_composition_option, key}}` from `start/1` or
+`with_runtime/2`, and `{:error, {:invalid_composition_option, key}, %{}}`
+from `start_edges/2`, before an edge starts:
 
-Validation order is fixed. After the outer list check, the released chain keeps
-its exact precedence: policy, required `:state_root`/`:workspace`/`:runtime_id`,
+Validation order is fixed. After the outer list check, `start_edges/2` first
+validates the lifecycle's `:interrupt` option, then requires the host-supplied
+`:credential_plane` key (`edges.ex:81-82`, `:158-171`). Those two checks do not
+run on the ordinary `start/1` and `with_runtime/2` paths. The shared released
+validator then keeps its seven-stage precedence (`loopex_composition.ex:146-152`):
+policy, required `:state_root`/`:workspace`/`:runtime_id`,
 `:recover_stale_writer`, `:artifact_transfers`, `:provider_launch`, resource
-manifest, then workspace manifest. Only after all eight released stages succeed
+manifest, then workspace manifest. Only after all seven released stages succeed
 does M6 validate `:model`, `:bounds`, `:sampling` and `:active_tools`, in that
 order. A provider-specific composition refusal from a well-shaped model occurs
 at the `:model` stage. Combined invalid existing/new and new/new options return
@@ -2871,13 +2130,20 @@ in the manifest. Existing discovery already takes both
   including an invalid name, symlink or special entry. It contributes the byte
   length of its complete raw `/`-separated root-relative path, separators
   included and with no leading slash or terminator; the root contributes zero.
-  A value exactly at 256 directories, 4,096 entries or 1,048,576 path bytes is
-  admitted, and the first candidate that would make a value larger refuses
+  A counter exactly at 256 directories, 4,096 entries or 1,048,576 path bytes
+  passes that cap check, and the first candidate that would make it larger refuses
   before content from that candidate is retained. The same traversal admits
   exactly 64 regular files and 1,048,576 cumulative content bytes; the 65th file
   or first content byte beyond that ceiling refuses. Non-regular entries affect
   entry and path counts but not file or content counts. The first exceeded cap
   returns `:skill_manifest_invalid`. The same traversal
+  counter transition is tested at each exact/max-plus-one boundary through a
+  test-only wrapper that invokes the actual transition with seeded counters;
+  production exports no wrapper and accepts no seeded-counter option. The
+  4,096-entry and 1 MiB path-byte positive controls prove that counter check,
+  not admission of an impossible whole pack under the tighter file and
+  directory limits. End-to-end valid-pack fixtures satisfy every cap together.
+  The retained pack validator
   requires `SKILL.md` with frontmatter whose name matches its directory, at most
   64 regular files and at most 1 MiB of regular-file content, and supplies the
   exact files from which the digest is computed. The traversal checks the caps
@@ -3057,7 +2323,7 @@ set. All shared values use the embedded API's domains: paths have at most
 unsigned 64-bit integers. A duplicate or out-of-domain flag refuses before
 either composition starts.
 - **Models.** Without `--state-root`, every model runs in-process; a hosted one
-  needs its provider's own credential variable and `--tools none`. With
+  needs its provider's own credential variable; every tool preset remains available. With
   `--state-root`, every
   model runs through the companion the escript embeds
   (`LoopexCli.ProviderLaunch.options/0`) with `LOOPEX_PROVIDER_API_KEY`, and
@@ -3313,7 +2579,7 @@ carried only in the JSON object in JSON mode.
 A status 1 refusal or command/lifecycle failure writes nothing to standard
 output. Except for the ordinary worker-reap hard halt named below, it writes
 the one bounded diagnostic selected by the diagnostic contract. In particular,
-if an unmarked owner or scheduling-gate crash makes
+if an unmarked owner crash makes
 `stop_session/1` return bare `:session_unavailable`, the command cannot
 construct a public cleanup proof and discards any earlier run observation
 rather than emit a misleading object. One public `cleanup_unproved` map is
@@ -3414,7 +2680,7 @@ Canonical decimal quantities are at most 20 bytes.
 `cleanup_unproved` map came from the worker or `stop_session/1` in the ephemeral
 profile, `{"proved": false, "root": "...", "root_ownership": "owned" | "unknown", "pending": [...]}`. The false form's `root` is a string; `root_ownership` is the exact projection of the public cleanup map and `unknown` never authorizes deletion. `pending` is a
 non-empty array containing only `"run_ending"`, `"effect_cleanup"`,
-`"process_groups"`, `"session_subtree"`, `"gate_release"` or `"root_removal"`, in that order
+`"process_groups"`, `"session_subtree"` or `"root_removal"`, in that order
 with no duplicates.
 The true form means both process cleanup and temporary-root removal succeeded.
 The exit status still reports the run's outcome, and standard error names the
@@ -3524,7 +2790,7 @@ provides, and exits 130. Under
 JSON output it emits the observed terminal outcome when one arrived, or
 `no_ending` from the worker's bounded no-ending snapshot when none did, with
 the exact `timeout` or `session_unavailable` reason and cleanup proof or
-kept-root failure. A bare-unavailable stop caused by an unmarked owner/gate
+kept-root failure. A bare-unavailable stop caused by an unmarked owner
 failure cannot construct that object and emits no standard output. Text output emits no answer after an
 interrupt; both modes name an unproved root on standard error and exit 130. A
 later handled member of that set while the handler remains in `stopping(ref)`, or expiry
@@ -3592,7 +2858,7 @@ from 127 and 130:
 | Status | Meaning |
 | --- | --- |
 | 0 | `completed` |
-| 1 | Refusal before the run, a cleanup-only failure before prompt admission with no run observation, or a command/lifecycle failure outside the run-outcome algebra for which no public cleanup proof can be constructed; standard output is empty. Except for the named ordinary worker-reap hard halt, which terminates before rendering and promises no output, the fixed code or retained-root diagnostic above is written to standard error. The last case includes an unmarked owner or scheduling-gate crash, even if a run observation had already arrived |
+| 1 | Refusal before the run, a cleanup-only failure before prompt admission with no run observation, or a command/lifecycle failure outside the run-outcome algebra for which no public cleanup proof can be constructed; standard output is empty. Except for the named ordinary worker-reap hard halt, which terminates before rendering and promises no output, the fixed code or retained-root diagnostic above is written to standard error. The last case includes an unmarked owner crash, even if a run observation had already arrived |
 | 2 | `failed` |
 | 3 | `bound_reached` |
 | 4 | `outcome_unknown` |
@@ -3771,7 +3037,8 @@ retained and stops the walk as truncated. Entry, depth, path-byte, file-byte,
 result or output ceilings return the bounded
 partial result plus the exact truncation notice above; the deadline uses
 the executor's existing timed-out tool result. None of the tools runs an OS
-process. The presence-only credential check occurs before this walker starts.
+process. The private session admission check precedes this walker; no
+environment-key presence check is performed.
 - The entry classifier is one small pure function over the `lstat` type. Real
   temporary-workspace integration fixtures cover a FIFO and Unix socket;
   one synthetic `%File.Stat{type: :device}` unit value covers Elixir's single
@@ -3792,10 +3059,10 @@ Concept: [Scope](M6.md#concept-plan-scope).
 | Command | Replaces | Contract |
 | --- | --- | --- |
 | `mix loopex.closure.confine TESTED ADMIN --name NAME --patch PATCH` | the M5 `confinement.py` | Enforces the milestone guide's [confinement](../developer/milestones-technical.md#technical-milestones-confinement) exactly: direct parent; exactly the five paths; ordinary blobs with unchanged modes; byte reconstruction of `docs/plans/README.md` and root `README.md`; the Closure row only; the context map append only; the scaffold `Pending` cells only. `PATCH` has an existing directory parent and must not exist. The task completes every check and buffers the bounded zero-context patch before creating `PATCH` exclusively; a failed check creates nothing, and a write failure removes only the partial file it just created. It prints one `PASS` or `FAIL` line per check and exits zero only after the complete patch is closed |
-| `scripts/stage-archive-manifest.sh SHA OUT` | the M5 inline staging | `OUT` and exact sidecar `OUT.source-identity` have an existing directory parent and must not exist. The script stages `git archive SHA` under the [canonical rule](../developer/milestones-technical.md#technical-milestones-archive-extraction): a fresh directory, a subshell with `umask 022`, called from a caller that sets `umask 0777` and records both. It writes the complete `scripts/source-archive-manifest.sh` bytes to `OUT` and the archive's exact `SOURCE_IDENTITY` bytes to `OUT.source-identity`, using exclusive temporary siblings and no-overwrite renames; failure removes only files it created and publishes neither final path |
-| `mix loopex.closure.archive_compare TESTED_MANIFEST ADMIN_MANIFEST TESTED ADMIN` | the M5 `archive_compare.py` | Reads the required exact sidecars `TESTED_MANIFEST.source-identity` and `ADMIN_MANIFEST.source-identity`; a missing, non-ordinary or malformed sidecar refuses. It checks NUL framing, no duplicates and sorted records; each projection against its commit's `git ls-tree -r -t --full-tree`; tested and administrative projections identical; tuples identical after removing `docs/**`, `README.md` and `SOURCE_IDENTITY`; and each sidecar's `SOURCE_IDENTITY` names its own commit and committer date. It is read-only, prints one `PASS` or `FAIL` line per check, writes no file and exits zero only when every check passes |
-| `scripts/floor-lane.sh SHA --output-dir DIR [--long-bound]` | the M5 `closure-lane.sh` | After all argument, SHA, toolchain, open-file and signal preflights pass, `DIR` must not exist and its parent must be an existing directory; the script creates it at mode `0700`. It makes a fresh clone at `SHA` outside `DIR` on the floor pair. It raises the soft open-file limit to 65_536 (or the hard limit) and refuses below 4_096. It refuses to run when `SIGHUP` is ignored in its own disposition, read portably with `ps -o ignored= -p $$` (supported by both BSD and procps `ps`), and prints the mask. It runs `LOOPEX_CHECK_ALONE=loopex_llm_reqllm bash scripts/check.sh`, retaining the complete stream plus final `EXIT=` and `DURATION_S=` in `DIR/check.log`; with `--long-bound` it then retains the corresponding run in `DIR/long-bound.log`. A preflight failure creates no directory; a run failure keeps the new directory and complete logs as evidence and exits nonzero |
-| `scripts/attended-release.sh --output LOG [--answer-attended --disposition ANCHOR --milestone NAME]` | the terminal the M5 `loopex-release-driver.py` provided | `LOG` must not exist and its parent must be an existing directory; after preflight the script creates it exclusively and never overwrites it. It runs `scripts/check-release.sh` under the platform's `script(1)`, so the attended cases have a terminal: BSD `script -q -F /dev/null …` on macOS, and util-linux `script -q -f -e -c "…" /dev/null` on Linux. **A person answers the attended notices by default**, exactly as the release check has always required. The M5 driver-attendance disposition (`agent-context-map.md#disposition-m5-driver-attendance-2026-09-23`) applied to the M5 closure candidates only. The script's automatic mode (`--answer-attended`) requires both following arguments and is refused unless the named recorded maintainer disposition authorizes it for this run. The script checks, and prints each check: the anchor exists in `docs/developer/agent-context-map.md` at `HEAD`; its entry names the passed milestone; its entry names the full 40-character SHA of `HEAD`, which must equal the clean checkout being tested; and its entry states automatic attended answers are authorized. Any failed check refuses before `LOG` creation or `check-release.sh`. In automatic mode it feeds a FIFO and writes `yes` only after the exact notice text is matched in the terminal output, ignoring carriage returns and its own echo. The terminal remains live while the exact transcript is retained to `LOG` with every occurrence of `LOOPEX_PROVIDER_API_KEY` replaced before publication; the final log includes `RELEASE_EXIT=` and `ATTENDED_ANSWERS=`. Check failure keeps that complete redacted log and exits nonzero |
+| `scripts/stage-archive-manifest.sh SHA OUT` | M5 inline staging | OUT and exact sidecar OUT.source-identity must not exist, with existing directory parents. A fresh git archive extraction uses the guide's scoped subshell umask 022 under caller umask 0777. It executes the extracted manifest script against that tree and writes its exact emitted NUL-delimited output bytes, not script source, to OUT; the archive's exact SOURCE_IDENTITY bytes go to the sidecar. It prints CALLER_UMASK=0777 and EXTRACTION_UMASK=0022 on stderr, retained in the staging transcript separately from the manifest bytes. Exclusive temporary siblings and no-overwrite publication preserve targets; failure removes only newly created files and publishes neither final path |
+| `mix loopex.closure.archive_compare TESTED_MANIFEST ADMIN_MANIFEST TESTED ADMIN` | the M5 `archive_compare.py` | Reads the required exact sidecars `TESTED_MANIFEST.source-identity` and `ADMIN_MANIFEST.source-identity`; a missing, non-ordinary or malformed sidecar refuses. It checks NUL framing, no duplicates and sorted records; each projection against its commit's `git ls-tree -r -t --full-tree`; tested and administrative projections identical; tuples identical after removing the `docs` directory entry plus `docs/**`, `README.md` and `SOURCE_IDENTITY`; and each sidecar's `SOURCE_IDENTITY` names its own commit and committer date. It is read-only, prints one `PASS` or `FAIL` line per check, writes no file and exits zero only when every check passes |
+| `scripts/floor-lane.sh SHA --output-dir DIR [--long-bound]` | M5 closure-lane.sh | Complete argument/SHA/floor-toolchain/open-file/signal preflight precedes creation of new mode-0700 DIR; parent must exist. A fresh clone at SHA and absolute pair-specific build root lie outside DIR. The retained fast command is `env -u MIX_BUILD_PATH MIX_BUILD_ROOT=/absolute/retained-work/M6-otp27-build LOOPEX_CHECK_ALONE=loopex_llm_reqllm mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`; the build root is an absolute sibling of DIR for that run. Raise soft nofile to 65,536 or hard limit and refuse below 4,096; refuse ignored SIGHUP using portable ps mask. Retain complete stream, EXIT and DURATION_S in DIR/check.log. --long-bound runs the same toolchain/build environment with `mix test --only long_bound` from each of apps/loopex, apps/loopex_executor_local and apps/loopex_daemon in turn and retains DIR/long-bound.log. Preflight creates nothing; executed failures retain complete outputs and exit nonzero |
+| `scripts/attended-release.sh --output LOG [--answer-attended --disposition ANCHOR --milestone NAME --authority-sha AUTH_SHA]` | M5 attended terminal driver | New LOG with existing parent; after preflight create exclusively and run check-release.sh under BSD or util-linux script(1), preserving platform exit behavior. A person answers by default. Automatic mode requires all three authorization arguments: AUTH_SHA must be a strict descendant of clean tested HEAD; read the exact context-map entry with git show AUTH_SHA:docs/developer/agent-context-map.md, require ANCHOR, exact NAME, full tested HEAD SHA and explicit automatic-answer authorization. Print tested SHA, authorization SHA and SHA-256 of extracted disposition bytes in retained transcript. Authority lives in that separately referenced descendant, which is not inserted into the tested-candidate/direct-child administrative closure chain, never the candidate's own hash. Wrong anchor/milestone/SHA/ancestry/authorization refuses before LOG creation. Automatic mode feeds yes via FIFO only after exact attended notice, ignoring CR/own echo. Retain complete transcript with all supported credential values redacted before publication, RELEASE_EXIT and ATTENDED_ANSWERS; executed failure retains evidence and exits nonzero |
 
 Each command has tests against a fixture repository:
 - `apps/loopex/test/closure_tooling_test.exs` for the two Mix tasks;
@@ -3812,6 +3079,32 @@ check runs on both platforms at closure (hosted CI on Linux, and the Darwin floo
 run), so the macOS and Linux branches of `script(1)` and `ps` are both executed.
 Nothing uses Python or any tool outside the toolchain baseline.
 
+
+**Inspectable credential witness.** Adapter-injection tests run with non-echoing
+scripted tools (or tools none). A private constructor-only test seam scans the
+cleanup owner's actual retained state within that owner's code before activation,
+after mapped reply receipt and at cleanup. It returns only a Boolean canary-match
+result; production installs no observer. The witness checks that result, never
+process_info messages/dictionary or tracing of a sensitive process, which OTP
+redacts. A deliberately injected bad owner-state field containing the canary must
+make the witness fail as a positive control. No mailbox-inspection claim is made.
+Exact-value echo fixtures include a literal binary map key and a decoded tool
+argument's nested map key, as well as values and nested lists; the recursive
+caller-side scan must reject every such provider-originated echo.
+Provider configuration and automatic model-adapter injection must keep the
+credential out of Loopex planes; a separate explicitly authorized tool-copy
+fixture intentionally proves the same bytes may appear as ordinary tool content.
+This distinction covers state, journal/public/context/trace assertions and the
+security review. Isolated TLS fixtures install their test CA with
+`:public_key.cacerts_load(path)`, which Mint reads through
+`:public_key.cacerts_get()` (`deps/mint/lib/mint/core/transport/ssl.ex:589-601`).
+The certificates include the fixture endpoint's SAN; verification remains on,
+with no extra production connection option or global Req default.
+The TLS resumption witness separately proves TLS 1.2 resumption
+with Mint's defaults and TLS 1.3 resumption with an explicit ticket-enabled
+control against the same respective servers, including observed ticket issuance.
+It then requires production's disabled retention to prevent reuse.
+
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
 
@@ -3822,33 +3115,33 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
 | # | Witness files | What they prove | Lane |
 | --- | --- | --- | --- |
 | 1 | `apps/loopex_composition/test/ephemeral_api_test.exs` and `ephemeral_api_fault_test.exs` (new), with a scripted model adapter behind the unchanged port | The closed API grammar and error algebra: every option default, mapping, precedence and malformed form; policy-module identity at 1, 256 and 257 bytes; positive-uint64 minima, maxima and max-plus-one refusals; the saturated timeout default; 32,768/32,769-byte prompts; and complete-path admission at 65,536/65,537 bytes before creation. Multi-turn, every terminal outcome, a failed tool result, an unresolved tool with nullable definition id, `interaction_pending`, every permitted answer-then-defer transition, `interaction_requires_session`, command-to-run joining, timeout continuation, post-admission session loss and every pre-admission lifecycle branch take their fixed forms. Fixed startup ids and injected nonce/counter/type vectors pin prompt, answer and abort ids; mismatched accepted ids, lost replies and every retry opportunity prove one id and no regeneration. Every terminal or no-ending observation carries only its bounded text, tool, shadowed-skill and fixed detail projection. Units exercise minimum, maximum and out-of-domain numeric members; 65,536/65,537-byte answer, history and tool-call-id boundaries; split UTF-8; resolved definition ids at 128 bytes; 256/257 list boundaries; 1 KiB identifier/detail bounds; and the `3 * uint64 - 1` observed-usage ceiling. Integrated cases use the largest Store-admissible events rather than claiming an impossible 64 KiB event payload | fast |
-| 1 | `apps/loopex_composition/test/ephemeral_startup_test.exs` and `ephemeral_api_fault_test.exs` (new) | Pre-root validation and a returned, fully rolled-back startup failure leave no owner, reservation, lease, process or root. The gate-issued one-use root token, `SessionRoot` ready/grant protocol, one 5,000 ms startup deadline, private-supervisor registration, every store/lease/executor/trace-capability/runtime phase, the post-runtime trace bind and a `RuntimeHolder` stalled in runtime readiness are suspended at ready, grant, return, registration, acknowledgement and commit. The trace capability's exact PID and handle are registered before runtime start; returned start/handle/validation and bind failures take their distinct fixed causes, an exact successful bind precedes preparation, and lost or malformed post-grant bind results take `start_unknown`. Loss after the side-effect-free candidate-preparation grant but before its exact report makes the owner kill the actor. Exact actor `DOWN` proves no root, preserves the fixed phase error and reaches the ordinary final disposition without poison; if exact `DOWN` remains unavailable, the final exchange is not reached, the fixed phase error survives, both modes are poisoned and no gate-release error is fabricated. A granted exclusive `mkdir` with no exact return yields the fixed temporary-root cause and, after a successful final gate acknowledgement, `root_ownership: :unknown` with `pending: [:root_removal]`; a faulted acknowledgement instead yields only `:gate_release`; neither branch deletes or retries the possible path. Only after exact root claim does a dependency phase granted without an exact return remain `start_unknown` with an owned root plus `:session_subtree` even after all known parents report `DOWN`; the executor-start branch also requires process-group proof. Every returned rollback after reservation exchange submits its final disposition only after the actor, subtree and applicable groups are gone; exact acknowledgement releases the record before root removal or a proved failure. Reached lost, refused, malformed and late acknowledgement with a possible root returns permanent `gate_release`, retains the root and poisons both modes; with no possible root it logs no path and returns `credential_tool_gate_unavailable`. Owner death after reservation exchange and before root-token issue returns bare `session_unavailable` with no root; after token issue it returns the same bare value while an unnamed root may remain. Every ordinary retained root is `:owned` | fast |
-| 1 | `apps/loopex_composition/test/ephemeral_stop_contract_test.exs` (new) | `stop_session/1` proves the ordered run-ending, effect-cleanup, process-group, complete-session-subtree and final gate-release obligations before root removal; terminal-before-abort clean endings win while `outcome_unknown` remains unproved. A missing or malformed terminal leaves only `:run_ending` and does not claim unevaluated effect cleanup. The exact final gate disposition removes every session registration and lease and must be acknowledged before deletion or success; lost, refused, malformed and late acknowledgements leave permanent `:gate_release`, flip the poison latch and never become success from process death. The first accepted stop enters `stopping`; concurrent stops receive its same result, while every public non-stop method raced after the transition returns `session_unavailable` immediately, including during a suspended phase worker. Concurrent stop never publishes a stale question and resolves an already waiting ask or answer with the observed terminal value, a pre-admission no-ending cleanup value or the bounded `session_unavailable` no-ending snapshot. Every reachable single and combined reached-failure set has fixed order: missing actor `DOWN` omits every unevaluated worker phase; a phase-worker result failure with exact `DOWN` permits later independent phases; missing phase-worker `DOWN` stops later phases; any item-1-to-4 failure omits gate release; gate failure omits root removal; and gate release and root removal never combine. Only sole subtree or sole owned root-removal failure creates retry state. Every retry and creator-exit final retry records a fresh `cleanup_grace_ms + 5_000` deadline, proves retained actors and phase/removal workers `DOWN`, then includes a never-reached process-group phase before still-pending runtime/subtree phases. Reached unproved run ending, effect cleanup, process-group proof, gate release and unknown root ownership are permanent. A caught post-admission session loss can only preserve its earlier cleanup map across the expected later bare-unavailable stop. One-shot, creator-exit and no-waiter paths log and exit, while successful, repeated and concurrent stops and closed/unavailable handles take the fixed forms | fast |
+| 1 | `apps/loopex_composition/test/ephemeral_startup_test.exs` and `ephemeral_api_fault_test.exs` (new) | Pin no-root validation refusal, owner proxy PID/result/DOWN/begin permutation and late undisclosed candidate self-exit without inputs. Fault ready/grant/return/register/ack/commit at every SessionRoot/private-supervisor/store/lease/executor/trace/runtime phase under one 5,000 ms deadline. Candidate prepare grants no mkdir; lost mkdir reply names unknown ownership and never deletes. Exact root claim followed by lost dependency return remains start_unknown even when parents are DOWN. Lost trace bind refuses before create/prompt. All startup causes and reached pending lists are pinned; session cell seals3 before unproved return, peer session continues, no shared restart is required | fast |
+| 1 | `apps/loopex_composition/test/ephemeral_stop_contract_test.exs` (new) | Prove run-ending/effect/group/subtree obligations before removal. Missing terminal omits unevaluated effect proof; outcome_unknown keeps effects unproved. Race every public method and grant around cell0→1/3; non-stop calls refuse and lost failure notifications cannot reopen; proved-closed2 remains absorbing under delayed failure/cancel notifications. Pin direct executor-PID/instance/nonce certificate before runtime shutdown, reject forged/replayed/wrong-session certificates, retain accepted proof across subtree-only retry. Exact DOWN controls every serial phase/replacement/removal worker. Pin reached-failure combinations and fresh retry deadline, irrecoverable proof remaining unproved, successful later retry setting2 and idempotent stop. A separate session still asks and uses tools after failure | fast |
 | 1 | `apps/loopex_composition/test/ephemeral_lifecycle_test.exs` and `ephemeral_cleanup_test.exs` (new) | The owner traps exits before linking helpers and correlates every `EXIT`, `DOWN`, PID and reference. The `FacadeClient` operation, ready, dispatch-with-deadline and cancel messages are suspended independently: missing ready takes the 1,000 ms handshake cancellation path; stop or borrower loss before grant gets a matching cancellation acknowledgement under its separate bound and cannot reach core; after grant a prompt or answer is conservatively possibly admitted regardless of actor scheduling. A second ask before the first grant returns `run_open`; a second answer returns `invalid_interaction_answer`; neither queues or starts a wait deadline, and exact pre-grant refusal or cancellation releases the one mutation slot. Pre-ready, ready-before-grant, granted poll and granted prompt/answer stop cases prove that stop cancels only ungranted work, waits granted work to its operation/cleanup bound, and reuses the live actor for abort. Forged, stale and reordered messages never move the boundary. Timeout-to-question, `last_result`, `run_open`, all four concurrent-stop/creator-exit admission-and-proof branches and terminal-wins races take their fixed forms. Separate process-group, runtime-stop and subtree-stop workers are faulted at result, `finish`, `EXIT` and `DOWN`; each has the 500 ms operation cutoff and 1,000 ms total slot. Refusal, malformed return, raise, throw, exit or timeout with exact worker `DOWN` records that phase and still attempts the next independent phase, while missing `DOWN` prevents a successor and retains `:session_subtree`. Accepted process-group proof is nonce-bound and reused; a retry after an actor-blocked first attempt reaches the previously unevaluated process-group phase, while no reached unproved process-group phase repeats. Every retry receives its fresh deadline. A root-removal-only retry proves any prior removal worker gone and starts no phase worker. Every helper is reaped or the exact reached obligation remains unproved | fast |
 | 2 | `apps/loopex_llm_reqllm/test/mapping_test.exs`, `provider_route_test.exs` and `in_process_adapter_test.exs` (new); companion mapping suites plus the dependency-visible correction cases | Cross-adapter vectors pin byte-identical request and valid bounded application-call reply mapping for all four providers. Planning receives the exact ordered credential-free option list; generation receives the same list with only a hosted `api_key` prepended. Response-header capture is provider-exact, deleted on every return/raise/throw/exit and supplies the mapped metadata. A non-nil response error and finish reasons `:error`, `:incomplete` and `:cancelled` fail. Buffered `ToolCall` fixtures cover valid `{}`, invalid text, `null`, arrays, incomplete but repairable JSON, visible atom/string error metadata, provider-executed builtin and provider-native markers, missing or empty visible id/name and multiple-call ordering; any invalid or non-application visible member rejects the whole call list as post-dispatch failure and no local tool executes. Separate provider-builder vectors pin the earlier generated id, normalized missing/nil/empty/unsupported arguments, forced function type, omitted malformed call and stripped error metadata; they prove the mapper makes no impossible refusal claim for an erased field while separately proving visible non-application markers remain rejected. Paired 401, 429, 5xx, transport error, raise, throw and exit cases assert the same public two-class error and fixed text without claiming identical private streaming/direct diagnostics. Route vectors cover provider defaults, omitted ports, explicit default and non-default ports, canonical IPv4, lowercase DNS, uppercase DNS input and normalized paths; they reject uppercase schemes, IPv6, Unicode or percent-encoded hosts, userinfo, empty or malformed authority, non-canonical ports, ports 0 and 65,536, query, fragment, dot segments and every disallowed path before a root or credential read. The effective HTTPS pool options reaching Mint contain the exact nested `conn_opts`/`transport_opts` retention controls, while HTTP omits them | fast |
-| 2 | `apps/loopex_llm_reqllm/test/in_process_adapter_test.exs`, `in_process_cleanup_test.exs` and `in_process_guard_test.exs` (new); model streaming conformance; companion suites; `in_process_real_test.exs` (`real_provider`) | All four providers use the inline model, canonical explicit address, `total_timeout: :infinity`, `receive_timeout: :infinity`, no cache and `max_retries: 0`. Anthropic and OpenAI planning passes literal `:chat` plus the exact credential-free generation-option list; generation takes the same chat path and adds only the hosted credential. Deadline vectors map the committed absolute system-millisecond instant with one frozen native offset; cover separated clock samples, positive and negative offsets, uint64 maximum, one positive native tick rounded up to 1 ms, zero/negative remainder, the 1,000 ms cap, in-time and late queued result timestamps and the zero-wait expiry race; and prove no full uint64 or native remainder reaches an OTP or Finch timer. Owner-candidate start proves exact unmanaged starter acquisition creates no proxy or candidate, while the managed path passes the opaque starter only to the unlinked proxy and permutes ready/grant, proxy result, candidate report, `finish`, `proxy_retiring`, proxy `DOWN`, `registration_pending`, activation preparation and `begin`; it faults every missing, late, duplicated, replayed, malformed, mismatching and abnormal form and covers wrong stop reference and retainer tuple. Callback death is injected before disclosure, after disclosure, during registration, after managed return and on both sides of `begin`; core stop is injected before and after managed return. With the locked owner `Task.Supervisor` suspended, expiry kills the proxy and poisons admission; resuming it may materialize an undisclosed request-free candidate, which receives no `begin` and exits on its first scheduled dead-proxy, dead-callback or expired-deadline step without a gate request, root, caller, credential read or dispatch. The worker-retained/guard-unregistered witness lets model settlement precede candidate `DOWN` and proves no registered provider-resource obligation exists. If a matching core stop was already queued, the candidate acknowledges it and exits; if registration committed but callback `DOWN` arrives first, candidate exit without acknowledgement yields locked core `provider_cleanup_unproved`. No branch uses a registration fallback timer or invents adapter `not_dispatched`. Exact `:unmanaged` or `{:error, :provider_resource_refused}` from registration with candidate `DOWN` remains clean `not_dispatched`; a missing candidate `DOWN` returns that fixed result only after the poison latch closes all grants. `{:error, :provider_guard_unavailable}`, raised and malformed registration retain core's conservative result. The selected hosted credential is read only by the sensitive caller; absent, empty, 65,536/65,537-byte, exact-value echo, ambient/global/address/provider/final-route and response-overflow/encoding cases map to their fixed public class without leaking private sentinels. A runtime trace session naming the exact one-MFA inventory plus dependency call sites sees the credential-free pre-exclusion call and a non-excluded control canary, but no raw trace message or entry from the sensitive caller after exact exclusion carries the credential canary; exclusion refusal reads no credential. Forced retry, redirect, 429/529 and upload-close cases receive at most one grant, accepted connection and request-start marker through the recorded HTTP/1 worker; a body over 64 KiB succeeds. Every setup and dispatch phase registers before progress. After exact managed registration, normal, stop, deadline, partial setup and caller/root/owner failure either prove every registered process `DOWN` and both tagged entries absent before success or acknowledgement, or take the unproved path; no missing registered-owner or child `DOWN` becomes fixed `not_dispatched`. TLS 1.2/1.3 non-resumption, distinct concurrent pools and the isolated 5,000 ms socket/controller drain witness hold. Real Ollama and hosted calls pass; valid mapping stays byte-identical, malformed binary arguments visible at the buffered `ToolCall` seam take the named correction, and dependency-normalized cases remain pinned | fast; release |
-| 2 | `apps/loopex_composition/test/credential_tool_gate_test.exs`, `credential_tool_gate_fault_test.exs` and `apps/loopex_executor_local/test/provider_environment_test.exs` (new) | Same-mode concurrency and opposite-mode exclusion use capability-bound records. Every ephemeral owner reserves and exchanges admission before root creation. An active Ollama owner holds its tools lease through real Ollama calls; each credential-free call registers its cleanup owner, root, children and directly spawned start-blocked caller under the owner's local-call capability, with no credential lease or quarantine. A hosted call instead registers its cleanup owner, acquires `:credential_call` before root/pool/caller creation, uses the gate-created start-blocked caller and releases only after all registered PIDs and entries are gone plus quarantine. Owner and gate loss are raced before and after each registration. Any unproved tool group or local/hosted call poisons both modes. Tool-enabled and `:tools :none` executors submit and validate their process-group proof nonce while alive; premature owner or executor `DOWN` retains `:process_groups` and poisons admission, while only no-executor rollback is vacuous. The one-way latch is faulted before and after every gate wait and transition for every named gate-scope helper, while the excluded facade, cleanup and removal workers retain only their retryable obligations. Owner-originated poison tests commit the latch, finish independent cleanup and select the reached-phase result before starting delivery. Helper-origin tests inject poison before cleanup, beside concurrent ask/stop/creator loss and at the cleanup deadline race. Custody atomically enters or joins the serialized stopping state, closes new admission and records the cleanup plus distinct 1,000 ms selection-notification deadlines; the detector retires only through its exact notice and `DOWN`. Missing custody, premature detector or owner `DOWN`, or absent delivery start exercises gate takeover. Exact `poison_delivery_started` after the stored reached-phase result then begins one aggregate 1,000 ms interval for a frozen capability-bound recipient-to-value set, including different simultaneous ask and stop values; entries are sent without serial waits, and malformed completion, missing acknowledgement and expiry terminate the tree only after the selected values have had their bounded path. Hygiene tests cover both a live gate reporting to its cohort and external requesters selecting the fixed failure on exact gate `DOWN` within the 7,000 ms outer deadline; owner-start tests prove the synchronous entrypoint keeps the creator identity and caller-held refusal without a wrapper or private handoff. No acknowledgement race can reopen admission, and other sessions ended by shared-tree termination receive only bare unavailable. Final session disposition requires the exact gate acknowledgement after every registration, lease, tag and proof is gone. Gate or supervisor crash ends all active ephemeral sessions and keeps poison across application restart. `prep_stop/1` alone seals admission through its unlinked monitored resolver: suspended child enumeration or gate calls, late/malformed result, missing `finish` or worker `DOWN` produce no proof and preserve both markers; only an in-time result, correlated `finish` and normal `DOWN` yields the generation-bound empty census consumed by `stop/1`. A gate crash after proof but before supervisor termination starts a replacement with a new persistent generation; the old proof cannot compare-and-erase that marker. Ephemeral-capability child environments are scrubbed while durable/direct instances preserve M5 behavior | fast |
-| 2 | `apps/loopex_composition/test/credential_tool_gate_fault_test.exs` (new), post-poison protocol cases | The gate refuses every authority-bearing transition after the latch and admits exactly correlated `poison_watch`, `poison_delivery_started` and `poison_handoff_complete`. Identical replay, stale reference, wrong PID or deadline, reordering, conflict and deadline-edge zero-wait cases neither extend time nor grant or release authority. Owner-origin cases install watch before delivery-start without awaiting the gate, preserve sender ordering and use the live owner as fallback; a pre-root ambient-credential preflight with missing exact `DOWN` records the fixed 10,000 ms rollback deadline before watch. Helper-origin cases send no preliminary gate message: exact gate watch acknowledgement precedes owner custody, then detector retirement and exact `DOWN` precede delivery-start; completion targets the gate after the detector has retired. Every cleanup and selection deadline race stores the complete reached-phase result before the aggregate delivery interval begins | fast |
-| 1–4 | `apps/loopex_composition/test/application_bootstrap_test.exs` and `req_llm_start_test.exs` (new); generated application, escript, companion-release and fixture-host-release assertions | Direct embedded and built-escript session creation exercises the bounded `loopex_composition` bootstrap: already started, exact success/error, malformed/late result, timeout, a controller start that completes after refusal and concurrent first calls all take their fixed branches, and the application gate tree is live before ephemeral gate lookup. The bootstrap guard is faulted while the worker blocks in the controller call, after provisional result and around `finish`; requester death, guard death, worker death, either missing `DOWN` and both deadline races leave no worker result path or session authority. Existing-handle API calls never bootstrap and return only their lifecycle-first result after application/gate loss. The built escript records `app: nil`; a callback stalled on its first composition start proves that `main/1` was reached and the 5,000 ms decision plus 1,000 ms reap bound wins. Every malformed or unclassifiable `ask`/`-p` form, including a missing `--state-root` value, refuses before any Loopex/project application start. Valid ephemeral forms start no `:loopex_cli` application first. Valid durable forms use the ask-specific helper; an injected arbitrary, large or control-bearing application error proves fixed `application_start_failed`, zero stdout and status 1. Every M1–M5 or unknown command instead invokes the private legacy-start helper before existing main logic; success preserves application order, and its injected dependency-start failure proves the exact former formatted line and status 1 rather than a match exception. Combined-fault cases pin workspace, skill, provider and pre-start guard refusal before bootstrap, and bootstrap refusal before ReqLLM hygiene. `req_llm`, `req` and `finch` code is present but not auto-started under `runtime: false`; neither bounded bootstrap nor escript startup loads `.env` or opens Tidewave. The guarded hygiene decision then exercises every start-table row, first-start overlap and host-declaration case. Companion dependency-start behavior remains unchanged because it starts the set explicitly | fast; release |
-| 1, 3, 4 | `apps/loopex_composition/test/application_bootstrap_test.exs` (new), guard-lifecycle cases | Requester death is faulted while the controller call blocks and after its provisional result; guard death is faulted before and after provisional forwarding; worker result, `finish`, worker `DOWN`, guard reap acknowledgement and guard `DOWN` are each withheld, malformed and reordered. Success is impossible until exact normal worker `DOWN`, then the correlated guard acknowledgement, then exact normal guard `DOWN`. Every failure kills or proves the worker and guard under the shared decision/reap deadlines; an already-submitted controller request may finish later but cannot return a session result or bypass a later full precedence pass | fast |
+| 2 | `apps/loopex_llm_reqllm/test/in_process_adapter_test.exs`, `in_process_cleanup_test.exs` and `in_process_guard_test.exs` (new); model streaming conformance; companion suites; `in_process_real_test.exs` (`real_provider`) | All four providers use the inline model, canonical explicit address, `total_timeout: :infinity`, `receive_timeout: :infinity`, no cache and `max_retries: 0`. Anthropic and OpenAI planning passes literal `:chat` plus the exact credential-free generation-option list; generation takes the same chat path and adds only the hosted credential. Deadline vectors map the committed absolute system-millisecond instant with one frozen native offset; cover separated clock samples, positive and negative offsets, uint64 maximum, one positive native tick rounded up to 1 ms, zero/negative remainder, the 1,000 ms cap, in-time and late queued result timestamps and the zero-wait expiry race; and prove no full uint64 or native remainder reaches an OTP or Finch timer. Owner-candidate start proves exact unmanaged starter acquisition creates no proxy or candidate, while the managed path passes the opaque starter only to the unlinked proxy and permutes ready/grant, proxy result, candidate report, `finish`, `proxy_retiring`, proxy `DOWN`, `registration_pending`, activation preparation and `begin`; it faults every missing, late, duplicated, replayed, malformed, mismatching and abnormal form and covers wrong stop reference and retainer tuple. Callback death is injected before disclosure, after disclosure, during registration, after managed return and on both sides of `begin`; core stop is injected before and after managed return. With the locked owner `Task.Supervisor` suspended, expiry kills the proxy and seals only its session; resuming it may materialize an undisclosed request-free candidate, which receives no `begin` and exits on its first scheduled dead-proxy, dead-callback or expired-deadline step without root, caller, credential read or dispatch. The worker-retained/guard-unregistered witness lets model settlement precede candidate `DOWN` and proves no registered provider-resource obligation exists. If a matching core stop was already queued, the candidate acknowledges it and exits; if registration committed but callback `DOWN` arrives first, candidate exit without acknowledgement yields locked core `provider_cleanup_unproved`. No branch uses a registration fallback timer or invents adapter `not_dispatched`. Exact `:unmanaged` or `{:error, :provider_resource_refused}` from registration with candidate `DOWN` remains clean `not_dispatched`; a missing candidate `DOWN` seals the session to 3 and returns conservative `dispatched_or_unknown`, never clean `not_dispatched`. `{:error, :provider_guard_unavailable}`, raised and malformed registration retain core's conservative result. The selected hosted credential is read only by the sensitive caller; absent, empty, 65,536/65,537-byte, exact-value echo, ambient/global/address/provider/final-route and response-overflow/encoding cases map to their fixed public class without leaking private sentinels. A runtime trace session naming the exact one-MFA inventory plus dependency call sites sees the credential-free pre-exclusion call and a non-excluded control canary, but no raw trace message or entry from the sensitive caller after exact exclusion carries the credential canary; exclusion refusal reads no credential. Forced retry, redirect, 429/529 and upload-close cases receive at most one grant, accepted connection and request-start marker through the recorded HTTP/1 worker; a body over 64 KiB succeeds. Every setup and dispatch phase registers before progress. After exact managed registration, normal, stop, deadline, partial setup and caller/root/owner failure either prove every registered process `DOWN` and both tagged entries absent before success or acknowledgement, or take the unproved path; no missing registered-owner or child `DOWN` becomes fixed `not_dispatched`. TLS 1.2/1.3 non-resumption with a Mint-default TLS 1.2 control and explicit ticket-enabled TLS 1.3 control against the same respective servers, distinct concurrent pools and the isolated 5,000 ms socket/controller drain witness hold. Real Ollama and hosted calls pass; valid mapping stays byte-identical, malformed binary arguments visible at the buffered `ToolCall` seam take the named correction, and dependency-normalized cases remain pinned | fast; release |
+| 2 | `apps/loopex_composition/test/session_containment_test.exs` and `apps/loopex_executor_local/test/provider_environment_test.exs` (new) | Hosted and Ollama models admit none/coding/read-only with all supported variables present; no composition/tool-dispatch presence refusal. Same lifecycle cell reaches model cleanup owner/caller and executor; suspend notifications and prove cell3 rejects later grants. Missing process/registry proof seals3 before conservative result. Callback-DOWN races before/after registration transfer failure authority exactly once; clean-retirement recording ack precedes core ack, exact retired-owner DOWN clears pending, and missing/lost retirement keeps later edge admission closed even before DOWN is handled. Delay independently delivered resource DOWN past retire_model arrival: pending retirement reconciles in the responsive loop, succeeds within its cleanup-control bound, and never blocks stop; expiry seals only that session. Expired model deadlines still permit bounded cleanup, not activation. Census-revision replays, mixed roles/tags and lost record acknowledgements cannot grant progress or retire unknown resources. Model→tool clean reconciliation is bounded1,000ms and succeeds; wrong-session/replayed/expired tokens cannot change any record. A separate session still calls providers/tools after failure. A deliberately authorized trusted tool reads a supported ambient key and returns it: ordinary tool content may appear in journal, public events and model context. Adapter injection witnesses exclude this deliberate host-authorized copy. OS child environment is released M5 behavior; no new scrubbing, same-user secret isolation or cross-call/tool exclusion is promised | fast |
+| 1–4 | `apps/loopex_composition/test/application_bootstrap_test.exs` and `req_llm_start_test.exs` (new); escript/companion/host release inventory fixtures | Bootstrap one authority-free worker success/error/malformed/late/DOWN/deadline/controller-late-completion and concurrent-start cases; every requester returns within5,000+1,000ms and existing handles never bootstrap. ReqLLMStarter admits one non-secret worker, concurrent requesters join, expiry removes only waiter, no cancellation/peer teardown, later completed start succeeds without VM restart. Fault service/worker restart with live/dying/ended old worker and exact recoverable provenance; no second worker before old DOWN. Pin startup refusal precedence, host declarations/current dotenv settings, fresh .env non-load and Tidewave guard. Built escript app:nil admits no project start for invalid ask; ephemeral stalls take bounded bootstrap; durable helper arbitrary errors produce fixed code; legacy commands preserve former start/error behavior. runtime:false code remains embedded; fixture OTP release :load leaves apps stopped until guarded start | fast |
+| 1, 3, 4 | `apps/loopex_composition/test/application_bootstrap_test.exs` (new), one-worker lifecycle cases | Requester death is faulted during controller call and after reported result; matching result/timestamp and exact normal worker DOWN are each withheld, malformed and reordered. Only both prove success. Every requester timeout is bounded by its decision/reap deadlines; an already-submitted controller request or authority-free worker may finish shared initialization later but cannot create a root/session or bypass the next full precedence pass | fast |
 | 1, 4 | Built-escript application inventory assertions in `apps/loopex_cli/test/ask_command_test.exs` (new) | Mix starts its embedded Elixir base before `main/1`; every no-start claim in this plan means no Loopex project application. Invalid `ask` and `-p` forms prove that no Loopex `.app` is started, valid ephemeral forms prove `:loopex_cli` stays stopped until the bounded composition path starts its own graph, and durable/legacy forms prove their distinct helpers start the exact M6 CLI graph with ReqLLM, Req and Finch still load-only | fast; release |
-| 2 | `apps/loopex_composition/test/credential_tool_gate_fault_test.exs` and `owner_start_fault_test.exs` (new) | Every gate request proves fresh reference, requester binding, absolute expiry, admission acknowledgement, idempotent cancellation, expired or late-dequeued refusal and stale-reply rejection. Owner-start tests suspend creator/guard/worker/owner messages, links and monitors before the call, while `start_child/2` blocks, after an owner may have returned, through exchange, commit preparation, guard retirement, both helper reaps and gate-issued one-use root-token delivery. A clean refusal proves all known helpers and any returned owner `DOWN`. Any guard or worker loss without the exact correlated start result takes the shared-supervisor kill branch, flips the poison latch, kills the exact gate tree and requires VM restart even when all known PIDs are down; missing known `DOWN` messages are logged but are not the source of uncertainty. Owner death after exchange is faulted both during active preflight before token issue, proving no root and orphan-lease cleanup or poison, and after token issue, proving bare unavailable with the named possible unnamed root. Gate death before token issue creates no root; every token/death/forwarding order after issue follows private-start rollback or the named unmarked-owner limitation. Existing owners monitor the gate and both application supervisors, reject new work and clean up on failure; a suspended process may outlive the bounded refusal only without a result or root-start capability | fast |
-| 2 | `apps/loopex_composition/test/req_llm_start_test.exs` (new) | The complete application read/configure/start decision uses one 5,000 ms deadline and one 1,000 ms reap bound in the responsive gate's linked, monitored worker. Tests suspend every snapshot, row directive, application read, configuration write, start return, provisional result, `finish` and exact normal `DOWN`, plus abnormal and missing `DOWN`, malformed/late results, gate loss, joined cohorts and requester death. No mutation is directed before `:starting`. A proved pre-mutation failure preserves the prior marker; uncertainty after the first mutation directive retains `:starting` and poisons both modes. Marker commit or restoration occurs only after an in-time provisional result, `finish` and normal `DOWN`. The worker reap cutoff is no later than 6,000 ms after decision start. The outer request/join path separately proves acknowledgement, the poison-only aggregate handoff and 7,000 ms expiry, cancellation, late dequeue and stale reply. Two first compositions start once, an entire failed cohort receives one result and no owner/root/credential/effect exists during the decision | fast |
-| 3 | The store conformance suite with `:memory` bound to `Loopex.Store.Memory`; `apps/loopex_composition/test/ephemeral_profile_test.exs` and `ephemeral_private_startup_test.exs` (new) | The shipped memory store passes every conformance and fault-injection case, and the profile refuses without policy. Private tmp and entropy seams cover lookup raise/throw/exit/malformed results; 65,536/65,537-byte and UTF-8/NUL complete paths; entropy shape; 15 collisions then success and 16 then refusal; every mkdir, chmod, lstat and listing failure or mismatch; and pre-existing paths untouched. Candidate preparation and claim ready/grant/return races prove loss before the side-effecting `mkdir` grant mutates nothing; missing candidate-actor `DOWN` keeps the same no-root refusal and poisons the gate. Exact claim success produces an owned empty ordinary directory at mode `0700`; loss after the `mkdir` grant but before its return yields the fixed cause, ownership-unknown possible path, no deletion and no retry. The winning nonce pins root and runtime-id vectors. After exact claim, `SessionRoot`, private-supervisor, store, lease, executor, trace-capability, `RuntimeHolder`/runtime and trace-bind ready/grant/return/register/ack/commit boundaries are faulted under the one startup deadline; an exact returned failure can roll back cleanly, while an unknown granted dependency phase keeps an owned root and subtree obligation even after all known parent `DOWN` messages. Successful stop and owner exit prove process groups, final gate release and every registered session process down before recursive removal; caller-visible errors preserve path, ownership, cause and ordered obligations, while the post-timeout no-waiter path is host-logger-only and standalone `ask` can suppress it | fast |
+| 2 | `apps/loopex_composition/test/owner_start_fault_test.exs` (new) | Withhold proxy result/DOWN, suspend start child, permute child report/retiring notice/normal DOWN and activation. No begin means no inputs/root even when delayed supervisor start materializes a child. Existing session remains live. After begin, owner death yields only bare unavailable and possible unnamed root; no replacement cleanup owner or invented cleanup map | fast |
+| 2 | `apps/loopex_composition/test/req_llm_start_test.exs` (new) | Suspend inert-worker creation, retained initializer identity, begin, shared snapshot, dotenv write, origin write, ensure-start return and worker DOWN. Two first callers initialize once; timeout removes only a waiter; a later cohort joins/re-evaluates after exact DOWN. Fault service loss before/after identity publication and begin; an undisclosed pre-publication worker stays inert. Preserve prior origin across fresh validation; a declared host start never becomes Loopex origin. Matching-declaration cohorts join, different declarations validate separately. Fault restart with live/dead worker and lost old-service reply; no second active worker before exact DOWN, then re-evaluate instead of awaiting a lost result. Real stalled infrastructure yields bounded creation failure, never a persistent admission block or peer teardown. Current host declarations/dotenv values, stopped-declaration refusal and host-interference limits are pinned | fast |
+| 3 | Store conformance/fault injection bound to `Loopex.Store.Memory`; `ephemeral_profile_test.exs` and `ephemeral_private_startup_test.exs` (new) | Library Memory checkpoint protocol uses no test module and30,000ms port calls; real fault probe cases pass. Temp/entropy seams pin UTF-8/NUL/65,536-byte complete paths,15 collisions then success/16 refusal, all mkdir/chmod/lstat/list failures, mode0700 and pre-existing targets untouched. Lost candidate prepare makes no root; lost mkdir return is unknown ownership and never deleted; lost granted dependency return keeps owned root/subtree even after known-parent DOWN. Successful stop/creator exit proves direct process groups and complete subtree before removal; all reached causes/pending shapes and no-waiter logger limitation are pinned | fast |
 | 4 | `apps/loopex_cli/test/ask_command_test.exs`, `ask_exit_test.exs` and `ask_delegation_test.exs` (new) | The complete grammar and fixed boundary precedence; `-p` identity; argv and incrementally bounded stdin prompts; profile selection independent of `LOOPEX_HOME`; credential-discard order; every exit status; text and JSON stdout purity; and separate-process delegation. Status-1 tests feed huge nested facade terms, exceptions, control characters, newlines, long paths and long unknown flags and prove only the closed fixed diagnostic code or bounded JSON-encoded cleanup-root line is emitted. Every text-mode terminal and no-ending standard-error line, including exact `ending no_ending timeout` and `ending no_ending session_unavailable`, is pinned. JSON-mode proved run and no-ending observations have empty standard error; an unproved cleanup has only its retained-root line. Both profiles pass the explicit empty named-directory manifest and perform no discovery | fast |
-| 4 | `apps/loopex_composition/test/resource_packs_directories_test.exs` (new) | Direct `LoopexComposition.ResourcePacks.read_directories/2` calls prove the complete public algebra and precedence: malformed paths before malformed options and before filesystem work; workspace failure before named-directory work; canonical unsigned-bytewise expanded-path inspection; and the same first error under every multi-fault input permutation. They also prove exact path/count bounds; relative and absolute resolution; two matching realpath/device/inode observations before the helper derives its non-caller-controlled `workspace_ref`; every named filesystem and pack error; exactly the two result members; exact project/user identities; local-wins shadows; same-kind duplicates; unsigned-bytewise result order; and path-order-independent manifest digest. Exact and max-plus-one fixtures pin depth, visited-directory, raw-entry, complete raw relative-path-byte, regular-file and content-byte caps, including invalid-name and special entries in the applicable counts and the named one-directory materialization limitation | fast |
+| 4 | Existing `apps/loopex_app_server/test/external_workflow_test.exs`, fixture server and independent Node clients | The separate process drives the unchanged JSON-lines app server and reads protocol results, covering the other delegation surface promised in Concept outcome4. Existing external-workflow cases remain required, with no claim that the ask CLI is itself the app server | node_client release |
+| 4 | `apps/loopex_composition/test/resource_packs_directories_test.exs` (new) | Direct `LoopexComposition.ResourcePacks.read_directories/2` calls prove the complete public algebra and precedence: malformed paths before malformed options and before filesystem work; workspace failure before named-directory work; canonical unsigned-bytewise expanded-path inspection; and the same first error under every multi-fault input permutation. They also prove exact path/count bounds; relative and absolute resolution; two matching realpath/device/inode observations before the helper derives its non-caller-controlled `workspace_ref`; every named filesystem and pack error; exactly the two result members; exact project/user identities; local-wins shadows; same-kind duplicates; unsigned-bytewise result order; and path-order-independent manifest digest. Seeded pure-counter unit vectors through the test-only wrapper pin exact/max-plus-one raw-entry and path-byte boundaries without claiming whole-pack admission; valid-pack integration fixtures separately pin depth, visited-directory, regular-file and content-byte caps, including invalid-name and special entries in the applicable counts and the named one-directory materialization limitation | fast |
 | 4 | `apps/loopex_composition/test/resource_admission_workflow_test.exs` (new) | Under both ephemeral startup and durable `ask`, the helper result is retained exactly once where durable, the exact host decision is admitted, catalog digests/disposition and the complete canonical tuple set are checked, and skills activate one at a time in unsigned-bytewise order with exact command-id replies. Empty input submits no resource command. Refusal, malformed return, raise, exit, session loss, missing/extra/duplicate catalog tuple, digest mismatch and every Nth activation stop at the first failure before prompt/provider/tool work. Proved ephemeral rollback destroys the partial memory state and root; an unproved rollback returns its exact cause and root; durable failure keeps the actual possibly committed prefix, never retries and leaves a tracked session resumable only after tracking succeeded | fast |
-| 4 | `apps/loopex_cli/test/ask_projection_test.exs` and `ask_interrupt_test.exs` (new) | The ephemeral renderer uses only the public completed result, run-error observation, no-ending snapshot or `cleanup_unproved.ending` plus the mandatory stop return, never the handle or attachment. Across both profiles and every outcome, compact JSON is exactly one closed-member object plus one LF, with no other stdout byte; `text`, `tools` and `shadowed_skills` come only from the selected run or composition in their stated order; an unresolved tool has `tool_id: null`; a timeout and a caught post-admission session loss each produce a complete `no_ending` object with the fixed distinct reason, the latter only from `cleanup_unproved.ending` with `cleanup.proved: false` and its retained root. Every false cleanup projects the ordered reached-failure set, including `gate_release` only when reached, and exact root ownership. Worker-origin cleanup maps followed by successful retry, a newer failed retry or a permanent bare stop select the exact stated cleanup/ending; `ending: :none` takes status 1 with zero standard output and names any still-retained root on standard error. Decimal-string witnesses cover `2^53`, unsigned-64-bit maxima and the exact observed-usage maximum without rounding. Text mode emits answer bytes only for completed and bounded terminal summaries on standard error. Forced unmarked owner/gate failure before observation and after a terminal observation, including bare-unavailable stop without an earlier proof-bearing cleanup map, proves status 1 and zero standard-output bytes because no public cleanup proof exists. Real signals suspend the worker before its lifecycle check/owner send, after owner registration but before dispatch grant, after grant and after its provisional result while mandatory stop is running. The first case proves successful stop plus bare `session_closed` or unavailable yields zero stdout, no fabricated `no_ending` and exit 130; every case proves one stop and at most one render. A latched pre-child signal is forwarded and reaped with the platform status but has no Loopex output, cleanup or status promise; second-signal and backstop cases remain hard kills | fast |
+| 4 | `apps/loopex_cli/test/ask_projection_test.exs` and `ask_interrupt_test.exs` (new) | The ephemeral renderer uses only the public completed result, run-error observation, no-ending snapshot or `cleanup_unproved.ending` plus the mandatory stop return, never the handle or attachment. Across both profiles and every outcome, compact JSON is exactly one closed-member object plus one LF, with no other stdout byte; `text`, `tools` and `shadowed_skills` come only from the selected run or composition in their stated order; an unresolved tool has `tool_id: null`; a timeout and a caught post-admission session loss each produce a complete `no_ending` object with the fixed distinct reason, the latter only from `cleanup_unproved.ending` with `cleanup.proved: false` and its retained root. Every false cleanup projects the ordered reached-failure set, with no global release phase, and exact root ownership. Worker-origin cleanup maps followed by successful retry, a newer failed retry or a permanent bare stop select the exact stated cleanup/ending; `ending: :none` takes status 1 with zero standard output and names any still-retained root on standard error. Decimal-string witnesses cover `2^53`, unsigned-64-bit maxima and the exact observed-usage maximum without rounding. Text mode emits answer bytes only for completed and bounded terminal summaries on standard error. Forced unmarked owner failure before observation and after a terminal observation, including bare-unavailable stop without an earlier proof-bearing cleanup map, proves status 1 and zero standard-output bytes because no public cleanup proof exists. Real signals suspend the worker before its lifecycle check/owner send, after owner registration but before dispatch grant, after grant and after its provisional result while mandatory stop is running. The first case proves successful stop plus bare `session_closed` or unavailable yields zero stdout, no fabricated `no_ending` and exit 130; every case proves one stop and at most one render. A latched pre-child signal is forwarded and reaped with the platform status but has no Loopex output, cleanup or status promise; second-signal and backstop cases remain hard kills | fast |
 | 4 | `apps/loopex_executor_local/test/read_only_tools_test.exs` and `apps/loopex_composition/test/tool_preset_budget_test.exs` (new) | The executor's final argument validator admits only each tool's exact key set and types, with exact/max-plus-one string bounds. Root failures, descendant skips, identity changes, symlink non-descent, special-file non-open behavior, raw-entry/path/file-byte/depth/result ceilings and grep's exact 16 MiB cumulative-read rule take their fixed forms. At-cap and next-item fixtures pin whether the requested root counts, maximum-depth emission, result truncation and every skip counter; default non-recursive `ls` does not mark an emitted directory truncated merely because its unrequested descendants exist, while recursive depth exhaustion does. Output records use the percent encoding exactly; the encoder always reserves 107 bytes, admits only complete records in the remaining 16,277 bytes, and emits the 95-byte maximum skipped notice before the 12-byte truncated notice. No fixture claims an OS sandbox or bounded one-directory enumeration. The three literal presets carry the exact definitions/active ids and remain under ADR 0017's measured system-class limit | fast |
 | 4 | `apps/loopex_executor_local/test/read_only_tools_test.exs` (new) | `loopex.grep` with omitted `glob` applies no path filter; explicit empty `glob` is invalid, and each admitted non-empty glob is matched against the complete workspace-relative `/`-separated file path. Omission, `*`, a nonmatching pattern and nested-path patterns have distinct fixtures | fast |
 | 4 | `apps/loopex_cli/test/ask_interrupt_test.exs` and launcher fixtures (new) | Exact ask-mode installation precedes worker start, is bounded at 1,000 ms and returns the exact `:erl_signal_server` manager PID. Install refusal, malformed return, duplicate active-handler claim, manager replacement or manager loss stop the new session, emit the fixed install diagnostic or real retained-root line, write zero stdout and exit 1; manager `DOWN` admits only an already-queued matching worker result before taking that path. Forged, stale, old-manager and replayed same-reference notices are ignored. Direct `SIGTERM`, `SIGHUP` and `SIGQUIT`, plus terminal `SIGINT` forwarded by the launcher as `SIGTERM`, each exercise the same ask-notice path. A provisional ordinary worker result starts the exact 1,000 ms reap deadline; in-time `DOWN` proceeds to mandatory stop, an absent `DOWN` gets one kill and zero-wait receive, and a still-absent `DOWN` hard-halts status 1 with no output or cleanup claim. Signals before, during and after mandatory stop race the exact 1,000 ms `finish_ask/2` call; manager serialization returns exactly `:ordinary` or `:interrupted`, and only the winner renders. Missing, malformed, late or mismatched finish reply and manager loss yield status 1, zero stdout and only the applicable fixed or retained-root diagnostic. The exact signal-manager PID/reference notice starts one orderly stop; exact finish and main `DOWN` disarm the backstop. A second handled signal or backstop expiry in `stopping` hard-halts, while one first signal never does. The monitored ask worker is suspended before owner registration, registered before grant and after grant; each branch performs one stop and at most one render, and the pre-registration branch invents no observation. After interrupt stop, queued result-before-`DOWN`, `DOWN` without result and neither queued are faulted; the exact worker is killed and reaped within 1,000 ms, while withheld `DOWN` takes the no-output status-130 hard halt. Launcher fixtures deliver each signal before child assignment and after assignment but before handler install; the latch forwards `TERM`, no signal is lost, the child is reaped and its platform status is preserved without a Loopex-130 assertion | fast |
 | 5 | `apps/loopex_composition/test/durable_options_test.exs` (new), exercised through `start/1`, `with_runtime/2` and `start_edges/2`; `apps/loopex_llm_reqllm/test/provider_deadline_test.exs` | All four added options and defaults share one validator: first-colon model parsing including an id with another colon; admitted and refused provider cases; complete and partial bounds at 1, uint64 maximum and maximum plus one; sampling at 1 and 1,000,000 and outside; every active-id combination, duplicate/unknown refusal and the explicit empty-definition workaround. Existing non-list, unknown-key and first-duplicate behavior remains released behavior. Combined faults pin the released validation chain followed by model→bounds→sampling→active-tools, including every adjacent pair, and no invalid added value starts an edge. Named directories are not a raw fifth option. Companion total, stream-idle and receive waits are infinite; the unchanged sliced coordinator deadline remains authoritative at uint64 maximum and for a short stalled call | fast |
 | 5 | `apps/loopex_cli/test/durable_ask_workflow_test.exs` (new) | The helper completes before root identity; placement and runtime id precede one credential-plane acquisition; one exact composition-option bundle retains the manifest once; and create→track→attach→admit→catalog→ordered activation→status→interrupt→prompt occurs exactly, with the empty-manifest path skipping resource commands. Create id bounds, the attachment struct, active status plus positive-uint64 cleanup grace, exact command replies, every catalog mismatch, and the catalog-to-`resource_admission_failed` diagnostic are pinned. Every boundary fails independently and in the stated combined-fault precedence. Create-reply loss, tracking failure before publication and after publication-before-fsync, each post-track failure and the legacy `interrupt-` id/uncorrelated accepted reply are exercised without retry or stronger recovery claims. The private monotonic-clock seam fixes prompt acceptance, reader return and expiry instants, including saturation and the zero-wait deadline race. The single `FollowReader` owns a replay attachment from the callback's accepted cursor and requires exact PID/ref/deadline/cursor acknowledgements. Pre-join events, another run's events, a matching `user.message_appended` command id, a duplicate or conflicting join and expiry before join prove that the prompt command id freezes exactly one run id and only that run enters the projection. On terminal, error, deadline and callback raise/throw/exit, exact `DOWN` proves reap; a deliberately withheld `DOWN` instead discards the projection, returns only `follow_reader_cleanup_unconfirmed`, emits no callback output and may briefly leave the killed, unlinked reader with no mutation or output route. An event consumed only by its disposable attachment remains replayable from the unchanged durable cursor in both branches. `with_runtime/2` cleanup replacement discards any callback projection, plane and placement release in order, and only the surviving value renders once afterward | fast |
 | 5 | The complete M5 suites and retained release lanes; `mix loopex.deps_budget`; `git diff v0.2.0 -- apps/loopex/lib ':(exclude)apps/loopex/lib/mix'` empty at the tested candidate, with only the two closure tasks added under `apps/loopex/lib/mix/tasks/` | Valid durable behavior, daemon and both protocol generations remain unchanged; a companion malformed binary argument still visible at the buffered `ToolCall` seam now fails closed before tool execution, visible provider-executed and provider-native calls fail rather than becoming local requests, dependency-normalized erased cases remain pinned, and the named timer-safety change leaves the coordinator deadline authoritative. The dependency budget and core runtime library are unchanged. Expected test-data changes are enumerated rather than called unchanged: running-build version assertions become version-derived; the exact definition inventory moves from four to seven while a separate assertion keeps the default active ids at the original four; visible malformed-binary and non-application fixtures change from flattening to fixed post-dispatch failure; dependency-normalization fixtures keep the locked behavior; `release_version` and developer text move to `0.3.0`; and the release manifest adds the two M6 provider rows plus the separate rollback lane. The durable default `policy_identity` remains literal `"0.2.0"`; pure encoder version-vector tests remain unchanged | fast; release |
-| 5 | `apps/loopex_cli/test/rollback_test.exs` (new, release lane `rollback`), against a `v0.2.0` build made from a fresh `git archive v0.2.0` and a scripted model | A durable root holding a pending interaction written by the candidate recovers, and the interaction is answered, under `v0.2.0`, and the reverse; a `loopex.grep` call written by the candidate but not yet dispatched, resumed under `v0.2.0`, is committed as a failed `unknown_tool` call and the run continues; one already dispatched is never run under `v0.2.0`, and its work either has a matching receipt admitted or stays pending for reconciliation; a completed `loopex.grep` call in history replays under `v0.2.0`; a root with an admitted user skill, written by the candidate, resumes under `v0.2.0`'s offline `loopex resume` with the retained snapshot reloaded by digest, and under `v0.2.0`'s daemon with the session resumed and all of that session's skill context withheld, project skills included. The default `policy_identity` revision is `"0.2.0"` under both | release |
-| 6 | `apps/loopex/test/closure_tooling_test.exs` (new); `scripts/test/stage-archive-manifest-test.sh`, `scripts/test/floor-lane-test.sh`, `scripts/test/attended-release-test.sh` (new); `bash scripts/check.sh --docs` | Every command's exact grammar, mandatory argument, preflight, PASS/FAIL line and exit rule is exercised. Existing outputs never overwrite; missing parents create nothing; partial writes remove only their own temporary files; failed executed lanes retain complete logs. Archive comparison refuses missing, non-ordinary and malformed exact sidecars and proves NUL framing, tuple projections and source identity. Automatic attendance refuses a missing anchor, wrong milestone, wrong exact HEAD SHA and absent authorization, and accepts only the recorded combination. P1's exact charter exception list, P2's selected unattended pre-merge lanes, P3's retained complete output plus SHA and P4's milestone-branch rejoin-main rule are present. A retained semantic review covers `README.md`, `docs/operator/getting-started.md`, `docs/operator/runtime.md`, `docs/operator/tools-and-policy.md`, `docs/developer/getting-started.md`, `docs/developer/getting-started-technical.md`, `docs/developer/runtime-and-embedding.md` and `docs/developer/compatibility-surfaces.md`; the documentation check passes. M6 closure invokes only these repository commands | fast; closure |
+| 5 | `apps/loopex_cli/test/rollback_test.exs` (new), separate credential-free rollback release lane; fixture-paired v0.2.0/candidate builds | External test driver extracts v0.2.0 and candidate into isolated trees, compiles each CLI with non-secret scripted launch file in LOOPEX_BUILD_PROVIDER_CONFIG and invokes Mix.Tasks.Escript.Build.run([]) directly; it bypasses build_pair/1, which overwrites launch input with real companion configuration. The same released scripted worker bootstrap/manifest/request/reply/cleanup protocol config is explicitly passed to daemon --provider-launch. These are declared fixture-paired compatibility builds; operator packaging is separately proved unchanged-source. Both directions recover/answer pending interactions with revision0.2.0; candidate M6-only tool pending-not-dispatched commits unknown_tool under0.2; dispatched work never runs again and matching receipt is admitted or work remains pending; completed history replays. User skill snapshot reloads by digest offline, while0.2 daemon resumes with all skill context withheld. No credential/provider call is needed. Build pairing sources: cli/mix.exs:36-94, provider_launch.ex:9-24, daemon.ex:180-196, provider_configuration.ex:9-44 | release |
+| 6 | `apps/loopex/test/closure_tooling_test.exs` (new); `scripts/test/stage-archive-manifest-test.sh`, `scripts/test/floor-lane-test.sh`, `scripts/test/attended-release-test.sh` (new); `bash scripts/check.sh --docs` | Every command's exact grammar, mandatory argument, preflight, PASS/FAIL line and exit rule is exercised. Existing outputs never overwrite; missing parents create nothing; partial writes remove only their own temporary files; failed executed lanes retain complete logs. Archive comparison refuses missing, non-ordinary and malformed exact sidecars and proves NUL framing, tuple projections and source identity. Automatic attendance refuses a missing anchor, wrong milestone, wrong tested SHA, non-descendant authority SHA and absent authorization, and accepts only the recorded combination. P1's exact charter exception list, P2's selected unattended pre-merge lanes, P3's retained complete output plus SHA and P4's milestone-branch rejoin-main rule are present. A retained semantic review covers `README.md`, `docs/operator/getting-started.md`, `docs/operator/runtime.md`, `docs/operator/tools-and-policy.md`, `docs/developer/getting-started.md`, `docs/developer/getting-started-technical.md`, `docs/developer/runtime-and-embedding.md` and `docs/developer/compatibility-surfaces.md`; the documentation check passes. M6 closure invokes only these repository commands | fast; closure |
 | 1–4 | `scripts/m6-demonstration.sh`, the single acceptance demonstration, run from a clean checkout with no `LOOPEX_HOME` on macOS and on Linux | Its four steps in order, each printing its own `PASS` or `FAIL` line and the elapsed time; the complete output of each platform's run retained with its reference and SHA-256 digest in `docs/evidence/M6-closure-runs.md` | closure |
-| — | An independent read-only security review of the in-process credential path, naming the tested SHA, retained as `docs/evidence/M6-security-review.md` with the reviewer's retained output reference and SHA-256 digest | The credential is read only at the model boundary and its exact value is gated before replies enter a Loopex plane; every guard and the final one-shot route check occur at the stated boundary; the call-owned pool is unique, its lifecycle root and every registered child end, and both tagged registry entries disappear before a provider result or successful cleanup acknowledgement; TLS reuse, tickets and secret retention are disabled; the caller is the only result path and ends before release. The review covers the ephemeral scheduling gate's participants, proof-bound releases, quarantine, both-mode poison, gate-failure termination and named nonparticipants. Checked-out socket and OTP TLS-controller exposure, including the isolated release witness's 5,000 ms threshold and the fact runtime cleanup does not wait for it, matches all seven amendment texts; host-environment and host-diagnostic retention is named; no arbitrary heap-erasure claim is made. Packaging leaves ReqLLM, Req and Finch loaded but stopped until the guarded start; the only persistent library setting Loopex changes is ReqLLM's `.env` switch, and `:llm_db` configuration remains untouched | closure |
+| 2 | Independent read-only in-process credential/security review of tested SHA; immutable complete output retained outside repository | `docs/evidence/M6-closure-runs.md` reserves Pending result, tested SHA, retained-output reference and SHA-256 fields before candidate commit. Administrative child fills only reserved fields; no new review document after testing. Review verifies transport, adapter-injected-value rejection, direct cleanup proofs, hosted tool use, ambient-key acceptance including deliberate trusted-tool disclosure, session-local seals, recoverable startup, all seven amendment texts and release-only socket/TLS5,000ms bound. No arbitrary heap erasure, global key-free runtime claim or same-user tool isolation. Load-only packaging and persisted dotenv off are checked | closure |
 
 **Evidence rules.**
 - **Executed witnesses.** Every derived number has an executed witness before
@@ -3894,17 +3187,16 @@ Concept: [Scope](M6.md#concept-plan-scope).
 | Boundary | Owner | Failure and its answer |
 | --- | --- | --- |
 | Host process ↔ ephemeral owner | The supervised `LoopexComposition.Ephemeral` owner monitors the creating caller; caller and owner are not linked. Each public request temporarily monitors the owner and normalizes its `DOWN` or request exit through the handle cell | The creating caller exits: the owner aborts an open run, stops the runtime (the executor terminating its owned process groups) and removes an owned root only when cleanup is proved, otherwise retaining and logging its path, ownership and pending obligations. A lost exclusive-claim return retains an unknown possible path and never removes it. The owner crashes: the caller survives, a waiting request or later handle call returns the proved closed or bare unavailable lifecycle result, and the private subtree collapses without restart; the root may remain, as with a hard VM kill, under the named limitation |
-| Entrypoint ↔ owner-start guard, worker and gate | The entrypoint monitors the responsive guard, its linked worker and any returned start-blocked owner; the gate owns reservation exchange and the one-use root-start token | A missing correlated start result, helper reap or retirement acknowledgement kills the known actors and shared owner supervisor, flips the poison latch and refuses with no root-start authority. Owner death after exchange returns bare unavailable: before token issue no root exists and orphan obligations close or poison; after issue a root may remain unnamed. No entrypoint becomes a replacement cleanup owner |
+| Entrypoint ↔ owner activation proxy | Entrypoint retains begin token and monitors proxy/candidate | No inputs or root before reconciled PID/return/normal proxy DOWN and exact begin. Lost start result withholds token; late child self-exits, and peer sessions remain live. Owner loss after begin returns only bare unavailable with possible unnamed root; no replacement owner |
 | Ephemeral owner ↔ public callers | The one serial owner holds one public-mutation slot and one lifecycle state | A second ask before or after grant is `run_open`; a second answer while an answer owns the slot is `invalid_interaction_answer`; neither queues. The first stop enters `stopping`; later stops join its result and later non-stop requests return unavailable immediately, while requests serialized earlier take their exact admission-state result |
 | Coordinator ↔ either adapter | The session coordinator, as for any model | A raise or exit inside the adapter is `dispatched_or_unknown` by the existing rule, and the run ends `failed`. A pre-dispatch refusal is retried once by the existing attempt limit |
-| Owner candidate or cleanup owner ↔ caller and tagged pool | The callback acquires the invocation-local starter before creating a process. The in-process adapter starts an authority-free candidate behind an unlinked, monitored proxy; only reconciled PID reports, authorized proxy retirement, normal proxy `DOWN`, exact managed coordinator registration, activation preparation and one-use `begin` convert and admit it as the cleanup owner. The ephemeral gate owns hosted credential-call registration and Ollama local-call registration | Exact unmanaged starter acquisition creates no proxy or candidate. An unknown queued supervisor start poisons admission and withholds `begin`; a later undisclosed candidate exits on its first scheduled dead-proxy, dead-callback or expired-deadline step without authority. In the locked worker-retained/guard-unregistered interval, model settlement may precede authority-free candidate `DOWN`; no registered provider-resource obligation, call input or authority exists, and complete session-subtree cleanup still reaps it. If registration committed, candidate exit without the exact stop acknowledgement is unproved. An admitted owner creates and monitors a start-blocked pool-lifecycle root and registers it before pool work. A hosted call acquires its credential-call lease and gate-created caller; Ollama uses the enclosing owner's local-call capability, takes no credential lease or quarantine and may run while that session's tools lease remains held. The root synchronously registers every returned child before progress. Once it starts, every later partial start, refusal, reply, spawn failure or exit joins one idempotent teardown. Normal completion proves the root, every registered child and both tagged registry entries absent, then ends the only result caller before release. Stop or deadline first makes replies inadmissible and sends the caller an untrappable kill, then requests cooperative root teardown. Missing caller, root, child or exact registered cleanup-owner `DOWN`, either registry entry or failed graceful teardown withholds provider success or cleanup acknowledgement, preserves the registered obligation and takes core's unproved-cleanup path; a bounded return never claims a missing `DOWN` occurred |
+| Model callback/candidate ↔ caller and tagged pool | Core registers cleanup owner; existing session owner retains pending-call census through clean retirement | Callback opens credential-free pending record before proxy; exact managed registration plus session-recorded owner PID permit begin. Resources are owner-registered before progress; normal/stop/deadline/partial failure prove exact applicable processes and both tags before success/core acknowledgement. Missing proof seals only session3 and leaves record pending. Clean retirement is recorded before core stop acknowledgement and exact owner DOWN clears it; queued/unprocessed owner loss cannot admit another edge |
 | Adapter ↔ ReqLLM | The in-process adapter | Any non-success return or raise from `generate_text/3` is `dispatched_or_unknown`. A response with a non-nil `error` or finish reason `:error`, `:incomplete` or `:cancelled` is not success. The kernel's deadline ends the call through the cleanup owner, and the run ends `failed` or `outcome_unknown` by the existing rules |
-| Composition ↔ guards and credential | The ephemeral composition, owner before pool creation, caller before each call and one-shot adapter at final dispatch | A replaced provider module, non-empty `:req` `:default_options`, set `SSLKEYLOGFILE`, unsafe base URL, plain HTTP or an active tool preset for a credential-bearing provider refuses before any per-session root exists; the pre-start Req and SSL guards run before Loopex starts ReqLLM/Req. Only the sensitive caller reads the key: an absent, empty or greater-than-65,536-byte value found immediately before `generate_text/3` is `not_dispatched`, accepts no connection and takes the owned teardown path. A final route mismatch or second adapter invocation is refused without network activity but remains conservatively `dispatched_or_unknown` because the ReqLLM call has begun |
-| Composition ↔ ReqLLM's start | The credential/tool gate owns the marker and one linked, monitored hygiene worker owns every application read, configuration write and start call under one decision deadline | `TIDEWAVE_REPL="true"`, an undeclared host start or a declared start with `.env` loading on refuses before owner admission. A proved pre-mutation failure preserves the prior marker. The gate writes `:starting` before the first mutation directive; any uncertainty after it retains that marker and poisons both modes until VM restart. A result is final only after provisional reply, `finish` and exact normal worker `DOWN`; requester loss cannot cancel admitted shared work |
-| Owner ↔ private startup actor and subtree | The owner monitors `SessionRoot`; `SessionRoot` is the lifetime OTP parent of the zero-restart `:one_for_all` supervisor, and a registered `RuntimeHolder` remains the runtime parent | The gate's one-use token is the only root-start authority. One 5,000 ms deadline covers root claim and every grant-gated store, lease, executor, trace-capability, runtime and trace-bind phase. A returned phase failure rolls back its known resources. The trace process and handle exist before runtime start, and exact bind to the returned runtime is required before startup preparation. Loss after the side-effect-free candidate-preparation grant but before its exact report makes the owner kill the actor: exact `DOWN` proves no root and reaches the ordinary no-root disposition without poison, while missing `DOWN` prevents that exchange and poisons both modes. Loss after a granted `mkdir` but before its exact return keeps an ownership-unknown possible path, never deletes or retries it and returns the fixed temporary-root cause. Only after exact root claim does a dependency-phase grant without an exact return become `start_unknown`; known parent `DOWN` cannot prove an unreported child absent, so the call returns `cleanup_unproved`, keeps the owned root and `:session_subtree`, and requires any applicable process-group proof |
+| Composition ↔ guards and credential | The ephemeral composition, owner before pool creation, caller before each call and one-shot adapter at final dispatch | A replaced provider module, non-empty `:req` `:default_options`, set `SSLKEYLOGFILE`, unsafe base URL, plain HTTP or an unsafe routing refuses before any per-session root exists; the pre-start Req and SSL guards run before Loopex starts ReqLLM/Req. Only the sensitive caller reads the key: an absent, empty or greater-than-65,536-byte value found immediately before `generate_text/3` is `not_dispatched`, accepts no connection and takes the owned teardown path. A final route mismatch or second adapter invocation is refused without network activity but remains conservatively `dispatched_or_unknown` because the ReqLLM call has begun |
+| Composition ↔ ReqLLM initialization | One restartable responsive ReqLLMStarter and at most one non-secret worker | Empty Req defaults/unset key-log/Tidewave guard precede shared start. Persist dotenv off before Loopex provenance/start; own bounded waiters join, expiry does not cancel worker/session. Exact worker DOWN permits re-evaluation; recoverable restart identity prevents second worker; ordinary infrastructure outage does not deliberately terminate sessions |
+| Owner ↔ private startup actor/subtree | Owner monitors SessionRoot, its private zero-restart supervisor and every registered edge | Exact begin and ready/grant control root/start authority. One5,000ms deadline covers all phases; lost mkdir result names unknown path without deletion; granted unknown dependency remains unproved despite parent DOWN. Trace binds before create/admission. Return failures roll back safely; containment closes only this session |
 | Runtime ↔ private ephemeral subtree | `SessionRoot` owns the `:one_for_all`, zero-restart-intensity subtree containing the memory store, lease, executor, runtime trace capability, `RuntimeHolder` and runtime; the ephemeral owner monitors every registered PID | Any child loss collapses the subtree without restarting an edge. The owner takes the session-failure cleanup path and exits unmarked; the handle reports unavailable, and nothing is recovered or silently replaced beneath it. Cleanup retries reap any retained actor, phase worker or removal worker before starting a successor |
-| Ephemeral owner ↔ final gate release | The gate retains the owner registration, lease or inactive capability, accepted proof nonce and every registered call/subtree/tag until the owner submits one correlated final disposition | Exact acknowledgement after an empty session census proves `:gate_release` and alone permits root removal. Refusal, malformed or lost acknowledgement flips the poison latch, keeps `:gate_release` permanently pending and never becomes success from owner or gate `DOWN` |
-| Executor ↔ tools and ephemeral gate | The local executor | M5 dispatch/effect behavior stays unchanged; three read-only in-VM tools are added, provider variables are scrubbed, and the private instance/lease-bound process-group proof feeds only the ephemeral scheduling gate |
+| Executor ↔ tools/session admission | Exact executor owner/instance and shared session lifecycle cell | Tool/model edge grants query the same responsive session owner; no grant bypasses a pending unretired model. Direct executor-PID/instance/nonce group certificate is retained before runtime stop. Released environment/effect protocol stays unchanged; only read-only tools and private containment/proof are added |
 | Durable callback ↔ `FollowReader` | The callback owns one linked, monitored disposable-attachment reader and its accepted cursor | Exact `DOWN` within the private reap bound permits the selected projection. Missing `DOWN` discards it, returns only `follow_reader_cleanup_unconfirmed` and leaves the already-killed reader with no mutation or output route; the durable cursor remains replayable |
 | `ask` main ↔ signal handler and worker | The CLI main owns the handle, installs and monitors exact ask mode, and monitors one blocking API worker | Installation or live-handler loss stops the session and exits 1. An ordinary provisional result must be followed by exact worker `DOWN` through the 1,000 ms reap protocol; a still-missing `DOWN` hard-halts status 1 without output. A first correlated interrupt notice performs bounded stop; afterward the main kills and proves worker `DOWN` within 1,000 ms before rendering. Missing `DOWN` on that interrupt path, a second handled signal or backstop expiry hard-halts 130. Every admitted ordinary outcome has one exit status; JSON is one compact object plus one LF and text mode emits only its defined bytes; no branch invents an observation |
 
@@ -3918,12 +3210,12 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 | Core runtime library (`apps/loopex/lib` outside `mix/`) | None | Unchanged |
 | Core Mix tasks (`apps/loopex/lib/mix/tasks/`) | Two closure tasks added beside the existing checks | Development tooling |
 | `LoopexComposition.Ephemeral` | New | Experimental |
-| `loopex_composition` application tree | Adds `LoopexComposition.Application`, names it through `mix.exs` `mod:`, and owns the one-for-all gate/owner-supervisor tree plus the clean-stop callback handshake | Private host-edge lifecycle required by the ephemeral profile; durable composition behavior is unchanged |
+| `loopex_composition` application tree | Application callback owns one-for-one ReqLLMStarter and temporary-owner DynamicSupervisor siblings | Shared startup failures are recoverable infrastructure failures; no cross-session exclusion, persistent refusal state or explicit peer teardown |
 | `LoopexComposition.start/1`, `with_runtime/2` and `start_edges/2` (M4/M5 rework) | Optional `:model`, `:bounds`, `:sampling` and `:active_tools`; defaults reproduce M5 exactly; released outer option behavior stays unchanged; named directories use the public helper, released `:resource_manifest` option and ADR 0025 session commands; the default policy revision is fixed at `"0.2.0"` | Experimental, additive; the revision keeps `0.2` recovery exact |
 | `LoopexComposition.ResourcePacks.read_directories/2` | New; project and user skill directories, `user:<name>` identity | Experimental |
 | The companion adapter (M1/M5 rework) | Pure mapping moved to `Loopex.LLM.ReqLLM.Mapping`; the dependency-visible tool-call mapper now decodes binary arguments without repair, rejects malformed payloads still visible after ReqLLM's buffered normalization rather than substituting `%{}`, and rejects visible provider-executed or provider-native calls instead of flattening them into replayable local calls; ReqLLM total, stream-idle and receive waits become `:infinity` so only the unchanged coordinator's sliced committed deadline governs the call | Private refactor, bounded fail-closed correctness fix and timer-safety fix; valid application-call reply mapping, dependency-normalized erased cases, protocol and deadline meaning unchanged |
 | `loopex_llm_reqllm` application (M1 rework) | `req_llm` plus the direct exact `req` and `finch` dependencies are `runtime: false`: their code stays embedded but none enters the adapter application's automatic start list; the companion already starts the dependency set explicitly | Hardening; companion and host releases list all three as `:load` |
-| Local executor (M2 rework) | An instance carrying the explicit ephemeral tool-lease capability removes the three per-provider credential variables as well as `LOOPEX_PROVIDER_API_KEY`; instances without it preserve M5 environment behavior. Ephemeral instances retain at most one unproved process group, freeze dispatch and send the private instance/lease-bound empty-group proof to the gate | Scoped hardening; public executor protocol, durable records and durable/direct default behavior unchanged |
+| Local executor (M2 rework) | Adds three read-only tools, explicit private session admission/lifecycle cell and direct at-most-one-group drain proof to its owner | Released environment, executor protocol, durable records and durable/direct default behavior unchanged |
 | The vision (§12) | The credential exclusion narrowed for the ephemeral profile, by ADR 0039 | Made at ADR 0039's acceptance |
 | Command line | `ask` and `-p` added; `refuse-all` selectable for `ask`, mapped to `LoopexCli.Policy.RefuseAll`; the launcher exports `ERL_CRASH_DUMP=/dev/null` for `ask` and `-p` only. The escript uses `app: nil`: invalid ask input starts nothing, valid ephemeral ask reaches the bounded composition bootstrap, valid durable ask starts the CLI graph through its fixed-diagnostic helper, and the exact-Mix-compatible legacy helper reproduces the former startup for every existing or unknown command; every existing subcommand remains behaviorally unchanged | Experimental command plus private startup rework |
 | Release check (M5 rework) | Two real-provider rows and the `rollback` lane added; a per-row credential mode; credential clearing and redaction cover the per-provider names; `release_version` moved to `0.3.0`; the Ollama precondition | Development tooling |
@@ -3945,9 +3237,9 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
 | Migration between profiles | None; an ephemeral session is never promoted to a durable one |
 | Backup and restore or downgrade policy | Unchanged from `0.2`; the `0.2` binary opens and resumes every root `0.3` writes, with the two exceptions below |
 | Pending interactions across versions | The default policy revision is `"0.2.0"` in both releases, so a pending interaction recovers and can be answered after an upgrade or a rollback |
-| Exception: a call to an M6-only tool | A call not yet dispatched is re-resolved against the active tool set on recovery (`session_coordinator.ex:6602`); `0.2` answers `{:error, {:unknown_tool, name}}` (`:6844`) and commits it as a failed tool call (`:6625-6626`), and the run continues; its effect never ran, and the model sees the failure. A call already dispatched follows core's dispatched-effect recovery unchanged (`session_coordinator.ex:2789-2796`): `0.2` queries the executor, admits a matching receipt, and otherwise leaves the work pending for reconciliation; `0.2`'s executor defines no such tool, so it never runs it again |
+| Exception: a call to an M6-only tool | A call not yet dispatched is re-resolved against the active tool set on recovery (`session_coordinator.ex:5609-5614`); `0.2` answers `{:error, {:unknown_tool, name}}` (`:6846`) and commits it as a failed tool call (same dispatch_effect error branch), and the run continues; its effect never ran, and the model sees the failure. A call already dispatched follows core's dispatched-effect recovery unchanged (`session_coordinator.ex:2789-2796`): `0.2` queries the executor, admits a matching receipt, and otherwise leaves the work pending for reconciliation; `0.2`'s executor defines no such tool, so it never runs it again |
 | Exception: an admitted user skill | Its admission is journaled as a reference, digest, decision and selections (`session_state.ex:4898`) and its snapshot retained under the state root by digest (`resource_packs.ex:333-380`), as for any pack. `0.2`'s offline `loopex resume` reloads it by digest through core validation, which accepts its `user:<name>` identity (`resource_pack.ex:203-216`, `:343-348`). `0.2`'s daemon composes only discovered project skills (`daemon.ex:239-242`), whose manifest can never match the session's one admitted digest, so the session resumes with all of its skill context withheld, project skills included (`runtime/resource_snapshot.ex:112-121`, `runtime/resource_context.ex:38-47`). `0.2` cannot admit a new one |
-| Proof | The `rollback` lane proves both directions and both exceptions |
+| Proof | The `rollback` lane proves both directions and the stated rollback limitations |
 
 <a id="technical-plan-packaging"></a>
 ### Packaging
@@ -3965,7 +3257,7 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
     gains no package, and none auto-starts with the edge application;
   - the ephemeral API and start step are in `loopex_composition`; its existing
     application gains `LoopexComposition.Application` and the `mix.exs` `mod:`
-    entry that owns the gate tree and clean-stop callback handshake;
+    entry that owns the one-for-one startup-service/owner-supervisor siblings;
   - the command is in `loopex_cli`.
 - **Dependency budget:** `mix loopex.deps_budget` changes nowhere. The CLI
   reaches the ephemeral profile only through composition, as the client rules
@@ -3983,7 +3275,7 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
   argv calls the private legacy-start helper, whose success and formatted
   application-error/status-1 branches exactly match the prior Mix wrapper. The release witness stalls the first composition callback and
   proves the ephemeral bound, requires the exact composition tree live before
-  gate lookup, proves the durable ask's bounded startup error, and replays every
+  owner activation, proves the durable ask's fixed returned-startup error, and replays every
   retained M1–M5 command witness through the explicit legacy-start branch,
   including one dependency-start error.
 - **Host releases:** a host building its own OTP release with the in-process
@@ -4000,18 +3292,20 @@ Concept: [Rollout and compatibility](M6.md#concept-plan-rollout).
   adapter and one pure deadline module shared by the companion and in-process
   owner; its cleanup owner, caller, anonymous pool supervisor and registered
   request-free pool-lifecycle root are direct functions of that edge.
-- The composition edge adds one VM-wide credential/tool gate, its persistent
-  fail-closed marker, the single module implementing the model and executor
-  edges' two private gate-client behaviours, and one DynamicSupervisor for
-  ephemeral session owners.
-  Owner admission uses one bounded guard and worker that both end before a
-  successful handle is returned. ReqLLM hygiene uses one bounded worker per
-  decision. Each session adds one `SessionRoot`, one private supervisor, one
-  runtime trace-capability process and one `RuntimeHolder`; these are required
-  to keep blocking starts out of the owner, bind sensitive-call exclusion to
-  the exact runtime and preserve the OTP parent of every surviving edge.
-- The local executor adds one private at-most-one-group proof state and one
-  gate-only drain handshake; no core behavior or executor protocol changes.
+- The composition edge adds one ReqLLMStarter and an owner DynamicSupervisor
+  as one-for-one siblings. Startup's sole worker isolates the shared application
+  controller; the entrypoint's sole bootstrap worker isolates its initial app
+  start, and one owner-activation proxy isolates DynamicSupervisor.start_child.
+  These workers have no session inputs or authority. Every live session adds one
+  SessionRoot/private supervisor, trace capability and RuntimeHolder because
+  runtime readiness/supervisor starts can block and each surviving OTP edge must
+  keep a lifetime parent. Existing responsive session owner also holds the small
+  private pending-call census; no additional admission actor or global scheduler
+  is added.
+- The local executor adds an at-most-one unproved group set and direct drain
+  certificate, and queries its existing session owner for private dispatch
+  admission; no core behavior, environment behavior or protocol changes.
+
 - The memory store is the promoted 125-line wrapper.
 - The command adds one parser branch, one renderer mode, one monitored worker
   and one correlated state in the existing signal handler so the main process
@@ -4030,28 +3324,27 @@ Concept: [Non-goals](M6.md#concept-plan-non-goals).
 
 | # | Limitation | Why it is accepted |
 | --- | --- | --- |
-| 1 | In the ephemeral profile the host environment has a hosted credential for the host's lifetime. During the call and owned cleanup until they end, the caller, tagged pool, provider HTTP/TLS state, crash reports, crash dumps and host telemetry may expose it; a host-made copy has host-owned retention. Cleanup proves the caller and tagged pool gone. Beyond the continuing host environment and host-made copies, a checked-out socket and its OTP TLS controller may retain request material while they drain | ADR 0039's vision amendment accepts this scoped exposure; the exact value is gated before a reply enters a Loopex plane; TLS reuse, tickets and secret retention are disabled; `SSLKEYLOGFILE` is refused; the caller is sensitive and excluded from Loopex tracing; no result route remains after cleanup. Under isolated release conditions the socket and controller must be gone within 5,000 ms of caller `DOWN`, but runtime cleanup does not wait for or prove that threshold; no arbitrary heap-erasure claim is made; the durable profile keeps structural isolation |
+| 1 | In the ephemeral profile the host environment has a hosted credential for the host's lifetime. During the call and owned cleanup until they end, the caller, tagged pool, provider HTTP/TLS state, crash reports, crash dumps and host telemetry may expose it; a host-made copy has host-owned retention. Cleanup proves the caller and tagged pool gone. Beyond the continuing host environment and host-made copies, a checked-out socket and its OTP TLS controller may retain request material while they drain | ADR 0039's vision amendment accepts this scoped exposure; the exact adapter-injected value is checked before a reply enters a Loopex plane; TLS reuse, tickets and secret retention are disabled; `SSLKEYLOGFILE` is refused; the caller is sensitive and excluded from Loopex tracing; no result route remains after cleanup. Under isolated release conditions the socket and controller must be gone within 5,000 ms of caller `DOWN`, but runtime cleanup does not wait for or prove that threshold; no arbitrary heap-erasure claim is made; the durable profile keeps structural isolation |
 | 2 | ReqLLM's start settings and, once Loopex starts it, its application plus Req's shared infrastructure stay for the VM's life unless the host stops them; a host that wants ReqLLM started earlier must start it itself with `.env` loading off and declare it | ReqLLM reads the settings only at start; composition refuses rather than inherit an unknown start. Loopex does not stop or reference-count shared dependencies another component may use, but no model call uses their default pools and the lifecycle witness proves the surviving infrastructure retains no per-call request or credential. Loopex also refuses `TIDEWAVE_REPL="true"` before it can start ReqLLM's optional listener; a host-started dependency may already have created one, which is a host-owned side effect Loopex cannot undo |
-| 3 | A hard VM kill or an unexpected crash of the ephemeral owner itself can leave the temporary root behind; a surviving opaque handle can report `session_unavailable` but cannot prove cleanup or name a root the crashed owner failed to retain | The root is under the host's temporary directory, mode `0700`, and holds no committed session truth because the store is in memory. It can hold the executor receipt ledger, which is committed effect evidence and is why an unproved root is never deleted. Caller exit, ordinary stop and startup failure remain covered by the cleanup-and-report contract. An `ask` command whose unmarked owner or scheduling gate crashes and therefore cannot obtain a public cleanup proof emits no JSON and exits with status 1, even if it had already observed the run |
+| 3 | A hard VM kill or an unexpected crash of the ephemeral owner itself can leave the temporary root behind; a surviving opaque handle can report `session_unavailable` but cannot prove cleanup or name a root the crashed owner failed to retain | The root is under the host's temporary directory, mode `0700`, and holds no committed session truth because the store is in memory. It can hold the executor receipt ledger, which is committed effect evidence and is why an unproved root is never deleted. Caller exit, ordinary stop and startup failure remain covered by the cleanup-and-report contract. An `ask` command whose unmarked owner crashes and therefore cannot obtain a public cleanup proof emits no JSON and exits with status 1, even if it had already observed the run |
 | 4 | A durable model must name a provider the single `LOOPEX_PROVIDER_API_KEY` serves, needs the built companion, and cannot be a local Ollama model | Per-provider durable credentials belong to the M7 draft's configuration decision |
 | 5 | `ask` offers no deferring policy; a deferred interaction is an API matter | Answering needs a client that holds the question; the app server and an embedding host are those clients |
 | 6 | The JSON result carries no usage or model identity | They are not public events; adding them is a protocol decision |
 | 7 | An ephemeral session's memory grows with its history, bounded per run but not across runs | Ephemeral sessions are meant to be short; stopping the session releases it |
-| 8 | A stop whose cleanup cannot be proved, or whose recursive root removal fails, keeps an owned temporary root for the host to remove after its users end. A lost exclusive-mkdir result instead names a possible path with unknown ownership and authorizes no deletion | Deleting an owned root while an effect or per-session process may still use it would be worse; deleting an unknown path could destroy pre-existing host data. The path, ownership and pending obligation are named in the error. A later stop retries only an owned unproved session-subtree stop or root removal; an unknown claim, unproved run ending, effect cleanup or process-group proof remains conservative for the VM lifetime |
+| 8 | A stop whose cleanup cannot be proved, or whose recursive root removal fails, keeps an owned temporary root for the host to remove after its users end. A lost exclusive-mkdir result instead names a possible path with unknown ownership and authorizes no deletion | Deleting an owned root while an effect or per-session process may still use it would be worse; deleting an unknown path could destroy pre-existing host data. The path, ownership and pending obligation are named in the error. A later stop retries only an owned unproved session-subtree stop or root removal; an unknown claim, unproved run ending, effect cleanup or process-group proof remains conservative for that session's lifetime |
 | 9 | Rolling a durable root back to `0.2` fails a not-yet-dispatched call to an M6-only tool as `unknown_tool`, withholds all skill context of a session with a user skill under `0.2`'s daemon, and `0.2` cannot admit a new user skill | Stated and proved by the `rollback` lane; the call's effect never ran |
 | 10 | The adapter refuses to run while the host sets any `:req` default options; model calls use HTTP/1 only | Default options reach every request; a host that needs them composes the durable profile. Finch's multiplexed HTTP/2 pool can resend below Req's control, and HTTP/2 negotiated on its HTTP/1 pool fails requests above the initial flow-control window; HTTP/2 waits for a transport that removes both limits |
 | 11 | A model's reply arrives whole in the ephemeral profile, with no streamed progress, and each call starts and tears down a new tagged pool while its checked-out transport may drain asynchronously | Progress is transient and never session truth; the per-call pool prevents cross-call connection or TLS-session reuse, at the cost of one handshake per HTTPS call. Shared `Req.Finch` registry infrastructure persists but holds no per-call request, connection or credential after owned cleanup; the socket and OTP TLS controller are outside that infrastructure and are covered by limitation 1; the durable companion keeps streaming |
 | 12 | The daemon is unchanged, so a durable session with a user skill resumed through it cannot match the admitted snapshot and has all of its skill context withheld, project skills included | Named skill directories in daemon-owned sessions belong to the M7 draft's saved configuration; the offline `loopex resume` reloads them |
-| 13 | The reply gate detects the exact resolved credential value, not an encoded, fragmented or otherwise transformed derivative a provider invents; same-VM host code can deliberately tamper with global registry or configuration after a guard | Exact known-value exclusion is testable without treating arbitrary output as secret by resemblance; a host needing a stronger structural boundary uses the durable profile, and trusted host interference is outside an in-VM library's protection |
+| 13 | The reply value check detects the exact resolved credential value, not an encoded, fragmented or otherwise transformed derivative a provider invents; same-VM host code can deliberately tamper with global registry or configuration after a guard | Exact known-value exclusion is testable without treating arbitrary output as secret by resemblance; a host needing a stronger structural boundary uses the durable profile, and trusted host interference is outside an in-VM library's protection |
 | 14 | A host-started Req/Finch may have opened an `SSLKEYLOGFILE` destination before composition | Loopex cannot undo a host side effect. Model calls never use the shared default pool; composition and each call refuse while the variable is set; when Loopex starts Req/Finch itself the guard runs first; and the witness distinguishes fresh-VM non-creation from no new open or append by the call-owned pool |
 | 15 | The in-process adapter refuses a provider response body over 8 MiB and any content-encoded response | The internal bounded collector halts HTTP/1 before retaining more body bytes, and identity encoding avoids an unbounded decompression stage. Hosted model replies are expected to be far smaller; a host needing a different transport contract uses the durable companion or a later adapter decision |
-| 16 | The scheduling gate covers only sessions and calls created by the ephemeral composition. A durable composition, directly constructed executor or trusted host process in the same VM can overlap a tool with the ephemeral provider path | Same-VM code is not a sandbox boundary. A host needing that exclusion gives the ephemeral profile a dedicated VM; the durable profile keeps provider execution in its isolated companion |
-| 17 | An active-tool owner that cannot prove its process groups empty, an unproved credential-call root, or a gate/supervisor crash poisons both lease modes until the VM restarts; the crash also ends every active ephemeral session and leaves its handle unavailable | Reopening either mode could expose a credential beside an orphan tool or admit a tool beside an orphan credential path. The persistent fail-closed marker survives application-process restart but contains no credential, request, policy or session truth |
-| 18 | After a credential caller and its pool are gone, the gate waits 5,000 ms before admitting an ephemeral tool, but it cannot observe or prove that a checked-out socket or TLS controller finished draining | The interval is the isolated release witness threshold, not a runtime cleanup proof. A transport that exceeds it can overlap a later tool; a host requiring structural exclusion gives the profile a dedicated VM |
+| 16 | Hosted and local ephemeral tools may run while supported host credentials are set; a deliberately authorized tool can copy a key into ordinary content | Same-VM trusted tools are not a secret-isolation boundary. This scoped exposure is Concept-visible and accepted separately with ADR0039. Provider configuration/injection keeps references; deliberate tool content follows ordinary provenance/policy/context bounds |
+| 17 | Unproved cleanup seals only that session's lifecycle; genuinely shared ReqLLM/application infrastructure can still be unavailable | Later stop may retry safe proof and new sessions remain eligible. Bounded shared-initialization waiters fail during a real outage and may succeed once it resolves. No permanent VM lockout, lease mode or deliberate peer termination |
 | 19 | `ask` can perform an orderly first-interrupt stop only after it has an ephemeral session handle. The launcher latches and forwards a pre-handle signal but preserves the reaped platform child status and promises no Loopex cleanup or result; a second handled signal or backstop expiry may hard-kill the VM and leave a temporary root without output | Before the opaque handle exists the command has no public stop target; the latch closes the lost-signal window without inventing a cleanup target or portable status. Repeated interrupt remains the operator's immediate escape hatch. The real-signal witness distinguishes the pre-handle, orderly and hard-kill paths |
 | 20 | The local executor's pathname checks, including the read-only walker, do not pin directory handles and cannot guarantee workspace confinement against a concurrent same-user filesystem swap or mutable mount | Erlang's `:file` API exposes neither `openat` nor `O_NOFOLLOW`. Lexical checks, parent realpaths, `lstat` and post-open identity checks refuse ordinary escapes and type replacements but do not create an OS sandbox; a host needing that boundary uses an isolated hand or otherwise controls workspace mutation |
 | 21 | The read-only walker materializes the complete entry-name list for one directory before sorting it and applying traversal caps | Erlang's `:file.list_dir_all/1` has no streaming iterator. The walker avoids materializing the whole tree and bounds all work after each directory enumeration, but a host must not treat the 10,000-entry or 8 MiB path cap as protection from the allocation or time cost of one exceptionally large directory |
 | 22 | After `ask/3` or `answer/3` returns a timeout, a later command or attachment failure in the sole-owner background drain cannot deliver a second no-ending snapshot | No API caller is then waiting and the opaque handle retains only its lifecycle cell. The earlier timeout remains the public observation; the owner cancels the drain, performs cleanup, emits any retained root and pending obligations only to the host logger, exits unmarked, and later handle calls return bare `session_unavailable`. Because standalone `ask` suppresses the logger, that command can leave this retained root unnamed |
-| 23 | A helper sent an untrappable kill can temporarily outlive a bounded API or command return when its exact `DOWN` is not available: the composition-bootstrap guard or worker, core client actor, cleanup phase worker, root-removal worker, owner-start helper, provider owner-candidate start proxy or durable `FollowReader`. A queued provider-candidate start may also materialize an undisclosed start-blocked child after the callback returns. Separately, the locked worker-retained/guard-unregistered interval can let a pre-registration model result precede a disclosed authority-free candidate's `DOWN` | BEAM scheduling cannot make process death synchronous, and killing a caller cannot retract a queued `Task.Supervisor` request. Its result is inadmissible; the session retains the exact monitor and cleanup obligation, owner-start or an unknown provider-candidate start poisons the gate, or durable `ask` returns the fixed `follow_reader_cleanup_unconfirmed` diagnostic. An undisclosed or pre-registration candidate captures no request, options, credential, gate, root, pool, caller or dispatch authority, receives no `begin` and exits on its first scheduled dead-proxy, dead-callback or expired-deadline step. The pre-registration result proves no registered provider-resource obligation, not candidate `DOWN`; complete session-subtree cleanup still reaps it. Exact managed registration restores the stronger registered-owner proof. No replacement cleanup phase or removal worker starts until its retained predecessor is proved down. A later creation call may start another bootstrap guard because the predecessor received no session input or authority and can only have submitted OTP's idempotent serialized application start. A detached `FollowReader` has no output route and its disposable cursor cannot consume durable truth from the callback's accepted cursor |
+| 23 | Killed helpers may outlive bounded returns until scheduled; queued supervisor starts may later materialize undisclosed start-blocked candidates | No begin means no session inputs or root authority. Disclosed missing process proofs seal the affected session and retain monitors; no replacement phase starts before predecessor DOWN. Authority-free bootstrap may finish shared OTP init after refusal; existing handles never create replacement sessions. Core's retained-but-unregistered provider interval can settle before candidate DOWN but grants no input/authority; managed registration restores strict cleanup proof. A detached durable FollowReader has no output route and cannot consume the accepted durable cursor |
 | 24 | Locked ReqLLM's buffered provider builders can generate a replacement for a missing tool-call id, normalize missing, nil, empty or unsupported arguments to `{}`, force the function type, omit a malformed call and remove earlier error metadata before Loopex's shared mapper | The mapper cannot reconstruct erased provider-wire facts. It rejects malformed binary arguments, invalid fields and provider-executed or provider-native classifications that remain visible. An omitted call executes nothing; a normalized `{}` still crosses core tool resolution, schema validation and host policy. Requiring raw-provider validation would add a provider-specific response parser beside ReqLLM and is outside this minimal adapter milestone |
 | 25 | After an ordinary ephemeral `ask` worker sends a provisional result, failure to prove that exact worker `DOWN` through the 1,000 ms kill-and-reap protocol hard-halts the command with status 1 and promises neither output nor cleanup | Rendering or entering stop while an unproved worker can still use the handle would admit two owners of command progress. BEAM scheduling cannot make `DOWN` synchronous; the hard halt is a bounded fail-closed terminal path, exercised independently from the interrupt status-130 path |

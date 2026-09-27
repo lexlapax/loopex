@@ -36,7 +36,9 @@ Technical depth: [Profile composition, adapters and proofs](0039-ephemeral-embed
     the limit of four selected skills, Git-sourced installation and project
     discovery's prompt are unchanged.
   - All three accepted records stay byte-for-byte as accepted.
-- **Amends the vision:** §12's credential exclusion, for this profile only, as
+- **Amends the vision:** clarifies §12 durability; amends the credential
+  exclusion in Concept §12 and §16, Technical §6.1, §6.2, §12.7 and §23,
+  and AGENTS.md, for this profile only, as
   [the vision amendment](#concept-adr-0039-vision) below states.
 - **Prerequisite for:** M6 outcomes 1 to 5, accepted with its paired vision
   amendment before the in-process model adapter, the memory store, the
@@ -120,9 +122,13 @@ narrows:
   value to ReqLLM for that call only. The value must be 1 to 65,536 bytes;
   absent, empty or larger values refuse before disclosure to ReqLLM. The host
   supplies the value through its environment and owns it there.
-- **Kept out of Loopex's planes.** The value never enters a journal record, a
-  public event, progress, a diagnostic, a log line Loopex emits, a fixture or
-  an executor job. Before a mapped provider reply can leave the caller, every
+- **Kept out of Loopex-owned provider handling.** Loopex does not inject the
+  selected model key into a journal record, public event, progress, diagnostic,
+  log, fixture or executor job. The provider caller rejects its exact value
+  before the mapped provider reply enters those planes. Host-authorized tools
+  can independently read/disclose ambient values through their ordinary tool
+  outputs; those disclosures are an explicit host-owned exception, not a
+  secrecy guarantee this profile supplies. Before a mapped provider reply can leave the caller, every
   provider-controlled binary in it—including assistant text, tool-call fields
   and `provider_response_id`—is checked for the exact resolved value; a match
   discards the reply and returns a fixed failure. The calling process is
@@ -145,95 +151,38 @@ narrows:
   threshold. This proves the owned processes and result route gone, not
   synchronous transport-process closure or byte erasure from arbitrary host-VM
   memory. That is the trade this profile makes, and the durable profile does not.
-- **No key needed:** a provider that needs none, such as a local Ollama server,
-  reads none and takes no credential-call lease. Its owned caller is registered
-  under the enclosing ephemeral session while start-blocked, so it can run
-  beside that same session's tool lease without weakening cleanup proof.
-- **Missing key:** only the sensitive per-call caller reads the value. A
-  variable that is missing, empty or over the bound refuses immediately before
-  ReqLLM, naming the variable and never a value; composition validates only the
-  provider-to-variable reference and the no-tools rule.
-- **No ephemeral active-tool session overlaps the owned credential-bearing call
-  path.** A
-  credential-bearing hosted model accepts only the `:none` tool preset. A
-  VM-wide composition gate holds a session-lifetime tool lease for any
-  ephemeral session with an active preset and a per-call credential lease for
-  every hosted call; the two modes are mutually exclusive. A tool lease
-  releases only after the registered session subtree is gone and the executor's
-  process groups are proved empty. A credential lease releases only after its
-  registered call resources are gone and the fixed post-caller quarantine ends.
-  An unproved tool group, any unproved registered provider-call root or loss of
-  the gate fails both lease modes closed for the rest of that VM lifetime. A
-  gate or supervising-subtree crash also terminates every active ephemeral
-  session; its opaque handles then report `session_unavailable`.
-  If a temporary owner start times out, loses its guard or worker, or otherwise
-  ends without a correlated result, composition returns no handle and treats
-  the start as unknown even when every process it knows about has ended: the
-  shared supervisor may still report a start-blocked child whose PID was never
-  returned. That attempted session has created no root, read no credential and
-  dispatched no effect. The same fail-closed supervisor path makes other active
-  ephemeral owners reject new work and enter bounded cleanup through their
-  lifetime monitors. A suspended unreported owner or an already-sent
-  untrappable kill may outlive the refusal until scheduled. The gate stays
-  poisoned and a VM restart is required; a missing `DOWN` for a known process
-  adds a bounded-reap failure but is not the condition that creates the poison.
-  Every ephemeral session, including a tool-free local session, first reserves
-  owner admission at that same gate and registers its owner before any root
-  starts. After closed public validation, workspace and skill resolution,
-  provider admission and the pre-start safety guards, but before ReqLLM hygiene
-  or owner admission, `start_session/1`, and `run/2` through that session-
-  creation path, boundedly start that application when needed; an exact or
-  unproved bootstrap failure
-  returns the fixed composition refusal before a root, credential read or
-  session, and a later call re-evaluates a controller request that may have
-  completed after refusal. A killed bootstrap guard or worker may outlive that
-  refusal until scheduled, but it received no session input or authority; a
-  later creation call may use a new guard because OTP serializes the only
-  possible action, its idempotent application start. The packaged escript uses no generated pre-main
-  application start: `ask` and `-p` finish command parsing, prompt bounds and
-  profile selection first, and invalid forms start nothing. A valid ephemeral
-  form reaches this same bounded entrypoint. A valid durable form starts
-  `:loopex_cli` through an ask-specific helper whose failure enters the closed
-  `application_start_failed` renderer. Every other argv uses the private helper
-  that exactly reproduces the former `:loopex_cli` success or formatted-error-
-  and-status-1 branches before dispatch. Only
-  session creation bootstraps: handle-consuming calls retain lifecycle-first
-  precedence and report the existing handle closed or unavailable after the
-  application tree is lost. Only
-  the composition application's explicit clean-stop handshake can
-  clear the unclean marker. Its pre-stop phase atomically refuses new owner,
-  lease and ReqLLM-hygiene admissions and accepts an empty census only when no
-  reservation, owner, lease, poisoned obligation, admitted hygiene cohort,
-  hygiene worker or controller-mutation obligation remains; it does not wait
-  for active sessions or decisions. After OTP has ended the application tree, the stop
-  callback clears the marker only from that exact empty-census proof. Ordinary
-  child or supervisor termination never clears it.
-  A hosted call's cleanup owner acquires and holds the credential lease before
-  it creates a pool or caller; after exact pool setup, the sensitive caller
-  verifies that bound lease immediately before it reads the selected value.
-  An active local session acquires its lease and then uses one registered,
-  short-lived sensitive preflight process to find all three supported
-  hosted-provider variables unset before its root starts. Its exact result and
-  normal process end must both arrive within the session-start deadline; a
-  crash, malformed result or timeout refuses composition, and a missing process
-  end poisons both modes. Every later tool dispatch repeats the bounded
-  result-and-process proof before effect admission and every OS child has those
-  variables removed. A present variable or failed dispatch probe produces a
-  fixed pre-effect refusal, and an active tool lease makes a hosted call a fixed
-  pre-dispatch failure.
+- **No key needed.** Ollama reads no credential; its caller has the same
+  per-call ownership and transport proof as a hosted caller.
+- **Missing key.** Only the sensitive caller reads the selected hosted
+  variable. A missing, empty or over-bound value refuses before ReqLLM;
+  composition validates the reference, never the value.
+- **Tools and host trust.** Hosted and local models may use either active tool
+  preset. Ambient provider-key variables are permitted, and the existing local
+  executor environment semantics remain unchanged. A tool or other trusted
+  host-VM code may read, copy or disclose an ambient value; this profile does
+  not isolate credentials from tools or other host code. The provider reply
+  check still excludes the exact selected key from Loopex's mapped model
+  result; it cannot classify arbitrary secrets a tool chooses to read. The
+  host chooses workspace, policy, environment, telemetry and permitted tools.
+  A host needing structural exclusion uses the durable profile or an isolated
+  VM and hand.
+- **Failure containment.** Cleanup uncertainty seals only the affected session
+  against new model and tool work. Its root and process census remain for the
+  bounded stop/retry contract. Successful proof marks that handle closed; it
+  never reopens it. Other sessions keep their independent cells and pools.
+  No VM-wide gate, credential/tool lease, quarantine or VM-restart lockout is
+  part of this profile. Shared dependency loss can still interrupt sessions
+  using that dependency; session containment is not shared-service availability.
 
-  This gate coordinates ephemeral-composition participants; a durable
-  composition, a directly constructed executor and trusted host code do not
-  participate. They can change the VM environment after admission, inspect a
-  same-user process or run a tool concurrently. The profile therefore does not
-  claim structural secrecy from another in-VM participant. A host that needs
-  that guarantee gives the ephemeral profile its own VM, or uses the durable
-  profile's isolated companion and hand. The gate, repeated check and scrub
-  prevent the ephemeral composition from scheduling its own owned paths together
-  and from inheriting a known value into a child; they do not turn the shared VM
-  into a sandbox. The 5,000 ms quarantine is the isolated witness threshold,
-  not a runtime proof: a slower checked-out socket or TLS controller can still
-  overlap a later tool.
+**Maintainer decisions recorded 2026-09-27.** These approvals authorize the
+following design choices; they do not accept ADR 0039 or the M6 plan pair:
+
+| Choice | Decision and connotation |
+| --- | --- |
+| Provider path | Approved: non-streaming calls, per-call tagged HTTP/1 pools and the one-shot adapter. The unchanged core remains the deadline and effect-classification authority. |
+| Hosted tools | Hosted ephemeral tools stay in scope. Both tool presets remain available for hosted and local models; the durable profile is an isolation choice, not a prerequisite for hosted tool use. |
+| Ambient variables | Tools are allowed with ambient provider-key variables. Tool admission does not probe or scrub those variables, and the profile makes no secrecy guarantee against a policy-authorized tool reading them. |
+| Cleanup containment | Cleanup failure is session-scoped, with no VM lockout. The affected handle admits no further effects and retains its unproved obligations; independent sessions remain usable. |
 
 **Guards on each call.** The provider call runs inside a host VM whose global
 configuration Loopex does not own, so the adapter refuses to call when that
@@ -315,99 +264,94 @@ ReqLLM's registry, global configuration or the request after a guard can race
 these checks; the final adapter closes every route it can validate, but this
 profile is not a sandbox from its host.
 
-**Cleanup owns the provider call.** Before creating a per-call process, the
-callback obtains the unchanged kernel's invocation-local child starter. An
-unmanaged invocation refuses as `not_dispatched` without a proxy, child,
-credential read, pool or poison. A managed invocation creates one
-authority-free owner candidate behind a bounded proxy. The candidate remains
-start-blocked with no request, credential, gate, root, pool, caller or dispatch
-authority until its PID is reconciled and exact managed core lifetime
-registration converts it into the cleanup owner. Only then can a one-use
-activation token let it proceed. An unknown queued start poisons ephemeral
-admission; no token is sent, and any undisclosed candidate that appears later
-can only observe its expired start deadline or dead callback and exit. The
-single-use proxy may remain blocked until that already-queued child-start request
-returns; it holds no call input, cannot submit another start and retires after
-observing callback `DOWN`. The
-unchanged kernel can end a callback in the narrow interval after its worker has
-retained the candidate but before its guard has registered it. A
-pre-registration model result with no registered provider-resource obligation
-proves that no provider-call authority or input was
-released, not that this authority-free candidate was already scheduled and
-`DOWN`; it disables activation and exits on its first scheduled protocol step
-after observing callback `DOWN`. If registration committed first, its exit
-without the registered stop handshake makes provider cleanup unproved. The
-complete session-subtree proof still reaps any candidate before public session
-cleanup can be proved. If the kernel interrupts registration or the registered
-owner's activation, the adapter cannot manufacture a return; the
-kernel keeps its conservative provider-failure or unproved-cleanup result, and
-the attempt is not retried even though no network dispatch was authorized.
-Each admitted call then has one cleanup owner that stays responsive throughout,
-one calling process that alone can return a result to Loopex, and one tagged
-pool subtree.
-The calling process catches every failure
-and reports only a mapped reply or fixed error class; the owner, also marked
-sensitive, reads exits only by shape, so no exception carrying the request or
-its credential reaches owner state or anything it reports. Once the
-owner-created, start-blocked pool-lifecycle root starts, every later pool-child
-failure or partial start, terminal
-reply, refusal, caller-start failure or exit makes the owner start or join its
-idempotent teardown before anything returns. On the
-transport path, after Req's adapter returns or raises, the one-shot adapter
-requests that teardown
-early and waits for the tagged subtree and both tagged registry entries to disappear. The
-caller then maps and sends the result and blocks; the owner ends it and waits
-for its `DOWN` before returning that result. A failure before the one-shot
-adapter is reached takes the same owner-gated teardown path. On a stop or
-deadline the owner makes any result inadmissible, kills and awaits the caller
-first, then stops and awaits the pool before acknowledging. Failure to prove
-either teardown takes the kernel's existing unproved-cleanup path. A checked-out
-socket and its OTP TLS controller may drain after that owned teardown. Bytes
-already handed to the operating system or TLS may still leave; the call was
-marked `dispatched_or_unknown` before its one dispatch grant, so it is never
-retried and nothing from it can reach the session after cleanup.
-The model's reply arrives whole: an in-process call reports no streamed
-progress, which is transient and never session truth.
+**Cleanup owns the provider call.** The callback first acquires the kernel's
+invocation-local child starter. An unmanaged invocation creates nothing and
+returns fixed `not_dispatched`. A managed invocation starts one authority-free
+candidate through a bounded, unlinked proxy. Before exact managed lifetime
+registration it receives no session cell, request, option, credential, pool or
+activation token. Only reconciled candidate/proxy identities, exact normal
+proxy termination, managed core registration and the callback's one-use
+activation release call authority.
 
-**Host hygiene.** The in-process adapter runs inside a host that may do other
-things, and ReqLLM loads a `.env` file when its application starts. ReqLLM, Req
-and Finch are therefore not automatic runtime dependencies of a Loopex
-application. The guarded composition step explicitly asks OTP's application
-controller to start ReqLLM and its dependency graph:
-- no Loopex application lists ReqLLM for automatic start, so it cannot start
-  before hygiene is in place;
-- before starting ReqLLM, composition checks the pre-start Req and key-log
-  guards and refuses while `TIDEWAVE_REPL` is `"true"`, because ReqLLM would
-  otherwise open a Bandit listener. The VM-wide credential/tool gate serializes
-  the decision without an unbounded lock. One linked, monitored worker performs
-  every application read, configuration operation and start under a 5,000 ms
-  decision bound plus 1,000 ms reap bound. Only an unproved worker lifecycle
-  adds one separate 1,000 ms poison-result handoff to the already admitted
-  cohort before the shared tree ends, so every admitted hygiene request has a
-  7,000 ms outer bound. The gate records `:starting` before
-  it directs the first mutation, then accepts a provisional result only after
-  `finish` and the worker's exact normal `DOWN`. A proved failure before that
-  first mutation preserves the prior hygiene marker. Any uncertainty after the
-  first mutation directive retains `:starting` and refuses both ephemeral modes
-  until VM restart; no owner, root, credential read or effect exists yet;
-- a composition proceeds whenever ReqLLM is running with `.env` loading off and
-  either that record exists or the host declares that it started ReqLLM itself
-  that way;
-- a ReqLLM running with `.env` loading on, or started by the host undeclared,
-  is refused.
+An unknown queued start or missing candidate/proxy termination seals only the
+attempted session and remains conservative failure; it never becomes clean
+`not_dispatched`. A queued Task.Supervisor start may later materialize only an
+inert candidate. Without activation it exits when it observes callback/proxy
+loss or expiry. In the locked worker-retained/guard-unregistered interval,
+core may settle before that authority-free candidate's termination; this
+proves no registered provider-resource obligation or released authority, not
+candidate termination. Complete session-subtree proof still reaps it. If
+registration committed first, the missing stop handshake is unproved cleanup.
 
-Because the setting persists, a later stop and restart of ReqLLM also loads no
-`.env`, unless the host deliberately turns loading back on, which the next
-composition sees and refuses. The setting stays for the life of the VM and is
-not restored; that is named. Once Loopex starts ReqLLM, it does not stop or
-reference-count the application, because another component may use it. Its
-shared supervisor, registries and default HTTP infrastructure therefore remain
-until the host stops them or the VM exits, but no model call uses the shared
-default pools and owned cleanup leaves them with no per-call request or
-credential. A host-started or host-restarted ReqLLM may already have opened its
-optional Tidewave listener; Loopex cannot undo that host side effect. Every
-model is named inline, so no model catalog is consulted and
-no unverified-model warning arises, and Loopex changes no other ReqLLM setting.
+Each admitted call has a responsive, sensitive cleanup owner, one sensitive
+caller and one request-free pool-lifecycle root with its tagged pool subtree.
+The owner keeps identities, process census and a bounded mapped result; never
+the key or raw request/error. The caller catches failures and reports only
+fixed classes or an exact-key-checked mapped reply. After the one-shot direct
+worker call returns, the adapter requests pool teardown while the caller
+waits. The caller then maps its result; the owner ends and proves that caller
+terminated before returning it. Pre-adapter refusal takes the same applicable
+owned teardown. Stop/deadline first makes results inadmissible and ends the
+caller, then requests pool teardown. Missing proof seals this session and
+withholds success or a stop acknowledgement. The owner remains alive until
+core's registered-resource stop handshake finishes. The model reply is whole;
+there is no streamed progress.
+
+The session's existing opaque lifecycle cell is also its explicit private
+admission seal: open `0`, stopping `1`, closed `2`, cleanup-unproved `3`.
+A second private atomic slot is idle `0` or provider-attempt outstanding `1`.
+Before any proxy/candidate, the callback requests begin-model custody from the
+responsive session owner, which reserves that slot and records its reference/
+monitor. Model and executor edges use inward private admission behaviours with
+one composition implementation over that existing owner; no new global actor
+or secret-bearing message is introduced. No pre-registration child
+receives the cell. Every model/tool grant requires open and a bounded correlated
+session-owner reconciliation of any prior outstanding attempt. A managed call
+clears outstanding only after the owner accepted its correlated clean-retirement
+proof and observed exact registered-cleanup-owner DOWN; clean pre-registration
+refusal requires its exact no-child/candidate/proxy proof instead. Missing proof
+writes lifecycle `3`; lost notification cannot reopen or clear outstanding. Stop may move `1` or `3` to `2` only after proof,
+never back to `0`. Previously granted effects retain their executor cleanup
+obligations. Non-stop facade calls use the existing lifecycle-first refusal;
+inspection survives only where the M6 API explicitly permits it.
+
+**Host hygiene.** ReqLLM, Req and Finch are compile-time/code dependencies but
+not automatically started runtime dependencies. Before an explicit start,
+composition requires empty Req defaults, no `SSLKEYLOGFILE` and
+`TIDEWAVE_REPL != "true"`. A restartable `ReqLLMStarter` service serializes
+startup under M6's shared-start protocol. Its worker contains no session input,
+key, activation or effect authority. A waiter has a 5,000 ms bound; timeout or
+requester death does not cancel shared application-controller work. The
+service retains startup provenance for later reconciliation; uncertainty is a
+fixed startup refusal for that waiter, not a persistent poison or VM lockout.
+Already-running ReqLLM is accepted only with .env loading off and retained
+Loopex startup provenance or the host's explicit declaration. Shared-service
+outages are reported honestly and may affect sessions using that service.
+
+Loopex persists `load_dotenv: false` before its admitted ReqLLM start and does
+not restore the setting or stop reference-counted dependencies. The host owns
+later mutations, false declarations, preexisting listener/file opens and
+shared infrastructure. Inline models avoid catalog lookup; no other ReqLLM
+setting changes. Embedded and escript startup use the same guards. The escript
+uses `app: nil`: invalid ask forms start no Loopex application, valid
+ephemeral forms call the bounded composition bootstrap, durable ask uses its
+fixed-diagnostic start helper, and legacy commands preserve the former startup
+and error behavior. Handle-consuming calls never bootstrap.
+
+<a id="concept-adr-0039-public"></a>
+### Public Admission and Packaging Contracts
+
+Technical depth: [Admission and packaging mechanics](0039-ephemeral-embedded-profile-technical.md#technical-adr-0039-public).
+
+| Contract | Observable rule |
+| --- | --- |
+| Base URL | At most 65,536 UTF-8 bytes: lowercase `https://host[:port][/path]` for hosted providers; Ollama also accepts `http`. Host is canonical IPv4 or ASCII DNS (253 bytes; 1..63-byte letter/digit-ended labels with internal hyphens), normalized lowercase. No IPv6, Unicode/percent-encoded host, userinfo, trailing DNS dot, query or fragment. Port is canonical decimal 1..65,535, with default 80/443 normalized away. Path uses slash-separated unreserved ASCII segments; no percent escapes, backslash, interior repeated separators or dot/dotdot segment; trailing slashes normalize away. |
+| Composition precedence | Complete closed options/prompt validation, then workspace and skill resolution, fixed provider prefix admission, Req-defaults guard, keylog guard, Tidewave guard, bounded composition bootstrap, shared ReqLLM-start reconciliation, exact built-in provider-module verification, normalized explicit/default base URL, bounded session-owner activation and private root/subtree startup. The first failure wins; no later phase runs after refusal. The M6 Concept public table owns the complete code vocabulary and remaining startup detail. |
+| Provider/address/ambient guards | Fixed composition reasons: `unknown_provider`, `provider_module_replaced`, `req_default_options_unsupported`, `ssl_key_log_enabled`, `req_llm_tidewave_enabled`, `provider_base_url_unsupported`. Ambient provider keys and active hosted/local tools are not refusal reasons. |
+| Shared-start refusals | `req_llm_host_declaration_invalid`, `req_llm_dotenv_enabled`, `req_llm_already_started`, `req_llm_start_failed`; no global poisoned/admission-closed/credential-active code. An unavailable waiter returns fixed start failure; a later waiter may reconcile. |
+| Model failure | Proved pre-call refusal is fixed `model_call_failed` with `not_dispatched`; started or unproved lifecycle paths use `dispatched_or_unknown`. Registered cleanup uncertainty withholds success/stop acknowledgement and closes only the affected handle. |
+| Host release | A release embedding this in-VM adapter lists `req_llm`, `req` and `finch` as `:load`, not automatically started. The composition service starts them after hygiene guards; their code remains present in escripts/companion builds. |
+| Skill-directory helper | `LoopexComposition.ResourcePacks.read_directories/2` is public in both profiles; M6 Concept states its complete options/return/error grammar. Admitted project/user identities, shadowing, digest retention and ADR 0025 activation are unchanged from the decision below. |
 
 **Skills named by path.** Both profiles can admit exactly the skill directories
 their host names. The ephemeral profile uses only those directories. For a
@@ -528,8 +472,8 @@ it belongs to this decision as an experimental surface:
   values are empty lists with false truncation flags; `run_id` is null only for
   `no_ending` when no run id was learned; and `cleanup` is an ephemeral proof
   object or null for the durable profile. A refusal before the run, a
-  cleanup-only failure before prompt admission, or an unmarked owner or
-  scheduling-gate failure for which no public cleanup proof can be constructed,
+  cleanup-only failure before prompt admission, or an unmarked
+  session-owner failure for which no public cleanup proof can be constructed,
   writes nothing to standard output even when the last case raced after a run
   observation; standard error names the command failure and any root available
   from a cleanup map. The one exception is the named ordinary worker-reap hard
@@ -599,17 +543,17 @@ credential rule. The paired vision files change with its acceptance:
   HTTPS-only, so this exception admits no plaintext network exposure. §12.7's
   "narrowest possible lifetime and audience" also yields for the host
   environment: any code in that VM may read the value while the host keeps it
-  there. Every other exclusion stands, including the reference-only runtime
+  there. Every Loopex-owned provider-handling exclusion stands, including reference-only runtime
   state, just-in-time resolution and host custody.
-  Within ephemeral-composition participants, a VM-wide gate prevents an active
-  tool session from overlapping the owned credential-call path and its fixed
-  post-caller quarantine. Tool release requires the registered session subtree
-  gone and the executor's process groups proved empty. Credential-call release
-  requires its registered processes gone and the quarantine elapsed. An
-  unproved release or gate loss poisons both modes until VM restart, and a gate
-  crash ends active ephemeral sessions. Durable compositions, direct executors,
-  trusted host code and transport that outlives the quarantine do not
-  participate in that guarantee.
+  Hosted and local tools are permitted even with ambient credential variables.
+  A policy-authorized tool or trusted host-VM code may read or disclose those
+  values, including through their ordinary tool output/effect planes; the
+  profile provides no isolation from that audience. The selected
+  model key is still excluded from the mapped provider reply and Loopex-owned
+  diagnostics. Cleanup uncertainty closes only the affected session's
+  admission; no shared gate, lease, quarantine or VM-restart lockout exists.
+  Shared dependency outages remain possible and are not disguised as an
+  independent-session availability guarantee.
 - **Host resolution.** Vision §6.1 gives the host credential resolution. Here
   the host resolves by placing the value in a variable it names in its own
   environment; the adapter reads that host-supplied value at the model
@@ -635,15 +579,17 @@ credential rule. The paired vision files change with its acceptance:
   requirement and disabled TLS retention close those paths. The next
   adversarial pass extended teardown to pre-adapter failures and narrowed the
   key-log-file claim to distinguish Loopex's pool from host-started Req state.
-  The maintainer chose one in-VM ReqLLM path for every provider in the
+  The maintainer approved one in-VM ReqLLM path for every provider in the
   ephemeral profile over carrying the companion into it.
-- **Compatibility impact.** None for existing users. The durable profile, the
-  daemon and every accepted credential decision keep full isolation. The
-  exception applies only where a host composes the ephemeral profile with a
-  hosted model.
-- **Migration path.** A host that needs structural exclusion composes the
-  durable profile, or keeps to a credential-free local model in the ephemeral
-  one. A later decision may add a companion path to the ephemeral profile.
+- **Compatibility impact.** The durable provider path and daemon keep their
+  accepted separate-process credential handling. The provider-call exception
+  concerns hosted ephemeral calls; the ambient-tool audience exception covers
+  both hosted and local ephemeral sessions.
+- **Migration path.** A host that needs provider-process isolation composes the
+  durable profile. A local ephemeral model alone does not isolate ambient keys
+  from tools. A credential-free local alternative needs a host and tool audience
+  that have no access to those values. A later decision may add a companion path
+  to the ephemeral profile.
 
 <a id="concept-adr-0039-consequences"></a>
 ### Observable Consequences
@@ -673,7 +619,7 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
     `cleanup_unproved`, which names the retained root and keeps the same partial
     projection under its `session_unavailable` ending; that no-ending value is
     not returned directly as proved cleanup. Before admission, proved cleanup returns the
-    bare lifecycle error; unproved cleanup names the root. After the owner or scheduling gate itself crashes, or
+    bare lifecycle error; unproved cleanup names the root. After the owner itself crashes, or
     when the background drain fails after the waiting call already timed out,
     the handle can report only the bare lifecycle error; the earlier timeout is
     then the only public observation. An unproved cleanup in that no-waiter
@@ -688,10 +634,10 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
     the later, unevaluated effect-cleanup obligation.
     A cleanup error from failed startup carries the fixed failing-step cause;
     ordinary stop cleanup carries no cause.
-    If the session owner dies after its successful gate exchange but before
+    If the session owner dies after activation but before
     returning a handle, the entrypoint returns bare `session_unavailable`; it
     never becomes a replacement owner or invents a cleanup map. Before the
-    root-start token no root exists; afterward a root may remain unnamed.
+    root-start grant no root exists; afterward a root may remain unnamed.
     A non-creator process that dies while waiting in `ask/3` or `answer/3`
     does not end the creator's session. Before the request can have reached core
     it has no effect; after the conservative possible-admission boundary the sole owner lets the command resolve.
@@ -707,35 +653,16 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
     unless a terminal event wins; creator exit still
     creates no retry state.
 
-  It needs no caller-supplied or durable state root, no companion build and no
-  store setup; the profile owns its temporary executor root. A hosted
-  model needs its provider's credential variable. When stopping cannot prove
-  effect cleanup, executor process-group cleanup and the end of every child in
-  the per-session store, lease, executor, trace-capability and runtime subtree, when the
-  credential/tool gate does not acknowledge final release of that session's
-  registration and lease, or when recursive root removal fails,
-  `stop_session/1` returns an error, keeps the owned temporary root and names the
-  pending obligation rather than deleting what an in-flight effect might still
-  use or claiming removal that did not occur. The list names only cleanup phases
-  the owner reached and failed to prove. A failed prerequisite omits downstream
-  phases that never ran: final gate release appears only after the earlier
-  cleanup proves, root removal only after gate release proves, and the two never
-  appear together.
-  When `stop_session/1` returns this error on a surviving session handle and
-  only the per-session subtree or root removal remains unproved, the owner
-  accepts only a later stop retry. One-shot and true no-waiter cleanup paths,
-  including creator exit without a registered borrower and post-timeout drain
-  failure, instead exit after logging any retained root. An unproved run ending,
-  effect cleanup, process group or final gate release is permanent: the owner exits unmarked and every later call
-  reports `session_unavailable`.
-  Startup rollback after a gate reservation exchange uses the same final gate
-  disposition after every known actor, subtree and process group is gone. An
-  unacknowledged reached release keeps a possible root with `gate_release`; if
-  no root could exist, composition instead reports
-  `credential_tool_gate_unavailable`, logs no path and keeps admission poisoned.
-  A no-root actor that cannot be proved down prevents the exchange, returns its
-  fixed phase error and also leaves admission poisoned; it does not report a
-  release that never ran.
+  It needs no caller-supplied or durable state root, companion build or store
+  setup. Hosted models need only the selected provider variable. A failed
+  effect/process-group/runtime/subtree proof or root removal keeps the owned
+  temporary root and names only obligations the owner reached and could not
+  prove. Root removal is reached only after all owned resources are proved
+  ended. A surviving handle may retry stop for a retryable subtree/removal
+  obligation; irreversible run-ending, effect or group uncertainty remains
+  explicitly unproved. One-shot/no-waiter paths retain their named logger-only
+  root limitation. The affected session alone remains sealed; no cleanup
+  result requires a VM restart or denies another session.
   A successful stop atomically marks the opaque handle closed and ends its owner:
   another stop is `:ok`, other calls report `session_closed`, and an owner that
   died without that mark reports `session_unavailable` rather than implying
@@ -747,7 +674,7 @@ Technical depth: [Adapters and proofs](0039-ephemeral-embedded-profile-technical
   `--model`, `--output json|text`, `--skill-dir DIR` (at most four, project or
   user skill directories) and a named policy. The exit status reports the run's
   outcome, not only whether the command started. The named unmarked-owner or
-  gate-crash limitation is outside a run outcome: without a public cleanup
+  owner-loss limitation is outside a run outcome: without a public cleanup
   proof, the command emits no JSON object and exits with the command-error
   status even if it had already observed the run. For an ephemeral command, a
   run observation stays provisional until its worker is proved ended through a
@@ -785,8 +712,8 @@ This adds the profile and narrowly reworks two private companion mechanics:
   stream-idle and receive waits become infinite so the unchanged coordinator's
   sliced committed deadline remains the one authority, including at the new
   unsigned-64-bit durable bound.
-- **Amended:** the vision's §12 credential exclusion, for the ephemeral profile
-  only.
+- **Amended:** Concept §12 and §16, Technical §6.1, §6.2, §12.7 and §23,
+  and AGENTS.md, for the ephemeral profile only.
 - **Experimental** under the 0.x policy:
   - the embedded API;
   - the `ask` command;
@@ -800,8 +727,8 @@ This adds the profile and narrowly reworks two private companion mechanics:
   the release version, so a pending interaction recorded under either release
   recovers under the other.
 - **Rollback** to `0.2`: remove the profile. No durable byte depends on it, and
-  a `0.2` binary opens and resumes every root `0.3` writes, with two named
-  exceptions that each leave a truthful record:
+  a `0.2` binary opens and resumes every root `0.3` writes, with the stated
+  rollback limitations and a truthful record:
   - a call to a tool only `0.3` defines, such as `grep`, that was not yet
     dispatched when the root is resumed under `0.2`: the call is committed as a
     failed `unknown_tool` call and the run continues. One already dispatched
