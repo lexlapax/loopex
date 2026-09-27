@@ -115,12 +115,8 @@ narrows:
 - **Not structurally excluded from the host VM.** While a call is in flight
   the value is also held inside ReqLLM, Req, Finch and the TLS connection
   processes that carry the request, so their crash reports, a crash dump or a
-  telemetry handler the host installs can see it. Calls to an `https` address
-  use HTTP/2 when the server offers it, and one provider's key outlives the
-  call there: Anthropic sends it in a header HTTP/2's compression table
-  stores, so it stays in that idle pooled connection until the pool closes,
-  at most about a minute after the last call to Anthropic. OpenAI's and
-  OpenRouter's keys travel in a header that table does not store. That is the trade this profile makes, and the durable
+  telemetry handler the host installs can see it. Calls use HTTP/1, which
+  keeps no header state on a connection, so no key outlives its call there. That is the trade this profile makes, and the durable
   profile does not.
 - **No key needed:** a provider that needs none, such as a local Ollama server,
   reads none.
@@ -141,19 +137,21 @@ configuration could change what the call does or where it goes:
   included, into every request. Composition refuses, and each call refuses
   before dispatch, while any are set, so a global authentication header, cache,
   plugin, pool or transport cannot enter the call.
-- **Loopex's own connection pools.** Each call names a connection pool whose
-  options Loopex fixes, so neither ReqLLM's shared pool nor anything the host
-  configured for it, a proxy, a protocol or a pool started earlier, can carry
-  the call. Each connection carries one call at a time, and the calling
-  process itself sends the request. The pool follows the scheme of the address
-  actually used: an `https` connection uses HTTP/2 when the server offers it
-  and HTTP/1 otherwise; a plain `http` address, such as a local Ollama server
-  or a local OpenAI-compatible server, uses HTTP/1. The pool closes all its
-  connections after half a minute without a call. Loopex does not use
-  multiplexed HTTP/2, because its pool can silently resend a request whose
-  connection closes mid-upload. Host code that deliberately registers a pool
-  under the same name first is trusted host code, which Loopex does not defend
-  against.
+- **A connection pool with Loopex's fixed options.** Each call names a
+  connection pool whose options Loopex fixes, so neither ReqLLM's shared pool
+  nor anything the host configured for it, a proxy, a protocol or a pool
+  started earlier, can carry the call. The pool lives under Req's supervisor
+  and is shared by any caller using the same options; host code that
+  deliberately registers a pool under its name first is trusted host code,
+  which Loopex does not defend against. Each connection carries one call at a
+  time, and the calling process itself drives the request, so a killed call
+  stops sending at once.
+- **HTTP/1 only, for now.** Every call uses HTTP/1, ReqLLM's own default. Both
+  ways of using HTTP/2 through the locked Finch are unsafe for this adapter:
+  its multiplexed pool can silently resend a request whose connection closes
+  mid-upload, and HTTP/2 negotiated on its HTTP/1 pool ignores flow control,
+  so any request over 64 KiB fails on a fresh connection. HTTP/2 is future
+  work, for when Finch removes one of those limits.
 - **Pinned address and options.** Each call names its address explicitly: the
   host's base URL, or the provider's built-in default, never one taken from
   ReqLLM's application configuration or model catalog. It allows no retry and
@@ -170,11 +168,12 @@ the owner or anything it reports. On a stop or a deadline the owner kills that p
 completion it exits by itself; either way the owner acknowledges cleanup, or
 returns the reply, only after it has seen that process exit. If it cannot see
 that, the kernel's existing unproved-cleanup path applies. The connection and
-TLS processes that carried the request belong to Loopex's shared pool, not to
-the call, but the calling process does the sending itself: when it dies the
-request stops at once and its connection closes, so a killed call sends
-nothing after its deadline and nothing can reach the session, whose call is
-already `dispatched_or_unknown`.
+TLS processes that carried the request belong to the shared pool, not to the
+call, but the calling process does the sending itself: when it dies it sends
+nothing more, and the pool closes its connection on seeing it gone. Bytes it
+had already handed to the operating system may still leave, which changes
+nothing, because the call is already `dispatched_or_unknown` and nothing can
+reach the session.
 The model's reply arrives whole: an in-process call reports no streamed
 progress, which is transient and never session truth.
 
@@ -262,8 +261,7 @@ profile answers each one as follows.
    model boundary for each call. The durable profile keeps the single source.
 
 What the ephemeral profile gives up is process isolation for the credential and
-the request while a call is in flight, and, for Anthropic over HTTP/2, for at
-most about a minute afterwards in an idle pooled connection. That trade is the point of the profile,
+the request while a call is in flight. That trade is the point of the profile,
 and it is stated wherever the profile is offered.
 
 **The `ask` command's machine contract.** Other agents and scripts parse it, so
@@ -318,9 +316,7 @@ change with its acceptance:
   prohibited plane, and AGENTS.md repeats the exclusion as a non-negotiable.
   For a profile the host explicitly composes to run the provider library in its
   own VM, a credential may be present in that library's processes during a
-  call, and, where a provider's HTTP/2 header compression stores it, in an
-  idle pooled connection for at most about a minute after the last call to
-  that provider; so in their crash reports, a crash dump or a host telemetry
+  call; so in their crash reports, a crash dump or a host telemetry
   handler. Every other exclusion stands, and the reference in runtime state,
   resolution at the model boundary and host custody stand.
 - **Host resolution.** Vision §6.1 gives the host credential resolution. Here
