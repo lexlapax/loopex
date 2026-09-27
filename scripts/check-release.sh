@@ -10,25 +10,37 @@
 # needs the Node version pinned in scripts/fixtures/m4/client-toolchain.txt
 # and, on Linux, a second unprivileged user named in LOOPEX_CROSS_UID_USER that
 # the current user may run a command as with `sudo -n`. Output streams as it
-# happens.
+# happens. Repeated --only selectors run unattended pre-merge lanes, not the
+# full closure matrix. Invalid selections refuse before staging or builds.
 set -euo pipefail
+script_dir=$(cd "$(dirname "$0")" && pwd)
+source "$script_dir/lib/release-lane.sh"
+release_select "$@"
 cd "$(git rev-parse --show-toplevel)"
 
-[ -n "${LOOPEX_PROVIDER_API_KEY:-}" ] ||
-  { echo 'check-release: LOOPEX_PROVIDER_API_KEY is required' >&2; exit 2; }
-export LOOPEX_PROVIDER_API_KEY
-pinned_node=$(awk -F= '$1 == "node" { print $2 }' scripts/fixtures/m4/client-toolchain.txt)
-observed_node=$(node --version 2>/dev/null </dev/null || true)
-[ "$observed_node" = "v$pinned_node" ] ||
-  { echo "check-release: Node v$pinned_node is required, found ${observed_node:-none}" >&2; exit 2; }
+if release_needs_provider; then
+  [ -n "${LOOPEX_PROVIDER_API_KEY:-}" ] ||
+    { echo 'check-release: LOOPEX_PROVIDER_API_KEY is required for the selected provider rows' >&2; exit 2; }
+  export LOOPEX_PROVIDER_API_KEY
+fi
+if release_needs_node; then
+  pinned_node=$(awk -F= '$1 == "node" { print $2 }' scripts/fixtures/m4/client-toolchain.txt)
+  observed_node=$(node --version 2>/dev/null </dev/null || true)
+  [ "$observed_node" = "v$pinned_node" ] ||
+    { echo "check-release: Node v$pinned_node is required, found ${observed_node:-none}" >&2; exit 2; }
+fi
+platform=$(uname -s)
+if [ "$release_mode" = selection-only ] && release_selected cross_uid && [ "$platform" != Linux ]; then
+  printf 'check-release: cross_uid unavailable on %s; selection cannot pass\n' "$platform" >&2
+  exit 2
+fi
 [ -z "$(git status --porcelain)" ] ||
   { echo 'check-release: the tree must be the committed candidate' >&2; exit 2; }
 
 started=$SECONDS
-platform=$(uname -s)
 commit=$(git rev-parse HEAD)
 release_version=0.2.0
-printf 'check-release: candidate %s on %s %s\n' "$commit" "$platform" "$(uname -m)"
+printf 'check-release: candidate %s on %s %s mode=%s selectors=%s\n' "$commit" "$platform" "$(uname -m)" "$release_mode" "${release_selectors:-all}"
 logs=$(mktemp -d "${TMPDIR:-/tmp}/loopex-release.XXXXXX")
 fresh=$(mktemp -d "${TMPDIR:-/tmp}/loopex-fresh.XXXXXX")
 trap 'rm -rf "$logs" "$fresh"' EXIT
@@ -52,13 +64,17 @@ printf 'check-release: open-file limit %s\n' "$(ulimit -Sn)"
 # Reference composition consumes and deletes the credential, so each
 # credential-consuming case runs in its own operating-system process that
 # inherits it once; every other lane runs with the name removed.
-with_credential() { "$@"; }
-without_credential() { env -u LOOPEX_PROVIDER_API_KEY "$@"; }
+with_credential() { env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
+without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
 # The wrapper self-check plants a synthetic value and reports only whether each
 # wrapper's child sees the name, never a value.
 (
   LOOPEX_PROVIDER_API_KEY=release-self-check-synthetic
-  probe='if [ -n "${LOOPEX_PROVIDER_API_KEY+set}" ]; then echo present; else echo absent; fi'
+  OPENAI_API_KEY=release-self-check-synthetic
+  ANTHROPIC_API_KEY=release-self-check-synthetic
+  OPENROUTER_API_KEY=release-self-check-synthetic
+  export LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+  probe='if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then echo present; else echo absent; fi'
   seen=$(with_credential sh -c "$probe")
   unseen=$(without_credential sh -c "$probe")
   printf 'check-release: credential self-check: manifest=%s other=%s\n' "$seen" "$unseen"
@@ -74,6 +90,18 @@ without_credential() { env -u LOOPEX_PROVIDER_API_KEY "$@"; }
 # every later lane runs inside this extraction.
 fresh_started=$SECONDS
 retain=${LOOPEX_RELEASE_RETAIN:-$(mktemp -d "${TMPDIR:-/tmp}/loopex-retained.XXXXXX")}
+[ -d "$retain" ] || { echo 'check-release: retained output directory must exist' >&2; exit 2; }
+retain=$(cd "$retain" && pwd -P)
+checkout=$(pwd -P)
+case "$retain/" in
+  "$checkout/"*) echo 'check-release: retained output must be outside the checkout' >&2; exit 2 ;;
+esac
+# Refuse reused evidence paths before an extraction can overwrite any retained
+# byte. The scoped umask makes newly created evidence private to this user.
+for retained in source-archive-manifest source-inventory source-archive-manifest.after fresh-source-build.log; do
+  (umask 077; set -C; : >"$retain/$retained") 2>/dev/null ||
+    { printf 'check-release: retained path unavailable or already exists: %s\n' "$retain/$retained" >&2; exit 2; }
+done
 tree="$fresh/src"
 printf 'check-release: fresh-source extraction of %s\n' "$commit"
 (umask 0777; (umask 022; mkdir "$tree" && git archive "$commit" | tar -x -C "$tree"))
@@ -81,10 +109,18 @@ bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive
 git ls-files -z >"$retain/source-inventory"
 elixir scripts/source-archive-check.exs verify \
   "$retain/source-archive-manifest" "$retain/source-inventory" "$commit" "$tree"
+set +e
 (cd "$tree" && without_credential mix deps.get &&
   MIX_ENV=prod without_credential mix cmd --app loopex_cli mix escript.build) 2>&1 |
-  tee "$logs/fresh-source-build.log"
-[ "${PIPESTATUS[0]}" -eq 0 ] || { echo 'check-release: fresh-source build RED' >&2; exit 1; }
+  tee "$retain/fresh-source-build.log"
+build_statuses=("${PIPESTATUS[@]}")
+set -e
+printf 'build-evidence: command_status=%s tee_status=%s duration_seconds=%s\n' \
+  "${build_statuses[0]}" "${build_statuses[1]}" "$((SECONDS - fresh_started))" >>"$retain/fresh-source-build.log"
+build_sha=$(release_digest "$retain/fresh-source-build.log")
+printf 'check-release: retained %s sha256=%s\n' "$retain/fresh-source-build.log" "$build_sha"
+[ "${build_statuses[0]}" -eq 0 ] && [ "${build_statuses[1]}" -eq 0 ] ||
+  { echo 'check-release: fresh-source build RED' >&2; exit 1; }
 bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest.after"
 elixir scripts/source-archive-check.exs unchanged \
   "$retain/source-archive-manifest" "$retain/source-archive-manifest.after"
@@ -99,35 +135,10 @@ esac
 [ "$(cat "$tree/VERSION")" = "$release_version" ] ||
   { echo "check-release: the extraction's VERSION is not $release_version" >&2; exit 1; }
 printf 'check-release: extraction identity %s version %s\n' "$commit" "$release_version"
-if command -v sha256sum >/dev/null 2>&1; then digest() { sha256sum "$1" | awk '{print $1}'; }
-else digest() { shasum -a 256 "$1" | awk '{print $1}'; }; fi
 for retained in source-archive-manifest source-inventory; do
-  printf 'check-release: retained %s sha256=%s\n' "$retain/$retained" "$(digest "$retain/$retained")"
+  printf 'check-release: retained %s sha256=%s\n' "$retain/$retained" "$(release_digest "$retain/$retained")"
 done
 printf 'check-release: fresh-source elapsed=%ss\n' "$((SECONDS - fresh_started))"
-
-# One lane: run its command in one application, stream to its own named log,
-# print its elapsed time, and require its executed count to be exactly the
-# expected number, or at least one when that is `nonzero`. The count is read by
-# the suite judge from either supported toolchain's result line.
-lane() {
-  local label=$1 app=$2 expected=$3 wrap=$4 lane_started=$SECONDS status executed
-  shift 4
-  printf 'check-release: %s\n' "$label"
-  set +e
-  (cd "$tree/apps/$app" && "$wrap" "$@") 2>&1 | tee "$logs/$label.log"
-  status=${PIPESTATUS[0]}
-  set -e
-  [ "$status" -eq 0 ] ||
-    { printf 'check-release: %s RED status=%s elapsed=%ss\n' "$label" "$status" "$((SECONDS - lane_started))" >&2; exit 1; }
-  executed=$(bash "$tree/scripts/suite-summary.sh" "$logs/$label.log" --count) ||
-    { printf 'check-release: %s executed no test\n' "$label" >&2; exit 1; }
-  if [ "$expected" != nonzero ] && [ "$executed" != "$expected" ]; then
-    printf 'check-release: %s executed %s tests, expected exactly %s\n' "$label" "$executed" "$expected" >&2
-    exit 1
-  fi
-  printf 'check-release: %s executed=%s elapsed=%ss\n' "$label" "$executed" "$((SECONDS - lane_started))"
-}
 
 # The real-provider manifest: application, test file and exact case name. Each
 # name must be defined exactly once; its current line selects that case alone.
@@ -144,6 +155,11 @@ loopex_daemon|test/external_socket_workflow_real_test.exs|a controller and obser
 loopex_cli|test/multi_client_workflow_real_test.exs|a Node observer takes over from a killed CLI controller and a real provider answers it
 EOF
 rows=0
+selected_rows=0
+expected_rows=0
+for row in 1 2 3 4 5 6 7 8 9; do
+  if release_selected "real-provider-$row"; then expected_rows=$((expected_rows + 1)); fi
+done
 # The manifest is read on descriptor 3: the lanes keep the terminal as their
 # standard input, where the two attended cases read the operator's answers.
 while IFS='|' read -r -u 3 app file name; do
@@ -152,34 +168,48 @@ while IFS='|' read -r -u 3 app file name; do
   [ -n "$definitions" ] && [ "$(printf '%s\n' "$definitions" | wc -l | tr -d ' ')" = 1 ] ||
     { printf 'check-release: manifest row %s is not defined exactly once in %s\n' "$rows" "$app/$file" >&2; exit 1; }
   line=${definitions%%:*}
-  lane "real-provider-$rows" "$app" 1 with_credential mix test "$file:$line" --only real_provider
+  if release_selected "real-provider-$rows"; then
+    selected_rows=$((selected_rows + 1))
+    lane "real-provider-$rows" "$app" 1 with_credential mix test "$file:$line" --only real_provider
+  fi
 done 3<"$manifest"
-[ "$rows" -eq 9 ] || { printf 'check-release: the manifest ran %s rows, expected 9\n' "$rows" >&2; exit 1; }
+[ "$rows" -eq 9 ] || { printf 'check-release: the manifest contains %s rows, expected 9\n' "$rows" >&2; exit 1; }
+[ "$selected_rows" -eq "$expected_rows" ] ||
+  { printf 'check-release: the manifest ran %s selected rows, expected %s\n' "$selected_rows" "$expected_rows" >&2; exit 1; }
+printf 'check-release: manifest rows=%s selected=%s\n' "$rows" "$selected_rows"
 
 # The independent Node client, each application in its own VM. The CLI's case
 # is the operator takeover: a killed CLI controller, a Node observer that takes
 # over and aborts, each its own operating-system process.
 node_client_apps="loopex_app_server loopex_protocol loopex_daemon loopex_cli"
-for app in $node_client_apps; do
-  lane "node-client-$app" "$app" nonzero without_credential mix test --only node_client
-done
+if release_selected node_client; then
+  for app in $node_client_apps; do
+    lane "node-client-$app" "$app" nonzero without_credential mix test --only node_client
+  done
+fi
 
 
 # The long-duration bound proofs: cases whose claim is a real wait, tagged
 # long_bound and excluded from the fast check.
 long_bound_apps="loopex loopex_executor_local loopex_daemon"
-for app in $long_bound_apps; do
-  lane "long-bound-$app" "$app" nonzero without_credential mix test --only long_bound
-done
+if release_selected long_bound; then
+  for app in $long_bound_apps; do
+    lane "long-bound-$app" "$app" nonzero without_credential mix test --only long_bound
+  done
+fi
 
 # The cross-UID witness needs Linux's peer credential and a second user. Its
 # two cases must both execute; elsewhere the run is visibly incomplete.
-if [ "$platform" = Linux ]; then
+if release_selected cross_uid && [ "$platform" = Linux ]; then
   lane cross-uid loopex_daemon 2 without_credential mix test --only cross_uid
-  printf 'check-release: total=%ss\n' "$((SECONDS - started))"
-  printf 'PASS\n'
-else
+elif release_selected cross_uid; then
   printf 'cross_uid: not run (%s)\n' "$platform"
-  printf 'check-release: total=%ss\n' "$((SECONDS - started))"
+fi
+printf 'check-release: total=%ss\n' "$((SECONDS - started))"
+if [ "$release_mode" = selection-only ]; then
+  printf 'PASS (selection-only: not full closure evidence)\n'
+elif [ "$platform" != Linux ]; then
   printf 'PASS (closure-incomplete: cross_uid not run)\n'
+else
+  printf 'PASS\n'
 fi

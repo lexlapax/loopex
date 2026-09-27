@@ -163,6 +163,7 @@ if [ "$mode" = --docs ]; then
   printf 'check: PASS (documentation only) total=%ss\n' "$((SECONDS - started))"
   exit 0
 fi
+step "release runner fixtures" bash scripts/test/check-release-test.sh
 step "dependency budget and direction" mix loopex.deps_budget
 step "one version across applications" mix loopex.version_train
 step "test build" env MIX_ENV=test mix compile --warnings-as-errors

@@ -109,8 +109,48 @@ daemon changes select its `node_client`, `long_bound`, applicable unattended
 replaced or waived by a selected run. The full
 release check runs once against the closure candidate and includes them.
 An unavailable selected lane blocks the affected merge and is not PASS.
-M6 adds the runner's selection support before any provider-touching merge;
-until then this prerequisite permits development, not a merge that bypasses it.
+The runner accepts zero or more `--only NAME` pairs. Zero pairs select the
+full closure matrix. With pairs, it takes the union of the named lanes and
+executes each lane once. A repeated identical name refuses, even if its group
+was already selected; a group plus one of its rows is an ordinary union.
+
+| Name | Selected cases |
+| --- | --- |
+| `real_provider` | Manifest rows 3 through 9, all current unattended real-provider cases |
+| `real-provider-3` through `real-provider-9` | Exactly the named current manifest row |
+| `node_client` | The Node client cases in app server, protocol, daemon and CLI |
+| `long_bound` | The current long-bound cases in core, local executor and daemon |
+| `cross_uid` | The daemon's two Linux cross-UID cases |
+
+Rows 1 and 2 are attended and cannot be selected individually. Unknown names,
+missing names, duplicate names and any other argument refuse with exit 2
+before repository checks, temporary-directory creation, builds or networking.
+The entire manifest still must contain exactly nine uniquely defined rows;
+the executed subset must match its selected row count. Future M6 real-provider
+rows and `rollback` are not admitted until their actual witnesses exist.
+
+Selected real-provider rows require `LOOPEX_PROVIDER_API_KEY`. Node is required
+for `node_client`, provider row 4 and provider row 9. Other selections impose
+neither precondition. The full run retains both preconditions. An explicitly
+selected `cross_uid` refuses outside Linux before staging. Every selection
+keeps the fresh-source extraction and build, then runs only its selected test
+lanes. Its final line is `PASS (selection-only: not full closure evidence)`.
+The unchanged no-option command still runs the attended rows and every group;
+outside Linux it reports the existing closure-incomplete result.
+
+The runner sources `scripts/lib/release-lane.sh`; the fixture command
+`bash scripts/test/check-release-test.sh` executes that same parser and lane
+helper. Each lane streams directly to `LOOPEX_RELEASE_RETAIN/LABEL.log`, or an
+automatically created retained directory outside the checkout. Logs use
+exclusive creation and are not removed by runner cleanup. After the pipeline,
+its complete status array is captured before another command can replace it.
+The guarded summary parser contributes its status and either the numeric
+executed count or `unavailable`. The helper appends command status, tee status,
+summary status, count and duration to that same file, then emits its path and
+SHA-256 before judging any failure. It never changes a log after its digest.
+Missing output or digest is unavailable evidence, not PASS. The fast check
+executes the fixtures, including command failure, parser failure, tee failure,
+count mismatch, unavailable digest, immutable logs and preflight refusal.
 
 **Reproducing an executor race under contention.** The launch guard, its
 wrapper subshell and the tool share one pipe, and the hosted runner's four

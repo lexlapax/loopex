@@ -93,6 +93,19 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 | Documentation only | `bash scripts/check.sh --docs`, which `check.sh --select` chooses on its own for a prose-only diff |
 | Unknown | Review first identifies the touched boundaries, then runs the union of their selected unattended release lanes; unresolved impact blocks merge, rather than treating a partial run as closure evidence |
 
+Pass each selection as `--only NAME`, repeating the option to combine lanes.
+`real_provider` selects every current unattended real-provider row;
+`real-provider-3` through `real-provider-9` select one exact row. The other
+names are `node_client`, `long_bound` and `cross_uid`. Unknown names, missing
+names, duplicate names and the two attended rows refuse before staging.
+Selections run the shared fresh-source build first. They require a provider
+credential or pinned Node only when the selected cases need it. A selected
+`cross_uid` lane requires Linux and refuses elsewhere. A successful selection
+says `selection-only`, never full closure PASS. Each executed test lane retains
+its complete output and final status record with a SHA-256 digest, including
+failed lanes. No options still run the complete closure matrix.
+Technical depth: [Selector grammar and retained lane results](verification-technical.md#technical-verification-selection).
+
 Hosted CI's green run on the candidate is the fast-check evidence for that
 merge; a local full run of the same bytes is not required as well.
 
