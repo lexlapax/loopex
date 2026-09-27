@@ -3649,9 +3649,14 @@ defmodule Loopex.Executor.Local do
   defp effect_text(_cause, %{kind: kind}, _stopped),
     do: "Whether #{kind} changed the workspace is unproven."
 
-  defp filesystem_effect(workspace, %{kind: kind} = arguments, limits)
-       when kind in [:grep, :find, :ls],
-       do: Loopex.Executor.Local.ReadOnlyTools.execute(workspace, arguments, limits.output)
+  defp filesystem_effect(workspace, %{kind: :grep} = arguments, limits),
+    do: Loopex.Executor.Local.ReadOnlyTools.execute(workspace, arguments, limits.output)
+
+  defp filesystem_effect(workspace, %{kind: :find} = arguments, limits),
+    do: Loopex.Executor.Local.ReadOnlyTools.execute(workspace, arguments, limits.output)
+
+  defp filesystem_effect(workspace, %{kind: :ls} = arguments, limits),
+    do: Loopex.Executor.Local.ReadOnlyTools.execute(workspace, arguments, limits.output)
 
   defp filesystem_effect(workspace, %{kind: :read, path: path}, limits) do
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
