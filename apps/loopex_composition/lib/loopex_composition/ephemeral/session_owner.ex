@@ -22,6 +22,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   @impl true
   def init({creator, proxy, ref, expiry}) do
+    Process.flag(:sensitive, true)
     Process.flag(:trap_exit, true)
     supervisor = supervisor_from_ancestry()
 

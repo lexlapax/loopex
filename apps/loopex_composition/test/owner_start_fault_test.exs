@@ -6,12 +6,29 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
   @failure {:error, {:composition, :ephemeral_owner_start_failed}}
 
   test "an admitted owner is inert until one exact begin" do
+    test_pid = self()
+
+    control =
+      spawn(fn ->
+        receive do
+          :emit -> send(test_pid, :control_reply)
+        end
+      end)
+
+    assert :erlang.trace(control, true, [:send]) == 1
+    send(control, :emit)
+    assert_receive {:trace, ^control, :send, :control_reply, ^test_pid}
+    assert_receive :control_reply
+
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     assert {:ok, activation} = OwnerActivation.start(supervisor)
     owner = OwnerActivation.owner(activation)
     assert Process.alive?(owner)
     assert Process.info(owner, :trap_exit) == {:trap_exit, true}
+    assert :erlang.trace(owner, true, [:send]) == 1
     assert {:ok, cell} = OwnerActivation.begin(activation)
+    refute_receive {:trace, ^owner, :send, _, _}, 20
+    assert :erlang.trace(owner, false, [:send]) == 1
     assert :atomics.get(cell, 1) == 0
     assert :atomics.get(cell, 2) == 0
     assert @failure = OwnerActivation.begin(activation)
