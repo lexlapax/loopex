@@ -3617,7 +3617,10 @@ defmodule LoopexCliTest do
                "loopex.write"
              ]
 
-    fixture = fixture(script: [%{text: "done"}], tools: definitions)
+    # Concept: inventory grows to seven, while M5's coding selection remains four.
+    # Technical depth: this receipt witness measures the actual default model
+    # projection; all seven are not one of M6's admitted command presets.
+    fixture = fixture(script: [%{text: "done"}], tools: Enum.take(definitions, 4))
     {session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "measure it")
     _events = observe(attachment)
     [request] = Loopex.AgentLoopTestModel.dispatched(fixture.model)

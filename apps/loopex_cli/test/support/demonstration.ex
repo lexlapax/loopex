@@ -67,7 +67,16 @@ defmodule LoopexCli.Demonstration do
         },
         executor: executor,
         tools: CodingTools.definitions(),
-        active_tools: Enum.map(CodingTools.definitions(), & &1["tool_id"]),
+        # Concept: the M6 inventory has seven definitions; the default coding
+        # workflow still offers the four M5 tools to the model.
+        # Technical depth: the runtime retains all seven declarations but
+        # stages only active definitions against its fixed system-class ceiling.
+        active_tools:
+          Keyword.get(
+            options,
+            :active_tools,
+            ~w(loopex.read loopex.write loopex.edit loopex.bash)
+          ),
         progress_to: Keyword.get(options, :progress_to)
       )
 
