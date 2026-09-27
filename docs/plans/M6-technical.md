@@ -1225,7 +1225,7 @@ and returns a sanitized error (`request_plan/diagnostic.ex:40-41,106-115`,
 `req_llm.ex:422-423`). The sensitive caller normalizes that error and catches
 any escaping raise before generate_text/selected-provider-key resolution, returning fixed
 `{:error, {:not_dispatched, "model_call_failed"}}` only after owned teardown;
-no model dispatch or raw loader reason escapes. This credential-free planning
+no model dispatch or raw loader reason escapes. This selected-provider-key-free planning
 failure is distinct from an activation-registration failure and a started call.
 Reply identity is built from the retained inline model, not the existing durable
 `identity/1` string resolver (`req_llm.ex:181-188` in the adapter application).
@@ -3582,10 +3582,11 @@ overlay or clearing the catalog must fail these assertions.
 
 The cold remote case sets `snapshot_source` to
 `{:github_releases, %{ref: :latest, repo: "loopex-fixture/catalog",
-cache_dir: fixture_cache, req_opts: [adapter: fixture_adapter]}}`, with an
-empty temporary cache and no snapshot-index override. The fixture adapter is
-a test-only Req request/response function, not a new dependency or global
-`:req :default_options`. It services the actual ReleaseStore release-list,
+cache_dir: fixture_cache, req_opts: [adapter: FixtureCatalogAdapter]}}`, with an
+empty temporary cache and no snapshot-index override. The fixture adapter is a test-only module FixtureCatalogAdapter implementing
+run/1 and returning the actual Req request/response pair, not a function-valued
+option (deprecated with IO.warn in `req/request.ex:1068-1070`), new dependency
+or global `:req :default_options`. It services the actual ReleaseStore release-list,
 index and snapshot-download steps: one non-draft `catalog-index-fixture`
 release with matching `snapshot-index-fixture.json` and `latest-fixture.json`
 asset names, an index containing the fixture snapshot id and download URL,
@@ -3607,7 +3608,7 @@ request. Assert the source options stay unchanged, the catalog and cache
 survive call cleanup, and the next call does not fetch again. Those host-owned
 effects are not per-session files or owned-pool obligations. Additional cold
 cases use an invalid file and a failing actual ReleaseStore fixture with a
-private sentinel in its loader reason. Credential-free planning must return
+private sentinel in its loader reason. Selected-provider-key-free planning must return
 fixed not_dispatched/model_call_failed after teardown, with no model connection,
 selected-provider-key read or sentinel in Loopex results, progress, trace or retained owner/runtime
 state. A blocked remote load with a second cold caller pins shared-lock waiting
