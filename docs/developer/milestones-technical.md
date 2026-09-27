@@ -67,20 +67,27 @@ reserved names the index lists.
 
 Concept: [Develop](milestones.md#concept-milestones-develop).
 
-- Branch per change, off `main`; commit titles `area(NAME): summary` with the
+- Branch per change, off `main`; a plan may designate one milestone branch to
+  hold its integrated candidate through closure. Commit titles use
+  `area(NAME): summary` with the
   milestone as the marker (the other markers AGENTS.md admits are `planning`
   and `seed`), at most 72 characters, no attribution trailers
   (`scripts/check-commit-messages.sh` enforces both over
   `merge-base(origin/main, HEAD)..HEAD`).
 - A feature branch lives only while its pull request is open: nothing reaches
-  `main` without a green CI run on the candidate and an independent review, and
-  the branch and its worktree go once the merge lands.
+  `main` without a green CI run or retained clean local run on the candidate
+  and an independent review. The branch and its worktree go once the merge
+  lands.
+  A plan-designated milestone branch may live until its administrative closure
+  commit fast-forwards into `main`.
   `scripts/check-repo-hygiene.sh` reports every merged branch and stale
   worktree except `main` and the branches the register's milestone names claim,
   which are kept as durable state.
 - Before opening the merge: `bash scripts/check.sh` locally or in CI on the
   branch, plus the extra checks the verification guide's selection table names
   for the boundary touched; an independent read of `git diff main..BRANCH`.
+  A local fast run counts only for a clean candidate whose exact HEAD SHA and
+  complete command output are retained outside the repository.
 - Parallel workstreams: `git worktree add -b BRANCH DIR origin/main` per
   writer; declared non-overlapping paths; the integrator rebases and merges.
   Delete the branch and remove the worktree once merged; the hygiene check
@@ -98,6 +105,15 @@ Concept: [Develop](milestones.md#concept-milestones-develop).
 Concept: [Close](milestones.md#concept-milestones-close).
 
 At the **tested implementation commit**, which is the closure candidate:
+
+If the plan designates a milestone branch, assemble and run the candidate
+there. Require `main` to be an ancestor of the candidate before its closure
+matrix, again before presenting the packet, and immediately before making the
+administrative direct child. After that child records the maintainer's closure
+decision, fast-forward `main` to it without a merge, rebase or source change.
+If `main` moves so that it cannot fast-forward, do not treat the branch as an
+integrated closure or tag it. Reassemble a candidate from the new base and
+repeat its checks and review before seeking closure.
 
 1. The candidate commit itself moves the register row from `In progress` to
    `In review` and supplies the corresponding complete marked status blocks in
@@ -126,7 +142,8 @@ At the **tested implementation commit**, which is the closure candidate:
      mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- bash scripts/check.sh`.
    - `bash scripts/check-release.sh` once on the current pair with the
      credential and pinned Node.
-   - CI already holds the current-pair fast check for the candidate.
+   - The candidate already has a current-pair fast check from hosted CI or a
+     retained complete local run bound to its clean exact SHA.
 
    Each run's revision, platform, toolchain, result and measured duration is
    retained outside the repository under a stable retained-output reference

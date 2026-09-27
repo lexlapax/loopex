@@ -326,6 +326,11 @@ Concept: [Contributing: toolchain and checks](getting-started.md#concept-getting
 | The mode CI picks from the diff | `bash scripts/check.sh --select` |
 | The slow check, once before a milestone closes | `LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh` |
 
+A local pre-merge fast check counts only from a clean candidate. Retain its
+complete output and exact HEAD SHA outside the repository; otherwise use the
+hosted CI result for that candidate. The [milestone guide](milestones.md#concept-milestones-close)
+owns branch-candidate rejoin and the separate closure matrix.
+
 Each application's test helper excludes the release-only tags —
 `real_provider`, `long_bound`, `node_client`, and `cross_uid` where they occur —
 so `mix test` needs no credential. The fast check runs every application's suite

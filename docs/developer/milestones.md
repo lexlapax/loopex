@@ -48,10 +48,12 @@ Technical depth: [Plan pair contents](milestones-technical.md#technical-mileston
 <a id="concept-milestones-develop"></a>
 ### Develop
 
-Work lands on `main` in small reviewed changes: each one passes the fast
-check in CI and an independent read of its diff, as the verification guide
-sets out. A milestone branch is the exception, for a slice that cannot be
-merged safely in pieces; it is short-lived and rejoins `main` the same way.
+Work normally lands on `main` in small reviewed changes. Each change passes
+the fast check in CI, or from a clean local candidate with its complete output
+and exact SHA retained, and an independent read of its diff. The verification
+guide sets out the checks. A plan-designated milestone branch may hold work
+through closure; it rejoins `main` at closure without changing the tested
+source. Other feature branches end after their reviewed merge.
 Parallel workstreams use one worktree per writer with non-overlapping paths
 and one integrator.
 
@@ -69,9 +71,10 @@ Technical depth: [Branches, worktrees and progress](milestones-technical.md#tech
 
 Closure happens in this order; use the `close-milestone` skill.
 
-1. **Assemble the candidate.** A closure candidate is one commit on `main` at
-   which every outcome maps to tests, retained evidence or a demonstration,
-   the documentation the milestone changed is updated, and the plan's
+1. **Assemble the candidate.** A closure candidate is one commit on `main` or
+   the plan-designated milestone branch at which every outcome maps to tests,
+   retained evidence or a demonstration. The documentation the milestone
+   changed is updated, and the plan's
    progress table says `Proved` for each outcome. The same commit moves the
    register and its two marked status blocks from `In progress` to
    `In review`, and carries the indexed evidence-page scaffold that closure
@@ -82,12 +85,16 @@ Closure happens in this order; use the `close-milestone` skill.
    stages the tested archive under the
    [canonical archive-extraction rule](milestones-technical.md#technical-milestones-archive-extraction).
 3. **Present the packet.** The maintainer closes the milestone or does not.
+   For a branch candidate, check that `main` can still fast-forward to it.
+   Otherwise assemble and prove a new candidate before asking for closure.
 4. **Record the decision.** On closure, the administrative direct child makes
    only the `In review` to `Closed` transition. The plan records the closing
    decision and the tested implementation SHA, and that commit fills the
    existing evidence page with the run and review identities, retained-output
    references, and SHA-256 digests, plus every plan-required outcome field or
-   placeholder the tested scaffold predeclared.
+   placeholder the tested scaffold predeclared. If the plan designated a
+   milestone branch, fast-forward `main` to that administrative SHA. If the
+   fast-forward fails, do not treat closure as integrated or release from it.
 
 `Proved` maps completed implementation to a named proof obligation; it does
 not claim that a closure run or review performed after the commit already has

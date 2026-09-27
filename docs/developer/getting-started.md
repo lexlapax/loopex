@@ -167,9 +167,12 @@ Technical depth: [The repository map](getting-started-technical.md#technical-get
 
 Work is maintainer-directed. Bounded work is a milestone: a pair of plan
 documents naming its purpose, outcomes, and how each outcome will be proved,
-accepted by the maintainer before implementation. Work lands on `main` in small
-reviewed changes; a milestone closes only when every outcome maps to tests or
-retained evidence and an independent review has read the exact candidate.
+accepted by the maintainer before implementation. Work normally lands on
+`main` in small reviewed changes. A plan-designated milestone branch may carry
+the tested candidate through closure, then rejoins `main` without changing
+that candidate's source. A milestone closes only after every outcome maps to
+tests, retained evidence, or a demonstration. An independent reviewer reads
+the exact candidate.
 Decisions about ownership, trust, public contracts, persistent formats,
 dependencies, or migration are architecture decisions, proposed and accepted
 before the work that depends on them. [AGENTS.md](../../AGENTS.md) is the

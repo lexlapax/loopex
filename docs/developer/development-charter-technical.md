@@ -55,13 +55,19 @@ roadmap, development charters, architecture and protocol documents, ADRs, and
 milestone plans. The following are explicit exceptions because they route,
 operate, record, or execute rather than explain a concept:
 
-- the canonical `AGENTS.md` development contract and client entrypoints;
+- the canonical `AGENTS.md` development contract and client entrypoints,
+  including root `CLAUDE.md` and `.claude/agents/*.md`;
 - `README.md` files and documentation indexes;
 - setup guides and operator runbooks such as `DEVELOPMENT.md`;
+- the cross-audience developer references
+  `docs/developer/runtime-and-embedding.md`,
+  `docs/developer/agent-loop-and-tools.md` and
+  `docs/developer/compatibility-surfaces.md`, which carry both depths in one
+  file and link to reciprocal operator runbooks;
 - changelogs, status registers, evidence logs, and generated references;
 - licenses, executable skills, client role prompts, configuration, and source;
-- schemas, fixtures, historical gate records, and other directly executable
-  contracts; and
+- schemas, fixtures including `test/fixtures/`, historical gate records, and
+  other directly executable contracts; and
 - immutable, non-normative archive material.
 
 An exception may link both depths. It may not become a hidden source of a
