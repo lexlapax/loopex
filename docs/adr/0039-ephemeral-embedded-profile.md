@@ -136,13 +136,22 @@ configuration could change what the call does or where it goes:
   included, into every request. Composition refuses, and each call refuses
   before dispatch, while any are set, so a global authentication header, cache,
   plugin, pool or transport cannot enter the call.
-- **Pinned request options.** Each call disables redirects and retries, passes
-  no response cache, and calls ReqLLM without its task-based timeout, so the
-  request is made once, to the named address, from the calling process.
+- **No global ReqLLM connection settings.** ReqLLM's own connection-pool
+  configuration can route every call through a proxy or another pool.
+  Composition and each call refuse while it is set.
+- **Pinned address and options.** Each call names its address explicitly: the
+  host's base URL, or the provider's built-in default, never one taken from
+  ReqLLM's application configuration or model catalog. It names ReqLLM's own
+  connection pool, allows no retry and follows no redirect, passes no response
+  cache, and calls ReqLLM without its task-based timeout, so the request is
+  made once, to that address, from the calling process.
 
 **Cleanup owns what can return a result.** Each call has one cleanup owner that
 stays responsive throughout, and one calling process that alone can return a
-result to Loopex. On a stop or a deadline the owner kills that process; on
+result to Loopex. The calling process catches every failure and ends with a
+fixed reason, and the owner, also marked sensitive, reads only the shape of any
+exit it sees, so no exception carrying the request or its credential reaches
+the owner or anything it reports. On a stop or a deadline the owner kills that process; on
 completion it exits by itself; either way the owner acknowledges cleanup, or
 returns the reply, only after it has seen that process exit. If it cannot see
 that, the kernel's existing unproved-cleanup path applies. The connection and
@@ -284,17 +293,32 @@ Technical depth: [Amended text and mechanics](0039-ephemeral-embedded-profile-te
 This decision amends the vision's credential rule, and the paired vision files
 change with its acceptance:
 
-- **Principle changed.** Vision §12 excludes known credentials from crash
-  reports. For a profile the host explicitly composes to run the provider
-  library in its own VM, a credential may be present in that library's
-  processes during a call, and so in their crash reports, a crash dump or a
-  host telemetry handler. Every other exclusion stands, and the reference in
-  runtime state, resolution at the model boundary and host custody stand.
-- **Evidence.** Four external reviews tried to keep a credential structurally
-  out of an in-VM ReqLLM call: a custodian with a redaction filter, then a
-  credential-free in-VM path with the companion for keys. Each exposed a gap
-  in the host's global configuration or in ReqLLM's process structure that
-  Loopex does not own. The maintainer chose one in-VM ReqLLM path for every
+- **Principle changed.** The vision's technical §12.7 excludes known
+  credentials from crash reports, its §6.2 counts crash detail and traces as
+  the diagnostics plane, its §16 says observability never captures secrets, its
+  §23 verification rule says known credential material never appears in a
+  prohibited plane, and AGENTS.md repeats the exclusion as a non-negotiable.
+  For a profile the host explicitly composes to run the provider library in its
+  own VM, a credential may be present in that library's processes during a
+  call, and so in their crash reports, a crash dump or a host telemetry
+  handler. Every other exclusion stands, and the reference in runtime state,
+  resolution at the model boundary and host custody stand.
+- **Host resolution.** Vision §6.1 gives the host credential resolution. Here
+  the host resolves by placing the value in a variable it names in its own
+  environment; the adapter reads that host-supplied value at the model
+  boundary, as the vision's "resolution occurs just in time at the approved
+  model boundary" allows, and Loopex stores only the variable's name.
+- **Where it lands.** Each of those six places gains the same bounded
+  exception, in the exact text ADR 0039's technical companion gives, in the
+  change that accepts this decision.
+- **Evidence.** Five external reviews of this decision tried to keep a
+  credential structurally out of an in-VM ReqLLM call: a custodian with a
+  value-redacting logger filter (the filter's readable value set, its
+  contiguous-match limit and its release before ReqLLM's processes ended), then
+  a credential-free in-VM path beside the companion (ReqLLM's Task and
+  metadata processes, Req defaults, redirects and pool changes that carry a
+  request out of the caller). Each exposed a path through the host's global
+  configuration or ReqLLM's process structure that Loopex does not own. The maintainer chose one in-VM ReqLLM path for every
   provider in the ephemeral profile over carrying the companion into it.
 - **Compatibility impact.** None for existing users. The durable profile, the
   daemon and every accepted credential decision keep full isolation. The
