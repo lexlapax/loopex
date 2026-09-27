@@ -45,6 +45,62 @@ expect_refusal --only real-provider-10
 expect_refusal --only node_client --only node_client
 expect_refusal --help
 
+# The actual manifest census rejects a duplicated case even with the right
+# number of rows. It checks every definition before any provider lane can run.
+manifest="$work/manifest"
+for index in 1 2 3; do
+  printf 'fixture|test/cases.exs|case %s\n' "$index" >>"$manifest"
+done
+mkdir "$tree/apps/fixture/test"
+for index in 1 2 3; do
+  printf '  test "case %s" do\n  end\n' "$index" >>"$tree/apps/fixture/test/cases.exs"
+done
+release_manifest_valid "$manifest" "$tree" 3 || fail 'valid complete manifest refused'
+head -n 2 "$manifest" >"$work/duplicate-manifest"
+head -n 1 "$manifest" >>"$work/duplicate-manifest"
+if release_manifest_valid "$work/duplicate-manifest" "$tree" 3 >"$work/manifest-output" 2>&1; then
+  fail 'duplicate case replaced a required manifest witness'
+fi
+if release_manifest_valid "$manifest" "$tree" 4 >"$work/manifest-output" 2>&1; then
+  fail 'wrong manifest count passed'
+fi
+printf 'fixture|test/cases.exs|undefined\n' >"$work/missing-manifest"
+if release_manifest_valid "$work/missing-manifest" "$tree" 1 >"$work/manifest-output" 2>&1; then
+  fail 'undefined manifest case passed'
+fi
+
+# Source/build identities use the same guarded helper as the actual runner.
+release_retain_identity "$manifest" >"$work/source-identity-output"
+grep -qE 'sha256=[0-9a-f]{64}$' "$work/source-identity-output" || fail 'valid source digest unavailable'
+(
+  release_digest() { return 37; }
+  for path in source-archive-manifest source-inventory fresh-source-build.log; do
+    status=0
+    release_retain_identity "$retain/$path" >"$work/source-digest-failed" 2>&1 || status=$?
+    [ "$status" -eq 1 ] || fail 'source/build digest failure passed'
+    grep -q 'digest unavailable' "$work/source-digest-failed" || fail 'source digest failure was not explicit'
+    if grep -q 'sha256=' "$work/source-digest-failed"; then fail 'failed source digest claimed identity'; fi
+  done
+)
+(
+  release_digest() { printf 'not-a-digest\n'; }
+  status=0
+  release_retain_identity "$manifest" >"$work/source-digest-malformed" 2>&1 || status=$?
+  [ "$status" -eq 1 ] || fail 'malformed source digest passed'
+)
+(
+  release_digest() { printf 'not-a-digest\n%064d\n' 0; }
+  status=0
+  release_retain_identity "$manifest" >"$work/source-digest-multiline" 2>&1 || status=$?
+  [ "$status" -eq 1 ] || fail 'mixed-line source digest passed'
+  if grep -q 'sha256=' "$work/source-digest-multiline"; then fail 'mixed-line digest claimed identity'; fi
+  status=0
+  (lane multiline-digest fixture 1 without_credential bash -c 'printf "Result: 1 passed\n"') \
+    >"$work/lane-digest-multiline" 2>&1 || status=$?
+  [ "$status" -eq 1 ] || fail 'mixed-line lane digest passed'
+  if grep -q 'sha256=' "$work/lane-digest-multiline"; then fail 'mixed-line lane digest claimed identity'; fi
+)
+
 run_case() {
   local label=$1 expected_status=$2 expected_count=$3 expected=$4
   shift 4

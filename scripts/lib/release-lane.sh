@@ -53,11 +53,49 @@ release_digest() {
   fi
 }
 
+release_retain_identity() {
+  local path=$1 sha
+  if ! sha=$(release_digest "$path") || [ "${#sha}" -ne 64 ]; then
+    printf 'check-release: retained digest unavailable: %s\n' "$path" >&2
+    return 1
+  fi
+  case "$sha" in
+    *[!0123456789abcdef]*)
+      printf 'check-release: retained digest unavailable: %s\n' "$path" >&2
+      return 1 ;;
+  esac
+  printf 'check-release: retained %s sha256=%s\n' "$path" "$sha"
+}
+
+# Validate the complete manifest before its first selected case can dispatch.
+# A repeated case cannot replace an omitted witness while preserving row count.
+release_manifest_valid() {
+  local manifest=$1 source_tree=$2 expected=$3 rows=0 app file name definitions
+  if ! awk -F'|' -v expected="$expected" '
+    NF != 3 || $1 == "" || $2 == "" || $3 == "" { invalid = 1 }
+    seen[$0]++ { invalid = 1 }
+    END { exit (invalid || NR != expected) }
+  ' "$manifest"; then
+    echo 'check-release: manifest must contain the exact count of unique well-formed cases' >&2
+    return 1
+  fi
+  while IFS='|' read -r -u 4 app file name; do
+    rows=$((rows + 1))
+    definitions=$(grep -nF "test \"$name\"" "$source_tree/apps/$app/$file" || true)
+    if [ -z "$definitions" ] ||
+       [ "$(printf '%s\n' "$definitions" | wc -l | tr -d ' ')" != 1 ]; then
+      printf 'check-release: manifest row %s is not defined exactly once in %s\n' \
+        "$rows" "$app/$file" >&2
+      return 1
+    fi
+  done 4<"$manifest"
+}
+
 # A failed command or parser still has an immutable evidence log. The runner
 # supplies tree and retain; fixtures supply disposable trees with real judges.
 lane() {
   local label=$1 app=$2 expected=$3 wrap=$4 lane_started=$SECONDS
-  local log summary_status executed=unavailable duration sha append_status=0
+  local log summary_status executed=unavailable duration append_status=0
   local pipeline_statuses
   shift 4
   log="$retain/$label.log"
@@ -82,15 +120,10 @@ lane() {
   duration=$((SECONDS - lane_started))
   printf 'lane-evidence: command_status=%s tee_status=%s summary_status=%s executed_count=%s duration_seconds=%s\n' \
     "${pipeline_statuses[0]}" "${pipeline_statuses[1]}" "$summary_status" "$executed" "$duration" >>"$log" || append_status=$?
-  if [ "$append_status" -ne 0 ] || ! sha=$(release_digest "$log"); then
+  if [ "$append_status" -ne 0 ] || ! release_retain_identity "$log"; then
     printf 'check-release: %s retained digest unavailable\n' "$label" >&2
     return 1
   fi
-  if ! printf '%s\n' "$sha" | grep -qE '^[0-9a-f]{64}$'; then
-    printf 'check-release: %s retained digest unavailable\n' "$label" >&2
-    return 1
-  fi
-  printf 'check-release: retained %s sha256=%s\n' "$log" "$sha"
   if [ "${pipeline_statuses[0]}" -ne 0 ] || [ "${pipeline_statuses[1]}" -ne 0 ] || [ "$summary_status" -ne 0 ]; then
     printf 'check-release: %s RED command=%s tee=%s summary=%s count=%s elapsed=%ss\n' \
       "$label" "${pipeline_statuses[0]}" "${pipeline_statuses[1]}" "$summary_status" "$executed" "$duration" >&2

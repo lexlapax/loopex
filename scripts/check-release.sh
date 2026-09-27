@@ -117,8 +117,7 @@ build_statuses=("${PIPESTATUS[@]}")
 set -e
 printf 'build-evidence: command_status=%s tee_status=%s duration_seconds=%s\n' \
   "${build_statuses[0]}" "${build_statuses[1]}" "$((SECONDS - fresh_started))" >>"$retain/fresh-source-build.log"
-build_sha=$(release_digest "$retain/fresh-source-build.log")
-printf 'check-release: retained %s sha256=%s\n' "$retain/fresh-source-build.log" "$build_sha"
+release_retain_identity "$retain/fresh-source-build.log"
 [ "${build_statuses[0]}" -eq 0 ] && [ "${build_statuses[1]}" -eq 0 ] ||
   { echo 'check-release: fresh-source build RED' >&2; exit 1; }
 bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest.after"
@@ -136,7 +135,7 @@ esac
   { echo "check-release: the extraction's VERSION is not $release_version" >&2; exit 1; }
 printf 'check-release: extraction identity %s version %s\n' "$commit" "$release_version"
 for retained in source-archive-manifest source-inventory; do
-  printf 'check-release: retained %s sha256=%s\n' "$retain/$retained" "$(release_digest "$retain/$retained")"
+  release_retain_identity "$retain/$retained"
 done
 printf 'check-release: fresh-source elapsed=%ss\n' "$((SECONDS - fresh_started))"
 
@@ -154,6 +153,7 @@ loopex_reference_client|test/real_model_session_test.exs|one real non-streaming 
 loopex_daemon|test/external_socket_workflow_real_test.exs|a controller and observer complete the documented daemon workflow against a real provider
 loopex_cli|test/multi_client_workflow_real_test.exs|a Node observer takes over from a killed CLI controller and a real provider answers it
 EOF
+release_manifest_valid "$manifest" "$tree" 9
 rows=0
 selected_rows=0
 expected_rows=0

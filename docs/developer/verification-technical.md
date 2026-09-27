@@ -39,7 +39,8 @@ adapters, ignore policy, commit messages over
 `merge-base(origin/main, HEAD)..HEAD`, branch and worktree hygiene, OTP
 application declarations, the suite-summary judge, and `mix loopex.status` over
 the current tree at 3 s), documentation ordering 1 s — where `--docs` stops —
-then dependency budget 2–3 s, one version 0–1 s, the test build, and the suite.
+then the release-runner fixtures, dependency budget 2–3 s, one version
+0–1 s, the test build, and the suite.
 
 Hosted CI: `.github/workflows/agent-bootstrap.yml` runs
 `bash scripts/check.sh --select` after an Elixir/OTP setup step with the
