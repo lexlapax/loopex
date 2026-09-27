@@ -72,129 +72,6 @@ defmodule LoopexStoreLocalTest.FaultProbe do
   end
 end
 
-defmodule LoopexStoreLocalTest.Memory do
-  @moduledoc false
-
-  use GenServer
-
-  @behaviour Loopex.Store
-
-  alias Loopex.Store
-  alias Loopex.Store.Local.State
-  alias Loopex.Store.Transitions
-  alias LoopexStoreLocalTest.FaultProbe
-
-  def start_link(options \\ []), do: GenServer.start_link(__MODULE__, options)
-
-  @impl Store
-  def transact(reference, transaction), do: GenServer.call(reference, {:transact, transaction})
-
-  @impl Store
-  def transaction_status(reference, session_id, mutation_domain, tx_id) do
-    GenServer.call(reference, {:transaction_status, session_id, mutation_domain, tx_id})
-  end
-
-  @impl Store
-  def ownership_head(reference, session_id, mutation_domain) do
-    GenServer.call(reference, {:ownership_head, session_id, mutation_domain})
-  end
-
-  @impl Store
-  def runtime_command(reference, command) do
-    GenServer.call(reference, {:runtime_command, command})
-  end
-
-  @impl Store
-  def load_records(reference, session_id, after_version, limit) do
-    GenServer.call(reference, {:load_records, session_id, after_version, limit})
-  end
-
-  @impl Store
-  def load_events(reference, session_id, after_sequence, limit) do
-    GenServer.call(reference, {:load_events, session_id, after_sequence, limit})
-  end
-
-  @impl GenServer
-  def init(options), do: {:ok, %{store: State.new(), fault_probe: options[:fault_probe]}}
-
-  @impl GenServer
-  def handle_call({:transact, transaction}, _from, state) do
-    case State.prepare(state.store, transaction) do
-      {:known, outcome} ->
-        with {:ok, transition} <- Transitions.id(transaction),
-             :continue <-
-               FaultProbe.checkpoint(
-                 state.fault_probe,
-                 {transition, :recovery_representation}
-               ) do
-          {:reply, outcome, state}
-        else
-          :return_unknown -> {:reply, unknown(transaction), state}
-          _other -> {:stop, :fault_probe_refused, unknown(transaction), state}
-        end
-
-      {:invalid, outcome} ->
-        {:reply, outcome, state}
-
-      {:new, next, _frame, outcome} ->
-        {:ok, transition} = Transitions.id(transaction)
-
-        case FaultProbe.checkpoint(state.fault_probe, {transition, :before_linearization}) do
-          :continue ->
-            committed = %{state | store: next}
-
-            case FaultProbe.checkpoint(
-                   state.fault_probe,
-                   {transition, :after_linearization_before_result}
-                 ) do
-              :continue -> {:reply, outcome, committed}
-              :return_unknown -> {:reply, unknown(transaction), committed}
-              :kill -> Process.exit(self(), :kill)
-              _other -> {:stop, :fault_probe_refused, unknown(transaction), committed}
-            end
-
-          :return_unknown ->
-            {:reply, unknown(transaction), state}
-
-          :kill ->
-            Process.exit(self(), :kill)
-
-          _other ->
-            {:stop, :fault_probe_refused, unknown(transaction), state}
-        end
-    end
-  end
-
-  def handle_call(
-        {:transaction_status, session_id, mutation_domain, tx_id},
-        _from,
-        state
-      ) do
-    {:reply, State.transaction_status(state.store, session_id, mutation_domain, tx_id), state}
-  end
-
-  def handle_call({:ownership_head, session_id, _mutation_domain}, _from, state) do
-    {:reply, State.ownership_head(state.store, session_id), state}
-  end
-
-  def handle_call({:runtime_command, command}, _from, state) do
-    {:reply, State.runtime_command(state.store, command), state}
-  end
-
-  def handle_call({:load_records, session_id, after_version, limit}, _from, state) do
-    {:reply, State.load_records(state.store, session_id, after_version, limit), state}
-  end
-
-  def handle_call({:load_events, session_id, after_sequence, limit}, _from, state) do
-    {:reply, State.load_events(state.store, session_id, after_sequence, limit), state}
-  end
-
-  defp unknown(transaction) do
-    {:ok, tx_id} = Store.transaction_id(transaction)
-    {:commit_unknown, tx_id}
-  end
-end
-
 defmodule LoopexStoreLocalTest.Conformance do
   @moduledoc false
 
@@ -206,7 +83,7 @@ defmodule LoopexStoreLocalTest.Conformance do
   alias Loopex.Store.OwnerLane
   alias Loopex.Store.Transitions
   alias LoopexStoreLocalTest.FaultProbe
-  alias LoopexStoreLocalTest.Memory
+  alias Loopex.Store.Memory
 
   @domain "session_journal"
 

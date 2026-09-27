@@ -4,17 +4,16 @@ defmodule Loopex.Store.Local.ConformanceTest do
   @moduledoc """
   ## Concept
 
-  Outcome 3: the in-memory test Store and durable local Store obey the same
+  The shipped memory Store and durable local Store obey the same
   atomic transaction, ownership, version, resolution, and outbox semantics;
   only the durable implementation claims restart and replay.
 
   ## Technical depth
 
-  The five protected cases delegate to one reusable conformance helper. Each
-  case contains multiple derived subcases, but the locked selector exposes only
-  the exact identities required by the M1 gate. The standalone gate runner does
-  not load `test_helper.exs`, so the helper uses only the isolated
-  `LOOPEX_HOME` supplied by its invocation.
+  Both production implementations run the reusable conformance helper,
+  including its declared fault checkpoints. Historical selector identities
+  remain stable. Fixtures use only the isolated LOOPEX_HOME supplied by test
+  startup or the invoking historical runner.
   """
 
   use ExUnit.Case, async: false
