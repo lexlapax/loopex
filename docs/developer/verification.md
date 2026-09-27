@@ -57,11 +57,13 @@ its own future result.
 
 The fast check is the everyday gate. It is credential-free, needs no network,
 and is the same command locally and in CI, where it runs as
-`check.sh --select` on every push to `main` and every pull request. The release check is the expensive one: it spends a provider
-credential, needs the pinned Node, and runs the attended operator workflow, so
-it runs once at milestone closure and whenever a change touches what it proves
-during development. An unchanged-source release reuses that closure evidence
-and runs only the pre-tag administrative-SHA proofs in the table.
+`check.sh --select` on every push to `main` and every pull request. Before a
+provider or credential, wire-protocol, or daemon change merges, run the selected
+unattended release lanes using `check-release.sh --only`. The selection table
+names the required lanes; a selection never supplies full closure evidence.
+The full release check, including attended cases, runs once for the closure
+candidate. An unchanged-source release reuses that closure evidence and runs
+only the pre-tag administrative-SHA proofs in the table.
 
 <a id="concept-verification-selection"></a>
 ### A changed guarantee selects its checks
@@ -84,12 +86,12 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 | Durable records, the Store, recovery | Nothing more to run; the review confirms the fault-injection and old-reader cases still cover the change |
 | The wire protocol, its schema or vectors | The Node consumer workflows (`--only node_client`, part of the release check), and the compatibility surfaces page updated in the same change |
 | The CLI or operator-facing commands | The operator page that describes the behavior updated in the same change; a changed operator command also selects its workflow in the release check |
-| Provider or credential handling | `bash scripts/check-release.sh`, the real-provider cases |
+| Provider or credential handling | The applicable unattended real-provider cases, selected with `check-release.sh --only`; attended cases remain mandatory at closure |
 | An operating-system process boundary: the executor's or the provider child's (launch, signals, credential delivery, cleanup) | `bash scripts/fixtures/pinned-load.sh` over the touched cases on a Linux host: thirty runs under four pinned cores and load, no failure and no hang |
-| The daemon's socket, peer check or lifecycle | The daemon's `node_client`, `long_bound` and Linux `cross_uid` lanes in the release check, and the [daemon operator page](../operator/daemon.md#concept) updated in the same change |
+| The daemon's socket, peer check or lifecycle | The daemon's `node_client`, `long_bound`, applicable unattended `real_provider` cases and Linux `cross_uid` lanes in the release check, and the [daemon operator page](../operator/daemon.md#concept) updated in the same change |
 | The toolchain floor or `.tool-versions` | The fast check under the floor pair once |
 | Documentation only | `bash scripts/check.sh --docs`, which `check.sh --select` chooses on its own for a prose-only diff |
-| Unknown | The release check, and the review names the boundaries it found |
+| Unknown | Review first identifies the touched boundaries, then runs the union of their selected unattended release lanes; unresolved impact blocks merge, rather than treating a partial run as closure evidence |
 
 Hosted CI's green run on the candidate is the fast-check evidence for that
 merge; a local full run of the same bytes is not required as well.

@@ -100,6 +100,18 @@ Concept: [Selection](verification.md#concept-verification-selection).
 | Operating-system process boundaries | The executor: `apps/loopex_executor_local/test/coding_tools_test.exs` launch-guard, cleanup and frame cases. The provider child: `apps/loopex_llm_reqllm/test/provider_startup_boundaries_test.exs`, `provider_retainer_boundaries_test.exs`, `provider_bridge_test.exs`, `credential_plane_test.exs` and `provider_companion_entry_test.exs`. Both reproduced under contention by the procedure below |
 | The daemon | `apps/loopex_daemon/test/` (see the [daemon technical page](daemon-technical.md#technical-daemon-evidence)); `apps/loopex_cli/test/multi_client_workflow_test.exs`, `live_daemon_test.exs`; the release lanes `node_client`, `long_bound`, `real_provider` and, on Linux, `cross_uid` |
 
+Before merging provider or credential, wire-protocol, or daemon changes, run
+the union of their applicable unattended release lanes with
+`bash scripts/check-release.sh --only`. Provider changes select the applicable
+unattended real-provider manifest cases; protocol changes select `node_client`;
+daemon changes select its `node_client`, `long_bound`, applicable unattended
+`real_provider` cases and Linux `cross_uid` lanes. Attended cases are not
+replaced or waived by a selected run. The full
+release check runs once against the closure candidate and includes them.
+An unavailable selected lane blocks the affected merge and is not PASS.
+M6 adds the runner's selection support before any provider-touching merge;
+until then this prerequisite permits development, not a merge that bypasses it.
+
 **Reproducing an executor race under contention.** The launch guard, its
 wrapper subshell and the tool share one pipe, and the hosted runner's four
 loaded cores exposed a frame split that a twenty-core machine never showed.

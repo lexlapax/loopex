@@ -276,9 +276,11 @@ repository's checks are two commands, described in
   workflows, the independent Node client, the fresh-source archive build, and
   the long-duration bound proofs the fast check excludes. It needs a provider
   credential in `LOOPEX_PROVIDER_API_KEY`, pinned Node and a clean tree, two of
-  its tests are attended, and it runs only once for the candidate before
-  closure. An unchanged-source release reuses that evidence and runs only the
-  pre-tag administrative-SHA proofs.
+  its tests are attended. Before a provider or credential, wire-protocol, or daemon
+  change merges, run the selected unattended lanes the verification guide
+  names using `--only`. The full check, including attended cases, runs once
+  for the closure candidate. An unchanged-source release reuses that evidence
+  and runs only the pre-tag administrative-SHA proofs.
 
 Both run locally from a clean checkout with the toolchain in
 [DEVELOPMENT.md](DEVELOPMENT.md): Git, shell and POSIX tools, and the accepted
