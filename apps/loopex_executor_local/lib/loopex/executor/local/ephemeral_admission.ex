@@ -36,6 +36,12 @@ defmodule Loopex.Executor.Local.EphemeralAdmission do
   def request(module, handle, {:tool_grant, executor, instance, dispatch} = operation, deadline)
       when is_atom(module) and is_pid(executor) and is_reference(instance) and
              is_reference(dispatch) and is_integer(deadline) do
+    deadline =
+      min(
+        deadline,
+        System.monotonic_time() + System.convert_time_unit(1_000, :millisecond, :native)
+      )
+
     if System.monotonic_time() < deadline do
       module.request(handle, operation, deadline) |> admit_return(deadline)
     else

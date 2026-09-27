@@ -8,8 +8,9 @@ defmodule LoopexComposition.SessionAdmission do
   ## Technical depth
 
   One monitored asynchronous request binds requester, generation, reference,
-  operation and absolute native expiry. Receive waits are capped at 1,000 ms
-  and never renew that expiry. The owner checks its session cell. Cleanup-only
+  operation and absolute native expiry. The complete handshake is capped at
+  1,000 ms or the supplied expiry, whichever is earlier. Sliced receives never
+  renew that expiry. The owner checks its session cell. Cleanup-only
   custody carries no cell and admits only retirement or cancellation for its
   recorded candidate and call. The owner validates state transitions and
   one-use tokens; neither inward edge imports this implementation.
@@ -33,6 +34,12 @@ defmodule LoopexComposition.SessionAdmission do
           integer()
         ) :: Loopex.LLM.ReqLLM.InProcess.Admission.result()
   def request(handle, operation, deadline) when is_integer(deadline) do
+    deadline =
+      min(
+        deadline,
+        System.monotonic_time() + System.convert_time_unit(1_000, :millisecond, :native)
+      )
+
     with {:ok, owner, generation} <- route(handle, operation),
          true <- System.monotonic_time() < deadline do
       reference = make_ref()

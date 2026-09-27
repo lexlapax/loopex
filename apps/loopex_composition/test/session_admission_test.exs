@@ -117,6 +117,37 @@ defmodule LoopexComposition.SessionAdmissionTest do
     refute_receive {:DOWN, _, :process, ^owner, _}
   end
 
+  test "a long enclosing deadline still gives admission only one second" do
+    {owner, owner_monitor} = responder(:silent)
+    generation = make_ref()
+    handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+    test = self()
+    deadline = System.monotonic_time() + System.convert_time_unit(60, :second, :native)
+
+    borrower =
+      start_supervised!(
+        {Task,
+         fn ->
+           result = SessionAdmission.request(handle, {:begin_model, self(), make_ref()}, deadline)
+           send(test, {:request_result, self(), result})
+         end}
+      )
+
+    borrower_monitor = Process.monitor(borrower)
+
+    assert_receive {:observed, ^owner, ^borrower, _reference, ^generation, _operation, expiry},
+                   1_000
+
+    assert expiry < deadline
+    assert expiry <= System.monotonic_time() + System.convert_time_unit(1, :second, :native)
+    assert_receive {:request_result, ^borrower, {:error, :session_admission_closed}}, 2_000
+    assert_receive {:DOWN, ^borrower_monitor, :process, ^borrower, :normal}
+    assert Process.alive?(owner)
+    send(owner, :late_grant)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+    refute_receive {:request_result, ^borrower, _}
+  end
+
   test "cleanup custody admits only its candidate's matching retirement and cancellation" do
     for type <- [:retire_model, :cancel_model] do
       {owner, monitor} = responder(:grant)
@@ -196,7 +227,15 @@ defmodule LoopexComposition.SessionAdmissionTest do
 
               :silent ->
                 receive do
-                  :stop -> :ok
+                  :stop ->
+                    :ok
+
+                  :late_grant ->
+                    send(
+                      requester,
+                      {:loopex_session_admission_result, self(), reference, generation, operation,
+                       deadline, result}
+                    )
                 end
 
               _ ->
@@ -216,5 +255,5 @@ defmodule LoopexComposition.SessionAdmissionTest do
     {pid, monitor}
   end
 
-  defp future, do: System.monotonic_time() + System.convert_time_unit(2, :second, :native)
+  defp future, do: System.monotonic_time() + System.convert_time_unit(500, :millisecond, :native)
 end

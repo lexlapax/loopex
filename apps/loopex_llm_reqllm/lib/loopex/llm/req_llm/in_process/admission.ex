@@ -43,6 +43,12 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Admission do
   @spec request(module(), term(), operation(), integer()) :: result()
   def request(module, handle, operation, deadline)
       when is_atom(module) and is_integer(deadline) do
+    deadline =
+      min(
+        deadline,
+        System.monotonic_time() + System.convert_time_unit(1_000, :millisecond, :native)
+      )
+
     if known_operation?(operation) and System.monotonic_time() < deadline do
       module.request(handle, operation, deadline)
       |> admit_return(operation, deadline)
