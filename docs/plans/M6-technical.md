@@ -29,7 +29,8 @@ profile needs it. Every rework M6 makes is listed in
 [Compatibility](#technical-plan-compatibility), and each keeps the M5 suites
 and release lanes green. The vision's non-negotiables are not covered by this
 decision: dependency direction, one serial owner, durability truth, plain
-boundary data, and credential isolation.
+boundary data, and credential isolation, except as ADR 0039's vision
+amendment states.
 
 **Maintainer decisions, 2026-09-26, after the second external review:**
 - every model in the ephemeral profile, local or hosted, runs through one
@@ -41,7 +42,9 @@ boundary data, and credential isolation.
 - the durable profile may activate the new read-only tools, and the rollback
   claim is narrowed to name what `0.2` does with them;
 - the in-process call is non-streaming and runs in one process, which its
-  cleanup ends (this replaces an earlier choice, recorded below).
+  cleanup ends; this awaits the maintainer's confirmation at acceptance,
+  because it replaces an earlier choice, recorded below;
+- model calls use HTTP/1, and HTTP/2 is future work gated on Finch.
 
 **The earlier choice, and why it was replaced:** on 2026-09-26 the
 maintainer first chose that the cleanup walk the call's linked process tree.
@@ -321,7 +324,7 @@ so `ollama:qwen3:14b` names id `qwen3:14b`. Any other prefix refuses as
   and `OPENROUTER_API_KEY` explicitly as well.
 - The ephemeral composition creates a runtime trace capability, as the durable
   composition does through its credential plane, so the caller can exclude
-  itself from Loopex trace sessions (`trace.ex:55`).
+  itself from Loopex trace sessions (`trace.ex:56`).
 
 **Host hygiene** follows ADR 0039's technical companion, which states the start
 table once:
@@ -373,10 +376,12 @@ the owner waits for the caller's `DOWN`, and only then acknowledges
 withholds the acknowledgement, and the coordinator's existing forced stop and
 unproved-cleanup path applies (`:4646-4652`). The caller performs the
 request's socket I/O itself over HTTP/1, so a killed caller stops sending at
-once, and the pool closes its connection on the caller's `DOWN`. Nothing the
+once; a fresh connection closes with the caller, and the pool closes a reused
+one on the caller's `DOWN`. Every request carries `connection: close`, so a
+completed call's connection and its TLS processes end with it. Nothing the
 pool holds can reach the session.
 
-**Diagnostics.** ReqLLM, Req, Finch and TLS processes can log, report or emit
+**Diagnostics.** The calling process, Finch's pool and TLS processes can log, report or emit
 the request, and for a hosted provider its credential, as ADR 0039's vision
 amendment names. A log line written in the caller is never emitted, because the
 caller's level is `:none`. The `ask` command sets the primary logger level to
@@ -851,7 +856,7 @@ Concept: [Non-goals](M6.md#concept-plan-non-goals).
 
 | # | Limitation | Why it is accepted |
 | --- | --- | --- |
-| 1 | In the ephemeral profile a hosted provider's credential, and every request, are inside ReqLLM, Req, Finch and TLS processes while a call is in flight, where a crash report, a crash dump or a host telemetry handler can see them | ADR 0039's vision amendment accepts it for this profile only; the credential stays out of every Loopex plane and runtime state; HTTP/1 keeps no header state, so no key outlives its call in a connection; the caller is sensitive and excluded from tracing; the durable profile keeps full isolation; the developer guide names what a library host takes on |
+| 1 | In the ephemeral profile a hosted provider's credential, and every request, are in the calling process, Finch's pool and TLS processes during a call, until the call's connection closes when its response ends, where a crash report, a crash dump or a host telemetry handler can see them | ADR 0039's vision amendment accepts it for this profile only; the credential stays out of every Loopex plane and runtime state; every request closes its connection, so its TLS processes end with the call; `SSLKEYLOGFILE` is refused; the caller is sensitive and excluded from tracing; the durable profile keeps full isolation; the developer guide names what a library host takes on |
 | 2 | ReqLLM's start settings stay for the VM's life, and a host that wants ReqLLM started earlier must start it itself with `.env` loading off and declare it | ReqLLM reads them only at start; composition refuses rather than inherit an unknown start |
 | 3 | A hard VM kill leaves the ephemeral temporary root behind | The root is under the host's temporary directory, mode `0700`, and holds no committed truth (the store is in memory) |
 | 4 | A durable model must name a provider the single `LOOPEX_PROVIDER_API_KEY` serves, needs the built companion, and cannot be a local Ollama model | Per-provider durable credentials belong to the M7 draft's configuration decision |
@@ -861,5 +866,5 @@ Concept: [Non-goals](M6.md#concept-plan-non-goals).
 | 8 | A stop whose cleanup cannot be proved keeps the temporary root for the host to remove | Deleting it while an effect may still use it would be worse; the root is named in the error, and a later stop removes it when only process groups were pending |
 | 9 | Rolling a durable root back to `0.2` fails a not-yet-dispatched call to an M6-only tool as `unknown_tool`, withholds all skill context of a session with a user skill under `0.2`'s daemon, and `0.2` cannot admit a new user skill | Stated and proved by the `rollback` lane; the call's effect never ran |
 | 10 | The adapter refuses to run while the host sets any `:req` default options; model calls use HTTP/1 only | Default options reach every request; a host that needs them composes the durable profile. Finch's multiplexed HTTP/2 pool can silently resend a request whose connection closes mid-upload, and HTTP/2 negotiated on its HTTP/1 pool ignores flow control so requests over 64 KiB fail (Finch issue #265, which ReqLLM guards on its streaming path); HTTP/2 waits for a Finch release that removes one of them |
-| 11 | A local model's reply arrives whole, with no streamed progress | Progress is transient and never session truth; the companion keeps streaming for hosted models |
+| 11 | A model's reply arrives whole in the ephemeral profile, with no streamed progress, and each call opens a new connection | Progress is transient and never session truth; closing each connection keeps the credential from outliving the call, at the cost of one TLS handshake per call; the durable profile's companion keeps streaming |
 | 12 | The daemon is unchanged, so a durable session with a user skill resumed through it cannot match the admitted snapshot and has all of its skill context withheld, project skills included | Named skill directories in daemon-owned sessions belong to the M7 draft's saved configuration; the offline `loopex resume` reloads them |

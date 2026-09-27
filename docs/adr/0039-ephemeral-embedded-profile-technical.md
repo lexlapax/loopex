@@ -72,7 +72,7 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
   Loopex's fixed configuration, independent of `ReqLLM.Finch`, of `:req_llm`'s
   `:finch` and `:stream_pool_protocols` settings, and of how a host-started
   `ReqLLM.Finch` was configured. ReqLLM adds a per-call `pool_timeout`
-  (`providers/anthropic.ex:223`, `providers/openai.ex:467`), a request option
+  (`providers/anthropic.ex:229`, `providers/openai.ex:467`), a request option
   that Req splits off before hashing (`req/finch.ex:154`, `:567-570`), so it
   never creates another pool; an IPv6-literal host adds `inet6`, which gives
   one other fixed pool. The pool is shared under Req's supervisor rather than
@@ -92,9 +92,15 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
   initial window (`mint/http2.ex:1496-1507`), so any request over 64 KiB fails
   on a fresh connection; ReqLLM guards the same case on its streaming path
   (`req_llm/streaming/finch_client.ex:333-359`, Finch issue #265). HTTP/2 is
-  future work, for a Finch release that removes one of these limits. HTTP/1
-  also keeps no header-compression state on a connection, so no credential
-  outlives its call there;
+  future work, for a Finch release that removes one of these limits;
+- `req_http_options: [headers: [{"connection", "close"}]]` as well, so the
+  server closes the connection when the response ends. Mint then marks it
+  closed, Finch's check-in fails on it and removes the worker
+  (`finch/http1/pool.ex:218-233`), and the connection's TLS processes exit,
+  taking the plaintext copies of the request, key included, that `:ssl.send`
+  gave them. A fresh TLS handshake per call is the cost; against a model call's
+  seconds it is small. HTTP/1 keeps no header-compression state, so nothing
+  else on the connection holds the key;
 - no `:cache` option, so ReqLLM's response cache is disabled
   (`cache.ex:125-128`).
 
@@ -107,12 +113,17 @@ each call:**
 - `ReqLLM.provider(prefix)` returns exactly the module in the table above;
   ReqLLM's registry lets a later registration replace a provider
   (`providers.ex`), and generation resolves the module at call time.
+- `System.get_env("SSLKEYLOGFILE")` is unset. Finch falls back to it when no
+  `:ssl_key_log_file` is given and appends each TLS session's secrets to that
+  file (`finch.ex:550-553`), which, with a capture of the traffic, recovers the
+  key after the call.
 - `Application.get_env(:req, :default_options, [])` is `[]`. `Req.new/1` merges
   it into every request, plugins included (`deps/req/lib/req.ex:475-479`,
   `:1359-1361`), so any value could add an `Authorization` header, a response
   cache, a plugin, another pool, `into:` or a transport.
-A failed guard at composition refuses `{:composition, :provider_module_replaced}`
-or `{:composition, :req_default_options_unsupported}`; before a call it returns
+A failed guard at composition refuses `{:composition, :provider_module_replaced}`,
+`{:composition, :ssl_key_log_enabled}` or
+`{:composition, :req_default_options_unsupported}`; before a call it returns
 `{:error, {:not_dispatched, "model_call_failed"}}`. The prefix maps to its
 provider atom through the fixed table, never through `String.to_atom/1`. The
 registry is read again inside the call, so a registration made between the
@@ -154,7 +165,7 @@ Each call has exactly two processes of its own:
    `Process.flag(:sensitive, true)` and `Logger.put_process_level(self(), :none)`
    (Elixir's API; OTP's `logger` exports no per-process level setter), excludes
    itself from Loopex trace sessions through the runtime's trace capability
-   (`Loopex.Trace.exclude_self/2`, `trace.ex:55`), checks the guards, reads the
+   (`Loopex.Trace.exclude_self/2`, `trace.ex:56`), checks the guards, reads the
    credential variable, calls `ReqLLM.generate_text/3` inside a `try` that
    catches every raise, throw and exit, maps the response, sends the owner
    either the reply or a fixed error class, and exits `:normal`. Its only
@@ -180,9 +191,10 @@ coordinator's existing unproved-cleanup path applies (`:4646-4652`).
   is opened in the caller and owned by it until checked in; a reused one stays
   owned by the pool, with the caller driving passive sends and receives
   (`finch/http1/pool.ex:188-199`, `:314-322`). Either way a killed caller
-  sends nothing more, and the pool closes that connection when its checkout
-  monitor sees the caller gone (`nimble_pool.ex:578`, `:669-674`, `:786-793`;
-  `finch/http1/pool.ex:290-293`). Bytes already handed to the operating system
+  sends nothing more. A fresh connection's socket closes because its
+  controlling process, the caller, died; a reused connection is closed by the
+  pool when its checkout monitor sees the caller gone (`nimble_pool.ex:578`,
+  `:669-674`, `:786-793`; `finch/http1/pool.ex:290-293`). Bytes already handed to the operating system
   or a TLS sender may still leave; the call is already `dispatched_or_unknown`,
   so that changes nothing.
 - **No hidden resend.** Finch's HTTP/1 pool has no read-only redispatch, and
@@ -191,24 +203,28 @@ coordinator's existing unproved-cleanup path applies (`:4646-4652`).
   server closed while idle can fail before sending anything; that error is
   still classified `dispatched_or_unknown`, which is safe but can overstate the
   uncertainty.
-- **No credential outlives the call in a connection.** HTTP/1 keeps no header
-  state on a connection after a request, so a pooled idle connection holds no
-  key. While a request is in flight its bytes, key included, pass through the
-  caller, the connection's TLS processes for an `https` address, and Finch's
-  telemetry metadata (`finch/http1/pool.ex:47-49`), which any handler the host
-  installs can read.
+- **No credential outlives the call in a connection.** During a call the
+  request's bytes, key included, pass through the caller, the connection's TLS
+  processes for an `https` address, and Finch's telemetry metadata
+  (`finch/http1/pool.ex:47-49`), which any handler the host installs can read.
+  The `connection: close` header makes the server close the connection when
+  the response ends, so the connection is removed and its TLS processes exit
+  with their copies; HTTP/1 keeps no other header state. No connection that
+  carried a key stays idle in the pool.
 
 Nothing any of this holds can reach the session: the result path ended with
-the caller, and the call is already `dispatched_or_unknown`. The in-flight
-copies, and whatever a host's handler copies, are the exposure the vision
-amendment names.
+the caller, and the call is already `dispatched_or_unknown`. Those copies, and
+whatever a host's handler copies, are the exposure the vision amendment
+names.
 
 **What the witness pins.** On both toolchain pairs, after one call has warmed
 the pool for the test server's origin (the first request to an origin starts
 Finch's pool shards, `finch/lib/finch/pool/manager.ex:96-134`), a census
 during a second call finds exactly the owner and the caller as new processes,
-once over plain `http` and once over TLS. A ReqLLM, Req or Finch update that
-moves the call into a new per-call process on either path fails it.
+once over plain `http` and once over TLS; after a completed call no process of
+that call's connection remains, its TLS processes included. A ReqLLM, Req or
+Finch update that moves the call into a new per-call process, or keeps its
+connection open, fails it.
 
 **Host hygiene.** `ReqLLM.Application.start/2` reads `:load_dotenv` (default
 `true`) and loads `.env` from the working directory (`application.ex:25-31`).
@@ -290,7 +306,7 @@ context:
   which known credential material is excluded, an exception: a host may
   compose a profile whose model adapter runs the provider library in the host
   VM; there a resolved credential exists in the calling process and in the
-  provider library's HTTP and TLS processes while a call is in flight, so their crash
+  provider library's HTTP and TLS processes during a call, until the call's connection closes when its response ends, so their crash
   reports, a crash dump and host-installed telemetry handlers can observe it.
   The reference-only runtime state, resolution at the model boundary, the
   calling process's trace exclusion and sensitive flag, and every other listed
@@ -298,15 +314,18 @@ context:
   profile that isolates the provider in its own OS process.
 - **`docs/vision.md` §12** gains the matching Concept sentence: a host may
   choose an in-VM model profile in which a credential is present in the host VM
-  while a call is in flight; the separate-process profile keeps full isolation.
+  during a call, until the call's connection closes when its response ends; the separate-process profile keeps full isolation.
 - **`docs/vision.md` §16**, after "Observability uses references and redaction
   rather than capturing secrets or unrestricted payloads", gains: "In an in-VM
   model profile a host chooses, the provider library's own crash reports and a
-  host's telemetry handlers can capture an in-flight credential; Loopex's own observability
+  host's telemetry handlers can capture a credential during a call, until the call's connection closes when its response ends; Loopex's own observability
   still never does."
 - **`docs/vision-technical.md` §6.1**, in the credential custody row, the host
   column reads "Owns encryption, resolution, rotation; may resolve by supplying
-  the value through a variable it names, read at the model boundary".
+  the value through a variable it names, read at the model boundary"; and
+  §12.7's "narrowest possible lifetime and audience" gains "; a value a host
+  supplies through its environment has that environment's lifetime and
+  audience, which the host owns".
 - **`docs/vision-technical.md` §6.2**, after the diagnostics plane's
   definition, gains: "Crash detail from a provider library the host runs in its
   own VM is the host's diagnostics, outside Loopex's diagnostics plane, as
@@ -317,7 +336,7 @@ context:
 - **`AGENTS.md`**, Product Non-Negotiables, "Credentials and context", after
   "beyond an approved scoped ephemeral hand secret", gains: "; in an in-VM
   model profile a host chooses, a credential may also reach the provider
-  library's processes and their crash reports while a call is in flight, never a Loopex
+  library's processes and their crash reports during a call, until the call's connection closes when its response ends, never a Loopex
   plane (ADR 0039)". Editing AGENTS.md is the maintainer's to approve with the
   acceptance.
 
@@ -330,9 +349,9 @@ Concept: [Observable consequences](0039-ephemeral-embedded-profile.md#concept-ad
 | --- | --- |
 | The memory store is a store | The store conformance suite's `:memory` kind is bound to `Loopex.Store.Memory` itself and passes unchanged |
 | The in-process adapter is a model | Mapping, option and error tests run against a scripted ReqLLM transport. The model streaming conformance suite runs against it with `streamed: false` and no deltas. Real-provider lanes call a local Ollama model and one hosted provider |
-| The guards hold | A replaced provider module and a non-empty `:req` `:default_options` (including an `auth:` default and a plugin) each refuse at composition, and each refuses the next call before dispatch when set after composition. With `:req_llm` per-provider `base_url` configuration and a catalog override set, the request still goes to the explicit address. With `:req_llm`'s `:finch` set to a proxy and `:stream_pool_protocols` changed, and with a host-started `ReqLLM.Finch` configured differently, the call still uses Loopex's pool. After `prepare_request`, the final request has `max_retries` 0, `redirect` false, and `finch` options that equal Loopex's fixed list once the request-only `pool_timeout` is removed. A 429, a 529 and a `:closed` transport error are each sent exactly once; a redirect response is not followed; no response is cached |
-| Credentials stay out of Loopex's planes | With each provider's variable set to a canary, a run with tool calls, a provider error reply, and a caller crash raised inside a Req step whose exception embeds the request leaves the canary in no committed record, event, progress item, diagnostic or trace entry, in no runtime, coordinator or owner state or mailbox, in no owner crash report, and in no log line Loopex emits; the caller is sensitive and excluded from a runtime trace session; no provider variable reaches a tool process |
-| Its cleanup owns what can return a result | On both toolchain pairs, against a local `http` test server and a local TLS test server, each stalling before its response headers, mid-body and after the body: a stop, a deadline and a normal completion each leave the caller dead before the acknowledgement or the returned reply, the owner answers while the caller is blocked, no reply reaches the coordinator after acknowledgement, and after a kill the server sees the connection close. A request body larger than 64 KiB is sent and answered over both. A server close during a body upload yields one request on the wire and a `dispatched_or_unknown` result. After one warming call, a census during a second call finds exactly the owner and the caller as new processes over both. A caller whose exit a test seam withholds takes the unproved path |
+| The guards hold | A replaced provider module, a set `SSLKEYLOGFILE` and a non-empty `:req` `:default_options` (including an `auth:` default and a plugin) each refuse at composition, and each refuses the next call before dispatch when set after composition. With `:req_llm` per-provider `base_url` configuration and a catalog override set, the request still goes to the explicit address. With `:req_llm`'s `:finch` set to a proxy and `:stream_pool_protocols` changed, and with a host-started `ReqLLM.Finch` configured differently, the call still uses Loopex's pool. After `prepare_request`, the final request has `max_retries` 0, `redirect` false, a `connection: close` header, and `finch` options that equal Loopex's fixed list once the request-only `pool_timeout` is removed. A 429, a 529 and a `:closed` transport error are each sent exactly once; a redirect response is not followed; no response is cached |
+| Credentials stay out of Loopex's planes | With each provider's variable set to a canary, a run with tool calls, a provider error reply, and a caller crash raised inside a Req step whose exception embeds the request leaves the canary in no committed record, event, progress item, diagnostic or trace entry, in no runtime, coordinator or owner state or mailbox, in no owner crash report, in no log line Loopex emits, and, after the call, in no live process's heap as read by `Process.info(pid, :binary)` over every process the call started or used; the caller is sensitive and excluded from a runtime trace session; no provider variable reaches a tool process |
+| Its cleanup owns what can return a result | On both toolchain pairs, against a local `http` test server and a local TLS test server, each stalling before its response headers, mid-body and after the body: a stop, a deadline and a normal completion each leave the caller dead before the acknowledgement or the returned reply, the owner answers while the caller is blocked, no reply reaches the coordinator after acknowledgement, and after a kill the server sees the connection close. After a completed call the server sees the connection close and no process of that connection, TLS processes included, remains. A request body larger than 64 KiB is sent and answered over both. A server close during a body upload yields one request on the wire and a `dispatched_or_unknown` result. After one warming call, a census during a second call finds exactly the owner and the caller as new processes over both. A caller whose exit a test seam withholds takes the unproved path |
 | Hygiene holds | `:req_llm` is started by no application start while the escript embeds its modules, and a fixture release built with `req_llm: :load` boots without starting it. A `.env` in the working directory is not loaded. Each row of the start table; two concurrent first compositions starting it once; a later composition proceeding, including after `loopex_composition` restarts; a host restart of ReqLLM loading no `.env`; a host turning loading back on, then refused; `warn_unverified_models` never written |
 | The companion path is unchanged | Every companion suite passes after the shared mapping is extracted; the durable profile refuses an `ollama:` model |
 | The profile is ephemeral and says so | After a proved stop, or its caller exiting, no file remains under the profile's temporary root. The result carries `profile: :ephemeral`, and `ask`'s JSON carries `"profile"` |

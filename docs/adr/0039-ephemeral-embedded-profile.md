@@ -112,12 +112,14 @@ narrows:
   an executor job. The calling process is excluded from Loopex trace sessions
   and marked sensitive, so tracing, process inspection and crash-dump stacks
   do not show it.
-- **Not structurally excluded from the host VM.** While a call is in flight
-  the value is also held inside ReqLLM, Req, Finch and the TLS connection
-  processes that carry the request, so their crash reports, a crash dump or a
-  telemetry handler the host installs can see it. Calls use HTTP/1, which
-  keeps no header state on a connection, so no key outlives its call there. That is the trade this profile makes, and the durable
-  profile does not.
+- **Not structurally excluded from the host VM.** During a call, and until the call's connection closes when its response ends,
+  the value is also held in the calling process's copies, in Finch's pool and
+  in the TLS connection processes that carry the request, so their crash
+  reports, a crash dump or a telemetry handler the host installs can see it.
+  Every request asks the server to close its connection when the response
+  ends, so the connection's TLS processes, and the key they copied, end with
+  the call instead of waiting idle in the pool. That is the trade this profile
+  makes, and the durable profile does not.
 - **No key needed:** a provider that needs none, such as a local Ollama server,
   reads none.
 - **Missing key:** a provider whose variable is missing or empty refuses at
@@ -133,6 +135,9 @@ configuration could change what the call does or where it goes:
 - **Built-in providers only.** Before each call it checks that ReqLLM's
   registered module for the provider is ReqLLM's own, so a provider registered
   later under the same name cannot take the call.
+- **No TLS key log.** Finch writes every TLS session's secrets to the file an
+  `SSLKEYLOGFILE` variable names, which with a packet capture would reveal the
+  key long after the call. Composition and each call refuse while it is set.
 - **No global Req defaults.** Req merges `:req`'s default options, plugins
   included, into every request. Composition refuses, and each call refuses
   before dispatch, while any are set, so a global authentication header, cache,
@@ -170,7 +175,8 @@ returns the reply, only after it has seen that process exit. If it cannot see
 that, the kernel's existing unproved-cleanup path applies. The connection and
 TLS processes that carried the request belong to the shared pool, not to the
 call, but the calling process does the sending itself: when it dies it sends
-nothing more, and the pool closes its connection on seeing it gone. Bytes it
+nothing more, and its connection closes, either with it or when the pool sees
+it gone. Bytes it
 had already handed to the operating system may still leave, which changes
 nothing, because the call is already `dispatched_or_unknown` and nothing can
 reach the session.
@@ -261,7 +267,7 @@ profile answers each one as follows.
    model boundary for each call. The durable profile keeps the single source.
 
 What the ephemeral profile gives up is process isolation for the credential and
-the request while a call is in flight. That trade is the point of the profile,
+the request during a call, until the call's connection closes when its response ends. That trade is the point of the profile,
 and it is stated wherever the profile is offered.
 
 **The `ask` command's machine contract.** Other agents and scripts parse it, so
@@ -316,17 +322,22 @@ change with its acceptance:
   prohibited plane, and AGENTS.md repeats the exclusion as a non-negotiable.
   For a profile the host explicitly composes to run the provider library in its
   own VM, a credential may be present in that library's processes during a
-  call; so in their crash reports, a crash dump or a host telemetry
-  handler. Every other exclusion stands, and the reference in runtime state,
-  resolution at the model boundary and host custody stand.
+  call, until the call's connection closes when its response ends; so in their crash reports, a crash dump or a
+  host telemetry handler. §12.7's "narrowest possible lifetime and audience"
+  also yields there: the host supplies the value through its environment,
+  which any code in its VM can read. Every other exclusion stands, and the
+  reference in runtime state, resolution at the model boundary and host
+  custody stand.
 - **Host resolution.** Vision §6.1 gives the host credential resolution. Here
   the host resolves by placing the value in a variable it names in its own
   environment; the adapter reads that host-supplied value at the model
   boundary, as the vision's "resolution occurs just in time at the approved
   model boundary" allows, and Loopex stores only the variable's name.
-- **Where it lands.** Each of those seven places gains the same bounded
-  exception, in the exact text ADR 0039's technical companion gives, in the
-  change that accepts this decision.
+- **Where it lands.** Seven places gain the same bounded exception, in the
+  exact text ADR 0039's technical companion gives, in the change that accepts
+  this decision: `docs/vision.md` §12 and §16; `docs/vision-technical.md`
+  §6.1, §6.2, §12.7 and §23; and AGENTS.md's "Credentials and context"
+  non-negotiable, which needs the maintainer's explicit approval.
 - **Evidence.** Five external reviews of this decision tried to keep a
   credential structurally out of an in-VM ReqLLM call: a custodian with a
   value-redacting logger filter (the filter's readable value set, its
