@@ -8,10 +8,12 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
   ## Technical depth
 
   An unlinked proxy owns the potentially stalled supervisor call. The creator
-  requires the owner's direct candidate report, the proxy's matching return,
-  its retirement notice and normal DOWN, then a prepared acknowledgement.
+  requires the owner's direct candidate report and owner-origin identity proof,
+  the proxy's matching return, its retirement notice and normal DOWN, then a
+  prepared acknowledgement.
   Only the creator keeps the begin token. A failed start kills and reaps known
-  processes under one bounded cleanup deadline.
+  processes under one bounded cleanup deadline. An unmatched reported PID is
+  observed but never killed as this call's owner.
   """
 
   alias LoopexComposition.Ephemeral.SessionOwner
@@ -41,11 +43,13 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
       proxy: proxy,
       proxy_monitor: proxy_monitor,
       candidate: nil,
+      candidate_identity: nil,
       candidate_monitor: nil,
       returned: nil,
       direct: false,
       provisional: false,
-      matched: false,
+      identity_challenge: nil,
+      owned: false,
       retiring: false,
       proxy_down: false,
       candidate_down: false
@@ -109,7 +113,7 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
 
   defp await_start(state) do
     cond do
-      state.proxy_down and state.direct and state.provisional and state.retiring ->
+      state.proxy_down and state.owned and state.retiring ->
         prepare(state)
 
       System.monotonic_time() >= state.expiry ->
@@ -124,13 +128,17 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
     %{candidate: candidate, proxy: proxy, ref: ref, proxy_monitor: proxy_monitor} = state
 
     receive do
-      {owner, ^ref, :owner_candidate} when is_pid(owner) ->
+      {owner, ^ref, :owner_candidate, identity}
+      when is_pid(owner) and is_reference(identity) ->
         if state.direct or (state.provisional and state.returned != owner) do
           fail(state)
         else
-          next = %{state | candidate: owner, direct: true}
+          next = %{state | candidate: owner, candidate_identity: identity, direct: true}
           finish_if_ready(next)
         end
+
+      {owner, ^ref, :owner_candidate, _bad} when is_pid(owner) ->
+        fail(state)
 
       {^proxy, ^ref, :provisional, {:ok, owner}} when is_pid(owner) ->
         if state.provisional or (state.direct and candidate != owner) do
@@ -143,14 +151,24 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
       {^proxy, ^ref, :provisional, _bad} ->
         fail(state)
 
+      {owner, ^ref, :candidate_identity, challenge}
+      when owner == candidate and challenge == state.identity_challenge and
+             is_reference(challenge) ->
+        monitor = Process.monitor(owner)
+        next = %{state | owned: true, candidate_monitor: monitor}
+        send(state.proxy, {state.creator, state.ref, :finish, owner})
+        await_start(next)
+
       {^proxy, ^ref, :proxy_retiring} ->
         await_start(%{state | retiring: true})
 
       {:DOWN, ^proxy_monitor, :process, ^proxy, :normal} ->
-        if state.retiring, do: await_start(%{state | proxy_down: true}), else: fail(state)
+        if state.retiring,
+          do: await_start(%{state | proxy_down: true}),
+          else: fail(%{state | proxy_down: true})
 
       {:DOWN, ^proxy_monitor, :process, ^proxy, _reason} ->
-        fail(state)
+        fail(%{state | proxy_down: true})
 
       {:DOWN, monitor, :process, owner, _reason}
       when monitor == state.candidate_monitor and owner == candidate ->
@@ -161,9 +179,17 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
   end
 
   defp finish_if_ready(%{direct: true, provisional: true} = state) do
-    monitor = Process.monitor(state.candidate)
-    next = %{state | matched: true, candidate_monitor: monitor}
-    send(state.proxy, {state.creator, state.ref, :finish, state.candidate})
+    challenge = make_ref()
+
+    send(state.candidate, {
+      state.creator,
+      state.ref,
+      :identify,
+      state.candidate_identity,
+      challenge
+    })
+
+    next = %{state | identity_challenge: challenge}
     await_start(next)
   end
 
@@ -187,7 +213,12 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
   end
 
   defp fail(state) do
-    owned = if state.matched, do: [state.proxy, state.candidate], else: [state.proxy]
+    observed_monitor =
+      if state.direct and not state.owned,
+        do: Process.monitor(state.candidate),
+        else: state.candidate_monitor
+
+    owned = if state.owned, do: [state.proxy, state.candidate], else: [state.proxy]
 
     for pid <- owned, is_pid(pid) and Process.alive?(pid) do
       Process.exit(pid, :kill)
@@ -196,8 +227,8 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
     reap_until = System.monotonic_time() + native(@reap_ms)
     unless state.proxy_down, do: await_down(state.proxy_monitor, state.proxy, reap_until)
 
-    if state.matched and not state.candidate_down,
-      do: await_down(state.candidate_monitor, state.candidate, reap_until)
+    if state.direct and not state.candidate_down,
+      do: await_down(observed_monitor, state.candidate, reap_until)
 
     @failure
   end

@@ -59,7 +59,7 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
     Process.exit(supervisor, :shutdown)
   end
 
-  test "malformed provisional return kills a known candidate without stopping a peer" do
+  test "malformed provisional return self-fences an unmatched candidate without stopping a peer" do
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     test = self()
 
@@ -120,8 +120,25 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
     assert @failure =
              OwnerActivation.start(supervisor, fn _sup, spec ->
                {_, _, [creator, _proxy, ref, _expiry]} = spec.start
-               send(creator, {peer_owner, ref, :owner_candidate})
+               send(creator, {peer_owner, ref, :owner_candidate, make_ref()})
                :malformed
+             end)
+
+    assert Process.alive?(peer_owner)
+    Process.exit(supervisor, :shutdown)
+  end
+
+  test "matching forged reports cannot kill a peer without owner-origin identity" do
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+    {:ok, peer} = OwnerActivation.start(supervisor)
+    peer_owner = OwnerActivation.owner(peer)
+    assert {:ok, _cell} = OwnerActivation.begin(peer)
+
+    assert @failure =
+             OwnerActivation.start(supervisor, fn _sup, spec ->
+               {_, _, [creator, _proxy, ref, _expiry]} = spec.start
+               send(creator, {peer_owner, ref, :owner_candidate, make_ref()})
+               {:ok, peer_owner}
              end)
 
     assert Process.alive?(peer_owner)

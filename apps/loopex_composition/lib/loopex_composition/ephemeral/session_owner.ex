@@ -35,7 +35,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       }
 
       cell = :atomics.new(2, signed: false)
-      send(creator, {self(), ref, :owner_candidate})
+      identity = make_ref()
+      send(creator, {self(), ref, :owner_candidate, identity})
       Process.send_after(self(), {:activation_expired, ref}, remaining(expiry))
 
       {:ok,
@@ -47,6 +48,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
          expiry: expiry,
          monitors: monitors,
          cell: cell,
+         identity: identity,
          retiring: false,
          phase: :blocked,
          token: nil
@@ -57,6 +59,15 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   @impl true
+  def handle_info(
+        {creator, ref, :identify, identity, challenge},
+        %{creator: creator, ref: ref, identity: identity, phase: :blocked} = state
+      )
+      when is_reference(challenge) do
+    send(creator, {self(), ref, :candidate_identity, challenge})
+    {:noreply, state}
+  end
+
   def handle_info(
         {proxy, ref, :proxy_retiring},
         %{proxy: proxy, ref: ref, phase: :blocked} = state
