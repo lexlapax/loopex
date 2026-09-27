@@ -116,12 +116,11 @@ narrows:
   the value is also held inside ReqLLM, Req, Finch and the TLS connection
   processes that carry the request, so their crash reports, a crash dump or a
   telemetry handler the host installs can see it. Calls to an `https` address
-  use HTTP/2, and one provider's key outlives the call there: Anthropic sends
-  it in a header HTTP/2's compression table stores, so it stays in that pooled
-  connection's state until Loopex's pool retires the connection, which happens
-  at the later of the connection's fixed maximum age and the deadline of the
-  last call sent on it. OpenAI's and OpenRouter's keys travel in a header that
-  table does not store. That is the trade this profile makes, and the durable
+  use HTTP/2 when the server offers it, and one provider's key outlives the
+  call there: Anthropic sends it in a header HTTP/2's compression table
+  stores, so it stays in that idle pooled connection until the pool closes,
+  at most about a minute after the last call to Anthropic. OpenAI's and
+  OpenRouter's keys travel in a header that table does not store. That is the trade this profile makes, and the durable
   profile does not.
 - **No key needed:** a provider that needs none, such as a local Ollama server,
   reads none.
@@ -145,14 +144,16 @@ configuration could change what the call does or where it goes:
 - **Loopex's own connection pools.** Each call names a connection pool whose
   options Loopex fixes, so neither ReqLLM's shared pool nor anything the host
   configured for it, a proxy, a protocol or a pool started earlier, can carry
-  the call. The pool follows the scheme of the address actually used: an
-  `https` address gets an HTTP/2 pool that multiplexes calls over one
-  connection and retires each connection after a fixed maximum age; a plain
-  `http` address, such as a local Ollama server or a local OpenAI-compatible
-  server, gets an HTTP/1 pool. An `https` endpoint must offer HTTP/2, as the
-  three built-in hosted providers do. Host code that deliberately registers a
-  pool under the same name first is trusted host code, which Loopex does not
-  defend against.
+  the call. Each connection carries one call at a time, and the calling
+  process itself sends the request. The pool follows the scheme of the address
+  actually used: an `https` connection uses HTTP/2 when the server offers it
+  and HTTP/1 otherwise; a plain `http` address, such as a local Ollama server
+  or a local OpenAI-compatible server, uses HTTP/1. The pool closes all its
+  connections after half a minute without a call. Loopex does not use
+  multiplexed HTTP/2, because its pool can silently resend a request whose
+  connection closes mid-upload. Host code that deliberately registers a pool
+  under the same name first is trusted host code, which Loopex does not defend
+  against.
 - **Pinned address and options.** Each call names its address explicitly: the
   host's base URL, or the provider's built-in default, never one taken from
   ReqLLM's application configuration or model catalog. It allows no retry and
@@ -169,12 +170,11 @@ the owner or anything it reports. On a stop or a deadline the owner kills that p
 completion it exits by itself; either way the owner acknowledges cleanup, or
 returns the reply, only after it has seen that process exit. If it cannot see
 that, the kernel's existing unproved-cleanup path applies. The connection and
-TLS processes that carried the request belong to Loopex's shared pools, not to
-the call. On HTTP/1 the pool sees the caller's death and closes its
-connection. On HTTP/2 the pool does not watch the caller: a killed call's
-stream runs on until the server answers or the call's own deadline passes,
-when the pool cancels it. Either way nothing they hold can reach the session,
-whose call is already `dispatched_or_unknown`.
+TLS processes that carried the request belong to Loopex's shared pool, not to
+the call, but the calling process does the sending itself: when it dies the
+request stops at once and its connection closes, so a killed call sends
+nothing after its deadline and nothing can reach the session, whose call is
+already `dispatched_or_unknown`.
 The model's reply arrives whole: an in-process call reports no streamed
 progress, which is transient and never session truth.
 
@@ -262,8 +262,8 @@ profile answers each one as follows.
    model boundary for each call. The durable profile keeps the single source.
 
 What the ephemeral profile gives up is process isolation for the credential and
-the request while a call is in flight, and, for Anthropic over HTTP/2, until
-the pooled connection is retired. That trade is the point of the profile,
+the request while a call is in flight, and, for Anthropic over HTTP/2, for at
+most about a minute afterwards in an idle pooled connection. That trade is the point of the profile,
 and it is stated wherever the profile is offered.
 
 **The `ask` command's machine contract.** Other agents and scripts parse it, so
@@ -318,10 +318,10 @@ change with its acceptance:
   prohibited plane, and AGENTS.md repeats the exclusion as a non-negotiable.
   For a profile the host explicitly composes to run the provider library in its
   own VM, a credential may be present in that library's processes during a
-  call, and, where a provider's HTTP/2 header compression stores it, in the
-  pooled connection until that connection is retired, at the later of its
-  fixed maximum age and the deadline of the last call sent on it; so in their
-  crash reports, a crash dump or a host telemetry handler. Every other exclusion stands, and the reference in runtime state,
+  call, and, where a provider's HTTP/2 header compression stores it, in an
+  idle pooled connection for at most about a minute after the last call to
+  that provider; so in their crash reports, a crash dump or a host telemetry
+  handler. Every other exclusion stands, and the reference in runtime state,
   resolution at the model boundary and host custody stand.
 - **Host resolution.** Vision §6.1 gives the host credential resolution. Here
   the host resolves by placing the value in a variable it names in its own
