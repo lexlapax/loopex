@@ -56,12 +56,25 @@ The kernel's ports are unchanged; the profile chooses what fills each one:
   retries a POST on 429, 529 and some transport errors (`step/retry.ex:57-67`,
   `:112-142`), and only Req's `retry_count < max_retries` check stops it
   (`deps/req/lib/req/steps.ex:1808-1813`);
-- `req_http_options: [redirect: false, finch: ReqLLM.Finch]`, which each
-  provider's chat path passes into its `Req.new/1` (`providers/anthropic.ex:199-229`,
+- `req_http_options: [redirect: false, finch: pool]`, which each provider's
+  chat path passes into its `Req.new/1` (`providers/anthropic.ex:199-229`,
   `providers/openai.ex:435-473`, `provider/defaults.ex:259-267` for Ollama and
-  OpenRouter), so no redirect is followed and the call uses ReqLLM's own pool,
-  not one named by `:req_llm`'s `:finch` configuration
-  (`provider/defaults.ex:657-667`, `application.ex:89-93`);
+  OpenRouter), so no redirect is followed. `pool` is a fixed keyword list of
+  Finch pool options with no `:name`:
+  - hosted providers: `[protocols: [:http2], count: 1,
+    http2: [max_connection_age: 300_000, max_connection_age_jitter: 30_000]]`;
+  - Ollama: `[protocols: [:http1], size: 8, count: 1]`.
+
+  ReqLLM keeps a name-less `finch:` list as given
+  (`provider/defaults.ex:650-667`), and Req, given pool options and no name,
+  starts or reuses one Finch instance under `Req.FinchSupervisor` whose name is
+  a hash of those options (`deps/req/lib/req/finch.ex:545-612`). So each fixed
+  list names exactly one pool that Loopex alone configures, independent of
+  `ReqLLM.Finch`, of `:req_llm`'s `:finch` and `:stream_pool_protocols`
+  settings, and of how a host-started `ReqLLM.Finch` was configured. A pool
+  listing both protocols would negotiate by ALPN without multiplexing
+  (`finch.ex:25-27`), so hosted calls name `:http2` alone; Ollama is plain
+  `http`, where HTTP/2 needs prior knowledge that its server does not offer;
 - no `:cache` option, so ReqLLM's response cache is disabled
   (`cache.ex:125-128`).
 
@@ -78,13 +91,8 @@ each call:**
   it into every request, plugins included (`deps/req/lib/req.ex:475-479`,
   `:1359-1361`), so any value could add an `Authorization` header, a response
   cache, a plugin, another pool, `into:` or a transport.
-- `Application.get_env(:req_llm, :finch)` is unset. It configures the pool
-  `ReqLLM.Finch` itself, proxy connection options included
-  (`application.ex:73-84`), so a set value could route every call elsewhere.
-
-A failed guard at composition refuses `{:composition, :provider_module_replaced}`,
-`{:composition, :req_default_options_unsupported}` or
-`{:composition, :req_llm_pool_configured}`; before a call it returns
+A failed guard at composition refuses `{:composition, :provider_module_replaced}`
+or `{:composition, :req_default_options_unsupported}`; before a call it returns
 `{:error, {:not_dispatched, "model_call_failed"}}`. The prefix maps to its
 provider atom through the fixed table, never through `String.to_atom/1`. The
 registry is read again inside the call, so a registration made between the
@@ -145,16 +153,33 @@ before it returns the reply, killing it if the cooperative deadline passes
 first. A `DOWN` that does not arrive leaves the acknowledgement unsent, and the
 coordinator's existing unproved-cleanup path applies (`:4646-4652`).
 
-**What the acknowledgement does not cover.** With an HTTP/1 pool the caller
-performs the socket I/O itself (`finch/http1/pool.ex:52-74`,
-`nimble_pool.ex:443-471`); with an HTTP/2 pool, and for every `https`
-connection, shared pool or TLS processes also hold the request. Those are
-shared infrastructure. They learn of the caller's death through their own
-monitors (`nimble_pool.ex:578`, `:669-674`, `:786-793`) and close its
-connection afterwards, asynchronously. Nothing they hold can reach the session:
-the result path ended with the caller, and the call is already
-`dispatched_or_unknown`. Their residual copy of the request and credential is
-the exposure the vision amendment names.
+**What the acknowledgement does not cover.** The pools are shared
+infrastructure, not the call's, and they behave differently by protocol:
+- **HTTP/1 (Ollama).** The caller performs the socket I/O itself
+  (`finch/http1/pool.ex:52-74`, `nimble_pool.ex:443-471`). When it dies, the
+  pool's checkout monitor (`nimble_pool.ex:578`, `:669-674`, `:786-793`) closes
+  its connection, asynchronously.
+- **HTTP/2 (hosted).** The connection process holds and sends the request. A
+  synchronous request installs no monitor on the caller
+  (`finch/http2/pool.ex:426-428`, against the asynchronous path at `:435-440`),
+  so a killed caller's stream runs on until the server answers or the pool's
+  own per-request timer, set from `receive_timeout`, which Loopex sets to the
+  time left before the call's deadline, fires and cancels it
+  (`finch/http2/pool.ex:735-737`, `:489`).
+- **Anthropic's key over HTTP/2.** Mint encodes every request header with
+  HPACK's `:store_name` (`mint/http2.ex:1413-1417`). A header whose name is in
+  HPACK's static table, such as `authorization` for OpenAI and OpenRouter, is
+  sent without indexing and not stored; `x-api-key`, which Anthropic uses
+  (`providers/anthropic.ex:511`), is not in that table, so its value is added
+  to the connection's dynamic table (`hpax.ex:320-322`) and stays in the
+  connection's state until evicted or until the connection ends. Loopex's
+  HTTP/2 pool ends each connection within `max_connection_age` plus jitter,
+  330 seconds at most (`finch.ex:133-150`).
+
+Nothing these processes hold can reach the session: the result path ended with
+the caller, and the call is already `dispatched_or_unknown`. Their residual
+copy of the request, and Anthropic's key in a live HTTP/2 connection, are the
+exposure the vision amendment names.
 
 **What the witness pins.** On both toolchain pairs, after one call has warmed
 the pool for the test server's origin (the first request to an origin starts
@@ -243,7 +268,9 @@ context:
   which known credential material is excluded, an exception: a host may
   compose a profile whose model adapter runs the provider library in the host
   VM; there a resolved credential exists in the calling process and in the
-  provider library's HTTP and TLS processes for one call, so their crash
+  provider library's HTTP and TLS processes for one call, and, where the
+  provider's HTTP/2 header compression stores it, in the pooled connection
+  until that connection is replaced within a fixed maximum age, so their crash
   reports, a crash dump and host-installed telemetry handlers can observe it.
   The reference-only runtime state, resolution at the model boundary, the
   calling process's trace exclusion and sensitive flag, and every other listed
@@ -284,9 +311,9 @@ Concept: [Observable consequences](0039-ephemeral-embedded-profile.md#concept-ad
 | --- | --- |
 | The memory store is a store | The store conformance suite's `:memory` kind is bound to `Loopex.Store.Memory` itself and passes unchanged |
 | The in-process adapter is a model | Mapping, option and error tests run against a scripted ReqLLM transport. The model streaming conformance suite runs against it with `streamed: false` and no deltas. Real-provider lanes call a local Ollama model and one hosted provider |
-| The guards hold | A replaced provider module, a non-empty `:req` `:default_options` (including an `auth:` default and a plugin) and a set `:req_llm` `:finch` each refuse at composition, and each refuses the next call before dispatch when set after composition. With `:req_llm` per-provider `base_url` configuration and a catalog override set, the request still goes to the explicit address. After `prepare_request`, the final request has `max_retries` 0, `redirect` false and `finch` `ReqLLM.Finch`. A 429, a 529 and a `:closed` transport error are each sent exactly once; a redirect response is not followed; no response is cached |
+| The guards hold | A replaced provider module and a non-empty `:req` `:default_options` (including an `auth:` default and a plugin) each refuse at composition, and each refuses the next call before dispatch when set after composition. With `:req_llm` per-provider `base_url` configuration and a catalog override set, the request still goes to the explicit address. With `:req_llm`'s `:finch` set to a proxy and `:stream_pool_protocols` changed, and with a host-started `ReqLLM.Finch` configured differently, the call still uses Loopex's pool. After `prepare_request`, the final request has `max_retries` 0, `redirect` false, and `finch` options equal to Loopex's fixed list for the provider. A 429, a 529 and a `:closed` transport error are each sent exactly once; a redirect response is not followed; no response is cached |
 | Credentials stay out of Loopex's planes | With each provider's variable set to a canary, a run with tool calls, a provider error reply, and a caller crash raised inside a Req step whose exception embeds the request leaves the canary in no committed record, event, progress item, diagnostic or trace entry, in no runtime, coordinator or owner state or mailbox, in no owner crash report, and in no log line Loopex emits; the caller is sensitive and excluded from a runtime trace session; no provider variable reaches a tool process |
-| Its cleanup owns what can return a result | On both toolchain pairs, against a local `http` test server that stalls before its response headers, mid-body and after the body: a stop, a deadline and a normal completion each leave the caller dead before the acknowledgement or the returned reply, the owner answers while the caller is blocked in socket I/O, and no reply reaches the coordinator after acknowledgement. After one warming call, a census during a second call finds exactly the owner and the caller as new processes. The Finch pool serves the next call. A caller whose exit a test seam withholds takes the unproved path |
+| Its cleanup owns what can return a result | On both toolchain pairs, against a local `http` HTTP/1 test server and a local TLS HTTP/2 test server built in test support from OTP `:ssl` and Mint's frame codec, each stalling before its response headers, mid-body and after the body: a stop, a deadline and a normal completion each leave the caller dead before the acknowledgement or the returned reply, the owner answers while the caller is blocked, and no reply reaches the coordinator after acknowledgement. On HTTP/1 the pool closes the killed caller's connection; on HTTP/2 the killed caller's stream is cancelled by the pool no later than the call's deadline. Over HTTP/2 an `x-api-key` canary is in the connection's dynamic table after a call and gone after the connection is replaced at its maximum age, and an `authorization` canary is never stored. After one warming call, a census during a second HTTP/1 call finds exactly the owner and the caller as new processes. A caller whose exit a test seam withholds takes the unproved path |
 | Hygiene holds | `:req_llm` is started by no application start while the escript embeds its modules, and a fixture release built with `req_llm: :load` boots without starting it. A `.env` in the working directory is not loaded. Each row of the start table; two concurrent first compositions starting it once; a later composition proceeding, including after `loopex_composition` restarts; a host restart of ReqLLM loading no `.env`; a host turning loading back on, then refused; `warn_unverified_models` never written |
 | The companion path is unchanged | Every companion suite passes after the shared mapping is extracted; the durable profile refuses an `ollama:` model |
 | The profile is ephemeral and says so | After a proved stop, or its caller exiting, no file remains under the profile's temporary root. The result carries `profile: :ephemeral`, and `ask`'s JSON carries `"profile"` |
