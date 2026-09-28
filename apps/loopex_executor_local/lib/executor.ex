@@ -1388,6 +1388,32 @@ defmodule Loopex.Executor.Local do
       is_integer(expiry) and System.monotonic_time() < expiry
   end
 
+  # Concept: a test can hold an already-admitted effect immediately after its
+  # final session check so cleanup must account for that exact in-flight work.
+  # Technical depth: production has no pause; the test-only observer is monitored
+  # and its death cannot turn a failed test into a later physical effect.
+  if Mix.env() == :test do
+    defp pause_after_session_fence(options, effect) do
+      case Keyword.get(options, :test_after_session_fence) do
+        {observer, reference, ^effect} when is_pid(observer) and is_reference(reference) ->
+          monitor = Process.monitor(observer)
+          send(observer, {:session_effect_fence_checked, self(), reference, effect})
+
+          receive do
+            {^reference, :continue} -> :ok
+            {:DOWN, ^monitor, :process, ^observer, _reason} -> exit(:test_barrier_owner_down)
+          end
+
+          Process.demonitor(monitor, [:flush])
+
+        _ ->
+          :ok
+      end
+    end
+  else
+    defp pause_after_session_fence(_options, _effect), do: :ok
+  end
+
   defp session_open(%{session: nil}), do: :ok
 
   defp session_open(%{session: %{owner: owner, cell: cell}, dispatch_cell: dispatch_cell}) do
@@ -3981,15 +4007,18 @@ defmodule Loopex.Executor.Local do
          deadline,
          {_monitor, lease_pid},
          limits,
-         _options
+         options
        ) do
     session_fence = Process.get(:loopex_session_fence)
 
     case bounded_guardian_with_remaining(
            fn ->
-             if session_effect_open?(session_fence),
-               do: filesystem_effect(workspace, arguments, limits),
-               else: {:cancelled, "the ephemeral session closed before this tool began"}
+             if session_effect_open?(session_fence) do
+               pause_after_session_fence(options, :filesystem)
+               filesystem_effect(workspace, arguments, limits)
+             else
+               {:cancelled, "the ephemeral session closed before this tool began"}
+             end
            end,
            fn -> fence_remaining(deadline) end,
            lease_pid,
@@ -4842,6 +4871,8 @@ defmodule Loopex.Executor.Local do
       close_waiting_guard(port, token)
       throw({:loopex_prelaunch_refused, job.job_id, cause})
     else
+      pause_after_session_fence(options, :shell)
+
       unless safe_port_command(port, "#{@guard_run}:#{token}\n") do
         close_waiting_guard(port, token)
         throw({:loopex_prelaunch_refused, job.job_id, :launch_guard_unavailable})

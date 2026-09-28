@@ -74,6 +74,118 @@ defmodule Loopex.Executor.LocalTest do
     refute File.exists?(Path.join(fixture.workspace, "sealed-tool.txt"))
   end
 
+  test "drain cannot prove an admitted filesystem effect paused after its final fence" do
+    cell = :atomics.new(2, signed: false)
+    generation = make_ref()
+    instance = make_ref()
+
+    fixture =
+      fixture("session-final-fence",
+        session_owner: self(),
+        session_generation: generation,
+        session_instance: instance,
+        session_cell: cell,
+        session_admission: {SessionHost, self(), generation, cell}
+      )
+
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "final-fence", "loopex.write")
+    barrier = make_ref()
+    parent = self()
+
+    effect =
+      Task.async(fn ->
+        Local.execute(fixture.executor, job, grant,
+          test_after_session_fence: {parent, barrier, :filesystem}
+        )
+      end)
+
+    assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
+    assert_receive {:session_effect_fence_checked, worker, ^barrier, :filesystem}, 2_000
+    monitor = Process.monitor(worker)
+
+    try do
+      :atomics.put(cell, 1, 1)
+      refute File.exists?(Path.join(fixture.workspace, "final-fence.txt"))
+      deadline = System.monotonic_time() + System.convert_time_unit(2_000, :millisecond, :native)
+
+      assert {:error, :process_groups_unproved} =
+               Local.drain_process_groups(
+                 fixture.executor,
+                 instance,
+                 self(),
+                 make_ref(),
+                 deadline
+               )
+
+      refute File.exists?(Path.join(fixture.workspace, "final-fence.txt"))
+    after
+      send(worker, {barrier, :continue})
+    end
+
+    assert {:ok, %{outcome: :completed, cleanup_confirmation: :confirmed}} =
+             Task.await(effect, 5_000)
+
+    assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
+    assert File.read!(Path.join(fixture.workspace, "final-fence.txt")) == "bytes-final-fence"
+  end
+
+  test "drain cannot prove a shell launch paused after its final fence" do
+    cell = :atomics.new(2, signed: false)
+    generation = make_ref()
+    instance = make_ref()
+
+    fixture =
+      fixture("session-shell-fence",
+        session_owner: self(),
+        session_generation: generation,
+        session_instance: instance,
+        session_cell: cell,
+        session_admission: {SessionHost, self(), generation, cell}
+      )
+
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "shell-fence", "loopex.demo.write")
+    barrier = make_ref()
+    parent = self()
+
+    effect =
+      Task.async(fn ->
+        Local.execute(fixture.executor, job, grant,
+          test_after_session_fence: {parent, barrier, :shell}
+        )
+      end)
+
+    assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
+    assert_receive {:session_effect_fence_checked, worker, ^barrier, :shell}, 5_000
+    monitor = Process.monitor(worker)
+
+    try do
+      :atomics.put(cell, 1, 1)
+      refute File.exists?(Path.join(fixture.workspace, "shell-fence.txt"))
+      deadline = System.monotonic_time() + System.convert_time_unit(3_000, :millisecond, :native)
+
+      assert {:error, :process_groups_unproved} =
+               Local.drain_process_groups(
+                 fixture.executor,
+                 instance,
+                 self(),
+                 make_ref(),
+                 deadline
+               )
+
+      refute File.exists?(Path.join(fixture.workspace, "shell-fence.txt"))
+    after
+      send(worker, {barrier, :continue})
+    end
+
+    assert {:ok, %{outcome: :cancelled, cleanup_confirmation: :confirmed}} =
+             Task.await(effect, 5_000)
+
+    assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
+    refute File.exists?(Path.join(fixture.workspace, "shell-fence.txt"))
+  end
+
   test "only the live exact executor certifies its completed process groups" do
     cell = :atomics.new(2, signed: false)
     generation = make_ref()
