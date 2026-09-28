@@ -6,8 +6,9 @@
 A session's loop runs a coding task to its end. It runs as many model turns as
 the work needs; every request carries the whole conversation the session has
 committed — the operator's prompt, the model's own prior messages, and the real
-output of every tool it ran; deltas reach the operator while a reply is still
-incomplete; and a named set of tools acts on a real workspace under a host
+output of every tool it ran; the durable reference adapter sends deltas while
+a reply is still incomplete, while the ephemeral in-VM adapter returns one
+buffered reply; and a named set of tools acts on a real workspace under a host
 policy that can refuse. This page is the reference for how that loop orders its
 work, what a tool is, and what bounds, streams, and artifacts promise. How a
 host starts a runtime and drives sessions is in
@@ -314,9 +315,11 @@ effect that reconciliation can complete safely. A successful reply carries a
 closed provider-neutral identity, normalized usage, tool calls, stream facts,
 response identifier, and the exact staged digest; raw provider structures and
 reasons cross no Core, Store, public, progress, diagnostic, or fixture plane.
-The reference adapter runs provider work in a host-owned companion process per
-invocation under
-[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept); its launch
+The durable reference adapter runs provider work in a host-owned companion
+process per invocation under
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept); the
+ephemeral reference adapter uses a buffered host-VM call under
+[ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept). Durable launch
 and credential custody are in
 [the architecture technical depth](architecture-technical.md#technical-arch-brains-hands).
 

@@ -4,15 +4,16 @@
 ## Concept
 
 The Loopex runtime is a headless, single-machine loop that a host program
-starts explicitly. The host supplies a durable local Store, a model adapter, a
-trusted-local executor, the tool definitions, and a host policy; Loopex returns
-a runtime reference that every session operation requires. Nothing is started
-implicitly and there is no global default runtime.
+starts explicitly. The durable profile takes a local Store, a model adapter,
+a trusted-local executor, tool definitions and a host policy, then returns an
+explicit runtime reference. The ephemeral profile composes those boundaries
+with an in-memory Store and a temporary root for one host-owned session;
+neither profile creates a global default runtime.
 
-This page is for an operator running or embedding that runtime directly, and
-for anyone recovering one after a crash. The `loopex` command, the daemon and
-the app server are hosts over this same runtime; if you only want to use the
-command, start with [getting started](getting-started.md) instead.
+This page is for an operator running or embedding either profile directly, and
+for anyone recovering a durable session after a crash. The `loopex` command,
+the daemon and the app server are hosts over the same kernel; if you only want
+to use the command, start with [getting started](getting-started.md) instead.
 
 What you can do here:
 
@@ -22,9 +23,11 @@ What you can do here:
   from the executor's receipt ledger;
 - read the runtime's refusals as the stop conditions they are.
 
-Constraints: one active run per session, one active runtime per Store and
-`runtime_id`, no network transport, remote executor or distribution, and no
-production credential manager. Keeping sessions alive between processes for
+Constraints: one active run per session, no network transport, remote executor
+or distribution, and no production credential manager. The one-active-runtime
+rule applies to each durable Store and `runtime_id`. An ephemeral handle and
+its in-memory conversation end with its host VM or proved stop; it cannot be
+resumed by a later process. Keeping sessions alive between processes for
 several local clients is the job of [the daemon](daemon.md#concept).
 
 Developer composition details:
@@ -43,6 +46,7 @@ or alternate loop.
 | Run the complete loop from this source tree | Available |
 | Use a deterministic model for a credential-free demonstration | Available |
 | Use the ReqLLM adapter with a real provider | Available |
+| Run an ephemeral session with an in-memory Store and an in-VM model call | Available: `LoopexComposition.Ephemeral` |
 | Execute tools in separate operating-system processes | Available |
 | Retain sessions, events and tool receipts, and resume after process loss | Available |
 | Drive sessions with the `loopex` command | Available: [coding sessions](coding-sessions.md#concept) |
@@ -51,8 +55,17 @@ or alternate loop.
 | Install a released package | Not provided |
 | Run a remote executor, network client, or distributed service | Not provided |
 
-The missing surfaces are not hidden routes to the same functionality. Every
-surface that exists drives this one runtime contract rather than a second loop.
+The missing surfaces are not hidden routes to the same functionality. Both
+profiles drive the same kernel loop; only the composition and retention differ.
+
+For an ephemeral embedding, call `LoopexComposition.Ephemeral.start_session/1`
+with an explicit host policy, then `ask/3`, `answer/3`, `history/1` or
+`last_result/1`, and finally `stop_session/1`. `run/2` owns that lifecycle for
+one prompt and returns a result only after cleanup. A successful stop proves
+the session's provider and tool subtree ended. If cleanup cannot be proved,
+`stop_session/1` returns `cleanup_unproved`, retains the temporary root, and
+seals only that session. No later process can resume this profile. Use the
+durable profile when recovery and retained history are required.
 
 <a id="operator-runtime-first-run"></a>
 ## Run the Working Loop
@@ -89,13 +102,16 @@ your own host, follow the
 <a id="operator-runtime-prerequisites"></a>
 ## Before Starting
 
-- Give the runtime one owned state root for the Store log, the executor's
-  receipt ledger and the artifact store, and a separate workspace for the tools.
-  Never point a development or test runtime at real user state.
+- For the durable profile, give the runtime one owned state root for the Store
+  log, the executor's receipt ledger and the artifact store, and a separate
+  workspace for the tools. The ephemeral profile creates its own temporary
+  root and takes no state root. Never point a development or test runtime at
+  real user state.
 - Start only one active runtime for a Store and `runtime_id`. Start a
   replacement only after the previous runtime's operating-system process tree is
   known to be gone or has been stopped.
-- Keep the provider credential in the host. The reference composition reads
+- In the durable profile, keep the provider credential in the host. Its
+  reference composition reads
   `LOOPEX_PROVIDER_API_KEY` once, moves it into private custody and removes it
   from the process environment; a second composition in the same
   operating-system process refuses with `provider_credential_required` rather
@@ -103,6 +119,12 @@ your own host, follow the
   commands, Store data, executor jobs, receipts, events, diagnostics, fixtures
   or logs. Where it does go is described under
   [credential boundary](tools-and-policy.md#operator-tools-credential).
+- In the ephemeral profile, a selected hosted-provider key is visible to the
+  host VM and its HTTP/TLS path during the call; host-installed observers and
+  authorized tools may also expose ambient values. Loopex does not put the
+  selected key in its own journal or diagnostics, but this is not structural
+  secrecy from trusted host code. See
+  [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept).
 - The trusted-local executor is not a sandbox. It runs only its registered
   tools beneath a held workspace lease, and each tool process receives an
   explicit environment containing only `PATH`. See
@@ -114,7 +136,7 @@ your own host, follow the
 <a id="operator-runtime-lifecycle"></a>
 ## Operating Lifecycle
 
-The reference composition, `LoopexComposition.start/1` or
+The durable reference composition, `LoopexComposition.start/1` or
 `LoopexComposition.with_runtime/2`, performs the first three steps in this order
 and the last one in reverse. A host composing its own stack follows the same
 order.

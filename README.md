@@ -54,11 +54,14 @@ experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.
   skills reach the model only after an explicit admission decision. They are
   budgeted, provenance-typed data and never a grant of authority. Downloaded
   skill files carry no permissions.
-- **A provider boundary that keeps the credential out of the session.** Model
-  calls go through a provider-neutral boundary. The reference adapter runs the
-  provider in a private companion process that receives the credential over a
-  bootstrap channel. Credentials never enter journals, events, progress or
-  diagnostics.
+- **Two provider profiles.** Model calls go through one provider-neutral
+  boundary. Durable sessions use a private companion process for the selected
+  credential. Ephemeral sessions call the provider in the host VM; during a
+  call, its HTTP/TLS state and host-installed observers can see that value.
+  Loopex keeps the selected key out of its own journal and diagnostics, but a
+  host-authorized tool can disclose ambient credentials. See
+  [ADR 0039](docs/adr/0039-ephemeral-embedded-profile.md#concept) for this
+  profile's trust and cleanup limits.
 - **Honest tool execution.** Every tool job is a durable operation with
   attempts, fencing tokens and receipts. The trusted local executor supervises
   each command's process group and reports exactly what it could confirm.
