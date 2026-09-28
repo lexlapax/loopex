@@ -19,19 +19,24 @@ expect_refusal() {
   [ "$status" -eq 2 ] || fail "selector refusal returned $status"
 }
 release_select
-for row in 1 2 3 4 5 6 7 8 9; do release_selected "real-provider-$row" || fail "full omitted row $row"; done
+for row in 1 2 3 4 5 6 7 8 9 10 11; do release_selected "real-provider-$row" || fail "full omitted row $row"; done
 release_selected node_client && release_selected long_bound && release_selected cross_uid || fail 'full omitted a group'
 release_select --only real_provider --only real-provider-5 --only long_bound
 count=0
-for row in 1 2 3 4 5 6 7 8 9; do
+for row in 1 2 3 4 5 6 7 8 9 10 11; do
   if release_selected "real-provider-$row"; then count=$((count + 1)); fi
 done
-[ "$count" -eq 7 ] || fail 'unattended provider union is not seven rows'
+[ "$count" -eq 9 ] || fail 'unattended provider union is not nine rows'
 if release_selected node_client || release_selected cross_uid; then fail 'selection expanded into other groups'; fi
 release_needs_node || fail 'provider group omitted Node-dependent rows'
 release_select --only real-provider-5
 release_needs_provider || fail 'provider row omitted credential preflight'
 if release_needs_node; then fail 'provider row 5 spuriously requires Node'; fi
+release_select --only real-provider-10
+if release_needs_provider || release_needs_node; then fail 'local Ollama row has unrelated preflights'; fi
+release_select --only real-provider-11
+release_needs_provider || fail 'hosted ephemeral row omitted credential preflight'
+if release_needs_node; then fail 'hosted ephemeral row spuriously requires Node'; fi
 release_select --only long_bound
 if release_needs_provider || release_needs_node; then fail 'long_bound has unrelated preflights'; fi
 release_select --only node_client
@@ -41,7 +46,7 @@ expect_refusal --only
 expect_refusal --only rollback
 expect_refusal --only real-provider-1
 expect_refusal --only real-provider-2
-expect_refusal --only real-provider-10
+expect_refusal --only real-provider-12
 expect_refusal --only node_client --only node_client
 expect_refusal --help
 
@@ -191,7 +196,7 @@ preflight() {
     [ ! -e "$entry" ] || fail 'preflight created release staging'
   done
 }
-for selector in rollback real-provider-1 real-provider-2 real-provider-10; do
+for selector in rollback real-provider-1 real-provider-2 real-provider-12; do
   preflight 2 --only "$selector"
   [ ! -s "$RELEASE_TEST_MARKER" ] || fail 'invalid selector reached Node or staging'
 done
@@ -203,6 +208,8 @@ grep -q 'LOOPEX_PROVIDER_API_KEY is required' "$work/preflight-output" || fail '
 [ ! -s "$RELEASE_TEST_MARKER" ] || fail 'missing credential reached Node or staging'
 preflight 77 --only long_bound
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'long_bound queried Node or refused the absent credential'
+preflight 77 --only real-provider-10
+[ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'local Ollama row queried Node or required a credential'
 preflight 77 --only node_client
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nstaging')" ] || fail 'node_client preflight selection is wrong'
 RELEASE_TEST_CREDENTIAL=synthetic
@@ -212,6 +219,8 @@ preflight 77 --only real-provider-4
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nstaging')" ] || fail 'provider row 4 omitted Node'
 preflight 77 --only real-provider-9
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nstaging')" ] || fail 'provider row 9 omitted Node'
+preflight 77 --only real-provider-11
+[ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'hosted ephemeral row spuriously queried Node'
 preflight 77
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nstaging')" ] || fail 'full preflight changed'
 unset RELEASE_TEST_CREDENTIAL

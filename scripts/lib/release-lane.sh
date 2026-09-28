@@ -8,7 +8,7 @@ release_select() {
     [ "$1" = --only ] && [ "$#" -ge 2 ] ||
       { echo 'check-release: usage: check-release.sh [--only NAME ...]' >&2; return 2; }
     case "$2" in
-      real_provider | node_client | long_bound | cross_uid | real-provider-[3-9]) ;;
+      real_provider | node_client | long_bound | cross_uid | real-provider-[3-9] | real-provider-10 | real-provider-11) ;;
       real-provider-1 | real-provider-2)
         echo 'check-release: attended rows cannot be selected; run the full closure matrix' >&2
         return 2 ;;
@@ -27,7 +27,7 @@ release_selected() {
   [ "$release_mode" = full ] && return 0
   case " $release_selectors " in *" $1 "*) return 0 ;; esac
   case "$1" in
-    real-provider-[3-9])
+    real-provider-[3-9] | real-provider-10 | real-provider-11)
       case " $release_selectors " in *' real_provider '*) return 0 ;; esac ;;
   esac
   return 1
@@ -35,7 +35,7 @@ release_selected() {
 
 release_needs_provider() {
   local row
-  for row in 1 2 3 4 5 6 7 8 9; do
+  for row in 1 2 3 4 5 6 7 8 9 11; do
     release_selected "real-provider-$row" && return 0
   done
   return 1

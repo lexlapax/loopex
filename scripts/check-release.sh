@@ -6,7 +6,7 @@
 # on Linux, the cross-UID witness. An
 # unchanged-source release reuses that evidence and does not run this command
 # again. It needs a provider credential in LOOPEX_PROVIDER_API_KEY, which
-# reaches only the nine manifest test processes and is never printed. It also
+# reaches only the credentialed manifest test processes and is never printed. It also
 # needs the Node version pinned in scripts/fixtures/m4/client-toolchain.txt
 # and, on Linux, a second unprivileged user named in LOOPEX_CROSS_UID_USER that
 # the current user may run a command as with `sudo -n`. Output streams as it
@@ -65,6 +65,10 @@ printf 'check-release: open-file limit %s\n' "$(ulimit -Sn)"
 # credential-consuming case runs in its own operating-system process that
 # inherits it once; every other lane runs with the name removed.
 with_credential() { env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
+with_ephemeral_credential() {
+  env -u OPENAI_API_KEY -u OPENROUTER_API_KEY \
+    ANTHROPIC_API_KEY="$LOOPEX_PROVIDER_API_KEY" "$@"
+}
 without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
 # The wrapper self-check plants a synthetic value and reports only whether each
 # wrapper's child sees the name, never a value.
@@ -76,9 +80,17 @@ without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHR
   export LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
   probe='if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then echo present; else echo absent; fi'
   seen=$(with_credential sh -c "$probe")
+  hosted=$(with_ephemeral_credential sh -c '
+    if [ "$ANTHROPIC_API_KEY" = "$LOOPEX_PROVIDER_API_KEY" ] &&
+       [ -z "${OPENAI_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+      echo selected
+    else
+      echo invalid
+    fi')
   unseen=$(without_credential sh -c "$probe")
-  printf 'check-release: credential self-check: manifest=%s other=%s\n' "$seen" "$unseen"
-  [ "$seen" = present ] && [ "$unseen" = absent ]
+  printf 'check-release: credential self-check: durable=%s ephemeral=%s other=%s\n' \
+    "$seen" "$hosted" "$unseen"
+  [ "$seen" = present ] && [ "$hosted" = selected ] && [ "$unseen" = absent ]
 ) || { echo 'check-release: credential wrapper self-check RED' >&2; exit 1; }
 
 # The fresh-source lane: stage the exact candidate with `git archive` into a
@@ -152,12 +164,14 @@ loopex_reference_client|test/end_to_end_recovery_test.exs|one real-provider trac
 loopex_reference_client|test/real_model_session_test.exs|one real non-streaming model call receives the committed canonical request bytes and digest and completes inside a session
 loopex_daemon|test/external_socket_workflow_real_test.exs|a controller and observer complete the documented daemon workflow against a real provider
 loopex_cli|test/multi_client_workflow_real_test.exs|a Node observer takes over from a killed CLI controller and a real provider answers it
+loopex_cli|test/ask_real_test.exs|ephemeral ask answers from a local Ollama model through a separate process
+loopex_composition|test/ephemeral_real_test.exs|the embedded API answers in-process from Anthropic with the release credential
 EOF
-release_manifest_valid "$manifest" "$tree" 9
+release_manifest_valid "$manifest" "$tree" 11
 rows=0
 selected_rows=0
 expected_rows=0
-for row in 1 2 3 4 5 6 7 8 9; do
+for row in 1 2 3 4 5 6 7 8 9 10 11; do
   if release_selected "real-provider-$row"; then expected_rows=$((expected_rows + 1)); fi
 done
 # The manifest is read on descriptor 3: the lanes keep the terminal as their
@@ -170,10 +184,15 @@ while IFS='|' read -r -u 3 app file name; do
   line=${definitions%%:*}
   if release_selected "real-provider-$rows"; then
     selected_rows=$((selected_rows + 1))
-    lane "real-provider-$rows" "$app" 1 with_credential mix test "$file:$line" --only real_provider
+    case "$rows" in
+      10) credential_mode=without_credential ;;
+      11) credential_mode=with_ephemeral_credential ;;
+      *) credential_mode=with_credential ;;
+    esac
+    lane "real-provider-$rows" "$app" 1 "$credential_mode" mix test "$file:$line" --only real_provider
   fi
 done 3<"$manifest"
-[ "$rows" -eq 9 ] || { printf 'check-release: the manifest contains %s rows, expected 9\n' "$rows" >&2; exit 1; }
+[ "$rows" -eq 11 ] || { printf 'check-release: the manifest contains %s rows, expected 11\n' "$rows" >&2; exit 1; }
 [ "$selected_rows" -eq "$expected_rows" ] ||
   { printf 'check-release: the manifest ran %s selected rows, expected %s\n' "$selected_rows" "$expected_rows" >&2; exit 1; }
 printf 'check-release: manifest rows=%s selected=%s\n' "$rows" "$selected_rows"
@@ -196,6 +215,8 @@ if release_selected long_bound; then
   for app in $long_bound_apps; do
     lane "long-bound-$app" "$app" nonzero without_credential mix test --only long_bound
   done
+  lane long-bound-loopex_llm_reqllm loopex_llm_reqllm 1 without_credential \
+    mix test test/in_process_transport_drain_test.exs --only long_bound
 fi
 
 # The cross-UID witness needs Linux's peer credential and a second user. Its
