@@ -52,6 +52,12 @@ defmodule LoopexCli do
   """
   @spec main([binary()]) :: no_return()
   def main([command | _rest] = argv) when command in ["ask", "-p"] do
+    # Concept: a standalone ask prints only its own result in either profile.
+    # Technical depth: Logger startup reloads its app level, so persist :none
+    # before any profile starts it and set the live primary level as well.
+    :ok = Application.put_env(:logger, :level, :none)
+    :ok = :logger.set_primary_config(:level, :none)
+
     if ask_json?(argv), do: Notice.silence_ask_json()
 
     argv

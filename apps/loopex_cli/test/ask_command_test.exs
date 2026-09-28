@@ -323,6 +323,8 @@ defmodule LoopexCli.AskCommandTest do
       end
     ]
     if mode in ["one-shot", "one-shot-text"] do
+      :ok = Application.stop(:logger)
+      :ok = Application.put_env(:logger, :level, :debug)
       Process.put({LoopexCli.Ask, :test_seams}, seams)
       LoopexCli.main(System.argv())
     else
