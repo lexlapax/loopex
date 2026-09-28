@@ -1413,7 +1413,9 @@ defmodule Loopex.Executor.Local do
   end
 
   defp cancel_group_jobs(executor, jobs) do
-    if Enum.all?(jobs, &(cancel(executor, &1) == {:ok, :cleaned})),
+    results = Enum.map(jobs, &cancel(executor, &1))
+
+    if Enum.all?(results, &(&1 == {:ok, :cleaned})),
       do: :ok,
       else: {:error, :job_cancel_unconfirmed}
   end
