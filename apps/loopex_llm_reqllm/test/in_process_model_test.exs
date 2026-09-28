@@ -1,0 +1,158 @@
+defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
+  use ExUnit.Case, async: false
+
+  alias Loopex.LLM.ReqLLM.InProcess
+  alias Loopex.LLM.ReqLLM.InProcess.Caller
+  alias Loopex.Model
+
+  setup_all do
+    previously_started? =
+      Enum.any?(Application.started_applications(), fn {application, _, _} ->
+        application == :req_llm
+      end)
+
+    previous_dotenv = Application.get_env(:req_llm, :load_dotenv, :not_set)
+    Application.put_env(:req_llm, :load_dotenv, false)
+    {:ok, _started} = Application.ensure_all_started(:req_llm)
+
+    on_exit(fn ->
+      unless previously_started?, do: Application.stop(:req_llm)
+
+      if previous_dotenv == :not_set,
+        do: Application.delete_env(:req_llm, :load_dotenv),
+        else: Application.put_env(:req_llm, :load_dotenv, previous_dotenv)
+    end)
+
+    :ok
+  end
+
+  defp request(model) do
+    {:ok, request} =
+      Model.request(model, [%{"role" => "user", "content" => "hello"}],
+        sampling: %{"max_tokens" => 16},
+        deadline: System.system_time(:millisecond) + 10_000
+      )
+
+    request
+  end
+
+  test "preflight selects each provider without resolving its selected key" do
+    for {model, provider, variable, surfaces} <- [
+          {"ollama:qwen3:14b", :ollama, nil, [:ollama_chat_completions]},
+          {"openai:gpt-4o-mini", :openai, "OPENAI_API_KEY",
+           [:openai_chat_completions, :openai_responses]},
+          {"anthropic:claude-sonnet-4-5", :anthropic, "ANTHROPIC_API_KEY", [:anthropic_messages]},
+          {"openrouter:openai/gpt-4o-mini", :openrouter, "OPENROUTER_API_KEY",
+           [:openrouter_chat_completions]}
+        ] do
+      assert {:ok, prepared} = InProcess.preflight(request(model), nil)
+      assert prepared.provider == provider
+      assert prepared.credential_variable == variable
+      assert prepared.surface in surfaces
+      assert String.starts_with?(prepared.base_url, "http")
+      refute Map.has_key?(prepared, :api_key)
+      refute Map.has_key?(prepared, :credential)
+      assert is_map(prepared.identity)
+      assert prepared.identity.endpoint == prepared.base_url
+    end
+  end
+
+  test "preflight refuses changed committed bytes, unsupported providers and unsafe addresses" do
+    original = request("ollama:small")
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} =
+             InProcess.preflight(%{original | staged_request_digest: <<0::256>>}, nil)
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} =
+             InProcess.preflight(request("other:model"), nil)
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} =
+             InProcess.preflight(request("openai:gpt-4o-mini"), "http://api.openai.com/v1")
+  end
+
+  test "preflight normalizes the explicit address and refuses host Req defaults" do
+    assert {:ok, prepared} =
+             InProcess.preflight(request("ollama:small"), "http://LOCALHOST:11434/v1///")
+
+    assert prepared.base_url == "http://localhost:11434/v1"
+
+    previous = Application.get_env(:req, :default_options, :not_set)
+
+    try do
+      Application.put_env(:req, :default_options, finch: :alternate)
+
+      assert {:error, {:not_dispatched, "model_call_failed"}} =
+               InProcess.preflight(request("ollama:small"), nil)
+    after
+      if previous == :not_set,
+        do: Application.delete_env(:req, :default_options),
+        else: Application.put_env(:req, :default_options, previous)
+    end
+  end
+
+  test "sensitive caller waits for both exact messages and refuses a missing trace grant" do
+    {:ok, prepared} = InProcess.preflight(request("ollama:small"), nil)
+    cell = :atomics.new(2, signed: false)
+    call_ref = make_ref()
+    input_ref = make_ref()
+    tag = make_ref()
+
+    arguments = %{
+      owner: self(),
+      callback: self(),
+      ref: call_ref,
+      input_ref: input_ref,
+      tag: tag,
+      cell: cell,
+      trace_capability: :invalid,
+      pool_timeout: 1
+    }
+
+    {caller, monitor} = spawn_monitor(fn -> Caller.run(arguments) end)
+    assert_receive {:in_process_caller_ready, ^caller, ^call_ref}, 1_000
+
+    send(caller, {:in_process_caller_begin, self(), call_ref, make_ref()})
+    send(caller, {:in_process_caller_input, self(), call_ref, input_ref, prepared})
+    refute_receive {^caller, ^call_ref, _result, _instant}, 50
+
+    send(caller, {:in_process_caller_begin, self(), call_ref, input_ref})
+
+    assert_receive {^caller, ^call_ref, {:error, {:not_dispatched, "model_call_failed"}},
+                    finished_at},
+                   1_000
+
+    assert is_integer(finished_at)
+    assert Process.alive?(caller)
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^caller, :killed}, 1_000
+  end
+
+  test "begin before input does not dispatch and callback loss ends the caller" do
+    owner = self()
+    callback = spawn(fn -> receive do: (:stop -> :ok) end)
+    cell = :atomics.new(2, signed: false)
+    call_ref = make_ref()
+    input_ref = make_ref()
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        Caller.run(%{
+          owner: owner,
+          callback: callback,
+          ref: call_ref,
+          input_ref: input_ref,
+          tag: make_ref(),
+          cell: cell,
+          trace_capability: :invalid,
+          pool_timeout: 1
+        })
+      end)
+
+    assert_receive {:in_process_caller_ready, ^caller, ^call_ref}, 1_000
+    send(caller, {:in_process_caller_begin, owner, call_ref, input_ref})
+    refute_receive {^caller, ^call_ref, _result, _instant}, 50
+    send(callback, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
+    refute_receive {^caller, ^call_ref, _result, _instant}, 50
+  end
+end

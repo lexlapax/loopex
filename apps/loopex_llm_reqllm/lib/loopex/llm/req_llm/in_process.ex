@@ -1,0 +1,350 @@
+defmodule Loopex.LLM.ReqLLM.InProcess do
+  @moduledoc """
+  ## Concept
+
+  Prepare one ephemeral model request without reading a provider credential.
+
+  ## Technical depth
+
+  This is the credential-free half of the in-VM model edge. It validates the
+  committed request, fixed provider, host configuration, address, context and
+  tool definitions. It does not grant work or implement the Model port until
+  the cleanup owner's active handoff can own the entire call lifecycle.
+  """
+
+  alias Loopex.LLM.ReqLLM.InProcess.{Guards, Route}
+  alias Loopex.LLM.ReqLLM.Mapping
+  alias Loopex.Model
+
+  @failed {:error, {:not_dispatched, "model_call_failed"}}
+
+  @doc false
+  def preflight(request, base_url) do
+    with :ok <- Model.validate_request(request),
+         {:ok, model} <- Guards.model(request.model),
+         :ok <- Guards.call(model.provider),
+         {:ok, address} <- Route.base_url(model.provider, base_url),
+         {:ok, context} <- Mapping.context_of(request),
+         {:ok, tools} <- Mapping.provider_tools(Model.model_facing_tools(request)),
+         {:ok, inline_model} <-
+           ReqLLM.model(%{provider: model.provider, id: model.model_id, base_url: address}),
+         {:ok, surface} <- probe_surface(model.provider, inline_model, request, tools, address) do
+      {:ok,
+       %{
+         request: request,
+         context: context,
+         tools: tools,
+         provider: model.provider,
+         model_id: model.model_id,
+         credential_variable: model.credential_variable,
+         base_url: address,
+         surface: surface,
+         identity: %{
+           provider: Atom.to_string(model.provider),
+           model: model.model_id,
+           endpoint: address
+         }
+       }}
+    else
+      _refused -> @failed
+    end
+  rescue
+    _error -> @failed
+  catch
+    _class, _reason -> @failed
+  end
+
+  defp probe_surface(:ollama, _model, _request, _tools, _address),
+    do: {:ok, :ollama_chat_completions}
+
+  defp probe_surface(:openrouter, _model, _request, _tools, _address),
+    do: {:ok, :openrouter_chat_completions}
+
+  defp probe_surface(_provider, model, request, tools, address) do
+    options = [
+      max_tokens: Model.max_tokens(request),
+      tools: tools,
+      total_timeout: :infinity,
+      receive_timeout: :infinity,
+      max_retries: 0,
+      base_url: address
+    ]
+
+    case ReqLLM.plan(model, :chat, options) do
+      {:ok, %{surface: surface}}
+      when surface in [:anthropic_messages, :openai_chat_completions, :openai_responses] ->
+        {:ok, surface}
+
+      _other ->
+        @failed
+    end
+  end
+end
+
+defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
+  @moduledoc """
+  ## Concept
+
+  Keep a provider credential inside one sensitive, owner-controlled call process.
+
+  ## Technical depth
+
+  This is the sole sensitive MFA for the in-VM adapter. The owner must already
+  have started and recorded the tagged pool before it sends the matching begin
+  message. The caller reports a fixed result and native completion instant,
+  then remains alive for owner-controlled teardown. No successful Model port
+  entrypoint invokes it until the active cleanup-owner handoff is implemented.
+  """
+
+  alias Loopex.LLM.ReqLLM.InProcess.{Guards, Route}
+  alias Loopex.LLM.ReqLLM.Mapping
+  alias Loopex.Model
+
+  @not_dispatched {:error, {:not_dispatched, "model_call_failed"}}
+  @unknown {:error, {:dispatched_or_unknown, "model_call_failed"}}
+  @header_namespace Loopex.LLM.ReqLLM.InProcess
+
+  @doc false
+  def run(%{
+        owner: owner,
+        callback: callback,
+        ref: ref,
+        input_ref: input_ref,
+        tag: tag,
+        cell: cell,
+        trace_capability: capability,
+        pool_timeout: pool_timeout
+      })
+      when is_pid(owner) and is_pid(callback) and is_reference(ref) and
+             is_reference(input_ref) and is_reference(tag) and
+             is_integer(pool_timeout) and pool_timeout in 1..1_000 do
+    Process.flag(:sensitive, true)
+    Logger.put_process_level(self(), :none)
+    owner_monitor = Process.monitor(owner)
+    callback_monitor = Process.monitor(callback)
+    send(owner, {:in_process_caller_ready, self(), ref})
+
+    case await_input(owner, callback, ref, input_ref, owner_monitor, callback_monitor) do
+      {:ok, prepared} ->
+        result =
+          try do
+            with true <- :atomics.get(cell, 1) == 0,
+                 :ok <- Guards.call(prepared.provider),
+                 :ok <-
+                   Loopex.Trace.exclude_self(capability,
+                     functions: [{__MODULE__, :run, 1}]
+                   ),
+                 {:ok, fingerprint} <-
+                   Route.fingerprint(
+                     prepared.provider,
+                     prepared.surface,
+                     prepared.base_url
+                   ),
+                 {:ok, inline_model} <-
+                   ReqLLM.model(%{
+                     provider: prepared.provider,
+                     id: prepared.model_id,
+                     base_url: prepared.base_url
+                   }) do
+              http_options = [
+                adapter: Loopex.LLM.ReqLLM.OneShotHTTP1,
+                redirect: false,
+                finch: [name: Req.Finch, pool_tag: tag, pool_timeout: pool_timeout],
+                finch_private: %{loopex_one_shot: {owner, tag, fingerprint}}
+              ]
+
+              planning_options = [
+                max_tokens: Model.max_tokens(prepared.request),
+                tools: prepared.tools,
+                total_timeout: :infinity,
+                receive_timeout: :infinity,
+                max_retries: 0,
+                base_url: prepared.base_url,
+                req_http_options: http_options
+              ]
+
+              planned =
+                case prepared.provider do
+                  :ollama ->
+                    prepared.surface == :ollama_chat_completions
+
+                  :openrouter ->
+                    prepared.surface == :openrouter_chat_completions
+
+                  _hosted ->
+                    case ReqLLM.plan(inline_model, :chat, planning_options) do
+                      {:ok, %{surface: surface}} -> surface == prepared.surface
+                      _other -> false
+                    end
+                end
+
+              if planned and :atomics.get(cell, 1) == 0 and
+                   Guards.call(prepared.provider) == :ok do
+                variable = prepared.credential_variable
+                credential = if is_binary(variable), do: System.get_env(variable), else: nil
+
+                if is_nil(variable) or
+                     (is_binary(credential) and byte_size(credential) in 1..65_536) do
+                  options =
+                    if is_nil(variable),
+                      do: planning_options,
+                      else: [{:api_key, credential} | planning_options]
+
+                  header_key = {@header_namespace, :response_headers, tag}
+                  Process.delete(header_key)
+
+                  try do
+                    case ReqLLM.generate_text(inline_model, prepared.context, options) do
+                      {:ok, %ReqLLM.Response{} = response} ->
+                        metadata = %{
+                          usage: response.usage || %{},
+                          finish_reason: response.finish_reason,
+                          headers: Process.get(header_key, [])
+                        }
+
+                        metadata =
+                          if is_nil(response.error),
+                            do: metadata,
+                            else: Map.put(metadata, :error, response.error)
+
+                        with :ok <- Mapping.completed(metadata),
+                             {:ok, calls} <- Mapping.bounded_calls(response),
+                             text when is_binary(text) <- ReqLLM.Response.text(response) || "" do
+                          reply =
+                            Mapping.reply(
+                              prepared.request,
+                              prepared.identity,
+                              metadata,
+                              text,
+                              calls,
+                              0
+                            )
+
+                          # An exact selected-key occurrence in any nested
+                          # binary field refuses the entire mapped reply.
+                          has_key = fn scan, value ->
+                            cond do
+                              is_nil(credential) ->
+                                false
+
+                              is_binary(value) ->
+                                :binary.match(value, credential) != :nomatch
+
+                              is_map(value) ->
+                                Enum.any?(value, fn {key, member} ->
+                                  scan.(scan, key) or scan.(scan, member)
+                                end)
+
+                              is_list(value) ->
+                                Enum.any?(value, &scan.(scan, &1))
+
+                              is_tuple(value) ->
+                                value |> Tuple.to_list() |> Enum.any?(&scan.(scan, &1))
+
+                              true ->
+                                false
+                            end
+                          end
+
+                          if has_key.(has_key, reply), do: @unknown, else: {:ok, reply}
+                        else
+                          _invalid -> @unknown
+                        end
+
+                      _other ->
+                        @unknown
+                    end
+                  rescue
+                    _error -> @unknown
+                  catch
+                    _class, _reason -> @unknown
+                  after
+                    Process.delete(header_key)
+                  end
+                else
+                  @not_dispatched
+                end
+              else
+                @not_dispatched
+              end
+            else
+              _refused -> @not_dispatched
+            end
+          rescue
+            _error -> @not_dispatched
+          catch
+            _class, _reason -> @not_dispatched
+          end
+
+        send(owner, {self(), ref, result, System.monotonic_time(:native)})
+
+        receive do
+          {:DOWN, ^owner_monitor, :process, ^owner, _reason} -> :ok
+        end
+
+      :down ->
+        :ok
+    end
+  end
+
+  defp await_input(owner, callback, ref, input_ref, owner_monitor, callback_monitor) do
+    await_input(owner, callback, ref, input_ref, owner_monitor, callback_monitor, nil, false)
+  end
+
+  defp await_input(
+         _owner,
+         _callback,
+         _ref,
+         _input_ref,
+         _owner_monitor,
+         _callback_monitor,
+         prepared,
+         true
+       )
+       when is_map(prepared),
+       do: {:ok, prepared}
+
+  defp await_input(
+         owner,
+         callback,
+         ref,
+         input_ref,
+         owner_monitor,
+         callback_monitor,
+         prepared,
+         begun
+       ) do
+    receive do
+      {:in_process_caller_input, ^callback, ^ref, ^input_ref, input}
+      when is_map(input) and is_nil(prepared) ->
+        await_input(
+          owner,
+          callback,
+          ref,
+          input_ref,
+          owner_monitor,
+          callback_monitor,
+          input,
+          begun
+        )
+
+      {:in_process_caller_begin, ^owner, ^ref, ^input_ref} when not begun ->
+        await_input(
+          owner,
+          callback,
+          ref,
+          input_ref,
+          owner_monitor,
+          callback_monitor,
+          prepared,
+          true
+        )
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        :down
+
+      {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
+        :down
+    end
+  end
+end
