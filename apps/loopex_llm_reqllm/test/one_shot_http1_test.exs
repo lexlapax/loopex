@@ -17,6 +17,24 @@ defmodule Loopex.LLM.ReqLLM.OneShotHTTP1Test do
     assert output =~ "TLS_FIXTURE_VERIFIED"
   end
 
+  test "TLS 1.2 positive control resumes but two one-shot calls do not" do
+    {output, status} = Loopex.LLM.ReqLLM.InProcessTLSFixture.run_resumption_in_child(:tls12)
+    assert status == 0, output
+    assert output =~ "TLS_tls12_NO_RESUMPTION_VERIFIED"
+  end
+
+  test "TLS 1.3 manual-ticket positive control resumes but two one-shot calls do not" do
+    {output, status} = Loopex.LLM.ReqLLM.InProcessTLSFixture.run_resumption_in_child(:tls13)
+    assert status == 0, output
+    assert output =~ "TLS_tls13_NO_RESUMPTION_VERIFIED"
+  end
+
+  test "TLS cache probe survives actual roleless client recovery" do
+    {output, status} = Loopex.LLM.ReqLLM.InProcessTLSFixture.run_cache_recovery_in_child()
+    assert status == 0, output
+    assert output =~ "TLS_CACHE_ROLELESS_RECOVERY_VERIFIED"
+  end
+
   test "one real HTTP dispatch uses the recorded worker and waits for subtree teardown" do
     fixture = fixture("response", hold_teardown: true)
     request = request(fixture, String.duplicate("q", 70_000))

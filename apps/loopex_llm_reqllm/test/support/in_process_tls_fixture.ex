@@ -47,6 +47,33 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
     )
   end
 
+  def run_resumption_in_child(protocol) when protocol in [:tls12, :tls13] do
+    run_probe_in_child("resumption_probe()", "--loopex-tls-#{protocol}")
+  end
+
+  def run_cache_recovery_in_child do
+    run_probe_in_child("cache_recovery_probe()", "--loopex-tls-cache-recovery")
+  end
+
+  defp run_probe_in_child(entry, marker) do
+    System.cmd(
+      System.find_executable("elixir"),
+      [
+        "-pa",
+        Path.expand("../../../../_build/test/lib/*/ebin", __DIR__),
+        "-r",
+        Path.expand("tls_session_cache_probe.ex", __DIR__),
+        "-r",
+        __ENV__.file,
+        "-e",
+        "Loopex.LLM.ReqLLM.InProcessTLSFixture.#{entry}",
+        "--",
+        marker
+      ],
+      stderr_to_stdout: true
+    )
+  end
+
   @doc """
   ## Concept
 
@@ -118,6 +145,244 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
   @doc """
   ## Concept
 
+  Prove that the fixture server can resume TLS while the production call cannot.
+
+  ## Technical depth
+
+  The positive control and two one-shot production calls share one listener,
+  hostname, port and TLS version. Only the server restricts protocol versions.
+  The TLS 1.2 control waits for both cache writes before its sole reconnect;
+  the TLS 1.3 control uses the exact ticket delivered to its first socket.
+  """
+  def resumption_probe do
+    protocol =
+      case System.argv() do
+        ["--loopex-tls-tls12"] -> :tls12
+        ["--loopex-tls-tls13"] -> :tls13
+      end
+
+    nonce = make_ref()
+    if protocol == :tls12, do: install_cache_probe(nonce, false)
+    {:ok, _} = Application.ensure_all_started(:req_llm)
+
+    with_test_ca(fn trusted ->
+      listener = resumption_listener(trusted, protocol)
+      {:ok, {_, port}} = :ssl.sockname(listener)
+
+      if protocol == :tls12,
+        do: Application.put_env(:ssl, :loopex_tls_probe_target, {"localhost", port})
+
+      test = self()
+      server = spawn(fn -> accept_resumption(listener, test) end)
+
+      try do
+        case protocol do
+          :tls12 -> tls12_control(port, nonce)
+          :tls13 -> tls13_control(port)
+        end
+
+        assert_handshake(2, true)
+
+        for index <- 3..4 do
+          fixture =
+            start_request(
+              listener,
+              port,
+              server,
+              "localhost",
+              :openai,
+              :openai_responses,
+              "/responses"
+            )
+
+          assert {_, %Req.Response{body: "tls response", status: 200}} =
+                   OneShotHTTP1.run(fixture.request)
+
+          assert_handshake(index, false)
+          gone(fixture)
+          send(fixture.owner, :stop)
+        end
+
+        assert_receive {:tls_resumption_server_done, ^server}, 5_000
+        IO.puts("TLS_#{protocol}_NO_RESUMPTION_VERIFIED")
+      after
+        :ssl.close(listener)
+      end
+    end)
+  end
+
+  @doc """
+  ## Concept
+
+  Prove that the TLS 1.2 cache callback survives OTP's real roleless recovery.
+
+  ## Technical depth
+
+  This separate child VM arms a one-shot client `size/1` fault. A real
+  handshake triggers registration and recovery; a second real handshake must
+  still install a client session through the reinitialized delegate.
+  """
+  def cache_recovery_probe do
+    assert System.argv() == ["--loopex-tls-cache-recovery"]
+    nonce = make_ref()
+    install_cache_probe(nonce, true)
+    {:ok, _} = Application.ensure_all_started(:req_llm)
+    assert_receive {:tls_cache_fault_armed, ^nonce, manager}, 5_000
+    assert_receive {:tls_cache_client_init, ^nonce, ^manager, true}, 5_000
+
+    with_test_ca(fn trusted ->
+      listener = resumption_listener(trusted, :tls12)
+      {:ok, {_, port}} = :ssl.sockname(listener)
+      Application.put_env(:ssl, :loopex_tls_probe_target, {"localhost", port})
+      test = self()
+      server = spawn(fn -> accept_control_only(listener, test, 2) end)
+
+      try do
+        mint_control(port)
+        assert_handshake(1, false)
+        assert_receive {:tls_cache_fault_triggered, ^nonce, ^manager}, 5_000
+        assert_receive {:tls_cache_reinit, ^nonce, :client, ^manager, true}, 5_000
+        assert_receive {:tls_cache_client_init, ^nonce, ^manager, false}, 5_000
+        mint_control(port)
+        assert_handshake(2, false)
+        assert_receive {:tls_cache_saved, ^nonce, :client}, 5_000
+        assert_receive {:tls_resumption_server_done, ^server}, 5_000
+        IO.puts("TLS_CACHE_ROLELESS_RECOVERY_VERIFIED")
+      after
+        :ssl.close(listener)
+      end
+    end)
+  end
+
+  defp install_cache_probe(nonce, fault) do
+    probe = LoopexLLMReqLLMTest.TLSSessionCacheProbe
+    Application.put_env(:ssl, :client_session_cb, probe)
+    Application.put_env(:ssl, :server_session_cb, probe)
+
+    Application.put_env(:ssl, :client_session_cb_init_args,
+      observer: self(),
+      nonce: nonce,
+      fault: fault
+    )
+
+    Application.put_env(:ssl, :server_session_cb_init_args, observer: self(), nonce: nonce)
+
+    if String.to_integer(to_string(:erlang.system_info(:otp_release))) < 29 do
+      Application.put_env(:ssl, :session_cb, probe)
+
+      Application.put_env(:ssl, :session_cb_init_args,
+        observer: self(),
+        nonce: nonce,
+        fault: fault
+      )
+    end
+  end
+
+  defp with_test_ca(fun) do
+    trusted = certificate()
+
+    directory =
+      Path.join(System.tmp_dir!(), "loopex-resumption-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(directory)
+
+    try do
+      ca_path = Path.join(directory, "ca.pem")
+
+      pem =
+        :public_key.pem_encode(Enum.map(trusted[:cacerts], &{:Certificate, &1, :not_encrypted}))
+
+      File.write!(ca_path, pem)
+      :ok = :public_key.cacerts_load(String.to_charlist(ca_path))
+      fun.(trusted)
+    after
+      File.rm_rf!(directory)
+    end
+  end
+
+  defp resumption_listener(trusted, protocol) do
+    options = [
+      :binary,
+      active: false,
+      reuseaddr: true,
+      cert: trusted[:cert],
+      key: trusted[:key],
+      versions: [if(protocol == :tls12, do: :"tlsv1.2", else: :"tlsv1.3")]
+    ]
+
+    options = if protocol == :tls13, do: options ++ [session_tickets: :stateful], else: options
+    {:ok, listener} = :ssl.listen(0, options)
+    listener
+  end
+
+  defp tls12_control(port, nonce) do
+    mint_control(port)
+    assert_handshake(1, false)
+    assert_receive {:tls_cache_saved, ^nonce, :client}, 5_000
+    assert_receive {:tls_cache_saved, ^nonce, :server}, 5_000
+    mint_control(port)
+  end
+
+  defp mint_control(port) do
+    {:ok, connection} = Mint.HTTP.connect(:https, "localhost", port)
+    {:ok, _closed} = Mint.HTTP.close(connection)
+  end
+
+  defp tls13_control(port) do
+    options = [
+      :binary,
+      active: true,
+      verify: :verify_peer,
+      cacerts: :public_key.cacerts_get(),
+      server_name_indication: ~c"localhost",
+      session_tickets: :manual
+    ]
+
+    {:ok, first} = :ssl.connect(~c"localhost", port, options, 5_000)
+    assert_handshake(1, false)
+
+    ticket =
+      receive do
+        {:ssl, :session_ticket, value} when is_map(value) -> value
+      after
+        5_000 -> flunk("TLS 1.3 fixture did not deliver a session ticket")
+      end
+
+    :ok = :ssl.close(first)
+    {:ok, second} = :ssl.connect(~c"localhost", port, options ++ [use_ticket: [ticket]], 5_000)
+    :ok = :ssl.close(second)
+  end
+
+  defp assert_handshake(index, expected) do
+    assert_receive {:tls_handshake, ^index, ^expected}, 5_000
+  end
+
+  defp accept_resumption(listener, test) do
+    accept_control_only(listener, test, 4)
+  end
+
+  defp accept_control_only(listener, test, count) do
+    for index <- 1..count do
+      {:ok, transport} = :ssl.transport_accept(listener, 10_000)
+      {:ok, socket} = :ssl.handshake(transport, 10_000)
+      {:ok, info} = :ssl.connection_information(socket, [:session_resumption])
+      send(test, {:tls_handshake, index, Keyword.fetch!(info, :session_resumption)})
+
+      if index >= 3 do
+        _headers = read_headers(socket, "")
+        :ok = :ssl.send(socket, "HTTP/1.1 200 OK\r\ncontent-length: 12\r\n\r\ntls response")
+      end
+
+      assert {:error, :closed} = :ssl.recv(socket, 0, 10_000)
+      :ok = :ssl.close(socket)
+    end
+
+    send(test, {:tls_resumption_server_done, self()})
+  end
+
+  @doc """
+  ## Concept
+
   Generate fixture-only certificate material for verified localhost TLS tests.
 
   ## Technical depth
@@ -150,6 +415,11 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
     {:ok, {_, port}} = :ssl.sockname(listener)
     test = self()
     server = spawn(fn -> accept(listener, test) end)
+    start_request(listener, port, server, hostname, provider, surface, endpoint)
+  end
+
+  defp start_request(listener, port, server, hostname, provider, surface, endpoint) do
+    test = self()
     base = "https://#{hostname}:#{port}"
     tag = make_ref()
     {:ok, fingerprint} = Route.fingerprint(provider, surface, base)
