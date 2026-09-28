@@ -295,6 +295,11 @@ The shipped app server reads its launch inputs from the environment —
 
 ```bash
 MIX_ENV=prod mix compile
+export LOOPEX_HOME="$(mktemp -d)"
+export LOOPEX_WORKSPACE="$(mktemp -d)"
+export LOOPEX_PROVIDER_LAUNCH="$PWD/_build/prod/loopex_provider.launch"
+export LOOPEX_POLICY=allow-all
+: "${LOOPEX_PROVIDER_API_KEY:?supply this through your host secret manager}"
 ELIXIR_ERL_OPTIONS=-noinput ERL_LIBS=_build/prod/lib elixir -e "Loopex.AppServer.Host.serve()"
 ```
 

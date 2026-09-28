@@ -52,7 +52,7 @@ it to work on:
 ```text
 MIX_ENV=prod mix cmd --app loopex_cli mix escript.build
 cd ~/code/my-project
-~/code/loopex/apps/loopex_cli/bin/loopex run --policy allow-all "add a changelog entry for the parser fix"
+"$HOME/src/loopex/apps/loopex_cli/bin/loopex" run --policy allow-all "add a changelog entry for the parser fix"
 ```
 
 The build writes the `loopex` escript beside the application and builds its
