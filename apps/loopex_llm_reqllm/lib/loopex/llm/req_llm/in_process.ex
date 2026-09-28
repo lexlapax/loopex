@@ -220,8 +220,10 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                               0
                             )
 
-                          # An exact selected-key occurrence in any nested
-                          # binary field refuses the entire mapped reply.
+                          # The request identity and canonical request bytes
+                          # are host inputs, not a provider echo. Only fields
+                          # controlled by the provider can trigger this
+                          # selected-key reply refusal.
                           has_key = fn scan, value ->
                             cond do
                               is_nil(credential) ->
@@ -246,7 +248,12 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                             end
                           end
 
-                          if has_key.(has_key, reply), do: @unknown, else: {:ok, reply}
+                          provider_fields =
+                            Map.take(reply, [:text, :tool_calls, :provider_response_id])
+
+                          if has_key.(has_key, provider_fields),
+                            do: @unknown,
+                            else: {:ok, reply}
                         else
                           _invalid -> @unknown
                         end
