@@ -45,6 +45,7 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
       run_id = "run-#{Process.get(:event_sequence) + 1}"
       Process.put(:run_id, run_id)
       Process.put(:unending, command.content == "unending")
+      Process.put(:defer_twice, command.content == "question-twice")
 
       enqueue(%{
         :kind => "user.message_appended",
@@ -57,7 +58,7 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
         command.content in ["slow", "unending"] ->
           :ok
 
-        command.content == "question" ->
+        command.content in ["question", "question-twice"] ->
           enqueue(%{
             :kind => "interaction.requested",
             "run_id" => run_id,
@@ -94,13 +95,34 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
     def command(_attachment, %{type: :interaction_answer} = command) do
       run_id = Process.get(:run_id)
 
-      enqueue(%{
-        :kind => "assistant.message_appended",
-        "run_id" => run_id,
-        "content" => "choice: " <> command.choice_id
-      })
+      if Process.get(:defer_twice) and
+           command.interaction_id in ["interaction-1", "interaction-2"] do
+        {next_id, next_turn, next_call, choice_id, label} =
+          case command.interaction_id do
+            "interaction-1" -> {"interaction-2", 2, "call-2", "continue", "Continue"}
+            "interaction-2" -> {"interaction-3", 3, "call-3", "proceed", "Proceed"}
+          end
 
-      finish(run_id, "completed")
+        enqueue(%{
+          :kind => "interaction.requested",
+          "run_id" => run_id,
+          "interaction_id" => next_id,
+          "turn" => next_turn,
+          "tool_call_id" => next_call,
+          "prompt" => "Continue once more?",
+          "choices" => [%{"id" => choice_id, "label" => label}],
+          "expires_at" => 1_800_000_000
+        })
+      else
+        enqueue(%{
+          :kind => "assistant.message_appended",
+          "run_id" => run_id,
+          "content" => "choice: " <> command.choice_id
+        })
+
+        finish(run_id, "completed")
+      end
+
       {:accepted, command.command_id}
     end
 
@@ -310,6 +332,40 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
 
     assert {:ok, %{text: "choice: yes", outcome: :completed}} =
              Ephemeral.answer(session, "interaction-1", "yes")
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "an answer may return the next question without releasing the run", %{tmp: tmp} do
+    session = start_private_session(tmp, ScriptedFacade)
+
+    assert {:error, {:interaction_pending, %{"interaction_id" => "interaction-1"}}} =
+             Ephemeral.ask(session, "question-twice")
+
+    assert {:error,
+            {:interaction_pending,
+             %{
+               "interaction_id" => "interaction-2",
+               "choices" => [%{"id" => "continue", "label" => "Continue"}]
+             }}} = Ephemeral.answer(session, "interaction-1", "yes")
+
+    assert {:error, :run_open} = Ephemeral.ask(session, "second prompt")
+
+    assert {:error, :invalid_interaction_answer} =
+             Ephemeral.answer(session, "interaction-1", "yes")
+
+    assert {:error,
+            {:interaction_pending,
+             %{
+               "interaction_id" => "interaction-3",
+               "choices" => [%{"id" => "proceed", "label" => "Proceed"}]
+             }}} = Ephemeral.answer(session, "interaction-2", "continue")
+
+    assert {:error, :invalid_interaction_answer} =
+             Ephemeral.answer(session, "interaction-2", "continue")
+
+    assert {:ok, %{text: "choice: proceed", outcome: :completed}} =
+             Ephemeral.answer(session, "interaction-3", "proceed")
 
     assert :ok = Ephemeral.stop_session(session)
   end

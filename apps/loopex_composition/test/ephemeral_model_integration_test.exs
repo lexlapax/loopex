@@ -11,6 +11,22 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     def decide(_request), do: {:allow, nil}
   end
 
+  defmodule DeferringPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl true
+    def decide(_request) do
+      {:defer,
+       %{
+         kind: :choice,
+         prompt: "May the tool list this workspace?",
+         choices: [%{id: "allow", label: "Allow once"}],
+         expires_in_ms: 60_000
+       }}
+    end
+  end
+
   test "a real in-process model turn retires custody before a second ask and stop" do
     root = Path.join(System.tmp_dir!(), "loopex-model-#{System.unique_integer([:positive])}")
     File.mkdir!(root)
@@ -91,6 +107,103 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert first_request =~ "POST /v1/chat/completions HTTP/1.1"
     assert_receive {:model_request, second_request}, 15_000
     assert second_request =~ "needle.txt"
+  end
+
+  test "one-call embedding refuses an unanswered tool question after proved cleanup" do
+    root = Path.join(System.tmp_dir!(), "loopex-deferral-#{System.unique_integer([:positive])}")
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    port = start_server([{:tool, "ls", %{"path" => "."}}])
+    prior_roots = ephemeral_roots()
+
+    assert {:error, :interaction_requires_session} =
+             Ephemeral.run("list the workspace",
+               policy: DeferringPolicy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :read_only,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert_receive {:model_request, request}, 15_000
+    assert request =~ "POST /v1/chat/completions HTTP/1.1"
+    assert MapSet.difference(ephemeral_roots(), prior_roots) == MapSet.new()
+  end
+
+  test "a declared turn ceiling stops a tool run before another model call" do
+    root = Path.join(System.tmp_dir!(), "loopex-turn-bound-#{System.unique_integer([:positive])}")
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    port = start_server([{:tool, "ls", %{"path" => "."}}, "unexpected second call"])
+
+    assert {:error,
+            {:run, :bound_reached,
+             %{
+               details: %{"bound" => "max_turns", "observed" => 1, "declared_limit" => 1},
+               tools: [%{tool_id: "loopex.ls", outcome: "completed"}]
+             }}} =
+             Ephemeral.run("list once",
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :read_only,
+               max_steps: 1,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert_receive {:model_request, request}, 15_000
+    assert request =~ "POST /v1/chat/completions HTTP/1.1"
+    refute_receive {:model_request, _second}, 300
+  end
+
+  test "a failed tool call is carried into the next real model request" do
+    root =
+      Path.join(System.tmp_dir!(), "loopex-tool-failed-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    port = start_server([{:tool, "ls", %{"path" => 42}}, "recovered after tool failure"])
+
+    assert {:ok, %{outcome: :completed, text: "recovered after tool failure", tools: [tool]}} =
+             Ephemeral.run("list the workspace",
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :read_only,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert tool.tool_id == "loopex.ls"
+    assert tool.outcome == "failed"
+    assert_receive {:model_request, first_request}, 15_000
+    assert first_request =~ "POST /v1/chat/completions HTTP/1.1"
+    assert_receive {:model_request, second_request}, 15_000
+    messages = request_body(second_request)["messages"]
+
+    assert [%{"role" => "tool", "tool_call_id" => "call_loopex_1", "content" => content}] =
+             Enum.filter(messages, &(&1["role"] == "tool"))
+
+    assert content =~ "failed"
+    assert content =~ "invalid_tool_arguments"
+  end
+
+  defp ephemeral_roots do
+    System.tmp_dir!()
+    |> Path.join("loopex-*")
+    |> Path.wildcard()
+    |> Enum.filter(&(Path.basename(&1) =~ ~r/\Aloopex-[0-9a-f]{64}\z/))
+    |> MapSet.new()
+  end
+
+  defp request_body(request) do
+    [_headers, body] = :binary.split(request, "\r\n\r\n")
+    JSON.decode!(body)
   end
 
   test "a tool reply arriving after stop starts no effect and leaves a peer session usable" do
@@ -227,8 +340,8 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
       end)
 
     on_exit(fn ->
-      :gen_tcp.close(listener)
       if Process.alive?(server), do: Process.exit(server, :kill)
+      :gen_tcp.close(listener)
     end)
 
     {port, server}
@@ -243,30 +356,36 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
 
     server =
       spawn(fn ->
-        for answer <- answers do
-          {:ok, socket} = :gen_tcp.accept(listener, 15_000)
-          {:ok, request} = read_request(socket, <<>>)
-          send(parent, {:model_request, request})
-          Process.sleep(delay_ms)
-          body = response(answer)
+        Enum.reduce_while(answers, :ok, fn answer, :ok ->
+          case :gen_tcp.accept(listener, 15_000) do
+            {:ok, socket} ->
+              {:ok, request} = read_request(socket, <<>>)
+              send(parent, {:model_request, request})
+              Process.sleep(delay_ms)
+              body = response(answer)
 
-          :ok =
-            :gen_tcp.send(socket, [
-              "HTTP/1.1 200 OK\r\n",
-              "content-type: application/json\r\n",
-              "content-length: ",
-              Integer.to_string(byte_size(body)),
-              "\r\nconnection: close\r\n\r\n",
-              body
-            ])
+              :ok =
+                :gen_tcp.send(socket, [
+                  "HTTP/1.1 200 OK\r\n",
+                  "content-type: application/json\r\n",
+                  "content-length: ",
+                  Integer.to_string(byte_size(body)),
+                  "\r\nconnection: close\r\n\r\n",
+                  body
+                ])
 
-          :gen_tcp.close(socket)
-        end
+              :gen_tcp.close(socket)
+              {:cont, :ok}
+
+            {:error, :closed} ->
+              {:halt, :ok}
+          end
+        end)
       end)
 
     on_exit(fn ->
-      :gen_tcp.close(listener)
       if Process.alive?(server), do: Process.exit(server, :kill)
+      :gen_tcp.close(listener)
     end)
 
     port
