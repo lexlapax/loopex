@@ -22,7 +22,7 @@ The umbrella's declared dependencies are the whole of the direction claim:
 | `loopex` | `:core` | `loopex_protocol`, `telemetry ~> 1.3` |
 | `loopex_store_local` | `:edge` | `loopex` |
 | `loopex_executor_local` | `:edge` | `loopex` |
-| `loopex_llm_reqllm` | `:edge` | `req_llm ~> 1.24.0`, `loopex`, `loopex_protocol` |
+| `loopex_llm_reqllm` | `:edge` | `req_llm ~> 1.24.0`, `req == 0.7.4`, `finch == 0.23.0` (all `runtime: false`); `loopex`, `loopex_protocol` |
 | `loopex_telemetry` | `:edge` | `loopex`, `telemetry ~> 1.3` |
 | `loopex_composition` | `:composition` | `loopex`, `loopex_protocol`, `loopex_store_local`, `loopex_llm_reqllm`, `loopex_executor_local` |
 | `loopex_reference_client` | `:client` | `loopex`; the three edges `only: :test` |
@@ -51,14 +51,18 @@ The rules it applies per role, as the module states them:
 | `:host` | The client rule, and additionally no dependency on another host. |
 | `:extension` | Depends inward only on the production contract application. |
 
-External dependencies are compared as an exact set rather than counted. The
-admitted set is `{:req_llm, "~> 1.24.0"}` in `loopex_llm_reqllm` and
-`{:telemetry, "~> 1.3"}` in `loopex` and in `loopex_telemetry`; a different
-application declaring one of those names, a widened requirement, or any third
-name refuses. `:telemetry` is a pure-Erlang library with no dependencies of its
-own, admitted by [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept)
-and the recorded vision change, and it is resolved through the canonical
-`mix.lock` like ReqLLM. The client-to-contract production edge lets
+External direct dependencies are compared as an exact set rather than counted.
+The admitted set is `{:req_llm, "~> 1.24.0", runtime: false}`,
+`{:req, "== 0.7.4", runtime: false}` and
+`{:finch, "== 0.23.0", runtime: false}` in `loopex_llm_reqllm`, plus
+`{:telemetry, "~> 1.3"}` in `loopex` and `loopex_telemetry`. The three provider
+edge dependencies are load-only, not automatically started. A different
+application declaring one of those names, a changed requirement or runtime
+option, or any other external direct dependency refuses. `:telemetry` is a
+pure-Erlang library with no dependencies of its own, admitted by
+[ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) and the
+recorded vision change, and it is resolved through the canonical `mix.lock`
+like the provider edge dependencies. The client-to-contract production edge lets
 `loopex_app_server` and `loopex_daemon` declare the schema application they
 speak, under
 [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept). Both

@@ -94,10 +94,14 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 | Unknown | Review first identifies the touched boundaries, then runs the union of their selected unattended release lanes; unresolved impact blocks merge, rather than treating a partial run as closure evidence |
 
 Pass each selection as `--only NAME`, repeating the option to combine lanes.
-`real_provider` selects every current unattended real-provider row;
-`real-provider-3` through `real-provider-9` select one exact row. The other
-names are `node_client`, `long_bound` and `cross_uid`. Unknown names, missing
-names, duplicate names and the two attended rows refuse before staging.
+`real_provider` selects all nine unattended real-provider rows (3 through 11);
+`real-provider-3` through `real-provider-11` select one exact row. The other
+names are `node_client`, `long_bound`, `cross_uid` and `rollback`. Rows 1 and 2
+are attended and cannot be selected. Row 10 exercises local Ollama without a
+provider credential; row 11 exercises the hosted ephemeral profile with one.
+`long_bound` includes the ReqLLM transport-drain proof, and `rollback`
+compares the released `v0.2.0` and candidate archives without a credential or
+Node. Unknown names, missing names and duplicate names refuse before staging.
 Selections run the shared fresh-source build first. They require a provider
 credential or pinned Node only when the selected cases need it. A selected
 `cross_uid` lane requires Linux and refuses elsewhere. A successful selection

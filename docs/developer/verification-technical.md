@@ -117,27 +117,32 @@ was already selected; a group plus one of its rows is an ordinary union.
 
 | Name | Selected cases |
 | --- | --- |
-| `real_provider` | Manifest rows 3 through 9, all current unattended real-provider cases |
-| `real-provider-3` through `real-provider-9` | Exactly the named current manifest row |
+| `real_provider` | Manifest rows 3 through 11, all nine current unattended real-provider cases |
+| `real-provider-3` through `real-provider-11` | Exactly the named current manifest row |
 | `node_client` | The Node client cases in app server, protocol, daemon and CLI |
-| `long_bound` | The current long-bound cases in core, local executor and daemon |
+| `long_bound` | The current long-bound cases in core, local executor and daemon, plus the ReqLLM transport-drain case |
 | `cross_uid` | The daemon's two Linux cross-UID cases |
+| `rollback` | The released `v0.2.0` and candidate archive compatibility lane |
 
 Rows 1 and 2 are attended and cannot be selected individually. Unknown names,
 missing names, duplicate names and any other argument refuse with exit 2
 before repository checks, temporary-directory creation, builds or networking.
-The entire manifest still must contain exactly nine uniquely defined rows;
-the executed subset must match its selected row count. Future M6 real-provider
-rows and `rollback` are not admitted until their actual witnesses exist.
+The entire manifest must contain exactly eleven uniquely defined rows; the
+executed subset must match its selected row count.
 
-Selected real-provider rows require `LOOPEX_PROVIDER_API_KEY`. Node is required
-for `node_client`, provider row 4 and provider row 9. Other selections impose
-neither precondition. The full run retains both preconditions. An explicitly
-selected `cross_uid` refuses outside Linux before staging. Every selection
-keeps the fresh-source extraction and build, then runs only its selected test
-lanes. Its final line is `PASS (selection-only: not full closure evidence)`.
-The unchanged no-option command still runs the attended rows and every group;
-outside Linux it reports the existing closure-incomplete result.
+Provider rows 1 through 9 and 11 require `LOOPEX_PROVIDER_API_KEY`; row 10
+uses local Ollama with provider credential variables removed. Row 11 maps the
+release credential to `ANTHROPIC_API_KEY` and removes the other hosted-provider
+keys for its test process. Node is required for `node_client`, provider row 4
+and provider row 9. The `rollback` selection requires the recorded `v0.2.0`
+closure tag, then stages archives of that commit and the candidate. It needs
+neither a credential nor Node. The full run retains both credential and Node
+preconditions. An explicitly selected `cross_uid` refuses outside
+Linux before staging. Every selection keeps the fresh-source extraction and
+build, then runs only its selected test lanes. Its final line is
+`PASS (selection-only: not full closure evidence)`. The unchanged no-option
+command still runs the attended rows and every group; outside Linux it reports
+the existing closure-incomplete result.
 
 The runner sources `scripts/lib/release-lane.sh`; the fixture command
 `bash scripts/test/check-release-test.sh` executes that same parser and lane

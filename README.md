@@ -149,8 +149,8 @@ without entering the kernel.
 
 - **Four layers:** a versioned protocol, a pure session core, an OTP session
   runtime, and replaceable edges (model adapters, stores, executors,
-  transports, clients). The core application depends on the Elixir/Erlang
-  standard runtime only.
+  transports, clients). The core application uses the Elixir/Erlang standard
+  runtime and declares only the external `:telemetry` event dispatcher.
 - **Durable sessions:** a private recovery journal plus a small stable
   public-event vocabulary, snapshots, and transient progress — distinct
   planes with distinct guarantees. Restart replays; clients reconnect from
