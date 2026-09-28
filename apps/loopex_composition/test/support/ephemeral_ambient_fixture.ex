@@ -8,8 +8,10 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
   ## Technical depth
 
   The child trusts only a generated localhost CA and uses a synthetic provider
-  value. One case holds a provider-only TLS call while inspecting the session
-  owner, coordinator and Store, then inspects their settled state and planes.
+  value. One case starts a named trace before creating the session, arms the
+  exact hosted caller while it is blocked before exclusion, and holds its TLS
+  call while inspecting trace membership, owner, coordinator and Store. It
+  then inspects their settled state and planes.
   The other drives two TLS calls around a host-authorized read tool effect;
   its policy deliberately copies the ambient value to a workspace file.
   The fixture reports no credential or request bytes to the parent.
@@ -17,6 +19,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
 
   import ExUnit.Assertions
   alias LoopexComposition.Ephemeral
+  alias LoopexComposition.Ephemeral.{OwnerActivation, Preflight, SessionOwner}
 
   @credential "synthetic-ambient-boundary-value"
 
@@ -71,8 +74,11 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       System.delete_env("LOOPEX_PROVIDER_API_KEY")
 
       case mode do
-        :disclosure -> disclosure_case(certificate, workspace)
-        :provider_only -> provider_only_case(certificate, workspace)
+        :disclosure ->
+          disclosure_case(certificate, workspace)
+
+        :provider_only ->
+          provider_only_case(certificate, workspace)
       end
     after
       File.rm_rf!(directory)
@@ -105,8 +111,8 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
   defp provider_only_case(certificate, workspace) do
     {port, server} = start_server(certificate, [answer_reply("provider-only answer")], true)
 
-    assert {:ok, {:loopex_ephemeral_session, owner, _cell} = session} =
-             Ephemeral.start_session(
+    assert {:ok, configuration} =
+             Preflight.prepare(
                policy: Policy,
                model: "openai:gpt-4",
                base_url: "https://localhost:#{port}",
@@ -116,6 +122,41 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
                timeout: 20_000
              )
 
+    observer = self()
+
+    runtime_start = fn options ->
+      with {:ok, runtime} <-
+             Loopex.Runtime.start_link(Keyword.put(options, :diagnostics_to, observer)),
+           {:ok, %{level: :arguments, sink: :diagnostics}} <-
+             Loopex.trace(runtime, %{
+               modules: [
+                 Loopex.Runtime.Control,
+                 Loopex.LLM.ReqLLM.InProcess,
+                 Loopex.LLM.ReqLLM.InProcess.Caller,
+                 ReqLLM,
+                 Req,
+                 Finch.HTTP1.Pool,
+                 Mint.HTTP1,
+                 :ssl
+               ],
+               level: :arguments,
+               sink: :diagnostics
+             }) do
+        {:ok, runtime}
+      end
+    end
+
+    configuration =
+      Map.put(configuration, :test_seams, %{runtime_holder: %{runtime_start: runtime_start}})
+
+    supervisor = Process.whereis(LoopexComposition.Ephemeral.OwnerSupervisor)
+    assert is_pid(supervisor)
+    assert {:ok, activation} = OwnerActivation.start(supervisor)
+    assert {:ok, cell} = OwnerActivation.begin(activation)
+    owner = OwnerActivation.owner(activation)
+    assert {:ok, :session_ready} = SessionOwner.start_session(owner, configuration, 16_000)
+    session = {:loopex_ephemeral_session, owner, cell}
+
     try do
       startup = :sys.get_state(owner).startup
       runtime = startup.registered.runtime
@@ -123,10 +164,98 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       session_id = startup.session_id
       {:ok, children} = Loopex.Runtime.Supervisor.children(runtime.supervisor)
       coordinator = :sys.get_state(children.control).sessions[session_id].coordinator
-      ask = Task.async(fn -> Ephemeral.ask(session, "Answer without tools") end)
+
+      _control = Loopex.session_status(runtime, "trace-control-canary")
+      capability = startup.registered.trace_capability
+      :ok = :sys.suspend(capability)
+
+      {ask, caller, trace_session} =
+        try do
+          ask = Task.async(fn -> Ephemeral.ask(session, "Answer without tools") end)
+          caller = await_caller(owner, System.monotonic_time(:millisecond) + 5_000)
+          assert is_pid(caller)
+
+          assert {:messages, messages} = Process.info(capability, :messages)
+
+          assert Enum.any?(messages, fn
+                   {:"$gen_call", {^caller, _reference},
+                    {:exclude, _incarnation, ^caller, _functions}} ->
+                     true
+
+                   _other ->
+                     false
+                 end)
+
+          [trace_session] =
+            Enum.filter(:trace.session_info(:all), fn
+              {:loopex_trace, id} when is_integer(id) -> true
+              _other -> false
+            end)
+
+          # Concept: exclusion must clear a trace actually armed on this caller.
+          # Technical depth: the sensitive cleanup owner does not pass trace
+          # flags to its child, so arm the exact blocked caller directly.
+          assert 1 = :trace.process(trace_session, caller, true, [:call])
+          assert {:flags, flags} = :trace.info(trace_session, caller, :flags)
+          assert :call in flags
+
+          assert {:traced, :local} =
+                   :trace.info(
+                     trace_session,
+                     {Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1},
+                     :traced
+                   )
+
+          {ask, caller, trace_session}
+        after
+          :ok = :sys.resume(capability)
+        end
 
       assert_receive {:ambient_model_request, ^server, request, true}, 5_000
       refute String.contains?(request, @credential)
+
+      control_state = :sys.get_state(children.control)
+      tracer_state = :sys.get_state(children.tracer)
+
+      assert MapSet.member?(
+               control_state.trace_excluded[caller].functions,
+               {Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1}
+             )
+
+      assert MapSet.member?(tracer_state.excluded_pids, caller)
+
+      assert MapSet.member?(
+               tracer_state.excluded_mfas,
+               {Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1}
+             )
+
+      assert {:flags, []} = :trace.info(trace_session, caller, :flags)
+
+      assert {:traced, false} =
+               :trace.info(
+                 trace_session,
+                 {Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1},
+                 :traced
+               )
+
+      :sys.get_state(children.dispatcher)
+      before_reply = drain_diagnostics([])
+
+      assert Enum.any?(before_reply, fn entry ->
+               entry["kind"] == "trace_call" and
+                 entry["module"] == "Loopex.LLM.ReqLLM.InProcess" and
+                 entry["function"] == "complete" and entry["arity"] == 3 and
+                 entry["pid"] != inspect(caller)
+             end)
+
+      assert Enum.any?(before_reply, fn entry ->
+               entry["kind"] == "trace_call" and
+                 entry["module"] == "Loopex.Runtime.Control" and
+                 String.contains?(inspect(entry), "trace-control-canary")
+             end)
+
+      {:messages, raw_trace_messages} = Process.info(children.tracer, :messages)
+      assert_no_provider_key({raw_trace_messages, :sys.get_state(children.tracer)})
 
       assert_no_provider_key({
         runtime,
@@ -166,6 +295,10 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       })
 
       assert_receive {:ambient_server_done, ^server}, 3_000
+      assert :ok = Loopex.trace_stop(runtime)
+      :sys.get_state(children.tracer)
+      :sys.get_state(children.dispatcher)
+      assert_no_provider_key({before_reply, drain_diagnostics([])})
       IO.puts("EPHEMERAL_PROVIDER_ONLY_EXCLUSION_PASSED")
     after
       send(server, {:ambient_release, self()})
@@ -178,6 +311,34 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
              :nomatch
 
     assert :binary.match(:erlang.term_to_binary(value), @credential) == :nomatch
+  end
+
+  defp drain_diagnostics(entries) do
+    receive do
+      {:loopex_diagnostic, entry} -> drain_diagnostics([entry | entries])
+    after
+      0 -> Enum.reverse(entries)
+    end
+  end
+
+  defp await_caller(owner, deadline) do
+    caller =
+      case :sys.get_state(owner).model_census.pending do
+        %{resources: %{caller: pid}} when is_pid(pid) -> pid
+        _other -> nil
+      end
+
+    cond do
+      is_pid(caller) ->
+        caller
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        nil
+
+      true ->
+        Process.sleep(10)
+        await_caller(owner, deadline)
+    end
   end
 
   defp certificate do

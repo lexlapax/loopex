@@ -41,7 +41,7 @@ defmodule LoopexComposition.Ephemeral.RealTest do
     assert {:ok, session} =
              Ephemeral.start_session(
                policy: Policy,
-               model: Loopex.LLM.ReqLLM.default_model(),
+               model: "anthropic:claude-haiku-4-5",
                cwd: root,
                tools: :read_only,
                max_tokens: 256,
