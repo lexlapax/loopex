@@ -1060,12 +1060,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     case ResourcePack.digest(startup.configuration.skills.manifest) do
       {:ok, digest, %{"packs" => packs}} when is_list(packs) ->
         try do
-          {client, monitor} =
-            FacadeClient.start(
-              self(),
-              startup.registered.runtime,
-              test_facade(startup.configuration)
-            )
+          {client, monitor} = start_facade_client(startup)
 
           process_monitors = Map.put(startup.process_monitors, client, monitor)
 
@@ -1086,6 +1081,23 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
       _ ->
         fail_start(state, :resource_admission_failed, :known)
+    end
+  end
+
+  # Concept: tests can fail client creation after the temporary root exists.
+  # Technical depth: the injected test function runs before any client spawn;
+  # production compiles only the direct FacadeClient call.
+  if Mix.env() == :test do
+    defp start_facade_client(startup) do
+      start =
+        get_in(startup.configuration, [:test_seams, :facade_client_start]) ||
+          (&FacadeClient.start/3)
+
+      start.(self(), startup.registered.runtime, test_facade(startup.configuration))
+    end
+  else
+    defp start_facade_client(startup) do
+      FacadeClient.start(self(), startup.registered.runtime, test_facade(startup.configuration))
     end
   end
 

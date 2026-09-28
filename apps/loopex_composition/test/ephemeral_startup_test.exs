@@ -393,6 +393,43 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     Process.exit(supervisor, :shutdown)
   end
 
+  test "facade client start failure rolls back before create", %{tmp: tmp} do
+    test = self()
+
+    configuration =
+      configuration(tmp, %{
+        facade_client_start: fn _owner, _runtime, _facade ->
+          send(test, :facade_client_start_attempted)
+          raise "scripted facade client start failure"
+        end,
+        runtime_holder: %{
+          runtime_start: fn _options ->
+            send(test, :runtime_started)
+            runtime_supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
+            {:ok, %Runtime{supervisor: runtime_supervisor, token: test}}
+          end
+        },
+        trace_bind: fn _handle, _runtime -> :ok end
+      })
+      |> Map.put(:test_facade, Facade)
+
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+    {:ok, activation} = OwnerActivation.start(supervisor)
+    owner = OwnerActivation.owner(activation)
+    {:ok, cell} = OwnerActivation.begin(activation)
+
+    assert {:error, {:client_start, :failed}} =
+             SessionOwner.start_session(owner, configuration, 6_000)
+
+    assert_receive :runtime_started
+    assert_receive :facade_client_start_attempted
+    refute_received :created
+    assert File.ls!(tmp) == []
+    assert :atomics.get(cell, 1) == 2
+    assert Process.alive?(supervisor)
+    Process.exit(supervisor, :shutdown)
+  end
+
   for {fault, expected_cause} <- [
         {:create, {:session_create, :failed}},
         {:attach, {:attach, :failed}},
