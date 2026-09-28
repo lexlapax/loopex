@@ -14,8 +14,8 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
   Both inputs are the exact NUL-delimited output of the archive's manifest
   producer. Their adjacent `.source-identity` files are ordinary files whose
   bytes must match the corresponding Git commit and manifest entry. Complete
-  kind/mode/path projections must match independent Git trees restricted to the
-  archived paths, then match each other;
+  kind/mode/path projections must cover every independently enumerated Git
+  archive member and match Git-tree modes, then match each other;
   only then are content tuples compared after the documented exclusions. No
   archive or evidence file is written by this task.
   """
@@ -77,10 +77,17 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
                {:ok, {first, second}}
              end
            end),
+         {:ok, {tested_members, admin_members}} <-
+           step("independent archive members", fn ->
+             with {:ok, first} <- archive_members(tested_sha),
+                  {:ok, second} <- archive_members(admin_sha) do
+               {:ok, {first, second}}
+             end
+           end),
          {:ok, _} <-
            step("complete archive projections", fn ->
-             if projection_matches_tree?(tested, tested_tree) and
-                  projection_matches_tree?(admin, admin_tree),
+             if projection_matches_tree?(tested, tested_tree, tested_members) and
+                  projection_matches_tree?(admin, admin_tree, admin_members),
                 do: {:ok, :matched},
                 else: {:error, "an archive kind/mode/path projection differs from its commit"}
            end),
@@ -190,6 +197,51 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
     end
   end
 
+  defp archive_members(sha) do
+    case System.cmd("git", ["archive", "--format=tar", sha]) do
+      {archive, 0} ->
+        case :erl_tar.table({:binary, archive}, [:verbose]) do
+          {:ok, entries} -> archive_paths(entries)
+          {:error, _} -> {:error, "Git archive could not be enumerated"}
+        end
+
+      {_output, _status} ->
+        {:error, "Git archive could not be enumerated"}
+    end
+  rescue
+    _ -> {:error, "Git archive could not be enumerated"}
+  end
+
+  defp archive_paths(entries) do
+    Enum.reduce_while(entries, {:ok, MapSet.new()}, fn entry, {:ok, paths} ->
+      case archive_path(entry) do
+        :metadata ->
+          {:cont, {:ok, paths}}
+
+        {:ok, path} ->
+          if MapSet.member?(paths, path),
+            do: {:halt, {:error, "Git archive has a duplicate path"}},
+            else: {:cont, {:ok, MapSet.put(paths, path)}}
+
+        :invalid ->
+          {:halt, {:error, "Git archive has an unsupported entry"}}
+      end
+    end)
+  end
+
+  defp archive_path({~c"pax_global_header", :unknown, _, _, _, _, _}), do: :metadata
+
+  defp archive_path({name, type, _, _, _, _, _})
+       when type in [:regular, :directory, :symlink] and is_list(name) do
+    path = List.to_string(name)
+
+    if path in ["_build", "deps"] or String.starts_with?(path, ["_build/", "deps/"]),
+      do: :metadata,
+      else: {:ok, path}
+  end
+
+  defp archive_path(_), do: :invalid
+
   defp parse_git_tree(bytes) do
     entries = :binary.split(bytes, <<0>>, [:global]) |> Enum.reject(&(&1 == ""))
 
@@ -219,13 +271,14 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
   defp projection(records),
     do: Map.new(records, fn {kind, mode, path, _} -> {path, {kind, mode}} end)
 
-  defp projection_matches_tree?(records, tree) do
-    Enum.all?(records, fn {kind, mode, path, _} ->
-      case Map.fetch(tree, path) do
-        {:ok, git_entry_mode} -> git_mode(git_entry_mode) == {:ok, {kind, mode}}
-        :error -> false
-      end
-    end)
+  defp projection_matches_tree?(records, tree, members) do
+    MapSet.new(records, &elem(&1, 2)) == members and
+      Enum.all?(records, fn {kind, mode, path, _} ->
+        case Map.fetch(tree, path) do
+          {:ok, git_entry_mode} -> git_mode(git_entry_mode) == {:ok, {kind, mode}}
+          :error -> false
+        end
+      end)
   end
 
   defp identity_matches(records, sidecar, sha) do

@@ -122,6 +122,22 @@ defmodule Loopex.ClosureArchiveCompareTest do
              compare(%{fixture | admin_path: path})
   end
 
+  test "the same omitted shipped path in both manifests fails completeness", fixture do
+    tested_copy = copy_manifest(fixture, fixture.tested_path)
+    admin_copy = copy_manifest(fixture, fixture.admin_path)
+    digest = Base.encode16(:crypto.hash(:sha256, "unchanged source\n"), case: :lower)
+    record = Enum.join(["f", "644", "source.txt", digest, ""], <<0>>)
+
+    for path <- [tested_copy, admin_copy] do
+      bytes = File.read!(path)
+      assert :binary.match(bytes, record) != :nomatch
+      File.write!(path, :binary.replace(bytes, record, ""))
+    end
+
+    assert {:error, "an archive kind/mode/path projection differs from its commit"} =
+             compare(%{fixture | tested_path: tested_copy, admin_path: admin_copy})
+  end
+
   test "truncated framing and duplicate paths refuse", fixture do
     path = copy_manifest(fixture)
     bytes = File.read!(path)
@@ -219,10 +235,11 @@ defmodule Loopex.ClosureArchiveCompareTest do
     end)
   end
 
-  defp copy_manifest(fixture) do
+  defp copy_manifest(fixture, source \\ nil) do
+    source = source || fixture.admin_path
     path = Path.join(fixture.root, "copy-#{System.unique_integer([:positive])}.manifest")
-    File.cp!(fixture.admin_path, path)
-    File.cp!(fixture.admin_path <> ".source-identity", path <> ".source-identity")
+    File.cp!(source, path)
+    File.cp!(source <> ".source-identity", path <> ".source-identity")
     path
   end
 
