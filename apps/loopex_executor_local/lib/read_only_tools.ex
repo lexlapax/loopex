@@ -146,6 +146,7 @@ defmodule Loopex.Executor.Local.ReadOnlyTools do
     end
   end
 
+  defp contained?(path, "/"), do: String.starts_with?(path, "/")
   defp contained?(path, root), do: path == root or String.starts_with?(path, root <> "/")
   defp relative(state, path), do: Path.relative_to(path, state.root)
   defp identity(info), do: {info.major_device, info.inode, info.type}

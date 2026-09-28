@@ -296,6 +296,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     root
   end
 
+  test "the filesystem root contains a descendant path" do
+    root = workspace()
+    requested = Path.relative_to(Path.join(root, "new.txt"), "/")
+
+    assert {:ok, resolved} = CodingTools.resolve("/", requested)
+    assert Path.basename(resolved) == "new.txt"
+  end
+
   defp executor_for(root, artifacts \\ nil) do
     {executor, lease_id, _lease} = executor_and_lease(root, artifacts)
     {executor, lease_id}

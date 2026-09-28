@@ -298,7 +298,10 @@ defmodule Loopex.Executor.Local.CodingTools do
   #
   # Technical depth: comparing the resolved strings with a separator appended
   # stops `/work` from appearing to contain `/workspace-elsewhere`, which a bare
-  # `String.starts_with?` would admit.
+  # `String.starts_with?` would admit. The filesystem root is already the
+  # separator, so appending another one would reject all of its descendants.
+  defp contained?(path, "/"), do: String.starts_with?(path, "/")
+
   defp contained?(path, root) do
     path == root or String.starts_with?(path, root <> "/")
   end

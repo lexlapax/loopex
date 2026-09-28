@@ -1,6 +1,6 @@
 defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
   use ExUnit.Case, async: true
-  alias Loopex.Executor.Local.{ReadOnlyTools, ToolGlob}
+  alias Loopex.Executor.Local.{CodingTools, ReadOnlyTools, ToolGlob}
 
   setup do
     root = Path.join(System.tmp_dir!(), "loopex-read-only-#{System.unique_integer([:positive])}")
@@ -12,6 +12,15 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
   defp execute(root, kind, arguments, limit \\ 16_384) do
     {:ok, admitted} = ReadOnlyTools.arguments("loopex." <> kind, arguments)
     ReadOnlyTools.execute(root, admitted, limit)
+  end
+
+  test "a filesystem-root workspace admits descendants", %{root: root} do
+    File.write!(Path.join(root, "needle.txt"), "found\n")
+    {:ok, canonical_root} = CodingTools.resolve(root, ".")
+    relative = Path.relative_to(canonical_root, "/")
+
+    assert {:completed, output} = execute("/", "ls", %{"path" => relative})
+    assert output =~ "needle.txt"
   end
 
   test "glob grammar anchors Unicode scalars, classes, quoting, dotfiles and zero-segment double star" do
