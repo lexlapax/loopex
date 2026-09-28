@@ -3942,8 +3942,8 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
   test or the eleven-case manifest, prove the separate 5,000 ms drain bound.
 - **Release credentials.** The release credential stays
   `LOOPEX_PROVIDER_API_KEY`, an Anthropic key.
-  - `with_credential` passes it to row 11 as `ANTHROPIC_API_KEY` for that row's
-    process only.
+  - `with_ephemeral_credential` passes it to row 11 as `ANTHROPIC_API_KEY` for
+    that row's process only and removes `LOOPEX_PROVIDER_API_KEY` in the child.
   - `without_credential` unsets `LOOPEX_PROVIDER_API_KEY`, `OPENAI_API_KEY`,
     `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`, so the driver and fast check
     see no real credential.

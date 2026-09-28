@@ -75,7 +75,7 @@ printf 'check-release: open-file limit %s\n' "$(ulimit -Sn)"
 # inherits it once; every other lane runs with the name removed.
 with_credential() { env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
 with_ephemeral_credential() {
-  env -u OPENAI_API_KEY -u OPENROUTER_API_KEY \
+  env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY \
     ANTHROPIC_API_KEY="$LOOPEX_PROVIDER_API_KEY" "$@"
 }
 without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
@@ -90,8 +90,8 @@ without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHR
   probe='if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then echo present; else echo absent; fi'
   seen=$(with_credential sh -c "$probe")
   hosted=$(with_ephemeral_credential sh -c '
-    if [ "$ANTHROPIC_API_KEY" = "$LOOPEX_PROVIDER_API_KEY" ] &&
-       [ -z "${OPENAI_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+    if [ "$ANTHROPIC_API_KEY" = release-self-check-synthetic ] &&
+       [ -z "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
       echo selected
     else
       echo invalid

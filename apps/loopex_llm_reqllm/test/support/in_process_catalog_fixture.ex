@@ -186,7 +186,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
     end
   end
 
-  def probe(mode) when mode in [:file, :gh, :github, :failure, :lock] do
+  def probe(mode) when mode in [:file, :gh, :github, :failure, :lock, :conformance] do
     {:ok, _} = Application.ensure_all_started(:req_llm)
     assert LLMDB.Catalog.snapshot() == nil
     assert Application.get_env(:req, :default_options, []) == []
@@ -199,7 +199,14 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
       token when token in [:gh, :github] -> remote_case(snapshot, cert, fixture_root, token)
       :failure -> failure_case(snapshot, fixture_root)
       :lock -> lock_case(snapshot, fixture_root)
+      :conformance -> conformance_case(cert)
     end
+  end
+
+  defp conformance_case(cert) do
+    System.put_env("ANTHROPIC_API_KEY", @selected)
+    direct_success(cert)
+    IO.puts("IN_PROCESS_STREAMING_CONFORMANCE_PROVED")
   end
 
   defp snapshot do
@@ -438,6 +445,13 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
     {:ok, {_, port}} = :ssl.sockname(listener)
     base = "https://localhost:#{port}"
     parent = self()
+    progress_ref = make_ref()
+
+    progress = fn delta ->
+      send(parent, {:in_process_progress, progress_ref, delta})
+      :ok
+    end
+
     server = spawn(fn -> serve_direct(listener, parent) end)
     {:ok, supervisor} = Task.Supervisor.start_link()
     runtime = Wire.runtime()
@@ -467,10 +481,14 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
             {:managed, parent, Loopex.Executor.default_cleanup_grace_ms()}
           end,
           starter,
-          fn -> InProcess.complete(request, options, Model.discard_progress()) end
+          fn -> InProcess.complete(request, options, progress) end
         )
 
-      assert {:ok, %{text: "catalog direct answer", streamed: false}} = result
+      assert {:ok, %{text: "catalog direct answer", streamed: false, delta_count: 0} = reply} =
+               result
+
+      assert is_binary(reply.text)
+      refute_receive {:in_process_progress, ^progress_ref, _}, 50
       assert_receive {:catalog_registered, candidate, stop_ref}, 1_000
       assert_receive {:catalog_model_wire, ^server, true, "POST /v1/messages HTTP/1.1"}, 1_000
       assert_receive {:catalog_model_closed, ^server}, 5_000

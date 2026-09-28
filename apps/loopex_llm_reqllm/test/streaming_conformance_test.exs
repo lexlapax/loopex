@@ -1,3 +1,5 @@
+Code.require_file("support/in_process_catalog_fixture.ex", __DIR__)
+
 defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
   @moduledoc false
 
@@ -7,14 +9,12 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
   alias Loopex.StreamDomain
   alias LoopexProtocol.Canonical
 
-  # Concept: one suite every shipped adapter satisfies, the one that ships
-  # included.
+  # Concept: every shipped adapter satisfies the streaming contract, including
+  # the session-owned in-process adapter.
   #
-  # Technical depth: the suite is defined over a behaviour, not over a module, so
-  # adding an adapter means adding it to this list rather than writing a second
-  # suite that can drift from this one. The non-streaming adapter is a
-  # first-class member: declaring that it does not stream is conformance, not an
-  # exemption.
+  # Technical depth: adapters without session custody share the list below.
+  # The in-process adapter needs a live admission and cleanup owner, so its
+  # managed child-VM case asserts the same zero-delta reply contract separately.
 
   defmodule Streaming do
     @moduledoc false
@@ -290,6 +290,15 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
       refute Enum.any?(deltas, &Map.has_key?(&1, :stream_domain_id))
       refute Enum.any?(deltas, &Map.has_key?(&1, :model_sequence))
     end
+  end
+
+  @tag timeout: 120_000
+  test "the managed in-process model port reports a complete non-streaming reply and no deltas" do
+    {output, status} =
+      Loopex.LLM.ReqLLM.InProcessCatalogFixture.run_in_child(:conformance)
+
+    assert status == 0, output
+    assert output =~ "IN_PROCESS_STREAMING_CONFORMANCE_PROVED"
   end
 
   test "each canonical delta kind is bounded plain data carrying no provider or host term" do
