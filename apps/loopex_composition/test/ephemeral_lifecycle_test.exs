@@ -342,6 +342,74 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
     assert {:error, :session_closed} = Ephemeral.last_result(session)
   end
 
+  test "creator exit during a failed borrowed stop retires after the first cleanup attempt", %{
+    tmp: tmp
+  } do
+    test = self()
+
+    remove = fn path ->
+      send(test, {:removal_entered, self(), path})
+
+      receive do
+        :release_removal -> {:error, :eacces}
+      end
+    end
+
+    creator =
+      spawn(fn ->
+        session =
+          start_session(tmp,
+            detach_supervisor: true,
+            supervisor_recipient: test,
+            rm_rf: remove
+          )
+
+        {owner, _actor} = owner_and_actor(session)
+        root = :sys.get_state(owner).startup.owned_root.path
+        send(test, {:created, session, root})
+        receive do: (:creator_exit -> :ok)
+      end)
+
+    assert_receive {:detached_supervisor, supervisor}, 6_000
+    on_exit(fn -> if Process.alive?(supervisor), do: Process.exit(supervisor, :shutdown) end)
+    assert_receive {:created, session, root}, 6_000
+    {:loopex_ephemeral_session, owner, cell} = session
+    owner_monitor = Process.monitor(owner)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+
+    assert_receive {:removal_entered, worker, ^root}, 3_000
+
+    assert %{phase: :aborting, abort: %{stage: :root_removal}, stop: %{no_retry: false}} =
+             :sys.get_state(owner)
+
+    creator_monitor = Process.monitor(creator)
+    send(creator, :creator_exit)
+    assert_receive {:DOWN, ^creator_monitor, :process, ^creator, :normal}
+    assert eventually(fn -> :sys.get_state(owner).stop.no_retry end, 50)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(worker, :release_removal)
+
+        assert {:error,
+                {:cleanup_unproved,
+                 %{
+                   pending: [:root_removal],
+                   root: ^root,
+                   root_ownership: :owned,
+                   ending: :none,
+                   cause: nil
+                 }}} = Task.await(stop, 7_000)
+
+        assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 7_000
+      end)
+
+    assert log =~ "ephemeral cleanup unproved root=#{inspect(root)} pending=[:root_removal]"
+    assert File.dir?(root)
+    assert :atomics.get(cell, 1) == 3
+    assert {:error, :session_unavailable} = Ephemeral.stop_session(session)
+  end
+
   test "creator exit and a concurrent stop remove the same owned root", %{tmp: tmp} do
     test = self()
 
@@ -424,6 +492,11 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
         "packs" => []
       })
 
+    temp_root =
+      if options[:rm_rf],
+        do: %{tmp: fn -> tmp end, rm_rf: options[:rm_rf]},
+        else: %{tmp: fn -> tmp end}
+
     configuration = %{
       cwd: tmp,
       model: "ollama:test",
@@ -439,7 +512,7 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
       timeout: 60_000,
       test_facade: Facade,
       test_seams: %{
-        temp_root: %{tmp: fn -> tmp end},
+        temp_root: temp_root,
         group_drain: fn executor, instance, owner, nonce, _deadline ->
           send(owner, {executor, instance, nonce, :groups_empty})
           {:ok, nonce}

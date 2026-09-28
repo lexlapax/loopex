@@ -339,6 +339,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       abort.worker && abort.worker.pid == pid && abort.worker.monitor == monitor ->
         {:noreply, finish_abort_worker(state, reason)}
 
+      {monitor, pid} == {state.monitors.creator, state.creator} ->
+        {:noreply, put_in(state.stop.no_retry, true)}
+
       Map.get(startup.process_monitors, pid) == monitor ->
         next = %{state | abort: %{abort | down: MapSet.put(abort.down, pid)}}
         {:noreply, continue_abort(next)}
