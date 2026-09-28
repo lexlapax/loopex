@@ -1,0 +1,162 @@
+defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
+  @moduledoc """
+  ## Concept
+
+  Runs the public embedded call from code extracted from the shipped escript.
+
+  ## Technical depth
+
+  This module is compiled into the fixture directory, not the escript. The
+  plain OTP child starts with no Elixir installation or checkout code path.
+  Its only non-OTP paths are the escript's extracted ebin directories and this
+  one driver directory. All credentials and endpoints are synthetic.
+  """
+
+  defmodule Policy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl true
+    def decide(_request), do: {:allow, nil}
+  end
+
+  def main do
+    [mode, model, base, ca, workspace, extracted] =
+      :init.get_plain_arguments() |> Enum.map(&List.to_string/1)
+
+    extracted = Path.expand(extracted)
+    otp = :code.root_dir() |> List.to_string() |> Path.expand()
+    :code.del_path(~c".")
+
+    for path <- :code.get_path() do
+      path = path |> List.to_string() |> Path.expand()
+
+      unless path == otp or String.starts_with?(path, otp <> "/") or
+               String.starts_with?(path, extracted <> "/") do
+        raise "foreign code path in packaged VM"
+      end
+    end
+
+    unless :persistent_term.get(:llm_db_store, nil) == nil,
+      do: raise("catalog populated before packaged startup")
+
+    started = fn -> Application.started_applications() |> Enum.map(&elem(&1, 0)) end
+    unless Enum.all?([:req_llm, :req, :finch], &(&1 not in started.())),
+      do: raise("provider dependency auto-started")
+
+    {:ok, _} = Application.ensure_all_started(:elixir)
+    {:ok, _} = Application.ensure_all_started(:public_key)
+
+    :ok = :public_key.cacerts_load(String.to_charlist(ca))
+
+    initial =
+      case mode do
+        "skip" ->
+          Application.put_env(:llm_db, :skip_packaged_load, true)
+          nil
+
+        "empty" ->
+          {:ok, _} = LLMDB.load_empty()
+          :persistent_term.get(:llm_db_store)
+
+        "preloaded" ->
+          {:ok, _} =
+            LLMDB.load(
+              custom: %{
+                packaging_fixture: [
+                  name: "Host fixture",
+                  models: %{"host-model" => %{capabilities: %{chat: true}}}
+                ]
+              }
+            )
+
+          :persistent_term.get(:llm_db_store)
+
+        "normal" ->
+          nil
+      end
+
+    unless System.get_env("LOOPEX_PACKAGED_DOTENV_CANARY") == nil,
+      do: raise("ambient dotenv canary present")
+
+    options = [
+      policy: Policy,
+      model: model,
+      base_url: base,
+      cwd: workspace,
+      tools: :none,
+      max_tokens: 32,
+      deadline_ms: 15_000,
+      timeout: 20_000
+    ]
+
+    count = if String.starts_with?(model, "anthropic:") and mode == "normal", do: 2, else: 1
+
+    catalogs =
+      for _ <- 1..count do
+        case apply(:"Elixir.LoopexComposition.Ephemeral", :run, [
+               "Answer with fixture reply.",
+               options
+             ]) do
+          {:ok, %{outcome: :completed, text: "packaged answer"}} ->
+            :ok
+
+          other ->
+            raise "packaged run failed: #{inspect(other)}"
+        end
+
+        :persistent_term.get(:llm_db_store, nil)
+      end
+
+    unless Enum.all?([:req_llm, :req, :finch], &(&1 in started.())),
+      do: raise("guarded provider startup did not complete")
+
+    unless :logger in started.(), do: raise("packaged Logger did not start")
+
+    unless Application.get_env(:req_llm, :load_dotenv) == false,
+      do: raise("guarded provider startup left dotenv enabled")
+
+    unless System.get_env("LOOPEX_PACKAGED_DOTENV_CANARY") == nil,
+      do: raise("packaged startup loaded dotenv")
+
+    after_call = List.last(catalogs)
+
+    case {mode, String.starts_with?(model, "anthropic:")} do
+      {"normal", true} ->
+        unless is_map(after_call) and map_size(after_call.snapshot.models) > 0,
+          do: raise("Anthropic did not load embedded catalog")
+
+        unless hd(catalogs) == after_call,
+          do: raise("Anthropic changed catalog epoch or content between calls")
+
+        {:ok, expected} = LLMDB.Loader.load()
+
+        unless same_catalog?(after_call.snapshot, expected),
+          do: raise("Anthropic changed embedded catalog content")
+
+      {"normal", false} ->
+        unless after_call == nil, do: raise("non-Anthropic call loaded catalog")
+        {:ok, _} = LLMDB.load()
+        loaded = :persistent_term.get(:llm_db_store)
+        {:ok, expected} = LLMDB.Loader.load()
+
+        unless is_map(loaded) and map_size(loaded.snapshot.models) > 0 and
+                 same_catalog?(loaded.snapshot, expected) do
+          raise "positive embedded-catalog control failed"
+        end
+
+      {"skip", _} ->
+        unless after_call == nil, do: raise("skip-packaged-load control was ignored")
+
+      {mode, _} when mode in ["empty", "preloaded"] ->
+        unless after_call == initial, do: raise("host catalog was replaced")
+    end
+
+    IO.puts("M6_PACKAGED_#{String.upcase(mode)}_OK")
+  end
+
+  defp same_catalog?(actual, expected) do
+    Map.delete(actual, :meta) == Map.delete(expected, :meta) and
+      Map.delete(actual.meta, :loaded_at) == Map.delete(expected.meta, :loaded_at)
+  end
+end
