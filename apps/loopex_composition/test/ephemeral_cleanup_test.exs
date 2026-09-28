@@ -224,6 +224,11 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     {:loopex_ephemeral_session, owner, cell} = session
     %{startup: %{root: root_pid, owned_root: %{path: root}}} = :sys.get_state(owner)
     root_monitor = Process.monitor(root_pid)
+    # Concept: hold a live subtree while testing its stop-worker ordering.
+    # Technical depth: runtime shutdown otherwise makes its holder collapse the root first.
+    holder = :sys.get_state(owner).startup.registered.runtime_holder
+    holder_suspension = suspend_process(holder)
+    on_exit(fn -> send(holder_suspension, {self(), :release}) end)
     stop = Task.async(fn -> Ephemeral.stop_session(session) end)
     stop_ref = stop.ref
 
@@ -287,6 +292,8 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
 
     assert true = :erlang.resume_process(worker)
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 1_000
+    send(holder_suspension, {self(), :release})
+    assert_receive {^holder_suspension, :released}, 1_000
     assert :ok = Task.await(stop, 7_000)
     assert :atomics.get(cell, 1) == 2
     refute File.exists?(root)
