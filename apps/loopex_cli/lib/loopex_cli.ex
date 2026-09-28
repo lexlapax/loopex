@@ -32,6 +32,7 @@ defmodule LoopexCli do
   """
 
   alias LoopexCli.Policy.AllowAll
+  alias LoopexCli.Policy.Notice
   alias LoopexCli.Policy.ShellAllowlist
   alias LoopexCli.Interrupt
   alias LoopexComposition.Placement
@@ -51,6 +52,8 @@ defmodule LoopexCli do
   """
   @spec main([binary()]) :: no_return()
   def main([command | _rest] = argv) when command in ["ask", "-p"] do
+    if ask_json?(argv), do: Notice.silence_ask_json()
+
     argv
     |> LoopexCli.Ask.run()
     |> halt_ask()
@@ -67,6 +70,17 @@ defmodule LoopexCli do
     result = dispatch(argv, install_live_signals: true)
     release_placement()
     halt(result)
+  end
+
+  # Concept: only an admitted JSON ask silences policy notices in this VM.
+  # Technical depth: this preparse selects output mode; Ask.run/1 remains the
+  # authority for diagnostics, including malformed argv that raises here.
+  defp ask_json?(argv) do
+    match?({:ok, %{output: "json"}}, LoopexCli.AskOptions.parse(argv))
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
   end
 
   # Concept: the escript defers application startup to command classification;
