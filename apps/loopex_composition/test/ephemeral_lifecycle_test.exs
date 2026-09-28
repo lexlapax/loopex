@@ -105,12 +105,34 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
     end
 
     def next_event(_attachment) do
+      case :persistent_term.get({__MODULE__, :read_probe}, nil) do
+        nil -> :ok
+        counter -> :atomics.add_get(counter, 1, 1)
+      end
+
       case Process.get(:events, []) do
         [event | rest] ->
+          if event.kind == "run.finished" and
+               :persistent_term.get({__MODULE__, :hold_terminal}, false) do
+            send(test_pid(), {:terminal_poll_held, self()})
+
+            receive do
+              :release_terminal_poll -> :ok
+            end
+          end
+
           Process.put(:events, rest)
           {:ok, event}
 
         [] ->
+          if :persistent_term.get({__MODULE__, :hold_empty_poll}, false) do
+            send(test_pid(), {:empty_poll_held, self()})
+
+            receive do
+              :release_empty_poll -> :ok
+            end
+          end
+
           {:error, :empty}
       end
     end
@@ -291,6 +313,202 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
     assert_receive {:facade_command, :answer, "yes", ^actor}, 2_000
     assert {:ok, %{text: "choice: yes"}} = Task.await(answer, 3_000)
     assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "history reads committed entries during an active ask without another facade read", %{
+    tmp: tmp
+  } do
+    session = start_session(tmp)
+    {owner, actor} = owner_and_actor(session)
+    reads = trace_facade_reads()
+    :persistent_term.put({Facade, :hold_terminal}, true)
+    on_exit(fn -> :persistent_term.erase({Facade, :hold_terminal}) end)
+
+    ask = Task.async(fn -> Ephemeral.ask(session, "history-current", timeout: 3_000) end)
+    assert_receive {:terminal_poll_held, ^actor}, 2_000
+
+    assert %{
+             kind: :ask,
+             admission: :following,
+             operation: :next_event,
+             facade: %{stage: :dispatched}
+           } =
+             :sys.get_state(owner).session.active
+
+    count = :atomics.get(reads, 1)
+
+    assert {:ok,
+            %{
+              entries: [
+                %{role: :user, text: "history-current"},
+                %{role: :assistant, text: "answer: history-current"}
+              ],
+              truncated: false
+            }} = Ephemeral.history(session)
+
+    assert :atomics.get(reads, 1) == count
+    assert nil == Task.yield(ask, 0)
+
+    :persistent_term.erase({Facade, :hold_terminal})
+    send(actor, :release_terminal_poll)
+    assert {:ok, %{text: "answer: history-current"}} = Task.await(ask, 3_000)
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "history reads committed entries during an active answer without another facade read", %{
+    tmp: tmp
+  } do
+    session = start_session(tmp)
+    {owner, actor} = owner_and_actor(session)
+    reads = trace_facade_reads()
+
+    assert {:error, {:interaction_pending, %{"interaction_id" => "question-1"}}} =
+             Ephemeral.ask(session, "question")
+
+    :persistent_term.put({Facade, :hold_terminal}, true)
+    on_exit(fn -> :persistent_term.erase({Facade, :hold_terminal}) end)
+
+    answer = Task.async(fn -> Ephemeral.answer(session, "question-1", "yes") end)
+    assert_receive {:terminal_poll_held, ^actor}, 2_000
+
+    assert %{
+             kind: :answer,
+             admission: :following,
+             operation: :next_event,
+             facade: %{stage: :dispatched}
+           } =
+             :sys.get_state(owner).session.active
+
+    count = :atomics.get(reads, 1)
+
+    assert {:ok,
+            %{
+              entries: [
+                %{role: :user, text: "question"},
+                %{role: :assistant, text: "choice: yes"}
+              ],
+              truncated: false
+            }} = Ephemeral.history(session)
+
+    assert :atomics.get(reads, 1) == count
+    assert nil == Task.yield(answer, 0)
+
+    :persistent_term.erase({Facade, :hold_terminal})
+    send(actor, :release_terminal_poll)
+    assert {:ok, %{text: "choice: yes"}} = Task.await(answer, 3_000)
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "history reads committed entries during a timed-out ask's background drain", %{
+    tmp: tmp
+  } do
+    session = start_session(tmp)
+    {owner, actor} = owner_and_actor(session)
+    reads = trace_facade_reads()
+
+    ask = Task.async(fn -> Ephemeral.ask(session, "held", timeout: 1_000) end)
+    assert_receive {:facade_command, :prompt, "held", ^actor}, 2_000
+    send(actor, :release_held_prompt)
+
+    assert eventually(fn ->
+             match?(
+               {:ok, %{entries: [%{role: :user, text: "held"}], truncated: false}},
+               Ephemeral.history(session)
+             )
+           end)
+
+    assert {:error, {:timeout, _}} = Task.await(ask, 2_000)
+
+    :persistent_term.put({Facade, :hold_empty_poll}, true)
+    on_exit(fn -> :persistent_term.erase({Facade, :hold_empty_poll}) end)
+    assert_receive {:empty_poll_held, ^actor}, 1_000
+
+    assert %{operation: :next_event, borrower: nil, facade: %{stage: :dispatched}} =
+             :sys.get_state(owner).session.active
+
+    count = :atomics.get(reads, 1)
+
+    assert {:ok, %{entries: [%{role: :user, text: "held"}], truncated: false}} =
+             Ephemeral.history(session)
+
+    assert :atomics.get(reads, 1) == count
+    assert {:error, :run_open} = Ephemeral.ask(session, "later")
+
+    :persistent_term.erase({Facade, :hold_empty_poll})
+    send(actor, :release_empty_poll)
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "an active owner crash leaves every public handle call unavailable", %{tmp: tmp} do
+    session = start_session(tmp)
+    {:loopex_ephemeral_session, owner, cell} = session
+    {_owner, actor} = owner_and_actor(session)
+    %{supervisor: supervisor, startup: startup} = :sys.get_state(owner)
+    registered = startup.registered
+    subtree_pids = Map.keys(startup.process_monitors)
+
+    assert MapSet.new(subtree_pids) ==
+             MapSet.new([
+               startup.root,
+               actor,
+               registered.private_supervisor,
+               registered.memory_store,
+               registered.workspace_lease,
+               registered.executor,
+               registered.trace_capability,
+               registered.runtime_holder,
+               registered.runtime_supervisor
+             ])
+
+    assert Enum.all?(subtree_pids, &Process.alive?/1)
+    subtree_monitors = Enum.map(subtree_pids, &{&1, Process.monitor(&1)})
+    runtime_children = Supervisor.which_children(registered.runtime_supervisor)
+
+    assert length(runtime_children) == 7
+
+    assert MapSet.new(Enum.map(runtime_children, &elem(&1, 0))) ==
+             MapSet.new([
+               Loopex.ToolRegistry,
+               Loopex.Runtime.Control,
+               Loopex.Runtime.Workers,
+               Loopex.Runtime.OwnerGroups,
+               Loopex.Runtime.SessionSupervisor,
+               Loopex.Runtime.EventDispatcher,
+               Loopex.Trace
+             ])
+
+    runtime_child_monitors =
+      Enum.map(runtime_children, fn {_id, pid, _type, _modules} ->
+        assert is_pid(pid) and Process.alive?(pid)
+        {pid, Process.monitor(pid)}
+      end)
+
+    ask = Task.async(fn -> Ephemeral.ask(session, "held", timeout: 7_000) end)
+    assert_receive {:facade_command, :prompt, "held", ^actor}, 2_000
+
+    assert %{kind: :ask, admission: :granted, facade: %{stage: :dispatched}} =
+             :sys.get_state(owner).session.active
+
+    monitor = Process.monitor(owner)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 2_000
+
+    Enum.each(subtree_monitors, fn {pid, child_monitor} ->
+      assert_receive {:DOWN, ^child_monitor, :process, ^pid, _reason}, 3_000
+    end)
+
+    Enum.each(runtime_child_monitors, fn {pid, child_monitor} ->
+      assert_receive {:DOWN, ^child_monitor, :process, ^pid, _reason}, 3_000
+    end)
+
+    assert eventually(fn -> DynamicSupervisor.which_children(supervisor) == [] end)
+    assert :atomics.get(cell, 1) == 0
+    assert {:error, :session_unavailable} = Task.await(ask, 2_000)
+    assert {:error, :session_unavailable} = Ephemeral.ask(session, "")
+    assert {:error, :session_unavailable} = Ephemeral.answer(session, "", "")
+    assert {:error, :session_unavailable} = Ephemeral.last_result(session)
+    assert {:error, :session_unavailable} = Ephemeral.history(session)
+    assert {:error, :session_unavailable} = Ephemeral.stop_session(session)
   end
 
   test "creator exit seals a borrowed session and removes its root after cleanup", %{tmp: tmp} do
@@ -610,6 +828,13 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
   end
 
   defp resume(pid), do: true = :erlang.resume_process(pid)
+
+  defp trace_facade_reads do
+    counter = :atomics.new(1, [])
+    :persistent_term.put({Facade, :read_probe}, counter)
+    on_exit(fn -> :persistent_term.erase({Facade, :read_probe}) end)
+    counter
+  end
 
   defp await_active(owner, predicate, attempts \\ 200) do
     assert eventually(fn -> predicate.(:sys.get_state(owner).session.active) end, attempts)
