@@ -46,13 +46,16 @@ reducer, a policy engine, or event truth of its own, and an embedder may choose
 between calling the facade in process and driving a server from another
 language over [the session protocol](app-server-protocol.md#concept).
 
-Three constraints shape every embedding:
+Four constraints shape every embedding:
 
 - **The host names authority.** A runtime with any tool active refuses to start
   without a policy module, and a policy needs a stable identity so a question it
   asked can be resumed only by the same policy.
 - **The host chooses context.** A direct runtime requires an explicit context
   token budget; nothing in core defaults it.
+- **The durable policy identity is explicit across releases.** The reference
+  composition keeps its default policy revision at `"0.2.0"` for rollback;
+  a host whose policy behavior changes supplies its own revision.
 - **Nothing is stable.** Every surface on this page may change without notice;
   pin an exact revision and read
   [Compatibility surfaces](compatibility-surfaces.md#concept).
@@ -221,7 +224,7 @@ composed with the four bootstrap coding tools and the ReqLLM model adapter:
 | --- | --- |
 | `:runtime_id`, `:state_root`, `:workspace` | Required non-empty binaries, resolved by the caller and never discovered here. |
 | `:policy` | Required; absence returns `{:error, :host_policy_required}`. The composition ships no policy of its own, so a permissive default can never be inherited by an embedder. |
-| `:policy_identity` | Defaults to `%{"id" => inspect(policy), "revision" => Loopex.version()}`; an embedder whose build can change what a policy does names its own. |
+| `:policy_identity` | Defaults to `%{"id" => inspect(policy), "revision" => "0.2.0"}`; an embedder whose policy behavior changes names its own revision. |
 | `:provider_launch` | The provider companion's launch configuration, a keyword list read from the non-secret `.launch` file that `mix loopex.provider.build` writes. No companion is discovered. |
 | `:context_token_budget` | Defaults to `8_192` estimated tokens; an explicit valid value is forwarded unchanged. |
 | `:cleanup_grace_ms`, `:process_probe` | Forwarded to the session and executor together, so a run's ending reports the period its cleanup ran under. |
