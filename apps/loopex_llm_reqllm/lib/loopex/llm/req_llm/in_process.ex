@@ -241,10 +241,11 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                               0
                             )
 
-                          # The request identity and canonical request bytes
-                          # are host inputs, not a provider echo. Only fields
-                          # controlled by the provider can trigger this
-                          # selected-key reply refusal.
+                          # Concept: a selected key echoed in provider-controlled
+                          # reply data cannot be published. Host-supplied request
+                          # identity and canonical bytes are not a provider echo.
+                          # Technical depth: usage also needs scanning: the locked
+                          # provider path can map a malformed string token count.
                           has_key = fn scan, value ->
                             cond do
                               is_nil(credential) ->
