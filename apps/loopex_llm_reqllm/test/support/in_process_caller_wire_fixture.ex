@@ -463,10 +463,18 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
     assert_one_write(safe_call)
     stop(safe_call)
 
+    partial = start(runtime, "openai:gpt-4", wire(:chat, "synthetic-echo-cred"), tls: trusted)
+    {partial_result, partial} = partial |> begin() |> result()
+    assert {:ok, %{text: "synthetic-echo-cred"}} = partial_result
+    assert_one_write(partial)
+    stop(partial)
+
     for {body, options} <- [
           {wire(:chat, "echo " <> key), []},
           {wire(:chat, "safe"), [header_id: key]},
           {tool_reply("read", "call-" <> key, %{}), []},
+          {tool_reply("read", "call", %{key => "literal-key"}), []},
+          {tool_reply("read", "call", %{"nested" => [%{key => "nested-key"}]}), []},
           {tool_reply("read", "call", %{"nested" => [%{"inside" => key}]}), []},
           {usage_echo_reply(key), []}
         ] do
