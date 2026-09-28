@@ -68,9 +68,12 @@ result is not a pass. Each lane's complete output is retained separately.
 ### Fresh-source and rollback archive identities
 
 Retain the exact NUL-delimited manifest bytes outside each extraction. Both
-archive projections must match their independent Git-tree projections before
-document exclusions; the administrative archive comparison is a separate
-pre-tag proof after closure.
+archive projections must match independently enumerated archive members and
+Git-tree modes before document exclusions. The administrative comparison is a
+separate pre-tag proof after closure. Its result, complete-patch reference and
+digests belong in the later release tag annotation. They are not closure
+placeholders because the comparison cannot run until the administrative commit
+exists.
 
 | Artifact or check | Source SHA or result | Retained-output reference | SHA-256 |
 | --- | --- | --- | --- |
@@ -81,7 +84,6 @@ pre-tag proof after closure.
 | `v0.2.0` rollback Git-tree projection | Pending | Pending | Pending |
 | Archive staging output and scoped umask values | Pending | Pending | Pending |
 | Rollback two-direction interaction, unknown tool, dispatched effects, skill and daemon results | Pending | Pending | Pending |
-| Pre-tag tested/admin archive comparison and complete patch | Pending | Pending | Pending |
 
 ## Four-step acceptance demonstration
 

@@ -119,7 +119,7 @@ case "$retain/" in
 esac
 # Refuse reused evidence paths before an extraction can overwrite any retained
 # byte. The scoped umask makes newly created evidence private to this user.
-for retained in source-archive-manifest source-inventory source-archive-manifest.after fresh-source-build.log; do
+for retained in source-archive-manifest source-archive-manifest.source-identity source-inventory source-archive-manifest.after fresh-source-build.log; do
   (umask 077; set -C; : >"$retain/$retained") 2>/dev/null ||
     { printf 'check-release: retained path unavailable or already exists: %s\n' "$retain/$retained" >&2; exit 2; }
 done
@@ -148,6 +148,8 @@ fi
 tree="$fresh/src"
 printf 'check-release: fresh-source extraction of %s\n' "$commit"
 (umask 0777; (umask 022; mkdir "$tree" && git archive "$commit" | tar -x -C "$tree"))
+release_retain_source_identity \
+  "$tree/SOURCE_IDENTITY" "$retain/source-archive-manifest.source-identity"
 bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest"
 git ls-files -z >"$retain/source-inventory"
 elixir scripts/source-archive-check.exs verify \

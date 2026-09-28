@@ -71,6 +71,22 @@ release_retain_identity() {
   printf 'check-release: retained %s sha256=%s\n' "$path" "$sha"
 }
 
+# Preserve the fresh archive's ordinary SOURCE_IDENTITY beside its manifest,
+# where the later read-only pre-tag comparison requires it.
+release_retain_source_identity() {
+  local source=$1 target=$2
+  if [ ! -f "$source" ] || [ -L "$source" ] || [ ! -s "$source" ] ||
+     [ ! -f "$target" ] || [ -L "$target" ] || [ -s "$target" ]; then
+    printf 'check-release: source identity sidecar is unavailable or reused\n' >&2
+    return 1
+  fi
+  if ! cp "$source" "$target" || ! cmp -s "$source" "$target"; then
+    printf 'check-release: source identity sidecar could not be retained exactly\n' >&2
+    return 1
+  fi
+  release_retain_identity "$target"
+}
+
 # Validate the complete manifest before its first selected case can dispatch.
 # A repeated case cannot replace an omitted witness while preserving row count.
 release_manifest_valid() {

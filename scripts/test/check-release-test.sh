@@ -82,6 +82,20 @@ fi
 # Source/build identities use the same guarded helper as the actual runner.
 release_retain_identity "$manifest" >"$work/source-identity-output"
 grep -qE 'sha256=[0-9a-f]{64}$' "$work/source-identity-output" || fail 'valid source digest unavailable'
+printf 'commit %040d\ncommitter-date 2026-09-28T00:00:00Z\n' 0 >"$work/source-identity"
+identity_copy="$retain/source-archive-manifest.source-identity"
+(umask 077; set -C; : >"$identity_copy")
+release_retain_source_identity "$work/source-identity" "$identity_copy" >"$work/identity-copy-output"
+cmp -s "$work/source-identity" "$identity_copy" || fail 'source identity sidecar bytes changed'
+grep -qE 'sha256=[0-9a-f]{64}$' "$work/identity-copy-output" || fail 'sidecar digest unavailable'
+if release_retain_source_identity "$work/source-identity" "$identity_copy" >"$work/identity-reuse" 2>&1; then
+  fail 'source identity sidecar was overwritten on reuse'
+fi
+ln -s "$work/source-identity" "$work/source-identity-link"
+(umask 077; set -C; : >"$work/identity-link-target")
+if release_retain_source_identity "$work/source-identity-link" "$work/identity-link-target" >"$work/identity-link-output" 2>&1; then
+  fail 'symlinked source identity was retained'
+fi
 (
   release_digest() { return 37; }
   for path in source-archive-manifest source-inventory fresh-source-build.log; do
