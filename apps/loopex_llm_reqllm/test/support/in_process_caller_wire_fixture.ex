@@ -492,7 +492,8 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
       )
 
     {result, call} = call |> begin() |> result()
-    assert {:ok, %{text: "safe"}} = result
+    assert {:ok, %{text: "safe", canonical_request_bytes: request_bytes}} = result
+    assert String.contains?(request_bytes, key)
     assert [written] = call.writes
     assert String.contains?(written.body, key)
     stop(call)
