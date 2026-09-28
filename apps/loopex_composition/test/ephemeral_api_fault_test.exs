@@ -111,6 +111,23 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
 
           {:accepted, command.command_id}
 
+        "malformed-question" ->
+          begin_run(command)
+
+          question = %{
+            "run_id" => Process.get(:run_id),
+            "interaction_id" => "malformed-interaction",
+            "turn" => 1,
+            "tool_call_id" => "malformed-call",
+            "prompt" => "Continue?",
+            "choices" => [%{"id" => "yes", "label" => "Yes"}],
+            "expires_at" => 1_800_000_000,
+            kind: "interaction.requested"
+          }
+
+          enqueue(:persistent_term.get({__MODULE__, :question_mutation}).(question))
+          {:accepted, command.command_id}
+
         mode
         when mode in [
                "question-max",
@@ -326,6 +343,98 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "malformed interaction members and choices never become public questions", %{tmp: tmp} do
+    mutation_key = {Facade, :question_mutation}
+    on_exit(fn -> :persistent_term.erase(mutation_key) end)
+
+    malformed = [
+      {"missing interaction id", &Map.delete(&1, "interaction_id")},
+      {"empty interaction id", &Map.put(&1, "interaction_id", "")},
+      {"invalid UTF-8 interaction id", &Map.put(&1, "interaction_id", <<255>>)},
+      {"oversized interaction id", &Map.put(&1, "interaction_id", String.duplicate("x", 257))},
+      {"missing call id", &Map.delete(&1, "tool_call_id")},
+      {"oversized call id", &Map.put(&1, "tool_call_id", String.duplicate("x", 65_537))},
+      {"empty prompt", &Map.put(&1, "prompt", "")},
+      {"invalid UTF-8 prompt", &Map.put(&1, "prompt", <<255>>)},
+      {"missing choices", &Map.delete(&1, "choices")},
+      {"empty choices", &Map.put(&1, "choices", [])},
+      {"too many distinct choices", &Map.put(&1, "choices", choices(9))},
+      {"duplicate choice ids",
+       &Map.put(&1, "choices", [
+         %{"id" => "yes", "label" => "Yes"},
+         %{"id" => "yes", "label" => "Again"}
+       ])},
+      {"choice with extra member",
+       &Map.put(&1, "choices", [%{"id" => "yes", "label" => "Yes", "grant" => true}])},
+      {"oversized choice id",
+       &Map.put(&1, "choices", [%{"id" => String.duplicate("x", 65), "label" => "Yes"}])},
+      {"invalid choice label", &Map.put(&1, "choices", [%{"id" => "yes", "label" => <<255>>}])}
+    ]
+
+    for {shape, mutate} <- malformed do
+      :persistent_term.put(mutation_key, mutate)
+      session = start_session(tmp)
+
+      assert {:error,
+              {:cleanup_unproved,
+               %{pending: pending, ending: :none, root: root, root_ownership: :owned}}} =
+               Ephemeral.ask(session, "malformed-question"),
+             shape
+
+      assert :run_ending in pending, shape
+      assert File.dir?(root), shape
+      assert {:error, :session_unavailable} = Ephemeral.last_result(session), shape
+      refute_receive {:answer_dispatched, _, _}
+    end
+
+    :persistent_term.put(mutation_key, &Map.put(&1, "choices", choices(8)))
+    session = start_session(tmp)
+
+    assert {:error,
+            {:interaction_pending,
+             %{"interaction_id" => "malformed-interaction", "choices" => offered} = question}} =
+             Ephemeral.ask(session, "malformed-question")
+
+    assert offered == choices(8)
+    assert {:error, {:interaction_pending, ^question}} = Ephemeral.last_result(session)
+
+    assert {:ok, %{outcome: :completed}} =
+             Ephemeral.answer(session, "malformed-interaction", "choice-8")
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "invalid answer ids leave the exact pending question unchanged", %{tmp: tmp} do
+    session = start_session(tmp)
+
+    assert {:error, {:interaction_pending, question}} =
+             Ephemeral.ask(session, "identity-question")
+
+    for interaction_id <- [nil, 17, "", <<255>>, String.duplicate("x", 257), "stale"] do
+      assert {:error, :invalid_interaction_answer} =
+               Ephemeral.answer(session, interaction_id, "yes")
+
+      assert {:error, {:interaction_pending, ^question}} = Ephemeral.last_result(session)
+    end
+
+    for choice_id <- [nil, 17, "", <<255>>, String.duplicate("x", 65), "unoffered"] do
+      assert {:error, :invalid_interaction_answer} =
+               Ephemeral.answer(session, "identity-interaction", choice_id)
+
+      assert {:error, {:interaction_pending, ^question}} = Ephemeral.last_result(session)
+    end
+
+    assert {:error, :run_open} = Ephemeral.ask(session, "second prompt")
+    refute_receive {:answer_dispatched, _, _}
+    refute_receive {:prompt_dispatched, _, _, "second prompt"}
+
+    assert {:ok, %{outcome: :completed}} =
+             Ephemeral.answer(session, "identity-interaction", "yes")
+
+    assert_receive {:answer_dispatched, _, _}
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
   test "an admitted timeout continues to a later ending without a second prompt", %{tmp: tmp} do
     session = start_session(tmp)
 
@@ -534,4 +643,7 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
       eventually(predicate, attempts - 1)
     end
   end
+
+  defp choices(count),
+    do: for(index <- 1..count, do: %{"id" => "choice-#{index}", "label" => "Choice #{index}"})
 end
