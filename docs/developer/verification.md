@@ -123,9 +123,10 @@ absence was exploited or nearly exploited during M0–M4.
 - A required check is never skipped, filtered, softened, retried into green,
   or satisfied with a fake where the real path is what is claimed. A failure
   that disappears on retry is a flake to fix.
-- The real-provider tests assert facts only a real provider can produce: its
-  own response identifiers and the observed model identity. A scripted model
-  cannot pass them.
+- Real-provider evidence is case-specific. The identity witnesses assert the
+  provider's own response identifiers and observed model identity. M6's local
+  `ask` and hosted embedding cases prove real-path completion, nonempty output,
+  and cleanup; the local case also checks Ollama's `/api/show`.
 - Tests fail before touching real user state; a leaked credential or a shared
   environment variable is a defect, and both checks run each application in
   its own VM so one application's tests cannot reach the next.

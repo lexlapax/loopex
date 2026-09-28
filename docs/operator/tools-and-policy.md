@@ -303,8 +303,10 @@ inherits this one.
 <a id="operator-tools-shell-allowlist"></a>
 ## A Stance That Refuses Something
 
-`shell-allowlist` allows the filesystem tools and allows `bash` only when the
-command's first word is one it names. Everything else is refused with
+`shell-allowlist` allows the filesystem tools. It allows `bash` only when a raw
+`command` string starts with one of its listed words. It denies every `argv`
+form, even when the first argument is a listed command. Everything else is
+refused with
 `policy_denied`, the refusal is reported, and the session carries on. It
 announces itself once:
 

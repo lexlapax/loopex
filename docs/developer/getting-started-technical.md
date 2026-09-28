@@ -51,8 +51,9 @@ explains.
 If you embed the ephemeral profile in your own OTP release, list `:req_llm`,
 `:req`, and `:finch` as `:load` applications in that host release's Mix
 configuration. The Loopex dependency declarations use `runtime: false` for
-these applications. Loading their code does not start them; the guarded
-ephemeral composition starts ReqLLM when it needs a model call.
+these applications. Loading their code does not start them. The guarded
+ephemeral composition starts ReqLLM during `start_session/1` preflight, before
+it creates the session.
 
 ```elixir
 releases: [

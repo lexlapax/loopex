@@ -61,7 +61,10 @@ profiles drive the same kernel loop; only the composition and retention differ.
 For an ephemeral embedding, call `LoopexComposition.Ephemeral.start_session/1`
 with an explicit host policy, then `ask/3`, `answer/3`, `history/1` or
 `last_result/1`, and finally `stop_session/1`. `run/2` owns that lifecycle for
-one prompt and returns a result only after cleanup. A successful stop proves
+one prompt and returns a result only after cleanup. The process that calls
+`start_session/1` owns the session: passing the opaque handle to another
+process does not extend its lifetime, and creator exit starts cleanup. A
+successful stop proves
 the session's provider and tool subtree ended. If cleanup cannot be proved,
 `stop_session/1` returns `cleanup_unproved`, retains the temporary root, and
 seals only that session. No later process can resume this profile. Use the

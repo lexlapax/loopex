@@ -219,8 +219,9 @@ loopex run --policy shell-allowlist "list the files in this repository and summa
 ```
 
 `--policy` is required; there is no default. `shell-allowlist` lets the session
-read and change files and run only `cat`, `ls`, `pwd`, `echo`, `git`, `grep`,
-`head`, `tail` and `wc`, which is a reasonable first scope. It is scope, not
+read and change files. For `bash`, it permits only raw `command` strings whose
+first word is `cat`, `ls`, `pwd`, `echo`, `git`, `grep`, `head`, `tail`, or `wc`;
+every `argv` form is denied. It is scope, not
 containment; see [host policy](tools-and-policy.md#operator-tools-policy) and
 the permissive [`allow-all`](tools-and-policy.md#operator-tools-allow-all)
 stance before choosing another.

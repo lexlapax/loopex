@@ -97,7 +97,7 @@ Tool reach and policy selection:
 | `Loopex.ResourcePack`, `Loopex.Runtime.ResourceSnapshot` | bounded skill identities and one immutable runtime-owned snapshot |
 | `Loopex.Runtime.ResourceContext` | catalog rendering and ordered instruction/supporting blocks from that snapshot |
 | `Loopex.Runtime.SessionCoordinator` | the serial owner: the only process that commits, dispatches, and stamps a stream domain |
-| `Loopex.Executor.Local.CodingTools` | the four shipped definitions and workspace-root resolution |
+| `Loopex.Executor.Local.CodingTools` | the seven shipped definitions and workspace-root resolution |
 | `Loopex.Store.Local.Artifacts` | the local content-addressed artifact objects |
 
 ### The Tool Contract
@@ -674,8 +674,9 @@ calls it.
 
 ### The Four Bootstrap Coding Tools
 
-`Loopex.Executor.Local.CodingTools.definitions/0` ships four reference-distribution
-declarations in the reserved namespace:
+`Loopex.Executor.Local.CodingTools.definitions/0` ships seven
+reference-distribution declarations in the reserved namespace. The original
+four coding tools remain the durable default active set:
 
 | `tool_id` | Effect class | Idempotency | Output ceiling |
 | --- | --- | --- | --- |
@@ -684,7 +685,16 @@ declarations in the reserved namespace:
 | `loopex.edit` | `workspace_write` | `never_blind_retry` | 4096 bytes |
 | `loopex.bash` | `process` | `never_blind_retry` | 16384 bytes |
 
-The two largest inline ceilings reserve three quarters of the Store's
+M6 adds three read-only definitions. They are available for explicit durable
+selection and the ephemeral `:read_only` preset:
+
+| `tool_id` | Effect class | Idempotency | Output ceiling |
+| --- | --- | --- | --- |
+| `loopex.grep` | `read_only` | `safe_retry` | 16384 bytes |
+| `loopex.find` | `read_only` | `safe_retry` | 16384 bytes |
+| `loopex.ls` | `read_only` | `safe_retry` | 16384 bytes |
+
+A 16,384-byte inline ceiling leaves three quarters of the Store's
 65,536-byte private record for the executor receipt and the next staged-context
 envelope. Local reserves capacity for the receipt before admitting an effect and
 measures the complete receipt before retaining it; valid identity fields may
@@ -706,17 +716,18 @@ replaces one exact occurrence and, on a mismatch, distinguishes absent from
 ambiguous and reports the nearest line it did find. `bash` takes either an argv
 vector, passed through without a shell, or an explicit raw `command`, which asks
 for a shell and gets one; collapsing the two would surprise a caller who supplied
-arguments safely. A job dispatched past its effective deadline is refused before it begins rather
-than interrupted while running: the three filesystem tools do not use deadline
-expiry as a mid-call verdict, so the executor compares the instant against the
-clock before starting one and returns `the effective deadline passed before this tool began`. No
-process is terminated because none was started. `bash` is the tool whose deadline
-governs a running child, and its expiry enters the termination and
-cleanup-confirmation sequence. Independently, loss of the Local instance that
-admitted a filesystem effect terminates its owner-aware worker and reports the
-effect unproven.
+arguments safely. If the effective deadline has passed before the effect
+starts, the executor refuses it without starting a worker. The six filesystem
+tools run in monitored VM workers. Their deadline is checked before the
+effect and while it runs. Expiry attempts to stop the worker and records
+whether termination was confirmed. A confirmed deadline stop reports a failed
+read-only call; a `write` or `edit` stop has an unknown outcome. An unconfirmed
+stop has an unknown outcome for every tool. Loss of the Local instance that
+admitted a filesystem effect also attempts to stop its owner-aware worker and
+reports the effect unproven. A running `bash` child
+follows the process-group termination and cleanup-confirmation sequence.
 
-The three filesystem tools start no operating-system process.
+The filesystem tools start no operating-system process.
 A credential-clean Port carrier opens first and starts the token-bound launch
 guard. Both internal scripts use absolute `/bin/bash`, independently of the raw
 command's `/bin/sh` interpreter. The carrier preserves its control input before

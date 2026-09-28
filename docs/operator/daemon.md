@@ -79,8 +79,9 @@ nothing else there:
 {"record":"daemon_ready","root":"/home/me/.loopex","socket":"/home/me/.loopex/daemon/daemon.sock","incarnation":"…","version":"0.3.0"}
 ```
 
-Logs go to standard error at `info` level, so a running daemon's standard error
-carries its info-level logs, warnings, failures and stop lines. A second daemon on the same
+The daemon sets its log threshold to `info`. Its current lifecycle messages are
+`debug` and stay hidden; standard error carries warnings, failures, and stop
+lines. A second daemon on the same
 root loses at the placement lock and exits `placement_active` (76) without
 touching the first.
 

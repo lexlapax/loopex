@@ -3828,7 +3828,7 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: the three filesystem tools start no child, so they hold no
+  # Concept: the filesystem tools start no child, so they hold no
   # environment; `bash` holds the one this executor constructed.
   #
   # Technical depth: reporting `PATH` for a tool that never spawned anything
@@ -3837,7 +3837,7 @@ defmodule Loopex.Executor.Local do
   defp coding_tool_environment(%{kind: :bash}), do: child_environment()
   defp coding_tool_environment(_arguments), do: []
 
-  # Concept: the three filesystem tools do not need a process, so they do not
+  # Concept: the filesystem tools do not need an OS process, so they do not
   # start one.
   #
   # Technical depth: spawning a shell to read a file would put an operating

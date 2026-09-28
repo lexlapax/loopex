@@ -62,8 +62,9 @@ It runs, in order, and stops at the first failure: `mix compile
 commit messages, branch and worktree hygiene, OTP application declarations, the
 suite-summary judge, and `mix loopex.status` over the current tree: paired
 documents, directory indexes, local links, and the status
-register), `mix loopex.docs_check`, the release-runner and escript-inventory
-fixtures, `mix loopex.deps_budget`,
+register), `mix loopex.docs_check`, the release-runner, escript-inventory,
+archive-manifest, attended-release, and floor-lane fixtures,
+`mix loopex.deps_budget`,
 `mix loopex.version_train`, the test build, and the credential-free suite, one
 application per VM with several at once (`LOOPEX_CHECK_JOBS` bounds how many;
 the default is half the cores; `LOOPEX_CHECK_ALONE` names applications that
@@ -89,10 +90,22 @@ machine with the pinned Node, a provider credential, and a running local
 Ollama server at `127.0.0.1:11434`, make the selected local model available
 there and export `LOOPEX_RELEASE_OLLAMA_MODEL=ollama:<installed-model>`. The
 real local-command case checks that model through Ollama's `/api/show` before
-it runs:
+it runs. For M6 closure, use the retained
+[floor and attended runners](docs/plans/M6-technical.md#technical-plan-closure-tooling):
 
 ```bash
-LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
+bash scripts/floor-lane.sh SHA --output-dir DIR --long-bound
+read -rs LOOPEX_PROVIDER_API_KEY
+export LOOPEX_PROVIDER_API_KEY
+bash scripts/attended-release.sh --output LOG
+```
+
+Run each once for the tested SHA. `DIR` and `LOG` are new retained-output paths
+outside the repository. The direct command below describes the underlying
+release check for other workflows; do not run it again for M6 closure:
+
+```bash
+bash scripts/check-release.sh
 ```
 
 It refuses without the credential, without the pinned Node, or on a dirty tree, and raises its own open-file soft limit toward the hard limit, refusing below 4,096, because the maximum-population case holds both ends of 512 daemon connections in one VM.

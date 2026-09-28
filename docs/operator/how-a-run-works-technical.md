@@ -278,11 +278,19 @@ provided.
   committed. Rollback is therefore possible only for histories containing no
   version-2 settlement. See
   [ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-consequences).
-- **Project resources.** Histories from before resources replay unchanged. An
-  older build refuses a history containing `resource_command_v1` or
+- **Project resources.** Histories from before resources replay unchanged. A
+  build from before resource support refuses a history containing `resource_command_v1` or
   `model_request_committed_resources_v1` before dispatch. Rolling back requires
   the matching older build and a complete state-root backup taken in the old
   format; removing installed skills does not convert a resource-bearing root.
+- **M6 tools under 0.2.** A pending call to an M6-only read-only tool that was
+  not dispatched becomes `unknown_tool` under 0.2 and the run continues. A
+  dispatched call follows receipt reconciliation; 0.2 does not run it again.
+- **User skills under 0.2.** Offline resume reloads an already admitted user
+  skill from its retained digest. The 0.2 daemon cannot match that skill in
+  its project-only discovery and withholds all skill context for the session.
+  Neither the 0.2 CLI nor its daemon can newly discover and activate an
+  external user skill.
 
 <a id="technical-run-daemon"></a>
 ## What Changes Under a Daemon

@@ -145,6 +145,13 @@ repeat its checks and review before seeking closure.
    - The candidate already has a current-pair fast check from hosted CI or a
      retained complete local run bound to its clean exact SHA.
 
+   M6 runs this matrix through the
+   [accepted closure tooling](../plans/M6-technical.md#technical-plan-closure-tooling):
+   `scripts/floor-lane.sh SHA --output-dir DIR --long-bound` runs the floor
+   check and transport-drain witness.
+   `scripts/attended-release.sh --output LOG` runs the one attended release
+   check. These commands replace the two direct invocations above for M6.
+
    Each run's revision, platform, toolchain, result and measured duration is
    retained outside the repository under a stable retained-output reference
    with a SHA-256 digest. For M5 and later, the release check's fresh-source
@@ -311,6 +318,14 @@ creating the tag:
 | Re-prove the documentation structure | `bash scripts/check.sh --docs` on `COMMIT` | The administrative commit's own documentation changes are not green; fix the candidate and assemble a replacement administrative commit |
 | Re-prove documentation meaning | Run the milestone's final semantic documentation gate on the relevant `docs/operator/` and `docs/developer/` pages at `COMMIT` | The operator and developer accounts disagree with each other, the plan, the accepted ADRs, or the implemented behavior; fix the candidate and assemble a replacement administrative commit |
 | Re-prove the archive identity | For M5 and later, stage `COMMIT` with `git archive` into a fresh empty extraction under the [canonical archive-extraction rule](#technical-milestones-archive-extraction), then run the M5-delivered producer as `bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retained_manifest"` with `retained_manifest` outside `tree`. Retain those exact bytes. For each archive, first require its complete unexcluded `(kind, mode, path)` projection to match the independent Git-tree source projection. Then require the tested and administrative manifests to have identical ordered projections before exclusions. A NUL-aware parser rejects malformed or duplicate records, removes `docs` and its descendants plus exact root `README.md` and the M5-delivered `SOURCE_IDENTITY`, and compares every remaining complete tuple with the manifest bytes retained for the tested SHA. Require exactly one root `SOURCE_IDENTITY` in each archive and validate it against that archive's own commit and source identity | The command or source identity is absent, fails validation, emits a malformed or duplicate record stream, depends on the ambient umask, differs from its commit's source modes, changes a canonical mode, or the published bytes are not the closed bytes outside the confined regions. Entries under `docs/`, the supplied root README and the two `SOURCE_IDENTITY` payloads are expected to differ. The preceding content-confinement proof covers every permitted documentation hunk and the README's exact marked-block replacement. This comparison catches archive inclusion or exclusion changes that `.gitattributes` can cause without a path appearing in `git diff` |
+
+For M6, use the [accepted closure tooling](../plans/M6-technical.md#technical-plan-closure-tooling)
+for these pre-tag rows: `mix loopex.closure.confine` retains the complete
+confinement patch, `scripts/stage-archive-manifest.sh` retains each archive's
+exact manifest and source-identity sidecar, and
+`mix loopex.closure.archive_compare` checks the two manifests. The plan fixes
+their arguments and no-overwrite preconditions; these are the M6 proof commands,
+not extra runs of the suite or release check.
 
 Nothing else is re-run. There is no second suite, no second release check and
 no second provider credential: the tested tree and the administrative tree
