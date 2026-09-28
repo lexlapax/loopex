@@ -6,6 +6,11 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
   alias LoopexComposition.Ephemeral.{OwnerActivation, SessionOwner}
 
   @uint64_max 18_446_744_073_709_551_615
+  @nonce String.duplicate("n", 32)
+  @first_prompt_id "e-aedd225c7f21201d6906ec3f62ff70ca920c21534f66d9d3083577c63dd96a"
+  @answer_id "e-2b86ab4ad4e0e94e5132a19ed27d43dcfd60d684748c17490cf860565f2af3"
+  @second_prompt_id "e-fdbd86c2263dccfb35dfff39757d83f8509e0f2c013f715e6221ca1ee1ee72"
+  @abort_id "e-17714b8f5af92cd5c6ca55f59d9c6a62372231ebe8d299a4d02003ce2513da"
 
   defmodule Policy do
     @moduledoc false
@@ -89,6 +94,26 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
           begin_run(command)
           {:accepted, command.command_id}
 
+        "identity-question" ->
+          begin_run(command)
+
+          enqueue(%{
+            "run_id" => Process.get(:run_id),
+            "interaction_id" => "identity-interaction",
+            "turn" => 1,
+            "tool_call_id" => "identity-call",
+            "prompt" => "Continue?",
+            "choices" => [%{"id" => "yes", "label" => "Yes"}],
+            "expires_at" => 1_800_000_000,
+            kind: "interaction.requested"
+          })
+
+          {:accepted, command.command_id}
+
+        "identity-abort" ->
+          begin_run(command)
+          {:accepted, command.command_id}
+
         _ ->
           begin_run(command)
           finish_run(command.command_id, 5_000)
@@ -96,9 +121,27 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
       end
     end
 
+    def command(_attachment, %{type: :interaction_answer} = command) do
+      send(test_pid(), {:answer_dispatched, self(), command.command_id})
+      finish_run(Process.get(:command_id), 5_000)
+      {:accepted, command.command_id}
+    end
+
     def command(_attachment, %{type: :abort} = command) do
       send(test_pid(), {:abort_dispatched, self(), command.command_id})
-      {:error, :no_active_run}
+
+      if Process.get(:mode) == "identity-abort" do
+        enqueue(%{
+          "run_id" => Process.get(:run_id),
+          "outcome" => "cancelled",
+          "cleanup_grace_ms" => 5_000,
+          kind: "run.finished"
+        })
+
+        {:accepted, command.command_id}
+      else
+        {:error, :no_active_run}
+      end
     end
 
     def next_event(_attachment) do
@@ -190,6 +233,27 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
     refute_receive {:prompt_dispatched, _, _, "never dispatched"}
     assert is_binary(first_id)
     assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "a fixed nonce pins prompt, answer, later prompt and abort identities", %{tmp: tmp} do
+    session = start_session(tmp, command_nonce: @nonce)
+
+    assert {:error, {:interaction_pending, %{"interaction_id" => "identity-interaction"}}} =
+             Ephemeral.ask(session, "identity-question")
+
+    assert_receive {:prompt_dispatched, _, @first_prompt_id, "identity-question"}
+
+    assert {:ok, %{outcome: :completed}} =
+             Ephemeral.answer(session, "identity-interaction", "yes")
+
+    assert_receive {:answer_dispatched, _, @answer_id}
+
+    assert {:error, {:timeout, %{run_id: _}}} =
+             Ephemeral.ask(session, "identity-abort", timeout: 30)
+
+    assert_receive {:prompt_dispatched, _, @second_prompt_id, "identity-abort"}
+    assert :ok = Ephemeral.stop_session(session)
+    assert_receive {:abort_dispatched, _, @abort_id}
   end
 
   test "an admitted timeout continues to a later ending without a second prompt", %{tmp: tmp} do
@@ -291,7 +355,7 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
     assert {:error, :session_unavailable} = Ephemeral.last_result(session)
   end
 
-  defp start_session(tmp) do
+  defp start_session(tmp, opts \\ []) do
     {:ok, _digest, manifest} =
       Loopex.ResourcePack.digest(%{
         "version" => "loopex.resource_pack/1",
@@ -317,6 +381,7 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
       timeout: 60_000,
       test_facade: Facade,
       test_seams: %{
+        command_nonce: Keyword.get(opts, :command_nonce),
         temp_root: %{tmp: fn -> tmp end},
         group_drain: fn executor, instance, owner, nonce, _deadline ->
           send(test, {:group_drain, executor, instance})
