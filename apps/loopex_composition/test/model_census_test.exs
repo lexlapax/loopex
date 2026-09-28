@@ -4,6 +4,29 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
   alias LoopexComposition.Ephemeral.ModelCensus
   alias LoopexComposition.SessionAdmission
 
+  test "cleanup-only route rejects every work operation without messaging the owner" do
+    generation = make_ref()
+    call = make_ref()
+    proof = make_ref()
+    handle = {:model_cleanup_custody, self(), generation, call, self(), proof}
+
+    for operation <- [
+          {:begin_model, self(), call},
+          {:register_model, call, self(), proof},
+          {:record_model_resources, call, self(), 1, []}
+        ] do
+      assert {:error, :session_admission_closed} =
+               Loopex.LLM.ReqLLM.InProcess.Admission.request(
+                 SessionAdmission,
+                 handle,
+                 operation,
+                 deadline()
+               )
+    end
+
+    refute_receive {:loopex_session_admission, _, _, _, _, _}, 20
+  end
+
   test "one live callback reserves the sole pending record and exact no-proxy cancellation clears it" do
     generation = make_ref()
     cell = :atomics.new(2, [])
@@ -84,7 +107,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     candidate =
       spawn(fn ->
         receive do
-          {:model_custody_prepare, _, _, _, _} -> send(test, :unexpected_custody)
+          {:model_custody_prepare, _, _, _, _, _} -> send(test, :unexpected_custody)
           :stop -> :ok
         end
       end)
@@ -249,7 +272,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, ^start_ref, staging_ref, expiry,
+          {:model_custody_prepare, ^start_ref, staging_ref, expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, ^generation, ^call, candidate, ^proof} = custody} ->
             assert candidate == self()
             assert expiry > System.monotonic_time()
@@ -337,7 +360,8 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, ^start_ref, _staging_ref, _expiry, _custody} -> :ok
+          {:model_custody_prepare, ^start_ref, _staging_ref, _expiry, SessionAdmission, _custody} ->
+            :ok
         end
       end)
 
@@ -377,7 +401,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, ^start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, ^start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, ^generation, ^call, _candidate, ^proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
             receive do: (:stop -> :ok)
@@ -420,7 +444,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
         end
@@ -447,7 +471,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
             receive do: (:stop -> :ok)
@@ -485,7 +509,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, _start_ref, _staging_ref, _expiry,
+          {:model_custody_prepare, _start_ref, _staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
             send(owner, {:model_custody_prepared, self(), make_ref(), generation, call, proof})
             receive do: (:stop -> :ok)
@@ -514,7 +538,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
             send(owner, {:candidate_ready, self()})
 
@@ -577,7 +601,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_start_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, ^start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, ^start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, ^generation, ^call, _candidate, ^proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
 
@@ -655,7 +679,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
       {candidate, candidate_start_monitor} =
         spawn_monitor(fn ->
           receive do
-            {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+            {:model_custody_prepare, _start_ref, staging_ref, _expiry, SessionAdmission,
              {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
               send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
               receive do: (:stop -> :ok)
@@ -740,7 +764,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_start_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
             receive do: (:stop -> :ok)
@@ -807,7 +831,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_start_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
             receive do: (:stop -> :ok)
@@ -860,7 +884,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_start_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
             receive do: (:stop -> :ok)
@@ -921,7 +945,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_start_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, ^start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, ^start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, ^generation, ^call, _candidate, ^proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
             receive do: (:stop -> :ok)
@@ -990,7 +1014,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     {candidate, candidate_monitor} =
       spawn_monitor(fn ->
         receive do
-          {:model_custody_prepare, _start_ref, staging_ref, _expiry,
+          {:model_custody_prepare, _start_ref, staging_ref, _expiry, SessionAdmission,
            {:model_cleanup_custody, ^owner, generation, call, _candidate, proof}} ->
             send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
             receive do: (:stop -> :ok)

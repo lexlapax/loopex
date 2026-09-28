@@ -1,6 +1,8 @@
 defmodule LoopexComposition.Ephemeral.ModelCensus do
   @moduledoc false
 
+  alias LoopexComposition.SessionAdmission
+
   # Concept: one session owner reserves at most one model invocation.
   # Technical depth: these functions run in that owner's receive loop, never
   # another actor. State carries identities and monitor evidence, not requests,
@@ -238,7 +240,13 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
           seen_refs: MapSet.put(pending.seen_refs, elem(envelope, 1))
       }
 
-      send(candidate, {:model_custody_prepare, start_ref, staging_ref, expiry, custody})
+      # The session owner supplies its own private admission implementation.
+      # The callback's start proof identifies the candidate, not the route.
+      send(
+        candidate,
+        {:model_custody_prepare, start_ref, staging_ref, expiry, SessionAdmission, custody}
+      )
+
       %{state | pending: pending, last_reply: nil}
     else
       refuse(state, envelope)

@@ -7,16 +7,15 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
 
   ## Technical depth
 
-  This checkpoint proves the actual Task.Supervisor parent, callback and proxy
-  identities, then accepts at most one cleanup-only census custody message.
-  It acknowledges custody only after the proxy's exact normal retirement.
-  Registration pending acknowledges only the original callback's first exact
-  stop reference after that custody acknowledgement; it grants no work.
-  Retirement and core-stop acknowledgement require a host admission route that
-  the accepted four-field candidate constructor does not yet provide; neither
-  is implemented here. A staged candidate whose callback dies stays inert for
-  subtree teardown rather than claiming an unrecorded retirement.
+  The candidate proves its Task.Supervisor parent, callback and proxy, then
+  binds one cleanup-only host route delivered with its exact custody identity.
+  It acknowledges custody only after the proxy's normal retirement. On callback
+  loss it asks that route to record empty retirement before it exits or waits
+  for a registered core stop. The cleanup handle has no work grant. Resource
+  teardown and core-stop acknowledgement are separate later transitions.
   """
+
+  alias Loopex.LLM.ReqLLM.InProcess.Admission
 
   @type spec :: %{
           callback: pid(),
@@ -54,7 +53,9 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
           proxy_down: false,
           custody: nil,
           owner_mon: nil,
-          registration_pending: nil
+          registration_pending: nil,
+          cleanup_attempted: false,
+          retired: false
         })
       end
     end
@@ -76,12 +77,14 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
 
   defp loop(state) do
     remaining =
-      case state.custody do
-        {_, _, _, _, _, :acked} -> :infinity
-        _ -> remaining_ms(state.deadline)
+      if state.cleanup_attempted or (state.custody && state.custody.acked) do
+        :infinity
+      else
+        remaining_ms(state.deadline)
       end
 
     if remaining == 0 do
+      if state.custody, do: retire_empty(state)
       :ok
     else
       receive do
@@ -100,10 +103,15 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
 
         {:DOWN, mon, :process, callback, _}
         when mon == state.callback_mon and callback == state.callback ->
-          # Concept: staged custody survives callback death for a later proved
-          # retirement; no missing host route can be replaced by a local ACK.
-          # Technical depth: keep the inert candidate alive for subtree removal.
-          if state.custody, do: loop(Map.put(state, :callback, nil)), else: :ok
+          if state.custody do
+            state = state |> Map.put(:callback, nil) |> retire_empty()
+
+            if state.retired and is_nil(state.registration_pending),
+              do: :ok,
+              else: loop(state)
+          else
+            :ok
+          end
 
         {:DOWN, mon, :process, parent, _}
         when mon == state.parent_mon and parent == state.parent ->
@@ -111,19 +119,32 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
 
         {:DOWN, mon, :process, owner, _}
         when mon == state.owner_mon and not is_nil(state.custody) and
-               owner == elem(state.custody, 0) ->
+               owner == state.custody.owner ->
           :ok
 
-        {:model_custody_prepare, ref, staging_ref, expiry,
+        {:model_custody_prepare, ref, staging_ref, expiry, module,
          {:model_cleanup_custody, owner, generation, call_ref, candidate, proof_ref}}
         when ref == state.start_ref and is_nil(state.custody) and is_reference(staging_ref) and
                is_integer(expiry) and is_pid(owner) and is_reference(generation) and
                is_reference(call_ref) and candidate == self() and is_reference(proof_ref) ->
-          if live_deadline?(expiry) and live?(owner) and state.callback != nil do
+          if valid_module?(module) and live_deadline?(expiry) and live?(owner) and
+               state.callback != nil do
             owner_mon = Process.monitor(owner)
 
+            handle =
+              {:model_cleanup_custody, owner, generation, call_ref, candidate, proof_ref}
+
             state
-            |> Map.put(:custody, {owner, staging_ref, generation, call_ref, proof_ref})
+            |> Map.put(:custody, %{
+              module: module,
+              handle: handle,
+              owner: owner,
+              staging: staging_ref,
+              generation: generation,
+              call: call_ref,
+              proof: proof_ref,
+              acked: false
+            })
             |> Map.put(:owner_mon, owner_mon)
             |> maybe_ack_custody()
             |> loop()
@@ -133,7 +154,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
 
         {:registration_pending, callback, stop_ref}
         when callback == state.callback and is_reference(stop_ref) and
-               tuple_size(state.custody) == 6 and elem(state.custody, 5) == :acked and
+               not is_nil(state.custody) and state.custody.acked and
                state.proxy_down and
                is_nil(state.registration_pending) ->
           send(callback, {:registration_pending_ack, self(), state.start_ref, stop_ref})
@@ -147,18 +168,45 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
     end
   end
 
-  defp maybe_ack_custody(
-         %{custody: {owner, staging, generation, call_ref, proof_ref}, proxy_down: true} = state
-       ) do
-    if live_deadline?(state.deadline) do
-      send(owner, {:model_custody_prepared, self(), staging, generation, call_ref, proof_ref})
-      Map.put(state, :custody, {owner, staging, generation, call_ref, proof_ref, :acked})
+  defp maybe_ack_custody(%{custody: %{acked: false} = custody, proxy_down: true} = state) do
+    if live_deadline?(state.deadline) and not state.cleanup_attempted and
+         not is_nil(state.callback) and live?(state.callback) do
+      send(
+        custody.owner,
+        {:model_custody_prepared, self(), custody.staging, custody.generation, custody.call,
+         custody.proof}
+      )
+
+      Map.put(state, :custody, %{custody | acked: true})
     else
       state
     end
   end
 
   defp maybe_ack_custody(state), do: state
+
+  # The admission edge validates a correlated completion grant. A failed
+  # request leaves the candidate alive for the session-subtree failure path;
+  # its own exit cannot substitute for a recorded retirement.
+  defp retire_empty(%{custody: custody, cleanup_attempted: false} = state) do
+    deadline =
+      System.monotonic_time() + System.convert_time_unit(1_000, :millisecond, :native)
+
+    operation = {:retire_model, custody.call, self(), custody.proof}
+
+    retired =
+      match?(
+        {:ok, {:session_grant, _, :retire_model, _, _, _}},
+        Admission.request(custody.module, custody.handle, operation, deadline)
+      )
+
+    %{state | cleanup_attempted: true, retired: retired}
+  end
+
+  defp retire_empty(state), do: state
+
+  defp valid_module?(module),
+    do: is_atom(module) and function_exported?(module, :request, 3)
 
   defp live?(pid), do: Process.alive?(pid)
   defp live_deadline?(deadline), do: System.monotonic_time() < deadline
