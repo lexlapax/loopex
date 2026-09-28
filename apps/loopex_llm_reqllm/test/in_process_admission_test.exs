@@ -85,6 +85,20 @@ defmodule Loopex.LLM.ReqLLM.InProcess.AdmissionTest do
              Admission.request(__MODULE__, nil, operation, expiry)
   end
 
+  test "only a live stage operation preserves the host's clean cancellation proof" do
+    expiry = System.monotonic_time() + System.convert_time_unit(1, :second, :native)
+    stage = {:stage_model, make_ref(), self(), make_ref(), make_ref(), :start_proof}
+    clean = {:return, {:error, :model_stage_cancelled}}
+
+    assert {:error, :model_stage_cancelled} = Admission.request(Host, clean, stage, expiry)
+
+    assert {:error, :session_admission_closed} =
+             Admission.request(Host, clean, {:begin_model, self(), make_ref()}, expiry)
+
+    assert {:error, :session_admission_closed} =
+             Admission.request(Host, clean, stage, System.monotonic_time() - 1)
+  end
+
   defp closed?(operation, expiry),
     do:
       Admission.request(Host, {:observe, self()}, operation, expiry) ==

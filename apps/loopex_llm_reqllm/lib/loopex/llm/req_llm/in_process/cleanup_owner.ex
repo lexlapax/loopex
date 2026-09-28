@@ -20,6 +20,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
   alias Loopex.LLM.ReqLLM.InProcess.Admission
   alias Loopex.LLM.ReqLLM.InProcess.PoolLifecycle
   alias Loopex.LLM.ReqLLM.InProcess.Route
+  alias Loopex.LLM.ReqLLM.Deadline
 
   @cleanup_ms 1_000
 
@@ -672,7 +673,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
       tag: work.tag,
       cell: state.activation.cell,
       trace_capability: work.trace_capability,
-      pool_timeout: 1_000
+      pool_timeout: pool_timeout(work.deadline, System.monotonic_time())
     }
 
     {caller, monitor} =
@@ -868,6 +869,14 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
 
   defp live?(pid), do: Process.alive?(pid)
   defp live_deadline?(deadline), do: System.monotonic_time() < deadline
+
+  @doc false
+  def pool_timeout(deadline, sampled_now) when is_integer(deadline) and is_integer(sampled_now) do
+    deadline
+    |> Deadline.remaining_timeout(sampled_now)
+    |> min(1_000)
+    |> max(1)
+  end
 
   defp remaining_ms(deadline) do
     native = deadline - System.monotonic_time()

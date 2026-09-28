@@ -46,6 +46,16 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
     {:ok, supervisor: supervisor}
   end
 
+  test "pool checkout timeout never exceeds the committed call deadline" do
+    now = System.monotonic_time()
+    milliseconds = &System.convert_time_unit(&1, :millisecond, :native)
+
+    assert CleanupOwner.pool_timeout(now + milliseconds.(2_000), now) == 1_000
+    assert CleanupOwner.pool_timeout(now + milliseconds.(250), now) == 250
+    assert CleanupOwner.pool_timeout(now + milliseconds.(1) - 1, now) == 1
+    assert CleanupOwner.pool_timeout(now, now) == 1
+  end
+
   test "the actual Task.Supervisor child starts inert and reports exact identity", %{
     supervisor: supervisor
   } do

@@ -24,7 +24,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Admission do
           | {:cancel_model, reference(), term()}
   @type grant ::
           {:session_grant, reference(), atom(), pid(), reference(), integer()}
-  @type result :: {:ok, grant()} | {:error, :session_admission_closed}
+  @type result ::
+          {:ok, grant()} | {:error, :session_admission_closed | :model_stage_cancelled}
 
   @doc """
   ## Concept
@@ -90,6 +91,18 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Admission do
          System.monotonic_time() < expiry,
        do: result,
        else: closed()
+  end
+
+  # Concept: only the host's independently settled staging record can report
+  # a clean pre-registrar cancellation.
+  # Technical depth: this status is not a general refusal; a timeout or a
+  # closed route remains ambiguous and cannot authorize candidate reaping.
+  defp admit_return(
+         {:error, :model_stage_cancelled} = result,
+         {:stage_model, _, _, _, _, _},
+         deadline
+       ) do
+    if System.monotonic_time() < deadline, do: result, else: closed()
   end
 
   defp admit_return(_result, _operation, _deadline), do: closed()

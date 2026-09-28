@@ -289,13 +289,23 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
             no_registrar(%{state | candidate_down: true}, config, call_ref, staging_ref, reason)
 
           :timeout ->
-            unknown_start(state, config.cell)
+            abandon_staging()
         end
 
+      {:error, :model_stage_cancelled} ->
+        @not_dispatched
+
       _closed ->
-        unknown_start(state, config.cell)
+        abandon_staging()
     end
   end
+
+  # Concept: an unproved staging reply never transfers cleanup authority back
+  # to the callback. The candidate may already hold provisional custody.
+  # Technical depth: core catches this fixed private exit, then the callback
+  # process ends; candidate DOWN monitoring and empty retirement stay with the
+  # session owner. Killing the candidate here would erase that cleanup proof.
+  defp abandon_staging, do: exit(:in_process_stage_unproved)
 
   defp register(
          state,

@@ -67,6 +67,65 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
       do: {:ok, {:session_grant, generation, elem(operation, 0), self(), reference, deadline}}
   end
 
+  defmodule StageRaceProbe do
+    @behaviour Loopex.LLM.ReqLLM.InProcess.Admission
+
+    @impl true
+    def request(
+          {__MODULE__, _observer, generation, _cell},
+          {:begin_model, _callback, _call} = operation,
+          deadline
+        ) do
+      grant(generation, operation, deadline)
+    end
+
+    def request(
+          {__MODULE__, observer, generation, _cell},
+          {:stage_model, call, candidate, proof, _stop, start_proof},
+          deadline
+        ) do
+      start_ref = elem(start_proof, 1)
+      staging_ref = make_ref()
+      send(observer, {:stage_requested, self(), candidate, call, proof, start_ref})
+
+      receive do
+        {:stage_result, ^candidate, :clean_cancel} ->
+          {:error, :model_stage_cancelled}
+
+        {:stage_result, ^candidate, :deliver_custody} ->
+          custody = {:model_cleanup_custody, observer, generation, call, candidate, proof}
+
+          send(
+            candidate,
+            {:model_custody_prepare, start_ref, staging_ref, deadline, __MODULE__, custody}
+          )
+
+          receive do
+            {:stage_result, ^candidate, :lost_ack} ->
+              {:error, :session_admission_closed}
+          after
+            1_000 -> {:error, :session_admission_closed}
+          end
+      after
+        1_000 -> {:error, :session_admission_closed}
+      end
+    end
+
+    def request(
+          {:model_cleanup_custody, observer, generation, call, candidate, proof},
+          {:retire_model, call, candidate, proof} = operation,
+          deadline
+        ) do
+      send(observer, {:retirement_requested, candidate, call, proof})
+      grant(generation, operation, deadline)
+    end
+
+    def request(_handle, _operation, _deadline), do: {:error, :session_admission_closed}
+
+    defp grant(generation, operation, deadline),
+      do: {:ok, {:session_grant, generation, elem(operation, 0), self(), make_ref(), deadline}}
+  end
+
   setup_all do
     previously_started? =
       Enum.any?(Application.started_applications(), fn {application, _, _} ->
@@ -320,6 +379,75 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     refute_receive {:admission_seen, :record_model_resources, _, _}, 30
   end
 
+  test "candidate DOWN before custody acknowledgement accepts only the owner's clean cancel" do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+    on_exit(fn -> stop_fixture_supervisor(supervisor) end)
+    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    test = self()
+    {options, cell} = stage_race_options()
+
+    {callback, callback_monitor} =
+      spawn_monitor(fn ->
+        result =
+          ProviderLifetime.scoped(
+            fn _, _ -> send(test, :registrar_entered) end,
+            starter,
+            fn -> InProcess.complete(request("ollama:small"), options, fn _ -> :ok end) end
+          )
+
+        send(test, {:callback_result, result})
+      end)
+
+    assert_receive {:stage_requested, ^callback, candidate, _call, _proof, _start_ref}, 1_000
+    candidate_monitor = Process.monitor(candidate)
+    Process.exit(candidate, :kill)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}, 1_000
+    send(callback, {:stage_result, candidate, :clean_cancel})
+
+    assert_receive {:callback_result, {:error, {:not_dispatched, "model_call_failed"}}}, 1_000
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 1_000
+    assert :atomics.get(cell, 1) == 0
+    refute_receive :registrar_entered, 20
+  end
+
+  test "lost stage acknowledgement leaves provisionally owned candidate to retire" do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+    on_exit(fn -> stop_fixture_supervisor(supervisor) end)
+    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    test = self()
+    {options, cell} = stage_race_options()
+
+    {callback, callback_monitor} =
+      spawn_monitor(fn ->
+        outcome =
+          try do
+            {:return,
+             ProviderLifetime.scoped(
+               fn _, _ -> send(test, :registrar_entered) end,
+               starter,
+               fn -> InProcess.complete(request("ollama:small"), options, fn _ -> :ok end) end
+             )}
+          catch
+            :exit, reason -> {:exit, reason}
+          end
+
+        send(test, {:callback_outcome, outcome})
+      end)
+
+    assert_receive {:stage_requested, ^callback, candidate, call, proof, _start_ref}, 1_000
+    candidate_monitor = Process.monitor(candidate)
+    send(callback, {:stage_result, candidate, :deliver_custody})
+    assert_receive {:model_custody_prepared, ^candidate, _, _, ^call, ^proof}, 1_000
+    send(callback, {:stage_result, candidate, :lost_ack})
+
+    assert_receive {:callback_outcome, {:exit, :in_process_stage_unproved}}, 1_000
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 1_000
+    assert_receive {:retirement_requested, ^candidate, ^call, ^proof}, 1_000
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 1_000
+    assert :atomics.get(cell, 1) == 0
+    refute_receive :registrar_entered, 20
+  end
+
   defp callback_options do
     cell = :atomics.new(2, signed: false)
 
@@ -330,6 +458,20 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
       credential_variable: nil,
       trace_capability: :invalid
     ]
+  end
+
+  defp stage_race_options do
+    cell = :atomics.new(2, signed: false)
+
+    options = [
+      session_admission: {StageRaceProbe, self(), make_ref(), cell},
+      session_cell: cell,
+      base_url: nil,
+      credential_variable: nil,
+      trace_capability: :invalid
+    ]
+
+    {options, cell}
   end
 
   defp stop_fixture_supervisor(supervisor) do
