@@ -27,13 +27,23 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
   alias Loopex.Trace.Capability
   alias LoopexComposition.Ephemeral.{RuntimeHolder, TempRoot}
 
-  @child_phases [:memory_store, :workspace_lease, :executor, :trace_capability, :runtime_holder]
+  @child_phases [
+    :memory_store,
+    :store_handle,
+    :workspace_lease,
+    :executor,
+    :trace_capability,
+    :trace_handle,
+    :runtime_holder
+  ]
   @next %{
     private_supervisor: :memory_store,
-    memory_store: :workspace_lease,
+    memory_store: :store_handle,
+    store_handle: :workspace_lease,
     workspace_lease: :executor,
     executor: :trace_capability,
-    trace_capability: :runtime_holder,
+    trace_capability: :trace_handle,
+    trace_handle: :runtime_holder,
     runtime_holder: :holding
   }
 
@@ -196,7 +206,7 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
   end
 
   defp execute(:trace_bind, _payload, state) do
-    trace = Map.fetch!(state.children, :trace_capability).handle
+    trace = Map.fetch!(state.children, :trace_handle)
 
     case bind_trace(trace, state.runtime) do
       :ok ->
@@ -205,10 +215,16 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
         prepared = %{
           root: state.owned_root,
           supervisor: state.supervisor,
-          store: Map.fetch!(state.children, :memory_store),
+          store: %{
+            pid: Map.fetch!(state.children, :memory_store),
+            handle: Map.fetch!(state.children, :store_handle)
+          },
           workspace_lease: Map.fetch!(state.children, :workspace_lease),
           executor: Map.fetch!(state.children, :executor),
-          trace_capability: Map.fetch!(state.children, :trace_capability),
+          trace_capability: %{
+            pid: Map.fetch!(state.children, :trace_capability),
+            handle: trace
+          },
           runtime_holder: Map.fetch!(state.children, :runtime_holder),
           runtime: state.runtime
         }
@@ -233,16 +249,12 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
   end
 
   defp child(:memory_store, _payload, state) do
-    case start_child(state.supervisor, Memory, []) do
-      {:ok, pid} ->
-        case Store.new(Memory, pid) do
-          {:ok, handle} -> {:ok, %{pid: pid, handle: handle}}
-          error -> {:error, {:memory_store_handle_unavailable, pid, error}}
-        end
+    start_child(state.supervisor, Memory, [])
+  end
 
-      error ->
-        error
-    end
+  defp child(:store_handle, _payload, state) do
+    store_pid = Map.fetch!(state.children, :memory_store)
+    make_store_handle(Memory, store_pid)
   end
 
   defp child(:workspace_lease, _payload, state) do
@@ -273,16 +285,12 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
   defp child(:executor, _options, _state), do: {:error, :invalid_private_executor_options}
 
   defp child(:trace_capability, _payload, state) do
-    case start_child(state.supervisor, Capability, []) do
-      {:ok, pid} ->
-        case Capability.handle(pid) do
-          {:ok, handle} -> {:ok, %{pid: pid, handle: handle}}
-          error -> {:error, {:trace_handle_unavailable, pid, error}}
-        end
+    start_child(state.supervisor, Capability, [])
+  end
 
-      error ->
-        error
-    end
+  defp child(:trace_handle, _payload, state) do
+    trace_pid = Map.fetch!(state.children, :trace_capability)
+    obtain_trace_handle(trace_pid)
   end
 
   defp child(:runtime_holder, _payload, state) do
@@ -356,6 +364,12 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
       if is_function(seams[:trace_bind], 2),
         do: Process.put({__MODULE__, :trace_bind}, seams.trace_bind)
 
+      if is_function(seams[:store_new], 2),
+        do: Process.put({__MODULE__, :store_new}, seams.store_new)
+
+      if is_function(seams[:trace_handle], 1),
+        do: Process.put({__MODULE__, :trace_handle}, seams.trace_handle)
+
       :ok
     end
 
@@ -366,9 +380,17 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
 
     defp bind_trace(handle, runtime),
       do: Process.get({__MODULE__, :trace_bind}, &Capability.bind/2).(handle, runtime)
+
+    defp make_store_handle(module, pid),
+      do: Process.get({__MODULE__, :store_new}, &Store.new/2).(module, pid)
+
+    defp obtain_trace_handle(pid),
+      do: Process.get({__MODULE__, :trace_handle}, &Capability.handle/1).(pid)
   else
     defp install_test_seams(_seams), do: :ok
     defp runtime_holder_test_seams, do: %{}
     defp bind_trace(handle, runtime), do: Capability.bind(handle, runtime)
+    defp make_store_handle(module, pid), do: Store.new(module, pid)
+    defp obtain_trace_handle(pid), do: Capability.handle(pid)
   end
 end
