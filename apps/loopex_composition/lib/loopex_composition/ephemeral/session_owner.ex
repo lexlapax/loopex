@@ -1819,11 +1819,13 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           end
       end
     else
-      _ -> live_failure(state)
+      _ -> live_failure(state, true)
     end
   end
 
-  defp accept_live_event(state, _unexpected), do: live_failure(state)
+  defp accept_live_event(state, {:disconnected, _sequence}), do: live_failure(state)
+  defp accept_live_event(state, {:error, _reason}), do: live_failure(state)
+  defp accept_live_event(state, _unexpected), do: live_failure(state, true)
 
   defp terminal_outcome({:ok, _observation}), do: :completed
   defp terminal_outcome({:error, {:run, outcome, _observation}}), do: outcome
@@ -2155,21 +2157,22 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     )
   end
 
-  defp live_failure(%{phase: :ready, session: %{settlement: %{}}} = state),
+  defp live_failure(state), do: live_failure(state, false)
+
+  defp live_failure(%{phase: :ready, session: %{settlement: %{}}} = state, _malformed),
     do: begin_stop(state, nil)
 
-  defp live_failure(state) do
+  defp live_failure(state, malformed) do
     case state.phase do
       :ready ->
-        state |> begin_stop(nil) |> fail_stopping_operation()
+        state |> begin_stop(nil) |> fail_stopping_operation(malformed)
 
       :stopping ->
-        fail_stopping_operation(state)
+        fail_stopping_operation(state, malformed)
     end
   end
 
-  defp fail_stopping_operation(%{phase: :stopping} = state) do
-    malformed = state.session.active && state.session.active.operation == :next_event
+  defp fail_stopping_operation(%{phase: :stopping} = state, malformed) do
     state = if malformed, do: put_in(state.stop.malformed, true), else: state
     finish_stop_run(state)
   end
