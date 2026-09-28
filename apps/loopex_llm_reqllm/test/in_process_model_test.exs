@@ -4,6 +4,68 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
   alias Loopex.LLM.ReqLLM.InProcess
   alias Loopex.LLM.ReqLLM.InProcess.Caller
   alias Loopex.Model
+  alias Loopex.Runtime.ProviderLifetime
+  alias Loopex.Runtime.ProviderLifetime.Starter
+
+  defmodule AdmissionProbe do
+    @behaviour Loopex.LLM.ReqLLM.InProcess.Admission
+
+    @impl true
+    def request(
+          {__MODULE__, owner, generation, _cell},
+          {:stage_model, call, candidate, proof, _stop, start_proof} = operation,
+          deadline
+        ) do
+      staging_ref = make_ref()
+      start_ref = elem(start_proof, 1)
+      custody = {:model_cleanup_custody, owner, generation, call, candidate, proof}
+
+      send(
+        candidate,
+        {:model_custody_prepare, start_ref, staging_ref, deadline, __MODULE__, custody}
+      )
+
+      receive do
+        {:model_custody_prepared, ^candidate, ^staging_ref, ^generation, ^call, ^proof} ->
+          grant(generation, operation, staging_ref, deadline)
+      after
+        1_000 -> {:error, :session_admission_closed}
+      end
+    end
+
+    def request(
+          {__MODULE__, _owner, generation, _cell},
+          {:cancel_model, _call,
+           {:registration_refused, _registration, candidate, candidate_monitor}} = operation,
+          deadline
+        ) do
+      Process.exit(candidate, :kill)
+
+      receive do
+        {:DOWN, ^candidate_monitor, :process, ^candidate, :killed} ->
+          grant(generation, operation, make_ref(), deadline)
+      after
+        1_000 -> {:error, :session_admission_closed}
+      end
+    end
+
+    def request({__MODULE__, owner, generation, _cell}, operation, deadline) do
+      send(owner, {:admission_seen, elem(operation, 0), self(), operation})
+      grant(generation, operation, make_ref(), deadline)
+    end
+
+    def request(
+          {:model_cleanup_custody, owner, generation, call, candidate, proof},
+          {:retire_model, call, candidate, proof} = operation,
+          deadline
+        ) do
+      send(owner, {:admission_seen, :retire_model, self(), operation})
+      grant(generation, operation, make_ref(), deadline)
+    end
+
+    defp grant(generation, operation, reference, deadline),
+      do: {:ok, {:session_grant, generation, elem(operation, 0), self(), reference, deadline}}
+  end
 
   setup_all do
     previously_started? =
@@ -154,5 +216,119 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     send(callback, :stop)
     assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
     refute_receive {^caller, ^call_ref, _result, _instant}, 50
+  end
+
+  test "unmanaged callback refuses before beginning or starting a child" do
+    options = callback_options()
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} =
+             InProcess.complete(request("ollama:small"), options, fn _ -> :ok end)
+
+    refute_receive {:admission_seen, _, _, _}, 30
+  end
+
+  test "a rejected admission route never invokes the managed starter" do
+    test = self()
+
+    starter =
+      Starter.new(fn _child ->
+        send(test, :starter_invoked)
+        {:error, :unavailable}
+      end)
+
+    options = callback_options()
+    {_module, owner, generation, cell} = options[:session_admission]
+    options = Keyword.put(options, :session_admission, {:wrong_route, owner, generation, cell})
+
+    result =
+      ProviderLifetime.scoped(fn _, _ -> :unmanaged end, starter, fn ->
+        InProcess.complete(request("ollama:small"), options, fn _ -> :ok end)
+      end)
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} = result
+    refute_receive :starter_invoked, 30
+  end
+
+  test "a proved no-child start cancels the pending call without registration" do
+    starter = Starter.new(fn _child -> {:error, :unavailable} end)
+
+    result =
+      ProviderLifetime.scoped(fn _, _ -> flunk("registrar entered") end, starter, fn ->
+        InProcess.complete(request("ollama:small"), callback_options(), fn _ -> :ok end)
+      end)
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} = result
+    assert_receive {:admission_seen, :begin_model, _, _}, 1_000
+    assert_receive {:admission_seen, :cancel_model, _, _}, 1_000
+    refute_receive {:admission_seen, :stage_model, _, _}, 30
+  end
+
+  test "a managed callback stages the candidate, registers it, and waits for owner proof" do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+    on_exit(fn -> if Process.alive?(supervisor), do: Supervisor.stop(supervisor) end)
+    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    test = self()
+
+    result =
+      ProviderLifetime.scoped(
+        fn candidate, stop_ref ->
+          send(test, {:registered_candidate, candidate, stop_ref})
+          {:managed, test, Loopex.Executor.default_cleanup_grace_ms()}
+        end,
+        starter,
+        fn ->
+          InProcess.complete(request("ollama:small"), callback_options(), fn _ -> :ok end)
+        end
+      )
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} = result
+    assert_receive {:registered_candidate, candidate, stop_ref}, 1_000
+    assert_receive {:admission_seen, :begin_model, _, _}, 1_000
+    assert_receive {:admission_seen, :register_model, _, _}, 1_000
+    assert_receive {:admission_seen, :record_model_resources, _, _}, 1_000
+    monitor = Process.monitor(candidate)
+    nonce = make_ref()
+    stop_at = System.monotonic_time(:millisecond) + 5_000
+    send(candidate, {:loopex_provider_resource_stop, stop_ref, nonce, self(), stop_at, stop_at})
+    assert_receive {:loopex_provider_resource_stopped, ^nonce, ^candidate}, 2_000
+    assert_receive {:DOWN, ^monitor, :process, ^candidate, :normal}, 2_000
+    assert_receive {:admission_seen, :retire_model, _, _}, 1_000
+  end
+
+  test "a refused registrar reaps the staged candidate without a work grant" do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+    on_exit(fn -> if Process.alive?(supervisor), do: Supervisor.stop(supervisor) end)
+    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    test = self()
+
+    result =
+      ProviderLifetime.scoped(
+        fn candidate, _stop_ref ->
+          send(test, {:refused_candidate, candidate})
+          :unmanaged
+        end,
+        starter,
+        fn ->
+          InProcess.complete(request("ollama:small"), callback_options(), fn _ -> :ok end)
+        end
+      )
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} = result
+    assert_receive {:refused_candidate, candidate}, 1_000
+    refute Process.alive?(candidate)
+    refute_receive {:admission_seen, :register_model, _, _}, 30
+    refute_receive {:admission_seen, :record_model_resources, _, _}, 30
+  end
+
+  defp callback_options do
+    cell = :atomics.new(2, signed: false)
+
+    [
+      session_admission: {AdmissionProbe, self(), make_ref(), cell},
+      session_cell: cell,
+      base_url: nil,
+      credential_variable: nil,
+      trace_capability: :invalid
+    ]
   end
 end

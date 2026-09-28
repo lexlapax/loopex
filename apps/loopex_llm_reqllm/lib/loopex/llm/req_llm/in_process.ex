@@ -2,14 +2,15 @@ defmodule Loopex.LLM.ReqLLM.InProcess do
   @moduledoc """
   ## Concept
 
-  Prepare one ephemeral model request without reading a provider credential.
+  Run one ephemeral model request without reading its provider credential in the
+  callback process.
 
   ## Technical depth
 
   This is the credential-free half of the in-VM model edge. It validates the
   committed request, fixed provider, host configuration, address, context and
-  tool definitions. It does not grant work or implement the Model port until
-  the cleanup owner's active handoff can own the entire call lifecycle.
+  tool definitions. The private callback protocol obtains session admission,
+  transfers cleanup custody, and gives input directly to the sensitive caller.
   """
 
   alias Loopex.LLM.ReqLLM.InProcess.{Guards, Route}
@@ -17,6 +18,26 @@ defmodule Loopex.LLM.ReqLLM.InProcess do
   alias Loopex.Model
 
   @failed {:error, {:not_dispatched, "model_call_failed"}}
+
+  @behaviour Model
+
+  @doc """
+  ## Concept
+
+  Complete one committed ephemeral model call under session-owned cleanup.
+
+  ## Technical depth
+
+  This callback never resolves the selected credential. Its private orchestrator
+  obtains the start and registration proofs before authorizing the cleanup
+  owner to create the caller and tagged pool.
+  """
+  @impl Model
+  def complete(request, options, progress)
+      when is_map(request) and is_list(options) and is_function(progress, 1),
+      do: __MODULE__.Callback.complete(request, options)
+
+  def complete(_request, _options, _progress), do: @failed
 
   @doc false
   def preflight(request, base_url) do
