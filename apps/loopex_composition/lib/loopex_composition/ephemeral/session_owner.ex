@@ -216,7 +216,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:DOWN, monitor, :process, proxy, :normal},
         %{proxy: proxy, monitors: %{proxy: monitor}, retiring: true, phase: :blocked} = state
       ) do
-    {:noreply, %{state | phase: :ready}}
+    if Process.alive?(proxy),
+      do: {:noreply, state},
+      else: {:noreply, %{state | phase: :ready}}
   end
 
   def handle_info(
@@ -375,6 +377,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         %{phase: :aborting, startup: startup, abort: abort} = state
       ) do
     cond do
+      Process.alive?(pid) ->
+        {:noreply, state}
+
       abort.worker && abort.worker.pid == pid && abort.worker.monitor == monitor ->
         {:noreply, finish_abort_worker(state, reason)}
 
@@ -543,7 +548,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:DOWN, monitor, :process, root, _reason},
         %{phase: :starting, startup: %{root: root, process_monitors: monitors}} = state
       ) do
-    if Map.get(monitors, root) == monitor do
+    if Map.get(monitors, root) == monitor and not Process.alive?(root) do
       failed = fail_start(state, :dependency_start_failed, :unknown)
       abort = %{failed.abort | down: MapSet.put(failed.abort.down, root)}
       {:noreply, continue_abort(%{failed | abort: abort})}
@@ -771,23 +776,31 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:DOWN, monitor, :process, pid, _reason},
         %{phase: :failed_stop, abort: %{worker: %{pid: pid, monitor: monitor}}} = state
       ) do
-    state = put_in(state.abort.worker, nil)
-    if state.stop.no_retry, do: {:noreply, retry_stop(state, nil)}, else: {:noreply, state}
+    if Process.alive?(pid) do
+      {:noreply, state}
+    else
+      state = put_in(state.abort.worker, nil)
+      if state.stop.no_retry, do: {:noreply, retry_stop(state, nil)}, else: {:noreply, state}
+    end
   end
 
   def handle_info(
         {:DOWN, monitor, :process, creator, _reason},
         %{phase: :failed_stop, creator: creator, monitors: %{creator: monitor}} = state
       ) do
-    state = put_in(state.stop.no_retry, true)
+    if Process.alive?(creator) do
+      {:noreply, state}
+    else
+      state = put_in(state.stop.no_retry, true)
 
-    case state.abort.worker do
-      %{pid: worker} ->
-        Process.exit(worker, :kill)
-        {:noreply, state}
+      case state.abort.worker do
+        %{pid: worker} ->
+          Process.exit(worker, :kill)
+          {:noreply, state}
 
-      nil ->
-        {:noreply, retry_stop(state, nil)}
+        nil ->
+          {:noreply, retry_stop(state, nil)}
+      end
     end
   end
 
@@ -795,9 +808,16 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:DOWN, monitor, :process, pid, reason},
         %{phase: :failed_stop, startup: %{process_monitors: monitors}} = state
       ) do
-    if Map.get(monitors, pid) == monitor,
-      do: {:noreply, put_in(state.abort.down, MapSet.put(state.abort.down, pid))},
-      else: {:noreply, handle_model_message(state, {:DOWN, monitor, :process, pid, reason})}
+    cond do
+      Process.alive?(pid) ->
+        {:noreply, state}
+
+      Map.get(monitors, pid) == monitor ->
+        {:noreply, put_in(state.abort.down, MapSet.put(state.abort.down, pid))}
+
+      true ->
+        {:noreply, handle_model_message(state, {:DOWN, monitor, :process, pid, reason})}
+    end
   end
 
   def handle_info(
@@ -805,6 +825,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         %{phase: :ready, startup: startup} = state
       ) do
     cond do
+      Process.alive?(pid) ->
+        {:noreply, state}
+
       {monitor, pid} == {state.monitors.creator, state.creator} ->
         {:noreply, begin_stop(state, nil)}
 
@@ -831,6 +854,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         %{phase: :stopping, startup: startup} = state
       ) do
     cond do
+      Process.alive?(pid) ->
+        {:noreply, state}
+
       {monitor, pid} == {state.monitors.creator, state.creator} ->
         {:noreply, put_in(state.stop.no_retry, true)}
 
@@ -844,6 +870,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   def handle_info({:DOWN, monitor, :process, pid, reason}, state) do
     cond do
+      Process.alive?(pid) ->
+        {:noreply, state}
+
       state.phase == :starting and
           {monitor, pid} ==
             {state.monitors.creator, state.creator} ->

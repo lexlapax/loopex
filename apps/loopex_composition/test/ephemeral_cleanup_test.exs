@@ -176,6 +176,7 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     send(owner, {:EXIT, worker, :normal})
     send(owner, {:DOWN, make_ref(), :process, worker, :normal})
     send(owner, {:DOWN, monitor, :process, self(), :normal})
+    send(owner, {:DOWN, monitor, :process, worker, :normal})
     send(owner, {worker, make_ref(), :subtree_stop, :result, :ok, System.monotonic_time()})
     send(owner, {self(), reference, :subtree_stop, :result, :ok, System.monotonic_time()})
     send(worker, {self(), reference, :finish})

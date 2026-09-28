@@ -32,6 +32,24 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     refute ModelCensus.settled?(pending)
   end
 
+  test "a forged exact callback DOWN cannot consume its cleanup window" do
+    generation = make_ref()
+    cell = :atomics.new(2, [])
+    callback = spawn(fn -> receive do: (:stop -> :ok) end)
+    on_exit(fn -> if Process.alive?(callback), do: Process.exit(callback, :kill) end)
+    call = make_ref()
+
+    state =
+      ModelCensus.new(generation, cell)
+      |> ModelCensus.handle(admission(callback, generation, {:begin_model, callback, call}))
+
+    monitor = state.pending.callback_monitor
+    state = ModelCensus.handle(state, {:DOWN, monitor, :process, callback, :normal})
+    assert state.pending.callback_down == nil
+    assert state.pending.timer == nil
+    assert Process.alive?(callback)
+  end
+
   test "one bound executor gets an exact tool grant only while the session is open" do
     generation = make_ref()
     instance = make_ref()
@@ -636,6 +654,10 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
 
     on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
     {state, cell, generation, call, proof} = direct_staging(candidate, candidate_monitor)
+    owner_monitor = state.pending.candidate_monitor
+    state = ModelCensus.handle(state, {:DOWN, owner_monitor, :process, candidate, :normal})
+    assert state.pending.phase == :staging
+    assert :atomics.get(cell, 2) == 1
 
     assert_receive {:model_custody_prepared, ^candidate, staging_ref, ^generation, ^call, ^proof} =
                      custody
@@ -742,7 +764,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}
   end
 
-  test "callback death after recorded empty retirement does not seal a held candidate" do
+  test "callback death and a forged candidate DOWN do not seal a held candidate" do
     owner = self()
     generation = make_ref()
     cell = :atomics.new(2, [])
@@ -818,6 +840,14 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert :atomics.get(cell, 1) == 0
 
     candidate_owner_monitor = state.pending.candidate_monitor
+
+    state =
+      ModelCensus.handle(state, {:DOWN, candidate_owner_monitor, :process, candidate, :normal})
+
+    assert state.pending.phase == :retired_wait_down
+    assert :atomics.get(cell, 2) == 1
+    assert Process.alive?(candidate)
+
     send(candidate, :stop)
 
     assert_receive {:DOWN, ^candidate_owner_monitor, :process, ^candidate, :normal} =
@@ -1289,6 +1319,11 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert :atomics.get(cell, 2) == 1
 
     [{root_monitor, ^root}] = Map.to_list(state.pending.resource_monitors)
+    state = ModelCensus.handle(state, {:DOWN, root_monitor, :process, root, :normal})
+    assert state.pending.phase == :retiring
+    assert :atomics.get(cell, 2) == 1
+    assert Process.alive?(root)
+
     send(root, :stop)
     assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal} = root_down
     state = ModelCensus.handle(state, root_down)

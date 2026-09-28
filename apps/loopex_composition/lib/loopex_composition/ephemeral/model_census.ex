@@ -90,15 +90,19 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
         %__MODULE__{pending: %{callback_monitor: monitor, callback: callback} = pending} = state,
         {:DOWN, monitor, :process, callback, _reason}
       ) do
-    cond do
-      pending.callback_down ->
-        state
+    if Process.alive?(callback) do
+      state
+    else
+      cond do
+        pending.callback_down ->
+          state
 
-      pending.phase in [:active, :retired_wait_down, :unproved] ->
-        %{state | pending: %{pending | callback_down: true}}
+        pending.phase in [:active, :retired_wait_down, :unproved] ->
+          %{state | pending: %{pending | callback_down: true}}
 
-      true ->
-        lost_candidate(%{state | pending: %{pending | callback_down: true}})
+        true ->
+          lost_candidate(%{state | pending: %{pending | callback_down: true}})
+      end
     end
   end
 
@@ -161,15 +165,19 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
         } = state,
         {:DOWN, monitor, :process, candidate, _reason}
       ) do
-    # Concept: no staging acknowledgement means no registrar permission escaped.
-    # Technical depth: independent candidate DOWN plus the reconciled start proof
-    # settles this empty invocation. Never send its now-stale staging grant.
-    {envelope, _staging_ref} = pending.stage
-    # The exact candidate DOWN is the owner's proof that this staging call
-    # never obtained registrar permission. Distinguish it from an ambiguous
-    # refusal so the callback need not seal an already-cleared session.
-    reply(state, envelope, {:error, :model_stage_cancelled})
-    clear_pending(state)
+    if Process.alive?(candidate) do
+      state
+    else
+      # Concept: no staging acknowledgement means no registrar permission escaped.
+      # Technical depth: independent candidate DOWN plus the reconciled start proof
+      # settles this empty invocation. Never send its now-stale staging grant.
+      {envelope, _staging_ref} = pending.stage
+      # The exact candidate DOWN is the owner's proof that this staging call
+      # never obtained registrar permission. Distinguish it from an ambiguous
+      # refusal so the callback need not seal an already-cleared session.
+      reply(state, envelope, {:error, :model_stage_cancelled})
+      clear_pending(state)
+    end
   end
 
   def handle(
@@ -177,24 +185,28 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
           state,
         {:DOWN, monitor, :process, candidate, reason}
       ) do
-    case pending.phase do
-      :retired_wait_down ->
-        clear_pending(state)
+    if Process.alive?(candidate) do
+      state
+    else
+      case pending.phase do
+        :retired_wait_down ->
+          clear_pending(state)
 
-      phase when phase in [:managed, :active] ->
-        state = %{state | pending: %{pending | candidate_down: true}}
-        lost_candidate(state)
+        phase when phase in [:managed, :active] ->
+          state = %{state | pending: %{pending | candidate_down: true}}
+          lost_candidate(state)
 
-      :retiring ->
-        finish_retirement(%{state | pending: %{pending | candidate_down: true}})
+        :retiring ->
+          finish_retirement(%{state | pending: %{pending | candidate_down: true}})
 
-      _ ->
-        reason = if reason in [:normal, :killed], do: reason, else: :other
+        _ ->
+          reason = if reason in [:normal, :killed], do: reason, else: :other
 
-        state =
-          %{state | pending: %{pending | candidate_down: true, candidate_down_reason: reason}}
+          state =
+            %{state | pending: %{pending | candidate_down: true, candidate_down_reason: reason}}
 
-        finish_no_registrar_cancel(state)
+          finish_no_registrar_cancel(state)
+      end
     end
   end
 
@@ -203,7 +215,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
         {:DOWN, monitor, :process, pid, _reason}
       )
       when is_map_key(monitors, monitor) do
-    if monitors[monitor] == pid do
+    if monitors[monitor] == pid and not Process.alive?(pid) do
       pending = %{pending | resource_down: MapSet.put(pending.resource_down, monitor)}
       finish_retirement(%{state | pending: pending})
     else
