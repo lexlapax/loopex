@@ -21,7 +21,7 @@ defmodule LoopexCli.MixProject do
       # The command an operator types is `loopex`. Without an explicit name the
       # escript takes the application's, and the documentation would be
       # describing a command that does not exist under that name.
-      escript: [main_module: LoopexCli, name: :loopex],
+      escript: [app: nil, main_module: LoopexCli, name: :loopex],
       aliases: ["escript.build": [&build_pair/1]],
       deps: deps()
     ]

@@ -50,13 +50,40 @@ defmodule LoopexCli do
   wrapping this command can tell success from failure.
   """
   @spec main([binary()]) :: no_return()
-  def main(["daemon" | arguments]), do: LoopexCli.Daemon.main(arguments)
+  def main(["daemon" | arguments]) do
+    start_legacy_application_or_halt()
+    LoopexCli.Daemon.main(arguments)
+  end
 
   def main(argv) do
+    start_legacy_application_or_halt()
     unless composes_offline?(argv), do: LoopexComposition.CredentialHost.discard()
     result = dispatch(argv, install_live_signals: true)
     release_placement()
     halt(result)
+  end
+
+  # Concept: the escript defers application startup to command classification;
+  # released commands still start the same application graph before dispatch.
+  # Technical depth: this reproduces Mix's generated escript start failure for
+  # an application error. The future ask branch uses a separate fixed diagnostic
+  # and validates its closed grammar before starting an application.
+  defp start_legacy_application_or_halt do
+    case Application.ensure_all_started(:loopex_cli) do
+      {:ok, _applications} ->
+        :ok
+
+      {:error, {application, reason}} when is_atom(application) ->
+        IO.write(:stderr, [
+          "ERROR! Could not start application ",
+          Atom.to_string(application),
+          ": ",
+          Application.format_error(reason),
+          "\n"
+        ])
+
+        :erlang.halt(1)
+    end
   end
 
   @doc """
