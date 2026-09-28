@@ -77,6 +77,60 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     end
   end
 
+  test "runtime stop waits for its worker result, finish, and exact DOWN", %{tmp: tmp} do
+    session = start_session(tmp, successful_drain())
+    {:loopex_ephemeral_session, owner, cell} = session
+
+    %{startup: %{owned_root: %{path: root}, registered: %{runtime: %Runtime{} = runtime}}} =
+      :sys.get_state(owner)
+
+    root_pid = :sys.get_state(owner).startup.root
+    runtime_monitor = Process.monitor(runtime.supervisor)
+    root_monitor = Process.monitor(root_pid)
+
+    suspension = suspend_runtime(runtime.supervisor)
+    on_exit(fn -> send(suspension, {self(), :release}) end)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    stop_ref = stop.ref
+
+    assert %{stage: :runtime_stop, worker: %{pid: worker, reference: reference} = phase_worker} =
+             await_runtime_stop(owner)
+
+    assert %{result: false, finish_sent: false} = phase_worker
+    worker_monitor = Process.monitor(worker)
+
+    send(owner, {:EXIT, worker, :normal})
+    send(owner, {:DOWN, make_ref(), :process, worker, :normal})
+
+    send(
+      owner,
+      {worker, make_ref(), :runtime_stop, :result, :ok, System.monotonic_time()}
+    )
+
+    send(
+      owner,
+      {self(), reference, :runtime_stop, :result, :ok, System.monotonic_time()}
+    )
+
+    assert %{stage: :runtime_stop, worker: %{pid: ^worker, result: false, finish_sent: false}} =
+             :sys.get_state(owner).abort
+
+    assert Process.alive?(worker)
+    assert Process.alive?(root_pid)
+    assert File.dir?(root)
+    refute_receive {^stop_ref, _}, 0
+
+    send(suspension, {self(), :release})
+    assert_receive {^suspension, :released}, 1_000
+
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 1_000
+    assert :ok = Task.await(stop, 7_000)
+    assert_receive {:DOWN, ^runtime_monitor, :process, _, _}, 1_000
+    assert_receive {:DOWN, ^root_monitor, :process, ^root_pid, _}, 1_000
+    assert :atomics.get(cell, 1) == 2
+    refute File.exists?(root)
+  end
+
   test "a retry cannot remove a replacement for the previously owned root", %{tmp: tmp} do
     test = self()
     removals = :atomics.new(1, signed: false)
@@ -173,4 +227,43 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
 
   defp maybe_remove_seam(temp_root, nil), do: temp_root
   defp maybe_remove_seam(temp_root, remove), do: Map.put(temp_root, :rm_rf, remove)
+
+  defp await_runtime_stop(owner) do
+    Enum.reduce_while(1..100, nil, fn _, _ ->
+      case :sys.get_state(owner).abort do
+        %{stage: :runtime_stop, worker: worker} = abort when is_map(worker) ->
+          {:halt, abort}
+
+        _ ->
+          Process.sleep(2)
+          {:cont, nil}
+      end
+    end)
+  end
+
+  defp suspend_runtime(runtime_supervisor) do
+    test = self()
+
+    # Concept: hold the real runtime stop worker while forged completions arrive.
+    # Technical depth: Supervisor.stop still terminates a :sys-suspended supervisor;
+    # the process that suspends it must also resume it, including after test failure.
+    suspension =
+      spawn(fn ->
+        test_monitor = Process.monitor(test)
+        true = :erlang.suspend_process(runtime_supervisor)
+        send(test, {self(), :suspended})
+
+        receive do
+          {requester, :release} ->
+            true = :erlang.resume_process(runtime_supervisor)
+            send(requester, {self(), :released})
+
+          {:DOWN, ^test_monitor, :process, ^test, _} ->
+            :erlang.resume_process(runtime_supervisor)
+        end
+      end)
+
+    assert_receive {^suspension, :suspended}, 1_000
+    suspension
+  end
 end
