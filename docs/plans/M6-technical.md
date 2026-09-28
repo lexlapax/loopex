@@ -60,6 +60,31 @@ The tagged pool and one-shot fence replace the shared-pool and
 prevent retained TLS session state. One owned pool gives local teardown an exact
 target; the request remains in the sensitive caller. HTTP/2 stays future work.
 
+<a id="technical-plan-mint-security-maintenance"></a>
+#### Exact Lock Change and Verification
+
+Concept: [Mint security maintenance](M6.md#concept-plan-mint-security-maintenance).
+
+The approved lock amendment changes exactly two records: Mint `1.10.1` to
+`1.11.0`, and HPAX `1.0.4` to `1.1.0` because Mint `1.11.0` requires HPAX
+`~> 1.1`. Finch remains `0.23.0`, Req remains `0.7.4`, and ReqLLM remains
+`1.24.0`. No package is added or removed. The [Mint changelog](https://github.com/elixir-mint/mint/blob/main/CHANGELOG.md)
+names the HTTP/1 transfer-coding and HTTP/2 header/frame fixes; the
+[HPAX changelog](https://github.com/elixir-mint/hpax/blob/main/CHANGELOG.md)
+names the decoder behavior required by Mint. These are source facts, not a new
+HTTP/2 route for the M6 model adapter.
+
+`mix loopex.deps_budget` must prove the same non-optional package-name closure
+and core dependency direction. The model-route and one-shot HTTP/1 suites,
+TLS/pool drain witness, fresh-source materialization, both toolchain fast
+checks, normal provider lanes and pristine-`v0.2.0` rollback must run on the
+final tested candidate. The dependency's stricter response parsing may turn a
+malformed peer response into a bounded model failure; no Loopex schema, journal,
+or stored-state migration follows. The accepted ADR 0039 source citations
+describe the dependency locked at its acceptance; the M6 candidate's tests
+and exact current source, not those historical line numbers, prove the updated
+dependency's transport behavior.
+
 **At acceptance of ADR 0039,** the acceptance change also:
 - makes the vision amendment ADR 0039's technical companion states, in all
   seven places together: `docs/vision.md` §12 and §16,
