@@ -62,7 +62,8 @@ It runs, in order, and stops at the first failure: `mix compile
 commit messages, branch and worktree hygiene, OTP application declarations, the
 suite-summary judge, and `mix loopex.status` over the current tree: paired
 documents, directory indexes, local links, and the status
-register), `mix loopex.docs_check`, `mix loopex.deps_budget`,
+register), `mix loopex.docs_check`, the release-runner and escript-inventory
+fixtures, `mix loopex.deps_budget`,
 `mix loopex.version_train`, the test build, and the credential-free suite, one
 application per VM with several at once (`LOOPEX_CHECK_JOBS` bounds how many;
 the default is half the cores; `LOOPEX_CHECK_ALONE` names applications that
@@ -115,7 +116,9 @@ manifest and the `git ls-files -z` inventory outside the extraction (set
 `LOOPEX_RELEASE_RETAIN` to choose where), proves with
 `scripts/source-archive-check.exs` that the extraction is exactly that commit,
 builds the command there with `mix deps.get` and the documented escript build,
-and proves the build changed nothing outside its declared outputs; it then
+checks that both built escripts contain Logger and the load-only provider
+applications, and proves the build changed nothing outside its declared
+outputs; it then
 requires the extraction's source identity to be the staged commit and its
 `VERSION` to be `0.3.0`, and prints both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
 `loopex_executor_local`, `loopex_daemon` and the in-process ReqLLM transport-drain witness runs the real-duration proofs the
