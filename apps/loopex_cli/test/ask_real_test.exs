@@ -3,14 +3,16 @@ defmodule LoopexCli.AskRealTest do
   ## Concept
 
   The release lane proves that a separate operating-system process can ask a
-  local Ollama model through the shipped command without a state root or key.
+  local Ollama model through the shipped command without a state root or key,
+  using both JSON and the default text mode.
 
   ## Technical depth
 
   The runner builds the escript from its fresh source archive before this case.
   Its credential-clearing wrapper is repeated here so a direct invocation has
-  the same boundary. Only the closed public JSON object and process exit are
-  observed; no in-process session handle is shared with the test.
+  the same boundary. Only the closed public JSON object, answer-only text
+  stdout, stderr and process exits are observed; no in-process session handle
+  is shared with the test.
   """
 
   use ExUnit.Case, async: false
@@ -31,44 +33,25 @@ defmodule LoopexCli.AskRealTest do
     assert String.starts_with?(model, "ollama:") and byte_size(model) > byte_size("ollama:")
     assert_local_model_available!(model)
 
-    {output, status} =
-      System.cmd(
-        "env",
-        [
-          "-u",
-          "LOOPEX_PROVIDER_API_KEY",
-          "-u",
-          "OPENAI_API_KEY",
-          "-u",
-          "ANTHROPIC_API_KEY",
-          "-u",
-          "OPENROUTER_API_KEY",
-          "-u",
-          "OPEN_ROUTER_API_KEY",
-          "-u",
-          "LOOPEX_HOME",
-          "-u",
-          "OLLAMA_HOST",
-          command,
-          "-p",
-          "Answer in one short sentence: what is two plus two?",
-          "--policy",
-          "allow-all",
-          "--model",
-          model,
-          "--tools",
-          "none",
-          "--cwd",
-          workspace,
-          "--deadline-ms",
-          "90000",
-          "--output",
-          "json"
-        ],
-        stderr_to_stdout: false
-      )
+    options = [
+      "Answer in one short sentence: what is two plus two?",
+      "--policy",
+      "allow-all",
+      "--model",
+      model,
+      "--tools",
+      "none",
+      "--cwd",
+      workspace,
+      "--deadline-ms",
+      "90000"
+    ]
+
+    {status, output, stderr} =
+      capture(command, ["-p" | options] ++ ["--output", "json"], workspace)
 
     assert status == 0
+    assert stderr == ""
     assert [encoded, ""] = String.split(output, "\n")
     result = JSON.decode!(encoded)
 
@@ -82,7 +65,44 @@ defmodule LoopexCli.AskRealTest do
     assert result["cleanup"] == %{"proved" => true}
     assert is_binary(result["text"]) and String.trim(result["text"]) != ""
     assert result["tools"] == []
+
+    {text_status, text_stdout, text_stderr} = capture(command, ["ask" | options], workspace)
+    assert text_status == 0
+    assert String.trim(text_stdout) != ""
+    assert String.ends_with?(text_stdout, "\n")
+    assert text_stderr == "ending completed\n"
+
     IO.puts(:stderr, "loopex M6 delegated local ask completed with proved cleanup")
+  end
+
+  defp capture(command, argv, workspace) do
+    number = System.unique_integer([:positive])
+    stdout_path = Path.join(workspace, "stdout-#{number}")
+    stderr_path = Path.join(workspace, "stderr-#{number}")
+
+    script =
+      "command=$1; stdout=$2; stderr=$3; shift 3; exec \"$command\" \"$@\" >\"$stdout\" 2>\"$stderr\""
+
+    {shell_output, status} =
+      System.cmd(
+        "/bin/sh",
+        ["-c", script, "capture", command, stdout_path, stderr_path] ++ argv,
+        cd: workspace,
+        env: [
+          {"LOOPEX_HOME", nil},
+          {"LOOPEX_PROVIDER_API_KEY", nil},
+          {"OPENAI_API_KEY", nil},
+          {"ANTHROPIC_API_KEY", nil},
+          {"OPENROUTER_API_KEY", nil},
+          {"OPEN_ROUTER_API_KEY", nil},
+          {"OLLAMA_HOST", nil},
+          {"ERL_AFLAGS", nil},
+          {"ERL_ZFLAGS", nil}
+        ]
+      )
+
+    assert shell_output == ""
+    {status, File.read!(stdout_path), File.read!(stderr_path)}
   end
 
   defp assert_local_model_available!(model) do

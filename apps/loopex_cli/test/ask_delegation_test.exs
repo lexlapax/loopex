@@ -3,13 +3,16 @@ defmodule LoopexCli.AskDelegationTest do
   ## Concept
 
   A separate program can run `loopex -p`, consume its one JSON result and use
-  the exit status to decide whether the delegated question succeeded.
+  the exit status to distinguish completed, failed, bounded and no-ending runs.
 
   ## Technical depth
 
-  The delegated child executes the production ask command and ephemeral API in
-  its own VM. A test-only address seam points its Ollama call at a local TCP
+  The delegated child executes the production ask command in its own VM. A
+  test-only address seam points its completed Ollama call at a local TCP
   responder, since the public command deliberately has no endpoint flag.
+  Public-result seams drive the other outcomes to witness JSON serialization,
+  stderr and exit statuses across processes. Those injected cases do not prove
+  runtime cleanup.
   """
 
   use ExUnit.Case, async: false
@@ -22,9 +25,7 @@ defmodule LoopexCli.AskDelegationTest do
     on_exit(fn -> File.rm_rf!(root) end)
     {port, server} = start_server("delegated answer")
     server_monitor = Process.monitor(server)
-    stand_in = Path.join(root, "loopex-child")
-    File.write!(stand_in, stand_in_source())
-    File.chmod!(stand_in, 0o755)
+    stand_in = build_stand_in(root)
 
     python = System.find_executable("python3") || flunk("Python 3 is unavailable")
 
@@ -68,6 +69,93 @@ defmodule LoopexCli.AskDelegationTest do
     assert length(String.split(summary, "\n")) == 2
   end
 
+  test "a delegating process serializes injected bounded, failed and no-ending results" do
+    root = temporary_directory()
+    on_exit(fn -> File.rm_rf!(root) end)
+    stand_in = build_stand_in(root)
+    python = System.find_executable("python3") || flunk("Python 3 is unavailable")
+
+    {summary, delegate_status} =
+      System.cmd(
+        python,
+        ["-c", outcome_delegator_source(), @launcher],
+        cd: root,
+        env: [
+          {"LOOPEX_ESCRIPT", stand_in},
+          {"LOOPEX_HOME", nil},
+          {"LOOPEX_PROVIDER_API_KEY", nil},
+          {"OPENAI_API_KEY", nil},
+          {"ANTHROPIC_API_KEY", nil},
+          {"OPENROUTER_API_KEY", nil},
+          {"OPEN_ROUTER_API_KEY", nil},
+          {"ERL_AFLAGS", nil},
+          {"ERL_ZFLAGS", nil}
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert delegate_status == 0, summary
+    assert [encoded, ""] = String.split(summary, "\n")
+
+    assert JSON.decode!(encoded) == [
+             %{
+               "case" => "failed",
+               "status" => 2,
+               "stderr" => "",
+               "outcome" => "failed",
+               "details" => %{
+                 "reason" => "model_call_failed",
+                 "failure" => nil,
+                 "cleanup_grace_ms" => "5000"
+               },
+               "cleanup" => %{"proved" => true}
+             },
+             %{
+               "case" => "bounded",
+               "status" => 3,
+               "stderr" => "",
+               "outcome" => "bound_reached",
+               "details" => %{
+                 "bound" => "max_turns",
+                 "observed" => "1",
+                 "declared_limit" => "1",
+                 "accounting_source" => nil,
+                 "cleanup_grace_ms" => "5000"
+               },
+               "cleanup" => %{"proved" => true}
+             },
+             %{
+               "case" => "timeout",
+               "status" => 6,
+               "stderr" => "",
+               "outcome" => "no_ending",
+               "details" => %{"reason" => "timeout", "waited_ms" => "25"},
+               "cleanup" => %{"proved" => true}
+             },
+             %{
+               "case" => "session-loss",
+               "status" => 6,
+               "stderr" =>
+                 "loopex: cleanup_unproved root=\"/tmp/ask-delegated-retained\" ownership=owned pending=run_ending,root_removal\n",
+               "outcome" => "no_ending",
+               "details" => %{"reason" => "session_unavailable", "waited_ms" => "25"},
+               "cleanup" => %{
+                 "proved" => false,
+                 "root" => "/tmp/ask-delegated-retained",
+                 "root_ownership" => "owned",
+                 "pending" => ["run_ending", "root_removal"]
+               }
+             }
+           ]
+  end
+
+  defp build_stand_in(root) do
+    stand_in = Path.join(root, "loopex-child")
+    File.write!(stand_in, stand_in_source())
+    File.chmod!(stand_in, 0o755)
+    stand_in
+  end
+
   defp stand_in_source do
     elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
 
@@ -77,28 +165,63 @@ defmodule LoopexCli.AskDelegationTest do
       end)
 
     program = """
-    port = System.fetch_env!("LOOPEX_TEST_PORT")
+    mode = System.get_env("LOOPEX_TEST_DELEGATE_CASE", "completed")
     manager = spawn(fn -> receive do :release -> :ok end end)
-    seams = [
+    base = [
       install_interrupt: fn _, _ -> {:ok, manager} end,
       signal_manager: fn -> manager end,
       handler_live: fn _, _ -> true end,
       interrupt_phase: fn _, _ -> :idle end,
-      finish_interrupt: fn _, _ -> {:ok, :ordinary} end,
-      start_session: fn options ->
+      finish_interrupt: fn _, _ -> {:ok, :ordinary} end
+    ]
+    seams = if mode == "completed" do
+      port = System.fetch_env!("LOOPEX_TEST_PORT")
+      Keyword.put(base, :start_session, fn options ->
         LoopexComposition.Ephemeral.start_session(
           Keyword.merge(options,
             base_url: "http://127.0.0.1:" <> port <> "/v1",
-            max_tokens: 128,
-            timeout: 15_000
+            max_tokens: 128, timeout: 15_000
           )
         )
+      end)
+    else
+      observation = %{
+        profile: :ephemeral, outcome: :completed, session_id: "session-1",
+        run_id: "run-1", text: "partial answer", text_truncated: false,
+        tools: [], tools_truncated: false, shadowed_skills: [], details: %{}
+      }
+      snapshot = observation |> Map.drop([:outcome, :details]) |> Map.put(:run_id, nil)
+        |> Map.put(:waited_ms, 25)
+      ending = case mode do
+        "failed" ->
+          failed = %{observation | outcome: :failed,
+            details: %{"reason" => "model_call_failed", "failure" => nil,
+              "cleanup_grace_ms" => 5_000}}
+          {:error, {:run, :failed, failed}}
+        "bounded" ->
+          bounded = %{observation | outcome: :bound_reached,
+            details: %{"bound" => "max_turns", "observed" => 1, "declared_limit" => 1,
+              "accounting_source" => nil, "cleanup_grace_ms" => 5_000}}
+          {:error, {:run, :bound_reached, bounded}}
+        "timeout" -> {:error, {:timeout, snapshot}}
+        "session-loss" -> {:ok, %{observation | details: %{"cleanup_grace_ms" => 5_000}}}
       end
-    ]
-    %{status: status, stdout: stdout, stderr: stderr} = LoopexCli.Ask.run(System.argv(), seams)
-    if stdout != "", do: IO.binwrite(:stdio, stdout)
-    if stderr != "", do: IO.binwrite(:stderr, stderr)
-    System.halt(status)
+      stop = case mode do
+        "session-loss" ->
+          cleanup = %{root: "/tmp/ask-delegated-retained", root_ownership: :owned,
+            pending: [:run_ending, :root_removal],
+            ending: {:error, {:session_unavailable, snapshot}}}
+          {:error, {:cleanup_unproved, cleanup}}
+        _ -> :ok
+      end
+      Keyword.merge(base,
+        start_session: fn _ -> {:ok, :session} end,
+        ask: fn _, _ -> ending end,
+        stop_session: fn _ -> stop end
+      )
+    end
+    Process.put({LoopexCli.Ask, :test_seams}, seams)
+    LoopexCli.main(System.argv())
     """
 
     "#!/bin/sh\nexec #{shell_quote(elixir)} #{paths} -e #{shell_quote(program)} -- \"$@\"\n"
@@ -107,13 +230,17 @@ defmodule LoopexCli.AskDelegationTest do
   defp delegator_source do
     """
     import json
+    import os
     import subprocess
     import sys
 
+    child_env = os.environ.copy()
+    child_env.pop('LOOPEX_TEST_DELEGATE_CASE', None)
     completed = subprocess.run(
         [sys.argv[1], '-p', 'delegated question', '--policy', 'allow-all',
          '--model', 'ollama:llama3.2', '--tools', 'none', '--output', 'json'],
-        capture_output=True, text=True, timeout=30, check=False)
+        capture_output=True, text=True, timeout=30, check=False,
+        env=child_env)
     assert completed.stdout.endswith('\\n'), repr((completed.returncode, completed.stdout, completed.stderr))
     assert completed.stdout.count('\\n') == 1, repr((completed.returncode, completed.stdout, completed.stderr))
     result = json.loads(completed.stdout)
@@ -126,6 +253,40 @@ defmodule LoopexCli.AskDelegationTest do
         'text': result['text'],
         'cleanup': result['cleanup'],
     }, separators=(',', ':')))
+    """
+  end
+
+  defp outcome_delegator_source do
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+
+    reports = []
+    keys = {'schema', 'session_id', 'run_id', 'profile', 'outcome', 'text',
+            'text_truncated', 'tools', 'tools_truncated', 'shadowed_skills',
+            'cleanup', 'details'}
+    for case in ('failed', 'bounded', 'timeout', 'session-loss'):
+        child_env = os.environ.copy()
+        child_env['LOOPEX_TEST_DELEGATE_CASE'] = case
+        completed = subprocess.run(
+            [sys.argv[1], '-p', 'delegated question', '--policy', 'allow-all',
+             '--model', 'ollama:llama3.2', '--tools', 'none', '--output', 'json'],
+            capture_output=True, text=True, timeout=30, check=False,
+            env=child_env)
+        assert completed.stdout.endswith('\\n'), repr((case, completed.returncode, completed.stdout, completed.stderr))
+        assert completed.stdout.count('\\n') == 1, repr((case, completed.returncode, completed.stdout, completed.stderr))
+        result = json.loads(completed.stdout)
+        assert isinstance(result, dict) and set(result) == keys, repr(result)
+        assert result['schema'] == 'loopex.ask/1' and result['profile'] == 'ephemeral', repr(result)
+        assert result['text'] == 'partial answer' and result['tools'] == [], repr(result)
+        assert result['run_id'] == (None if case in ('timeout', 'session-loss') else 'run-1'), repr(result)
+        reports.append({
+            'case': case, 'status': completed.returncode, 'stderr': completed.stderr,
+            'outcome': result['outcome'], 'details': result['details'],
+            'cleanup': result['cleanup']})
+    print(json.dumps(reports, separators=(',', ':')))
     """
   end
 

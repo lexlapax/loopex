@@ -3,15 +3,17 @@ defmodule LoopexCli.AskCommandTest do
   ## Concept
 
   Proves that the built command admits both standalone spellings in a separate
-  process and exits with their fixed diagnostic bytes.
+  process and exits with their fixed diagnostic and result bytes.
 
   ## Technical depth
 
   The invalid-input case builds a fresh escript from this run's compiled beams.
   The tool case calls main/1 in a child VM with a test-only local model
   endpoint seam, since the public command has no endpoint flag. A direct
-  Ask.run/2 call is the positive notice control. Shell capture keeps stdout
-  and stderr apart.
+  Ask.run/2 call is the positive notice control. Public-result seams drive
+  failed, bounded and no-ending outcomes through main/1 in separate VMs to
+  witness serialization, stderr and exit status, not runtime cleanup. Shell
+  capture keeps stdout and stderr apart.
   """
 
   use ExUnit.Case, async: false
@@ -133,6 +135,83 @@ defmodule LoopexCli.AskCommandTest do
       assert_receive {:model_request, second}, 15_000
       assert second =~ "a tool really read this file"
       assert_receive {:DOWN, ^server_monitor, :process, ^server, :normal}, 1_000
+      refute File.exists?(state_root)
+    end
+  end
+
+  test "main emits one JSON object and the outcome status from a separate VM" do
+    elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
+    code_paths = Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end)
+
+    for {case_name, status, outcome, details, stderr} <- [
+          {"failed", 2, "failed",
+           %{"reason" => "model_call_failed", "failure" => nil, "cleanup_grace_ms" => "5000"},
+           ""},
+          {"bounded", 3, "bound_reached",
+           %{
+             "bound" => "max_turns",
+             "observed" => "1",
+             "declared_limit" => "1",
+             "accounting_source" => nil,
+             "cleanup_grace_ms" => "5000"
+           }, ""},
+          {"timeout", 6, "no_ending", %{"reason" => "timeout", "waited_ms" => "25"}, ""},
+          {"session-loss", 6, "no_ending",
+           %{"reason" => "session_unavailable", "waited_ms" => "25"},
+           "loopex: cleanup_unproved root=\"/tmp/ask-retained\" ownership=owned pending=run_ending,root_removal\n"}
+        ] do
+      root = temporary_directory()
+      on_exit(fn -> File.rm_rf!(root) end)
+      state_root = Path.join(root, "unused-state-root")
+
+      {actual_status, stdout, actual_stderr} =
+        capture(
+          elixir,
+          code_paths ++
+            [
+              "-e",
+              outcome_ask_source(),
+              "--",
+              "ask",
+              "question",
+              "--policy",
+              "allow-all",
+              "--output",
+              "json"
+            ],
+          root,
+          state_root,
+          [{"LOOPEX_TEST_ASK_CASE", case_name}]
+        )
+
+      assert actual_status == status
+      assert actual_stderr == stderr
+      assert [encoded, ""] = String.split(stdout, "\n")
+      object = JSON.decode!(encoded)
+
+      assert Enum.sort(Map.keys(object)) ==
+               Enum.sort(~w(schema session_id run_id profile outcome text text_truncated tools
+                            tools_truncated shadowed_skills cleanup details))
+
+      assert object["schema"] == "loopex.ask/1"
+      assert object["profile"] == "ephemeral"
+      assert object["outcome"] == outcome
+      assert object["details"] == details
+      assert object["text"] == "partial answer"
+      assert object["tools"] == [%{"tool_id" => nil, "outcome" => "denied"}]
+      assert object["run_id"] == if(outcome == "no_ending", do: nil, else: "run-1")
+
+      assert object["cleanup"] ==
+               if(case_name == "session-loss",
+                 do: %{
+                   "proved" => false,
+                   "root" => "/tmp/ask-retained",
+                   "root_ownership" => "owned",
+                   "pending" => ["run_ending", "root_removal"]
+                 },
+                 else: %{"proved" => true}
+               )
+
       refute File.exists?(state_root)
     end
   end
@@ -261,6 +340,55 @@ defmodule LoopexCli.AskCommandTest do
       if stderr != "", do: IO.binwrite(:stderr, stderr)
       System.halt(status)
     end
+    """
+  end
+
+  defp outcome_ask_source do
+    ~S"""
+    mode = System.fetch_env!("LOOPEX_TEST_ASK_CASE")
+    manager = spawn(fn -> receive do :release -> :ok end end)
+    observation = %{
+      profile: :ephemeral, outcome: :completed, session_id: "session-1", run_id: "run-1",
+      text: "partial answer", text_truncated: false,
+      tools: [%{tool_id: nil, outcome: "denied", private: "not public"}],
+      tools_truncated: false, shadowed_skills: [], details: %{}, private: "not public"
+    }
+    snapshot = observation |> Map.drop([:outcome, :details]) |> Map.put(:run_id, nil)
+      |> Map.put(:waited_ms, 25)
+    ending = case mode do
+      "failed" ->
+        failed = %{observation | outcome: :failed,
+          details: %{"reason" => "model_call_failed", "failure" => nil,
+            "cleanup_grace_ms" => 5_000}}
+        {:error, {:run, :failed, failed}}
+      "bounded" ->
+        bounded = %{observation | outcome: :bound_reached,
+          details: %{"bound" => "max_turns", "observed" => 1, "declared_limit" => 1,
+            "accounting_source" => nil, "cleanup_grace_ms" => 5_000}}
+        {:error, {:run, :bound_reached, bounded}}
+      "timeout" -> {:error, {:timeout, snapshot}}
+      "session-loss" -> {:ok, %{observation | details: %{"cleanup_grace_ms" => 5_000}}}
+    end
+    stop = case mode do
+      "session-loss" ->
+        cleanup = %{root: "/tmp/ask-retained", root_ownership: :owned,
+          pending: [:run_ending, :root_removal],
+          ending: {:error, {:session_unavailable, snapshot}}}
+        {:error, {:cleanup_unproved, cleanup}}
+      _ -> :ok
+    end
+    seams = [
+      install_interrupt: fn _, _ -> {:ok, manager} end,
+      signal_manager: fn -> manager end,
+      handler_live: fn _, _ -> true end,
+      interrupt_phase: fn _, _ -> :idle end,
+      finish_interrupt: fn _, _ -> {:ok, :ordinary} end,
+      start_session: fn _ -> {:ok, :session} end,
+      ask: fn _, _ -> ending end,
+      stop_session: fn _ -> stop end
+    ]
+    Process.put({LoopexCli.Ask, :test_seams}, seams)
+    LoopexCli.main(System.argv())
     """
   end
 
