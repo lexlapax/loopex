@@ -49,12 +49,36 @@ defmodule LoopexCli.AskOSSignalDriver do
         if scenario in ["double", "backstop"] do
           {:ok, :fixture_session}
         else
-          Ephemeral.start_session(
-            Keyword.merge(options,
-              base_url: "http://127.0.0.1:1/v1",
-              model: "ollama:loopex-signal-fixture"
+          result =
+            Ephemeral.start_session(
+              Keyword.merge(options,
+                base_url: "http://127.0.0.1:1/v1",
+                model: "ollama:loopex-signal-fixture"
+              )
             )
-          )
+
+          if scenario in ["pregrant", "postgrant"] do
+            {:ok, {:loopex_ephemeral_session, owner, _cell}} = result
+            actor = :sys.get_state(owner).startup.registered.facade_client
+            gate = hold_actor(actor)
+            Process.put(:signal_actor_gate, gate)
+
+            if scenario == "pregrant" do
+              spawn(fn -> watch_pregrant(socket, owner, 200) end)
+            else
+              spawn(fn ->
+                try do
+                  watch_postgrant(socket, owner, actor, gate, 200)
+                rescue
+                  error -> send_control(socket, {:postgrant_error, Exception.message(error)})
+                catch
+                  kind, reason -> send_control(socket, {:postgrant_error, {kind, reason}})
+                end
+              end)
+            end
+          end
+
+          result
         end
       end,
       start_worker: fn work ->
@@ -70,14 +94,28 @@ defmodule LoopexCli.AskOSSignalDriver do
           spawn_monitor(work)
         end
       end,
-      ask: fn _, _ ->
+      ask: fn session, prompt ->
         send_control(socket, :ask_enter)
-        {:ok, observation()}
+        if scenario in ["pregrant", "postgrant"],
+          do: Ephemeral.ask(session, prompt),
+          else: {:ok, observation()}
       end,
       stop_session: fn session ->
         send_control(socket, :stop_enter)
 
-        if scenario in ["stop", "pre_worker", "double", "backstop"], do: await_release(socket)
+        if scenario in ["stop", "pre_worker", "double", "backstop"],
+          do: await_release(socket)
+
+        if scenario in ["pregrant", "postgrant"] do
+          {:loopex_ephemeral_session, owner, _cell} = session
+          gate = Process.get(:signal_actor_gate)
+
+          if scenario == "pregrant" do
+            spawn(fn -> release_pregrant_after_cancel(socket, owner, gate, 200) end)
+          else
+            spawn(fn -> release_postgrant_after_stop(socket, owner, gate, 200) end)
+          end
+        end
 
         result = if scenario in ["double", "backstop"], do: :ok, else: Ephemeral.stop_session(session)
         send_control(socket, {:stop_returned, result})
@@ -126,6 +164,172 @@ defmodule LoopexCli.AskOSSignalDriver do
 
       _ ->
         :ok
+    end
+  end
+
+  defp watch_pregrant(_socket, _owner, 0), do: :ok
+
+  defp watch_pregrant(socket, owner, remaining) do
+    active = :sys.get_state(owner).session.active
+
+    if match?(
+         %{kind: :ask, operation: :command, admission: :pregrant,
+           borrower: borrower, facade: %{stage: :await_ready}}
+         when is_pid(borrower),
+         active
+       ) do
+      send_control(socket, :pregrant_reserved)
+    else
+      Process.sleep(5)
+      watch_pregrant(socket, owner, remaining - 1)
+    end
+  end
+
+  defp watch_postgrant(socket, _owner, _actor, _gate, 0),
+    do: send_control(socket, :postgrant_pregrant_unseen)
+
+  defp watch_postgrant(socket, owner, actor, gate, remaining) do
+    case :sys.get_state(owner).session.active do
+      %{kind: :ask, operation: :command, admission: :pregrant, borrower: borrower,
+        facade: %{pid: ^actor, reference: reference, stage: :await_ready}}
+      when is_pid(borrower) ->
+        send_control(socket, :postgrant_pregrant_seen)
+        :ok = :sys.suspend(owner)
+        send_control(socket, :postgrant_owner_suspended)
+        1 = :erlang.trace(actor, true, [:send, {:tracer, self()}])
+        :ok = gate_resume(gate)
+        send_control(socket, :postgrant_actor_resumed)
+
+        receive do
+          {:trace, ^actor, :send, {^actor, ^reference, :ready}, ^owner} ->
+            send_control(socket, :postgrant_ready_trace)
+            :ok = await_actor_await_grant(actor, 200)
+            send_control(socket, :postgrant_actor_await_grant)
+            :ok = gate_suspend(gate)
+            1 = :erlang.trace(actor, false, [:send])
+            :ok = :sys.resume(owner)
+            wait_granted(socket, owner, actor, 200)
+        after
+          1_000 ->
+            send_control(socket, :postgrant_ready_unseen)
+        end
+
+      _ ->
+        Process.sleep(5)
+        watch_postgrant(socket, owner, actor, gate, remaining - 1)
+    end
+  end
+
+  defp wait_granted(socket, _owner, _actor, 0),
+    do: send_control(socket, :postgrant_grant_unseen)
+
+  defp wait_granted(socket, owner, actor, remaining) do
+    case :sys.get_state(owner).session.active do
+      %{admission: :granted, facade: %{pid: ^actor, stage: :dispatched}} ->
+        send_control(socket, :postgrant_granted)
+
+      _ ->
+        Process.sleep(5)
+        wait_granted(socket, owner, actor, remaining - 1)
+    end
+  end
+
+  defp await_actor_await_grant(_actor, 0), do: raise("facade actor did not await grant")
+
+  defp await_actor_await_grant(actor, remaining) do
+    case Process.info(actor, :current_function) do
+      {:current_function,
+       {LoopexComposition.Ephemeral.FacadeClient, :await_grant, 3}} ->
+        :ok
+
+      _ ->
+        Process.sleep(5)
+        await_actor_await_grant(actor, remaining - 1)
+    end
+  end
+
+  defp release_pregrant_after_cancel(socket, _owner, gate, 0) do
+    send_control(socket, :pregrant_cancel_unseen)
+    gate_resume(gate)
+  end
+
+  defp release_pregrant_after_cancel(socket, owner, gate, remaining) do
+    state = :sys.get_state(owner)
+
+    if state.phase == :stopping and state.stop.possible == false and
+         match?(%{admission: :pregrant, facade: %{stage: :cancelling}}, state.session.active) do
+      send_control(socket, :pregrant_cancelling)
+      gate_resume(gate)
+    else
+      Process.sleep(5)
+      release_pregrant_after_cancel(socket, owner, gate, remaining - 1)
+    end
+  end
+
+  defp release_postgrant_after_stop(socket, _owner, gate, 0) do
+    send_control(socket, :postgrant_stop_unseen)
+    gate_resume(gate)
+  end
+
+  defp release_postgrant_after_stop(socket, owner, gate, remaining) do
+    state = :sys.get_state(owner)
+
+    if state.phase == :stopping and state.stop.possible and
+         match?(%{admission: :granted, facade: %{stage: :dispatched}}, state.session.active) do
+      send_control(socket, :postgrant_stopping)
+      gate_resume(gate)
+    else
+      Process.sleep(5)
+      release_postgrant_after_stop(socket, owner, gate, remaining - 1)
+    end
+  end
+
+  defp hold_actor(actor) do
+    parent = self()
+
+    gate =
+      spawn(fn ->
+        true = :erlang.suspend_process(actor)
+        send(parent, {self(), :held})
+        actor_gate(actor)
+      end)
+
+    receive do
+      {^gate, :held} -> gate
+    after
+      1_000 -> raise "facade actor suspension was not acknowledged"
+    end
+  end
+
+  defp actor_gate(actor) do
+    receive do
+      {sender, :resume} ->
+        send(sender, {self(), :resumed, :erlang.resume_process(actor)})
+        actor_gate(actor)
+
+      {sender, :suspend} ->
+        send(sender, {self(), :suspended, :erlang.suspend_process(actor)})
+        actor_gate(actor)
+    end
+  end
+
+  defp gate_resume(gate) do
+    send(gate, {self(), :resume})
+
+    receive do
+      {^gate, :resumed, true} -> :ok
+    after
+      1_000 -> raise "facade actor resume was not acknowledged"
+    end
+  end
+
+  defp gate_suspend(gate) do
+    send(gate, {self(), :suspend})
+
+    receive do
+      {^gate, :suspended, true} -> :ok
+    after
+      1_000 -> raise "facade actor re-suspension was not acknowledged"
     end
   end
 

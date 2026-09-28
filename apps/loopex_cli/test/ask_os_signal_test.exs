@@ -98,9 +98,51 @@ defmodule LoopexCli.AskOSSignalTest do
     release(state.socket)
     assert_control(state.socket, {:stop_returned, :ok})
     assert_restored_handlers(state.socket)
-    assert {:result, %{status: 130, stdout: ""}} = receive_control(state.socket)
+    assert {:result, %{status: 130, stdout: "", stderr: ""}} = receive_control(state.socket)
     assert {130, output} = await_exit(state.port, 10_000)
     refute output =~ "signal answer"
+  end
+
+  test "a real signal after owner registration but before grant starts no prompt", fixture do
+    state = start_case(fixture, "pregrant")
+    assert_control(state.socket, :ask_enter)
+    assert_control(state.socket, :pregrant_reserved)
+    signal(state, "TERM", :child)
+
+    assert MapSet.new(for _ <- 1..3, do: receive_control(state.socket)) ==
+             MapSet.new([{:phase, :stopping}, :stop_enter, :pregrant_cancelling])
+
+    assert_control(state.socket, {:stop_returned, :ok})
+    assert_restored_handlers(state.socket)
+    assert {:result, %{status: 130, stdout: "", stderr: ""}} = receive_control(state.socket)
+    assert {130, output} = await_exit(state.port, 10_000)
+    assert output == ""
+    assert File.read!(state.stderr_path) == ""
+  end
+
+  test "a real signal after dispatch grant stops the possibly admitted prompt", fixture do
+    state = start_case(fixture, "postgrant")
+    assert_control(state.socket, :ask_enter)
+    assert_control(state.socket, :postgrant_pregrant_seen)
+    assert_control(state.socket, :postgrant_owner_suspended)
+    assert_control(state.socket, :postgrant_actor_resumed)
+    assert_control(state.socket, :postgrant_ready_trace)
+    assert_control(state.socket, :postgrant_actor_await_grant)
+    assert_control(state.socket, :postgrant_granted)
+    signal(state, "TERM", :child)
+
+    assert MapSet.new(for _ <- 1..3, do: receive_control(state.socket)) ==
+             MapSet.new([{:phase, :stopping}, :stop_enter, :postgrant_stopping])
+
+    assert_control(state.socket, {:stop_returned, :ok})
+    assert_restored_handlers(state.socket)
+
+    assert {:result, %{status: 130, stdout: "", stderr: "ending cancelled\n"}} =
+             receive_control(state.socket)
+
+    assert {130, output} = await_exit(state.port, 10_000)
+    assert output == ""
+    assert File.read!(state.stderr_path) == "ending cancelled\n"
   end
 
   test "a second signal hard-halts a stop that has not returned", fixture do
