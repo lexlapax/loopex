@@ -143,6 +143,20 @@ defmodule LoopexCli.AskEphemeralTest do
     assert result == LoopexCli.AskResult.diagnostic(:session_unavailable)
   end
 
+  test "an unmarked owner loss before an observation emits no result" do
+    result =
+      Ask.run(
+        ["ask", "--policy", "allow-all", "--output", "json", "hello"],
+        seams(
+          ask: fn _, _ -> {:error, :session_unavailable} end,
+          stop_session: fn _ -> {:error, :session_unavailable} end
+        )
+      )
+
+    assert result == %{status: 1, stdout: "", stderr: "loopex: session_unavailable\n"}
+    assert_receive :handler_finished
+  end
+
   test "a proof-bearing stop selects its no-ending snapshot and retained root" do
     snapshot = no_ending_snapshot()
 
