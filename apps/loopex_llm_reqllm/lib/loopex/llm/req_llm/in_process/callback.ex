@@ -273,6 +273,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
                deadline
              ) do
           :ok ->
+            before_provider_register(config.cell, call_ref, state.candidate)
+
             register(
               state,
               prepared,
@@ -306,6 +308,20 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
   # process ends; candidate DOWN monitoring and empty retirement stay with the
   # session owner. Killing the candidate here would erase that cleanup proof.
   defp abandon_staging, do: exit(:in_process_stage_unproved)
+
+  if Mix.env() == :test do
+    defp before_provider_register(cell, call_ref, candidate) do
+      rendezvous = Loopex.LLM.ReqLLM.InProcess.TestRegisterRendezvous
+
+      if Code.ensure_loaded?(rendezvous) do
+        apply(rendezvous, :await!, [cell, call_ref, candidate])
+      else
+        :ok
+      end
+    end
+  else
+    defp before_provider_register(_cell, _call_ref, _candidate), do: :ok
+  end
 
   defp register(
          state,

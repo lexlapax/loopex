@@ -19,6 +19,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
         "test/support/provider_build_fixture.exs",
         "test/support/provider_isolation_fixture.exs",
         "test/support/provider_phase_diagnostic.exs",
+        "test/support/provider_register_rendezvous.exs",
         "test/support/in_process_tls_fixture.ex",
         "test/support/in_process_caller_wire_fixture.ex",
         "test/support/in_process_catalog_fixture.ex",
