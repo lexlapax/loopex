@@ -569,6 +569,79 @@ defmodule LoopexCli.DurableAskWorkflowTest do
     assert object["details"] == %{"reason" => "timeout", "waited_ms" => "30001"}
   end
 
+  test "a queued terminal returned at the exact follow deadline wins the zero-wait receive" do
+    caller = self()
+    prompt_id = "cli-prompt"
+
+    {:ok, ticks} =
+      Agent.start_link(fn ->
+        %{
+          caller_calls: 0,
+          reads: 0,
+          events: [
+            event(1, "user.message_appended", "run-1", %{"command_id" => prompt_id}),
+            event(2, "run.finished", "run-1", %{
+              "outcome" => "completed",
+              "cleanup_grace_ms" => 5_000
+            })
+          ]
+        }
+      end)
+
+    facade = fn
+      Loopex, :attach, [:runtime, "session-1", [after_event_sequence: 0]] ->
+        {:ok, %Loopex.Attachment{}}
+
+      Loopex, :next_event, [%Loopex.Attachment{}] ->
+        Agent.get_and_update(ticks, fn %{events: [next | rest]} = state ->
+          {{:ok, next}, %{state | events: rest, reads: state.reads + 1}}
+        end)
+    end
+
+    clock = fn ->
+      if self() == caller do
+        call =
+          Agent.get_and_update(ticks, fn state ->
+            {state.caller_calls, %{state | caller_calls: state.caller_calls + 1}}
+          end)
+
+        if call < 2 do
+          0
+        else
+          await_queued_terminal(5_000)
+          30_001
+        end
+      else
+        Agent.get(ticks, fn state -> if state.reads == 1, do: 0, else: 30_001 end)
+      end
+    end
+
+    assert {:observation, {:ok, observation}} =
+             FollowReader.follow(:runtime, "session-1", prompt_id, 0, 1, [],
+               facade: facade,
+               monotonic_ms: clock
+             )
+
+    assert observation.run_id == "run-1"
+    assert observation.outcome == :completed
+  end
+
+  defp await_queued_terminal(0), do: flunk("terminal return was not queued")
+
+  defp await_queued_terminal(attempts) do
+    {:messages, messages} = Process.info(self(), :messages)
+
+    if Enum.any?(messages, fn
+         {_reader, _reference, {:ok, %{kind: "run.finished"}}, 30_001} -> true
+         _ -> false
+       end) do
+      :ok
+    else
+      Process.sleep(1)
+      await_queued_terminal(attempts - 1)
+    end
+  end
+
   test "failed terminal without an absent counterpart field still renders its exact public reason" do
     events = fn prompt_id ->
       [
