@@ -120,14 +120,18 @@ An OTP build without trace sessions returns
 `{:error, :trace_sessions_unavailable}` and changes nothing, rather than
 pretending to start one.
 
-### The one process a trace never sees
+### Credential-bearing processes a Loopex trace never sees
 
-The process that hands the provider credential to a model call's private
-companion excludes itself from every current and future trace session before it
-touches the credential, and names the exact functions that carry it; the call
-does not proceed until that exclusion is acknowledged. Even the `arguments`
-level never renders the credential, and a trace started mid-call cannot reach
-that process. The exclusion ends when the process does.
+In the durable profile, the process handing a credential to the private
+companion excludes itself from current and future Loopex trace sessions before
+touching it. The call waits for that exclusion. A trace started mid-call cannot
+reach that process, even at the `arguments` level.
+
+In the ephemeral profile, the in-VM provider caller is also excluded from
+Loopex trace sessions. That is not a same-VM secrecy boundary: host-installed
+trace, telemetry and logger handlers and crash diagnostics can observe its
+selected credential during the call. Use the durable profile when the host VM
+must not be in that credential's audience.
 
 <a id="operator-observability-daemon"></a>
 ### Under the daemon

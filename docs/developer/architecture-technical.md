@@ -609,7 +609,8 @@ the lease ends the owned process group or abandons the filesystem effect, and th
 job is retained as unproven rather than complete. Exact duplicate jobs return the
 retained receipt without another start.
 
-Credentials stay at the provider boundary. The reference adapter reads no
+Credentials stay at the provider boundary, but the two profiles make different
+isolation claims. In the durable profile the companion adapter reads no
 environment variable: the host reads `LOOPEX_PROVIDER_API_KEY` once, deletes it
 and holds it in a custody process beside a routing registry
 (`LoopexComposition.CredentialHost`), and the adapter, given an opaque
@@ -629,6 +630,15 @@ by [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) and
 [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept);
 the host-facing custody API is in
 [Runtime and embedding](runtime-and-embedding.md#technical-embedding-composition).
+The ephemeral profile instead reads the selected provider variable inside one
+sensitive in-VM caller immediately before its ReqLLM call. Its cleanup owner
+proves that caller and the tagged pool subtree ended before returning a model
+result; socket and TLS-controller drain has a separate release witness. Trusted
+host code, its telemetry or logger handlers, crash reports and crash dumps can
+still observe the value. A host-authorized tool may disclose an ambient value
+through ordinary tool results. This narrower guarantee is fixed by
+[ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept), not by the
+durable companion's isolation claim.
 
 <a id="technical-arch-concerns"></a>
 ## Where Each Concern Lives

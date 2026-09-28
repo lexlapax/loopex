@@ -37,10 +37,10 @@ the role fixes which dependencies it may declare.
 | `loopex_protocol` | contract | Canonical encoding, the tool-definition record, and the experimental public session schemas and vectors, with no dependencies at all. |
 | `loopex` | core | The kernel: the five ports, the runtime supervision tree, the session reducer and coordinator, durable interactions, trace sessions, and the telemetry emission points. |
 | `loopex_store_local` | edge | The durable single-machine Store and the local artifact store, including bounded artifact transfers. |
-| `loopex_llm_reqllm` | edge | The reference model adapter over the ReqLLM library, run in a private companion process. |
-| `loopex_executor_local` | edge | The trusted-local executor, the workspace lease, and the four bootstrap coding tools. |
+| `loopex_llm_reqllm` | edge | Two ReqLLM model paths: the durable profile's private companion and the ephemeral profile's in-VM, per-call adapter. |
+| `loopex_executor_local` | edge | The trusted-local executor, the workspace lease, four bootstrap coding tools and three read-only tools. |
 | `loopex_telemetry` | edge | The one Loopex-attached telemetry handler, which hands core's spans to a runtime's diagnostics plane. |
-| `loopex_composition` | composition | One module that wires the reference stack and returns a started runtime. |
+| `loopex_composition` | composition | Durable and ephemeral profiles that wire the same kernel with different state and provider lifetimes. |
 | `loopex_reference_client` | client | A thin embedded client over the public facade. |
 | `loopex_cli` | client | `loopex`, the command an operator runs, including the forms that talk to a daemon. |
 | `loopex_app_server` | client | A foreground server that speaks the experimental session protocol over standard input and output. |
@@ -166,6 +166,10 @@ settlement. Fixed by
 [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept),
 [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept), and
 [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept).
+The durable reference adapter streams through its companion; the ephemeral
+adapter returns one buffered reply in the host VM and emits no model deltas.
+The latter's credential audience is wider, as [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept)
+states.
 
 **Executor** is the authority and effect-start boundary. It defines one
 transport-neutral job, the host-grant bindings an executor revalidates
