@@ -427,6 +427,33 @@ defmodule Loopex.Executor.Local do
     end
   end
 
+  @doc """
+  ## Concept
+
+  Proves the ephemeral executor has no owned process group before its session
+  owner stops the runtime subtree.
+
+  ## Technical depth
+
+  This private host-edge call binds the exact executor instance and owner. The
+  executor closes further dispatch, drains its recorded jobs and validates the
+  process table and open ledger under one absolute native deadline. Only the
+  live executor sends the nonce-bound certificate directly to its recorded
+  owner. A worker's return alone is not that certificate.
+  """
+  @spec drain_process_groups(pid(), reference(), pid(), reference(), integer()) ::
+          {:ok, reference()} | {:error, :process_groups_unproved}
+  def drain_process_groups(executor, instance, owner, nonce, deadline)
+      when is_pid(executor) and is_reference(instance) and is_pid(owner) and
+             is_reference(nonce) and is_integer(deadline) do
+    GenServer.call(executor, {:drain_process_groups, instance, owner, nonce, deadline}, :infinity)
+  catch
+    :exit, _ -> {:error, :process_groups_unproved}
+  end
+
+  def drain_process_groups(_executor, _instance, _owner, _nonce, _deadline),
+    do: {:error, :process_groups_unproved}
+
   # Concept: waiting out an admitted period is one wait spent in slices, not one
   # timer the VM refuses to arm.
   #
@@ -1247,6 +1274,9 @@ defmodule Loopex.Executor.Local do
          claim_wait_ms: claim_wait_ms,
          process_probe: process_probe,
          session: session,
+         dispatch_closed: false,
+         dispatch_cell: :atomics.new(1, signed: false),
+         drain: nil,
          inflight_table: table,
          reserved: %{},
          reservation_monitors: %{},
@@ -1264,20 +1294,29 @@ defmodule Loopex.Executor.Local do
   # module is taken from the host-supplied handle, never imported from
   # composition. Neither the handle nor the cell enters a job or receipt.
   defp session_configuration(options) do
-    keys = [:session_owner, :session_generation, :session_cell, :session_admission]
+    keys = [
+      :session_owner,
+      :session_generation,
+      :session_instance,
+      :session_cell,
+      :session_admission
+    ]
+
     values = Enum.map(keys, &Keyword.fetch(options, &1))
 
     case values do
-      [:error, :error, :error, :error] ->
+      [:error, :error, :error, :error, :error] ->
         {:ok, nil}
 
       [
         {:ok, owner},
         {:ok, generation},
+        {:ok, instance},
         {:ok, cell},
         {:ok, handle}
       ]
-      when is_pid(owner) and is_reference(generation) and is_reference(cell) and
+      when is_pid(owner) and is_reference(generation) and is_reference(instance) and
+             is_reference(cell) and
              is_tuple(handle) and tuple_size(handle) > 0 ->
         module = elem(handle, 0)
 
@@ -1289,7 +1328,7 @@ defmodule Loopex.Executor.Local do
              cell: cell,
              module: module,
              handle: handle,
-             instance: make_ref()
+             instance: instance
            }}
         else
           {:error, :invalid_executor_configuration}
@@ -1308,8 +1347,8 @@ defmodule Loopex.Executor.Local do
 
   defp session_open(%{session: nil}), do: :ok
 
-  defp session_open(%{session: %{owner: owner, cell: cell}}) do
-    if Process.alive?(owner) and atomics_open?(cell),
+  defp session_open(%{session: %{owner: owner, cell: cell}, dispatch_cell: dispatch_cell}) do
+    if :atomics.get(dispatch_cell, 1) == 0 and Process.alive?(owner) and atomics_open?(cell),
       do: :ok,
       else: {:error, :session_admission_closed}
   end
@@ -1343,6 +1382,102 @@ defmodule Loopex.Executor.Local do
     else
       _ -> refused_before_effect(:session_admission_closed)
     end
+  end
+
+  # Concept: the drain worker may wait for a live job or the operating-system
+  # process table; the serialized executor remains responsive to settlement.
+  # Technical depth: dispatch is already closed before this worker starts. It
+  # cancels each recorded job through its actual launch owner, verifies every
+  # captured group against one complete process table, then requires both the
+  # in-flight table and the root's open-authority index empty. A malformed or
+  # unavailable observation proves nothing. Its result is still only worker
+  # evidence; the executor issues the certificate after this worker's DOWN.
+  defp drain_groups_work(executor, table, ledger, probe, deadline) do
+    with true <- System.monotonic_time() < deadline,
+         {:ok, initial} <- group_snapshot(table),
+         :ok <- cancel_group_jobs(executor, initial.jobs),
+         :ok <- process_groups_empty(initial.groups, probe, deadline),
+         {:ok, final} <- group_snapshot(table),
+         :ok <- final_group_table_empty(final),
+         {:ok, []} <- open_groups_empty(ledger, deadline),
+         true <- System.monotonic_time() < deadline do
+      :ok
+    else
+      {:error, stage} -> {:error, stage}
+      _ -> {:error, :remaining_open_authority}
+    end
+  rescue
+    _ -> {:error, :drain_exception}
+  catch
+    _, _ -> {:error, :drain_exception}
+  end
+
+  defp cancel_group_jobs(executor, jobs) do
+    if Enum.all?(jobs, &(cancel(executor, &1) == {:ok, :cleaned})),
+      do: :ok,
+      else: {:error, :job_cancel_unconfirmed}
+  end
+
+  defp final_group_table_empty(%{jobs: [], groups: [], authorities: 0}), do: :ok
+  defp final_group_table_empty(_), do: {:error, :group_table_not_empty}
+
+  defp group_snapshot(table) do
+    entries = :ets.tab2list(table)
+
+    Enum.reduce_while(entries, {:ok, %{jobs: [], groups: [], authorities: 0}}, fn
+      {job_id, {:starting, worker}}, {:ok, snapshot}
+      when is_binary(job_id) and is_pid(worker) ->
+        {:cont, {:ok, %{snapshot | jobs: [job_id | snapshot.jobs]}}}
+
+      {job_id, group}, {:ok, snapshot}
+      when is_binary(job_id) and is_integer(group) and group > 1 ->
+        {:cont,
+         {:ok, %{snapshot | jobs: [job_id | snapshot.jobs], groups: [group | snapshot.groups]}}}
+
+      {{kind, _job_id}, _value}, {:ok, snapshot}
+      when kind in [@operation_owner_key, @process_authority_key] ->
+        {:cont, {:ok, %{snapshot | authorities: snapshot.authorities + 1}}}
+
+      {{@process_authority_key, _job_id}, worker, grace}, {:ok, snapshot}
+      when is_pid(worker) and is_integer(grace) and grace > 0 ->
+        {:cont, {:ok, %{snapshot | authorities: snapshot.authorities + 1}}}
+
+      {{@hand_off_claim_key, _tag}, _claimant}, {:ok, snapshot} ->
+        {:cont, {:ok, snapshot}}
+
+      _entry, _snapshot ->
+        {:halt, {:error, :process_groups_unproved}}
+    end)
+    |> case do
+      {:ok, snapshot} ->
+        {:ok,
+         %{
+           snapshot
+           | jobs: Enum.uniq(snapshot.jobs),
+             groups: Enum.uniq(snapshot.groups)
+         }}
+
+      error ->
+        error
+    end
+  rescue
+    ArgumentError -> {:error, :process_groups_unproved}
+  end
+
+  defp process_groups_empty([], _probe, _deadline), do: :ok
+
+  defp process_groups_empty(groups, probe, deadline) do
+    until = System.convert_time_unit(deadline, :native, :millisecond)
+    answer = process_table_until(probe, until)
+
+    if Enum.all?(groups, &process_group_answered_empty?(answer, &1)),
+      do: :ok,
+      else: {:error, :process_groups_unproved}
+  end
+
+  defp open_groups_empty(ledger, deadline) do
+    until = System.convert_time_unit(deadline, :native, :millisecond)
+    Ledger.with_claim_until(ledger, &Ledger.open_snapshot/1, until)
   end
 
   # Concept: unresolved open authority on this root quarantines new effects, and
@@ -1416,6 +1551,54 @@ defmodule Loopex.Executor.Local do
 
   def handle_call(:process_probe, _from, state),
     do: {:reply, state.process_probe, state}
+
+  def handle_call(
+        {:drain_process_groups, instance, owner, nonce, deadline},
+        from,
+        %{session: %{owner: owner, instance: instance}, drain: nil, dispatch_closed: false} =
+          state
+      )
+      when is_reference(nonce) and is_integer(deadline) do
+    if System.monotonic_time() < deadline and Process.alive?(owner) do
+      reference = make_ref()
+      executor = self()
+      :atomics.put(state.dispatch_cell, 1, 1)
+
+      {worker, monitor} =
+        spawn_monitor(fn ->
+          result =
+            drain_groups_work(
+              executor,
+              state.inflight_table,
+              state.ledger,
+              state.process_probe,
+              deadline
+            )
+
+          send(executor, {:drain_groups_result, self(), reference, result})
+        end)
+
+      Process.send_after(self(), {:drain_groups_tick, reference}, 1_000)
+
+      drain = %{
+        worker: worker,
+        monitor: monitor,
+        reference: reference,
+        from: from,
+        owner: owner,
+        nonce: nonce,
+        deadline: deadline,
+        result: nil
+      }
+
+      {:noreply, %{state | dispatch_closed: true, drain: drain}}
+    else
+      {:reply, {:error, :process_groups_unproved}, state}
+    end
+  end
+
+  def handle_call({:drain_process_groups, _, _, _, _}, _from, state),
+    do: {:reply, {:error, :process_groups_unproved}, state}
 
   # Concept: the one serialized decision, and nothing else.
   #
@@ -1793,6 +1976,45 @@ defmodule Loopex.Executor.Local do
   # this clause the default implementation logs each one as an unexpected
   # message, which turns a bounded abandonment into noise in an operator's log.
   @impl GenServer
+  def handle_info(
+        {:drain_groups_result, worker, reference, result},
+        %{drain: %{worker: worker, reference: reference} = drain} = state
+      ) do
+    {:noreply, %{state | drain: %{drain | result: result}}}
+  end
+
+  def handle_info(
+        {:drain_groups_tick, reference},
+        %{drain: %{reference: reference, deadline: deadline} = drain} = state
+      ) do
+    if System.monotonic_time() < deadline do
+      Process.send_after(self(), {:drain_groups_tick, reference}, 1_000)
+      {:noreply, state}
+    else
+      Process.exit(drain.worker, :kill)
+      GenServer.reply(drain.from, {:error, :process_groups_unproved})
+      {:noreply, %{state | drain: nil}}
+    end
+  end
+
+  def handle_info(
+        {:DOWN, monitor, :process, worker, reason},
+        %{drain: %{monitor: monitor, worker: worker} = drain} = state
+      ) do
+    proved =
+      reason == :normal and drain.result == :ok and
+        System.monotonic_time() < drain.deadline and Process.alive?(drain.owner)
+
+    if proved do
+      send(drain.owner, {self(), state.session.instance, drain.nonce, :groups_empty})
+      GenServer.reply(drain.from, {:ok, drain.nonce})
+    else
+      GenServer.reply(drain.from, {:error, :process_groups_unproved})
+    end
+
+    {:noreply, %{state | drain: nil}}
+  end
+
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
     case Map.pop(state.reservation_monitors, monitor) do
       {nil, _monitors} ->

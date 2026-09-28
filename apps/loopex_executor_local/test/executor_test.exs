@@ -41,11 +41,13 @@ defmodule Loopex.Executor.LocalTest do
   test "an ephemeral executor needs its exact session grant and closes before a second effect" do
     cell = :atomics.new(2, signed: false)
     generation = make_ref()
+    instance = make_ref()
 
     fixture =
       fixture("session-tool-grant",
         session_owner: self(),
         session_generation: generation,
+        session_instance: instance,
         session_cell: cell,
         session_admission: {SessionHost, self(), generation, cell}
       )
@@ -56,10 +58,10 @@ defmodule Loopex.Executor.LocalTest do
     executor = fixture.executor
 
     assert_receive {:session_tool_grant_requested, ^executor,
-                    {:tool_grant, ^executor, instance, dispatch}, deadline},
+                    {:tool_grant, ^executor, ^instance, dispatch}, deadline},
                    1_000
 
-    assert is_reference(instance) and is_reference(dispatch) and is_integer(deadline)
+    assert is_reference(dispatch) and is_integer(deadline)
     assert File.exists?(Path.join(fixture.workspace, "first-tool.txt"))
 
     :atomics.put(cell, 1, 3)
@@ -70,6 +72,115 @@ defmodule Loopex.Executor.LocalTest do
 
     refute_receive {:session_tool_grant_requested, _, _, _}, 25
     refute File.exists?(Path.join(fixture.workspace, "sealed-tool.txt"))
+  end
+
+  test "only the live exact executor certifies its completed process groups" do
+    cell = :atomics.new(2, signed: false)
+    generation = make_ref()
+    instance = make_ref()
+
+    fixture =
+      fixture("session-group-proof",
+        session_owner: self(),
+        session_generation: generation,
+        session_instance: instance,
+        session_cell: cell,
+        session_admission: {SessionHost, self(), generation, cell}
+      )
+
+    on_exit(fn -> stop_fixture(fixture) end)
+    {first, first_grant} = job_and_grant(fixture, "proved-tool", "loopex.demo.write")
+
+    assert {:ok, %{cleanup_confirmation: :confirmed}} =
+             Local.execute(fixture.executor, first, first_grant)
+
+    assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
+    deadline = System.monotonic_time() + System.convert_time_unit(2_000, :millisecond, :native)
+    nonce = make_ref()
+    executor = fixture.executor
+
+    assert {:error, :process_groups_unproved} =
+             Local.drain_process_groups(executor, make_ref(), self(), make_ref(), deadline)
+
+    assert {:ok, ^nonce} =
+             Local.drain_process_groups(executor, instance, self(), nonce, deadline)
+
+    assert_receive {^executor, ^instance, ^nonce, :groups_empty}, 1_000
+    refute_receive {^executor, _, _, :groups_empty}, 25
+
+    {later, later_grant} = job_and_grant(fixture, "after-proof", "loopex.demo.write")
+
+    assert {:error, {:refused_before_effect, :session_admission_closed}} =
+             Local.execute(executor, later, later_grant)
+
+    refute File.exists?(Path.join(fixture.workspace, "after-proof.txt"))
+  end
+
+  test "the session drain cancels a live group before the direct certificate" do
+    cell = :atomics.new(2, signed: false)
+    generation = make_ref()
+    instance = make_ref()
+
+    fixture =
+      fixture("session-live-group",
+        session_owner: self(),
+        session_generation: generation,
+        session_instance: instance,
+        session_cell: cell,
+        session_admission: {SessionHost, self(), generation, cell}
+      )
+
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {job, grant} =
+      job_and_grant(fixture, "live-tool", "loopex.demo.wait_write", %{
+        "relative_path" => "live-tool.txt",
+        "content" => "must-not-land",
+        "delay_ms" => 10_000
+      })
+
+    parent = self()
+    running = Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
+    assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
+
+    assert_receive {:executor_process_started, job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert job_id == job.job_id
+    deadline = System.monotonic_time() + System.convert_time_unit(8_000, :millisecond, :native)
+    nonce = make_ref()
+    executor = fixture.executor
+
+    assert {:ok, group} =
+             await_answer(
+               fn ->
+                 case Process.info(executor, :dictionary) do
+                   {:dictionary, dictionary} ->
+                     table = Keyword.fetch!(dictionary, :loopex_inflight_table)
+
+                     case :ets.lookup(table, job.job_id) do
+                       [{_job_id, group}] when is_integer(group) and group > 1 -> {:ok, group}
+                       _ -> :absent
+                     end
+
+                   _ ->
+                     :absent
+                 end
+               end,
+               1_000
+             )
+
+    assert group > 1
+
+    assert {:ok, ^nonce} =
+             Local.drain_process_groups(executor, instance, self(), nonce, deadline)
+
+    assert_receive {^executor, ^instance, ^nonce, :groups_empty}, 1_000
+
+    assert {:ok, %{outcome: :cancelled, cleanup_confirmation: :confirmed}} =
+             Task.await(running, 10_000)
+
+    refute File.exists?(Path.join(fixture.workspace, "live-tool.txt"))
   end
 
   test "a malformed job is refused without reserving an empty identity" do
