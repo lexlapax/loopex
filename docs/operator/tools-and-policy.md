@@ -274,7 +274,7 @@ Where you choose the policy:
 | --- | --- | --- |
 | `loopex run` and `loopex resume` | `--policy` | `allow-all`, `shell-allowlist` |
 | `loopex ask` and `loopex -p` | `--policy` | `allow-all`, `shell-allowlist`, `refuse-all` |
-| `loopex cancel` | optional `--policy` | as above; without one, a stance that refuses every call |
+| `loopex cancel` | optional `--policy` | `allow-all`, `shell-allowlist`; without one, a stance that refuses every call |
 | `loopex daemon` | `--policy` or `LOOPEX_POLICY`, once at start | `allow-all`, `shell-allowlist` |
 | The app server | `LOOPEX_POLICY`, once at launch | `allow-all`, `ask` |
 | An embedding host | `policy: YourModule` | any module implementing the port |
