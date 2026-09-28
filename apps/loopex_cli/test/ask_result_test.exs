@@ -103,6 +103,45 @@ defmodule LoopexCli.AskResultTest do
 
     assert [known_object, ""] = String.split(known_json, "\n")
     assert JSON.decode!(known_object)["run_id"] == "run-known"
+
+    for value <- [9_007_199_254_740_992, 9_007_199_254_740_993] do
+      %{stdout: precise_json} =
+        AskResult.render({:error, {:timeout, %{snapshot | waited_ms: value}}}, :durable, :json)
+
+      assert JSON.decode!(String.trim_trailing(precise_json, "\n"))["details"]["waited_ms"] ==
+               Integer.to_string(value)
+    end
+  end
+
+  test "an ephemeral session-loss snapshot needs its matching unproved cleanup" do
+    snapshot = %{
+      profile: :ephemeral,
+      session_id: "session-1",
+      run_id: nil,
+      text: "",
+      text_truncated: false,
+      tools: [],
+      tools_truncated: false,
+      shadowed_skills: [],
+      waited_ms: 7
+    }
+
+    ending = {:error, {:session_unavailable, snapshot}}
+
+    cleanup = %{
+      root: "/temporary/retained",
+      root_ownership: :owned,
+      pending: [:run_ending],
+      ending: ending
+    }
+
+    assert AskResult.render(ending, :proved, :json) == AskResult.diagnostic(:command_failed)
+
+    assert AskResult.render(ending, {:unproved, %{cleanup | ending: :none}}, :json) ==
+             AskResult.diagnostic(:command_failed)
+
+    assert %{status: 6, stdout: json} = AskResult.render(ending, {:unproved, cleanup}, :json)
+    assert JSON.decode!(String.trim_trailing(json, "\n"))["cleanup"]["proved"] == false
   end
 
   test "each non-completed terminal has its own status and closed detail members" do
@@ -204,12 +243,13 @@ defmodule LoopexCli.AskResultTest do
 
   test "unproved cleanup retains only bounded public root and reached obligations" do
     snapshot = Map.merge(observation(:ephemeral, :completed, %{}), %{run_id: nil, waited_ms: 0})
+    ending = {:error, {:session_unavailable, snapshot}}
 
     cleanup = %{
       root: "/temporary/α\n",
       root_ownership: :unknown,
       pending: [:run_ending, :process_groups, :root_removal],
-      ending: :private,
+      ending: ending,
       cause: :private
     }
 
@@ -218,7 +258,7 @@ defmodule LoopexCli.AskResultTest do
 
     assert %{status: 6, stdout: json, stderr: ^root_line} =
              AskResult.render(
-               {:error, {:session_unavailable, snapshot}},
+               ending,
                {:unproved, cleanup},
                :json
              )
@@ -235,7 +275,7 @@ defmodule LoopexCli.AskResultTest do
     assert object["details"] == %{"reason" => "session_unavailable", "waited_ms" => "0"}
 
     assert AskResult.render(
-             {:error, {:session_unavailable, snapshot}},
+             ending,
              {:unproved, cleanup},
              :text
            ) ==
@@ -284,11 +324,12 @@ defmodule LoopexCli.AskResultTest do
       | tools: [%{tool_id: "loopex.read", outcome: "cancelled"}]
     }
 
-    cleanup = %{root: "/kept", root_ownership: :owned, pending: [:root_removal]}
+    ending = {:error, {:run, :cancelled, observation}}
+    cleanup = %{root: "/kept", root_ownership: :owned, pending: [:root_removal], ending: ending}
     line = "loopex: cleanup_unproved root=\"/kept\" ownership=owned pending=root_removal\n"
 
     assert AskResult.render(
-             {:error, {:run, :cancelled, observation}},
+             ending,
              {:unproved, cleanup},
              :text
            ) ==
@@ -300,7 +341,7 @@ defmodule LoopexCli.AskResultTest do
 
     assert %{status: 5, stderr: ^line, stdout: json} =
              AskResult.render(
-               {:error, {:run, :cancelled, observation}},
+               ending,
                {:unproved, cleanup},
                :json
              )

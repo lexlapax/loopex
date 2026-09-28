@@ -109,6 +109,22 @@ defmodule LoopexCli.AskResult do
     {status, outcome, observation, details} = ending!(ending)
     profile = Map.fetch!(observation, :profile)
     require!(profile in [:ephemeral, :durable])
+
+    # Concept: an unproved cleanup map is the source of its selected ending;
+    # a post-admission ephemeral session loss cannot claim proved cleanup.
+    # Technical depth: this is the command's public-result boundary. The
+    # selector's precedence alone cannot validate a direct or malformed call.
+    case cleanup do
+      {:unproved, %{ending: ^ending}} -> :ok
+      {:unproved, _} -> invalid!()
+      _ -> :ok
+    end
+
+    if profile == :ephemeral and outcome == :no_ending and
+         Map.fetch!(details, :reason) == "session_unavailable" do
+      require!(match?({:unproved, _}, cleanup))
+    end
+
     {cleanup_object, root_line} = cleanup!(profile, cleanup)
     object = object!(observation, profile, outcome, details, cleanup_object)
 

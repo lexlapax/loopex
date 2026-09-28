@@ -168,6 +168,102 @@ defmodule LoopexCli.AskEphemeralTest do
     assert String.contains?(stderr, "root=\"/tmp/ask-kept\"")
   end
 
+  test "a worker cleanup map yields to successful, newer unproved, or bare stop" do
+    first = cleanup_map({:ok, observation()})
+
+    proved =
+      Ask.run(
+        ["ask", "--policy", "allow-all", "--output", "json", "hello"],
+        seams(ask: fn _, _ -> {:error, {:cleanup_unproved, first}} end)
+      )
+
+    assert %{status: 0, stderr: "", stdout: proved_json} = proved
+
+    assert %{"outcome" => "completed", "cleanup" => %{"proved" => true}} =
+             JSON.decode!(String.trim_trailing(proved_json, "\n"))
+
+    cancelled = %{observation() | outcome: :cancelled}
+    newer = %{cleanup_map({:error, {:run, :cancelled, cancelled}}) | root: "/tmp/newer-root"}
+
+    replaced =
+      Ask.run(
+        ["ask", "--policy", "allow-all", "--output", "json", "hello"],
+        seams(
+          ask: fn _, _ -> {:error, {:cleanup_unproved, first}} end,
+          stop_session: fn _ -> {:error, {:cleanup_unproved, newer}} end
+        )
+      )
+
+    assert %{status: 5, stdout: replaced_json, stderr: replaced_stderr} = replaced
+
+    assert %{
+             "outcome" => "cancelled",
+             "cleanup" => %{"proved" => false, "root" => "/tmp/newer-root"}
+           } = JSON.decode!(String.trim_trailing(replaced_json, "\n"))
+
+    assert replaced_stderr =~ "root=\"/tmp/newer-root\""
+    refute replaced_stderr =~ "/tmp/ask-kept"
+
+    retained =
+      Ask.run(
+        ["ask", "--policy", "allow-all", "--output", "json", "hello"],
+        seams(
+          ask: fn _, _ -> {:error, {:cleanup_unproved, first}} end,
+          stop_session: fn _ -> {:error, :session_unavailable} end
+        )
+      )
+
+    assert %{status: 0, stdout: retained_json, stderr: retained_stderr} = retained
+
+    assert %{
+             "outcome" => "completed",
+             "cleanup" => %{"proved" => false, "root" => "/tmp/ask-kept"}
+           } = JSON.decode!(String.trim_trailing(retained_json, "\n"))
+
+    assert retained_stderr =~ "root=\"/tmp/ask-kept\""
+  end
+
+  test "an unproved stop with no ending names only its retained root" do
+    result =
+      Ask.run(
+        ["ask", "--policy", "allow-all", "--output", "json", "hello"],
+        seams(stop_session: fn _ -> {:error, {:cleanup_unproved, cleanup_map(:none)}} end)
+      )
+
+    assert result == %{
+             status: 1,
+             stdout: "",
+             stderr:
+               "loopex: cleanup_unproved root=\"/tmp/ask-kept\" ownership=owned pending=session_subtree\n"
+           }
+  end
+
+  test "an ordinary timeout keeps its no-ending observation after proved stop" do
+    result =
+      Ask.run(
+        ["ask", "--policy", "allow-all", "--output", "json", "hello"],
+        seams(ask: fn _, _ -> {:error, {:timeout, no_ending_snapshot()}} end)
+      )
+
+    assert %{status: 6, stderr: "", stdout: json} = result
+
+    assert %{
+             "outcome" => "no_ending",
+             "cleanup" => %{"proved" => true},
+             "details" => %{"reason" => "timeout", "waited_ms" => "25"}
+           } = JSON.decode!(String.trim_trailing(json, "\n"))
+  end
+
+  test "a bare worker session loss cannot invent a proved no-ending result" do
+    result =
+      Ask.run(
+        ["ask", "--policy", "allow-all", "--output", "json", "hello"],
+        seams(ask: fn _, _ -> {:error, {:session_unavailable, no_ending_snapshot()}} end)
+      )
+
+    assert result == LoopexCli.AskResult.diagnostic(:command_failed)
+  end
+
   test "worker death without a result stops the session and invents no ending" do
     result =
       Ask.run(
