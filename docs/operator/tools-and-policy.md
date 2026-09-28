@@ -7,8 +7,10 @@ Technical depth: [Budgets, policy port, grants, and credential boundaries](#tech
 
 A coding session is useful only if it can act. Loopex ships four coding tools
 — `read`, `write`, `edit` and `bash` — plus three read-only search tools:
-`grep`, `find` and `ls`. A session activates only its selected preset, and a
-host policy stands in front of every tool call.
+`grep`, `find` and `ls`. The standalone `ask` command selects `none`,
+`read-only` or `coding`, while an embedding host may select a valid subset of
+the seven tools for a durable session. A host policy stands in front of every
+tool call.
 
 Authority is the host's, not the runtime's. Loopex owns the mechanics of running
 a tool and stopping it truthfully; it has no opinion about whether a particular
@@ -327,21 +329,21 @@ another client. The duplication follows from that dependency rule.
 <a id="operator-tools-artifacts"></a>
 ## Artifacts
 
-A tool whose output exceeds its declared bound neither floods the conversation
-nor silently loses the rest. The full bytes spill to an artifact store under
-your state root, and the durable event carries the content digest, media type,
-size, role and an opaque retrieval reference. Each shipped tool collects at most
+A tool whose output exceeds its declared bound does not flood the conversation.
+In a durable session with an artifact store, the excess bytes spill under your
+state root, and the durable event carries the content digest, media type, size,
+role and an opaque retrieval reference. Each shipped tool collects at most
 8 MiB of output; a command that prints more has the remainder dropped, and the
-result says so. The terminal prints the reference beside the tool's outcome as
-the command that reads it back:
+result says so. For that durable case, the terminal prints the reference beside
+the tool's outcome as the command that reads it back:
 
 ```text
     output beyond the tool's bound was retained: 240113 bytes,
     read it with `loopex artifact -- '3f9c1a…d80b'`
 ```
 
-The model sees a bounded result naming what was truncated. You retrieve the
-whole output with that command:
+The model sees a bounded result naming what was truncated. In the durable case,
+you retrieve the retained output with that command:
 
 ```text
 loopex artifact -- '3f9c1a…d80b' > full-output.txt

@@ -152,8 +152,9 @@ and the older one is the floor. While editing, run the focused tests for what
 you touched. Before a change is integrated, the fast check runs once: formatting,
 warning-free compilation, dependency direction, documentation structure, and the
 credential-free test suite. A prose-only change has a documentation mode. The
-slow release check, which needs a real provider credential, runs once before a
-milestone closes and is not part of everyday work.
+full release check needs a real provider credential and runs once before a
+milestone closes. Selected unattended release lanes also run before merges
+that change provider or credential handling, wire protocol, or daemon behavior.
 
 Checks are honest by rule: a required check is never skipped, filtered, softened,
 or retried into passing, and a failure that disappears on retry is a flake to

@@ -109,10 +109,11 @@ IO.puts(result.text)
 ```
 
 `run/2` returns a bounded observation, not just text; a failed or bounded run
-returns `{:error, {:run, outcome, observation}}`. It cleans up its temporary
-root before returning. For a policy that may defer, use the opaque handle from
-`start_session/1`, call `ask/3`, answer its pending interaction with `answer/3`,
-and call `stop_session/1`. The creator process owns that handle's lifetime.
+returns `{:error, {:run, outcome, observation}}`. It removes its temporary root
+before returning only when cleanup is proved; an unproved stop retains the root
+and returns the cleanup failure. For a policy that may defer, use the opaque
+handle from `start_session/1`, call `ask/3`, answer its pending interaction with
+`answer/3`, and call `stop_session/1`. The creator process owns that handle's lifetime.
 This profile loses session history when its VM ends. Hosted OpenAI, Anthropic
 and OpenRouter models use the same entrypoint and tools, but the selected
 provider's key is read inside the host VM for each call. See the

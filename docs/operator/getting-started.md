@@ -20,13 +20,15 @@ Constraints to know before you start:
 
 - Loopex is built from source. There is no package, installer or service unit.
 - It runs on Darwin (macOS) and Linux.
-- Without `--model`, `loopex ask` uses `LOOPEX_MODEL` when set and otherwise
-  defaults to local `ollama:llama3.2`; run Ollama and make that model available
-  before the one-shot example. Its `--model` flag also selects a supported
-  hosted model. OpenAI needs `OPENAI_API_KEY`, Anthropic needs
+- Without `--state-root`, `loopex ask` uses `LOOPEX_MODEL` when `--model` is
+  omitted and that variable is set; otherwise it defaults to local
+  `ollama:llama3.2`. Run Ollama and make that model available before the
+  one-shot example. `--model` also selects a supported hosted model. OpenAI
+  needs `OPENAI_API_KEY`, Anthropic needs
   `ANTHROPIC_API_KEY`, and OpenRouter needs `OPENROUTER_API_KEY`. The older
-  durable `loopex run` path still defaults to
-  `anthropic:claude-haiku-4-5` and needs `LOOPEX_PROVIDER_API_KEY`.
+  durable `loopex run` path and `ask --state-root` default to
+  `anthropic:claude-haiku-4-5` when no model is selected, and need
+  `LOOPEX_PROVIDER_API_KEY`.
 - Tools run as your own operating-system user. The host policy you choose is
   the only thing between the model and your files and commands; it is not a
   sandbox. Read [what local execution can reach](tools-and-policy.md#operator-tools-reach)
