@@ -242,6 +242,24 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "a release acknowledgement without candidate DOWN cannot prove settlement" do
+    {session, _owner, cell, question, facade, candidate} = start_pending_ask()
+    send(facade, :release_settlement_prompt)
+    assert_receive {:settlement_status_requested, ^facade}, 2_000
+    send(facade, :release_settlement_status)
+
+    assert_receive {:candidate_released, _, _, _}, 2_000
+    assert Process.alive?(candidate)
+    assert nil == Task.yield(question, 25)
+
+    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
+             Task.yield(question, 4_000)
+
+    assert :atomics.get(cell, 1) > 0
+    refute Process.alive?(candidate)
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
   defp start_pending_ask do
     root = Path.join(System.tmp_dir!(), "loopex-settlement-#{System.unique_integer([:positive])}")
     File.mkdir!(root)

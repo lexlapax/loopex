@@ -439,7 +439,15 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
 
     assert_receive {:owner, owner, cell}
     assert_receive {:store_died, root_process, _store_pid}
-    assert eventually(fn -> :sys.get_state(owner).phase == :aborting end)
+
+    assert eventually(fn ->
+             try do
+               :sys.get_state(owner).phase == :aborting
+             catch
+               :exit, _ -> :atomics.get(cell, 1) == 3
+             end
+           end)
+
     send(root_process, :release_store_handle)
 
     assert_receive {:result,
