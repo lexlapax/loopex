@@ -13,13 +13,16 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
-      # These two modules are explicitly required by tests, not test selectors.
-      # Current Mix warns on unclassified .exs files; no *_test.exs is ignored.
+      # These support modules are explicitly required by tests, not test selectors.
+      # Current Mix warns on unclassified fixture files; no *_test.exs is ignored.
       test_ignore_filters: [
         "test/support/provider_build_fixture.exs",
         "test/support/provider_isolation_fixture.exs",
         "test/support/provider_phase_diagnostic.exs",
-        "test/support/in_process_tls_fixture.ex"
+        "test/support/in_process_tls_fixture.ex",
+        "test/support/in_process_caller_wire_fixture.ex",
+        "test/support/in_process_catalog_fixture.ex",
+        "test/support/tls_session_cache_probe.ex"
       ],
       start_permanent: Mix.env() == :prod,
       escript: [

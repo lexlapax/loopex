@@ -1,7 +1,7 @@
 defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
   use ExUnit.Case, async: true
 
-  alias LoopexComposition.Ephemeral.OwnerActivation
+  alias LoopexComposition.Ephemeral.{OwnerActivation, SessionOwner}
 
   @failure {:error, {:composition, :ephemeral_owner_start_failed}}
 
@@ -149,17 +149,29 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     test = self()
 
+    # Concept: creator loss applies after owner creation, independently of activation timing.
+    # Technical depth: a direct child avoids the activation handshake's one-second deadline.
     creator =
       spawn(fn ->
-        {:ok, activation} = OwnerActivation.start(supervisor)
-        send(test, {:owner, OwnerActivation.owner(activation)})
+        ref = make_ref()
+        expiry = System.monotonic_time() + System.convert_time_unit(30_000, :millisecond, :native)
+
+        spec = %{
+          id: SessionOwner,
+          start: {SessionOwner, :start_link, [self(), test, ref, expiry]},
+          restart: :temporary
+        }
+
+        {:ok, owner} = DynamicSupervisor.start_child(supervisor, spec)
+        send(test, {:owner, owner})
         receive do: (:wait -> :ok)
       end)
 
-    assert_receive {:owner, owner}
+    assert_receive {:owner, owner}, 5_000
+    assert Process.alive?(owner)
     monitor = Process.monitor(owner)
     Process.exit(creator, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^owner, _}
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 1_000
     Process.exit(supervisor, :shutdown)
   end
 end

@@ -348,16 +348,16 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
   end
 
   defp claim_and_supervise(root, ref) do
-    assert_receive {:root_ready, ^root, ^ref}
-    assert_receive {:phase_ready, ^root, ^ref, :candidate_prepare}
+    assert_receive {:root_ready, ^root, ^ref}, 1_000
+    assert_receive {:phase_ready, ^root, ^ref, :candidate_prepare}, 1_000
     send(root, {:grant, self(), ref, :candidate_prepare, nil})
-    assert_receive {:phase_result, ^root, ^ref, :candidate_prepare, {:ok, _candidate}}
-    assert_receive {:phase_ready, ^root, ^ref, :root_claim}
+    assert_receive {:phase_result, ^root, ^ref, :candidate_prepare, {:ok, _candidate}}, 1_000
+    assert_receive {:phase_ready, ^root, ^ref, :root_claim}, 1_000
     send(root, {:grant, self(), ref, :root_claim, nil})
-    assert_receive {:phase_result, ^root, ^ref, :root_claim, {:ok, owned}}
-    assert_receive {:phase_ready, ^root, ^ref, :private_supervisor}
+    assert_receive {:phase_result, ^root, ^ref, :root_claim, {:ok, owned}}, 1_000
+    assert_receive {:phase_ready, ^root, ^ref, :private_supervisor}, 1_000
     send(root, {:grant, self(), ref, :private_supervisor, nil})
-    assert_receive {:phase_result, ^root, ^ref, :private_supervisor, {:ok, supervisor}}
+    assert_receive {:phase_result, ^root, ^ref, :private_supervisor, {:ok, supervisor}}, 1_000
     {owned, supervisor}
   end
 
