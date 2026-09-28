@@ -104,5 +104,6 @@ bash "$source_dir/scripts/rollback-binary-case.sh" "$scratch"
 bash "$source_dir/scripts/rollback-skill-case.sh" "$scratch"
 printf 'rollback: M6-only pending tool under released v0.2 reader\n'
 bash "$source_dir/scripts/rollback-case.sh" "$scratch" new-to-old unknown-tool
+bash "$source_dir/scripts/rollback-dispatched-case.sh" "$scratch"
 
-printf 'rollback: PASS paired builds, interactions, unknown tool, CLI and skill/daemon cases\n'
+printf 'rollback: PASS paired builds, interactions, unknown tool, CLI, skills, daemon and dispatched recovery\n'
