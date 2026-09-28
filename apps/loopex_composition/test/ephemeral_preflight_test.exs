@@ -75,6 +75,16 @@ defmodule LoopexComposition.Ephemeral.PreflightTest do
     assert is_map(selection.skills.manifest)
   end
 
+  test "a hosted address refuses HTTP without reading a key" do
+    assert {:error, {:composition, :provider_base_url_unsupported}} =
+             Preflight.prepare(
+               policy: Policy,
+               cwd: File.cwd!(),
+               model: "openai:gpt-4o-mini",
+               base_url: "http://example.test/v1"
+             )
+  end
+
   defp restore_env(name, nil), do: System.delete_env(name)
   defp restore_env(name, value), do: System.put_env(name, value)
 end

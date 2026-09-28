@@ -28,7 +28,7 @@ defmodule LoopexComposition.Ephemeral.Preflight do
          :ok <- Bootstrap.start(),
          :ok <- req_llm(selected.req_llm),
          :ok <- composition(Guards.provider(model.provider)),
-         {:ok, base_url} <- composition(Route.base_url(model.provider, selected.base_url)) do
+         {:ok, base_url} <- address(model.provider, selected.base_url) do
       {:ok,
        selected
        |> Map.put(:cwd, cwd)
@@ -81,6 +81,14 @@ defmodule LoopexComposition.Ephemeral.Preflight do
       :ok -> :ok
       {:error, reason} -> {:error, {:composition, reason}}
     end
+  end
+
+  defp address(provider, selected) do
+    composition(Route.base_url(provider, selected))
+  rescue
+    _ -> {:error, {:composition, :provider_base_url_unsupported}}
+  catch
+    _, _ -> {:error, {:composition, :provider_base_url_unsupported}}
   end
 
   defp composition(:ok), do: :ok
