@@ -3,12 +3,15 @@
 <a id="concept"></a>
 ## Concept
 
-Every surface Loopex exposes is unstable. None is labelled, frozen, versioned
-for consumers, or given a compatibility promise, and none is owed a deprecation
-window or a migration note. This page lists what an embedder, a client author,
-or an operator can reach today, what each surface consists of, which data a
-given reader can open, and what would have to exist before any surface could be
-frozen.
+Every surface Loopex exposes is unfrozen. M6's new embedding and command
+contracts and the exact wire-protocol generations are experimental; the other
+reachable source interfaces in this inventory are described as unstable.
+None claims release-candidate or stable status or a deprecation window.
+Breaking an experimental API in a minor release carries an explicit migration
+note under the vision's 0.x policy. This page lists what an embedder, a client
+author, or an operator can reach today, what each surface consists of, which
+data a given reader can open, and what would have to exist before any surface
+could be frozen.
 
 That is a deliberate position, not an omission. The
 [compatibility contract](../vision.md#concept-vision-compatibility) freezes a
@@ -69,7 +72,7 @@ surface it belongs to under
 | --- | --- | --- | --- |
 | Embedded facade | `Loopex` and its start options | 5, embedded Elixir API | Unstable |
 | Ephemeral composition | `LoopexComposition.Ephemeral.run/2`, session and observation functions | 5, embedded Elixir API | Experimental; in-VM lifetime only |
-| Durable reference composition | `LoopexComposition.start/1`, `with_runtime/2`, `start_edges/2`, `artifacts/1`, and the named-skill helper | 5, embedded Elixir API | Unstable |
+| Durable reference composition | `LoopexComposition.start/1`, `with_runtime/2`, `start_edges/2`, `artifacts/1`, and the named-skill helper | 5, embedded Elixir API | Unstable; M6 `read_directories/2` is experimental |
 | Store port | `Loopex.Store` behaviour and handle | 1, private journal and store schema | Unstable |
 | Model port | `Loopex.Model` behaviour, request and reply shapes, delta contract | 2, public protocol semantics | Unstable |
 | Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2`, optional `retained_receipt/2` | 3, executor protocol | Unstable |
@@ -85,7 +88,8 @@ surface it belongs to under
 | Public protocol schemas and vectors | `apps/loopex_protocol/priv/schema/` and `priv/vectors/`, reported as a schema digest at initialization | 2, public protocol semantics | Experimental |
 | Telemetry events | the `[:loopex, …]` span inventory, `Loopex.Telemetry.attach/1` and `detach/1` | not a listed surface; transient diagnostics | Experimental |
 | Trace sessions | `Loopex.trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` | 5, embedded Elixir API; transient diagnostics | Experimental |
-| Operator command | the `loopex` escript, its subcommands, flags, exit statuses, and the compact JSON of daemon queries | not a listed surface | Unstable |
+| Operator command | the `loopex` escript, its subcommands, flags, exit statuses, and the compact JSON of daemon queries | not a listed surface | Unstable; M6 `ask` and its JSON contract are experimental |
+| Model selection strings | the `provider:model` values admitted by M6 embedded and command entrypoints | 5, embedded Elixir API | Experimental |
 
 Surface 4, the extension manifest and lifecycle API, does not exist yet.
 Surface 7, released package names and their contents, is inert: no package is

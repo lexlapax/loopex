@@ -51,7 +51,7 @@ an alternate reducer, a policy engine, or event truth of its own. An embedder
 may also drive a server from another language over
 [the session protocol](app-server-protocol.md#concept).
 
-Five constraints shape every embedding:
+Six constraints shape every embedding:
 
 - **The host names authority.** A runtime with any tool active refuses to start
   without a policy module, and a policy needs a stable identity so a question it
@@ -66,6 +66,10 @@ Five constraints shape every embedding:
   tools and host-installed handlers may observe or copy it. Cleanup uncertainty
   seals only that session. The durable profile retains its separate-process
   credential and persistent-state contracts.
+- **Catalog loading remains host-owned.** A host-selected cold model catalog can
+  use ordinary Req transport and ambient GitHub credentials, and retain shared
+  cache and metadata outside the call-owned model pool. Its load lock spends the
+  model deadline. The default compiled catalog needs no fetch.
 - **Nothing is stable.** Every surface on this page may change without notice;
   pin an exact revision and read
   [Compatibility surfaces](compatibility-surfaces.md#concept).
@@ -243,7 +247,11 @@ read from that provider's environment variable immediately before each model
 call; local Ollama needs no key. A hosted `:base_url` must be HTTPS. If the host
 started ReqLLM itself with `.env` loading disabled, it declares
 `req_llm: :host_started`; an undeclared or `.env`-enabled existing instance is
-refused. Otherwise composition performs the guarded start. `:tools` is
+refused. Otherwise composition performs the guarded start. That start refuses
+`TIDEWAVE_REPL=true`; composition and model calls refuse `SSLKEYLOGFILE` or
+nonempty global Req defaults, and calls refuse a replaced provider module.
+Malformed or origin-ambiguous base URLs are refused before dispatch, with a
+fixed diagnostic rather than the dependency's raw error. `:tools` is
 `:none`, `:coding` (the original four), or `:read_only` (`read`, `grep`, `find`,
 `ls`), defaulting to `:coding`.
 Every model admits every preset. `:skills` accepts at most four named project
@@ -271,6 +279,10 @@ selected key into its own records or diagnostics and rejects its exact value
 from provider-controlled reply fields. A call-owned HTTP/1 pool and caller are
 proved gone before a result or successful cleanup acknowledgement; a checked-
 out socket and TLS controller may drain afterward without a result route. A
+host-selected cold catalog source is a separate dependency path: it may use
+ordinary Req and `GH_TOKEN` or `GITHUB_TOKEN`, retain shared cache and metadata
+after call cleanup, and spend the model deadline waiting on its shared load
+lock. The default compiled catalog needs no network fetch. A
 host that needs separate-process credential custody or recovery uses the
 durable profile. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept)
 states the boundary in full.

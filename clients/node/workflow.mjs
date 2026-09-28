@@ -26,11 +26,18 @@ import { Connection, wire } from "./loopex-client.mjs";
 
 const [elixir, ...paths] = process.argv.slice(2);
 
-// The entry point the server process is started with is an operator input, read
-// the way the chain client reads it. Which host a client drives is not the
-// client's decision, and a default that could only name one of them would make
-// this client part of that host's configuration.
+// The entry point, prompt and event-wait patience are operator inputs, as in
+// the chain client. Choosing a host or task here would make this proof client
+// part of that host's configuration. Patience only limits this client; it says
+// nothing about the session's outcome.
 const serverEntry = process.env.LOOPEX_WORKFLOW_ENTRY || "Loopex.AppServer.Fixture.serve()";
+const task = process.env.LOOPEX_WORKFLOW_PROMPT || "do the task";
+const patienceMs = Number(process.env.LOOPEX_WORKFLOW_PATIENCE_MS || 10_000);
+
+if (!Number.isFinite(patienceMs) || patienceMs <= 0) {
+  console.error("LOOPEX_WORKFLOW_PATIENCE_MS must be a positive number of milliseconds");
+  process.exit(2);
+}
 
 if (!elixir || paths.length === 0) {
   console.error("usage: node workflow.mjs <elixir-executable> <path>...");
@@ -94,7 +101,7 @@ async function run(connection) {
 
   const prompted = await connection.request("session.prompt", {
     command_id: wire.identity("client-prompt"),
-    content_b64: wire.bytes("do the task"),
+    content_b64: wire.bytes(task),
   });
 
   assert(prompted.type === "admission", `expected an admission, received ${prompted.type}`);
@@ -103,7 +110,10 @@ async function run(connection) {
 
   // The run's end is a durable fact the client waits for, not a timer it
   // guesses at.
-  const finished = await connection.waitForEvent((event) => event.kind === "run.finished");
+  const finished = await connection.waitForEvent(
+    (event) => event.kind === "run.finished",
+    patienceMs,
+  );
   summary.run_finished_sequence = finished.event_sequence;
 
   const kinds = connection.events().map((event) => event.kind);

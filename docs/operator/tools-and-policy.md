@@ -571,7 +571,11 @@ that tool. Loopex does not inject the key into its own jobs or diagnostics and
 rejects an exact selected-key echo in a mapped provider reply. Successful
 cleanup proves Loopex's caller and tagged provider-pool subtree gone, while a
 checked-out socket or TLS controller may drain afterward. If that trust scope
-is unsuitable, choose the durable profile or isolate the host VM. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept)
+is unsuitable, choose the durable profile or isolate the host VM. A
+host-selected cold model catalog is separate from that call-owned path: it may
+use ordinary Req and ambient `GH_TOKEN` or `GITHUB_TOKEN`, retain shared cache
+and metadata, and spend the model deadline. The default compiled catalog needs
+no fetch. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept)
 records the profile's limits.
 
 <a id="operator-tools-skill-acquisition"></a>

@@ -4,8 +4,9 @@ All notable changes to Loopex are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 semantic versioning under the
 [0.x compatibility policy](docs/vision.md#concept-vision-compatibility). That
-policy labels public surfaces stable, release-candidate, or experimental once
-there are public surfaces to label. No public surface is labelled yet — see
+policy labels public surfaces stable, release-candidate, or experimental. The
+wire protocol and M6's new surfaces are experimental; none is labelled
+release-candidate or stable — see
 [compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
 No installable package is published yet. The `0.1.0` entry records the

@@ -85,7 +85,11 @@ coding-agent client, and runs once per integration candidate: hosted CI runs
 and does not define it.
 
 Before closing a milestone, once from the exact committed candidate, on a
-machine with the pinned Node and a provider credential:
+machine with the pinned Node, a provider credential, and a running local
+Ollama server at `127.0.0.1:11434`, make the selected local model available
+there and export `LOOPEX_RELEASE_OLLAMA_MODEL=ollama:<installed-model>`. The
+real local-command case checks that model through Ollama's `/api/show` before
+it runs:
 
 ```bash
 LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh

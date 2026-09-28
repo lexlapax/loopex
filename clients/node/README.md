@@ -29,16 +29,20 @@ server needs.
 
 Against the shipped host, with the inputs
 [the operator guide](../../docs/operator/app-server.md#operator-app-server-launching)
-names already exported:
+names already exported, including `LOOPEX_POLICY=allow-all` and a credential
+provided by the host, set the Elixir no-input option before launching:
 
 ```bash
+export ELIXIR_ERL_OPTIONS=-noinput
+export LOOPEX_WORKFLOW_PATIENCE_MS=120000
 export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
 node clients/node/workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
 ```
 
 The server must be started with `-noinput`, because the virtual machine
-otherwise keeps standard input for its own shell, and the workflow sets that for
-the process it launches. This client never answers a question, so pair it with
+otherwise keeps standard input for its own shell. The workflow passes its
+launch arguments and environment through; it does not add that option. This
+client never answers a question, so pair it with
 `LOOPEX_POLICY=allow-all`; under `ask` the first tool call waits for an answer it
 will not send.
 
@@ -52,9 +56,19 @@ withholds the reference along with every entry until a trust decision naming it
 is active. The client relays that decision; it does not judge it, and it could
 not construct one from anything the server told it. This is the client that
 answers, so it is the one to run under `LOOPEX_POLICY=ask`. The shipped host
-computes the workspace reference from the workspace it was launched with:
+computes the workspace reference from the workspace it was launched with.
+Prepare that workspace with an admitted project skill under
+`.agents/skills/<name>/`: its `SKILL.md` and a supporting `notes.txt` must both
+exist. The client selects the first catalog entry and requests `notes.txt`, so
+an empty catalog or a different first skill cannot complete this example.
+Set `LOOPEX_WORKFLOW_PROMPT` to a task naming a workspace file for the model to
+read, then run:
 
 ```bash
+export ELIXIR_ERL_OPTIONS=-noinput
+export LOOPEX_WORKFLOW_PATIENCE_MS=120000
+export LOOPEX_POLICY=ask
+export LOOPEX_WORKFLOW_PROMPT="Use the read tool once on architecture.txt, then finish."
 export LOOPEX_WORKSPACE_REF="$(ERL_LIBS=_build/prod/lib elixir -e 'IO.write(Loopex.AppServer.Host.workspace_reference!())')"
 export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
 node clients/node/interaction-workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin

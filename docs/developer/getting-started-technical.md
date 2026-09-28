@@ -149,7 +149,9 @@ defmodule MyHost.Events do
 end
 ```
 
-Then start the durable composition:
+Before running the durable example, define `MyHost.Policy` from
+[A First Policy](#technical-getting-started-policy) above the event reader in
+the same file. Then start the durable composition:
 
 ```elixir
 {:ok, state_root} = Loopex.state_root()
@@ -181,6 +183,14 @@ LoopexComposition.with_runtime(
     MyHost.Events.until_finished(attachment)
   end
 )
+```
+
+Save the policy, event reader and composition code as `durable.exs`. With
+`LOOPEX_PROVIDER_API_KEY` supplied by your host's secret manager and the
+companion already built, run it under a disposable root:
+
+```bash
+LOOPEX_HOME="$(mktemp -d)" mix run durable.exs
 ```
 
 `Loopex.state_root/0` reads `LOOPEX_HOME`. Without a credential,
@@ -287,15 +297,24 @@ and the new `session_id`; a `snapshot`; and another `admission`. From then on
 between them. The complete method, record, and error inventories are in
 [the protocol technical reference](app-server-protocol-technical.md#technical-depth).
 
-The independent Node client does all of this and more:
+The independent Node client does all of this and more. With
+`LOOPEX_PROVIDER_API_KEY` already supplied by your host's secret manager,
+launch it against disposable state and workspace roots. The client passes its
+Elixir arguments through unchanged, so set the server's required `-noinput`
+option in the environment:
 
 ```bash
+export LOOPEX_HOME="$(mktemp -d)"
+export LOOPEX_WORKSPACE="$(mktemp -d)"
+export LOOPEX_PROVIDER_LAUNCH="$PWD/_build/prod/loopex_provider.launch"
+export LOOPEX_POLICY=allow-all
+export ELIXIR_ERL_OPTIONS=-noinput
+export LOOPEX_WORKFLOW_PATIENCE_MS=120000
 export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
 node clients/node/workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
 ```
 
-It launches its own server, so run it with `LOOPEX_POLICY=allow-all`, since it
-never answers a question; `clients/node/interaction-workflow.mjs` is the one
+It never answers a policy question; `clients/node/interaction-workflow.mjs` is the one
 that answers. [The client's README](../../clients/node/README.md) describes
 both, and `clients/node/loopex-client.mjs` is a compact reference for the wire
 encodings.
@@ -432,9 +451,11 @@ Concept: [Contributing: how work is planned](getting-started.md#concept-getting-
   [its mechanics](milestones-technical.md#technical-depth).
 - **An architecture decision:** a numbered pair under `docs/adr/`, prepared with
   the `adr` skill and accepted by the maintainer before dependent work.
-- **A document:** a new active document under `docs/` is a Concept and Technical
-  depth pair, indexed in its directory's `README.md` and in
-  [docs/README.md](../README.md) in the same change, following the
+- **A document:** a new substantive Concept document under `docs/` has a
+  Technical depth companion. Runbooks, indexes, evidence and the other forms
+  named by the charter are exceptions. Index new documents in their directory's
+  `README.md` and in [docs/README.md](../README.md) in the same change,
+  following the
   [charter's link and anchor rules](development-charter-technical.md#technical-traceable-depth).
 - **A commit:** a short imperative title `area(marker): summary`, where the
   marker is the milestone the work belongs to, such as `docs(M5): …`, with no

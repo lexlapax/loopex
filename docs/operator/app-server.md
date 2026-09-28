@@ -131,6 +131,9 @@ is not a `.exs` file is a code directory, so a shell glob over the prod build
 expands to exactly what the server needs:
 
 ```bash
+export ELIXIR_ERL_OPTIONS=-noinput
+export LOOPEX_WORKFLOW_PATIENCE_MS=120000
+export LOOPEX_POLICY=allow-all
 export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
 node clients/node/workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin
 ```
@@ -143,9 +146,18 @@ The chain consumer, `interaction-workflow.mjs`, takes the same arguments and one
 more input: `LOOPEX_WORKSPACE_REF`, the workspace reference a trust decision
 must carry. It is an operator input rather than something the client asks the
 server for — see [skills and trust](#operator-app-server-skills). The host
-computes the value from `LOOPEX_WORKSPACE`, so ask it:
+computes the value from `LOOPEX_WORKSPACE`, so ask it. Before this chain, give
+that workspace an admitted project skill at `.agents/skills/<name>/` with both
+`SKILL.md` and `notes.txt`, plus the workspace file named by
+`LOOPEX_WORKFLOW_PROMPT`. The client selects the first catalog entry and
+requests its `notes.txt`; it cannot succeed with an empty catalog or an
+unrelated first skill.
 
 ```bash
+export ELIXIR_ERL_OPTIONS=-noinput
+export LOOPEX_WORKFLOW_PATIENCE_MS=120000
+export LOOPEX_POLICY=ask
+export LOOPEX_WORKFLOW_PROMPT="Use the read tool once on architecture.txt, then finish."
 export LOOPEX_WORKSPACE_REF="$(ERL_LIBS=_build/prod/lib elixir -e 'IO.write(Loopex.AppServer.Host.workspace_reference!())')"
 export LOOPEX_WORKFLOW_ENTRY="Loopex.AppServer.Host.serve()"
 node clients/node/interaction-workflow.mjs "$(command -v elixir)" _build/prod/lib/*/ebin

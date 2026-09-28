@@ -185,9 +185,10 @@ What the open development does not include:
   or timeline is owed.
 - **The roadmap follows the maintainer's use,** not a backlog. Requests are
   interesting to read but create no obligations.
-- **No stability promises in 0.x.** Public surfaces are labeled stable,
-  release-candidate, or experimental, and the labels are honest — but 0.x
-  minors may break experimental APIs with migration notes.
+- **No stability promises in 0.x.** Current surfaces are unfrozen. M6's new
+  embedding and command contracts and the wire protocol are experimental;
+  breaking an experimental API in a minor release carries an explicit migration
+  note. No surface claims release-candidate or stable status.
 
 None of that is discouragement; it is the accurate shape of the project. The
 code is Apache-2.0, so the permission to use, fork, and embed it is real
