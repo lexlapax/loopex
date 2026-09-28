@@ -509,8 +509,8 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
              startup.expected == :workspace_lease and startup.granted == false
            end)
 
+    # Proved teardown may move cell 1 to 2 before this observer samples it.
     assert eventually(fn -> :atomics.get(cell, 1) != 0 end, 1_200)
-    assert :atomics.get(cell, 1) == 1
     resume_if_suspended(root)
 
     assert_receive {:result, {:error, {:composition, :workspace_lease_failed}}}, 6_000
