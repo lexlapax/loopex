@@ -110,13 +110,17 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
     end
 
     def next_event(_attachment) do
-      case Process.get(:events, []) do
-        [event | rest] ->
-          Process.put(:events, rest)
-          {:ok, event}
+      if :persistent_term.get({__MODULE__, :hold_answer_events}, false) do
+        {:error, :empty}
+      else
+        case Process.get(:events, []) do
+          [event | rest] ->
+            Process.put(:events, rest)
+            {:ok, event}
 
-        [] ->
-          {:error, :empty}
+          [] ->
+            {:error, :empty}
+        end
       end
     end
 
@@ -191,6 +195,20 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "timely second ask clears the prior ending while it follows the new run", %{tmp: tmp} do
+    {:loopex_ephemeral_session, owner, _cell} =
+      session = start_private_session(tmp, ScriptedFacade)
+
+    assert {:ok, %{text: "answer: first"}} = Ephemeral.ask(session, "first")
+    assert {:ok, %{text: "answer: first"}} = Ephemeral.last_result(session)
+
+    pending = Task.async(fn -> Ephemeral.ask(session, "slow", timeout: 1_000) end)
+    assert :ok = await_following(owner, :ask, 100)
+    assert :none = Ephemeral.last_result(session)
+    assert {:error, {:timeout, %{run_id: _}}} = Task.await(pending, 3_000)
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
   test "an interaction remains open until an offered answer is accepted", %{tmp: tmp} do
     session = start_private_session(tmp, ScriptedFacade)
 
@@ -204,6 +222,26 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
     assert {:ok, %{text: "choice: yes", outcome: :completed}} =
              Ephemeral.answer(session, "interaction-1", "yes")
 
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "timely interaction answer clears its answered question before the next event", %{tmp: tmp} do
+    {:loopex_ephemeral_session, owner, _cell} =
+      session = start_private_session(tmp, ScriptedFacade)
+
+    assert {:error, {:interaction_pending, %{"interaction_id" => "interaction-1"}}} =
+             Ephemeral.ask(session, "question")
+
+    hold = {ScriptedFacade, :hold_answer_events}
+    :persistent_term.put(hold, true)
+    on_exit(fn -> :persistent_term.erase(hold) end)
+
+    pending = Task.async(fn -> Ephemeral.answer(session, "interaction-1", "yes") end)
+    assert :ok = await_following(owner, :answer, 100)
+    assert :none = Ephemeral.last_result(session)
+
+    :persistent_term.erase(hold)
+    assert {:ok, %{text: "choice: yes", outcome: :completed}} = Task.await(pending, 3_000)
     assert :ok = Ephemeral.stop_session(session)
   end
 
@@ -298,5 +336,18 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
     {:ok, cell} = OwnerActivation.begin(activation)
     assert {:ok, :session_ready} = SessionOwner.start_session(owner, config, 6_000)
     {:loopex_ephemeral_session, owner, cell}
+  end
+
+  defp await_following(_owner, _kind, 0), do: flunk("accepted command never began following")
+
+  defp await_following(owner, kind, attempts) do
+    case :sys.get_state(owner).session.active do
+      %{kind: ^kind, admission: :following} ->
+        :ok
+
+      _ ->
+        Process.sleep(10)
+        await_following(owner, kind, attempts - 1)
+    end
   end
 end

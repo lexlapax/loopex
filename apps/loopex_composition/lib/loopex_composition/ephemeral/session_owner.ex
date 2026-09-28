@@ -1720,7 +1720,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         %{session | interaction: nil}
       end
 
-    last_result = active.timed_out || session.last_result
+    last_result = active.timed_out || :none
 
     session = %{session | last_result: last_result, active: %{active | admission: :following}}
 
