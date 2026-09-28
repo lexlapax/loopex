@@ -467,7 +467,8 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
           {wire(:chat, "echo " <> key), []},
           {wire(:chat, "safe"), [header_id: key]},
           {tool_reply("read", "call-" <> key, %{}), []},
-          {tool_reply("read", "call", %{"nested" => [%{"inside" => key}]}), []}
+          {tool_reply("read", "call", %{"nested" => [%{"inside" => key}]}), []},
+          {usage_echo_reply(key), []}
         ] do
       call = start(runtime, "openai:gpt-4", body, [tls: trusted] ++ options)
       {result, call} = call |> begin() |> result()
@@ -507,6 +508,17 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
     body
     |> put_in(["choices", Access.at(0), "message"], message)
     |> put_in(["choices", Access.at(0), "finish_reason"], "tool_calls")
+    |> Jason.encode!()
+  end
+
+  defp usage_echo_reply(key) do
+    wire(:chat, "safe")
+    |> Jason.decode!()
+    |> Map.put("usage", %{
+      "prompt_tokens" => key,
+      "completion_tokens" => 2,
+      "total_tokens" => 3
+    })
     |> Jason.encode!()
   end
 end

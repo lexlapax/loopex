@@ -270,7 +270,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                           end
 
                           provider_fields =
-                            Map.take(reply, [:text, :tool_calls, :provider_response_id])
+                            Map.take(reply, [:text, :tool_calls, :provider_response_id, :usage])
 
                           if has_key.(has_key, provider_fields),
                             do: @unknown,
