@@ -6,9 +6,9 @@
 Concept: [Getting started](getting-started.md#concept).
 
 This companion carries the commands and code for both tracks. Every command runs
-from the repository root unless it says otherwise, and every example uses a
-temporary state root: never point development or test commands at a real
-`~/.loopex`.
+from the repository root unless it says otherwise. Durable examples use a
+temporary state root; the ephemeral example uses none. Never point development
+or test commands at a real `~/.loopex`.
 
 <a id="technical-getting-started-source"></a>
 ## Building From Source
@@ -29,8 +29,9 @@ version manager and what to clear when switching. On Linux, export
 `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`. The shipped local executor needs
 executable `/bin/bash` at run time.
 
-Two further build steps are needed only when a real model provider or the
-command is involved:
+The embedded ephemeral profile needs neither a companion build nor a state
+root. The durable reference profile needs its private provider companion;
+building the source command also builds that companion for durable commands:
 
 ```bash
 # The private provider companion; from a clean Git checkout, once.
@@ -80,10 +81,74 @@ IO.inspect(Loopex.session_status(runtime, session_id))
 The snapshot is anchored at event sequence `0`; `Loopex.next_event/1` answers
 `{:error, :empty}` until something commits.
 
-**With the reference stack.** `LoopexComposition` adds the ReqLLM model adapter,
-the local executor, and its four coding tools. It needs a policy (below), the
-launch file from the companion build, and `LOOPEX_PROVIDER_API_KEY` in the
-environment, which it reads once and removes:
+**One call with local Ollama.** Start an Ollama server and make the selected
+model available, then save this as `ephemeral.exs` and run
+`mix run ephemeral.exs` from the repository root. It uses no `LOOPEX_HOME`,
+provider credential, or companion. The host supplies the policy even for
+read-only tools:
+
+```elixir
+defmodule MyHost.ReadOnly do
+  @behaviour Loopex.Policy
+
+  @impl Loopex.Policy
+  def decide(%{effect_class: "read_only"}), do: {:allow, nil}
+  def decide(_request), do: {:deny, :effect_class_not_permitted}
+end
+
+{:ok, result} =
+  LoopexComposition.Ephemeral.run(
+    "List the files in this directory.",
+    policy: MyHost.ReadOnly,
+    model: "ollama:llama3.2",
+    tools: :read_only,
+    cwd: File.cwd!()
+  )
+
+IO.puts(result.text)
+```
+
+`run/2` returns a bounded observation, not just text; a failed or bounded run
+returns `{:error, {:run, outcome, observation}}`. It cleans up its temporary
+root before returning. For a policy that may defer, use the opaque handle from
+`start_session/1`, call `ask/3`, answer its pending interaction with `answer/3`,
+and call `stop_session/1`. The creator process owns that handle's lifetime.
+This profile loses session history when its VM ends. Hosted OpenAI, Anthropic
+and OpenRouter models use the same entrypoint and tools, but the selected
+provider's key is read inside the host VM for each call. See the
+[ephemeral contract](runtime-and-embedding.md#technical-embedding-ephemeral)
+before using one with ambient credentials or trusted tools.
+
+**With the durable reference stack.** `LoopexComposition` adds the companion
+ReqLLM model adapter, the local executor, and seven defined tools (the original
+four coding tools active by default). It needs a policy (below), the launch
+file from the companion build, and `LOOPEX_PROVIDER_API_KEY` in the
+environment, which it reads once and removes. Define the event reader before
+the composition callback:
+
+```elixir
+defmodule MyHost.Events do
+  def until_finished(attachment, backoff \\ 10) do
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"} = event} ->
+        {:ok, event}
+
+      {:ok, event} ->
+        IO.inspect(event.kind)
+        until_finished(attachment, 10)
+
+      {:error, :empty} ->
+        Process.sleep(backoff)
+        until_finished(attachment, min(backoff * 2, 500))
+
+      other ->
+        other
+    end
+  end
+end
+```
+
+Then start the durable composition:
 
 ```elixir
 {:ok, state_root} = Loopex.state_root()
@@ -119,34 +184,16 @@ LoopexComposition.with_runtime(
 
 `Loopex.state_root/0` reads `LOOPEX_HOME`. Without a credential,
 `with_runtime/2` returns `{:error, :provider_credential_required}` and starts
-nothing. Committed events are read by polling; `{:error, :empty}` is transient,
-so back off and ask again:
+nothing. `{:error, :empty}` from the attachment is transient, so the reader
+backs off and asks again. The durable composition also accepts optional
+`:model`, `:bounds`, `:sampling` and `:active_tools` to change its defaults;
+they are validated, not silently ignored. `:active_tools` can select the new
+`loopex.grep`, `loopex.find` and `loopex.ls` read-only tools.
 
-```elixir
-defmodule MyHost.Events do
-  def until_finished(attachment, backoff \\ 10) do
-    case Loopex.next_event(attachment) do
-      {:ok, %{kind: "run.finished"} = event} ->
-        {:ok, event}
-
-      {:ok, event} ->
-        IO.inspect(event.kind)
-        until_finished(attachment, 10)
-
-      {:error, :empty} ->
-        Process.sleep(backoff)
-        until_finished(attachment, min(backoff * 2, 500))
-
-      other ->
-        other
-    end
-  end
-end
-```
-
-The model's streamed text arrives separately, as `{:loopex_progress, item}`
-messages to the `:progress_to` process, and is never the durable answer: the
-committed `assistant.message_appended` event is. A queue overflow returns
+In the durable profile, the model's streamed text arrives separately as
+`{:loopex_progress, item}` messages to the `:progress_to` process and is never
+the durable answer: the committed `assistant.message_appended` event is. The
+ephemeral in-process model call is non-streaming. A queue overflow returns
 `{:disconnected, last_sequence}`; reattach with
 `after_event_sequence: last_sequence`. Every start option, the complete facade,
 and recovery are in [Runtime and embedding](runtime-and-embedding.md#technical-depth).

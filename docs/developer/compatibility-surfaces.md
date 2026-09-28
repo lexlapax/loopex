@@ -16,12 +16,12 @@ surface only when its own consumers, schemas, vectors, migration, rollback, and
 operational evidence justify the claim. No surface has all of those yet, so
 labelling one stable would be a promise with nothing behind it.
 
-**Versions name source, not contracts.** The source `VERSION` is `0.2.0`. The
-annotated tag `v0.0.0-m2` identifies one integrated source snapshot and
-`v0.1.0` a source release; neither is a package, a publication, or a
-compatibility freeze. Nothing is packaged or published, so the vision's package
-surface — released names, their contents, and the constraints they declare —
-has never been created. The session protocol's generations are negotiated
+**Versions name source, not contracts.** The closed M5 source is `v0.2.0`;
+M6 targets `0.3.0` with an ephemeral embedding profile and `loopex ask`.
+The older `v0.0.0-m2` and `v0.1.0` tags also name source snapshots. None is a
+package or a compatibility freeze. No installed binary or package is published,
+so the vision's package surface — released names, contents, and constraints —
+has not been created. The session protocol's generations are negotiated
 independently of the source version, as accepted
 [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept)
 requires.
@@ -34,7 +34,9 @@ partial match, no nearest neighbour, and no version comparison that could round
 the word `experimental` up to a released contract. A generation has schemas,
 vectors, and an independent consumer; it has no migration path and no freeze.
 
-**Durable data grows by new record kinds, and older readers refuse.** A reader
+**Durable data grows by new record kinds, and older readers refuse.** M6's
+ephemeral profile writes no durable session data; its added durable composition
+options and named-skill helper use existing record kinds. A reader
 replays every history a later revision can still interpret, and a session that
 contains a record kind an older reader does not know is refused by that reader
 at load, before any model or executor work. There is no in-place migration and
@@ -66,7 +68,8 @@ surface it belongs to under
 | Surface | Reached through | Vision surface | State |
 | --- | --- | --- | --- |
 | Embedded facade | `Loopex` and its start options | 5, embedded Elixir API | Unstable |
-| Reference composition | `LoopexComposition.start/1`, `with_runtime/2`, `start_edges/2`, `artifacts/1` | 5, embedded Elixir API | Unstable |
+| Ephemeral composition | `LoopexComposition.Ephemeral.run/2`, session and observation functions | 5, embedded Elixir API | Experimental; in-VM lifetime only |
+| Durable reference composition | `LoopexComposition.start/1`, `with_runtime/2`, `start_edges/2`, `artifacts/1`, and the named-skill helper | 5, embedded Elixir API | Unstable |
 | Store port | `Loopex.Store` behaviour and handle | 1, private journal and store schema | Unstable |
 | Model port | `Loopex.Model` behaviour, request and reply shapes, delta contract | 2, public protocol semantics | Unstable |
 | Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2`, optional `retained_receipt/2` | 3, executor protocol | Unstable |
@@ -140,7 +143,10 @@ digest like every other semantic field, and the shipped local executor bounds a
 job by the smallest of the run's deadline, that budget, and the budget its own
 copy of the definition declares.
 
-**Reference provider launch.**
+**Reference provider launch.** The following companion contract belongs to
+the durable profile. The ephemeral profile uses an in-VM ReqLLM call for
+Ollama, OpenAI, Anthropic and OpenRouter, with no separate credential custody;
+it is described in [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept).
 [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) requires one
 private companion process per invocation and explicit adapter options:
 `worker_path`, `interpreter_path`, `worker_sha256`, and
@@ -239,20 +245,29 @@ the schema subset or the budget set is additive and does not disturb a retained
 generation, because a definition that did not use the wider form encodes
 exactly as before; anything else changes every retained digest.
 
-**Reference composition.** Its options are listed in
-[Runtime and embedding](runtime-and-embedding.md#technical-embedding-composition).
-It names four concrete implementations, so an embedder that depends on it
-acquires the reference adapters and their external dependency whether or not
-every one is used; an embedder that wants a different Store, Model, Executor, or
-ArtifactStore composes the ports and the `Loopex` facade directly.
+**Reference compositions.** Their options are listed in
+[the ephemeral contract](runtime-and-embedding.md#technical-embedding-ephemeral)
+and [durable contract](runtime-and-embedding.md#technical-embedding-composition).
+The durable composition names four concrete implementations, so an embedder
+that depends on it acquires their external dependencies whether or not every
+one is used. M6 adds validated `:model`, `:bounds`, `:sampling` and
+`:active_tools` options; those four keys were ignored in `0.2`, so supplying
+an invalid value now refuses. Defaults preserve M5, including the original
+four active coding tools and policy revision `"0.2.0"` for pending-interaction
+rollback. `LoopexComposition.ResourcePacks.read_directories/2` turns up to
+four named project or user skill directories into the existing manifest path;
+the project copy wins a shared name. The ephemeral composition instead uses a
+memory Store and an in-VM model edge and has no recovery or artifact store.
 
-**Operator command.** The subcommands are `run`, `sessions`, `resume`,
-`attach`, `cancel`, `artifact`, `skill`, and `daemon`. Each admits its own flags,
+**Operator command.** The subcommands are `ask`, `run`, `sessions`, `resume`,
+`attach`, `cancel`, `artifact`, `skill`, and `daemon`; leading `-p` aliases
+`ask`. Each admits its own flags,
 and an unrecognised flag is refused rather than ignored, so admitting a flag on
 one more subcommand is observable and withdrawing one is breaking:
 
 | Subcommand | Flags |
 | --- | --- |
+| `ask`, `-p` | `--model`, `--output text\|json`, repeatable `--skill-dir` (up to four), `--tools none\|coding\|read-only`, required `--policy`, `--cwd`, `--max-steps`, `--deadline-ms`, `--state-root` |
 | `run` | `--policy`, `--state-root`, `--workspace`, `--steer`, `--follow-up`, `--cleanup-grace-ms`, `--context-token-budget`, `--skill`, `--skill-resource` |
 | `resume`, `cancel` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |
 | `sessions`, `artifact` | `--state-root` |
@@ -263,9 +278,13 @@ A `--daemon SOCKET` argument selects the live grammar of `run`, `resume`, and
 daemon's exit statuses in
 [the operator daemon reference](../operator/daemon.md#technical-depth). A bare
 `--` ends option parsing and preserves every remaining word as data, which is
-what makes an artifact locator beginning with `--` retrievable. `--policy`
-accepts `allow-all` and `shell-allowlist`; the set of names is part of the
-surface. `loopex artifact` reads objects through the `Loopex.ArtifactStore`
+what makes an artifact locator beginning with `--` retrievable. The existing
+commands accept `allow-all` and `shell-allowlist` for `--policy`; `ask` also
+accepts `refuse-all`. `ask` defaults to the ephemeral profile, and
+`--state-root` selects the durable profile with its companion and credential
+requirements. `--output json` emits one bounded result object and an exit
+status for its outcome. `loopex artifact` reads objects through the
+`Loopex.ArtifactStore`
 port. The command's cross-application interrupt entries —
 `LoopexCli.Interrupt.install/1`, `install/2`, `install_prepared/3`,
 `activate_prepared/1`, `abandon_prepared/1`, and `abandon_resume/2` — are
@@ -328,6 +347,17 @@ Neither changes a durable format, and removing either needs no migration.
 | `resource_command_v1`, `model_request_committed_resources_v1` | Replayed; even a refused resource command creates this boundary | A reader without resource records refuses the session at load |
 | `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1` | Replayed | A reader without interaction records refuses the session before any effect |
 | A root with a session directory but no daemon index | Offline commands read it; the daemon refuses it as `session_index_upgrade_required` until `loopex daemon prepare-index` imports it | — |
+
+M6's ephemeral sessions have no row in this table: they leave no durable
+session root to migrate or roll back. Its durable defaults preserve the M5
+record formats and policy revision `"0.2.0"`, so a `0.2` reader can resume a
+`0.3` root, with three observable limits. A pending M6-only read-only tool
+call becomes `unknown_tool` under `0.2` if it was not dispatched; a dispatched
+effect follows the existing reconciliation fence. An admitted user skill's
+retained snapshot can be reloaded by `0.2` offline resume, but its daemon
+cannot rediscover that external directory and withholds the session's skill
+context. The `0.2` CLI and daemon cannot activate a new external user skill.
+These are rollback limits, not a migration of an ephemeral session.
 
 Rollback therefore requires stopping owners and preserving a complete backup of
 the root. Ownership acquisition may still write fenced administration before

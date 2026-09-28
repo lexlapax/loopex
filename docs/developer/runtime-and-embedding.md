@@ -3,50 +3,55 @@
 <a id="concept"></a>
 ## Concept
 
-An embedding host runs Loopex inside its own Elixir application. It starts an
-explicit OTP runtime, creates or resumes durable sessions, attaches at a
-public-event cursor, submits commands, and reads committed events, while the
-runtime coordinates model turns and controlled tool calls. The host supplies
-authority and the concrete edges; the runtime owns loop ordering and durable
-session truth. This page is the reference for that embedding contract. The turn
+An embedding host runs Loopex inside its own Elixir application. It can use an
+ephemeral session for an answer or conversation held only in its VM, or a
+durable session that survives process loss and can be resumed. Both profiles
+run the same kernel: the host supplies authority and concrete edges, and the
+runtime owns loop ordering and session truth for the profile's declared
+lifetime. This page is the reference for that embedding contract. The turn
 machine itself is in [Agent loop and tools](agent-loop-and-tools.md#concept),
 and the applications and ports behind it are in the
 [architecture pair](architecture.md#concept).
 
-What an embedder can do through the facade:
+What an embedder can do through the facade or a profile entrypoint:
 
 - start and stop any number of independent runtimes in one VM, each named only
   by the opaque reference it returns;
-- create, resume, and find sessions under a state root, and attach any number
-  of callers to a session at an exact durable cursor;
+- use an opaque ephemeral handle for a multi-turn session, with no state root
+  or recovery claim;
+- create, resume, and find durable sessions under a state root, and attach any
+  number of callers at an exact durable cursor;
 - admit prompts, steers, follow-ups, and aborts, and consume committed events
   and transient progress;
-- let its host policy ask the operator a question instead of deciding, with the
-  question kept as durable session state across restarts;
-- admit project skills from an immutable snapshot and select what a run sees;
-- read an artifact back in bounded, verified chunks;
+- let its host policy ask the operator a question instead of deciding, retaining
+  it across restarts in the durable profile or while the ephemeral session lives;
+- admit project or user skills from an immutable snapshot and select what a run
+  sees;
+- read a durable artifact back in bounded, verified chunks;
 - observe the runtime with a trace session and telemetry spans, without
   editing source; and
-- recover a session after its process died, including one whose last effect has
-  an unknown outcome.
+- recover a durable session after its process died, including one whose last
+  effect has an unknown outcome.
 
-There are two ways to assemble a runtime. `LoopexComposition` is shipped code
-that wires the reference stack — the local Store and artifact store, the ReqLLM
-model adapter, and the trusted-local executor with its four coding tools — and
-returns a started runtime. An embedder that wants a different Store, Model,
-Executor, or ArtifactStore composes the ports and calls `Loopex.start_link/1`
-directly; the composition is not a wiring framework, because with one
-implementation of each port there is no second composition to give evidence
-for one.
+`LoopexComposition.Ephemeral` is the small host entrypoint: a memory Store, an
+in-process ReqLLM adapter, the local executor and a temporary root. Its
+`run/2` answers one prompt; its session API supports follow-up turns and policy
+questions while the creating process and VM remain live. It has no artifact
+store, durable listing, or recovery path. `LoopexComposition` remains the
+durable reference stack: local Store and artifact store, the separate provider
+companion, and the local executor. Both define seven tools; the durable default
+keeps the original four coding tools active. An embedder that wants different
+edges composes the ports and calls `Loopex.start_link/1` directly.
 
-The embedded API is a direct facade, not a transport or a sixth boundary
-behaviour. The command, the reference client, the app server, and the daemon
-are peers over it: none needs coordinator access, Store access, an alternate
-reducer, a policy engine, or event truth of its own, and an embedder may choose
-between calling the facade in process and driving a server from another
-language over [the session protocol](app-server-protocol.md#concept).
+The durable embedded API is a direct facade, not a transport or a sixth
+boundary behaviour. The ephemeral composition wraps that same facade rather
+than creating another loop. The command, the reference client, the app server,
+and the daemon are peers over it: none needs coordinator access, Store access,
+an alternate reducer, a policy engine, or event truth of its own. An embedder
+may also drive a server from another language over
+[the session protocol](app-server-protocol.md#concept).
 
-Four constraints shape every embedding:
+Five constraints shape every embedding:
 
 - **The host names authority.** A runtime with any tool active refuses to start
   without a policy module, and a policy needs a stable identity so a question it
@@ -56,12 +61,18 @@ Four constraints shape every embedding:
 - **The durable policy identity is explicit across releases.** The reference
   composition keeps its default policy revision at `"0.2.0"` for rollback;
   a host whose policy behavior changes supplies its own revision.
+- **The profiles have different trust and lifetime bounds.** Ephemeral hosted
+  calls resolve their selected provider key in the host VM, where trusted code,
+  tools and host-installed handlers may observe or copy it. Cleanup uncertainty
+  seals only that session. The durable profile retains its separate-process
+  credential and persistent-state contracts.
 - **Nothing is stable.** Every surface on this page may change without notice;
   pin an exact revision and read
   [Compatibility surfaces](compatibility-surfaces.md#concept).
 
 Technical depth: [Start options](#technical-embedding-options),
 [the embedded API](#technical-embedding-api),
+[the ephemeral composition](#technical-embedding-ephemeral),
 [the reference composition](#technical-embedding-composition),
 [resource snapshots](#technical-embedding-resources),
 [durable interactions](#technical-embedding-interactions),
@@ -200,13 +211,78 @@ reorders or drops one. `attachment_status/1`, `progress/2`, and `diagnostic/2`
 are transient observations. None of those grants authority or substitutes for
 Store history.
 
+<a id="technical-embedding-ephemeral"></a>
+### Ephemeral Composition
+
+`LoopexComposition.Ephemeral.run/2` composes, runs one prompt and cleans up in
+one call. `start_session/1` returns an opaque handle for successive `ask/3`
+calls; `answer/3` submits an offered choice for a pending policy interaction,
+`last_result/1` and `history/1` read bounded observations, and
+`stop_session/1` ends the owned session. Pass the handle back; do not inspect
+its internals. The process that created it owns its lifetime even if another
+process borrows the handle. This API uses the same kernel and policy port as the
+durable facade, but stores session truth only in memory. VM loss ends it, with
+no resume or migration to the durable profile.
+
+```elixir
+{:ok, result} =
+  LoopexComposition.Ephemeral.run("List the files here.",
+    policy: MyHost.ReadOnly,
+    model: "ollama:llama3.2",
+    tools: :read_only,
+    cwd: File.cwd!()
+  )
+
+IO.puts(result.text)
+```
+
+The host must supply `:policy`; neither composition supplies one. `:model`
+defaults to `LOOPEX_MODEL` or `"ollama:llama3.2"`. Accepted model prefixes are
+`ollama:`, `openai:`, `anthropic:` and `openrouter:`. The selected hosted key is
+read from that provider's environment variable immediately before each model
+call; local Ollama needs no key. A hosted `:base_url` must be HTTPS. If the host
+started ReqLLM itself with `.env` loading disabled, it declares
+`req_llm: :host_started`; an undeclared or `.env`-enabled existing instance is
+refused. Otherwise composition performs the guarded start. `:tools` is
+`:none`, `:coding` (the original four), or `:read_only` (`read`, `grep`, `find`,
+`ls`), defaulting to `:coding`.
+Every model admits every preset. `:skills` accepts at most four named project
+or user skill directories. `:cwd` defaults to the current working directory;
+`:max_steps`, `:deadline_ms`, `:max_tokens`, `:context_token_budget`, `:timeout`
+and `:base_url` set the remaining per-session choices. Only `:timeout` may be
+overridden on an individual `ask/3`.
+
+A completed run returns `{:ok, observation}` with bounded text, tool history,
+profile and skill-shadow information. Failed, bounded, unknown and cancelled
+runs return `{:error, {:run, outcome, observation}}`. A deferring policy returns
+a pending interaction from `ask/3`; `answer/3` takes its exact interaction and
+choice IDs. `run/2` cannot answer one and returns
+`{:error, :interaction_requires_session}` after cleanup. A timed-out wait has
+a bounded partial observation; the owner continues draining the admitted run.
+`stop_session/1` returns `:ok` only after its cleanup proof. If proof is
+unavailable, `{:error, {:cleanup_unproved, details}}` names the retained root
+and pending obligations. The session is not silently reported as closed.
+
+This profile is not a credential sandbox. Hosted keys, HTTP/TLS state, crash
+reports and host-installed telemetry or logger handlers can be observed by
+trusted code in the VM; authorized tools can read ambient variables and return
+their values through ordinary tool-result planes. Loopex does not inject a
+selected key into its own records or diagnostics and rejects its exact value
+from provider-controlled reply fields. A call-owned HTTP/1 pool and caller are
+proved gone before a result or successful cleanup acknowledgement; a checked-
+out socket and TLS controller may drain afterward without a result route. A
+host that needs separate-process credential custody or recovery uses the
+durable profile. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept)
+states the boundary in full.
+
 <a id="technical-embedding-composition"></a>
-### Reference Composition
+### Durable Reference Composition
 
 `LoopexComposition.start/1` starts the applications an escript does not start
 for it, opens the durable Store and the artifact store under the caller's state
 root, opens a workspace lease and the local executor, and returns a runtime
-composed with the four bootstrap coding tools and the ReqLLM model adapter:
+with seven defined tools (the original four active by default) and the
+companion ReqLLM model adapter:
 
 ```elixir
 {:ok, runtime} =
@@ -226,6 +302,10 @@ composed with the four bootstrap coding tools and the ReqLLM model adapter:
 | `:policy` | Required; absence returns `{:error, :host_policy_required}`. The composition ships no policy of its own, so a permissive default can never be inherited by an embedder. |
 | `:policy_identity` | Defaults to `%{"id" => inspect(policy), "revision" => "0.2.0"}`; an embedder whose policy behavior changes names its own revision. |
 | `:provider_launch` | The provider companion's launch configuration, a keyword list read from the non-secret `.launch` file that `mix loopex.provider.build` writes. No companion is discovered. |
+| `:model` | Optional hosted `provider:model`; default `anthropic:claude-haiku-4-5`. The durable profile refuses `ollama:`. |
+| `:bounds` | Optional map of positive unsigned-64-bit `:max_turns`, `:token_budget` and `:deadline_ms`; omitted members keep runtime defaults. |
+| `:sampling` | Optional exact `%{"max_tokens" => n}` with `n` from 1 to 1,000,000. |
+| `:active_tools` | Optional unique list of declared tool IDs, from the four coding tools and `loopex.grep`, `loopex.find`, `loopex.ls`. Omission keeps the coding four active. |
 | `:context_token_budget` | Defaults to `8_192` estimated tokens; an explicit valid value is forwarded unchanged. |
 | `:cleanup_grace_ms`, `:process_probe` | Forwarded to the session and executor together, so a run's ending reports the period its cleanup ran under. |
 | `:artifact_transfers` | `false` by default. `true` starts a transfer owner and hands the same artifact store to the runtime; absent, the runtime refuses the transfer family. |
@@ -277,7 +357,7 @@ uses it. `LoopexComposition.artifacts/1` returns the artifact-store handle on it
 own, because an artifact outlives the run that produced it and an operator
 retrieving one later needs no runtime.
 
-The composition names `Loopex.Store.Local`, `Loopex.LLM.ReqLLM`,
+The durable composition names `Loopex.Store.Local`, `Loopex.LLM.ReqLLM`,
 `Loopex.Executor.Local`, and `Loopex.Store.Local.Artifacts` in this one place,
 which is what makes the dependency direction checkable, and it reads nothing
 from application environment.
@@ -293,6 +373,18 @@ Git acquisition, containment, and retained provenance. `discover/2` walks only
 requires an exact commit, a selected directory, and explicit acquisition
 authority; installation does not admit content to a session. `retain/2` and
 `load/2` keep the exact snapshot under its manifest digest in the state root.
+
+For caller-named directories, use
+`LoopexComposition.ResourcePacks.read_directories(paths, workspace: dir)`.
+It accepts up to four paths and returns
+`{:ok, %{manifest: manifest, shadowed_skills: names}}`. A workspace-local
+`.agents/skills/<name>` directory is `project:<name>`; a directory outside
+the workspace is `user:<name>`. A project skill wins a shared name, and
+`shadowed_skills` names the omitted user source IDs. Other workspace paths
+refuse. The helper constructs a manifest; it does not itself admit content to
+a session. The durable host passes `manifest` as `:resource_manifest` and
+uses the session commands below. The ephemeral composition performs this
+admission from its `:skills` option.
 
 Pass the verified manifest as `resource_manifest:` to the composition or to
 `Loopex.start_link/1`. Core validates it once and stores one copy in a protected
@@ -484,6 +576,9 @@ are in `apps/loopex_store_local/test/artifact_transfer_test.exs`.
 
 <a id="technical-embedding-recovery"></a>
 ### Recovery
+
+These procedures apply only to the durable profile. An ephemeral handle has no
+retained Store or resume path after its owner or VM ends.
 
 **Reopening the Store.** The host reopens the local Store with
 `recover_stale_writer: true`, which the Store honours only after asking the

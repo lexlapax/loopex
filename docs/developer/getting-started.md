@@ -22,12 +22,15 @@ them.
 <a id="concept-getting-started-model"></a>
 ## What You Are Working With
 
-Loopex is an OTP runtime that keeps coding-agent sessions durable. A **runtime**
-is a supervised process tree a host starts explicitly and names by an opaque
-reference. A **session** is a durable conversation between an operator and a
-model; its history is an append-only journal written by exactly one process at a
-time, so a session survives the process that ran it and can be resumed. A
-**run** is one task inside a session: the model is asked, may call tools, and is
+Loopex is an OTP runtime for coding-agent sessions. A **runtime** is a supervised
+process tree a host starts explicitly and names by an opaque reference. A
+**session** is a conversation between an operator and a model, with its history
+written by exactly one process at a time. The durable profile keeps that
+history in an append-only local journal so a session can be resumed; the
+ephemeral profile keeps the same ordering in memory and loses the session when
+its VM ends.
+
+A **run** is one task inside a session: the model is asked, may call tools, and is
 asked again until it stops, a declared bound is reached, or the run is stopped.
 Tools act on a workspace through an **executor**, and every tool call is decided
 by the host's **policy** — Loopex never grants itself authority.
@@ -39,8 +42,8 @@ a transient rendering aid that may be dropped.
 
 Five replaceable boundaries, called ports, separate the kernel from everything
 concrete: the Store, the Model, the Executor, the ArtifactStore, and the Policy.
-The repository ships one implementation of each except Policy, which every host
-supplies itself.
+The reference compositions select different Store and Model implementations;
+neither supplies a Policy, which every host must provide.
 
 Technical depth: [Building from source](getting-started-technical.md#technical-getting-started-source).
 
@@ -49,29 +52,38 @@ Technical depth: [Building from source](getting-started-technical.md#technical-g
 
 An embedding host calls the `Loopex` facade in process. It starts a runtime,
 creates or resumes a session, attaches, submits commands, and reads events; the
-runtime runs the loop. The quickest working runtime comes from
-`LoopexComposition`, which wires the shipped local Store, the ReqLLM model
-adapter, and the local executor with its four coding tools. A host that wants a
-different store, model, or executor composes the ports itself and starts the
-runtime directly.
+runtime runs the loop. For one answer or a multi-turn session without recovery,
+`LoopexComposition.Ephemeral` provides `run/2` or a session handle. It uses an
+in-memory Store and calls a local Ollama model without a credential or provider
+companion. The same profile can use hosted models when their provider key is in
+the host environment. For retained sessions, `LoopexComposition` wires the
+local Store, the separate provider companion, and the local executor. A host
+that wants different edges composes the ports itself and starts the runtime
+directly. Both profiles use the same kernel and require a host policy; neither
+has a permissive policy default.
 
 What the host must decide, and Loopex will not decide for it:
 
-- **where durable state lives** — a state root directory;
+- **whether the session must survive the VM** — choose the durable profile and
+  a state root if it must;
 - **which workspace the tools may touch**;
-- **who authorizes tool calls** — a policy module and its stable identity; and
+- **who authorizes tool calls** — a policy module, with a stable identity for
+  durable interaction recovery; and
 - **how much context one request may carry** — a context token budget (the
   reference composition defaults it; a direct runtime requires it).
 
-A model provider also needs its credential and its private companion process,
-built once from the checkout. A runtime can be started with no model and no
-tools at all; it then creates, attaches to, and recovers sessions but runs no
-turns, which is a useful first experiment that needs no credential.
+The durable reference stack needs a hosted provider credential and its private
+companion process, built once from the checkout. The ephemeral Ollama path
+needs a running local Ollama server and model, but no provider key, state root,
+or companion at runtime. Its hosted path reads the selected provider key in the
+host VM during each call; it is not a credential-isolation boundary from tools
+or trusted host code. A direct runtime can also start with no model or tools:
+it creates, attaches to, and recovers durable sessions but runs no turns.
 
 The full contract is [Runtime and embedding](runtime-and-embedding.md#concept);
 the turn machine behind it is [Agent loop and tools](agent-loop-and-tools.md#concept).
 
-Technical depth: [A first embedded host](getting-started-technical.md#technical-getting-started-embedding).
+Technical depth: [A one-call host and durable embedded host](getting-started-technical.md#technical-getting-started-embedding).
 
 <a id="concept-getting-started-policy"></a>
 ## Building On: Write the Host Policy
@@ -83,10 +95,12 @@ allow is a denial: a policy that crashes, blocks, or answers malformed data
 denies, and a denial is reported to the model and never retried.
 
 Defer is how a host asks its operator: it poses one bounded multiple-choice
-question, the runtime keeps that question as durable session state, and when an
-answer arrives the same policy is asked again with the answer attached. The
-answer never grants anything by itself, and a pending question survives the
-host process ending.
+question, and when an answer arrives the same policy is asked again with the
+answer attached. The answer never grants anything by itself. The durable
+profile retains a pending question across restarts; an ephemeral session can
+answer it only while its owner and VM remain live. A one-shot `run/2` cannot
+answer a deferral, so use `start_session/1`, `ask/3` and `answer/3` for a policy
+that may defer.
 
 Technical depth: [A first policy](getting-started-technical.md#technical-getting-started-policy).
 
@@ -132,7 +146,8 @@ Technical depth: [Adding an adapter](getting-started-technical.md#technical-gett
 ## Contributing: Toolchain and Checks
 
 Development needs Git, Bash, ordinary POSIX tools, and the accepted Elixir and
-Erlang/OTP toolchain — nothing else. Two supported toolchain pairs are pinned,
+Erlang/OTP toolchain. The automatic attended release runner additionally needs
+Python 3. Two supported toolchain pairs are pinned,
 and the older one is the floor. While editing, run the focused tests for what
 you touched. Before a change is integrated, the fast check runs once: formatting,
 warning-free compilation, dependency direction, documentation structure, and the

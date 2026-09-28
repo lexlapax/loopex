@@ -34,14 +34,14 @@ works.
 
 | Document | Purpose |
 | --- | --- |
-| [Getting started](getting-started.md#concept) · [technical](getting-started-technical.md#technical-depth) | Two tracks: building on Loopex (embedding a runtime, driving the daemon/app-server protocol) and contributing (toolchain, checks, milestones). |
+| [Getting started](getting-started.md#concept) · [technical](getting-started-technical.md#technical-depth) | Two tracks: building on Loopex (a one-call ephemeral host, durable embedding, or the daemon/app-server protocol) and contributing (toolchain, checks, milestones). |
 | [Architecture](architecture.md#concept) · [technical](architecture-technical.md#technical-depth) | The applications and their inward dependency direction, the replaceable ports, the truth planes and who may publish to each, and the serial session owner; then the invariants with the module enforcing each, the record shapes, and a sequence diagram of one turn. |
-| [Runtime and embedding](runtime-and-embedding.md#concept) | Embedding a runtime: application shape, explicit composition, resource snapshots and commands, durable interactions, bounded artifact transfers, commit ordering, the embedded API, recovery and verification entry points. |
+| [Runtime and embedding](runtime-and-embedding.md#concept) | Ephemeral and durable composition over one kernel: the in-VM session API and its trust limit, durable embedding and options, resource snapshots and commands, interactions, transfers and recovery. |
 | [Agent loop and tools](agent-loop-and-tools.md#concept) | The multi-turn loop: turn ordering, the tool registry and canonical requests, attempts and settlement, run bounds, streaming, host policy, artifacts, and progressive skill context and replay. |
 | [App server protocol](app-server-protocol.md#concept) · [technical](app-server-protocol-technical.md#technical-depth) | The normative wire reference for both session-protocol generations: the foreground `loopex.experimental/1` served over standard input and output, and the daemon's `loopex.experimental/2` over its Unix socket, with methods, record families, error codes, encodings, limits and evidence. |
 | [The daemon](daemon.md#concept) · [technical](daemon-technical.md#technical-depth) | The host that keeps a root's sessions alive between processes over generation 2 on a Unix-domain socket: controller lease and takeover, durable-first delivery and lifecycle order; then its processes, stop clocks, bounds, succession and tests. |
 | [Observability](observability.md#concept) · [technical](observability-technical.md#technical-depth) | Trace sessions and telemetry as the diagnostics plane, why neither is truth or authority, and why redaction is a contract; then the ADR 0030 emission inventory, trace ceilings, redaction rules and their tests. |
-| [Compatibility surfaces](compatibility-surfaces.md#concept) | Every surface Loopex exposes to an embedder or client today, its experimental label, the app server's exact-generation rule, interaction-record old-reader refusal and rollback, and why none is labelled or frozen. |
+| [Compatibility surfaces](compatibility-surfaces.md#concept) | The experimental ephemeral API and `ask` command alongside durable and wire surfaces, exact-generation rules, old-reader refusal and rollback, and why none is frozen. |
 
 ## Contributing
 
