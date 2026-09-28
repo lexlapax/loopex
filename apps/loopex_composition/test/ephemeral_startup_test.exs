@@ -466,6 +466,84 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     send(creator, :finish)
   end
 
+  test "an ungranted startup phase times out without inventing an unknown child", %{tmp: tmp} do
+    test = self()
+
+    configuration =
+      configuration(tmp, %{
+        store_new: fn module, pid ->
+          send(test, {:store_handle_blocked, self()})
+          receive do: (:release_store_handle -> Loopex.Store.new(module, pid))
+        end
+      })
+
+    creator =
+      spawn(fn ->
+        {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+        {:ok, activation} = OwnerActivation.start(supervisor)
+        owner = OwnerActivation.owner(activation)
+        {:ok, cell} = OwnerActivation.begin(activation)
+        send(test, {:owner, owner, cell})
+        send(test, {:result, SessionOwner.start_session(owner, configuration, 6_000)})
+        receive do: (:finish -> :ok)
+      end)
+
+    on_exit(fn -> Process.exit(creator, :kill) end)
+    assert_receive {:owner, owner, cell}
+    assert_receive {:store_handle_blocked, root}
+
+    on_exit(fn ->
+      for pid <- [owner, root] do
+        resume_if_suspended(pid)
+      end
+    end)
+
+    assert :erlang.suspend_process(owner)
+    send(root, :release_store_handle)
+    assert eventually(fn -> match?({:store_handle, _}, :sys.get_state(root).awaiting_ack) end)
+    assert :erlang.suspend_process(root)
+    assert :erlang.resume_process(owner)
+
+    assert eventually(fn ->
+             startup = :sys.get_state(owner).startup
+             startup.expected == :workspace_lease and startup.granted == false
+           end)
+
+    assert eventually(fn -> :atomics.get(cell, 1) != 0 end, 1_200)
+    assert :atomics.get(cell, 1) == 1
+    resume_if_suspended(root)
+
+    assert_receive {:result, {:error, {:composition, :workspace_lease_failed}}}, 6_000
+    assert File.ls!(tmp) == []
+    assert :atomics.get(cell, 1) == 2
+    send(creator, :finish)
+  end
+
+  test "a granted success with an unregistrable handle remains an unknown start", %{tmp: tmp} do
+    configuration =
+      configuration(tmp, %{
+        store_new: fn module, _pid -> Loopex.Store.new(module, self()) end
+      })
+
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+    {:ok, activation} = OwnerActivation.start(supervisor)
+    owner = OwnerActivation.owner(activation)
+    {:ok, cell} = OwnerActivation.begin(activation)
+
+    assert {:error,
+            {:cleanup_unproved,
+             %{
+               root: root,
+               root_ownership: :owned,
+               pending: [:session_subtree],
+               cause: {:composition, :store_start_failed}
+             }}} = SessionOwner.start_session(owner, configuration, 6_000)
+
+    assert File.dir?(root)
+    assert :atomics.get(cell, 1) == 3
+    Process.exit(supervisor, :shutdown)
+  end
+
   defp eventually(fun, attempts \\ 100)
   defp eventually(_fun, 0), do: false
 
@@ -475,6 +553,14 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     else
       Process.sleep(10)
       eventually(fun, attempts - 1)
+    end
+  end
+
+  defp resume_if_suspended(pid) do
+    try do
+      :erlang.resume_process(pid)
+    catch
+      :error, :badarg -> :ok
     end
   end
 

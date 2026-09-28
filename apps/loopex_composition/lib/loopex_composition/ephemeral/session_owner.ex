@@ -2284,7 +2284,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         %{state | startup: startup, model_census: census} |> advance(next, %{})
 
       :error ->
-        fail_start(state, failure_cause(phase), :unknown)
+        fail_start(state, failure_cause(phase), :unknown, true)
     end
   end
 
@@ -2484,7 +2484,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   # Concept: rollback observes the same one-session proof obligations as stop.
   # Technical depth: an exact returned failure is not a lost grant. Cleanup
   # attempts never block this receive loop and never remove an unowned path.
-  defp fail_start(%{startup: startup} = state, cause, ownership) do
+  # A returned success that cannot be registered is still uncertain, but a
+  # timeout before the phase's grant cannot invent a child start.
+  defp fail_start(state, cause, ownership), do: fail_start(state, cause, ownership, false)
+
+  defp fail_start(%{startup: startup} = state, cause, ownership, unregistered_granted_result?) do
     :atomics.put(state.cell, 1, 1)
 
     deadline =
@@ -2497,7 +2501,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     unknown_start =
       startup.expected in @phase_order and
         startup.expected not in [:candidate_prepare, :root_claim] and
-        (startup.granted or (ownership == :unknown and cause == failure_cause(startup.expected)))
+        (startup.granted or
+           (unregistered_granted_result? and ownership == :unknown and
+              cause == failure_cause(startup.expected)))
 
     possible_root =
       cond do
