@@ -37,7 +37,7 @@ def check(path: Path) -> None:
     print(f"escript-inventory: PASS {path.name} logger and provider dependency bytes")
 
 
-def main(arguments: list[str]) -> int:
+def main(arguments) -> int:
     if len(arguments) != 2:
         print("usage: escript-inventory.py CLI_ESCRIPT PROVIDER_ESCRIPT", file=sys.stderr)
         return 2
