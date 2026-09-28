@@ -23,6 +23,15 @@ if release_needs_provider; then
     { echo 'check-release: LOOPEX_PROVIDER_API_KEY is required for the selected provider rows' >&2; exit 2; }
   export LOOPEX_PROVIDER_API_KEY
 fi
+if release_needs_ollama; then
+  [ -n "${LOOPEX_RELEASE_OLLAMA_MODEL:-}" ] ||
+    { echo 'check-release: LOOPEX_RELEASE_OLLAMA_MODEL is required for the local Ollama row' >&2; exit 2; }
+  case "$LOOPEX_RELEASE_OLLAMA_MODEL" in
+    ollama:?*) ;;
+    *) echo 'check-release: LOOPEX_RELEASE_OLLAMA_MODEL must name an ollama: model' >&2; exit 2 ;;
+  esac
+  export LOOPEX_RELEASE_OLLAMA_MODEL
+fi
 if release_needs_node; then
   pinned_node=$(awk -F= '$1 == "node" { print $2 }' scripts/fixtures/m4/client-toolchain.txt)
   observed_node=$(node --version 2>/dev/null </dev/null || true)

@@ -254,12 +254,13 @@ process, and commits a truthful denied outcome you see in the transcript:
 The run then continues or ends truthfully. It never retries a call the host
 refused.
 
-`defer` asks a person instead of deciding: the runtime commits a durable
-question with its offered choices, a client answers it, and the policy is asked
-again once the answer has committed. The answer is an input to that second
-decision, never the decision itself. The app server's `ask` stance works this
-way; see [app server operations](app-server.md#operator-app-server-launching).
-The `loopex` command and the daemon ship no stance that defers, and the command
+`defer` asks a person instead of deciding. In a durable session, the runtime
+commits the question and its offered choices; in an ephemeral embedded session,
+the interaction exists only in memory and the host uses `answer/3`. The policy
+is asked again after the answer, which is an input to that decision, never the
+decision itself. The app server's `ask` stance uses the durable path; see
+[app server operations](app-server.md#operator-app-server-launching). The
+`loopex` command and the daemon ship no stance that defers, and the command
 has no way to answer a question.
 
 Failure fails closed. A policy that raises, times out after five seconds, or
@@ -471,7 +472,7 @@ request carries no process identifier, credential or provider value.
 | --- | --- |
 | `{:allow, context}` in the bounded shape, or `{:allow, nil}` | a grant |
 | `{:deny, category}` with a published category | a durable denial; nothing runs |
-| `{:defer, question}` inside the admitted question family | a durable interaction; the policy is asked again once an answer commits |
+| `{:defer, question}` inside the admitted question family | a durable interaction in the durable profile, or an in-memory interaction in an ephemeral embedded session; the policy is asked again after an answer |
 | anything else, a raise, an exit, or no answer within 5 s | `{:deny, :policy_unavailable}` |
 
 The durable interaction lifecycle — expiry, re-arming after a restart, and the

@@ -41,6 +41,10 @@ release_needs_provider() {
   return 1
 }
 
+release_needs_ollama() {
+  release_selected real-provider-10
+}
+
 release_needs_node() {
   release_selected node_client || release_selected real-provider-4 || release_selected real-provider-9
 }

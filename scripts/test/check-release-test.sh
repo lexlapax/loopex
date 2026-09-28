@@ -32,12 +32,13 @@ if release_selected node_client || release_selected cross_uid; then fail 'select
 release_needs_node || fail 'provider group omitted Node-dependent rows'
 release_select --only real-provider-5
 release_needs_provider || fail 'provider row omitted credential preflight'
-if release_needs_node; then fail 'provider row 5 spuriously requires Node'; fi
+if release_needs_node || release_needs_ollama; then fail 'provider row 5 has unrelated preflights'; fi
 release_select --only real-provider-10
 if release_needs_provider || release_needs_node; then fail 'local Ollama row has unrelated preflights'; fi
+release_needs_ollama || fail 'local Ollama row omitted its model preflight'
 release_select --only real-provider-11
 release_needs_provider || fail 'hosted ephemeral row omitted credential preflight'
-if release_needs_node; then fail 'hosted ephemeral row spuriously requires Node'; fi
+if release_needs_node || release_needs_ollama; then fail 'hosted ephemeral row has unrelated preflights'; fi
 release_select --only long_bound
 if release_needs_provider || release_needs_node; then fail 'long_bound has unrelated preflights'; fi
 release_select --only node_client
@@ -190,8 +191,9 @@ preflight() {
   local credential_env=("PATH=$work/bin:$PATH" "TMPDIR=$work/preflight-tmp")
   shift
   if [ -n "${RELEASE_TEST_CREDENTIAL:-}" ]; then credential_env+=("LOOPEX_PROVIDER_API_KEY=$RELEASE_TEST_CREDENTIAL"); fi
+  if [ -n "${RELEASE_TEST_OLLAMA_MODEL:-}" ]; then credential_env+=("LOOPEX_RELEASE_OLLAMA_MODEL=$RELEASE_TEST_OLLAMA_MODEL"); fi
   : >"$RELEASE_TEST_MARKER"
-  (cd "$fixture" && env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY \
+  (cd "$fixture" && env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY -u LOOPEX_RELEASE_OLLAMA_MODEL \
     "${credential_env[@]}" bash "$root/scripts/check-release.sh" "$@") >"$work/preflight-output" 2>&1 || status=$?
   [ "$status" -eq "$expected" ] || fail "preflight returned $status, expected $expected"
   # Apple's git launcher may create xcrun_db in TMPDIR. Release-owned staging
@@ -214,6 +216,14 @@ preflight 77 --only long_bound
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'long_bound queried Node or refused the absent credential'
 preflight 77 --only rollback
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'rollback queried Node or required a real credential'
+preflight 2 --only real-provider-10
+grep -q 'LOOPEX_RELEASE_OLLAMA_MODEL is required' "$work/preflight-output" || fail 'local Ollama model refusal missing'
+[ ! -s "$RELEASE_TEST_MARKER" ] || fail 'missing Ollama model reached Node or staging'
+RELEASE_TEST_OLLAMA_MODEL=ollama:
+preflight 2 --only real-provider-10
+grep -q 'must name an ollama: model' "$work/preflight-output" || fail 'empty Ollama model was admitted'
+[ ! -s "$RELEASE_TEST_MARKER" ] || fail 'empty Ollama model reached Node or staging'
+RELEASE_TEST_OLLAMA_MODEL=ollama:fixture
 preflight 77 --only real-provider-10
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'local Ollama row queried Node or required a credential'
 preflight 77 --only node_client
@@ -230,6 +240,7 @@ preflight 77 --only real-provider-11
 preflight 77
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nstaging')" ] || fail 'full preflight changed'
 unset RELEASE_TEST_CREDENTIAL
+unset RELEASE_TEST_OLLAMA_MODEL
 RELEASE_TEST_NODE=wrong
 preflight 2 --only node_client
 grep -q 'Node v' "$work/preflight-output" || fail 'incorrect Node version did not refuse'

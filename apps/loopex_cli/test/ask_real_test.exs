@@ -27,8 +27,9 @@ defmodule LoopexCli.AskRealTest do
     File.mkdir!(workspace)
     on_exit(fn -> File.rm_rf!(workspace) end)
 
-    model = System.get_env("LOOPEX_REAL_OLLAMA_MODEL") || "ollama:llama3.2"
-    assert String.starts_with?(model, "ollama:")
+    model = System.fetch_env!("LOOPEX_RELEASE_OLLAMA_MODEL")
+    assert String.starts_with?(model, "ollama:") and byte_size(model) > byte_size("ollama:")
+    assert_local_model_available!(model)
 
     {output, status} =
       System.cmd(
@@ -82,5 +83,21 @@ defmodule LoopexCli.AskRealTest do
     assert is_binary(result["text"]) and String.trim(result["text"]) != ""
     assert result["tools"] == []
     IO.puts(:stderr, "loopex M6 delegated local ask completed with proved cleanup")
+  end
+
+  defp assert_local_model_available!(model) do
+    assert {:ok, _} = Application.ensure_all_started(:inets)
+
+    response =
+      :httpc.request(
+        :post,
+        {~c"http://127.0.0.1:11434/api/show", [], ~c"application/json",
+         JSON.encode!(%{"model" => String.replace_prefix(model, "ollama:", "")})},
+        [timeout: 3_000, connect_timeout: 3_000],
+        body_format: :binary
+      )
+
+    assert match?({:ok, {{_, 200, _}, _, _}}, response),
+           "release evidence unavailable: local Ollama does not have #{model} on 127.0.0.1:11434"
   end
 end
