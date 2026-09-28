@@ -50,6 +50,12 @@ defmodule LoopexCli do
   wrapping this command can tell success from failure.
   """
   @spec main([binary()]) :: no_return()
+  def main([command | _rest] = argv) when command in ["ask", "-p"] do
+    argv
+    |> LoopexCli.Ask.run()
+    |> halt_ask()
+  end
+
   def main(["daemon" | arguments]) do
     start_legacy_application_or_halt()
     LoopexCli.Daemon.main(arguments)
@@ -134,6 +140,8 @@ defmodule LoopexCli do
   # child it starts can inherit it.
   defp composes_offline?([command | rest]) when command in ~w(run resume cancel),
     do: not LoopexCli.Live.daemon_form?(rest)
+
+  defp composes_offline?([command | _rest]) when command in ["ask", "-p"], do: true
 
   defp composes_offline?(_argv), do: false
 
@@ -1723,6 +1731,8 @@ defmodule LoopexCli do
     loopex — run a coding task from your terminal
 
       loopex run --policy allow-all "describe the change"
+      loopex ask --policy allow-all "one question"
+      loopex -p --policy allow-all --output json "one question"
       loopex run --policy allow-all --steer "actually, do it this way"
       loopex run --policy allow-all --follow-up "then do this next"
       loopex run --policy allow-all --cleanup-grace-ms 8000 "describe the change"
@@ -1753,6 +1763,15 @@ defmodule LoopexCli do
   defp halt({:error, message}) do
     IO.puts(:stderr, "loopex: #{terminal_message(message)}")
     System.halt(1)
+  end
+
+  # Concept: ask writes only the already-selected final result, once.
+  # Technical depth: no arbitrary error term reaches the legacy formatter.
+  defp halt_ask(%{status: status, stdout: stdout, stderr: stderr})
+       when is_integer(status) and is_binary(stdout) and is_binary(stderr) do
+    if stdout != "", do: IO.binwrite(:stdio, stdout)
+    if stderr != "", do: IO.binwrite(:stderr, stderr)
+    System.halt(status)
   end
 
   defp terminal_message(value) when is_binary(value) do

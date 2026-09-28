@@ -19,6 +19,31 @@ defmodule LoopexCli.Ask do
   @doc """
   ## Concept
 
+  Runs one admitted command without emitting terminal bytes.
+
+  ## Technical depth
+
+  This is the command-aware escript entry used before the legacy application
+  graph starts. The selected profile is fixed by `--state-root`; invalid input
+  never starts either profile.
+  """
+  @spec run(term(), keyword()) :: map()
+  def run(argv, seams \\ []) do
+    case prepare(argv, seams) do
+      {:ok, %{options: %{profile: :durable}} = prepared} ->
+        execute_durable(prepared, seams)
+
+      {:ok, %{options: %{profile: :ephemeral}} = prepared} ->
+        discard_durable_credential(prepared, seams)
+
+      %{status: 1, stdout: "", stderr: _} = diagnostic ->
+        diagnostic
+    end
+  end
+
+  @doc """
+  ## Concept
+
   Validates command input without starting either runtime profile.
 
   ## Technical depth
@@ -80,6 +105,25 @@ defmodule LoopexCli.Ask do
 
   def execute_durable(_, _), do: AskResult.diagnostic(:command_failed)
 
+  # The session/signal integration is deliberately left closed while the exact
+  # correlated interrupt handler is being authorized and implemented.
+  defp execute_ephemeral(_prepared, _seams),
+    do: AskResult.diagnostic(:interrupt_handler_unavailable)
+
+  # Concept: selecting the ephemeral profile removes only the durable CLI
+  # credential, after input admission and before starting that profile.
+  # Technical depth: the provider-specific variable remains host-owned for the
+  # in-process adapter to resolve at each call. A failed discard never starts
+  # the session and exposes no caller term in the diagnostic.
+  defp discard_durable_credential(prepared, seams) do
+    dependencies = Map.merge(defaults(), Map.new(seams))
+
+    case protected(fn -> dependencies.discard_credential.() end) do
+      {:ok, :ok} -> execute_ephemeral(prepared, seams)
+      _ -> AskResult.diagnostic(:command_failed)
+    end
+  end
+
   defp defaults do
     %{
       input: :stdio,
@@ -87,6 +131,7 @@ defmodule LoopexCli.Ask do
       resolve_path: &WorkspaceIdentity.resolve_path/1,
       directory_identity: &WorkspaceIdentity.directory_identity/1,
       start_application: fn -> Application.ensure_all_started(:loopex_cli) end,
+      discard_credential: &LoopexComposition.CredentialHost.discard/0,
       durable_run: &DurableAsk.run/3
     }
   end

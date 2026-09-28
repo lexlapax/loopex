@@ -98,6 +98,68 @@ defmodule LoopexCli.AskRunnerTest do
            ) == answer
   end
 
+  test "entry routing admits ask and -p before any application startup" do
+    for command <- ["ask", "-p"] do
+      assert Ask.run(
+               [command, "--policy", "allow-all", "--output", "wrong", "hello"],
+               start_application: fn -> flunk("invalid input started an application") end,
+               discard_credential: fn -> flunk("invalid input discarded a credential") end,
+               durable_run: fn _, _, _ -> flunk("invalid input started a runtime") end
+             ) == diagnostic(:invalid_output)
+
+      assert Ask.run(
+               [
+                 command,
+                 "--policy",
+                 "allow-all",
+                 "--state-root",
+                 "/tmp/ask-root",
+                 "hello"
+               ],
+               start_application: fn -> {:error, {:loopex_cli, :not_started}} end,
+               discard_credential: fn -> flunk("durable input discarded its credential") end,
+               durable_run: fn _, _, _ -> flunk("failed startup entered runtime") end
+             ) == diagnostic(:application_start_failed)
+    end
+  end
+
+  test "ephemeral selection discards only the durable credential after admission" do
+    parent = self()
+
+    for command <- ["ask", "-p"] do
+      assert Ask.run(
+               [command, "--policy", "allow-all", "hello"],
+               start_application: fn -> flunk("ephemeral input started legacy application") end,
+               discard_credential: fn ->
+                 send(parent, :durable_credential_discarded)
+                 :ok
+               end
+             ) == diagnostic(:interrupt_handler_unavailable)
+
+      assert_receive :durable_credential_discarded
+    end
+
+    assert Ask.run(
+             ["ask", "--policy", "allow-all", "hello"],
+             discard_credential: fn -> {:error, :private_failure} end
+           ) == diagnostic(:command_failed)
+  end
+
+  test "entry routing forwards a complete durable answer without terminal printing" do
+    answer = %{status: 0, stdout: "answer\n", stderr: ""}
+
+    assert Ask.run(
+             ["-p", "--policy", "allow-all", "--state-root", "/tmp/ask-root", "hello"],
+             start_application: fn -> {:ok, []} end,
+             durable_run: fn options, cwd, prompt ->
+               assert options.profile == :durable
+               assert is_binary(cwd)
+               assert prompt == "hello"
+               answer
+             end
+           ) == answer
+  end
+
   test "unexpected durable return is contained without inspecting its value" do
     admitted = %{
       options: %{profile: :durable},
