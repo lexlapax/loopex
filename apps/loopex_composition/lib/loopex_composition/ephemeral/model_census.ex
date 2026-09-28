@@ -13,6 +13,13 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
   def new(generation, cell) when is_reference(generation) and is_reference(cell),
     do: %__MODULE__{generation: generation, cell: cell}
 
+  # Concept: a stopped session cannot claim cleanup while model custody is
+  # pending, even if the runtime subtree has already gone down.
+  # Technical depth: clear_pending/1 follows the exact resource and registry
+  # proofs and clears slot two; neither condition alone is sufficient.
+  def settled?(%__MODULE__{pending: nil, cell: cell}), do: :atomics.get(cell, 2) == 0
+  def settled?(%__MODULE__{}), do: false
+
   def handle(
         %__MODULE__{generation: generation} = state,
         {:loopex_session_admission, requester, reference, generation, operation, expiry}

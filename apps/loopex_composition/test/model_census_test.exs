@@ -4,6 +4,34 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
   alias LoopexComposition.Ephemeral.ModelCensus
   alias LoopexComposition.SessionAdmission
 
+  test "closure proof requires both an empty census and cleared slot two" do
+    generation = make_ref()
+    cell = :atomics.new(2, [])
+    empty = ModelCensus.new(generation, cell)
+    assert ModelCensus.settled?(empty)
+
+    :atomics.put(cell, 2, 1)
+    refute ModelCensus.settled?(empty)
+    :atomics.put(cell, 2, 0)
+
+    call = make_ref()
+    reference = make_ref()
+    operation = {:begin_model, self(), call}
+
+    pending =
+      ModelCensus.handle(
+        empty,
+        {:loopex_session_admission, self(), reference, generation, operation, deadline()}
+      )
+
+    assert_receive {:loopex_session_admission_result, _, ^reference, ^generation, ^operation, _,
+                    {:ok, _}}
+
+    refute ModelCensus.settled?(pending)
+    :atomics.put(cell, 2, 0)
+    refute ModelCensus.settled?(pending)
+  end
+
   test "cleanup-only route rejects every work operation without messaging the owner" do
     generation = make_ref()
     call = make_ref()

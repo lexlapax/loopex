@@ -26,7 +26,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   alias Loopex.Attachment
   alias Loopex.ResourcePack
   alias LoopexComposition.SessionAdmission
-  alias LoopexComposition.Ephemeral.{FacadeClient, SessionRoot, TempRoot}
+  alias LoopexComposition.Ephemeral.{FacadeClient, ModelCensus, SessionRoot, TempRoot}
 
   @startup_ms 5_000
   @startup_wait_ms 16_000
@@ -128,6 +128,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
          startup_deadline: nil,
          startup: nil,
          abort: nil,
+         model_census: nil,
          session: nil,
          stop: nil
        }}
@@ -137,6 +138,18 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   @impl true
+  def handle_info({:loopex_session_admission, _, _, _, _, _} = message, state),
+    do: {:noreply, handle_model_message(state, message)}
+
+  def handle_info({:model_custody_prepared, _, _, _, _, _} = message, state),
+    do: {:noreply, handle_model_message(state, message)}
+
+  def handle_info({:model_census_retirement_check, _} = message, state),
+    do: {:noreply, handle_model_message(state, message)}
+
+  def handle_info({:model_census_lost_callback, _} = message, state),
+    do: {:noreply, handle_model_message(state, message)}
+
   def handle_info(
         {creator, ref, :identify, identity, challenge},
         %{creator: creator, ref: ref, identity: identity, phase: :blocked} = state
@@ -305,7 +318,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:noreply, continue_abort(next)}
 
       true ->
-        {:noreply, state}
+        {:noreply, handle_model_message(state, {:DOWN, monitor, :process, pid, reason})}
     end
   end
 
@@ -688,16 +701,16 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       do: {:noreply, put_in(state.abort.worker, nil)}
 
   def handle_info(
-        {:DOWN, monitor, :process, pid, _reason},
+        {:DOWN, monitor, :process, pid, reason},
         %{phase: :failed_stop, startup: %{process_monitors: monitors}} = state
       ) do
     if Map.get(monitors, pid) == monitor,
       do: {:noreply, put_in(state.abort.down, MapSet.put(state.abort.down, pid))},
-      else: {:noreply, state}
+      else: {:noreply, handle_model_message(state, {:DOWN, monitor, :process, pid, reason})}
   end
 
   def handle_info(
-        {:DOWN, monitor, :process, pid, _reason},
+        {:DOWN, monitor, :process, pid, reason},
         %{phase: :ready, startup: startup} = state
       ) do
     cond do
@@ -718,12 +731,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:noreply, borrower_down(state)}
 
       true ->
-        {:noreply, state}
+        {:noreply, handle_model_message(state, {:DOWN, monitor, :process, pid, reason})}
     end
   end
 
   def handle_info(
-        {:DOWN, monitor, :process, pid, _reason},
+        {:DOWN, monitor, :process, pid, reason},
         %{phase: :stopping, startup: startup} = state
       ) do
     cond do
@@ -734,11 +747,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:noreply, mark_stopped_child_down(state, pid)}
 
       true ->
-        {:noreply, state}
+        {:noreply, handle_model_message(state, {:DOWN, monitor, :process, pid, reason})}
     end
   end
 
-  def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
+  def handle_info({:DOWN, monitor, :process, pid, reason}, state) do
     cond do
       state.phase == :starting and
           {monitor, pid} ==
@@ -759,7 +772,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:noreply, continue_abort(%{failed | abort: abort})}
 
       true ->
-        {:noreply, state}
+        {:noreply, handle_model_message(state, {:DOWN, monitor, :process, pid, reason})}
     end
   end
 
@@ -768,7 +781,27 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   def handle_info(:retire_sealed, %{phase: :sealed} = state), do: {:stop, :normal, state}
 
+  def handle_info(
+        {:model_settle_check, reference},
+        %{phase: :aborting, abort: %{stage: {:await_model, reference}}} = state
+      ) do
+    {:noreply, after_subtree(%{state | abort: %{state.abort | stage: :await_subtree}})}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp handle_model_message(%{model_census: %ModelCensus{} = census} = state, message) do
+    state = %{state | model_census: ModelCensus.handle(census, message)}
+
+    if state.phase == :aborting and match?({:await_model, _}, state.abort.stage) and
+         ModelCensus.settled?(state.model_census) do
+      after_subtree(%{state | abort: %{state.abort | stage: :await_subtree}})
+    else
+      state
+    end
+  end
+
+  defp handle_model_message(state, _message), do: state
 
   defp start_subtree(state, request, configuration) do
     reference = make_ref()
@@ -806,7 +839,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           owner_epoch: nil
         }
 
-        {:noreply, %{state | phase: :starting, startup: startup}}
+        census = ModelCensus.new(startup.generation, state.cell)
+        {:noreply, %{state | phase: :starting, startup: startup, model_census: census}}
 
       _failure ->
         send(state.creator, {self(), request, {:error, {:composition, :dependency_start_failed}}})
@@ -2286,6 +2320,20 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       state.stop && (not state.stop.run_proved or not state.stop.effect_proved) ->
         finish_abort(state)
 
+      not model_settled?(state) and fresh?(abort.deadline) ->
+        reference = make_ref()
+
+        Process.send_after(
+          self(),
+          {:model_settle_check, reference},
+          min(10, remaining(abort.deadline))
+        )
+
+        %{state | abort: %{abort | stage: {:await_model, reference}}}
+
+      not model_settled?(state) ->
+        finish_abort(state)
+
       is_map(startup.owned_root) ->
         start_abort_worker(state, :root_removal, nil)
 
@@ -2454,6 +2502,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     Enum.all?(Map.keys(startup.process_monitors), &MapSet.member?(down, &1))
   end
 
+  defp model_settled?(%{model_census: nil}), do: true
+  defp model_settled?(%{model_census: census}), do: ModelCensus.settled?(census)
+
   defp finish_abort(%{phase: :aborting, startup: startup, abort: abort} = state) do
     pending =
       []
@@ -2465,6 +2516,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       |> maybe_pending(abort.group_failed, :process_groups)
       |> maybe_pending(
         abort.unknown_start or abort.subtree_failed or
+          not model_settled?(state) or
           not all_subtree_down?(startup, abort.down) or
           (abort.worker != nil and abort.worker.phase not in [:root_removal, :root_absence]),
         :session_subtree
@@ -2595,6 +2647,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     case {Process.get(:"$ancestors"), Process.info(self(), :links)} do
       {[parent | _], {:links, links}} when is_pid(parent) ->
         if parent in links, do: parent, else: nil
+
+      {[name | _], {:links, links}} when is_atom(name) ->
+        case Process.whereis(name) do
+          parent when is_pid(parent) -> if(parent in links, do: parent, else: nil)
+          _ -> nil
+        end
 
       _ ->
         nil
