@@ -48,7 +48,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
     for {stage, class} <- pairs ++ [{"unavailable", "unclassified"}] do
       report = failure_report([{stage, class}])
       assert report["failure"] == %{"stage" => stage, "class" => class}
-      assert report["healthy"] and report["cleanup_confirmed"]
+      assert report["healthy"]
+      assert report["cleanup_confirmed"]
       refute report["incomplete"]
       assert map_size(report["phases"]) == 2
       assert report["counts"] == %{"dispatch_started" => 1, "cleanup_proved" => 1}
@@ -97,7 +98,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
     assert failure_report([])["failure"] == nil
   end
 
-  test "a descendant's finite failure is delivered before the collector barrier" do
+  test "a PID-fenced descendant's finite failure reaches the collector" do
     output =
       capture_io(fn ->
         assert catch_throw(
@@ -111,6 +112,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
                        end)
 
                      assert_receive {:DOWN, ^reference, :process, ^child, :normal}, 5_000
+                     delivery = :erlang.trace_delivered(child)
+                     assert_receive {:trace_delivered, ^child, ^delivery}, 5_000
                      throw(:original_failure)
                    end,
                    Control
@@ -125,7 +128,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
       |> Jason.decode!()
 
     assert report["failure"] == %{"stage" => "metadata", "class" => "returned_error"}
-    assert report["healthy"] and report["cleanup_confirmed"]
+    assert report["healthy"]
+    assert report["cleanup_confirmed"]
     refute report["incomplete"]
     assert {:traced, false} = :erlang.trace_info({Control, :observe_failure, 2}, :traced)
   end
@@ -219,7 +223,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
     assert output =~ "\"available\":false"
   end
 
-  test "descendant traces are fenced and collector exits after the original failure" do
+  test "PID-fenced descendant traces are collected before the original failure" do
     owner = self()
 
     output =
@@ -233,9 +237,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
                      {child, reference} =
                        spawn_monitor(fn -> Control.cleanup_proved(%{secret: "hidden"}) end)
 
-                     receive do
-                       {:DOWN, ^reference, :process, ^child, :normal} -> :ok
-                     end
+                     assert_receive {:DOWN, ^reference, :process, ^child, :normal}, 5_000
+                     delivery = :erlang.trace_delivered(child)
+                     assert_receive {:trace_delivered, ^child, ^delivery}, 5_000
 
                      throw(:original_failure)
                    end,
