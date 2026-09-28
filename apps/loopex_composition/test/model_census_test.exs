@@ -32,6 +32,73 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     refute ModelCensus.settled?(pending)
   end
 
+  test "one bound executor gets an exact tool grant only while the session is open" do
+    generation = make_ref()
+    instance = make_ref()
+    cell = :atomics.new(2, [])
+    state = ModelCensus.new(generation, cell) |> ModelCensus.bind_executor(self(), instance)
+    dispatch = make_ref()
+    operation = {:tool_grant, self(), instance, dispatch}
+    envelope = {:loopex_session_admission, self(), dispatch, generation, operation, deadline()}
+
+    state = ModelCensus.handle(state, envelope)
+
+    assert_receive {:loopex_session_admission_result, _, ^dispatch, ^generation, ^operation, _,
+                    {:error, :session_admission_closed}}
+
+    state = ModelCensus.activate_tools(state, true)
+    state = ModelCensus.handle(state, envelope)
+
+    assert_receive {:loopex_session_admission_result, _, ^dispatch, ^generation, ^operation, _,
+                    {:ok, {:session_grant, ^generation, :tool_grant, requester, ^dispatch, _}}}
+
+    assert requester == self()
+    :atomics.put(cell, 1, 1)
+    _state = ModelCensus.handle(state, envelope)
+
+    assert_receive {:loopex_session_admission_result, _, ^dispatch, ^generation, ^operation, _,
+                    {:error, :session_admission_closed}}
+  end
+
+  test "a tool grant waits for the prior model's empty census to retire" do
+    generation = make_ref()
+    instance = make_ref()
+    cell = :atomics.new(2, [])
+
+    state =
+      ModelCensus.new(generation, cell)
+      |> ModelCensus.bind_executor(self(), instance)
+      |> ModelCensus.activate_tools(true)
+
+    call = make_ref()
+    begin_operation = {:begin_model, self(), call}
+    state = ModelCensus.handle(state, admission(self(), generation, begin_operation))
+
+    assert_receive {:loopex_session_admission_result, _, _, ^generation, ^begin_operation, _,
+                    {:ok, _}}
+
+    dispatch = make_ref()
+    tool_operation = {:tool_grant, self(), instance, dispatch}
+
+    state =
+      ModelCensus.handle(state, admission_with_ref(self(), dispatch, generation, tool_operation))
+
+    refute_receive {:loopex_session_admission_result, _, ^dispatch, ^generation, ^tool_operation,
+                    _, _},
+                   0
+
+    refute ModelCensus.settled?(state)
+
+    cancel = {:cancel_model, call, :no_proxy}
+    state = ModelCensus.handle(state, admission(self(), generation, cancel))
+    assert_receive {:loopex_session_admission_result, _, _, ^generation, ^cancel, _, {:ok, _}}
+    assert_receive {:model_tool_reconcile, token}, 100
+    _state = ModelCensus.handle(state, {:model_tool_reconcile, token})
+
+    assert_receive {:loopex_session_admission_result, _, ^dispatch, ^generation, ^tool_operation,
+                    _, {:ok, {:session_grant, ^generation, :tool_grant, _, ^dispatch, _}}}
+  end
+
   test "cleanup-only route rejects every work operation without messaging the owner" do
     generation = make_ref()
     call = make_ref()
@@ -1290,6 +1357,9 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
 
   defp admission(requester, generation, operation),
     do: {:loopex_session_admission, requester, make_ref(), generation, operation, deadline()}
+
+  defp admission_with_ref(requester, reference, generation, operation),
+    do: {:loopex_session_admission, requester, reference, generation, operation, deadline()}
 
   defp await_sealed(owner, cell, expiry) do
     if :atomics.get(cell, 1) != 3 do

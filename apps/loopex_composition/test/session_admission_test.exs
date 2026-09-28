@@ -45,6 +45,22 @@ defmodule LoopexComposition.SessionAdmissionTest do
     refute_receive {:DOWN, _, :process, ^owner, _}
   end
 
+  test "a tool request uses its dispatch reference as the correlated grant reference" do
+    {owner, monitor} = responder(:grant)
+    generation = make_ref()
+    dispatch = make_ref()
+    operation = {:tool_grant, self(), make_ref(), dispatch}
+    handle = SessionAdmission.handle(owner, generation, :atomics.new(2, []))
+    deadline = future()
+
+    assert {:ok, {:session_grant, ^generation, :tool_grant, requester, ^dispatch, ^deadline}} =
+             SessionAdmission.request(handle, operation, deadline)
+
+    assert requester == self()
+    assert_receive {:observed, ^owner, ^requester, ^dispatch, ^generation, ^operation, ^deadline}
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
+  end
+
   test "forged correlation is ignored until the actual matching response" do
     {owner, monitor} = responder(:forged_then_grant)
     generation = make_ref()

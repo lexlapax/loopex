@@ -42,7 +42,19 @@ defmodule LoopexComposition.SessionAdmission do
 
     with {:ok, owner, generation} <- route(handle, operation),
          true <- System.monotonic_time() < deadline do
-      reference = make_ref()
+      # The executor's dispatch reference is the request identity at this
+      # boundary. Its final-effect check can therefore compare the owner's
+      # correlated token with the reservation it is about to consume.
+      reference =
+        case operation do
+          {:tool_grant, requester, _instance, dispatch}
+          when requester == self() and is_reference(dispatch) ->
+            dispatch
+
+          _ ->
+            make_ref()
+        end
+
       monitor = Process.monitor(owner)
 
       try do

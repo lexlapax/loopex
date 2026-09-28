@@ -93,15 +93,17 @@ LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
 It refuses without the credential, without the pinned Node, or on a dirty tree, and raises its own open-file soft limit toward the hard limit, refusing below 4,096, because the maximum-population case holds both ends of 512 daemon connections in one VM.
 It first stages the candidate as a fresh source archive and builds it there
 (described below), then runs every test lane inside that extraction rather than
-in your checkout. Reference composition consumes the credential, so each of the nine
-real-provider cases runs from a named manifest (application, file and exact
-case name) in its own `mix test FILE:LINE` process and must execute exactly one
-test; the nine rows must each run once. The ninth is the operator takeover:
+in your checkout. The eleven real-provider cases run from a named manifest
+(application, file and exact case name), each in its own `mix test FILE:LINE`
+process and each executing exactly one test. The ninth is the operator takeover:
 `loopex daemon`, a CLI controller killed with `SIGKILL` and the Node observer
 taking over, each its own process, the observer's prompt answered by the real
-provider. Only those processes inherit the
-credential: every other lane runs under `env -u LOOPEX_PROVIDER_API_KEY`, which
-a self-check proves first by logging only `present` or `absent`. The
+provider. The tenth drives local Ollama through `loopex -p` without a
+credential; the eleventh drives the embedded API against Anthropic with only
+`ANTHROPIC_API_KEY`. Rows one through nine receive the durable
+`LOOPEX_PROVIDER_API_KEY`. Every other lane removes all supported provider
+credential names. A wrapper self-check reports only presence or absence, never
+the values. The
 independent Node client runs with `--only node_client` over
 `loopex_app_server`, `loopex_protocol`, `loopex_daemon` and `loopex_cli`, the
 last being the operator takeover: a killed CLI controller and a Node observer
@@ -115,14 +117,17 @@ manifest and the `git ls-files -z` inventory outside the extraction (set
 builds the command there with `mix deps.get` and the documented escript build,
 and proves the build changed nothing outside its declared outputs; it then
 requires the extraction's source identity to be the staged commit and its
-`VERSION` to be `0.2.0`, and prints both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
-`loopex_executor_local` and `loopex_daemon` runs the real-duration proofs the
+`VERSION` to be `0.3.0`, and prints both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
+`loopex_executor_local`, `loopex_daemon` and the in-process ReqLLM transport-drain witness runs the real-duration proofs the
 fast check excludes. On Linux the last lane runs the daemon's two
 `--only cross_uid` cases and requires exactly two to execute; it needs a second
 unprivileged user named in `LOOPEX_CROSS_UID_USER` that you may run a command
 as with `sudo -n`. Elsewhere that lane prints `cross_uid: not run (Darwin)` and
 the run ends `PASS (closure-incomplete: cross_uid not run)`; closure needs a
-Linux run ending in a plain `PASS`. Every lane prints its executed count and
+Linux run ending in a plain `PASS`. The separate `--only rollback` lane builds
+pristine `v0.2.0` and candidate source archives with a scripted provider and
+checks the documented N/N-1 interaction and skill behavior without a real
+credential. Every lane prints its executed count and
 elapsed time. The credential never goes in a command argument, log, fixture
 or retained evidence. Two of the real-provider tests are attended:
 they prompt on the controlling terminal for the operator's trust decisions

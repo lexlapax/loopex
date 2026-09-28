@@ -8,16 +8,40 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
   # another actor. State carries identities and monitor evidence, not requests,
   # model options, credentials or results. Slot two stays set until exact cleanup
   # evidence clears the reservation. Unknown operations fail closed.
-  defstruct [:generation, :cell, :pending, :retired, :last_reply]
+  defstruct [
+    :generation,
+    :cell,
+    :pending,
+    :retired,
+    :last_reply,
+    :executor,
+    :executor_instance,
+    :tools_open,
+    :tool_wait
+  ]
 
   def new(generation, cell) when is_reference(generation) and is_reference(cell),
     do: %__MODULE__{generation: generation, cell: cell}
+
+  def bind_executor(%__MODULE__{executor: nil} = state, executor, instance)
+      when is_pid(executor) and is_reference(instance),
+      do: %{state | executor: executor, executor_instance: instance}
+
+  def bind_executor(state, _executor, _instance), do: state
+
+  def activate_tools(%__MODULE__{executor: executor} = state, enabled)
+      when is_pid(executor) and is_boolean(enabled),
+      do: %{state | tools_open: enabled}
+
+  def activate_tools(state, _enabled), do: state
 
   # Concept: a stopped session cannot claim cleanup while model custody is
   # pending, even if the runtime subtree has already gone down.
   # Technical depth: clear_pending/1 follows the exact resource and registry
   # proofs and clears slot two; neither condition alone is sufficient.
-  def settled?(%__MODULE__{pending: nil, cell: cell}), do: :atomics.get(cell, 2) == 0
+  def settled?(%__MODULE__{pending: nil, tool_wait: nil, cell: cell}),
+    do: :atomics.get(cell, 2) == 0
+
   def settled?(%__MODULE__{}), do: false
 
   def handle(
@@ -33,6 +57,13 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
         state
 
       state.pending && state.pending.proof == reference ->
+        reply(state, envelope, closed())
+        state
+
+      state.tool_wait && state.tool_wait.envelope == envelope ->
+        state
+
+      state.tool_wait && match?({:tool_grant, _, _, _}, operation) ->
         reply(state, envelope, closed())
         state
 
@@ -188,6 +219,23 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
   end
 
   def handle(
+        %__MODULE__{tool_wait: %{token: token, envelope: envelope}} = state,
+        {:model_tool_reconcile, token}
+      ) do
+    cond do
+      not live_envelope?(envelope) or not work_allowed?(state, elem(envelope, 2)) ->
+        reply(state, envelope, closed())
+        %{state | tool_wait: nil}
+
+      model_empty?(state) ->
+        grant(%{state | tool_wait: nil}, envelope)
+
+      true ->
+        schedule_tool_reconcile(%{state | tool_wait: nil}, envelope)
+    end
+  end
+
+  def handle(
         %__MODULE__{pending: %{timer: {_timer, token}} = pending} = state,
         {:model_census_lost_callback, token}
       ) do
@@ -240,6 +288,18 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
     else
       refuse(state, envelope)
     end
+  end
+
+  defp transition(
+         %__MODULE__{executor: requester, executor_instance: instance, tools_open: true} =
+           state,
+         {requester, reference, {:tool_grant, requester, instance, reference}, _expiry} =
+           envelope
+       )
+       when is_pid(requester) and is_reference(instance) and is_reference(reference) do
+    if model_empty?(state),
+      do: grant(state, envelope),
+      else: schedule_tool_reconcile(state, envelope)
   end
 
   defp transition(
@@ -524,7 +584,20 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
   # cleanup completion remains admissible while the session is stopping or sealed.
   defp work_allowed?(state, {:begin_model, _, _}), do: :atomics.get(state.cell, 1) == 0
   defp work_allowed?(state, {:register_model, _, _, _}), do: :atomics.get(state.cell, 1) == 0
+
+  defp work_allowed?(state, {:tool_grant, _, _, _}),
+    do: state.tools_open == true and :atomics.get(state.cell, 1) == 0
+
   defp work_allowed?(_state, _operation), do: true
+
+  defp model_empty?(%__MODULE__{pending: nil, cell: cell}), do: :atomics.get(cell, 2) == 0
+  defp model_empty?(_state), do: false
+
+  defp schedule_tool_reconcile(state, envelope) do
+    token = make_ref()
+    Process.send_after(self(), {:model_tool_reconcile, token}, 10)
+    %{state | tool_wait: %{token: token, envelope: envelope}}
+  end
 
   defp cleanup_operation?({:stage_model, _, _, _, _, _}), do: true
   defp cleanup_operation?({:cancel_model, _, _}), do: true

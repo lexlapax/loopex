@@ -245,7 +245,8 @@ defmodule Loopex.Executor.Local do
     :loopex_cleanup_episode,
     :loopex_retention_episode,
     :loopex_admission,
-    :loopex_cancel_requests
+    :loopex_cancel_requests,
+    :loopex_session_fence
   ]
 
   # Concept: a process-group note says only what was proved about the group.
@@ -1345,6 +1346,13 @@ defmodule Loopex.Executor.Local do
     _, _ -> false
   end
 
+  defp session_effect_open?(nil), do: true
+
+  defp session_effect_open?({owner, cell, dispatch_cell, expiry}) do
+    Process.alive?(owner) and atomics_open?(cell) and atomics_open?(dispatch_cell) and
+      is_integer(expiry) and System.monotonic_time() < expiry
+  end
+
   defp session_open(%{session: nil}), do: :ok
 
   defp session_open(%{session: %{owner: owner, cell: cell}, dispatch_cell: dispatch_cell}) do
@@ -1357,9 +1365,11 @@ defmodule Loopex.Executor.Local do
   # final effect boundary. An unresponsive or sealed owner never grants work.
   # Technical depth: the absolute effect deadline is converted once to native
   # units; the inward dispatcher caps its wait at 1,000 ms. A grant must echo
-  # this exact executor instance, dispatch reference and generation. Recheck
-  # the cell after the owner reply, before the durable marker is admitted.
-  defp session_tool_grant(%{session: nil}, _action), do: :ok
+  # this exact executor instance, dispatch reference and generation. Retain its
+  # native expiry privately through ledger admission; the actual file or process
+  # start rechecks it and the session/dispatch cells. An expired grant after
+  # admission settles a cancellation receipt without starting an effect.
+  defp session_tool_grant(%{session: nil}, _action), do: {:ok, nil}
 
   defp session_tool_grant(%{session: session} = state, action) do
     dispatch = make_ref()
@@ -1378,7 +1388,7 @@ defmodule Loopex.Executor.Local do
            generation == session.generation and requester == self() and
              reference == dispatch and is_integer(expiry) and expiry <= deadline,
          :ok <- session_open(state) do
-      :ok
+      {:ok, expiry}
     else
       _ -> refused_before_effect(:session_admission_closed)
     end
@@ -2164,6 +2174,8 @@ defmodule Loopex.Executor.Local do
     Process.put(:loopex_process_probe, placement.process_probe)
     Process.put(:loopex_inflight_table, placement.inflight_table)
     Process.put(:loopex_effect_owner, placement.executor)
+
+    Process.put(:loopex_session_fence, nil)
     close_cleanup_episode()
     close_retention_episode()
     Process.delete(:loopex_admission)
@@ -2287,12 +2299,19 @@ defmodule Loopex.Executor.Local do
        ) do
     case decision do
       {:admitted, admission} ->
+        session_fence =
+          if placement.session,
+            do:
+              {placement.session.owner, placement.session.cell, placement.dispatch_cell,
+               admission.grant_expiry}
+
+        Process.put(:loopex_session_fence, session_fence)
         lease = {Process.monitor(lease_pid), lease_pid}
         Process.put(:loopex_admission, admission)
 
         try do
           effect =
-            if session_open(placement) == :ok do
+            if session_open(placement) == :ok and session_effect_open?(session_fence) do
               run_tool(
                 placement,
                 job,
@@ -2665,7 +2684,7 @@ defmodule Loopex.Executor.Local do
          {:ok, receipt_output_limit} <-
            reserve_receipt_output(state, job, tool, arguments, wall),
          :ok <- authorize_effect(state, job, action),
-         :ok <- session_tool_grant(state, action),
+         {:ok, grant_expiry} <- session_tool_grant(state, action),
          :ok <-
            Ledger.admit(
              state.ledger,
@@ -2673,8 +2692,14 @@ defmodule Loopex.Executor.Local do
              Ledger.open_entry(job, state.identity)
            ),
          :ok <- claim_operation_owner(state, job.job_id, reservation_ref, caller) do
-      {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall},
-       receipt_output_limit}
+      {:ok,
+       %{
+         wall: wall,
+         monotonic: monotonic,
+         action: action,
+         observed_at_ms: wall,
+         grant_expiry: grant_expiry
+       }, receipt_output_limit}
     else
       {:error, {:refused_before_effect, reason}} ->
         refusal_result(state, job, reason, {:refused_before_effect, reason})
@@ -3904,8 +3929,14 @@ defmodule Loopex.Executor.Local do
          limits,
          _options
        ) do
+    session_fence = Process.get(:loopex_session_fence)
+
     case bounded_guardian_with_remaining(
-           fn -> filesystem_effect(workspace, arguments, limits) end,
+           fn ->
+             if session_effect_open?(session_fence),
+               do: filesystem_effect(workspace, arguments, limits),
+               else: {:cancelled, "the ephemeral session closed before this tool began"}
+           end,
            fn -> fence_remaining(deadline) end,
            lease_pid,
            effect_owner()
@@ -4404,6 +4435,7 @@ defmodule Loopex.Executor.Local do
     table = inflight_table()
     grace = cleanup_grace_ms()
     probe = process_probe()
+    session_fence = Process.get(:loopex_session_fence)
 
     # Progress is delivered by the execute caller, not by the process owner. A
     # host callback is outside Local's cleanup authority and may block; forwarding
@@ -4421,6 +4453,7 @@ defmodule Loopex.Executor.Local do
         Process.put(:loopex_inflight_table, table)
         Process.put(:loopex_cleanup_grace_ms, grace)
         Process.put(:loopex_process_probe, probe)
+        Process.put(:loopex_session_fence, session_fence)
 
         case await_owned_process_start(caller, guard, tag, job.job_id) do
           {:run, owner} ->
@@ -4646,6 +4679,17 @@ defmodule Loopex.Executor.Local do
     )
   end
 
+  defp prelaunch_refusal_result(job, owner, output_limit, :session_admission_closed) do
+    forget_inflight(job.job_id)
+
+    finalize_effect_owner_result(
+      {{:cancelled, "[loopex: the ephemeral session closed before the process began.]",
+        :complete}, 0, :confirmed},
+      owner,
+      output_limit
+    )
+  end
+
   defp prelaunch_refusal_result(job, owner, output_limit, :workspace_lease_lost) do
     forget_inflight(job.job_id)
 
@@ -4724,10 +4768,20 @@ defmodule Loopex.Executor.Local do
 
     cause =
       cond do
-        not Process.alive?(lease_pid) -> :workspace_lease_lost
-        not effect_owner_alive?(owner) -> :effect_owner_lost
-        remaining <= 0 -> :run_deadline_reached
-        true -> nil
+        not Process.alive?(lease_pid) ->
+          :workspace_lease_lost
+
+        not effect_owner_alive?(owner) ->
+          :effect_owner_lost
+
+        not session_effect_open?(Process.get(:loopex_session_fence)) ->
+          :session_admission_closed
+
+        remaining <= 0 ->
+          :run_deadline_reached
+
+        true ->
+          nil
       end
 
     if cause do

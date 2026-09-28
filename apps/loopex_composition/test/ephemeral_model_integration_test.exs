@@ -68,6 +68,31 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert request =~ "POST /v1/chat/completions HTTP/1.1"
   end
 
+  test "one session executes an admitted read-only tool and continues the model turn" do
+    root = Path.join(System.tmp_dir!(), "loopex-tool-#{System.unique_integer([:positive])}")
+    File.mkdir!(root)
+    File.write!(Path.join(root, "needle.txt"), "find me")
+    on_exit(fn -> File.rm_rf!(root) end)
+    port = start_server([{:tool, "ls", %{"path" => "."}}, "tool complete"])
+
+    assert {:ok, %{outcome: :completed, text: "tool complete", tools: tools}} =
+             Ephemeral.run("list the workspace",
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :read_only,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert [%{tool_id: "loopex.ls", outcome: "completed"}] = tools
+    assert_receive {:model_request, first_request}, 15_000
+    assert first_request =~ "POST /v1/chat/completions HTTP/1.1"
+    assert_receive {:model_request, second_request}, 15_000
+    assert second_request =~ "needle.txt"
+  end
+
   defp start_server(answers, delay_ms \\ 0) do
     {:ok, listener} =
       :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
@@ -136,6 +161,33 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     else
       other -> other
     end
+  end
+
+  defp response({:tool, name, arguments}) do
+    JSON.encode!(%{
+      id: "chatcmpl-loopex-tool",
+      object: "chat.completion",
+      created: 1_800_000_000,
+      model: "llama3.2",
+      choices: [
+        %{
+          index: 0,
+          message: %{
+            role: "assistant",
+            content: nil,
+            tool_calls: [
+              %{
+                id: "call_loopex_1",
+                type: "function",
+                function: %{name: name, arguments: JSON.encode!(arguments)}
+              }
+            ]
+          },
+          finish_reason: "tool_calls"
+        }
+      ],
+      usage: %{prompt_tokens: 12, completion_tokens: 3, total_tokens: 15}
+    })
   end
 
   defp response(answer) do

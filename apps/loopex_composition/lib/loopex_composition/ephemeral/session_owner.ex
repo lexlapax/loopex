@@ -150,6 +150,28 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   def handle_info({:model_census_lost_callback, _} = message, state),
     do: {:noreply, handle_model_message(state, message)}
 
+  def handle_info({:model_tool_reconcile, _} = message, state),
+    do: {:noreply, handle_model_message(state, message)}
+
+  def handle_info(
+        {:model_settlement_deadline, reference},
+        %{phase: :ready, session: %{settlement: %{reference: reference}}} = state
+      ),
+      do: {:noreply, fail_model_settlement(state)}
+
+  def handle_info(
+        {:empty_invocation_released, candidate, reference},
+        %{
+          phase: :ready,
+          session:
+            %{settlement: %{stage: :release, candidate: candidate, release_ref: reference}} =
+              session
+        } = state
+      ) do
+    settlement = %{session.settlement | acked: true}
+    {:noreply, %{state | session: %{session | settlement: settlement}}}
+  end
+
   def handle_info(
         {creator, ref, :identify, identity, challenge},
         %{creator: creator, ref: ref, identity: identity, phase: :blocked} = state
@@ -701,8 +723,26 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   def handle_info(
         {:DOWN, monitor, :process, pid, _reason},
         %{phase: :failed_stop, abort: %{worker: %{pid: pid, monitor: monitor}}} = state
-      ),
-      do: {:noreply, put_in(state.abort.worker, nil)}
+      ) do
+    state = put_in(state.abort.worker, nil)
+    if state.stop.no_retry, do: {:noreply, retry_stop(state, nil)}, else: {:noreply, state}
+  end
+
+  def handle_info(
+        {:DOWN, monitor, :process, creator, _reason},
+        %{phase: :failed_stop, creator: creator, monitors: %{creator: monitor}} = state
+      ) do
+    state = put_in(state.stop.no_retry, true)
+
+    case state.abort.worker do
+      %{pid: worker} ->
+        Process.exit(worker, :kill)
+        {:noreply, state}
+
+      nil ->
+        {:noreply, retry_stop(state, nil)}
+    end
+  end
 
   def handle_info(
         {:DOWN, monitor, :process, pid, reason},
@@ -796,16 +836,172 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   defp handle_model_message(%{model_census: %ModelCensus{} = census} = state, message) do
     state = %{state | model_census: ModelCensus.handle(census, message)}
+    state = bind_model_call(state)
 
     if state.phase == :aborting and match?({:await_model, _}, state.abort.stage) and
          ModelCensus.settled?(state.model_census) do
       after_subtree(%{state | abort: %{state.abort | stage: :await_subtree}})
     else
-      state
+      advance_model_settlement(state)
     end
   end
 
   defp handle_model_message(state, _message), do: state
+
+  # Concept: one observed model call belongs to the prompt whose run is being
+  # followed, including when its begin request precedes the prompt acceptance.
+  # Technical depth: answer retains the original prompt/run identity. A changed
+  # call reference is a new invocation of that same serial run, never a new run.
+  defp bind_model_call(
+         %{phase: phase, model_census: %{pending: %{call: call}}, session: session} = state
+       )
+       when phase in [:ready, :stopping] do
+    if match?(%{call: ^call}, session.model_binding) do
+      state
+    else
+      active = session.active
+      run = session.run
+
+      command_id =
+        cond do
+          active && active.kind == :ask -> active.command_id
+          run -> run.command_id
+          true -> nil
+        end
+
+      if is_binary(command_id) do
+        run_id = if run && run.command_id == command_id, do: run.run_id, else: nil
+        binding = %{call: call, command_id: command_id, run_id: run_id}
+        put_in(state.session.model_binding, binding)
+      else
+        state
+      end
+    end
+  end
+
+  defp bind_model_call(state), do: state
+
+  defp begin_model_settlement(state, result, sequence) do
+    if ModelCensus.settled?(state.model_census) do
+      settle_live(state, result, nil)
+    else
+      run = state.session.run
+      binding = state.session.model_binding
+      pending = state.model_census.pending
+
+      if run && pending && binding && binding.call == pending.call &&
+           binding.command_id == run.command_id && binding.run_id == run.run_id do
+        reference = make_ref()
+        deadline = System.monotonic_time() + native(1_000)
+        Process.send_after(self(), {:model_settlement_deadline, reference}, 1_000)
+
+        settlement = %{
+          terminal: result,
+          sequence: sequence,
+          command_id: run.command_id,
+          run_id: run.run_id,
+          call: pending.call,
+          reference: reference,
+          deadline: deadline,
+          stage: :waiting,
+          candidate: nil,
+          release_ref: nil,
+          acked: false
+        }
+
+        state = put_in(state.session.settlement, settlement)
+        state = put_in(state.session.active.operation, :model_settlement)
+        advance_model_settlement(state)
+      else
+        state
+        |> put_in([:session, :settlement], %{terminal: result})
+        |> fail_model_settlement()
+      end
+    end
+  end
+
+  defp advance_model_settlement(
+         %{phase: :ready, session: %{settlement: %{stage: stage} = settlement}} = state
+       )
+       when stage in [:waiting, :status, :status_proved, :release] do
+    cond do
+      not fresh?(settlement.deadline) ->
+        fail_model_settlement(state)
+
+      ModelCensus.settled?(state.model_census) and stage != :status ->
+        state = put_in(state.session.settlement, nil)
+        settle_live(state, settlement.terminal, nil)
+
+      state.model_census.pending && state.model_census.pending.call != settlement.call ->
+        fail_model_settlement(state)
+
+      state.model_census.pending && state.model_census.pending.phase == :unproved ->
+        fail_model_settlement(state)
+
+      stage == :waiting and empty_retired_candidate?(state.model_census.pending) ->
+        state = put_in(state.session.settlement.stage, :status)
+        live_facade_operation(state, :session_status, :settlement_status)
+
+      stage == :status_proved and empty_retired_candidate?(state.model_census.pending) ->
+        pending = state.model_census.pending
+        release_ref = make_ref()
+
+        send(
+          pending.candidate,
+          {:release_empty_invocation, state.model_census.generation, pending.call,
+           pending.candidate, pending.proof, release_ref, settlement.deadline}
+        )
+
+        state
+        |> put_in([:session, :settlement, :stage], :release)
+        |> put_in([:session, :settlement, :candidate], pending.candidate)
+        |> put_in([:session, :settlement, :release_ref], release_ref)
+
+      true ->
+        state
+    end
+  end
+
+  defp advance_model_settlement(state), do: state
+
+  defp empty_retired_candidate?(%{
+         phase: :retired_wait_down,
+         callback_down: true,
+         candidate_down: false,
+         candidate: candidate,
+         revision: 0,
+         resources: resources,
+         registries: registries
+       })
+       when is_pid(candidate) and map_size(resources) == 0 and map_size(registries) == 0,
+       do: Process.alive?(candidate)
+
+  defp empty_retired_candidate?(_), do: false
+
+  defp accept_settlement_status(state, {:ok, status}) when is_map(status) do
+    settlement = state.session.settlement
+
+    if status[:status] == :active and status[:owner_epoch] == state.startup.owner_epoch and
+         is_integer(status[:event_sequence]) and
+         status[:event_sequence] >= settlement.sequence and
+         status[:active_run_id] != settlement.run_id and
+         is_list(status[:pending_work_ids]) and
+         not Enum.member?(status[:pending_work_ids], settlement.run_id) do
+      state
+      |> put_in([:session, :settlement, :stage], :status_proved)
+      |> put_in([:session, :active, :operation], :model_settlement)
+      |> advance_model_settlement()
+    else
+      fail_model_settlement(state)
+    end
+  end
+
+  defp accept_settlement_status(state, _result), do: fail_model_settlement(state)
+
+  defp fail_model_settlement(%{phase: :ready, session: %{settlement: %{terminal: _}}} = state),
+    do: begin_stop(state, nil)
+
+  defp fail_model_settlement(state), do: state
 
   defp start_subtree(state, request, configuration) do
     reference = make_ref()
@@ -935,6 +1131,13 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           start_facade_operation(next_state, operation)
 
         {:ready, ready_state} ->
+          census =
+            ModelCensus.activate_tools(
+              ready_state.model_census,
+              ready_state.startup.configuration.tools != :none
+            )
+
+          ready_state = %{ready_state | model_census: census}
           send(state.creator, {self(), startup.request, {:ok, :session_ready}})
 
           %{
@@ -1144,6 +1347,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     }
 
     cond do
+      state.session.settlement != nil ->
+        terminal_stop(state)
+
       active == nil ->
         stop_abort_or_cleanup(state)
 
@@ -1158,6 +1364,19 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       true ->
         state
     end
+  end
+
+  defp terminal_stop(%{phase: :stopping, session: %{settlement: %{terminal: terminal}}} = state) do
+    outcome = terminal_outcome(terminal)
+
+    stop = %{
+      state.stop
+      | run_proved: true,
+        effect_proved: outcome != :outcome_unknown,
+        ending: terminal
+    }
+
+    %{state | stop: stop} |> finish_stop_run()
   end
 
   defp stop_abort_or_cleanup(%{stop: %{possible: false}} = state), do: finish_stop_run(state)
@@ -1271,7 +1490,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
          state.abort.worker == nil do
       deadline = System.monotonic_time() + native(state.cleanup_grace_ms + 5_000)
       Process.send_after(self(), {:abort_deadline, state.startup.reference}, remaining(deadline))
-      stop = %{state.stop | waiters: [waiter], deadline: deadline}
+      stop = %{state.stop | waiters: List.wrap(waiter), deadline: deadline}
 
       abort = %{
         state.abort
@@ -1284,8 +1503,17 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
       %{state | phase: :aborting, stop: stop, abort: abort} |> continue_abort()
     else
-      send(elem(waiter, 0), {self(), elem(waiter, 1), state.stop.result})
-      state
+      if waiter do
+        send(elem(waiter, 0), {self(), elem(waiter, 1), state.stop.result})
+        state
+      else
+        Logger.error(
+          "ephemeral cleanup unproved root=#{inspect(state.startup.possible_root)} pending=#{inspect(pending)}"
+        )
+
+        send(self(), :retire_sealed)
+        %{state | phase: :sealed}
+      end
     end
   end
 
@@ -1302,7 +1530,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       history_truncated: false,
       cursor: 0,
       active: nil,
-      poll_marker: nil
+      poll_marker: nil,
+      model_binding: nil,
+      settlement: nil
     }
   end
 
@@ -1350,6 +1580,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     }
 
     state = put_in(state.session.active, active)
+    state = if kind == :ask, do: put_in(state.session.model_binding, nil), else: state
     state = live_facade_operation(state, {:command, command}, :command)
     schedule_public_tick(state)
   end
@@ -1463,6 +1694,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp accept_live_result(%{session: %{active: %{operation: :next_event}}} = state, result),
     do: accept_live_event(state, result)
 
+  defp accept_live_result(
+         %{session: %{active: %{operation: :settlement_status}}} = state,
+         result
+       ),
+       do: accept_settlement_status(state, result)
+
   defp accepted_live_command(state) do
     active = state.session.active
     session = state.session
@@ -1483,10 +1720,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         %{session | interaction: nil}
       end
 
-    last_result =
-      if state.phase == :stopping or active.kind == :abort or active.timed_out,
-        do: active.timed_out || session.last_result,
-        else: :none
+    last_result = active.timed_out || session.last_result
 
     session = %{session | last_result: last_result, active: %{active | admission: :following}}
 
@@ -1563,7 +1797,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
             %{state | stop: stop} |> finish_stop_run()
           else
-            settle_live(state, result, nil)
+            begin_model_settlement(state, result, sequence)
           end
       end
     else
@@ -1629,7 +1863,18 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
       if is_nil(run.run_id) and bounded_id?(id, 256) do
         run = %{run | run_id: id, observation: %{run.observation | run_id: id}}
-        {:ok, put_in(state.session.run, run), nil}
+        state = put_in(state.session.run, run)
+
+        state =
+          case state.session.model_binding do
+            %{command_id: command_id, run_id: nil} = binding when command_id == run.command_id ->
+              put_in(state.session.model_binding, %{binding | run_id: id})
+
+            _ ->
+              state
+          end
+
+        {:ok, state, nil}
       else
         :error
       end
@@ -1892,6 +2137,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     )
   end
 
+  defp live_failure(%{phase: :ready, session: %{settlement: %{}}} = state),
+    do: begin_stop(state, nil)
+
   defp live_failure(state) do
     case state.phase do
       :ready ->
@@ -1987,11 +2235,18 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp accept_phase_result(state, phase, {:ok, value}) when phase in @phase_order do
     case register_result(state.startup, phase, value) do
       {:ok, startup} ->
+        census =
+          if phase == :executor do
+            ModelCensus.bind_executor(state.model_census, value, startup.executor_instance)
+          else
+            state.model_census
+          end
+
         if phase != :runtime,
           do: send(startup.root, {:ack, self(), startup.reference, phase, value})
 
         next = next_phase(phase)
-        %{state | startup: startup} |> advance(next, %{})
+        %{state | startup: startup, model_census: census} |> advance(next, %{})
 
       :error ->
         fail_start(state, failure_cause(phase), :unknown)

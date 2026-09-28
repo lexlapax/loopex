@@ -21,10 +21,19 @@ courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
 
 ## [Unreleased]
 
+Add the experimental `0.3.0` minimal runnable profile: an in-VM ephemeral
+session with an in-memory store and in-process ReqLLM provider calls, a
+one-shot `loopex ask`/`-p` command, and three read-only search tools. The
+durable profile remains available through an explicit state root. Hosted
+provider calls in the ephemeral profile share the host VM's trust boundary;
+the new operator and developer guides explain its credential, cleanup and
+rollback limits. M6 also brings the milestone closure tooling into the
+repository.
+
 Revise the operator and developer documentation to describe current behaviour
 rather than milestone history, correcting statements the code contradicted, and
 add an operator getting-started runbook and a paired developer getting-started
-guide. The root README now states what Loopex provides at `0.2.0`.
+guide. The root README states what Loopex provides at the current source version.
 
 Rename the exact foreground protocol generation from
 `loopex.session.v1-experimental` to `loopex.experimental/1`, matching the
