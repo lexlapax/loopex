@@ -181,7 +181,7 @@ defmodule LoopexDaemon.ListenerTest do
   end
 
   test "a generation-one offer is refused once and then expires" do
-    fixture = start_fixture(initialize_deadline_ms: 250)
+    fixture = start_fixture()
     assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
     client = connect(fixture.path)
 
@@ -194,6 +194,18 @@ defmodule LoopexDaemon.ListenerTest do
     assert spent["code"] == "already_initialized"
     assert spent["request_id"] == "r2"
 
+    # Concept: observe both real protocol replies before making the uninitialized offer expire.
+    # Technical depth: backdate its exact live row and invoke the registry's ordinary timer path.
+    [{token, %{phase: :live, initialized: false}}] =
+      fixture.registry |> :sys.get_state() |> Map.fetch!(:rows) |> Map.to_list()
+
+    expired_at = System.monotonic_time(:millisecond) - 1
+
+    :sys.replace_state(fixture.registry, fn state ->
+      put_in(state, [:rows, token, :initialize_deadline], expired_at)
+    end)
+
+    send(fixture.registry, {:initialize_deadline, token})
     eventually(fn -> ConnectionRegistry.status(fixture.registry).occupied == 0 end)
     assert {:error, :closed} = :socket.recv(client, 1, 500)
     assert :ok = :socket.close(client)
