@@ -89,6 +89,65 @@ defmodule LoopexComposition.SessionContainmentTest do
     refute File.exists?(root)
   end
 
+  test "a normal model result waits for every recorded process and registry entry", %{
+    workspace: workspace
+  } do
+    {port, server} = held_server("retired answer")
+
+    assert {:ok, {:loopex_ephemeral_session, owner, cell} = session} =
+             Ephemeral.start_session(
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: workspace,
+               tools: :none,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    question = Task.async(fn -> Ephemeral.ask(session, "complete call") end)
+    assert_receive {:model_request, ^server, _request}, 15_000
+
+    pending =
+      await(owner, fn state ->
+        case state.model_census.pending do
+          %{resources: resources, registries: registries} = pending
+          when map_size(resources) == 5 and map_size(registries) == 2 ->
+            {:ok, pending}
+
+          _ ->
+            :wait
+        end
+      end)
+
+    monitors =
+      Enum.map(pending.resources, fn {role, pid} -> {role, pid, Process.monitor(pid)} end)
+
+    worker_identity = pending.registries.worker
+    supervisor_identity = pending.registries.supervisor
+    assert Registry.lookup(Req.Finch, worker_identity) != []
+    assert Registry.lookup(Req.Finch.SupervisorRegistry, supervisor_identity) != []
+
+    send(server, :release)
+
+    assert {:ok, {:ok, %{outcome: :completed, text: "retired answer"}}} =
+             Task.yield(question, 15_000)
+
+    for {role, pid, monitor} <- monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _reason},
+                     1_000,
+                     "recorded #{role} remained alive after a returned result"
+
+      refute Process.alive?(pid)
+    end
+
+    assert Registry.lookup(Req.Finch, worker_identity) == []
+    assert Registry.lookup(Req.Finch.SupervisorRegistry, supervisor_identity) == []
+    assert :atomics.get(cell, 2) == 0
+    assert :atomics.get(cell, 1) == 0
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
   test "a real local tool effect waits for this owner to retire its model slot", %{
     workspace: workspace
   } do
@@ -205,7 +264,7 @@ defmodule LoopexComposition.SessionContainmentTest do
     {job, grant}
   end
 
-  defp held_server do
+  defp held_server(answer \\ nil) do
     {:ok, listener} =
       :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
 
@@ -220,6 +279,34 @@ defmodule LoopexComposition.SessionContainmentTest do
 
           receive do
             :release -> :ok
+          end
+
+          if is_binary(answer) do
+            body =
+              JSON.encode!(%{
+                id: "chatcmpl-loopex-containment",
+                object: "chat.completion",
+                created: 1_800_000_000,
+                model: "llama3.2",
+                choices: [
+                  %{
+                    index: 0,
+                    message: %{role: "assistant", content: answer},
+                    finish_reason: "stop"
+                  }
+                ],
+                usage: %{prompt_tokens: 12, completion_tokens: 3, total_tokens: 15}
+              })
+
+            :ok =
+              :gen_tcp.send(socket, [
+                "HTTP/1.1 200 OK\r\n",
+                "content-type: application/json\r\n",
+                "content-length: ",
+                Integer.to_string(byte_size(body)),
+                "\r\nconnection: close\r\n\r\n",
+                body
+              ])
           end
 
           :gen_tcp.close(socket)
