@@ -114,6 +114,11 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
           begin_run(command)
           {:accepted, command.command_id}
 
+        "wrong-accept" ->
+          begin_run(command)
+          finish_run(command.command_id, 5_000)
+          {:accepted, "another-command"}
+
         _ ->
           begin_run(command)
           finish_run(command.command_id, 5_000)
@@ -301,6 +306,25 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
     refute_receive {:prompt_dispatched, _, _, "held-reply"}
     refute_receive {:prompt_dispatched, _, _, "other"}
     assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "a mismatched accepted id cannot complete or regenerate a prompt", %{tmp: tmp} do
+    session = start_session(tmp, command_nonce: @nonce)
+
+    assert {:error,
+            {:cleanup_unproved,
+             %{
+               pending: pending,
+               ending: {:error, {:session_unavailable, %{run_id: nil}}},
+               root: root
+             }}} =
+             Ephemeral.ask(session, "wrong-accept")
+
+    assert_receive {:prompt_dispatched, _, @first_prompt_id, "wrong-accept"}
+    assert :run_ending in pending
+    assert File.dir?(root)
+    refute_receive {:prompt_dispatched, _, _, "wrong-accept"}
+    assert {:error, :session_unavailable} = Ephemeral.last_result(session)
   end
 
   test "pre-admission refusal stays local, while an invalid terminal fails the session", %{
