@@ -51,7 +51,14 @@ defmodule LoopexComposition.Ephemeral.ObservationBoundsTest do
     def command(_attachment, %{type: :prompt} = command) do
       index = Process.get(:run_index) + 1
       Process.put(:run_index, index)
-      run_id = "bounds-run-#{index}"
+
+      run_id =
+        case command.content do
+          "run-id:256" -> String.duplicate("r", 256)
+          "run-id:257" -> String.duplicate("r", 257)
+          _ -> "bounds-run-#{index}"
+        end
+
       Process.put(:current_run_id, run_id)
 
       enqueue(%{
@@ -98,6 +105,55 @@ defmodule LoopexComposition.Ephemeral.ObservationBoundsTest do
 
         "grace-negative" ->
           finish(run_id, bound(@observed_max, @uint64_max, -1))
+
+        "answer:" <> count_text ->
+          {count, ""} = Integer.parse(count_text)
+
+          enqueue(%{
+            :kind => "assistant.message_appended",
+            "run_id" => run_id,
+            "content" => String.duplicate("a", count)
+          })
+
+          finish(run_id, %{"outcome" => "completed", "cleanup_grace_ms" => 5_000})
+
+        "definition:" <> count_text ->
+          {count, ""} = Integer.parse(count_text)
+
+          enqueue(%{
+            :kind => "tool.finished",
+            "run_id" => run_id,
+            "tool_id" => String.duplicate("d", count),
+            "outcome" => "completed"
+          })
+
+          finish(run_id, %{"outcome" => "completed", "cleanup_grace_ms" => 5_000})
+
+        "question-tool:" <> count_text ->
+          {count, ""} = Integer.parse(count_text)
+
+          enqueue(%{
+            :kind => "interaction.requested",
+            "run_id" => run_id,
+            "interaction_id" => "bounds-interaction",
+            "turn" => 1,
+            "tool_call_id" => String.duplicate("c", count),
+            "prompt" => "Continue?",
+            "choices" => [%{"id" => "yes", "label" => "Yes"}],
+            "expires_at" => 1_800_000_000
+          })
+
+        "reconciliation:" <> count_text ->
+          {count, ""} = Integer.parse(count_text)
+
+          finish(run_id, %{
+            "outcome" => "outcome_unknown",
+            "reconciliation_ref" => String.duplicate("q", count),
+            "cleanup_grace_ms" => 5_000
+          })
+
+        "run-id:" <> _ ->
+          finish(run_id, %{"outcome" => "completed", "cleanup_grace_ms" => 5_000})
       end
 
       {:accepted, command.command_id}
@@ -162,6 +218,76 @@ defmodule LoopexComposition.Ephemeral.ObservationBoundsTest do
 
     assert {^ascii_limit, true} =
              SessionOwner.text_projection_probe(String.duplicate("a", 65_537))
+  end
+
+  test "assistant answer and history share the exact text byte ceiling", %{tmp: tmp} do
+    session = start_private_session(tmp)
+
+    assert {:ok, %{text: at_limit, text_truncated: false}} =
+             Ephemeral.ask(session, "answer:65536")
+
+    assert byte_size(at_limit) == 65_536
+
+    assert {:ok, %{text: over_limit, text_truncated: true}} =
+             Ephemeral.ask(session, "answer:65537")
+
+    assert over_limit == at_limit
+    assert {:ok, %{entries: entries}} = Ephemeral.history(session)
+
+    assert [%{text: ^at_limit, text_truncated: false}, %{text: ^over_limit, text_truncated: true}] =
+             Enum.filter(entries, &(&1.role == :assistant))
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "run and resolved definition identifiers enforce their own byte ceilings", %{tmp: tmp} do
+    session = start_private_session(tmp)
+
+    assert {:ok, %{run_id: run_id}} = Ephemeral.ask(session, "run-id:256")
+    assert byte_size(run_id) == 256
+
+    assert {:ok, %{tools: [%{tool_id: definition_id}]}} =
+             Ephemeral.ask(session, "definition:128")
+
+    assert byte_size(definition_id) == 128
+    assert :ok = Ephemeral.stop_session(session)
+
+    for prompt <- ["run-id:257", "definition:129"] do
+      cwd = Path.join(tmp, prompt)
+      File.mkdir!(cwd)
+      assert_run_ending_unproved(start_private_session(cwd), prompt)
+    end
+  end
+
+  test "pending tool-call identifiers admit 65,536 bytes and refuse 65,537", %{tmp: tmp} do
+    session = start_private_session(tmp)
+
+    assert {:error, {:interaction_pending, %{"tool_call_id" => call_id}}} =
+             Ephemeral.ask(session, "question-tool:65536")
+
+    assert byte_size(call_id) == 65_536
+    assert :ok = Ephemeral.stop_session(session)
+
+    cwd = Path.join(tmp, "question-over")
+    File.mkdir!(cwd)
+    assert_run_ending_unproved(start_private_session(cwd), "question-tool:65537")
+  end
+
+  test "the reconciliation detail identifier admits 1,024 bytes and refuses 1,025", %{
+    tmp: tmp
+  } do
+    session = start_private_session(tmp)
+
+    assert {:error, {:run, :outcome_unknown, %{details: %{"reconciliation_ref" => ref}}}} =
+             Ephemeral.ask(session, "reconciliation:1024")
+
+    assert byte_size(ref) == 1_024
+    assert {:error, {:cleanup_unproved, %{pending: pending}}} = Ephemeral.stop_session(session)
+    assert :effect_cleanup in pending
+
+    cwd = Path.join(tmp, "reconciliation-over")
+    File.mkdir!(cwd)
+    assert_run_ending_unproved(start_private_session(cwd), "reconciliation:1025")
   end
 
   test "history and tool projections cut at 256 entries and retain the newest entries", %{
@@ -236,6 +362,17 @@ defmodule LoopexComposition.Ephemeral.ObservationBoundsTest do
       assert File.dir?(root)
       assert {:error, :session_unavailable} = Ephemeral.last_result(session)
     end
+  end
+
+  defp assert_run_ending_unproved(session, prompt) do
+    assert {:error,
+            {:cleanup_unproved,
+             %{ending: :none, pending: [:run_ending], root: root, root_ownership: :owned}}} =
+             Ephemeral.ask(session, prompt)
+
+    assert is_binary(root)
+    assert File.dir?(root)
+    assert {:error, :session_unavailable} = Ephemeral.last_result(session)
   end
 
   defp start_private_session(tmp) do
