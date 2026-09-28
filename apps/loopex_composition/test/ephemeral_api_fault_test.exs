@@ -91,7 +91,7 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
           finish_run(command.command_id, 5_000)
           {:accepted, command.command_id}
 
-        "continue" ->
+        mode when mode in ["continue", "background-disconnect"] ->
           begin_run(command)
           {:accepted, command.command_id}
 
@@ -191,6 +191,10 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
         [] ->
           cond do
             Process.get(:disconnect, false) ->
+              {:disconnected, Process.get(:sequence)}
+
+            Process.get(:mode) == "background-disconnect" and
+                :persistent_term.get({__MODULE__, :fail_background}, false) ->
               {:disconnected, Process.get(:sequence)}
 
             Process.get(:mode) == "continue" and
@@ -344,6 +348,40 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
     refute_receive {:prompt_dispatched, _, _, "not yet"}
     assert {:ok, %{outcome: :completed}} = Ephemeral.ask(session, "next")
     assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "a post-timeout background disconnect retains its root and exposes only lifecycle failure",
+       %{
+         tmp: tmp
+       } do
+    session = start_session(tmp)
+    {:loopex_ephemeral_session, owner, cell} = session
+    root = :sys.get_state(owner).startup.owned_root.path
+    owner_monitor = Process.monitor(owner)
+
+    assert {:error, {:timeout, %{run_id: run_id} = partial}} =
+             Ephemeral.ask(session, "background-disconnect", timeout: 30)
+
+    assert_receive {:prompt_dispatched, _actor, command_id, "background-disconnect"}
+    assert run_id == "run-" <> command_id
+    assert {:error, {:timeout, ^partial}} = Ephemeral.last_result(session)
+    assert :sys.get_state(owner).session.active.borrower == nil
+    assert File.dir?(root)
+
+    on_exit(fn -> :persistent_term.erase({Facade, :fail_background}) end)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        :persistent_term.put({Facade, :fail_background}, true)
+        assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 7_000
+      end)
+
+    assert log =~ "ephemeral cleanup unproved root=#{inspect(root)} pending=[:run_ending]"
+    assert :atomics.get(cell, 1) == 3
+    assert File.dir?(root)
+    assert {:error, :session_unavailable} = Ephemeral.last_result(session)
+    assert {:error, :session_unavailable} = Ephemeral.ask(session, "later")
+    assert {:error, :session_unavailable} = Ephemeral.stop_session(session)
   end
 
   test "a timed-out granted call keeps its one command identity through a late reply", %{tmp: tmp} do
