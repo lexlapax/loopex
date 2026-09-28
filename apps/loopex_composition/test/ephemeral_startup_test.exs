@@ -258,7 +258,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     assert_receive :created
     assert_receive :attached
     assert_receive {:command, admit}
-    assert admit.command_id =~ ~r/^admit-resources-[0-9a-f]{32}$/
+    assert admit.command_id == "admit-resources"
     assert admit.manifest_digest == digest
 
     assert admit.decision == %{
@@ -275,12 +275,11 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     assert_receive {:command, first}
     assert_receive {:command, second}
 
-    assert first.command_id =~ ~r/^activate-skill-1-[0-9a-f]{32}$/
-    assert {first.name, first.supporting_labels} == {"alpha", []}
+    assert {first.command_id, first.name, first.supporting_labels} ==
+             {"activate-skill-1", "alpha", []}
 
-    assert second.command_id =~ ~r/^activate-skill-2-[0-9a-f]{32}$/
-    assert {second.name, second.supporting_labels} == {"zeta", []}
-    refute first.command_id == second.command_id
+    assert {second.command_id, second.name, second.supporting_labels} ==
+             {"activate-skill-2", "zeta", []}
 
     assert_receive :status_read
     Process.exit(supervisor, :shutdown)
@@ -409,15 +408,15 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     Process.exit(supervisor, :shutdown)
   end
 
-  test "a returned store that dies at registration never permits commit", %{tmp: tmp} do
+  test "a store lost before its granted handle returns never permits commit", %{tmp: tmp} do
     test = self()
 
     configuration =
       configuration(tmp, %{
         store_new: fn module, pid ->
-          send(test, {:store_died, pid})
           Process.exit(pid, :kill)
-          Loopex.Store.new(module, pid)
+          send(test, {:store_died, self(), pid})
+          receive do: (:release_store_handle -> Loopex.Store.new(module, pid))
         end,
         runtime_holder: %{
           runtime_start: fn _options ->
@@ -427,19 +426,48 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
         }
       })
 
-    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
-    {:ok, activation} = OwnerActivation.start(supervisor)
-    owner = OwnerActivation.owner(activation)
-    {:ok, cell} = OwnerActivation.begin(activation)
+    creator =
+      spawn(fn ->
+        {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+        {:ok, activation} = OwnerActivation.start(supervisor)
+        owner = OwnerActivation.owner(activation)
+        {:ok, cell} = OwnerActivation.begin(activation)
+        send(test, {:owner, owner, cell})
+        send(test, {:result, SessionOwner.start_session(owner, configuration, 6_000)})
+        receive do: (:finish -> :ok)
+      end)
 
-    assert {:error, {:composition, :dependency_start_failed}} =
-             SessionOwner.start_session(owner, configuration, 6_000)
+    assert_receive {:owner, owner, cell}
+    assert_receive {:store_died, root_process, _store_pid}
+    assert eventually(fn -> :sys.get_state(owner).phase == :aborting end)
+    send(root_process, :release_store_handle)
 
-    assert_receive {:store_died, _store_pid}
+    assert_receive {:result,
+                    {:error,
+                     {:cleanup_unproved,
+                      %{
+                        root: root,
+                        pending: [:session_subtree],
+                        cause: {:composition, :dependency_start_failed}
+                      }}}},
+                   6_000
+
     refute_receive :unexpected_runtime_start
-    assert File.ls!(tmp) == []
-    assert :atomics.get(cell, 1) == 2
-    Process.exit(supervisor, :shutdown)
+    assert File.dir?(root)
+    assert :atomics.get(cell, 1) == 3
+    send(creator, :finish)
+  end
+
+  defp eventually(fun, attempts \\ 100)
+  defp eventually(_fun, 0), do: false
+
+  defp eventually(fun, attempts) do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
+    end
   end
 
   test "a blocked mkdir cannot become an owned root after the startup deadline", %{tmp: tmp} do

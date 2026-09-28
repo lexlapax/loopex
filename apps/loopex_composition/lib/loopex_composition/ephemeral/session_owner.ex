@@ -18,6 +18,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   """
 
   use GenServer
+  require Logger
 
   alias Loopex.Runtime
   alias Loopex.Store
@@ -29,6 +30,19 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   @startup_ms 5_000
   @startup_wait_ms 16_000
+  @uint64_max 18_446_744_073_709_551_615
+  @observed_max 55_340_232_221_128_654_844
+  @text_max 65_536
+  @tool_max 256
+  @history_max 256
+  @tool_outcomes ~w(completed failed denied cancelled cancelled_workspace_lease_lost outcome_unknown)
+  @run_outcomes %{
+    "completed" => :completed,
+    "failed" => :failed,
+    "bound_reached" => :bound_reached,
+    "outcome_unknown" => :outcome_unknown,
+    "cancelled" => :cancelled
+  }
   @phase_order [
     :candidate_prepare,
     :root_claim,
@@ -113,7 +127,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
          token: nil,
          startup_deadline: nil,
          startup: nil,
-         abort: nil
+         abort: nil,
+         session: nil,
+         stop: nil
        }}
     else
       {:stop, :expired_owner_start}
@@ -450,13 +466,243 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     end
   end
 
+  def handle_info({borrower, request, :public, :last_result}, %{phase: :ready} = state)
+      when is_pid(borrower) and is_reference(request) do
+    send(borrower, {self(), request, state.session.last_result})
+    {:noreply, state}
+  end
+
+  def handle_info({borrower, request, :public, :history}, %{phase: :ready} = state)
+      when is_pid(borrower) and is_reference(request) do
+    history = %{entries: state.session.history, truncated: state.session.history_truncated}
+    send(borrower, {self(), request, {:ok, history}})
+    {:noreply, state}
+  end
+
+  def handle_info({borrower, request, :public, :stop}, %{phase: :ready} = state)
+      when is_pid(borrower) and is_reference(request),
+      do: {:noreply, begin_stop(state, {borrower, request})}
+
+  def handle_info({borrower, request, :public, :stop}, %{phase: phase, stop: stop} = state)
+      when phase in [:stopping, :aborting] and is_pid(borrower) and is_reference(request) and
+             not is_nil(stop),
+      do: {:noreply, put_in(state.stop.waiters, [{borrower, request} | stop.waiters])}
+
+  def handle_info({borrower, request, :public, :stop}, %{phase: :failed_stop} = state)
+      when is_pid(borrower) and is_reference(request),
+      do: {:noreply, retry_stop(state, {borrower, request})}
+
+  def handle_info({borrower, request, :public, :stop}, %{phase: :sealed, stop: stop} = state)
+      when is_pid(borrower) and is_reference(request) and not is_nil(stop) do
+    result = if :atomics.get(state.cell, 1) == 2, do: :ok, else: stop.result
+    send(borrower, {self(), request, result})
+    {:noreply, state}
+  end
+
+  def handle_info({borrower, request, :public, {:ask, prompt, timeout}}, %{phase: :ready} = state)
+      when is_pid(borrower) and is_reference(request) and is_binary(prompt) do
+    if state.session.active || state.session.run_open do
+      send(borrower, {self(), request, {:error, :run_open}})
+      {:noreply, state}
+    else
+      {command_id, session} = next_command_id(state.session, :prompt)
+      command = %{type: :prompt, command_id: command_id, content: prompt}
+      wait = timeout || state.startup.configuration.timeout
+      next = %{state | session: session}
+      {:noreply, begin_live_command(next, borrower, request, :ask, command, wait)}
+    end
+  end
+
+  def handle_info(
+        {borrower, request, :public, {:answer, interaction_id, choice_id}},
+        %{phase: :ready} = state
+      )
+      when is_pid(borrower) and is_reference(request) do
+    interaction = state.session.interaction
+
+    if state.session.active || not answer_matches?(interaction, interaction_id, choice_id) do
+      send(borrower, {self(), request, {:error, :invalid_interaction_answer}})
+      {:noreply, state}
+    else
+      {command_id, session} = next_command_id(state.session, :answer)
+
+      command = %{
+        type: :interaction_answer,
+        command_id: command_id,
+        interaction_id: interaction_id,
+        choice_id: choice_id
+      }
+
+      next = %{state | session: session}
+
+      {:noreply,
+       begin_live_command(
+         next,
+         borrower,
+         request,
+         :answer,
+         command,
+         state.startup.configuration.timeout
+       )}
+    end
+  end
+
+  def handle_info({borrower, request, :public, _operation}, state)
+      when is_pid(borrower) and is_reference(request) do
+    send(borrower, {self(), request, {:error, :session_unavailable}})
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {client, reference, :ready},
+        %{
+          phase: phase,
+          session: %{
+            active:
+              %{facade: %{pid: client, reference: reference, stage: :await_ready} = facade} =
+                active
+          }
+        } = state
+      )
+      when phase in [:ready, :stopping] do
+    cond do
+      phase == :stopping and active.kind != :abort and
+          (active.admission == :pregrant or active.operation == :next_event) ->
+        send(client, {self(), reference, :cancel})
+        Process.send_after(self(), {:live_cancel_deadline, reference}, 1_000)
+        {:noreply, put_in(state.session.active.facade.stage, :cancelling)}
+
+      fresh?(facade.handshake_deadline) ->
+        deadline =
+          System.monotonic_time() +
+            native(if(active.operation == :next_event, do: 1_000, else: 5_000))
+
+        deadline = if state.stop, do: min(deadline, state.stop.deadline), else: deadline
+        send(client, {self(), reference, :dispatch, deadline})
+        Process.send_after(self(), {:live_operation_deadline, reference}, remaining(deadline))
+        facade = %{facade | stage: :dispatched, operation_deadline: deadline}
+
+        active = %{
+          active
+          | facade: facade,
+            admission: if(active.operation == :command, do: :granted, else: active.admission)
+        }
+
+        {:noreply, put_in(state.session.active, active)}
+
+      true ->
+        send(client, {self(), reference, :cancel})
+        Process.send_after(self(), {:live_cancel_deadline, reference}, 1_000)
+        {:noreply, put_in(state.session.active.facade.stage, :cancelling)}
+    end
+  end
+
+  def handle_info(
+        {client, reference, :cancelled},
+        %{
+          phase: phase,
+          session: %{active: %{facade: %{pid: client, reference: reference, stage: :cancelling}}}
+        } = state
+      )
+      when phase in [:ready, :stopping] do
+    {:noreply, cancel_live_command(state)}
+  end
+
+  def handle_info(
+        {client, reference, result},
+        %{
+          phase: phase,
+          session: %{active: %{facade: %{pid: client, reference: reference, stage: :dispatched}}}
+        } = state
+      )
+      when phase in [:ready, :stopping] do
+    {:noreply, accept_live_result(state, result)}
+  end
+
+  def handle_info(
+        {:live_handshake_deadline, reference},
+        %{
+          phase: phase,
+          session: %{active: %{facade: %{reference: reference, stage: :await_ready} = facade}}
+        } = state
+      )
+      when phase in [:ready, :stopping] do
+    if fresh?(facade.handshake_deadline) do
+      {:noreply, state}
+    else
+      send(facade.pid, {self(), reference, :cancel})
+      Process.send_after(self(), {:live_cancel_deadline, reference}, 1_000)
+      {:noreply, put_in(state.session.active.facade.stage, :cancelling)}
+    end
+  end
+
+  def handle_info(
+        {:live_cancel_deadline, reference},
+        %{
+          phase: phase,
+          session: %{active: %{facade: %{reference: reference, stage: :cancelling}}}
+        } = state
+      )
+      when phase in [:ready, :stopping],
+      do: {:noreply, live_failure(state)}
+
+  def handle_info(
+        {:live_operation_deadline, reference},
+        %{
+          phase: phase,
+          session: %{active: %{facade: %{reference: reference, stage: :dispatched} = facade}}
+        } = state
+      )
+      when phase in [:ready, :stopping] do
+    if fresh?(facade.operation_deadline),
+      do: {:noreply, state},
+      else: {:noreply, live_failure(state)}
+  end
+
+  def handle_info({:live_poll, marker}, %{phase: phase, session: %{poll_marker: marker}} = state)
+      when phase in [:ready, :stopping] do
+    if state.session.active && state.session.active.operation == :next_event,
+      do: {:noreply, state},
+      else: {:noreply, begin_live_poll(state)}
+  end
+
+  def handle_info(
+        {:public_tick, request},
+        %{phase: :ready, session: %{active: %{request: request} = active}} = state
+      ) do
+    if is_pid(active.borrower) and System.monotonic_time() >= active.wait_deadline,
+      do: {:noreply, timeout_live_request(state)},
+      else: {:noreply, schedule_public_tick(state)}
+  end
+
+  def handle_info(
+        {:stop_grace_deadline, reference},
+        %{phase: :stopping, stop: %{reference: reference}} = state
+      ),
+      do: {:noreply, finish_stop_run(state)}
+
+  def handle_info(
+        {:DOWN, monitor, :process, pid, _reason},
+        %{phase: :failed_stop, abort: %{worker: %{pid: pid, monitor: monitor}}} = state
+      ),
+      do: {:noreply, put_in(state.abort.worker, nil)}
+
+  def handle_info(
+        {:DOWN, monitor, :process, pid, _reason},
+        %{phase: :failed_stop, startup: %{process_monitors: monitors}} = state
+      ) do
+    if Map.get(monitors, pid) == monitor,
+      do: {:noreply, put_in(state.abort.down, MapSet.put(state.abort.down, pid))},
+      else: {:noreply, state}
+  end
+
   def handle_info(
         {:DOWN, monitor, :process, pid, _reason},
         %{phase: :ready, startup: startup} = state
       ) do
     cond do
       {monitor, pid} == {state.monitors.creator, state.creator} ->
-        {:noreply, fail_start(state, :session_unavailable, :known)}
+        {:noreply, begin_stop(state, nil)}
 
       {monitor, pid} in [
         {state.monitors.proxy, state.proxy},
@@ -465,9 +711,27 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:stop, :normal, state}
 
       Map.get(startup.process_monitors, pid) == monitor ->
-        failed = fail_start(state, :dependency_start_failed, :unknown)
-        abort = %{failed.abort | down: MapSet.put(failed.abort.down, pid)}
-        {:noreply, continue_abort(%{failed | abort: abort})}
+        {:noreply, begin_stop(state, nil) |> mark_stopped_child_down(pid)}
+
+      (state.session.active && state.session.active.borrower_monitor == monitor) and
+          state.session.active.borrower == pid ->
+        {:noreply, borrower_down(state)}
+
+      true ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:DOWN, monitor, :process, pid, _reason},
+        %{phase: :stopping, startup: startup} = state
+      ) do
+    cond do
+      {monitor, pid} == {state.monitors.creator, state.creator} ->
+        {:noreply, put_in(state.stop.no_retry, true)}
+
+      Map.get(startup.process_monitors, pid) == monitor ->
+        {:noreply, mark_stopped_child_down(state, pid)}
 
       true ->
         {:noreply, state}
@@ -634,7 +898,13 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
         {:ready, ready_state} ->
           send(state.creator, {self(), startup.request, {:ok, :session_ready}})
-          %{ready_state | phase: :ready, startup: %{ready_state.startup | replied: true}}
+
+          %{
+            ready_state
+            | phase: :ready,
+              startup: %{ready_state.startup | replied: true},
+              session: new_session(ready_state.startup)
+          }
 
         {:error, cause} ->
           fail_start(state, cause, :known)
@@ -721,7 +991,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
     %{
       type: :admit_resources,
-      command_id: fresh_command_id("admit-resources"),
+      command_id: "admit-resources",
       manifest_digest: digest,
       decision: %{
         manifest_digest: digest,
@@ -740,7 +1010,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
     %{
       type: :activate_skill,
-      command_id: fresh_command_id("activate-skill-#{index + 1}"),
+      command_id: "activate-skill-#{index + 1}",
       manifest_digest: state.startup.manifest_digest,
       source_id: pack["source_id"],
       name: pack["name"],
@@ -773,15 +1043,832 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   defp catalog_tuple(_entry), do: :invalid
 
-  defp fresh_command_id(prefix),
-    do: prefix <> "-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-
   defp facade_failure(:create), do: :session_create_failed
   defp facade_failure(:attach), do: :attach_failed
   defp facade_failure(:session_status), do: :attach_failed
   defp facade_failure(:resource_catalog), do: :resource_admission_failed
   defp facade_failure({:command, %{type: :admit_resources}}), do: :resource_admission_failed
   defp facade_failure({:command, %{type: :activate_skill}}), do: :skill_activation_failed
+
+  # Concept: closing admission is immediate; run-ending and teardown remain
+  # separate proof obligations. The facade actor stays serial during abort.
+  # Technical depth: an in-flight borrower is moved into stop state before its
+  # operation can produce a second public reply.
+  defp begin_stop(state, waiter) do
+    :atomics.put(state.cell, 1, 1)
+    now = System.monotonic_time()
+    grace_deadline = now + native(state.cleanup_grace_ms)
+    deadline = grace_deadline + native(5_000)
+    reference = make_ref()
+    Process.send_after(self(), {:stop_grace_deadline, reference}, remaining(grace_deadline))
+    active = state.session.active
+
+    possible =
+      state.session.run_open or
+        (not is_nil(active) and active.admission in [:granted, :following])
+
+    prior_interaction =
+      if state.session.interaction && active == nil,
+        do: {:error, {:interaction_pending, state.session.interaction}},
+        else: :none
+
+    waiters = if waiter, do: [waiter], else: []
+
+    stop = %{
+      reference: reference,
+      deadline: deadline,
+      grace_deadline: grace_deadline,
+      waiters: waiters,
+      waiting: active,
+      no_retry: waiter == nil,
+      possible: possible,
+      run_proved: not possible,
+      effect_proved: not possible and not state.session.effect_unproved,
+      ending: prior_interaction,
+      down: MapSet.new(),
+      malformed: false,
+      abort_sent: false
+    }
+
+    active =
+      if active do
+        if is_reference(active.borrower_monitor),
+          do: Process.demonitor(active.borrower_monitor, [:flush])
+
+        %{active | borrower: nil, borrower_monitor: nil}
+      end
+
+    state = %{
+      state
+      | phase: :stopping,
+        stop: stop,
+        session: %{state.session | active: active, poll_marker: nil}
+    }
+
+    cond do
+      active == nil ->
+        stop_abort_or_cleanup(state)
+
+      active.operation == :poll_scheduled ->
+        state |> put_in([:session, :active], nil) |> stop_abort_or_cleanup()
+
+      active.facade.stage == :await_ready ->
+        send(active.facade.pid, {self(), active.facade.reference, :cancel})
+        Process.send_after(self(), {:live_cancel_deadline, active.facade.reference}, 1_000)
+        put_in(state.session.active.facade.stage, :cancelling)
+
+      true ->
+        state
+    end
+  end
+
+  defp stop_abort_or_cleanup(%{stop: %{possible: false}} = state), do: finish_stop_run(state)
+
+  defp stop_abort_or_cleanup(%{stop: %{abort_sent: true}} = state), do: begin_live_poll(state)
+
+  defp stop_abort_or_cleanup(%{session: %{run_open: false}} = state),
+    do: finish_stop_run(state)
+
+  defp stop_abort_or_cleanup(state) do
+    {id, session} = next_command_id(state.session, :abort)
+
+    active = %{
+      borrower: nil,
+      borrower_monitor: nil,
+      request: nil,
+      kind: :abort,
+      command_id: id,
+      started_at: System.monotonic_time(),
+      wait_deadline: state.stop.grace_deadline,
+      admission: :pregrant,
+      operation: :command,
+      facade: nil,
+      timed_out: nil,
+      cancel_reason: nil
+    }
+
+    state = %{
+      state
+      | session: %{session | active: active},
+        stop: %{state.stop | abort_sent: true}
+    }
+
+    live_facade_operation(state, {:command, %{type: :abort, command_id: id}}, :command)
+  end
+
+  defp finish_stop_run(%{phase: :stopping} = state) do
+    # A failed or missing terminal never promotes a run-ending proof. The
+    # teardown still proceeds to prove independent process and root facts.
+    ending = stop_ending(state)
+    state = state |> put_in([:session, :poll_marker], nil) |> put_in([:stop, :ending], ending)
+    failed = fail_start(state, :session_unavailable, :known)
+    down = MapSet.union(failed.abort.down, state.stop.down)
+
+    %{failed | startup: %{failed.startup | cause: nil}, abort: %{failed.abort | down: down}}
+    |> continue_abort()
+  end
+
+  defp mark_stopped_child_down(%{phase: :stopping} = state, pid) do
+    state = put_in(state.stop.down, MapSet.put(state.stop.down, pid))
+
+    if pid == Map.get(state.startup.registered, :facade_client),
+      do: finish_stop_run(state),
+      else: state
+  end
+
+  defp mark_stopped_child_down(%{phase: :aborting} = state, pid) do
+    state = put_in(state.abort.down, MapSet.put(state.abort.down, pid))
+    continue_abort(state)
+  end
+
+  defp mark_stopped_child_down(state, _pid), do: state
+
+  defp stop_ending(%{stop: %{malformed: true}}), do: :none
+  defp stop_ending(%{stop: %{run_proved: true, ending: ending}}), do: ending
+  defp stop_ending(%{stop: %{ending: {:error, {:interaction_pending, _}} = ending}}), do: ending
+  defp stop_ending(%{stop: %{possible: false}}), do: :none
+
+  defp stop_ending(state) do
+    active = state.stop.waiting || state.session.active
+
+    cond do
+      active && match?({:error, {:timeout, _}}, active.timed_out) ->
+        active.timed_out
+
+      active && active.admission in [:granted, :following] ->
+        {:error, {:session_unavailable, no_ending_snapshot(state, active)}}
+
+      match?({:error, {:timeout, _}}, state.session.last_result) ->
+        state.session.last_result
+
+      true ->
+        :none
+    end
+  end
+
+  defp borrower_down(state) do
+    active = state.session.active
+
+    cond do
+      active.admission == :pregrant and active.facade.stage == :await_ready ->
+        send(active.facade.pid, {self(), active.facade.reference, :cancel})
+        Process.send_after(self(), {:live_cancel_deadline, active.facade.reference}, 1_000)
+
+        state
+        |> put_in([:session, :active, :borrower], nil)
+        |> put_in([:session, :active, :borrower_monitor], nil)
+        |> put_in([:session, :active, :facade, :stage], :cancelling)
+
+      true ->
+        state
+        |> put_in([:session, :active, :borrower], nil)
+        |> put_in([:session, :active, :borrower_monitor], nil)
+    end
+  end
+
+  defp retry_stop(state, waiter) do
+    pending = state.stop.pending
+
+    if Enum.all?(pending, &(&1 in [:session_subtree, :root_removal])) and
+         state.abort.worker == nil do
+      deadline = System.monotonic_time() + native(state.cleanup_grace_ms + 5_000)
+      Process.send_after(self(), {:abort_deadline, state.startup.reference}, remaining(deadline))
+      stop = %{state.stop | waiters: [waiter], deadline: deadline}
+
+      abort = %{
+        state.abort
+        | deadline: deadline,
+          stage: :facade_reap,
+          worker: nil,
+          subtree_failed: false,
+          root_failed: false
+      }
+
+      %{state | phase: :aborting, stop: stop, abort: abort} |> continue_abort()
+    else
+      send(elem(waiter, 0), {self(), elem(waiter, 1), state.stop.result})
+      state
+    end
+  end
+
+  defp new_session(startup) do
+    %{
+      nonce: command_nonce(startup.configuration),
+      counter: 0,
+      run_open: false,
+      run: nil,
+      effect_unproved: false,
+      interaction: nil,
+      last_result: :none,
+      history: [],
+      history_truncated: false,
+      cursor: 0,
+      active: nil,
+      poll_marker: nil
+    }
+  end
+
+  defp next_command_id(session, type) when type in [:prompt, :answer, :abort] do
+    counter = session.counter + 1
+    bytes = :erlang.term_to_binary([session.nonce, counter, type], [:deterministic])
+    digest = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+    {"e-" <> binary_part(digest, 0, 62), %{session | counter: counter}}
+  end
+
+  if Mix.env() == :test do
+    defp command_nonce(configuration) do
+      case get_in(configuration, [:test_seams, :command_nonce]) do
+        value when is_binary(value) and byte_size(value) == 32 -> value
+        _ -> :crypto.strong_rand_bytes(32)
+      end
+    end
+  else
+    defp command_nonce(_configuration), do: :crypto.strong_rand_bytes(32)
+  end
+
+  defp answer_matches?(%{"interaction_id" => id, "choices" => choices}, id, choice)
+       when is_list(choices), do: Enum.any?(choices, &(Map.get(&1, "id") == choice))
+
+  defp answer_matches?(_interaction, _id, _choice), do: false
+
+  defp begin_live_command(state, borrower, request, kind, command, wait_ms) do
+    started_at = System.monotonic_time()
+    wait_deadline = started_at + native(wait_ms)
+    monitor = Process.monitor(borrower)
+
+    active = %{
+      borrower: borrower,
+      borrower_monitor: monitor,
+      request: request,
+      kind: kind,
+      command_id: command.command_id,
+      started_at: started_at,
+      wait_deadline: wait_deadline,
+      admission: :pregrant,
+      operation: :command,
+      facade: nil,
+      timed_out: nil,
+      cancel_reason: nil
+    }
+
+    state = put_in(state.session.active, active)
+    state = live_facade_operation(state, {:command, command}, :command)
+    schedule_public_tick(state)
+  end
+
+  defp live_facade_operation(state, operation, kind) do
+    client = Map.fetch!(state.startup.registered, :facade_client)
+    reference = make_ref()
+    handshake_deadline = System.monotonic_time() + native(1_000)
+    send(client, {self(), reference, operation})
+    Process.send_after(self(), {:live_handshake_deadline, reference}, 1_000)
+
+    facade = %{
+      pid: client,
+      reference: reference,
+      operation: operation,
+      stage: :await_ready,
+      handshake_deadline: handshake_deadline,
+      operation_deadline: nil
+    }
+
+    active = %{state.session.active | operation: kind, facade: facade}
+    put_in(state.session.active, active)
+  end
+
+  defp schedule_public_tick(%{session: %{active: %{borrower: borrower} = active}} = state)
+       when is_pid(borrower) do
+    delay = min(10, remaining(active.wait_deadline))
+    Process.send_after(self(), {:public_tick, active.request}, delay)
+    state
+  end
+
+  defp schedule_public_tick(state), do: state
+
+  defp timeout_live_request(state) do
+    active = state.session.active
+    snapshot = no_ending_snapshot(state, active)
+    result = {:error, {:timeout, snapshot}}
+    send(active.borrower, {self(), active.request, result})
+    Process.demonitor(active.borrower_monitor, [:flush])
+    active = %{active | borrower: nil, borrower_monitor: nil, timed_out: result}
+    state = put_in(state.session.active, active)
+
+    cond do
+      active.operation == :command and active.admission == :pregrant and
+          active.facade.stage == :await_ready ->
+        send(active.facade.pid, {self(), active.facade.reference, :cancel})
+        Process.send_after(self(), {:live_cancel_deadline, active.facade.reference}, 1_000)
+
+        state
+        |> put_in([:session, :active, :facade, :stage], :cancelling)
+        |> put_in([:session, :active, :cancel_reason], :wait_timeout)
+
+      active.admission in [:accepted, :following] ->
+        put_in(state.session.last_result, result)
+
+      true ->
+        state
+    end
+  end
+
+  defp cancel_live_command(state) do
+    active = state.session.active
+
+    cond do
+      state.phase == :stopping ->
+        state |> put_in([:session, :active], nil) |> stop_abort_or_cleanup()
+
+      active.cancel_reason == :wait_timeout or is_nil(active.borrower) ->
+        if is_reference(active.borrower_monitor),
+          do: Process.demonitor(active.borrower_monitor, [:flush])
+
+        put_in(state.session.active, nil)
+
+      true ->
+        live_failure(state)
+    end
+  end
+
+  defp accept_live_result(%{session: %{active: %{operation: :command} = active}} = state, result) do
+    case result do
+      {:accepted, id} when id == active.command_id ->
+        accepted_live_command(state)
+
+      {:error, reason}
+      when (active.kind == :ask and reason == :run_open) or
+             (active.kind == :answer and reason == :invalid_interaction_answer) ->
+        refusal =
+          if active.kind == :ask,
+            do: {:error, :run_open},
+            else: {:error, :invalid_interaction_answer}
+
+        if state.phase == :stopping do
+          state |> put_in([:session, :active], nil) |> stop_abort_or_cleanup()
+        else
+          if is_pid(active.borrower), do: send(active.borrower, {self(), active.request, refusal})
+
+          if is_reference(active.borrower_monitor),
+            do: Process.demonitor(active.borrower_monitor, [:flush])
+
+          put_in(state.session.active, nil)
+        end
+
+      {:error, :no_active_run} when active.kind == :abort and state.phase == :stopping ->
+        begin_live_poll(state)
+
+      _ ->
+        live_failure(state)
+    end
+  end
+
+  defp accept_live_result(%{session: %{active: %{operation: :next_event}}} = state, result),
+    do: accept_live_event(state, result)
+
+  defp accepted_live_command(state) do
+    active = state.session.active
+    session = state.session
+
+    session =
+      if active.kind == :ask do
+        %{
+          session
+          | run_open: true,
+            run:
+              new_run(
+                state.startup.session_id,
+                active.command_id,
+                state.startup.configuration.skills.shadowed_skills
+              )
+        }
+      else
+        %{session | interaction: nil}
+      end
+
+    last_result =
+      if state.phase == :stopping or active.kind == :abort or active.timed_out,
+        do: active.timed_out || session.last_result,
+        else: :none
+
+    session = %{session | last_result: last_result, active: %{active | admission: :following}}
+
+    state = %{state | session: session}
+
+    if state.phase == :stopping and active.kind != :abort,
+      do: stop_abort_or_cleanup(state),
+      else: begin_live_poll(state)
+  end
+
+  defp new_run(session_id, command_id, shadows) do
+    %{
+      command_id: command_id,
+      run_id: nil,
+      observation: %{
+        text: "",
+        text_truncated: false,
+        profile: :ephemeral,
+        session_id: session_id,
+        run_id: nil,
+        tools: [],
+        tools_truncated: false,
+        shadowed_skills: shadows
+      }
+    }
+  end
+
+  defp begin_live_poll(%{session: %{active: nil}} = state), do: state
+
+  defp begin_live_poll(state) do
+    state |> live_facade_operation(:next_event, :next_event)
+  end
+
+  defp schedule_live_poll(state) do
+    if state.phase == :stopping and not fresh?(state.stop.grace_deadline),
+      do: finish_stop_run(state),
+      else: schedule_live_poll_fresh(state)
+  end
+
+  defp schedule_live_poll_fresh(state) do
+    marker = make_ref()
+    Process.send_after(self(), {:live_poll, marker}, 10)
+    state = put_in(state.session.poll_marker, marker)
+    put_in(state.session.active.operation, :poll_scheduled)
+  end
+
+  defp accept_live_event(state, {:error, :empty}), do: schedule_live_poll(state)
+
+  defp accept_live_event(state, {:ok, event}) do
+    with {:ok, sequence} <- event_sequence(event, state.session.cursor),
+         {:ok, state} <- project_history(state, event),
+         {:ok, state, ending} <- project_live_run(state, event) do
+      state = put_in(state.session.cursor, sequence)
+
+      case ending do
+        nil ->
+          schedule_live_poll(state)
+
+        {:question, question} ->
+          if state.phase == :stopping,
+            do: state |> put_in([:session, :interaction], question) |> stop_abort_or_cleanup(),
+            else: settle_live(state, {:error, {:interaction_pending, question}}, question)
+
+        {:terminal, result} ->
+          if state.phase == :stopping do
+            outcome = terminal_outcome(result)
+
+            stop = %{
+              state.stop
+              | run_proved: true,
+                effect_proved: outcome != :outcome_unknown,
+                ending: result
+            }
+
+            %{state | stop: stop} |> finish_stop_run()
+          else
+            settle_live(state, result, nil)
+          end
+      end
+    else
+      _ -> live_failure(state)
+    end
+  end
+
+  defp accept_live_event(state, _unexpected), do: live_failure(state)
+
+  defp terminal_outcome({:ok, _observation}), do: :completed
+  defp terminal_outcome({:error, {:run, outcome, _observation}}), do: outcome
+
+  defp event_sequence(%{event_sequence: sequence, kind: kind}, cursor)
+       when is_integer(sequence) and sequence > cursor and sequence <= @uint64_max and
+              is_binary(kind),
+       do: {:ok, sequence}
+
+  defp event_sequence(_event, _cursor), do: :error
+
+  defp project_history(state, %{kind: kind} = event)
+       when kind in ["user.message_appended", "assistant.message_appended"] do
+    content = Map.get(event, "content")
+
+    if is_binary(content) and String.valid?(content) do
+      {text, truncated} = bounded_text(content)
+      role = if(kind == "user.message_appended", do: :user, else: :assistant)
+      {:ok, append_history(state, %{role: role, text: text, text_truncated: truncated})}
+    else
+      :error
+    end
+  end
+
+  defp project_history(state, %{kind: "tool.finished"} = event) do
+    id = Map.get(event, "tool_id")
+    outcome = Map.get(event, "outcome")
+
+    if (is_nil(id) or bounded_id?(id, 128)) and outcome in @tool_outcomes,
+      do: {:ok, append_history(state, %{role: :tool, tool_id: id, outcome: outcome})},
+      else: :error
+  end
+
+  defp project_history(state, _event), do: {:ok, state}
+
+  defp append_history(state, entry) do
+    entries = state.session.history ++ [entry]
+    truncated = length(entries) > @history_max
+    entries = if truncated, do: tl(entries), else: entries
+
+    session = %{
+      state.session
+      | history: entries,
+        history_truncated: state.session.history_truncated or truncated
+    }
+
+    %{state | session: session}
+  end
+
+  defp project_live_run(state, %{kind: "user.message_appended"} = event) do
+    run = state.session.run
+
+    if Map.get(event, "command_id") == run.command_id do
+      id = Map.get(event, "run_id")
+
+      if is_nil(run.run_id) and bounded_id?(id, 256) do
+        run = %{run | run_id: id, observation: %{run.observation | run_id: id}}
+        {:ok, put_in(state.session.run, run), nil}
+      else
+        :error
+      end
+    else
+      {:ok, state, nil}
+    end
+  end
+
+  defp project_live_run(state, event) do
+    run = state.session.run
+
+    if run && run.run_id && Map.get(event, "run_id") == run.run_id,
+      do: project_selected_event(state, event),
+      else: {:ok, state, nil}
+  end
+
+  defp project_selected_event(state, %{kind: "assistant.message_appended"} = event) do
+    case Map.get(event, "content") do
+      content when is_binary(content) ->
+        if String.valid?(content) do
+          {text, truncated} = bounded_text(content)
+          run = state.session.run
+          observation = %{run.observation | text: text, text_truncated: truncated}
+          {:ok, put_in(state.session.run.observation, observation), nil}
+        else
+          :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp project_selected_event(state, %{kind: "tool.finished"} = event) do
+    id = Map.get(event, "tool_id")
+    outcome = Map.get(event, "outcome")
+
+    if (is_nil(id) or bounded_id?(id, 128)) and outcome in @tool_outcomes do
+      observation = state.session.run.observation
+      tools = observation.tools ++ [%{tool_id: id, outcome: outcome}]
+      truncated = length(tools) > @tool_max
+      tools = if truncated, do: tl(tools), else: tools
+
+      observation = %{
+        observation
+        | tools: tools,
+          tools_truncated: observation.tools_truncated or truncated
+      }
+
+      {:ok, put_in(state.session.run.observation, observation), nil}
+    else
+      :error
+    end
+  end
+
+  defp project_selected_event(state, %{kind: "interaction.requested"} = event) do
+    question =
+      event
+      |> Map.take(~w(interaction_id run_id turn tool_call_id prompt choices expires_at))
+      |> Map.put("status", "pending")
+
+    if valid_interaction?(question), do: {:ok, state, {:question, question}}, else: :error
+  end
+
+  defp project_selected_event(state, %{kind: "run.finished"} = event) do
+    with {:ok, outcome} <- Map.fetch(@run_outcomes, Map.get(event, "outcome")),
+         {:ok, details} <- terminal_details(outcome, event) do
+      observation =
+        Map.merge(state.session.run.observation, %{outcome: outcome, details: details})
+
+      result =
+        if outcome == :completed,
+          do: {:ok, observation},
+          else: {:error, {:run, outcome, observation}}
+
+      {:ok, state, {:terminal, result}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp project_selected_event(state, _event), do: {:ok, state, nil}
+
+  defp settle_live(state, result, interaction) do
+    active = state.session.active
+    if is_pid(active.borrower), do: send(active.borrower, {self(), active.request, result})
+
+    if is_reference(active.borrower_monitor),
+      do: Process.demonitor(active.borrower_monitor, [:flush])
+
+    session = %{
+      state.session
+      | active: nil,
+        poll_marker: nil,
+        last_result: result,
+        interaction: interaction,
+        run_open: not is_nil(interaction),
+        effect_unproved:
+          state.session.effect_unproved or match?({:error, {:run, :outcome_unknown, _}}, result)
+    }
+
+    %{state | session: session}
+  end
+
+  defp valid_interaction?(question) when is_map(question) do
+    choices = Map.get(question, "choices")
+
+    Enum.sort(Map.keys(question)) ==
+      Enum.sort(~w(interaction_id run_id turn tool_call_id status prompt choices expires_at)) and
+      bounded_id?(question["interaction_id"], 256) and
+      bounded_id?(question["run_id"], 256) and
+      positive_uint64?(question["turn"]) and
+      bounded_id?(question["tool_call_id"], 65_536) and
+      question["status"] == "pending" and
+      bounded_id?(question["prompt"], 2_048) and
+      is_list(choices) and length(choices) in 1..8 and
+      Enum.all?(choices, fn choice ->
+        is_map(choice) and Enum.sort(Map.keys(choice)) == ["id", "label"] and
+          bounded_id?(choice["id"], 64) and bounded_id?(choice["label"], 256)
+      end) and
+      length(Enum.uniq_by(choices, & &1["id"])) == length(choices) and
+      positive_uint64?(question["expires_at"])
+  end
+
+  defp terminal_details(outcome, event) do
+    grace = Map.get(event, "cleanup_grace_ms")
+
+    if positive_uint64?(grace) do
+      case outcome do
+        :completed ->
+          {:ok, %{"cleanup_grace_ms" => grace}}
+
+        :cancelled ->
+          {:ok, %{"cleanup_grace_ms" => grace}}
+
+        :outcome_unknown ->
+          ref = Map.get(event, "reconciliation_ref")
+
+          if bounded_id?(ref, 1_024),
+            do: {:ok, %{"reconciliation_ref" => ref, "cleanup_grace_ms" => grace}},
+            else: :error
+
+        :bound_reached ->
+          bound_details(event, grace)
+
+        :failed ->
+          failed_details(event, grace)
+      end
+    else
+      :error
+    end
+  end
+
+  defp bound_details(event, grace) do
+    bound = Map.get(event, "bound")
+    observed = Map.get(event, "observed")
+    limit = Map.get(event, "declared_limit")
+    source = Map.get(event, "accounting_source")
+
+    if bound in ~w(max_turns token_budget deadline) and observed_quantity?(observed) and
+         uint64?(limit) and source in ["reported", "estimated", nil] do
+      {:ok,
+       %{
+         "bound" => bound,
+         "observed" => observed,
+         "declared_limit" => limit,
+         "accounting_source" => source,
+         "cleanup_grace_ms" => grace
+       }}
+    else
+      :error
+    end
+  end
+
+  defp failed_details(event, grace) do
+    reason = Map.get(event, "reason")
+    failure = Map.get(event, "failure")
+
+    cond do
+      reason in ["model_call_failed", "unreadable_model_answer"] and is_nil(failure) ->
+        {:ok, %{"reason" => reason, "failure" => nil, "cleanup_grace_ms" => grace}}
+
+      is_nil(reason) and valid_failure?(failure) ->
+        {:ok,
+         %{"reason" => nil, "failure" => normalize_failure(failure), "cleanup_grace_ms" => grace}}
+
+      true ->
+        :error
+    end
+  end
+
+  defp valid_failure?(
+         %{"category" => "deadline_preflight_failed", "retryable" => false} = failure
+       ),
+       do: Enum.all?(~w(dimension observed limit), &is_nil(Map.get(failure, &1)))
+
+  defp valid_failure?(%{"category" => "context_budget_exceeded", "retryable" => false} = failure),
+    do:
+      Map.get(failure, "dimension") in ~w(system_class_tokens context_tokens context_record_bytes context_record_depth context_record_cardinality) and
+        observed_quantity?(Map.get(failure, "observed")) and
+        positive_uint64?(Map.get(failure, "limit"))
+
+  defp valid_failure?(_), do: false
+
+  defp normalize_failure(failure) do
+    Map.take(failure, ~w(category retryable dimension observed limit))
+    |> Map.put_new("dimension", nil)
+    |> Map.put_new("observed", nil)
+    |> Map.put_new("limit", nil)
+  end
+
+  defp bounded_text(content) when byte_size(content) <= @text_max, do: {content, false}
+  defp bounded_text(content), do: {valid_prefix(binary_part(content, 0, @text_max)), true}
+
+  defp valid_prefix(prefix) do
+    if String.valid?(prefix),
+      do: prefix,
+      else: valid_prefix(binary_part(prefix, 0, byte_size(prefix) - 1))
+  end
+
+  defp bounded_id?(value, max),
+    do: is_binary(value) and byte_size(value) in 1..max and String.valid?(value)
+
+  defp uint64?(value), do: is_integer(value) and value >= 0 and value <= @uint64_max
+  defp positive_uint64?(value), do: is_integer(value) and value > 0 and value <= @uint64_max
+
+  defp observed_quantity?(value),
+    do: is_integer(value) and value >= 0 and value <= @observed_max
+
+  defp no_ending_snapshot(state, active) do
+    current_run? =
+      state.session.run != nil and
+        (active.kind in [:answer, :abort] or
+           state.session.run.command_id == active.command_id)
+
+    observation =
+      if current_run?,
+        do: state.session.run.observation,
+        else:
+          new_run(
+            state.startup.session_id,
+            active.command_id,
+            state.startup.configuration.skills.shadowed_skills
+          ).observation
+
+    Map.put(
+      observation,
+      :waited_ms,
+      min(
+        @uint64_max,
+        max(
+          0,
+          System.convert_time_unit(
+            System.monotonic_time() - active.started_at,
+            :native,
+            :millisecond
+          )
+        )
+      )
+    )
+  end
+
+  defp live_failure(state) do
+    case state.phase do
+      :ready ->
+        state |> begin_stop(nil) |> fail_stopping_operation()
+
+      :stopping ->
+        fail_stopping_operation(state)
+    end
+  end
+
+  defp fail_stopping_operation(%{phase: :stopping} = state) do
+    malformed = state.session.active && state.session.active.operation == :next_event
+    state = if malformed, do: put_in(state.stop.malformed, true), else: state
+    finish_stop_run(state)
+  end
 
   if Mix.env() == :test do
     defp test_facade(configuration), do: Map.get(configuration, :test_facade, Loopex)
@@ -1071,7 +2158,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   # attempts never block this receive loop and never remove an unowned path.
   defp fail_start(%{startup: startup} = state, cause, ownership) do
     :atomics.put(state.cell, 1, 1)
-    deadline = System.monotonic_time() + native(state.cleanup_grace_ms + 5_000)
+
+    deadline =
+      if state.stop,
+        do: state.stop.deadline,
+        else: System.monotonic_time() + native(state.cleanup_grace_ms + 5_000)
+
     Process.send_after(self(), {:abort_deadline, startup.reference}, remaining(deadline))
 
     unknown_start =
@@ -1147,6 +2239,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     executor = Map.get(startup.registered, :executor)
 
     cond do
+      abort.group_proved ->
+        start_runtime_stop(state)
+
       not is_pid(executor) and startup.expected == :executor and startup.granted ->
         start_runtime_stop(%{state | abort: %{abort | group_failed: true}})
 
@@ -1186,6 +2281,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp after_subtree(%{abort: abort, startup: startup} = state) do
     cond do
       abort.unknown_start or abort.group_failed or abort.subtree_failed ->
+        finish_abort(state)
+
+      state.stop && (not state.stop.run_proved or not state.stop.effect_proved) ->
         finish_abort(state)
 
       is_map(startup.owned_root) ->
@@ -1359,6 +2457,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp finish_abort(%{phase: :aborting, startup: startup, abort: abort} = state) do
     pending =
       []
+      |> maybe_pending(not is_nil(state.stop) and not state.stop.run_proved, :run_ending)
+      |> maybe_pending(
+        not is_nil(state.stop) and state.stop.run_proved and not state.stop.effect_proved,
+        :effect_cleanup
+      )
       |> maybe_pending(abort.group_failed, :process_groups)
       |> maybe_pending(
         abort.unknown_start or abort.subtree_failed or
@@ -1370,7 +2473,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
     result =
       if pending == [] and (abort.root_proved or startup.possible_root == nil) do
-        {:error, startup.cause}
+        if state.stop, do: :ok, else: {:error, startup.cause}
       else
         {:error,
          {:cleanup_unproved,
@@ -1378,7 +2481,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
             root: startup.possible_root,
             root_ownership: if(is_map(startup.owned_root), do: :owned, else: :unknown),
             pending: pending,
-            ending: :none,
+            ending: if(state.stop, do: state.stop.ending, else: :none),
             cause: startup.cause
           }}}
       end
@@ -1389,9 +2492,56 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       if(match?({:error, {:cleanup_unproved, _}}, result), do: 3, else: 2)
     )
 
-    unless startup.replied, do: send(state.creator, {self(), startup.request, result})
-    send(self(), :retire_sealed)
-    %{state | phase: :sealed}
+    if state.stop do
+      finish_stop_abort(state, result, pending)
+    else
+      unless startup.replied, do: send(state.creator, {self(), startup.request, result})
+      send(self(), :retire_sealed)
+      %{state | phase: :sealed}
+    end
+  end
+
+  defp finish_stop_abort(state, result, pending) do
+    Enum.each(state.stop.waiters, fn {pid, reference} ->
+      send(pid, {self(), reference, result})
+    end)
+
+    if state.stop.waiting && is_pid(state.stop.waiting.borrower) do
+      reply =
+        case result do
+          :ok ->
+            if state.stop.run_proved, do: state.stop.ending, else: {:error, :session_unavailable}
+
+          _ ->
+            result
+        end
+
+      send(state.stop.waiting.borrower, {self(), state.stop.waiting.request, reply})
+    end
+
+    if pending != [] and Enum.all?(pending, &(&1 in [:session_subtree, :root_removal])) and
+         not state.stop.no_retry do
+      %{
+        state
+        | phase: :failed_stop,
+          stop:
+            Map.merge(state.stop, %{waiters: [], waiting: nil, pending: pending, result: result})
+      }
+    else
+      if pending != [] and state.stop.no_retry,
+        do:
+          Logger.error(
+            "ephemeral cleanup unproved root=#{inspect(state.startup.possible_root)} pending=#{inspect(pending)}"
+          )
+
+      send(self(), :retire_sealed)
+
+      %{
+        state
+        | phase: :sealed,
+          stop: Map.merge(state.stop, %{waiters: [], waiting: nil, result: result})
+      }
+    end
   end
 
   defp maybe_pending(pending, true, item), do: pending ++ [item]
