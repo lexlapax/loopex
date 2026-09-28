@@ -20,9 +20,11 @@ Constraints to know before you start:
 
 - Loopex is built from source. There is no package, installer or service unit.
 - It runs on Darwin (macOS) and Linux.
-- `loopex ask` defaults to local `ollama:llama3.2`; run Ollama and make that
-  model available before the one-shot example. Its `--model` flag also selects
-  a supported hosted model, which needs that provider's own key. The older
+- Without `--model`, `loopex ask` uses `LOOPEX_MODEL` when set and otherwise
+  defaults to local `ollama:llama3.2`; run Ollama and make that model available
+  before the one-shot example. Its `--model` flag also selects a supported
+  hosted model. OpenAI needs `OPENAI_API_KEY`, Anthropic needs
+  `ANTHROPIC_API_KEY`, and OpenRouter needs `OPENROUTER_API_KEY`. The older
   durable `loopex run` path still defaults to
   `anthropic:claude-haiku-4-5` and needs `LOOPEX_PROVIDER_API_KEY`.
 - Tools run as your own operating-system user. The host policy you choose is
@@ -125,13 +127,23 @@ loopex -p "summarise this repository" --policy shell-allowlist \
   --tools read-only --output json
 ```
 
-The result is one JSON object on standard output and the exit status identifies
-the outcome. These read-only examples name their tool preset explicitly;
+For a public run outcome, the result is one JSON object on standard output, with schema
+`loopex.ask/1`, session and run IDs, profile, outcome, text, tool summaries,
+shadowed skills, cleanup proof and outcome details. Status `0` means completed;
+`1` means command refusal or lifecycle failure; `2` failed; `3` bound reached;
+`4` outcome unknown; `5` cancelled; `6` no ending observed; and `130`
+interrupted. These read-only examples name their tool preset explicitly;
 omitting `--tools` selects the coding preset, which includes writes and shell
 commands. `--model`, `--tools`,
 `--skill-dir`, `--max-steps`, and `--deadline-ms` select this call's model,
 tool preset, named skill directories and bounds. The command does not silently
 discover a home or project skill.
+
+You may name up to four existing directories with `--skill-dir`. A directory
+at `<workspace>/.agents/skills/<name>` contributes a project skill; a directory
+outside the workspace contributes a user skill. Other directories inside the
+workspace are refused. If both sources use the same name, the project skill
+wins and the result reports the shadowed user skill.
 
 `--state-root DIR` changes `ask` to the durable profile. It then needs the
 built provider companion and `LOOPEX_PROVIDER_API_KEY`, and the resulting
