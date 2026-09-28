@@ -66,6 +66,10 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert_receive {:model_request, first_request}, 15_000
     assert first_request =~ "POST /v1/chat/completions HTTP/1.1"
 
+    # The owner-start ticket expires after one second; a running session must
+    # outlive it and admit another model call.
+    Process.sleep(1_100)
+
     assert {:ok, %{outcome: :completed, text: "second answer"}} =
              Ephemeral.ask(session, "second prompt")
 

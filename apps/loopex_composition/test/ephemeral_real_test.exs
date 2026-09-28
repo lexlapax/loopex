@@ -36,14 +36,8 @@ defmodule LoopexComposition.Ephemeral.RealTest do
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
 
-    assert {:ok,
-            %{
-              outcome: :completed,
-              profile: :ephemeral,
-              text: text,
-              tools: tools
-            }} =
-             Ephemeral.run("Answer in one short sentence: what is two plus two?",
+    assert {:ok, session} =
+             Ephemeral.start_session(
                policy: Policy,
                model: Loopex.LLM.ReqLLM.default_model(),
                cwd: root,
@@ -52,6 +46,16 @@ defmodule LoopexComposition.Ephemeral.RealTest do
                deadline_ms: 90_000,
                timeout: 120_000
              )
+
+    assert {:ok,
+            %{
+              outcome: :completed,
+              profile: :ephemeral,
+              text: text,
+              tools: tools
+            }} = Ephemeral.ask(session, "Answer in one short sentence: what is two plus two?")
+
+    assert :ok = Ephemeral.stop_session(session)
 
     assert is_binary(text) and String.trim(text) != ""
     assert is_list(tools)

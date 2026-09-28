@@ -201,7 +201,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     end
   end
 
-  def handle_info({:activation_expired, ref}, %{ref: ref, phase: phase} = state)
+  # Concept: the owner-start ticket expires, not a session that has already
+  # started. `:ready` is also the live-session phase.
+  # Technical depth: only the pre-start state has no startup record; its timer
+  # must be inert after the begin token has been consumed.
+  def handle_info({:activation_expired, ref}, %{ref: ref, phase: phase, startup: nil} = state)
       when phase in [:blocked, :ready, :prepared] do
     if fresh?(state.expiry),
       do: {:noreply, state},
