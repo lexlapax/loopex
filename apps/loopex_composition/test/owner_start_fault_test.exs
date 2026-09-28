@@ -1,5 +1,5 @@
 defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias LoopexComposition.Ephemeral.{OwnerActivation, SessionOwner}
 
