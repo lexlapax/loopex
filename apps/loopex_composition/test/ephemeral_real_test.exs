@@ -35,6 +35,8 @@ defmodule LoopexComposition.Ephemeral.RealTest do
 
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
+    token = "M6_" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+    File.write!(Path.join(root, "answer.txt"), token)
 
     assert {:ok, session} =
              Ephemeral.start_session(
@@ -42,9 +44,9 @@ defmodule LoopexComposition.Ephemeral.RealTest do
                model: Loopex.LLM.ReqLLM.default_model(),
                cwd: root,
                tools: :read_only,
-               max_tokens: 128,
-               deadline_ms: 90_000,
-               timeout: 120_000
+               max_tokens: 256,
+               deadline_ms: 120_000,
+               timeout: 150_000
              )
 
     assert {:ok,
@@ -53,12 +55,30 @@ defmodule LoopexComposition.Ephemeral.RealTest do
               profile: :ephemeral,
               text: text,
               tools: tools
-            }} = Ephemeral.ask(session, "Answer in one short sentence: what is two plus two?")
+            }} =
+             Ephemeral.ask(
+               session,
+               "Call loopex.read once with path answer.txt. Do not use another tool. " <>
+                 "Then answer with the exact file contents. The contents are not in this prompt; do not guess."
+             )
+
+    assert [%{tool_id: "loopex.read", outcome: "completed"}] = tools
+    assert String.contains?(text, token)
+
+    assert {:ok, %{entries: entries, truncated: false}} = Ephemeral.history(session)
+
+    tool_index =
+      Enum.find_index(entries, &match?(%{role: :tool, tool_id: "loopex.read"}, &1))
+
+    answer_index =
+      Enum.find_index(entries, fn
+        %{role: :assistant, text: answer} -> String.contains?(answer, token)
+        _entry -> false
+      end)
+
+    assert is_integer(tool_index) and is_integer(answer_index) and tool_index < answer_index
 
     assert :ok = Ephemeral.stop_session(session)
-
-    assert is_binary(text) and String.trim(text) != ""
-    assert is_list(tools)
-    IO.puts(:stderr, "loopex M6 embedded hosted model completed with proved session cleanup")
+    IO.puts(:stderr, "loopex M6 embedded hosted tool turn completed with proved cleanup")
   end
 end
