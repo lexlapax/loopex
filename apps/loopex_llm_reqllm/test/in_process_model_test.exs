@@ -265,7 +265,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
 
   test "a managed callback stages the candidate, registers it, and waits for owner proof" do
     {:ok, supervisor} = Task.Supervisor.start_link()
-    on_exit(fn -> if Process.alive?(supervisor), do: Supervisor.stop(supervisor) end)
+    on_exit(fn -> stop_fixture_supervisor(supervisor) end)
     starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
     test = self()
 
@@ -297,7 +297,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
 
   test "a refused registrar reaps the staged candidate without a work grant" do
     {:ok, supervisor} = Task.Supervisor.start_link()
-    on_exit(fn -> if Process.alive?(supervisor), do: Supervisor.stop(supervisor) end)
+    on_exit(fn -> stop_fixture_supervisor(supervisor) end)
     starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
     test = self()
 
@@ -330,5 +330,11 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
       credential_variable: nil,
       trace_capability: :invalid
     ]
+  end
+
+  defp stop_fixture_supervisor(supervisor) do
+    Supervisor.stop(supervisor)
+  catch
+    :exit, _ -> :ok
   end
 end
