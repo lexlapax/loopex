@@ -87,6 +87,14 @@ release_retain_source_identity() {
   release_retain_identity "$target"
 }
 
+# Source text alone cannot distinguish an ExUnit case from a comment, string,
+# or quoted macro. Select only a parsed direct test definition in its module.
+release_definition_lines() {
+  local source=$1 name=$2 script
+  script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/release-test-definition.exs"
+  elixir "$script" "$source" "$name"
+}
+
 # Validate the complete manifest before its first selected case can dispatch.
 # A repeated case cannot replace an omitted witness while preserving row count.
 release_manifest_valid() {
@@ -101,7 +109,7 @@ release_manifest_valid() {
   fi
   while IFS='|' read -r -u 4 app file name; do
     rows=$((rows + 1))
-    definitions=$(grep -nF "test \"$name\"" "$source_tree/apps/$app/$file" || true)
+    definitions=$(release_definition_lines "$source_tree/apps/$app/$file" "$name" || true)
     if [ -z "$definitions" ] ||
        [ "$(printf '%s\n' "$definitions" | wc -l | tr -d ' ')" != 1 ]; then
       printf 'check-release: manifest row %s is not defined exactly once in %s\n' \

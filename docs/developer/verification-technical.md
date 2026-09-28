@@ -132,13 +132,15 @@ The entire manifest must contain exactly eleven uniquely defined rows; the
 executed subset must match its selected row count.
 
 Provider rows 1 through 9 and 11 require `LOOPEX_PROVIDER_API_KEY`; row 10
-uses local Ollama with provider credential variables removed. Row 11 maps the
-release credential to `ANTHROPIC_API_KEY` and removes the other hosted-provider
-keys for its test process. Node is required for `node_client`, provider row 4
-and provider row 9. The `rollback` selection requires the recorded `v0.2.0`
-closure tag, then stages archives of that commit and the candidate. It needs
-neither a credential nor Node. The full run retains both credential and Node
-preconditions. An explicitly selected `cross_uid` refuses outside
+uses local Ollama with provider credential variables removed and requires a
+reachable model named by `LOOPEX_RELEASE_OLLAMA_MODEL=ollama:<installed-model>`.
+Row 11 maps the release credential to `ANTHROPIC_API_KEY` and removes the
+other hosted-provider keys for its test process. Node is required for
+`node_client`, provider row 4 and provider row 9. The `rollback` selection
+requires the recorded `v0.2.0` closure tag, then stages archives of that
+commit and the candidate. It needs neither a credential nor Node. The full
+run retains both credential and Node preconditions. An explicitly selected
+`cross_uid` refuses outside
 Linux before staging. Every selection keeps the fresh-source extraction and
 build, then runs only its selected test lanes. Its final line is
 `PASS (selection-only: not full closure evidence)`. The unchanged no-option

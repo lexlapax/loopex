@@ -45,7 +45,7 @@ experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.
   process and replays on restart. A lost effect is reported as
   `outcome_unknown` and reconciled, never blindly retried. See the
   [embedding guide](docs/developer/runtime-and-embedding.md#concept).
-- **A coding loop at the terminal.** The `loopex` command runs a prompt as a
+- **A coding loop at the terminal.** `loopex run` runs a prompt as a
   durable, multi-turn session and streams the answer as it is produced. The
   model sees the whole conversation and the real output of every tool it ran.
   Four coding tools (`read`, `write`, `edit`, `bash`) act on a real workspace

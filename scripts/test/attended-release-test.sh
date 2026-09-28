@@ -9,6 +9,13 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/loopex-attended-test.XXXXXX")
 work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 fail() { printf 'attended-release-test: %s\n' "$1" >&2; exit 1; }
+digest_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
 
 repo="$work/repo"
 mkdir -p "$repo/scripts" "$repo/docs/developer" "$work/retained"
@@ -316,13 +323,13 @@ printf '<a id="%s"></a>\n### M6 attended release authorization\n\nMilestone: M6\
   "$anchor" "$tested" >"$work/expected-authority"
 cmp -s "$work/expected-authority" "$good.authority" ||
   fail 'retained disposition bytes changed'
-digest=$(shasum -a 256 "$good.authority" | awk '{ print $1 }')
+digest=$(digest_file "$good.authority")
 grep -q "sidecar=$good.authority sha256=$digest" "$good" ||
   { sed -n '1,30p' "$good" >&2; fail 'sidecar reference or digest missing'; }
 grep -q "tested_sha=$tested authority_sha=$authority ancestry=strict-descendant" "$good" ||
   fail 'ancestry and candidate identity missing'
 git -C "$repo" branch -D authority >/dev/null
-[ "$digest" = "$(shasum -a 256 "$good.authority" | awk '{ print $1 }')" ] ||
+[ "$digest" = "$(digest_file "$good.authority")" ] ||
   fail 'authority sidecar changed after branch deletion'
 
 status=0
@@ -513,11 +520,11 @@ grep -qx 'ATTENDED_FAILURE=interrupted' "$signal_log" ||
   fail 'signal did not retain interruption outcome'
 if kill -0 "$child_pid" 2>/dev/null; then fail 'PTY child survived interruption'; fi
 
-before=$(shasum -a 256 "$good" | awk '{print $1}')
+before=$(digest_file "$good")
 status=0
 (cd "$repo" && bash "$runner" --output "$good" "${auto_args[@]}") \
   >"$work/reuse.output" 2>&1 || status=$?
-[ "$status" -eq 1 ] && [ "$before" = "$(shasum -a 256 "$good" | awk '{print $1}')" ] ||
+[ "$status" -eq 1 ] && [ "$before" = "$(digest_file "$good")" ] ||
   fail 'successful transcript was overwritten'
 
 python3 - "$source_root/scripts/attended-pty.py" <<'PY'

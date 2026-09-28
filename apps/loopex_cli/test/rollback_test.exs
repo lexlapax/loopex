@@ -14,18 +14,19 @@ defmodule LoopexCli.RollbackTest do
 
   @checker Path.expand("../../../scripts/rollback-archive-check.exs", __DIR__)
   @commit String.duplicate("a", 40)
-  @digest String.duplicate("b", 64)
 
   setup do
     root =
       Path.join(System.tmp_dir!(), "loopex-rollback-check-#{System.unique_integer([:positive])}")
 
-    File.mkdir_p!(root)
+    tree = Path.join(root, "tree")
+    File.mkdir_p!(tree)
     on_exit(fn -> File.rm_rf!(root) end)
     identity = "commit #{@commit}\ncommitter-date 2026-09-27T00:00:00+00:00\n"
-    File.write!(Path.join(root, "SOURCE_IDENTITY"), identity)
+    digest = Base.encode16(:crypto.hash(:sha256, identity), case: :lower)
+    File.write!(Path.join(tree, "SOURCE_IDENTITY"), identity)
     File.write!(Path.join(root, "identity"), identity)
-    File.write!(Path.join(root, "manifest"), "f\0" <> "644\0SOURCE_IDENTITY\0#{@digest}\0")
+    File.write!(Path.join(root, "manifest"), "f\0" <> "644\0SOURCE_IDENTITY\0#{digest}\0")
     File.write!(Path.join(root, "projection"), "100644 blob #{@commit}\tSOURCE_IDENTITY\0")
     %{root: root}
   end
@@ -65,7 +66,7 @@ defmodule LoopexCli.RollbackTest do
         Path.join(root, "projection"),
         Path.join(root, "identity"),
         @commit,
-        root
+        Path.join(root, "tree")
       ],
       stderr_to_stdout: true
     )

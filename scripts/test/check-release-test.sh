@@ -62,9 +62,11 @@ for index in 1 2 3; do
   printf 'fixture|test/cases.exs|case %s\n' "$index" >>"$manifest"
 done
 mkdir "$tree/apps/fixture/test"
+printf 'defmodule ManifestFixture do\n  use ExUnit.Case\n' >"$tree/apps/fixture/test/cases.exs"
 for index in 1 2 3; do
   printf '  test "case %s" do\n  end\n' "$index" >>"$tree/apps/fixture/test/cases.exs"
 done
+printf 'end\n' >>"$tree/apps/fixture/test/cases.exs"
 release_manifest_valid "$manifest" "$tree" 3 || fail 'valid complete manifest refused'
 head -n 2 "$manifest" >"$work/duplicate-manifest"
 head -n 1 "$manifest" >>"$work/duplicate-manifest"
@@ -77,6 +79,26 @@ fi
 printf 'fixture|test/cases.exs|undefined\n' >"$work/missing-manifest"
 if release_manifest_valid "$work/missing-manifest" "$tree" 1 >"$work/manifest-output" 2>&1; then
   fail 'undefined manifest case passed'
+fi
+cat >"$tree/apps/fixture/test/cases.exs" <<'EOF'
+defmodule ManifestFixture do
+  use ExUnit.Case
+  test "case 1" do
+  end
+  test "case 2" do
+  end
+  # test "case 3" do
+  @decoy """
+  test "case 3" do
+  """
+  quote do
+    test "case 3" do
+    end
+  end
+end
+EOF
+if release_manifest_valid "$manifest" "$tree" 3 >"$work/manifest-output" 2>&1; then
+  fail 'comment, string or quoted test replaced a required witness'
 fi
 
 # Source/build identities use the same guarded helper as the actual runner.

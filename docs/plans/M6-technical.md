@@ -3863,17 +3863,16 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
   stable reference and a SHA-256 digest, recorded in
   `docs/evidence/M6-closure-runs.md`, which the tested candidate creates and
   indexes as a scaffold.
-- **Release rows.** The manifest (`check-release.sh:135-157`) grows from nine
-  real-provider rows to eleven, and its header comment changes with it. The
+- **Release rows.** The manifest (`scripts/check-release.sh:194-209`) has eleven
+  real-provider rows, and its header comment matches. The
   `rollback` lane is a separate `--only rollback` lane beside them, requiring
   no real provider credential because it drives a scripted model:
   - row 10, `loopex_cli|test/ask_real_test.exs|ephemeral ask answers from a
     local Ollama model through a separate process`. The ephemeral profile runs
     against a local Ollama model, driven through `loopex -p --output json` from
     a separate OS process, which is also the real-provider agent-delegation
-    case. It runs under `without_credential`: the manifest loop gains a
-    per-row credential mode, since today it runs every row under
-    `with_credential` (`check-release.sh:155`);
+    case. It runs under `without_credential`; the manifest loop selects its
+    per-row credential mode (`scripts/check-release.sh:225-232`);
   - row 11, `loopex_composition|test/ephemeral_real_test.exs|the embedded API
     answers in-process from Anthropic with the release credential`. The
     ephemeral profile's embedded API runs an Anthropic model in-process.

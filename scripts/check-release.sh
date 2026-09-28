@@ -218,10 +218,10 @@ done
 # standard input, where the two attended cases read the operator's answers.
 while IFS='|' read -r -u 3 app file name; do
   rows=$((rows + 1))
-  definitions=$(grep -nF "test \"$name\"" "$tree/apps/$app/$file" || true)
+  definitions=$(release_definition_lines "$tree/apps/$app/$file" "$name" || true)
   [ -n "$definitions" ] && [ "$(printf '%s\n' "$definitions" | wc -l | tr -d ' ')" = 1 ] ||
     { printf 'check-release: manifest row %s is not defined exactly once in %s\n' "$rows" "$app/$file" >&2; exit 1; }
-  line=${definitions%%:*}
+  line=$definitions
   if release_selected "real-provider-$rows"; then
     selected_rows=$((selected_rows + 1))
     case "$rows" in
