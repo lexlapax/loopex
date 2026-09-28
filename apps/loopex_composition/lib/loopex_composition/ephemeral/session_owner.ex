@@ -2748,9 +2748,25 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp abort_operation(state, :runtime_stop, _nonce, _deadline),
     do: Loopex.stop(state.startup.registered.runtime)
 
-  defp abort_operation(state, :subtree_stop, _nonce, _deadline) do
-    Process.exit(state.startup.root, :shutdown)
-    :ok
+  # Concept: tests can hold subtree teardown at the worker boundary.
+  # Technical depth: only the test build accepts a callback; production exits
+  # the owned root directly.
+  if Mix.env() == :test do
+    defp abort_operation(state, :subtree_stop, _nonce, _deadline) do
+      case get_in(state.startup.configuration, [:test_seams, :subtree_stop]) do
+        callback when is_function(callback, 1) ->
+          callback.(state.startup.root)
+
+        _ ->
+          Process.exit(state.startup.root, :shutdown)
+          :ok
+      end
+    end
+  else
+    defp abort_operation(state, :subtree_stop, _nonce, _deadline) do
+      Process.exit(state.startup.root, :shutdown)
+      :ok
+    end
   end
 
   defp abort_operation(state, :root_removal, _nonce, _deadline),

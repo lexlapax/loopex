@@ -131,6 +131,111 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     refute File.exists?(root)
   end
 
+  test "subtree stop waits for its worker result, finish, and exact DOWN", %{tmp: tmp} do
+    test = self()
+
+    subtree_stop = fn root ->
+      send(test, {:subtree_stop_entered, self(), root})
+
+      receive do
+        {^test, :release} ->
+          Process.exit(root, :shutdown)
+          :ok
+      end
+    end
+
+    session = start_session(tmp, successful_drain(), subtree_stop: subtree_stop)
+    {:loopex_ephemeral_session, owner, cell} = session
+    %{startup: %{root: root_pid, owned_root: %{path: root}}} = :sys.get_state(owner)
+    root_monitor = Process.monitor(root_pid)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    stop_ref = stop.ref
+
+    assert_receive {:subtree_stop_entered, worker, ^root_pid}, 3_000
+
+    on_exit(fn ->
+      send(worker, {test, :release})
+      if Process.alive?(worker), do: :erlang.resume_process(worker)
+      if Process.alive?(owner), do: :sys.resume(owner)
+    end)
+
+    worker_monitor = Process.monitor(worker)
+
+    assert %{
+             stage: :subtree_stop,
+             worker: %{
+               pid: ^worker,
+               reference: reference,
+               monitor: monitor,
+               result: false,
+               finish_sent: false
+             },
+             root_removal_attempted: false
+           } = :sys.get_state(owner).abort
+
+    send(owner, {:EXIT, worker, :normal})
+    send(owner, {:DOWN, make_ref(), :process, worker, :normal})
+    send(owner, {:DOWN, monitor, :process, self(), :normal})
+    send(owner, {worker, make_ref(), :subtree_stop, :result, :ok, System.monotonic_time()})
+    send(owner, {self(), reference, :subtree_stop, :result, :ok, System.monotonic_time()})
+    send(worker, {self(), reference, :finish})
+
+    assert %{
+             stage: :subtree_stop,
+             worker: %{pid: ^worker, result: false, finish_sent: false},
+             root_removal_attempted: false
+           } = :sys.get_state(owner).abort
+
+    assert Process.alive?(worker)
+    assert Process.alive?(root_pid)
+    assert File.dir?(root)
+    refute_receive {^stop_ref, _}, 0
+
+    assert :ok = :sys.suspend(owner)
+    send(worker, {test, :release})
+    assert_receive {:DOWN, ^root_monitor, :process, ^root_pid, _}, 1_000
+    assert waiting_for_finish?(worker)
+    assert true = :erlang.suspend_process(worker)
+    assert :ok = :sys.resume(owner)
+
+    assert %{
+             stage: :subtree_stop,
+             worker: %{pid: ^worker, result: true, finish_sent: true},
+             root_removal_attempted: false
+           } = :sys.get_state(owner).abort
+
+    assert Process.alive?(worker)
+    assert File.dir?(root)
+    refute_receive {^stop_ref, _}, 0
+
+    assert true = :erlang.resume_process(worker)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 1_000
+    assert :ok = Task.await(stop, 7_000)
+    assert :atomics.get(cell, 1) == 2
+    refute File.exists?(root)
+  end
+
+  test "a raised subtree-stop operation retains the root despite root DOWN", %{tmp: tmp} do
+    subtree_stop = fn root ->
+      Process.exit(root, :shutdown)
+      raise "subtree stop failed"
+    end
+
+    session = start_session(tmp, successful_drain(), subtree_stop: subtree_stop)
+    {:loopex_ephemeral_session, owner, cell} = session
+    %{startup: %{root: root_pid, owned_root: %{path: root}}} = :sys.get_state(owner)
+    root_monitor = Process.monitor(root_pid)
+
+    assert {:error,
+            {:cleanup_unproved,
+             %{pending: [:session_subtree], root: ^root, root_ownership: :owned}}} =
+             Ephemeral.stop_session(session)
+
+    assert_receive {:DOWN, ^root_monitor, :process, ^root_pid, _}, 1_000
+    assert :atomics.get(cell, 1) == 3
+    assert File.dir?(root)
+  end
+
   test "a retry cannot remove a replacement for the previously owned root", %{tmp: tmp} do
     test = self()
     removals = :atomics.new(1, signed: false)
@@ -209,7 +314,11 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
       max_tokens: 128,
       context_token_budget: 8_192,
       timeout: 60_000,
-      test_seams: %{temp_root: temp_root, group_drain: drain}
+      test_seams:
+        Map.merge(
+          %{temp_root: temp_root, group_drain: drain},
+          Map.new(Keyword.take(options, [:subtree_stop]))
+        )
     }
 
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
@@ -227,6 +336,17 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
 
   defp maybe_remove_seam(temp_root, nil), do: temp_root
   defp maybe_remove_seam(temp_root, remove), do: Map.put(temp_root, :rm_rf, remove)
+
+  defp waiting_for_finish?(worker) do
+    Enum.reduce_while(1..100, false, fn _, _ ->
+      if Process.info(worker, :status) == {:status, :waiting} do
+        {:halt, true}
+      else
+        Process.sleep(1)
+        {:cont, false}
+      end
+    end)
+  end
 
   defp await_runtime_stop(owner) do
     Enum.reduce_while(1..100, nil, fn _, _ ->
