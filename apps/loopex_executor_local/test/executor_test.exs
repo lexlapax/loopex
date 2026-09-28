@@ -6,6 +6,21 @@ defmodule Loopex.Executor.LocalTest do
   alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
 
+  defmodule SessionHost do
+    @moduledoc false
+    @behaviour Loopex.Executor.Local.EphemeralAdmission
+
+    @impl true
+    def request({__MODULE__, test, generation, _cell}, operation, deadline) do
+      send(test, {:session_tool_grant_requested, self(), operation, deadline})
+
+      case operation do
+        {:tool_grant, executor, _instance, dispatch} ->
+          {:ok, {:session_grant, generation, :tool_grant, executor, dispatch, deadline}}
+      end
+    end
+  end
+
   @oracle MapSet.new([
             :operation_id,
             :attempt,
@@ -21,6 +36,40 @@ defmodule Loopex.Executor.LocalTest do
 
   test "required grant bindings equal the independent contract oracle" do
     assert MapSet.new(Executor.required_grant_bindings()) == @oracle
+  end
+
+  test "an ephemeral executor needs its exact session grant and closes before a second effect" do
+    cell = :atomics.new(2, signed: false)
+    generation = make_ref()
+
+    fixture =
+      fixture("session-tool-grant",
+        session_owner: self(),
+        session_generation: generation,
+        session_cell: cell,
+        session_admission: {SessionHost, self(), generation, cell}
+      )
+
+    on_exit(fn -> stop_fixture(fixture) end)
+    {first, first_grant} = job_and_grant(fixture, "first-tool", "loopex.demo.write")
+    assert {:ok, _receipt} = Local.execute(fixture.executor, first, first_grant)
+    executor = fixture.executor
+
+    assert_receive {:session_tool_grant_requested, ^executor,
+                    {:tool_grant, ^executor, instance, dispatch}, deadline},
+                   1_000
+
+    assert is_reference(instance) and is_reference(dispatch) and is_integer(deadline)
+    assert File.exists?(Path.join(fixture.workspace, "first-tool.txt"))
+
+    :atomics.put(cell, 1, 3)
+    {second, second_grant} = job_and_grant(fixture, "sealed-tool", "loopex.demo.write")
+
+    assert {:error, {:refused_before_effect, :session_admission_closed}} =
+             Local.execute(fixture.executor, second, second_grant)
+
+    refute_receive {:session_tool_grant_requested, _, _, _}, 25
+    refute File.exists?(Path.join(fixture.workspace, "sealed-tool.txt"))
   end
 
   test "a malformed job is refused without reserving an empty identity" do

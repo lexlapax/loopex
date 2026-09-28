@@ -1208,6 +1208,7 @@ defmodule Loopex.Executor.Local do
         Enum.all?(leases, fn {id, pid} -> is_binary(id) and is_pid(pid) end)
 
     with true <- valid,
+         {:ok, session} <- session_configuration(options),
          {:ok, ledger} <-
            Ledger.prepare(ledger_root, identity, max(cleanup_grace_ms, 1)) do
       # Concept: the configured period is kept where the code that cleans up can
@@ -1245,6 +1246,7 @@ defmodule Loopex.Executor.Local do
          cleanup_grace_ms: cleanup_grace_ms,
          claim_wait_ms: claim_wait_ms,
          process_probe: process_probe,
+         session: session,
          inflight_table: table,
          reserved: %{},
          reservation_monitors: %{},
@@ -1253,6 +1255,93 @@ defmodule Loopex.Executor.Local do
     else
       {:error, reason} -> {:stop, reason}
       _other -> {:stop, :invalid_executor_configuration}
+    end
+  end
+
+  # Concept: durable executors keep their released admission path; a session
+  # executor carries one private owner, generation and cell for its lifetime.
+  # Technical depth: all four options must arrive together. The inward port's
+  # module is taken from the host-supplied handle, never imported from
+  # composition. Neither the handle nor the cell enters a job or receipt.
+  defp session_configuration(options) do
+    keys = [:session_owner, :session_generation, :session_cell, :session_admission]
+    values = Enum.map(keys, &Keyword.fetch(options, &1))
+
+    case values do
+      [:error, :error, :error, :error] ->
+        {:ok, nil}
+
+      [
+        {:ok, owner},
+        {:ok, generation},
+        {:ok, cell},
+        {:ok, handle}
+      ]
+      when is_pid(owner) and is_reference(generation) and is_reference(cell) and
+             is_tuple(handle) and tuple_size(handle) > 0 ->
+        module = elem(handle, 0)
+
+        if is_atom(module) and Process.alive?(owner) and atomics_open?(cell) do
+          {:ok,
+           %{
+             owner: owner,
+             generation: generation,
+             cell: cell,
+             module: module,
+             handle: handle,
+             instance: make_ref()
+           }}
+        else
+          {:error, :invalid_executor_configuration}
+        end
+
+      _ ->
+        {:error, :invalid_executor_configuration}
+    end
+  end
+
+  defp atomics_open?(cell) do
+    :atomics.get(cell, 1) == 0
+  catch
+    _, _ -> false
+  end
+
+  defp session_open(%{session: nil}), do: :ok
+
+  defp session_open(%{session: %{owner: owner, cell: cell}}) do
+    if Process.alive?(owner) and atomics_open?(cell),
+      do: :ok,
+      else: {:error, :session_admission_closed}
+  end
+
+  # Concept: an ephemeral tool gets one correlated, session-local grant at the
+  # final effect boundary. An unresponsive or sealed owner never grants work.
+  # Technical depth: the absolute effect deadline is converted once to native
+  # units; the inward dispatcher caps its wait at 1,000 ms. A grant must echo
+  # this exact executor instance, dispatch reference and generation. Recheck
+  # the cell after the owner reply, before the durable marker is admitted.
+  defp session_tool_grant(%{session: nil}, _action), do: :ok
+
+  defp session_tool_grant(%{session: session} = state, action) do
+    dispatch = make_ref()
+    operation = {:tool_grant, self(), session.instance, dispatch}
+    deadline = System.convert_time_unit(action, :millisecond, :native)
+
+    with :ok <- session_open(state),
+         {:ok, {:session_grant, generation, :tool_grant, requester, reference, expiry}} <-
+           Loopex.Executor.Local.EphemeralAdmission.request(
+             session.module,
+             session.handle,
+             operation,
+             deadline
+           ),
+         true <-
+           generation == session.generation and requester == self() and
+             reference == dispatch and is_integer(expiry) and expiry <= deadline,
+         :ok <- session_open(state) do
+      :ok
+    else
+      _ -> refused_before_effect(:session_admission_closed)
     end
   end
 
@@ -1761,7 +1850,8 @@ defmodule Loopex.Executor.Local do
   # independently validated job bytes, tool metadata, live lease, fence,
   # audience, expiry, and all ten grant bindings.
   defp final_prestart_validation(state, job, grant) do
-    with :ok <- Executor.validate_job(job),
+    with :ok <- session_open(state),
+         :ok <- Executor.validate_job(job),
          {:ok, tool} <- resolve_tool(job),
          {:ok, lease_pid} <- Map.fetch(state.leases, job.workspace_lease),
          true <- Process.alive?(lease_pid),
@@ -1977,17 +2067,24 @@ defmodule Loopex.Executor.Local do
         Process.put(:loopex_admission, admission)
 
         try do
-          case run_tool(
-                 placement,
-                 job,
-                 tool,
-                 workspace,
-                 arguments,
-                 receipt_output_limit,
-                 options,
-                 lease,
-                 progress
-               ) do
+          effect =
+            if session_open(placement) == :ok do
+              run_tool(
+                placement,
+                job,
+                tool,
+                workspace,
+                arguments,
+                receipt_output_limit,
+                options,
+                lease,
+                progress
+              )
+            else
+              session_cancelled_receipt(placement, job, tool, arguments)
+            end
+
+          case effect do
             {:settle, receipt} ->
               settled = settle_receipt(placement, job, receipt, lease)
               answer_cancellations(match?({:ok, %{cleanup_confirmation: :confirmed}}, settled))
@@ -2015,6 +2112,32 @@ defmodule Loopex.Executor.Local do
       :join ->
         join_admitted_operation(placement, job)
     end
+  end
+
+  # Concept: a session that closes after durable admission but before this
+  # caller starts the tool still settles its admitted job without an effect.
+  # Technical depth: a marker already exists, so a pre-effect refusal would be
+  # false. The empty, confirmed cancellation receipt closes that marker through
+  # the same settlement path as any other admitted job.
+  defp session_cancelled_receipt(state, job, tool, arguments) do
+    environment =
+      if Map.has_key?(tool, :coding),
+        do: coding_tool_environment(arguments),
+        else: demonstration_environment()
+
+    {:settle,
+     receipt(
+       state,
+       job,
+       tool,
+       :cancelled,
+       "",
+       environment,
+       [],
+       effective_deadline(job, tool),
+       0,
+       :confirmed
+     )}
   end
 
   # Concept: publishing this job's terminal truth and disposing of its open
@@ -2318,6 +2441,7 @@ defmodule Loopex.Executor.Local do
          {:ok, receipt_output_limit} <-
            reserve_receipt_output(state, job, tool, arguments, wall),
          :ok <- authorize_effect(state, job, action),
+         :ok <- session_tool_grant(state, action),
          :ok <-
            Ledger.admit(
              state.ledger,
