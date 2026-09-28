@@ -140,6 +140,13 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
       :retired_wait_down ->
         clear_pending(state)
 
+      phase when phase in [:managed, :active] ->
+        state = %{state | pending: %{pending | candidate_down: true}}
+        lost_candidate(state)
+
+      :retiring ->
+        finish_retirement(%{state | pending: %{pending | candidate_down: true}})
+
       _ ->
         reason = if reason in [:normal, :killed], do: reason, else: :other
 
@@ -148,6 +155,26 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
 
         finish_no_registrar_cancel(state)
     end
+  end
+
+  def handle(
+        %__MODULE__{pending: %{resource_monitors: monitors} = pending} = state,
+        {:DOWN, monitor, :process, pid, _reason}
+      )
+      when is_map_key(monitors, monitor) do
+    if monitors[monitor] == pid do
+      pending = %{pending | resource_down: MapSet.put(pending.resource_down, monitor)}
+      finish_retirement(%{state | pending: pending})
+    else
+      state
+    end
+  end
+
+  def handle(
+        %__MODULE__{pending: %{retirement_timer: {_timer, token}} = pending} = state,
+        {:model_census_retirement_check, token}
+      ) do
+    finish_retirement(%{state | pending: %{pending | retirement_timer: nil}})
   end
 
   def handle(
@@ -187,6 +214,14 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
         stage_ref: nil,
         stage_issued: false,
         cancel: nil,
+        revision: 0,
+        last_resource_entries: nil,
+        resources: %{},
+        resource_monitors: %{},
+        resource_down: MapSet.new(),
+        registries: %{},
+        retirement: nil,
+        retirement_timer: nil,
         seen_refs: MapSet.new([elem(envelope, 1)])
       }
 
@@ -386,11 +421,45 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
 
   defp transition(
          %__MODULE__{
+           pending: %{phase: phase, candidate: requester, call: call} = pending
+         } = state,
+         {requester, reference, {:record_model_resources, call, requester, revision, entries},
+          _expiry} = envelope
+       )
+       when phase in [:managed, :active] do
+    cond do
+      revision == pending.revision and entries == pending.last_resource_entries ->
+        pending = %{pending | seen_refs: MapSet.put(pending.seen_refs, reference)}
+        grant(%{state | pending: pending}, envelope)
+
+      revision == pending.revision and entries != pending.last_resource_entries ->
+        seal_record(state, envelope)
+
+      revision == pending.revision + 1 and valid_resource_entries?(pending, entries) ->
+        pending = retain_resource_entries(pending, entries)
+
+        pending = %{
+          pending
+          | phase: :active,
+            revision: revision,
+            last_resource_entries: entries,
+            seen_refs: MapSet.put(pending.seen_refs, reference)
+        }
+
+        grant(%{state | pending: pending}, envelope)
+
+      true ->
+        refuse(state, envelope)
+    end
+  end
+
+  defp transition(
+         %__MODULE__{
            pending: %{phase: phase, call: call, candidate: requester, proof: proof} = pending
          } = state,
          {requester, _reference, {:retire_model, call, requester, proof}, _expiry} = envelope
        )
-       when phase in [:staging, :provisional, :managed] do
+       when phase in [:staging, :provisional, :managed, :active] do
     if pending.stage do
       {stage_envelope, _staging_ref} = pending.stage
       reply(state, stage_envelope, closed())
@@ -400,14 +469,14 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
 
     pending = %{
       pending
-      | phase: :retired_wait_down,
+      | phase: :retiring,
         stage: nil,
         timer: nil,
+        retirement: envelope,
         seen_refs: MapSet.put(pending.seen_refs, elem(envelope, 1))
     }
 
-    state = grant(%{state | pending: pending}, envelope)
-    if pending.candidate_down, do: clear_pending(state), else: state
+    finish_retirement(%{state | pending: pending})
   end
 
   defp transition(state, envelope), do: refuse(state, envelope)
@@ -470,10 +539,147 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
       proxy_monitor != candidate_monitor
   end
 
+  @process_roles [:root, :anonymous_supervisor, :pool_supervisor, :http1_worker, :caller]
+  @registry_kinds [:worker, :supervisor]
+
+  defp valid_resource_entries?(pending, entries) when is_list(entries) and entries != [] do
+    length(entries) <= 7 and
+      Enum.reduce_while(entries, {pending.resources, pending.registries}, fn entry,
+                                                                             {processes,
+                                                                              registries} ->
+        case entry do
+          {:process, role, pid} when role in @process_roles and is_pid(pid) ->
+            cond do
+              Map.has_key?(processes, role) ->
+                {:halt, :invalid}
+
+              Enum.any?(processes, fn {other, known} -> other != role and known == pid end) ->
+                {:halt, :invalid}
+
+              true ->
+                {:cont, {Map.put(processes, role, pid), registries}}
+            end
+
+          {:registry, kind, {scheme, host, port, tag} = identity}
+          when kind in @registry_kinds and scheme in [:http, :https] and is_binary(host) and
+                 byte_size(host) in 1..253 and is_integer(port) and port in 1..65_535 and
+                 is_reference(tag) ->
+            cond do
+              Map.has_key?(registries, kind) ->
+                {:halt, :invalid}
+
+              Enum.any?(registries, fn {_other, known} -> known != identity end) ->
+                {:halt, :invalid}
+
+              true ->
+                {:cont, {processes, Map.put(registries, kind, identity)}}
+            end
+
+          _invalid ->
+            {:halt, :invalid}
+        end
+      end) != :invalid
+  end
+
+  defp valid_resource_entries?(_pending, _entries), do: false
+
+  defp retain_resource_entries(pending, entries) do
+    Enum.reduce(entries, pending, fn
+      {:process, role, pid}, pending ->
+        if Map.has_key?(pending.resources, role) do
+          pending
+        else
+          monitor = Process.monitor(pid)
+
+          %{
+            pending
+            | resources: Map.put(pending.resources, role, pid),
+              resource_monitors: Map.put(pending.resource_monitors, monitor, pid)
+          }
+        end
+
+      {:registry, kind, identity}, pending ->
+        %{pending | registries: Map.put(pending.registries, kind, identity)}
+    end)
+  end
+
+  defp finish_retirement(%{pending: %{phase: :retiring, retirement: envelope} = pending} = state) do
+    cond do
+      not live_envelope?(envelope) ->
+        fail_retirement(state)
+
+      (pending.candidate_down or Process.alive?(pending.candidate)) and
+        resource_down?(pending) and registries_empty?(pending.registries) ->
+        cancel_timer(pending.retirement_timer)
+
+        if pending.candidate_down do
+          reply(state, envelope, {:ok, retirement_grant(state, envelope)})
+          clear_pending(state)
+        else
+          pending = %{pending | phase: :retired_wait_down, retirement: nil, retirement_timer: nil}
+          grant(%{state | pending: pending}, envelope)
+        end
+
+      true ->
+        schedule_retirement(state)
+    end
+  end
+
+  defp finish_retirement(state), do: state
+
+  defp retirement_grant(state, {requester, reference, operation, expiry}) do
+    {:session_grant, state.generation, elem(operation, 0), requester, reference, expiry}
+  end
+
+  defp resource_down?(pending),
+    do: map_size(pending.resource_monitors) == MapSet.size(pending.resource_down)
+
+  defp registries_empty?(registries) do
+    Enum.all?(registries, fn
+      {:worker, identity} -> Registry.lookup(Req.Finch, identity) == []
+      {:supervisor, identity} -> Registry.lookup(Req.Finch.SupervisorRegistry, identity) == []
+    end)
+  rescue
+    _error -> false
+  catch
+    _kind, _reason -> false
+  end
+
+  defp schedule_retirement(
+         %{pending: %{retirement_timer: nil, retirement: envelope} = pending} = state
+       ) do
+    {_requester, _reference, _operation, expiry} = envelope
+    native_per_ms = System.convert_time_unit(1, :millisecond, :native)
+    remaining = max(expiry - System.monotonic_time(), 0)
+    delay = max(1, min(10, div(remaining + native_per_ms - 1, native_per_ms)))
+    token = make_ref()
+    timer = Process.send_after(self(), {:model_census_retirement_check, token}, delay)
+    %{state | pending: %{pending | retirement_timer: {timer, token}}}
+  end
+
+  defp schedule_retirement(state), do: state
+
+  defp fail_retirement(%{pending: %{retirement: envelope} = pending} = state) do
+    reply(state, envelope, closed())
+    cancel_timer(pending.retirement_timer)
+    seal(state.cell)
+    %{state | pending: %{pending | phase: :unproved, retirement: nil, retirement_timer: nil}}
+  end
+
+  defp seal_record(%{pending: pending} = state, envelope) do
+    reply(state, envelope, closed())
+    cancel_timer(pending.timer)
+    cancel_timer(pending.retirement_timer)
+    seal(state.cell)
+    %{state | pending: %{pending | phase: :unproved, timer: nil, retirement_timer: nil}}
+  end
+
   defp clear_pending(%{pending: pending} = state) do
     Process.demonitor(pending.callback_monitor, [:flush])
     if pending.candidate_monitor, do: Process.demonitor(pending.candidate_monitor, [:flush])
+    Enum.each(Map.keys(pending.resource_monitors), &Process.demonitor(&1, [:flush]))
     cancel_timer(pending.timer)
+    cancel_timer(pending.retirement_timer)
     :atomics.put(state.cell, 2, 0)
     %{state | pending: nil, retired: pending.call, last_reply: nil}
   end

@@ -1117,6 +1117,152 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
   end
 
+  test "recorded resources require their genuine DOWN before retirement and slot release" do
+    {state, cell, generation, call, proof, candidate} = direct_managed()
+    root = spawn(fn -> receive do: (:stop -> :ok) end)
+    on_exit(fn -> if Process.alive?(root), do: Process.exit(root, :kill) end)
+    record = {:record_model_resources, call, candidate, 1, [{:process, :root, root}]}
+    state = ModelCensus.handle(state, admission(candidate, generation, record))
+    assert state.pending.phase == :active
+    assert state.pending.revision == 1
+    assert :atomics.get(cell, 2) == 1
+
+    retire = {:retire_model, call, candidate, proof}
+    state = ModelCensus.handle(state, admission(candidate, generation, retire))
+    assert state.pending.phase == :retiring
+    assert :atomics.get(cell, 2) == 1
+
+    [{root_monitor, ^root}] = Map.to_list(state.pending.resource_monitors)
+    send(root, :stop)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal} = root_down
+    state = ModelCensus.handle(state, root_down)
+    assert state.pending.phase == :retired_wait_down
+    assert :atomics.get(cell, 1) == 0
+    assert :atomics.get(cell, 2) == 1
+
+    candidate_monitor = state.pending.candidate_monitor
+    Process.exit(candidate, :kill)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed} = candidate_down
+    state = ModelCensus.handle(state, candidate_down)
+    assert state.pending == nil
+    assert :atomics.get(cell, 2) == 0
+  end
+
+  test "managed candidate DOWN before its queued exact retirement is reconciled" do
+    {state, cell, generation, call, proof, candidate} = direct_managed()
+    retirement = admission(candidate, generation, {:retire_model, call, candidate, proof})
+    candidate_monitor = state.pending.candidate_monitor
+    Process.exit(candidate, :kill)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed} = down
+    state = ModelCensus.handle(state, down)
+    assert state.pending.phase == :managed
+    assert state.pending.timer != nil
+    assert :atomics.get(cell, 1) == 0
+    assert :atomics.get(cell, 2) == 1
+
+    state = ModelCensus.handle(state, retirement)
+    assert state.pending == nil
+    assert :atomics.get(cell, 1) == 0
+    assert :atomics.get(cell, 2) == 0
+  end
+
+  test "retirement polls both exact tagged registries after recorded process DOWN" do
+    {:ok, _started} = Application.ensure_all_started(:req)
+    {state, cell, generation, call, proof, candidate} = direct_managed()
+    root = spawn(fn -> receive do: (:stop -> :ok) end)
+    on_exit(fn -> if Process.alive?(root), do: Process.exit(root, :kill) end)
+    identity = {:http, "127.0.0.1", 11_434, make_ref()}
+    {:ok, _} = Registry.register(Req.Finch, identity, :worker)
+    {:ok, _} = Registry.register(Req.Finch.SupervisorRegistry, identity, :supervisor)
+
+    entries = [
+      {:process, :root, root},
+      {:registry, :worker, identity},
+      {:registry, :supervisor, identity}
+    ]
+
+    state =
+      ModelCensus.handle(
+        state,
+        admission(candidate, generation, {:record_model_resources, call, candidate, 1, entries})
+      )
+
+    state =
+      ModelCensus.handle(
+        state,
+        admission(candidate, generation, {:retire_model, call, candidate, proof})
+      )
+
+    [{root_monitor, ^root}] = Map.to_list(state.pending.resource_monitors)
+    send(root, :stop)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal} = root_down
+    state = ModelCensus.handle(state, root_down)
+    assert state.pending.phase == :retiring
+    assert :atomics.get(cell, 2) == 1
+
+    Registry.unregister(Req.Finch, identity)
+    Registry.unregister(Req.Finch.SupervisorRegistry, identity)
+    {_timer, token} = state.pending.retirement_timer
+    assert_receive {:model_census_retirement_check, ^token} = check, 100
+    state = ModelCensus.handle(state, check)
+    assert state.pending.phase == :retired_wait_down
+    assert :atomics.get(cell, 1) == 0
+  end
+
+  test "a conflicting resource revision seals this session without changing a peer" do
+    {state, cell, generation, call, _proof, candidate} = direct_managed()
+    peer_cell = :atomics.new(2, [])
+    root = spawn(fn -> receive do: (:stop -> :ok) end)
+    caller = spawn(fn -> receive do: (:stop -> :ok) end)
+    on_exit(fn -> if Process.alive?(root), do: Process.exit(root, :kill) end)
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+
+    first = {:record_model_resources, call, candidate, 1, [{:process, :root, root}]}
+    state = ModelCensus.handle(state, admission(candidate, generation, first))
+    assert state.pending.revision == 1
+    state = ModelCensus.handle(state, admission(candidate, generation, first))
+    assert state.pending.revision == 1
+    duplicate_as_new = {:record_model_resources, call, candidate, 2, [{:process, :root, root}]}
+    state = ModelCensus.handle(state, admission(candidate, generation, duplicate_as_new))
+    assert state.pending.revision == 1
+    assert :atomics.get(cell, 1) == 0
+
+    conflicting = {:record_model_resources, call, candidate, 1, [{:process, :caller, caller}]}
+    state = ModelCensus.handle(state, admission(candidate, generation, conflicting))
+    assert state.pending.phase == :unproved
+    assert state.pending.revision == 1
+    assert :atomics.get(cell, 1) == 3
+    assert :atomics.get(cell, 2) == 1
+    assert :atomics.get(peer_cell, 1) == 0
+    assert :atomics.get(peer_cell, 2) == 0
+  end
+
+  defp direct_managed do
+    owner = self()
+    candidate = spawn(fn -> receive do: (:stop -> :ok) end)
+    candidate_start_monitor = Process.monitor(candidate)
+    on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
+    {state, cell, generation, call, proof} = direct_staging(candidate, candidate_start_monitor)
+    stage_ref = state.pending.stage_ref
+
+    state =
+      ModelCensus.handle(
+        state,
+        {:model_custody_prepared, candidate, stage_ref, generation, call, proof}
+      )
+
+    assert_receive {:loopex_session_admission_result, ^owner, ^stage_ref, ^generation,
+                    {:stage_model, ^call, ^candidate, ^proof, _, _}, _, {:ok, _}}
+
+    register = {:register_model, call, candidate, proof}
+    state = ModelCensus.handle(state, admission(owner, generation, register))
+    assert state.pending.phase == :managed
+    {state, cell, generation, call, proof, candidate}
+  end
+
+  defp admission(requester, generation, operation),
+    do: {:loopex_session_admission, requester, make_ref(), generation, operation, deadline()}
+
   defp await_sealed(owner, cell, expiry) do
     if :atomics.get(cell, 1) != 3 do
       assert System.monotonic_time() < expiry
