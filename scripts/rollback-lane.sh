@@ -94,6 +94,14 @@ make_launch new
 build_pair old
 build_pair new
 
+for label in old new; do
+  printf 'rollback: %s durable option entrypoints\n' "$label"
+  (cd "$scratch/$label/apps/loopex_app_server" && \
+    MIX_ENV=prod ROLLBACK_OPTIONS_SIDE="$label" \
+    ROLLBACK_OPTIONS_ROOT="$scratch/$label-options" \
+    mix run --no-start "$source_dir/scripts/rollback-options-case.exs")
+done
+
 # The public facade witness is deliberately a separate driver process for
 # each direction. A binary is not invoked until both isolated builds finish.
 for direction in old-to-new new-to-old; do
