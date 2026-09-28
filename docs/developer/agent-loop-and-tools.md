@@ -38,8 +38,9 @@ definition_digest}`, and a staged request carries the complete definitions it
 used, so what a model was shown stays reconstructible from the journal after
 the registry that held them has changed. Registration is append-only and scoped
 to one runtime; being registered and being offered to a model are separate
-facts. The reference distribution ships four coding tools — read, write, edit,
-and a shell tool — under the reserved `loopex.` namespace.
+facts. The reference distribution ships seven tools under the reserved
+`loopex.` namespace: `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`.
+The durable default offers the original four coding tools.
 
 **Context is admitted, not assumed.** Required context — the system block,
 history, steers, and tool definitions — is measured before any optional content

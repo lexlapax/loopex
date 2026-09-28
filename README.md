@@ -63,9 +63,11 @@ experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.
   tool results. See
   [ADR 0039](docs/adr/0039-ephemeral-embedded-profile.md#concept) for this
   profile's trust and cleanup limits.
-- **Honest tool execution.** Every tool job is a durable operation with
-  attempts, fencing tokens and receipts. The trusted local executor supervises
-  each command's process group and reports exactly what it could confirm.
+- **Honest tool execution.** Each dispatched tool job is attempt- and
+  fence-bound; its outcome is recorded as a receipt or as unresolved. Durable
+  sessions retain that truth for recovery; ephemeral sessions order it in
+  memory. The trusted local executor supervises each command's process group
+  and reports exactly what it could confirm.
 - **Durable questions and bounded artifacts.** A host policy, such as the app
   server's `ask` stance, can answer a tool request with a question instead of a
   verdict. The question stays as durable
@@ -153,8 +155,9 @@ without entering the kernel.
   public-event vocabulary, snapshots, and transient progress — distinct
   planes with distinct guarantees. Restart replays; clients reconnect from
   cursors.
-- **Honest effects:** every model call and tool job is a durable operation
-  with attempts, epochs, fencing, receipts, and reconciliation.
+- **Honest effects:** model calls and tool jobs carry attempts, epochs,
+  fencing, receipts, and reconciliation. The durable profile retains their
+  truth across restarts; the ephemeral profile does not.
 - **Brains and hands:** tool execution is placement-transparent — local
   process, isolated container/microVM, or trusted remote worker — behind one
   job/receipt protocol. Distribution connects trusted gateways only; the
@@ -163,8 +166,9 @@ without entering the kernel.
   quiescent generations with tested migration and exact rollback — code
   evolves, session history survives.
 - **A seven-tool coding surface** (`read write edit bash grep find ls`)
-  inside a system prompt budgeted under 1,000 tokens. The first four ship
-  today; the rest follow measurement of those.
+  inside a system prompt budgeted under 1,000 tokens. The coding and
+  read-only presets select four tools each, and the selected definitions are
+  measured with the request before dispatch.
 
 ## Honest Posture
 

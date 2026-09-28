@@ -549,7 +549,7 @@ session and the executor.
 
 - [Getting started](getting-started.md) — a first session from a fresh checkout.
 - [The daemon](daemon.md#concept) — the same sessions driven from separate processes through one long-lived daemon per state root.
-- [Tools and policy](tools-and-policy.md#concept) — the four coding tools, host authority and artifacts.
+- [Tools and policy](tools-and-policy.md#concept) — seven available tools, active presets, host authority and artifacts.
 - [How a run works](how-a-run-works.md#concept) — the flow of one run and what is durable at each step.
 - [Agent loop and tools](../developer/agent-loop-and-tools.md#concept) — the loop, contracts and invariants behind this command.
 - [Compatibility surfaces](../developer/compatibility-surfaces.md#concept) — this command's surface and what its experimental status means.
