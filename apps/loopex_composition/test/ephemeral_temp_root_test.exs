@@ -42,6 +42,8 @@ defmodule LoopexComposition.Ephemeral.TempRootTest do
     File.write!(Path.join(owned.path, "receipts/entry"), "receipt")
     assert TempRoot.remove(owned) == :ok
     assert File.lstat(owned.path) == {:error, :enoent}
+    assert TempRoot.remove(owned) == {:error, :root_removal_unproved}
+    assert TempRoot.remove(owned, true) == :ok
   end
 
   test "collision attempts mkdir once and leave the preexisting directory untouched" do
@@ -75,10 +77,12 @@ defmodule LoopexComposition.Ephemeral.TempRootTest do
     File.mkdir!(owned.path)
     File.write!(Path.join(owned.path, "marker"), "replacement")
     assert TempRoot.remove(owned) == {:error, :root_removal_unproved}
+    assert TempRoot.remove(owned, true) == {:error, :root_removal_unproved}
     assert File.read!(Path.join(owned.path, "marker")) == "replacement"
     File.rm_rf!(owned.path)
     File.ln_s!(moved, owned.path)
     assert TempRoot.remove(owned) == {:error, :root_removal_unproved}
+    assert TempRoot.remove(owned, true) == {:error, :root_removal_unproved}
     assert File.lstat!(owned.path).type == :symlink
     assert File.dir?(moved)
     assert TempRoot.claim(candidate) == {:error, :collision}

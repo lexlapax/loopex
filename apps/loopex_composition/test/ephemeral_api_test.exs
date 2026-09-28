@@ -140,6 +140,95 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
     end
   end
 
+  defmodule HeldPollFacade do
+    @moduledoc false
+
+    def create_session(_runtime, %{"surface" => "embedded"}, command_id: "create"),
+      do: {:ok, "held-poll-session"}
+
+    def attach(runtime, "held-poll-session", after_event_sequence: 0) do
+      Process.put(:events, [])
+
+      {:ok,
+       %Loopex.Attachment{
+         runtime: runtime,
+         session_id: "held-poll-session",
+         attachment_id: "a",
+         incarnation_id: "i",
+         snapshot: %{}
+       }}
+    end
+
+    def session_status(_runtime, "held-poll-session"),
+      do:
+        {:ok,
+         %{
+           status: :active,
+           owner_epoch: 0,
+           active_run_id: nil,
+           pending_work_ids: [],
+           cleanup_grace_ms: 5_000
+         }}
+
+    def command(_attachment, %{type: :prompt} = command) do
+      Process.put(:events, [
+        {:ok,
+         %{
+           :kind => "user.message_appended",
+           :event_sequence => 1,
+           "command_id" => command.command_id,
+           "run_id" => "held-run",
+           "content" => command.content
+         }}
+      ])
+
+      {:accepted, command.command_id}
+    end
+
+    def command(_attachment, %{type: :abort} = command) do
+      Process.put(:events, [
+        {:ok,
+         %{
+           :kind => "run.finished",
+           :event_sequence => 2,
+           "run_id" => "held-run",
+           "outcome" => "cancelled",
+           "cleanup_grace_ms" => 5_000
+         }}
+      ])
+
+      send(:persistent_term.get({__MODULE__, :test_pid}), {:abort_received, self()})
+      {:accepted, command.command_id}
+    end
+
+    def next_event(_attachment) do
+      case Process.get(:events, []) do
+        [event | rest] ->
+          Process.put(:events, rest)
+          event
+
+        [] ->
+          if Process.get(:held_poll_released, false) do
+            send(:persistent_term.get({__MODULE__, :test_pid}), :polled_after_release)
+            {:error, :empty}
+          else
+            send(:persistent_term.get({__MODULE__, :test_pid}), {:held_poll, self()})
+
+            receive do
+              :release_poll ->
+                send(:persistent_term.get({__MODULE__, :test_pid}), :poll_release_seen)
+
+                receive do
+                  :complete_poll ->
+                    Process.put(:held_poll_released, true)
+                    {:error, :empty}
+                end
+            end
+          end
+      end
+    end
+  end
+
   setup do
     tmp = Path.join(System.tmp_dir!(), "loopex-api-#{System.unique_integer([:positive])}")
     File.mkdir!(tmp)
@@ -295,7 +384,74 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
     assert File.dir?(root)
   end
 
-  defp start_private_session(tmp, facade \\ Loopex) do
+  test "a lost removal result can be retried after the owned root is absent", %{tmp: tmp} do
+    test = self()
+
+    session =
+      start_private_session(tmp, ScriptedFacade, %{
+        rm_rf: fn path ->
+          result = File.rm_rf(path)
+          send(test, {:root_removed, path, self()})
+          receive do: (:release_removal -> result)
+        end
+      })
+
+    first_stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert_receive {:root_removed, root, worker}, 5_000
+
+    assert {:error, {:cleanup_unproved, %{pending: [:root_removal], root: ^root}}} =
+             Task.await(first_stop, 7_000)
+
+    refute Process.alive?(worker)
+    refute File.exists?(root)
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "stop consumes a granted empty poll before sending abort", %{tmp: tmp} do
+    :persistent_term.put({HeldPollFacade, :test_pid}, self())
+    on_exit(fn -> :persistent_term.erase({HeldPollFacade, :test_pid}) end)
+
+    test = self()
+
+    session =
+      start_private_session(tmp, HeldPollFacade, %{}, %{
+        stop_poll_probe: fn -> send(test, :stop_poll_scheduled) end
+      })
+
+    {:loopex_ephemeral_session, owner, _cell} = session
+    ask = Task.async(fn -> Ephemeral.ask(session, "held") end)
+    assert_receive {:held_poll, facade}, 5_000
+
+    assert %{operation: :next_event, facade: %{stage: :dispatched}} =
+             :sys.get_state(owner).session.active
+
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert eventually(fn -> :sys.get_state(owner).phase == :stopping end)
+    stopping = :sys.get_state(owner)
+    refute stopping.stop.abort_sent
+    assert %{operation: :next_event, facade: %{stage: :dispatched}} = stopping.session.active
+
+    assert stopping.stop.grace_deadline - System.monotonic_time() >
+             System.convert_time_unit(3_000, :millisecond, :native)
+
+    send(facade, :release_poll)
+    assert_receive :poll_release_seen
+    refute :sys.get_state(owner).stop.abort_sent
+    send(facade, :complete_poll)
+
+    receive do
+      {:abort_received, ^facade} -> :ok
+      :stop_poll_scheduled -> flunk("stop scheduled another poll before sending abort")
+      :polled_after_release -> flunk("stop polled again before sending abort")
+    after
+      5_000 -> flunk("stop did not send abort")
+    end
+
+    assert :ok = Task.await(stop, 7_000)
+    assert {:error, {:run, :cancelled, _observation}} = Task.await(ask, 7_000)
+  end
+
+  defp start_private_session(tmp, facade \\ Loopex, temp_root_seams \\ %{}, extra_seams \\ %{}) do
     {:ok, _digest, manifest} =
       Loopex.ResourcePack.digest(%{
         "version" => "loopex.resource_pack/1",
@@ -320,14 +476,15 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
       context_token_budget: 8_192,
       timeout: 60_000,
       test_facade: facade,
-      test_seams: %{
-        temp_root: %{tmp: fn -> tmp end},
-        group_drain: fn executor, instance, owner, nonce, _deadline ->
-          send(test, {:group_drain, executor, instance})
-          send(owner, {executor, instance, nonce, :groups_empty})
-          {:ok, nonce}
-        end
-      }
+      test_seams:
+        Map.merge(extra_seams, %{
+          temp_root: Map.put(temp_root_seams, :tmp, fn -> tmp end),
+          group_drain: fn executor, instance, owner, nonce, _deadline ->
+            send(test, {:group_drain, executor, instance})
+            send(owner, {executor, instance, nonce, :groups_empty})
+            {:ok, nonce}
+          end
+        })
     }
 
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
@@ -348,6 +505,18 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
       _ ->
         Process.sleep(10)
         await_following(owner, kind, attempts - 1)
+    end
+  end
+
+  defp eventually(fun, attempts \\ 100)
+  defp eventually(_fun, 0), do: false
+
+  defp eventually(fun, attempts) do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
     end
   end
 end

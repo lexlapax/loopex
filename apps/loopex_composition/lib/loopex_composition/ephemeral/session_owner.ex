@@ -1754,10 +1754,28 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     state |> live_facade_operation(:next_event, :next_event)
   end
 
-  defp schedule_live_poll(state) do
-    if state.phase == :stopping and not fresh?(state.stop.grace_deadline),
-      do: finish_stop_run(state),
-      else: schedule_live_poll_fresh(state)
+  defp schedule_live_poll(%{phase: :stopping, stop: %{abort_sent: false}} = state),
+    do: stop_abort_or_cleanup(state)
+
+  defp schedule_live_poll(%{phase: :stopping} = state) do
+    probe_stop_poll(state)
+
+    if fresh?(state.stop.grace_deadline),
+      do: schedule_live_poll_fresh(state),
+      else: finish_stop_run(state)
+  end
+
+  defp schedule_live_poll(state), do: schedule_live_poll_fresh(state)
+
+  if Mix.env() == :test do
+    defp probe_stop_poll(state) do
+      case get_in(state.startup.configuration, [:test_seams, :stop_poll_probe]) do
+        callback when is_function(callback, 0) -> callback.()
+        _ -> :ok
+      end
+    end
+  else
+    defp probe_stop_poll(_state), do: :ok
   end
 
   defp schedule_live_poll_fresh(state) do
@@ -2496,7 +2514,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           group_failed: false,
           subtree_failed: false,
           root_failed: false,
-          root_proved: false
+          root_proved: false,
+          root_removal_attempted: false
         }
     }
 
@@ -2615,6 +2634,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       :erlang.spawn_opt(
         fn ->
           Process.flag(:sensitive, true)
+          install_temp_root_test_seam(state.startup.configuration)
 
           result =
             try do
@@ -2651,7 +2671,25 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       finish_sent: false
     }
 
-    %{state | abort: %{state.abort | stage: phase, worker: worker}}
+    abort = %{
+      state.abort
+      | stage: phase,
+        worker: worker,
+        root_removal_attempted: state.abort.root_removal_attempted or phase == :root_removal
+    }
+
+    %{state | abort: abort}
+  end
+
+  if Mix.env() == :test do
+    defp install_temp_root_test_seam(configuration) do
+      case get_in(configuration, [:test_seams, :temp_root]) do
+        seams when is_map(seams) -> Process.put({TempRoot, :dependencies}, seams)
+        _ -> :ok
+      end
+    end
+  else
+    defp install_temp_root_test_seam(_configuration), do: :ok
   end
 
   defp abort_operation(state, :process_groups, nonce, deadline) do
@@ -2675,7 +2713,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   defp abort_operation(state, :root_removal, _nonce, _deadline),
-    do: TempRoot.remove(state.startup.owned_root)
+    do: TempRoot.remove(state.startup.owned_root, state.abort.root_removal_attempted)
 
   defp abort_operation(state, :root_absence, _nonce, _deadline) do
     case File.lstat(state.startup.owned_root.path) do

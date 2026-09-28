@@ -64,25 +64,41 @@ defmodule LoopexComposition.Ephemeral.TempRoot do
   end
 
   # Concept: removal needs retained ownership and a fresh matching directory.
+  # A later retry may prove an absent root only after an authorized removal
+  # attempt whose result was lost.
   # Technical depth: the host filesystem is trusted between lstat and rm_rf.
   # These pathname operations do not provide atomic protection against a
   # concurrent same-user replacement. The session owner supplies the bounded
   # worker and proves its DOWN and a separate absence observation.
-  def remove(%{path: path, identity: expected} = owned) when is_map(expected) do
+  def remove(owned), do: remove(owned, false)
+
+  def remove(%{path: path, identity: expected} = owned, prior_attempt)
+      when is_map(expected) and is_boolean(prior_attempt) do
     with true <- candidate?(owned) and identity?(expected),
          {:ok, uid} <- current_uid(),
-         true <- expected.uid == uid,
-         {:ok, stat} <- invoke(:lstat, [path], &File.lstat/1),
-         true <- stat.type == :directory and identity(stat) == expected,
-         {:ok, _} <- invoke(:rm_rf, [path], &File.rm_rf/1),
-         {:error, :enoent} <- invoke(:lstat, [path], &File.lstat/1) do
-      :ok
+         true <- expected.uid == uid do
+      case invoke(:lstat, [path], &File.lstat/1) do
+        {:error, :enoent} when prior_attempt ->
+          :ok
+
+        {:ok, stat} when stat.type == :directory ->
+          with true <- identity(stat) == expected,
+               {:ok, _} <- invoke(:rm_rf, [path], &File.rm_rf/1),
+               {:error, :enoent} <- invoke(:lstat, [path], &File.lstat/1) do
+            :ok
+          else
+            _ -> {:error, :root_removal_unproved}
+          end
+
+        _ ->
+          {:error, :root_removal_unproved}
+      end
     else
       _ -> {:error, :root_removal_unproved}
     end
   end
 
-  def remove(_), do: {:error, :root_removal_unproved}
+  def remove(_, _), do: {:error, :root_removal_unproved}
 
   defp temporary_directory do
     try do
