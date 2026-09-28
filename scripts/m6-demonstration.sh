@@ -201,7 +201,7 @@ M6_DEMO_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/loopex-m6-demo.XXXXXX")
 export M6_DEMO_WORKSPACE="$M6_DEMO_ROOT/workspace"
 export M6_DEMO_SKILL="$M6_DEMO_ROOT/skills/m6-demo"
 mkdir "$M6_DEMO_WORKSPACE"
-export M6_DEMO_COMMAND="$PWD/apps/loopex_cli/loopex"
+export M6_DEMO_COMMAND="$PWD/apps/loopex_cli/bin/loopex"
 export M6_DEMO_PROMPT='Perform the coding task defined by the supplied m6-demo skill.'
 printf 'm6-demonstration: candidate %s on %s; workspace %s\n' \
   "$candidate" "$(uname -s)" "$M6_DEMO_WORKSPACE"

@@ -37,10 +37,13 @@ fi
 
 paths=$(mktemp "${TMPDIR:-/tmp}/loopex-manifest-paths.XXXXXX")
 records=$(mktemp "${TMPDIR:-/tmp}/loopex-manifest-records.XXXXXX")
-trap 'rm -f "$paths" "$records"' EXIT
+sorted=$(mktemp "${TMPDIR:-/tmp}/loopex-manifest-sorted.XXXXXX")
+trap 'rm -f "$paths" "$records" "$sorted"' EXIT
 
 find . -mindepth 1 \( -path ./_build -o -path ./deps \) -prune -o -print0 >"$paths" ||
   { echo 'source-archive-manifest: the walk did not complete' >&2; exit 1; }
+LC_ALL=C sort -z "$paths" >"$sorted" ||
+  { echo 'source-archive-manifest: sorting paths failed' >&2; exit 1; }
 
 while IFS= read -r -d '' entry; do
   path=${entry#./}
@@ -64,6 +67,6 @@ while IFS= read -r -d '' entry; do
     echo 'source-archive-manifest: unsupported entry kind' >&2
     exit 1
   fi
-done < <(LC_ALL=C sort -z "$paths")
+done <"$sorted"
 
 cat "$records"

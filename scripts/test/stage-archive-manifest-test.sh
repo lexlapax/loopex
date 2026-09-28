@@ -45,6 +45,18 @@ cmp -s "$work/expected-tree/SOURCE_IDENTITY" "$out.source-identity" ||
   fail 'sidecar differs from exact archive bytes'
 grep -q "^commit $sha$" "$out.source-identity" || fail 'sidecar does not name archived commit'
 
+mkdir "$work/sort-fault-bin" "$work/sort-tree"
+printf 'fixture bytes\n' >"$work/sort-tree/item"
+printf '%s\n' '#!/bin/sh' "printf './item\\000'" 'exit 9' >"$work/sort-fault-bin/sort"
+chmod +x "$work/sort-fault-bin/sort"
+if PATH="$work/sort-fault-bin:$PATH" bash "$source_root/scripts/source-archive-manifest.sh" \
+    "$work/sort-tree" >"$work/sort-fault.stdout" 2>"$work/sort-fault.stderr"; then
+  fail 'failed sort unexpectedly produced a manifest'
+fi
+[ ! -s "$work/sort-fault.stdout" ] || fail 'failed sort emitted partial manifest bytes'
+grep -qx 'source-archive-manifest: sorting paths failed' "$work/sort-fault.stderr" ||
+  fail 'failed sort had no diagnostic'
+
 # Command substitution must not trim bytes from link targets, and a hashing
 # utility must not escape a file's name into its digest field.
 link_seen=0
