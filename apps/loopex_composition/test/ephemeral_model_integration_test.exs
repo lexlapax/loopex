@@ -16,38 +16,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
 
-    {:ok, listener} =
-      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
-
-    {:ok, {_, port}} = :inet.sockname(listener)
-    parent = self()
-
-    server =
-      spawn(fn ->
-        for answer <- ["first answer", "second answer"] do
-          {:ok, socket} = :gen_tcp.accept(listener, 15_000)
-          {:ok, request} = read_request(socket, <<>>)
-          send(parent, {:model_request, request})
-          body = response(answer)
-
-          :ok =
-            :gen_tcp.send(socket, [
-              "HTTP/1.1 200 OK\r\n",
-              "content-type: application/json\r\n",
-              "content-length: ",
-              Integer.to_string(byte_size(body)),
-              "\r\nconnection: close\r\n\r\n",
-              body
-            ])
-
-          :gen_tcp.close(socket)
-        end
-      end)
-
-    on_exit(fn ->
-      :gen_tcp.close(listener)
-      if Process.alive?(server), do: Process.exit(server, :kill)
-    end)
+    port = start_server(["first answer", "second answer"])
 
     assert {:ok, session} =
              Ephemeral.start_session(
@@ -76,6 +45,65 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert_receive {:model_request, second_request}, 15_000
     assert second_request =~ "POST /v1/chat/completions HTTP/1.1"
     assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "one-call embedding outlives its owner-start ticket while the model answers" do
+    root = Path.join(System.tmp_dir!(), "loopex-once-#{System.unique_integer([:positive])}")
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    port = start_server(["one-call answer"], 1_100)
+
+    assert {:ok, %{outcome: :completed, text: "one-call answer"}} =
+             Ephemeral.run("one prompt",
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :none,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert_receive {:model_request, request}, 15_000
+    assert request =~ "POST /v1/chat/completions HTTP/1.1"
+  end
+
+  defp start_server(answers, delay_ms \\ 0) do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
+
+    {:ok, {_, port}} = :inet.sockname(listener)
+    parent = self()
+
+    server =
+      spawn(fn ->
+        for answer <- answers do
+          {:ok, socket} = :gen_tcp.accept(listener, 15_000)
+          {:ok, request} = read_request(socket, <<>>)
+          send(parent, {:model_request, request})
+          Process.sleep(delay_ms)
+          body = response(answer)
+
+          :ok =
+            :gen_tcp.send(socket, [
+              "HTTP/1.1 200 OK\r\n",
+              "content-type: application/json\r\n",
+              "content-length: ",
+              Integer.to_string(byte_size(body)),
+              "\r\nconnection: close\r\n\r\n",
+              body
+            ])
+
+          :gen_tcp.close(socket)
+        end
+      end)
+
+    on_exit(fn ->
+      :gen_tcp.close(listener)
+      if Process.alive?(server), do: Process.exit(server, :kill)
+    end)
+
+    port
   end
 
   defp read_request(socket, buffered) do
