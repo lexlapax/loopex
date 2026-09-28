@@ -1,8 +1,17 @@
 defmodule LoopexComposition.SessionContainmentTest do
   use ExUnit.Case, async: false
 
+  Code.require_file(
+    Path.expand(
+      "../../loopex_llm_reqllm/test/support/provider_register_rendezvous.exs",
+      __DIR__
+    )
+  )
+
   alias Loopex.Executor
   alias Loopex.Executor.Local
+  alias Loopex.LLM.ReqLLM.InProcess.TestRegisterRendezvous
+  alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias LoopexComposition.Ephemeral
   alias LoopexComposition.SessionAdmission
 
@@ -226,6 +235,216 @@ defmodule LoopexComposition.SessionContainmentTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "real worker retention keeps an unregistered candidate until exact release and DOWN", %{
+    workspace: workspace
+  } do
+    {port, server} = held_server("second answer")
+
+    assert {:ok, {:loopex_ephemeral_session, owner, cell} = session} =
+             Ephemeral.start_session(
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: workspace,
+               tools: :coding,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    :ok = TestRegisterRendezvous.open!()
+    release_table = :ets.new(:loopex_test_empty_release, [:named_table, :public, :set])
+    nonce = make_ref()
+    :ok = TestRegisterRendezvous.arm!(cell, self(), nonce)
+    first = Task.async(fn -> Ephemeral.ask(session, "first call") end)
+
+    assert_receive {:before_provider_register, ^nonce, callback, call, candidate}, 5_000
+    owner_state = :sys.get_state(owner)
+    runtime = owner_state.startup.registered.runtime
+    session_id = owner_state.startup.session_id
+    {:ok, %{control: control}} = RuntimeSupervisor.children(runtime.supervisor)
+    coordinator = :sys.get_state(control).sessions[session_id].coordinator
+
+    [{_task_ref, {:model, run_id, worker, %{guard: guard, reference: reference}}}] =
+      await(coordinator, fn state ->
+        models =
+          Enum.filter(state.in_flight, fn
+            {_task_ref, {:model, _run_id, _worker, _tree}} -> true
+            _other -> false
+          end)
+
+        if models == [], do: :wait, else: {:ok, models}
+      end)
+
+    assert Process.alive?(callback)
+    assert Process.alive?(candidate)
+    assert Process.alive?(worker)
+    assert Process.alive?(guard)
+    assert is_binary(run_id)
+    assert is_reference(reference)
+    assert true = :erlang.suspend_process(worker)
+
+    try do
+      send(callback, {:continue_provider_register, nonce})
+
+      {:loopex_provider_resource_offered, ^reference, ^callback, ^candidate, stop_ref, offer_ref} =
+        await_process_message(worker, fn
+          {:loopex_provider_resource_offered, ^reference, ^callback, ^candidate, stop, offer}
+          when is_reference(stop) and is_reference(offer) ->
+            true
+
+          _other ->
+            false
+        end)
+
+      assert true = :erlang.suspend_process(callback)
+
+      try do
+        assert true = :erlang.resume_process(worker)
+
+        assert {:loopex_provider_resource_retained_by_worker, ^reference, ^offer_ref, ^worker} =
+                 await_process_message(callback, fn
+                   {:loopex_provider_resource_retained_by_worker, ^reference, ^offer_ref, ^worker} ->
+                     true
+
+                   _other ->
+                     false
+                 end)
+
+        assert {:monitors, worker_monitors} = Process.info(worker, :monitors)
+        assert {:process, candidate} in worker_monitors
+        assert {:messages, guard_messages} = Process.info(guard, :messages)
+
+        refute Enum.any?(guard_messages, fn
+                 {:loopex_provider_resource_register, ^reference, ^callback, ^candidate,
+                  ^stop_ref, _registration} ->
+                   true
+
+                 _other ->
+                   false
+               end)
+
+        assert {:dictionary, guard_dictionary} = Process.info(guard, :dictionary)
+
+        refute Enum.any?(guard_dictionary, fn {key, _value} ->
+                 key == {{Loopex.Runtime.SessionCoordinator, :provider_resource}, reference}
+               end)
+
+        held_state = :sys.get_state(owner)
+        executor = held_state.startup.registered.executor
+        {job, grant} = write_job(held_state, "held-effect", workspace)
+        effect = Task.async(fn -> Local.execute(executor, job, grant) end)
+
+        assert %{envelope: {_requester, _reference, {:tool_grant, ^executor, _, _}, _expiry}} =
+                 await(owner, fn state ->
+                   case state.model_census.tool_wait do
+                     nil -> :wait
+                     waiting -> {:ok, waiting}
+                   end
+                 end)
+
+        assert nil == Task.yield(effect, 0)
+        refute File.exists?(Path.join(workspace, "held-effect.txt"))
+
+        release_nonce = make_ref()
+        true = :ets.insert_new(release_table, {cell, self(), release_nonce})
+        {:ok, attachment} = Loopex.attach(runtime, session_id)
+
+        assert {:accepted, _} =
+                 Loopex.command(attachment, %{
+                   type: :abort,
+                   command_id: "retained-unregistered-abort"
+                 })
+
+        assert_receive {:empty_release_deferred, ^release_nonce, ^owner, ^candidate,
+                        {:release_empty_invocation, generation, ^call, ^candidate, proof,
+                         release_ref, deadline} = release},
+                       5_000
+
+        assert is_reference(generation)
+        assert is_reference(proof)
+        assert is_reference(release_ref)
+        assert deadline > System.monotonic_time()
+        Process.put({__MODULE__, :held_release}, {candidate, release})
+        assert Process.alive?(candidate)
+        assert :atomics.get(cell, 2) == 1
+
+        assert %{phase: :retired_wait_down, call: ^call, candidate: ^candidate} =
+                 :sys.get_state(owner).model_census.pending
+
+        assert %{stage: :release, run_id: ^run_id, call: ^call, candidate: ^candidate} =
+                 :sys.get_state(owner).session.settlement
+
+        assert {:error, :run_open} = Ephemeral.ask(session, "blocked while release held")
+        refute_receive {:model_request, ^server, _request}, 0
+        pre_release_effect = Task.yield(effect, 0)
+
+        assert pre_release_effect in [
+                 nil,
+                 {:ok, {:error, {:refused_before_effect, :session_admission_closed}}}
+               ]
+
+        refute File.exists?(Path.join(workspace, "held-effect.txt"))
+
+        candidate_monitor = Process.monitor(candidate)
+        assert deadline > System.monotonic_time()
+        send(candidate, release)
+        Process.delete({__MODULE__, :held_release})
+        assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, _reason}, 1_000
+
+        assert :ok =
+                 await(owner, fn state ->
+                   if state.model_census.pending == nil and :atomics.get(cell, 2) == 0,
+                     do: {:ok, :ok},
+                     else: :wait
+                 end)
+
+        assert {:ok, {:error, {:run, outcome, _detail}}} = Task.yield(first, 5_000)
+        assert outcome in [:cancelled, :bound_reached]
+
+        store = :sys.get_state(owner).startup.registered.store_handle
+        assert {:ok, records} = Loopex.Store.load_records(store, session_id, 0, 512)
+
+        assert [%{payload: %{"transport" => "dispatched_or_unknown"}}] =
+                 Enum.filter(records, fn record ->
+                   (record.payload[:kind] || record.payload["kind"]) ==
+                     "model_attempt_settled_v2" and record.payload["run_id"] == run_id
+                 end)
+
+        effect_result = pre_release_effect || Task.yield(effect, 5_000)
+
+        assert effect_result in [
+                 {:ok, {:error, {:refused_before_effect, :session_admission_closed}}},
+                 {:ok, {:ok, %{outcome: :completed, cleanup_confirmation: :confirmed}}}
+               ]
+
+        if match?({:ok, {:ok, _}}, effect_result) do
+          assert File.read!(Path.join(workspace, "held-effect.txt")) == "bytes"
+        else
+          refute File.exists?(Path.join(workspace, "held-effect.txt"))
+        end
+
+        second = Task.async(fn -> Ephemeral.ask(session, "second call") end)
+        assert_receive {:model_request, ^server, _request}, 5_000
+        send(server, :release)
+
+        assert {:ok, {:ok, %{outcome: :completed, text: "second answer"}}} =
+                 Task.yield(second, 5_000)
+
+        assert :ok = Ephemeral.stop_session(session)
+      after
+        resume_fixture_process(callback)
+      end
+    after
+      resume_fixture_process(worker)
+      send(callback, {:continue_provider_register, nonce})
+      release_held_by_fixture(owner, candidate)
+      :ets.delete(release_table)
+      TestRegisterRendezvous.close!()
+
+      if Process.alive?(owner), do: Ephemeral.stop_session(session)
+    end
+  end
+
   defp write_job(state, label, workspace) do
     {:ok, tool} = Local.tool("loopex.write")
     now = System.system_time(:millisecond)
@@ -357,6 +576,51 @@ defmodule LoopexComposition.SessionContainmentTest do
       :wait ->
         Process.sleep(5)
         await(owner, read, attempts - 1)
+    end
+  end
+
+  defp await_process_message(pid, match?, attempts \\ 200)
+  defp await_process_message(_pid, _match?, 0), do: flunk("expected process message was absent")
+
+  defp await_process_message(pid, match?, attempts) do
+    case Process.info(pid, :messages) do
+      {:messages, messages} ->
+        case Enum.find(messages, match?) do
+          nil ->
+            Process.sleep(5)
+            await_process_message(pid, match?, attempts - 1)
+
+          message ->
+            message
+        end
+
+      nil ->
+        flunk("process died before its expected message was observed")
+    end
+  end
+
+  defp resume_fixture_process(pid) do
+    try do
+      case Process.info(pid, :status) do
+        {:status, :suspended} -> :erlang.resume_process(pid)
+        _other -> :ok
+      end
+    catch
+      :error, :badarg -> :ok
+    end
+  end
+
+  defp release_held_by_fixture(owner, candidate) do
+    case Process.delete({__MODULE__, :held_release}) do
+      {^candidate, release} -> send(candidate, release)
+      _none -> :ok
+    end
+
+    receive do
+      {:empty_release_deferred, _nonce, ^owner, ^candidate, release} ->
+        send(candidate, release)
+    after
+      0 -> :ok
     end
   end
 

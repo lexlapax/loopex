@@ -1025,11 +1025,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         pending = state.model_census.pending
         release_ref = make_ref()
 
-        send(
-          pending.candidate,
+        release =
           {:release_empty_invocation, state.model_census.generation, pending.call,
            pending.candidate, pending.proof, release_ref, settlement.deadline}
-        )
+
+        dispatch_empty_release(state.cell, pending.candidate, release)
 
         state
         |> put_in([:session, :settlement, :stage], :release)
@@ -1042,6 +1042,31 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   defp advance_model_settlement(state), do: state
+
+  if Mix.env() == :test do
+    # Concept: one fixture may delay only its session's exact empty release.
+    # Technical depth: the owner never waits for the fixture. Production code
+    # compiles the direct-send branch below and has no table lookup.
+    defp dispatch_empty_release(cell, candidate, release) do
+      table = :loopex_test_empty_release
+
+      case :ets.whereis(table) do
+        :undefined ->
+          send(candidate, release)
+
+        _table ->
+          case :ets.take(table, cell) do
+            [{^cell, fixture, nonce}] ->
+              send(fixture, {:empty_release_deferred, nonce, self(), candidate, release})
+
+            [] ->
+              send(candidate, release)
+          end
+      end
+    end
+  else
+    defp dispatch_empty_release(_cell, candidate, release), do: send(candidate, release)
+  end
 
   defp empty_retired_candidate?(%{
          phase: :retired_wait_down,

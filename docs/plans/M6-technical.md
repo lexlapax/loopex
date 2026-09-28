@@ -3674,9 +3674,11 @@ ask in that same session. While the correlated release is withheld in the
 existing release-fault variant, require a second public ask to return
 {:error, :run_open}, the one record and slot2 still held, and no second model
 invocation or work grant; only actual candidate DOWN permits the next
-successful ask. The existing private test dispatcher defers only that exact
-release send, without blocking the session owner's receive loop or the sole
-facade reader. Deliver the original release within its unchanged 1,000 ms
+successful ask. A test-only cell-keyed release dispatcher atomically consumes
+one fixture-owned ETS arm and hands only that exact release tuple to the
+fixture, without blocking the session owner's receive loop or the sole facade
+reader. With no matching arm, production and test calls send directly. Deliver
+the original release within its unchanged 1,000 ms
 bound, then require genuine DOWN, cleared slot2 and the successful later ask.
 If withholding exhausts the bound, require conservative session cleanup,
 never successful reuse or a deadline extension. No fake registrar, fabricated signal
