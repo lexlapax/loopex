@@ -58,8 +58,9 @@ experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.
   boundary. Durable sessions use a private companion process for the selected
   credential. Ephemeral sessions call the provider in the host VM; during a
   call, its HTTP/TLS state and host-installed observers can see that value.
-  Loopex keeps the selected key out of its own journal and diagnostics, but a
-  host-authorized tool can disclose ambient credentials. See
+  Loopex does not inject the selected key into its journal or diagnostics, but
+  a host-authorized tool can disclose ambient credentials through ordinary
+  tool results. See
   [ADR 0039](docs/adr/0039-ephemeral-embedded-profile.md#concept) for this
   profile's trust and cleanup limits.
 - **Honest tool execution.** Every tool job is a durable operation with

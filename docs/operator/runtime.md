@@ -121,8 +121,8 @@ your own host, follow the
   [credential boundary](tools-and-policy.md#operator-tools-credential).
 - In the ephemeral profile, a selected hosted-provider key is visible to the
   host VM and its HTTP/TLS path during the call; host-installed observers and
-  authorized tools may also expose ambient values. Loopex does not put the
-  selected key in its own journal or diagnostics, but this is not structural
+  authorized tools may also expose ambient values. Loopex does not inject the
+  selected key into its own journal or diagnostics, but this is not structural
   secrecy from trusted host code. See
   [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept).
 - The trusted-local executor is not a sandbox. It runs only its registered
