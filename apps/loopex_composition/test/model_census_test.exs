@@ -395,7 +395,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
 
     assert {:ok, _} = SessionAdmission.request(handle, {:begin_model, self(), call}, deadline())
 
-    assert {:error, :session_admission_closed} =
+    assert {:error, :model_stage_cancelled} =
              SessionAdmission.request(
                handle,
                {:stage_model, call, candidate, make_ref(), make_ref(),

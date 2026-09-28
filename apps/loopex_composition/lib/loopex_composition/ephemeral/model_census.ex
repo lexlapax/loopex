@@ -134,7 +134,10 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
     # Technical depth: independent candidate DOWN plus the reconciled start proof
     # settles this empty invocation. Never send its now-stale staging grant.
     {envelope, _staging_ref} = pending.stage
-    reply(state, envelope, closed())
+    # The exact candidate DOWN is the owner's proof that this staging call
+    # never obtained registrar permission. Distinguish it from an ambiguous
+    # refusal so the callback need not seal an already-cleared session.
+    reply(state, envelope, {:error, :model_stage_cancelled})
     clear_pending(state)
   end
 

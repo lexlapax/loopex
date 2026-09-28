@@ -1331,7 +1331,10 @@ an OpenAI surface change can pass the final boundary.
   composition's `SessionAdmission` implements both. A thin asynchronous
   request helper provides
   `request(module, opaque_handle, operation, native_deadline)` returning exact
-  `{:ok, token}` or `{:error, :session_admission_closed}`. Each edge's private
+  `{:ok, token}` or `{:error, :session_admission_closed}`. An exact monitored
+  candidate DOWN during staging alone returns the correlated
+  `{:error, :model_stage_cancelled}` to that live stage request after the
+  owner clears the empty record. Each edge's private
   dispatch wrapper is request/4 (module, handle, operation, native deadline);
   the behaviour callback and composition implementation are request/3 (handle,
   operation, deadline). They dynamically invoke the supplied module's request/3,
@@ -1456,7 +1459,9 @@ an OpenAI surface change can pass the final boundary.
   During staging, candidate DOWN before any staging acknowledgement was issued
   to callback proves no registrar permission was released. With the reconciled
   start/proxy proof and exact candidate DOWN, owner can cancel that empty record;
-  it sends no stale staging acknowledgement. After provisional commitment,
+  it sends the correlated clean-cancellation result, not a staging grant. A
+  missing or expired result remains ambiguous and cannot itself seal a record
+  that the owner may already have cleared. After provisional commitment,
   candidate must record retirement before exit on callback loss before
   registration_pending is acknowledged, including its original start-deadline expiry after
   custody delivery. After registration_pending, callback DOWN permanently

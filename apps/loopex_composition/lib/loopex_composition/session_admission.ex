@@ -317,6 +317,16 @@ defmodule LoopexComposition.SessionAdmission do
        else: closed()
   end
 
+  defp validate_result(
+         {:error, :model_stage_cancelled} = result,
+         _generation,
+         _reference,
+         {:stage_model, _, _, _, _, _},
+         deadline
+       ) do
+    if System.monotonic_time() < deadline, do: result, else: closed()
+  end
+
   defp validate_result(_result, _generation, _reference, _operation, _deadline), do: closed()
 
   defp remaining_slice(deadline) do
