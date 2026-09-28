@@ -3754,6 +3754,16 @@ Concept: [How each outcome is verified](M6.md#concept-plan-verification).
 | 1–4 | `scripts/m6-demonstration.sh`, the single acceptance demonstration, run from a clean checkout with no `LOOPEX_HOME` on macOS and on Linux | Its four steps in order, each printing its own `PASS` or `FAIL` line and the elapsed time; the complete output of each platform's run retained with its reference and SHA-256 digest in `docs/evidence/M6-closure-runs.md` | closure |
 | 2 | Independent read-only in-process credential/security review of tested SHA; immutable complete output retained outside repository | `docs/evidence/M6-closure-runs.md` reserves Pending result, tested SHA, retained-output reference and SHA-256 fields before candidate commit. Administrative child fills only reserved fields; no new review document after testing. Review verifies transport, adapter-injected-value rejection, direct cleanup proofs, hosted tool use, ambient-key acceptance including deliberate trusted-tool disclosure, session-local seals, recoverable startup, all seven amendment texts including the proposed host-selected catalog trust scope, loader failure/lock witnesses and release-only socket/TLS5,000ms bound. No arbitrary heap erasure, global key-free runtime claim or same-user tool isolation. Load-only packaging and persisted dotenv off are checked | closure |
 
+The 2026-09-27 maintainer documentation direction extends row 6's retained
+semantic review to the existing `docs/operator/coding-sessions.md`,
+`docs/operator/observability.md`, `docs/operator/how-a-run-works.md` and its
+technical companion, `docs/developer/architecture.md`,
+`docs/developer/agent-loop-and-tools.md`, both directory indexes, and the
+root `README.md` and `CHANGELOG.md`. The review checks every affected
+getting-started command and embedding example against the tested candidate,
+distinguishes ephemeral and durable credential/tool/artifact behavior, and
+leaves `run`, daemon and app-server guidance correct for the durable profile.
+
 **Evidence rules.**
 - **Executed witnesses.** Every derived number has an executed witness before
   closure: the exit statuses, the tool bounds, the defaults, and the release
