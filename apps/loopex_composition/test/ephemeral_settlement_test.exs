@@ -260,7 +260,23 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
-  defp start_pending_ask do
+  test "genuine candidate DOWN proves settlement when the release acknowledgement is lost" do
+    {session, _owner, cell, question, facade, candidate} = start_pending_ask(:drop_release_ack)
+    send(facade, :release_settlement_prompt)
+    assert_receive {:settlement_status_requested, ^facade}, 2_000
+    send(facade, :release_settlement_status)
+
+    assert_receive {:candidate_released, _, _, _}, 2_000
+
+    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
+             Task.yield(question, 2_000)
+
+    refute Process.alive?(candidate)
+    assert :atomics.get(cell, 2) == 0
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  defp start_pending_ask(mode \\ :ack) do
     root = Path.join(System.tmp_dir!(), "loopex-settlement-#{System.unique_integer([:positive])}")
     File.mkdir!(root)
     Application.put_env(:loopex_composition, :settlement_test, self())
@@ -277,7 +293,7 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     call = make_ref()
     proof = make_ref()
     test = self()
-    candidate = spawn(fn -> candidate_loop(owner, cell, test, call, proof) end)
+    candidate = spawn(fn -> candidate_loop(owner, cell, test, call, proof, mode) end)
     on_exit(fn -> if Process.alive?(candidate), do: Process.exit(candidate, :kill) end)
 
     :sys.replace_state(owner, fn state ->
@@ -310,20 +326,23 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     {session, owner, cell, question, facade, candidate}
   end
 
-  defp candidate_loop(owner, cell, test, call, proof) do
+  defp candidate_loop(owner, cell, test, call, proof, mode) do
     receive do
       {:release_empty_invocation, generation, ^call, candidate, ^proof, release_ref, deadline}
       when candidate == self() ->
         send(test, {:candidate_released, generation, release_ref, deadline})
-        send(owner, {:empty_invocation_released, self(), release_ref})
-        candidate_loop(owner, cell, test, call, proof)
+
+        if mode == :ack do
+          send(owner, {:empty_invocation_released, self(), release_ref})
+          candidate_loop(owner, cell, test, call, proof, mode)
+        end
 
       :finish_candidate ->
         :ok
     after
       10 ->
         if :atomics.get(cell, 1) == 0,
-          do: candidate_loop(owner, cell, test, call, proof),
+          do: candidate_loop(owner, cell, test, call, proof, mode),
           else: :ok
     end
   end
