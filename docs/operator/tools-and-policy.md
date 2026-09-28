@@ -5,9 +5,10 @@
 
 Technical depth: [Budgets, policy port, grants, and credential boundaries](#technical-depth).
 
-A coding session is useful only if it can act. Loopex gives a session four tools
-— `read`, `write`, `edit` and `bash` — that act on a real workspace on your
-machine, and it puts a host policy in front of every one of them.
+A coding session is useful only if it can act. Loopex ships four coding tools
+— `read`, `write`, `edit` and `bash` — plus three read-only search tools:
+`grep`, `find` and `ls`. A session activates only its selected preset, and a
+host policy stands in front of every tool call.
 
 Authority is the host's, not the runtime's. Loopex owns the mechanics of running
 a tool and stopping it truthfully; it has no opinion about whether a particular
@@ -31,7 +32,7 @@ Running, steering and stopping a session:
 [Agent loop and tools](../developer/agent-loop-and-tools.md#concept).
 
 <a id="operator-tools-four"></a>
-## The Four Tools
+## The Four Coding Tools
 
 | Tool | What it does | Effect class | Retry class |
 | --- | --- | --- | --- |
@@ -44,6 +45,24 @@ Running, steering and stopping a session:
 as doing them once: an edit that already applied would not match again, and a
 command that already ran may already have changed something. Their per-tool
 budgets are under [declared budgets](#operator-tools-budgets).
+
+<a id="operator-tools-search"></a>
+## The Read-Only Search Tools
+
+| Tool | What it returns |
+| --- | --- |
+| `grep` | Bounded UTF-8 regex matches in regular files under a workspace path, optionally filtered by a glob |
+| `find` | Workspace paths matching a bounded glob |
+| `ls` | Entries under a workspace path, optionally recursive |
+
+All three are `read_only` and `safe_retry`. They do not follow a final symbolic
+link, stop at fixed traversal, file and output limits, and report truncation or
+skipped entries. They are not a filesystem sandbox: a same-user process can
+race path checks. The durable `run` and `resume` defaults still activate only
+the four coding tools. `loopex ask` and the ephemeral embedded API select
+`:coding` (the four coding tools), `:read_only` (`read`, `grep`, `find`, `ls`),
+or `:none`; the command spells those presets `coding`, `read-only` and `none`
+with `--tools`. A durable `ask --state-root` uses the same selected active set.
 
 <a id="operator-tools-reach"></a>
 ## What Local Execution Can Reach
@@ -75,9 +94,10 @@ to claim cleanup, reports the effect unproven and quarantines the executor's
 ledger root; it does not claim that an unsandboxed command sabotaging the
 cleanup mechanism can always be reaped synchronously.
 
-Every process the executor starts has the provider credential removed
-explicitly. A model-supplied command then crosses `/usr/bin/env -i` and receives
-only a fixed `PATH`, so none of your shell variables reach it. The first
+In a durable session, every process the executor starts has
+`LOOPEX_PROVIDER_API_KEY` removed explicitly. A model-supplied command then
+crosses `/usr/bin/env -i` and receives only a fixed `PATH`, so none of your
+shell variables reach it. The first
 launcher process is also given an override that clears the environment names
 present when it is assembled. The Erlang port environment extends the process
 environment rather than replacing it atomically, so Loopex does not claim that a
@@ -181,8 +201,9 @@ unproven. The derived windows are listed under
 <a id="operator-tools-ledger"></a>
 ### The Executor's Ledger Root
 
-The local executor's ledger root (`receipts/` under the state root) is part of
-its authority, not a cache. An entry is opened before an effect starts and
+The local executor's ledger root (`receipts/` under the durable state root, or
+under an ephemeral session's temporary root) is part of its authority, not a
+cache. An entry is opened before an effect starts and
 closed only when cleanup is confirmed, so an unproven effect leaves its entry
 open deliberately. Keep the root as one intact unit. Copying or deleting part of
 it, restoring an older snapshot, reusing its filesystem identity, or rewriting
@@ -248,6 +269,7 @@ Where you choose the policy:
 | Surface | How it is named | Stances shipped |
 | --- | --- | --- |
 | `loopex run` and `loopex resume` | `--policy` | `allow-all`, `shell-allowlist` |
+| `loopex ask` and `loopex -p` | `--policy` | `allow-all`, `shell-allowlist`, `refuse-all` |
 | `loopex cancel` | optional `--policy` | as above; without one, a stance that refuses every call |
 | `loopex daemon` | `--policy` or `LOOPEX_POLICY`, once at start | `allow-all`, `shell-allowlist` |
 | The app server | `LOOPEX_POLICY`, once at launch | `allow-all`, `ask` |
@@ -344,25 +366,31 @@ the state root until you remove them; an artifact outlives the run that produced
 it, which is the point of retrieving it later, and it is why that directory only
 grows.
 
-**Where there is no store, the rest is lost.** The executor takes its artifact
-store from whoever composed it. The `loopex` command, the daemon and the app
-server always supply one, but a host that composed none, or a store that refuses
-the write, leaves the tool with a marker naming how many bytes existed and no way
-to reach them. The receipt then records an empty artifact list, which is true,
-and that is the whole of the warning.
+**Where there is no artifact store, the rest is lost.** The executor takes its
+artifact store from whoever composed it. Durable `run`, `resume`, the daemon and
+the app server supply one; ephemeral `ask` deliberately does not. A host that
+composed none, or a store that refuses the write, leaves the tool with a marker
+naming how many bytes existed and no way to retrieve them. The receipt then
+records an empty artifact list, which is true, and that is the whole warning.
 
 <a id="operator-tools-disclosure"></a>
 ## What Is Kept on Disk, Unencrypted
 
-The local store keeps **session records and artifact bytes unencrypted on your
-local disk** under the state root. That includes your prompts, the model's
+The durable local store keeps **session records and artifact bytes unencrypted
+on your local disk** under the state root. That includes your prompts, the model's
 replies, the tool calls it made, and the output those tools produced — which is
 the content of the files the session read.
 
-Decide what to let a session read with that in mind. If a repository contains
+The ephemeral profile keeps session truth in memory instead and removes its
+temporary executor root after proved cleanup. It creates no retained artifact
+store, but tools still change real workspace files. If cleanup is unproved, its
+temporary root is kept and named rather than silently deleted. Decide what to
+let a session read with both profiles in mind. If a repository contains
 material you would not want written to your state root in the clear, a session
-that reads it will write it there. The provider credential is the one thing that
-never enters that record; see [credential boundary](#operator-tools-credential).
+that reads it durably will write it there. The durable provider credential is
+not put into that record by Loopex; an authorized tool may nevertheless copy
+an ambient value into an ordinary result in the ephemeral profile. See the
+[credential boundary](#operator-tools-credential).
 
 <a id="operator-tools-skill-authority"></a>
 ## Skill Content Does Not Grant Authority
@@ -399,6 +427,9 @@ Developer companion:
 | `loopex.write` | 30,000 ms | 4,096 | 8,388,608 |
 | `loopex.edit` | 30,000 ms | 4,096 | 8,388,608 |
 | `loopex.bash` | 120,000 ms | 16,384 | 8,388,608 |
+| `loopex.grep` | 30,000 ms | 16,384 | 1 |
+| `loopex.find` | 30,000 ms | 16,384 | 1 |
+| `loopex.ls` | 30,000 ms | 16,384 | 1 |
 
 The read and shell ceilings leave room for both the durable receipt and the next
 staged context inside the Store's 65,536-byte record ceiling. The local executor
@@ -407,7 +438,7 @@ complete receipt before retaining it; unusually large identity fields can shrink
 the inline prefix further, with truncation or artifact retention reported in the
 result.
 
-All four carry version `1.0.0`. The `loopex.` prefix is reserved: the runtime
+All seven carry version `1.0.0`. The `loopex.` prefix is reserved: the runtime
 admits a tool with that prefix only through its own `:tools` start option, so no
 tenant or extension can register a definition that shadows one of these.
 
@@ -492,13 +523,13 @@ returning empty content.
 <a id="operator-tools-credential"></a>
 ### Credential Boundary
 
-The provider credential is read from `LOOPEX_PROVIDER_API_KEY` once, by the host
-that composes the runtime — the `loopex` command, the daemon, the app server, or
-your own host through the reference composition — which moves it into private
-custody and removes it from its own environment. A second composition in the
-same process refuses rather than finding it again.
+For the durable reference composition, the provider credential is read from
+`LOOPEX_PROVIDER_API_KEY` once, by the host that composes the runtime — the
+`loopex` command, the daemon, the app server, or your own host — which moves it
+into private custody and removes it from its own environment. A second durable
+composition in the same process refuses rather than finding it again.
 
-Every executor spawn removes that credential explicitly, including the launcher
+Every durable executor spawn removes that variable explicitly, including the launcher
 and the executor's own process-management helpers, and a model-supplied command
 runs through `/usr/bin/env -i` with `PATH` as its only variable. Each receipt
 records that constructed environment and whether the credential was present, so
@@ -511,8 +542,8 @@ long as Loopex runs, and a model's `bash` command runs as that user. Treat the
 key as visible to that account, and run Loopex under an account whose processes
 you trust.
 
-The reference adapter runs provider code in one private companion process per
-model call, with its crash output, standard output, standard error, logger and
+In the durable profile, the reference adapter runs provider code in one private
+companion process per model call, with its crash output, standard output, standard error, logger and
 direct IO suppressed before the provider starts. The credential reaches that
 companion through a private channel only after the companion proves its
 protected entry and build identity; it is never in the companion's arguments or
@@ -526,6 +557,18 @@ running the provider in-process. A guardian watches the committed deadline
 independently of a blocked provider and owns the companion's process group until
 its cleanup is proved. [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept)
 fixes these boundaries.
+
+The ephemeral `ask` and embedded profile deliberately use a different boundary:
+ReqLLM runs in the host VM. A hosted provider's selected key may be visible to
+trusted host code, host-installed handlers, crash reports, and HTTP/TLS state
+during the call. A host-authorized tool can read an ambient key and disclose it
+through an ordinary tool result; Loopex does not claim structural secrecy from
+that tool. Loopex does not inject the key into its own jobs or diagnostics and
+rejects an exact selected-key echo in a mapped provider reply. Successful
+cleanup proves Loopex's caller and tagged provider-pool subtree gone, while a
+checked-out socket or TLS controller may drain afterward. If that trust scope
+is unsuitable, choose the durable profile or isolate the host VM. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept)
+records the profile's limits.
 
 <a id="operator-tools-skill-acquisition"></a>
 ### Skill Acquisition and Tool Authority

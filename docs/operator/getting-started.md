@@ -1,14 +1,16 @@
 # Getting Started
 
-This runbook takes you from a fresh source checkout to a finished coding
-session you can find again, watch, and stop cleanly. It uses the `loopex`
-command first on its own and then through a daemon, so you see both ways the
-command reaches a session. Each step names the page that owns the topic when you
-need more than the step.
+This runbook takes you from a fresh source checkout to a one-shot local answer,
+then to a durable coding session you can find again, watch, and stop cleanly.
+The `loopex ask` command needs no state root or provider companion at run time
+when it uses local Ollama. The later `run`, `resume`, and daemon steps use the
+durable profile. Each step names the page that owns the topic when you need
+more than the step.
 
 What you end up with:
 
-- a `loopex` command built from source, with its private provider companion;
+- a `loopex` command built from source, with the companion available for durable calls;
+- one local answer from `loopex ask` without a state root;
 - one state root holding durable sessions, receipts and artifacts;
 - a first session run against a repository of yours, and its record;
 - a daemon on the same state root that keeps sessions alive between commands,
@@ -18,15 +20,19 @@ Constraints to know before you start:
 
 - Loopex is built from source. There is no package, installer or service unit.
 - It runs on Darwin (macOS) and Linux.
-- The shipped command calls the Anthropic model `anthropic:claude-haiku-4-5`,
-  so you need an Anthropic API key. Choosing another model is a host decision,
-  not a command flag.
+- `loopex ask` defaults to local `ollama:llama3.2`; run Ollama and make that
+  model available before the one-shot example. Its `--model` flag also selects
+  a supported hosted model, which needs that provider's own key. The older
+  durable `loopex run` path still defaults to
+  `anthropic:claude-haiku-4-5` and needs `LOOPEX_PROVIDER_API_KEY`.
 - Tools run as your own operating-system user. The host policy you choose is
   the only thing between the model and your files and commands; it is not a
   sandbox. Read [what local execution can reach](tools-and-policy.md#operator-tools-reach)
   before pointing a session at a repository that matters.
-- Session records are written unencrypted under the state root, including the
-  contents of files a session reads. See
+- Durable session records are written unencrypted under the state root,
+  including the contents of files a session reads. The one-shot ephemeral
+  profile does not retain session truth there, but tools still change real
+  files. See
   [what is kept on disk](tools-and-policy.md#operator-tools-disclosure).
 
 Back to the [operator documentation index](README.md).
@@ -46,7 +52,7 @@ You need:
   [local supervision prerequisite](tools-and-policy.md#operator-local-supervision-shell).
 - An executable `/bin/ps`. Loopex runs it to confirm that a stopped tool's
   processes are gone and that a lock's owner is still alive.
-- Network access for fetching dependencies and for the model provider.
+- Network access for fetching dependencies and for the selected model endpoint.
 
 Confirm the toolchain:
 
@@ -70,7 +76,9 @@ mix deps.get
 MIX_ENV=prod mix cmd --app loopex_cli mix escript.build
 ```
 
-The build writes three things you use later:
+The build writes three things you use later. It builds the companion even when
+you intend to use only local `ask`; that companion is not launched for an
+ephemeral call:
 
 | Path under the checkout | What it is |
 | --- | --- |
@@ -93,18 +101,49 @@ With no arguments the command prints its usage and exits with status `1`. If
 the launcher reports `no built command at …`, the build did not finish; run the
 `escript.build` step again from a clean checkout.
 
-To prove the whole loop on this machine without a credential, you can also run
-the credential-free demonstration from
-[runtime operations](runtime.md#operator-runtime-first-run).
+<a id="operator-start-ask"></a>
+## 3. Ask Once Without a State Root
+
+Run Ollama with `llama3.2` available, then move into the repository you want
+Loopex to inspect. The working directory is the workspace. The command needs
+an explicit policy even for a one-shot run, because model-requested tools act
+as your operating-system user.
+
+```bash
+cd ~/code/my-project
+loopex ask --policy shell-allowlist "summarise this repository"
+```
+
+This form prints only the final answer to standard output. It needs neither
+`LOOPEX_HOME` nor `LOOPEX_PROVIDER_API_KEY`; Loopex proves its owned session,
+caller and provider-pool subtree gone before reporting success. A checked-out
+socket and its TLS controller may drain afterward. For another agent or a
+shell script, use:
+
+```bash
+loopex -p "summarise this repository" --policy shell-allowlist --output json
+```
+
+The result is one JSON object on standard output and the exit status identifies
+the outcome. `--model`, `--tools`,
+`--skill-dir`, `--max-steps`, and `--deadline-ms` select this call's model,
+tool preset, named skill directories and bounds. The command does not silently
+discover a home or project skill.
+
+`--state-root DIR` changes `ask` to the durable profile. It then needs the
+built provider companion and `LOOPEX_PROVIDER_API_KEY`, and the resulting
+session can be resumed. The rest of this guide shows that profile through the
+existing session commands. See [tools and policy](tools-and-policy.md#concept)
+before allowing writes or shell commands.
 
 <a id="operator-start-credential"></a>
-## 3. Name a State Root and the Credential
+## 4. Name a State Root and the Credential
 
-The state root is the directory Loopex writes to: the session journal, tool
-receipts and retained artifacts. It is not your repository. Every command takes
-it from `--state-root`, or from `LOOPEX_HOME` when the flag is absent; there is
-no built-in default, and a command that finds neither refuses with
-`:loopex_home_required`.
+The durable state root is the directory Loopex writes to: the session journal,
+tool receipts and retained artifacts. It is not your repository. Durable
+commands take it from `--state-root`, or from `LOOPEX_HOME` when the flag is
+absent; there is no built-in default. The ephemeral `ask` form above does not
+need either one.
 
 ```bash
 export LOOPEX_HOME="$HOME/.loopex"
@@ -126,7 +165,7 @@ root. A missing, empty or oversized value (above 65,536 bytes) refuses with
 the key goes and who can still read it.
 
 <a id="operator-start-first-run"></a>
-## 4. Run a First Session
+## 5. Run a First Durable Session
 
 Move into the repository you want the session to work on. That directory becomes
 the workspace the tools act on.
@@ -165,7 +204,7 @@ conversation and leaves the commentary on your terminal. The endings and what ea
 [one run, from prompt to answer](how-a-run-works.md#concept-run-flow).
 
 <a id="operator-start-observe"></a>
-## 5. Find and Inspect the Session
+## 6. Find and Inspect the Session
 
 Sessions outlive the process that started them. List the ones in the state root:
 
@@ -190,11 +229,11 @@ Run that command to get the full bytes back; see
 [artifacts](tools-and-policy.md#operator-tools-artifacts).
 
 To watch a session from a second terminal while it runs, use the daemon in
-step 7. To trace or measure the runtime itself, see
+step 8. To trace or measure the runtime itself, see
 [observability](observability.md#concept).
 
 <a id="operator-start-stop"></a>
-## 6. Stop a Session Cleanly
+## 7. Stop a Session Cleanly
 
 Press Ctrl-C while a run is going. The launcher turns it into the same public
 abort any host would submit, and the run reports what actually happened before
@@ -221,13 +260,13 @@ to settle it, but no `--policy`: it runs no tool.
 its refusals.
 
 <a id="operator-start-daemon"></a>
-## 7. Keep Sessions Alive With the Daemon
+## 8. Keep Sessions Alive With the Daemon
 
 `loopex daemon` holds a state root for as long as it runs, so sessions keep
 running while no command is attached, and several terminals can reach the same
 session. The daemon, not the client, owns the workspace, policy and credential.
 
-A state root that offline commands have already written, as steps 4 to 6 did,
+A state root that offline commands have already written, as steps 5 to 7 did,
 must be imported once, while nothing else holds it. Otherwise the daemon refuses
 to start with status `85` (`session_index_upgrade_required`).
 
@@ -287,8 +326,8 @@ bound. After it exits, the offline commands work against the root again.
 | What you see | What it means | What to do |
 | --- | --- | --- |
 | `loopex: no built command at …` (exit 127) | The launcher found no escript beside it | Rebuild from a clean checkout, or set `LOOPEX_ESCRIPT` to the escript's path |
-| `loopex: :loopex_home_required` | Neither `--state-root` nor `LOOPEX_HOME` names a state root | Export `LOOPEX_HOME` or pass `--state-root` |
-| `loopex: :provider_credential_required` | `LOOPEX_PROVIDER_API_KEY` is missing, empty or too large | Export the key in this shell before the command |
+| `loopex: :loopex_home_required` | A durable command has neither `--state-root` nor `LOOPEX_HOME` | Export `LOOPEX_HOME` or pass `--state-root`; ephemeral `ask` needs neither |
+| `loopex: :provider_credential_required` | The durable profile's `LOOPEX_PROVIDER_API_KEY` is missing, empty or too large | Export the key in this shell before the durable command; local Ollama `ask` needs no key |
 | `loopex: --policy is required; there is no default host authority` | `run` or `resume` was given no policy | Name `shell-allowlist` or `allow-all` |
 | `loopex: another loopex process (pid N) is using this state root; …` | Another command or a daemon holds the state root | Use the daemon's live forms, stop the other process, or pass another `--state-root` |
 | `loopex daemon` exits 85 (`session_index_upgrade_required`) | The root has offline sessions and no daemon index | Run `loopex daemon prepare-index` with nothing else holding the root |
@@ -305,7 +344,7 @@ Every `loopex daemon` exit status is listed in the
   is durable at each step, and what a crash leaves behind.
 - [Coding sessions](coding-sessions.md#concept) — steering, follow-ups,
   resuming, project skills, and every flag of the offline command.
-- [Tools and policy](tools-and-policy.md#concept) — the four tools, host
+- [Tools and policy](tools-and-policy.md#concept) — the coding and read-only presets, host
   authority, artifacts, and the limits of local execution.
 - [The daemon](daemon.md#concept) — several clients, takeover, reconnection,
   limits and exit statuses.
