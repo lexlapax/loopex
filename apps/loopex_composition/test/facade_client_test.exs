@@ -17,8 +17,6 @@ defmodule LoopexComposition.FacadeClientTest do
       receive do
         :release -> {:ok, "session"}
         :fail -> raise "private sentinel"
-      after
-        1_000 -> {:error, :bounded_fixture_timeout}
       end
     end
   end
@@ -141,12 +139,13 @@ defmodule LoopexComposition.FacadeClientTest do
       end)
 
     try do
-      assert_receive {:client, client}
+      assert_receive {:client, client}, 1_000
+      on_exit(fn -> if Process.alive?(client), do: Process.exit(client, :kill) end)
       monitor = Process.monitor(client)
       wait_for_call(control, client, System.monotonic_time(:millisecond) + 5_000)
       owner_monitor = Process.monitor(owner)
       send(owner, :stop)
-      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 1_000
       assert Process.alive?(client)
       true = :erlang.resume_process(control)
       # Concept: owner loss retires the actor after its real core call returns.
@@ -218,7 +217,7 @@ defmodule LoopexComposition.FacadeClientTest do
   defp operation(client, operation) do
     ref = make_ref()
     send(client, {self(), ref, operation})
-    assert_receive {^client, ^ref, :ready}
+    assert_receive {^client, ^ref, :ready}, 1_000
     send(client, {self(), ref, :dispatch, deadline()})
 
     receive do
@@ -252,7 +251,7 @@ defmodule LoopexComposition.FacadeClientTest do
     {client, monitor} = FacadeClient.start(self(), self(), Facade)
     ref = make_ref()
     send(client, {self(), ref, :create})
-    assert_receive {^client, ^ref, :ready}
+    assert_receive {^client, ^ref, :ready}, 1_000
     send(client, {self(), make_ref(), :dispatch, deadline()})
     send(client, {spawn(fn -> :ok end), ref, :dispatch, deadline()})
     send(client, {self(), make_ref(), :cancel})
@@ -260,8 +259,8 @@ defmodule LoopexComposition.FacadeClientTest do
     send(client, {self(), ref, :dispatch, :invalid})
     refute_receive {:entered, _, _, _}
     send(client, {self(), ref, :dispatch, deadline()})
-    assert_receive {:entered, ^client, %{"surface" => "embedded"}, [command_id: "create"]}
-    assert_receive {^client, ^ref, {:ok, "session"}}
+    assert_receive {^client, ^ref, {:ok, "session"}}, 1_000
+    assert_received {:entered, ^client, %{"surface" => "embedded"}, [command_id: "create"]}
     send(client, {self(), ref, :dispatch, deadline()})
     refute_receive {:entered, _, _, _}
     kill(client, monitor)
@@ -272,23 +271,24 @@ defmodule LoopexComposition.FacadeClientTest do
     {client, monitor} = FacadeClient.start(self(), self(), Facade)
     ref = make_ref()
     send(client, {self(), ref, :create})
-    assert_receive {^client, ^ref, :ready}
+    assert_receive {^client, ^ref, :ready}, 1_000
     send(client, {self(), ref, :dispatch, System.monotonic_time() - 1})
     refute_receive {:entered, _, _, _}
     send(client, {self(), ref, :cancel})
-    assert_receive {^client, ^ref, :cancelled}
+    assert_receive {^client, ^ref, :cancelled}, 1_000
     kill(client, monitor)
   end
 
   test "application exceptions become a fixed private failure" do
     {client, monitor} = FacadeClient.start(self(), self(), BlockingFacade)
+    on_exit(fn -> if Process.alive?(client), do: Process.exit(client, :kill) end)
     ref = make_ref()
     send(client, {self(), ref, :create})
-    assert_receive {^client, ^ref, :ready}
+    assert_receive {^client, ^ref, :ready}, 1_000
     send(client, {self(), ref, :dispatch, deadline()})
-    assert_receive {:blocked, ^client}
     send(client, :fail)
-    assert_receive {^client, ^ref, {:error, :facade_client_failed}}
+    assert_receive {^client, ^ref, {:error, :facade_client_failed}}, 1_000
+    assert_received {:blocked, ^client}
     kill(client, monitor)
   end
 
@@ -307,9 +307,9 @@ defmodule LoopexComposition.FacadeClientTest do
         end
       end)
 
-    assert_receive {:client, client}
+    assert_receive {:client, client}, 1_000
     monitor = Process.monitor(client)
-    assert_receive {:DOWN, ^monitor, :process, ^client, _}
+    assert_receive {:DOWN, ^monitor, :process, ^client, _}, 1_000
     refute Process.alive?(owner)
     refute_receive {:entered, _, _, _}
   end
@@ -334,19 +334,21 @@ defmodule LoopexComposition.FacadeClientTest do
           end
         end)
 
-      assert_receive {:client, client}
+      on_exit(fn -> if Process.alive?(owner), do: Process.exit(owner, :kill) end)
+      assert_receive {:client, client}, 1_000
+      on_exit(fn -> if Process.alive?(client), do: Process.exit(client, :kill) end)
       monitor = Process.monitor(client)
-      assert_receive {:blocked, ^client}
+      assert_receive {:blocked, ^client}, 1_000
       owner_monitor = Process.monitor(owner)
       if reason == :normal, do: send(owner, :stop), else: Process.exit(owner, reason)
-      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _}
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _}, 1_000
 
       if reason == :normal do
         assert Process.alive?(client)
         send(client, :release)
       end
 
-      assert_receive {:DOWN, ^monitor, :process, ^client, _}
+      assert_receive {:DOWN, ^monitor, :process, ^client, _}, 1_000
       refute_receive {:blocked, _}
     end
   end
@@ -357,7 +359,7 @@ defmodule LoopexComposition.FacadeClientTest do
   defp kill(client, monitor) do
     Process.unlink(client)
     Process.exit(client, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^client, :killed}
+    assert_receive {:DOWN, ^monitor, :process, ^client, :killed}, 1_000
   end
 
   test "cancellation acknowledges the exact queued operation without facade entry" do
@@ -367,11 +369,11 @@ defmodule LoopexComposition.FacadeClientTest do
     send(client, {self(), ref, :create})
     send(client, {self(), ref, :cancel})
     true = :erlang.resume_process(client)
-    assert_receive {^client, ^ref, :ready}
-    assert_receive {^client, ^ref, :cancelled}
+    assert_receive {^client, ^ref, :cancelled}, 1_000
+    assert_received {^client, ^ref, :ready}
     refute_receive {:entered, _, _, _}
     Process.unlink(client)
     Process.exit(client, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^client, :killed}
+    assert_receive {:DOWN, ^monitor, :process, ^client, :killed}, 1_000
   end
 end

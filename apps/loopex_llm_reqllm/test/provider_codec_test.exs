@@ -1,5 +1,6 @@
 defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
-  use ExUnit.Case, async: true
+  # Socket-call trace patterns are VM-global, so these witnesses run serially.
+  use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM.ProviderCodec
   alias Loopex.Store
@@ -397,25 +398,84 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
              ProviderCodec.encode(:terminal, terminal(%{"text" => :binary.copy("x", 12_000)}))
 
     <<header::binary-size(8), first::binary-size(4_096), tail::binary>> = frame
-    :ok = :gen_tcp.send(sender, header)
+    duration_ms = 5_000
+    duration_native = System.convert_time_unit(duration_ms, :millisecond, :native)
+    parent = self()
 
-    # Each fragment lands within 400 ms of the read before it, so a deadline
-    # per read would receive the whole frame; one deadline shared across the
-    # reads times out at 400 ms, well before the 500 ms tail, and the 700 ms
-    # ceiling leaves a loaded machine room without reaching the tail.
-    producer =
-      spawn_link(fn ->
-        Process.sleep(250)
-        :ok = :gen_tcp.send(sender, first)
-        Process.sleep(250)
-        :ok = :gen_tcp.send(sender, tail)
+    on_exit(fn ->
+      :erlang.trace_pattern({ProviderCodec, :receive_bytes, 4}, false, [:local])
+      :erlang.trace_pattern({:gen_tcp, :recv, 3}, false, [:local])
+    end)
+
+    assert :erlang.trace_pattern({ProviderCodec, :receive_bytes, 4}, true, [:local]) == 1
+    assert :erlang.trace_pattern({:gen_tcp, :recv, 3}, true, [:local]) == 1
+
+    {reader, monitor} =
+      spawn_monitor(fn ->
+        receive do
+          :read ->
+            result = ProviderCodec.recv(receiver, duration_ms)
+            send(parent, {:fragment_timeout_answer, self(), result, System.monotonic_time()})
+        end
       end)
 
-    started = System.monotonic_time(:millisecond)
-    assert {:error, :timeout} = ProviderCodec.recv(receiver, 400)
-    assert System.monotonic_time(:millisecond) - started < 700
-    monitor = Process.monitor(producer)
-    assert_receive {:DOWN, ^monitor, :process, ^producer, _reason}, 1_000
+    on_exit(fn ->
+      if Process.alive?(reader), do: Process.exit(reader, :kill)
+    end)
+
+    assert :ok = :gen_tcp.controlling_process(receiver, reader)
+    assert :erlang.trace(reader, true, [:call, {:tracer, self()}]) == 1
+    before_start = System.monotonic_time()
+    send(reader, :read)
+
+    assert_receive {:trace, ^reader, :call,
+                    {ProviderCodec, :receive_bytes, [^receiver, 8, deadline, []]}},
+                   duration_ms
+
+    after_start = System.monotonic_time()
+    assert deadline >= before_start + duration_native
+    assert deadline <= after_start + duration_native
+
+    budget = fn ->
+      max(System.convert_time_unit(deadline - System.monotonic_time(), :native, :millisecond), 0) +
+        1_000
+    end
+
+    # Concept: delayed fragments spend the original allowance rather than
+    # receiving a fresh socket wait at each read.
+    # Technical depth: trace both the carried deadline and the actual recv/3
+    # timeout after two delays. A renewed full-duration socket wait fails even
+    # if the private function still carries the original deadline argument.
+    assert_receive {:trace, ^reader, :call, {:gen_tcp, :recv, [^receiver, 8, _header_wait]}},
+                   budget.()
+
+    Process.sleep(250)
+    assert :ok = :gen_tcp.send(sender, header)
+
+    assert_deadline_read(
+      reader,
+      receiver,
+      byte_size(first) + byte_size(tail),
+      [],
+      deadline,
+      budget
+    )
+
+    assert_receive {:trace, ^reader, :call, {:gen_tcp, :recv, [^receiver, 4_096, payload_wait]}},
+                   budget.()
+
+    assert payload_wait < duration_ms - 200
+    Process.sleep(250)
+    assert :ok = :gen_tcp.send(sender, first)
+    assert_deadline_read(reader, receiver, byte_size(tail), [first], deadline, budget)
+
+    assert_receive {:trace, ^reader, :call, {:gen_tcp, :recv, [^receiver, 4_096, tail_wait]}},
+                   budget.()
+
+    assert tail_wait < payload_wait - 200
+    assert_receive {:fragment_timeout_answer, ^reader, {:error, :timeout}, finished}, budget.()
+    assert finished >= deadline
+    assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}, 5_000
   end
 
   test "delayed header and split payload reads retain one original native deadline" do
