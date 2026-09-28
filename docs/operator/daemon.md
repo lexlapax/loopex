@@ -48,8 +48,9 @@ Build the command as [Coding sessions](coding-sessions.md#operator-sessions-runn
 describes, then start one daemon per state root. Start it through the
 `bin/loopex` launcher so that Ctrl-C in its terminal becomes an orderly stop.
 
-```text
-export LOOPEX_PROVIDER_API_KEY=...        # read once, then removed
+```bash
+read -rs LOOPEX_PROVIDER_API_KEY
+export LOOPEX_PROVIDER_API_KEY
 loopex daemon --state-root ~/.loopex --workspace ~/code/my-project \
               --provider-launch ~/src/loopex/_build/prod/loopex_provider.launch \
               --policy allow-all

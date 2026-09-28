@@ -165,6 +165,7 @@ if [ "$mode" = --docs ]; then
 fi
 step "release runner fixtures" bash scripts/test/check-release-test.sh
 step "escript inventory fixture" bash scripts/test/escript-inventory-test.sh
+step "archive manifest fixtures" bash scripts/test/stage-archive-manifest-test.sh
 step "attended release fixtures" bash scripts/test/attended-release-test.sh
 step "floor lane fixtures" bash scripts/test/floor-lane-test.sh
 step "dependency budget and direction" mix loopex.deps_budget

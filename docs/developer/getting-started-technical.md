@@ -348,7 +348,9 @@ The daemon is started by the command and listens on `ROOT/daemon/daemon.sock`
 by default:
 
 ```bash
-LOOPEX_PROVIDER_API_KEY=... apps/loopex_cli/bin/loopex daemon \
+read -rs LOOPEX_PROVIDER_API_KEY
+export LOOPEX_PROVIDER_API_KEY
+apps/loopex_cli/bin/loopex daemon \
   --state-root "$LOOPEX_HOME" --workspace "$PWD" \
   --provider-launch _build/prod/loopex_provider.launch --policy allow-all
 ```
