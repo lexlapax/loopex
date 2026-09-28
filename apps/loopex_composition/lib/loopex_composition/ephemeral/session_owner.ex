@@ -984,8 +984,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     if status[:status] == :active and status[:owner_epoch] == state.startup.owner_epoch and
          is_integer(status[:event_sequence]) and
          status[:event_sequence] >= settlement.sequence and
+         Map.has_key?(status, :active_run_id) and
+         (is_nil(status[:active_run_id]) or bounded_id?(status[:active_run_id], 256)) and
          status[:active_run_id] != settlement.run_id and
          is_list(status[:pending_work_ids]) and
+         Enum.all?(status[:pending_work_ids], &bounded_id?(&1, 256)) and
          not Enum.member?(status[:pending_work_ids], settlement.run_id) do
       state
       |> put_in([:session, :settlement, :stage], :status_proved)

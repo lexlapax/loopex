@@ -228,6 +228,124 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
     assert {:error, :session_closed} = Ephemeral.last_result(session)
   end
 
+  test "a status missing active_run_id cannot prove that the run ended" do
+    {session, _owner, cell, question, facade, candidate} = start_pending_ask()
+    send(facade, :release_settlement_prompt)
+    assert_receive {:settlement_status_requested, ^facade}, 2_000
+
+    send(
+      facade,
+      {:release_settlement_status,
+       {:ok,
+        %{
+          status: :active,
+          owner_epoch: 0,
+          event_sequence: 2,
+          pending_work_ids: []
+        }}}
+    )
+
+    refute_receive {:candidate_released, _, _, _}, 50
+
+    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
+             Task.yield(question, 4_000)
+
+    assert :atomics.get(cell, 1) > 0
+    refute Process.alive?(candidate)
+    refute_receive {:candidate_released, _, _, _}, 25
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "wrong epoch, stale sequence, malformed run ids, pending run and status error cannot release the candidate" do
+    valid = %{
+      status: :active,
+      owner_epoch: 0,
+      event_sequence: 2,
+      active_run_id: nil,
+      pending_work_ids: []
+    }
+
+    for response <- [
+          {:ok, %{valid | owner_epoch: 1}},
+          {:ok, %{valid | event_sequence: 1}},
+          {:ok, %{valid | active_run_id: false}},
+          {:ok, %{valid | active_run_id: :unknown}},
+          {:ok, %{valid | active_run_id: String.duplicate("x", 257)}},
+          {:ok, %{valid | pending_work_ids: [false]}},
+          {:ok, %{valid | pending_work_ids: [:unknown]}},
+          {:ok, %{valid | pending_work_ids: [String.duplicate("x", 257)]}},
+          {:ok, %{valid | pending_work_ids: ["settlement-run"]}},
+          {:error, :status_unavailable}
+        ] do
+      {session, _owner, cell, question, facade, candidate} = start_pending_ask()
+      send(facade, :release_settlement_prompt)
+      assert_receive {:settlement_status_requested, ^facade}, 2_000
+      send(facade, {:release_settlement_status, response})
+
+      refute_receive {:candidate_released, _, _, _}, 25
+
+      assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
+               Task.yield(question, 4_000)
+
+      assert :atomics.get(cell, 1) > 0
+      refute Process.alive?(candidate)
+      refute_receive {:candidate_released, _, _, _}, 25
+      assert :ok = Ephemeral.stop_session(session)
+    end
+  end
+
+  test "a model call bound to a different reference cannot enter the status barrier" do
+    {session, owner, cell, question, facade, candidate} = start_pending_ask()
+
+    :sys.replace_state(owner, fn state ->
+      put_in(state.session.model_binding.call, make_ref())
+    end)
+
+    send(facade, :release_settlement_prompt)
+    refute_receive {:settlement_status_requested, ^facade}, 25
+    refute_receive {:candidate_released, _, _, _}, 25
+
+    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
+             Task.yield(question, 4_000)
+
+    assert :atomics.get(cell, 1) > 0
+    refute Process.alive?(candidate)
+    refute_receive {:settlement_status_requested, ^facade}, 25
+    refute_receive {:candidate_released, _, _, _}, 25
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "a forged facade status reply cannot release a candidate" do
+    {session, owner, _cell, question, facade, candidate} = start_pending_ask()
+    send(facade, :release_settlement_prompt)
+    assert_receive {:settlement_status_requested, ^facade}, 2_000
+
+    send(
+      owner,
+      {facade, make_ref(),
+       {:ok,
+        %{
+          status: :active,
+          owner_epoch: 0,
+          event_sequence: 2,
+          active_run_id: nil,
+          pending_work_ids: []
+        }}}
+    )
+
+    assert %{session: %{active: %{operation: :settlement_status}}} = :sys.get_state(owner)
+    refute_receive {:candidate_released, _, _, _}, 25
+
+    send(facade, :release_settlement_status)
+    assert_receive {:candidate_released, _, _, _}, 2_000
+    send(candidate, :finish_candidate)
+
+    assert {:ok, {:ok, %{outcome: :completed, run_id: "settlement-run"}}} =
+             Task.yield(question, 2_000)
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
   test "an unresponsive status read is bounded and retains the terminal" do
     {session, _owner, cell, question, facade, candidate} = start_pending_ask()
     send(facade, :release_settlement_prompt)

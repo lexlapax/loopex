@@ -283,6 +283,81 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
     assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 1_000
   end
 
+  test "only an exact empty retired invocation can be released", %{supervisor: supervisor} do
+    observer = self()
+
+    callback =
+      spawn(fn ->
+        receive do
+          {:model_candidate_ready, candidate, start_ref, proxy} ->
+            send(observer, {:ready, candidate, start_ref, proxy})
+
+            receive do
+              {:registration_pending_ack, ^candidate, ^start_ref, stop_ref} ->
+                send(observer, {:pending_acked, candidate, stop_ref})
+                receive do: (:stop -> :ok)
+            end
+        end
+      end)
+
+    proxy = proxy()
+    start_ref = make_ref()
+    {:ok, candidate} = start(supervisor, callback, proxy, start_ref, future())
+    candidate_monitor = Process.monitor(candidate)
+    assert_receive {:ready, ^candidate, ^start_ref, ^proxy}
+    send(proxy, {:retire, candidate, start_ref})
+    generation = make_ref()
+    call = make_ref()
+    proof = make_ref()
+    send(candidate, custody(start_ref, make_ref(), generation, call, candidate, proof))
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof}
+    stop_ref = make_ref()
+    send(candidate, {:registration_pending, callback, stop_ref})
+    assert_receive {:pending_acked, ^candidate, ^stop_ref}
+
+    premature = make_ref()
+
+    send(
+      candidate,
+      {:release_empty_invocation, generation, call, candidate, proof, premature, future()}
+    )
+
+    refute_receive {:empty_invocation_released, ^candidate, ^premature}, 25
+    assert Process.alive?(candidate)
+
+    send(callback, :stop)
+    assert_receive {:empty_retirement_requested, ^candidate, ^call, ^proof}, 1_000
+
+    for {bad_generation, bad_call, bad_candidate, bad_proof, deadline} <- [
+          {make_ref(), call, candidate, proof, future()},
+          {generation, make_ref(), candidate, proof, future()},
+          {generation, call, self(), proof, future()},
+          {generation, call, candidate, make_ref(), future()},
+          {generation, call, candidate, proof, System.monotonic_time() - 1}
+        ] do
+      release_ref = make_ref()
+
+      send(
+        candidate,
+        {:release_empty_invocation, bad_generation, bad_call, bad_candidate, bad_proof,
+         release_ref, deadline}
+      )
+
+      refute_receive {:empty_invocation_released, ^candidate, ^release_ref}, 20
+      assert Process.alive?(candidate)
+    end
+
+    release_ref = make_ref()
+
+    send(
+      candidate,
+      {:release_empty_invocation, generation, call, candidate, proof, release_ref, future()}
+    )
+
+    assert_receive {:empty_invocation_released, ^candidate, ^release_ref}, 1_000
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 1_000
+  end
+
   test "a wrong module or route cannot acknowledge custody", %{supervisor: supervisor} do
     start_ref = make_ref()
     proxy = proxy()
@@ -409,6 +484,16 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
     assert_received {:resources_recorded, ^candidate, ^call, 1, [{:process, :root, root}]}
     assert is_pid(root)
     assert_received {:resources_recorded, ^candidate, ^call, 6, [{:process, :caller, ^caller}]}
+
+    release_ref = make_ref()
+
+    send(
+      candidate,
+      {:release_empty_invocation, generation, call, candidate, proof, release_ref, future()}
+    )
+
+    refute_receive {:empty_invocation_released, ^candidate, ^release_ref}, 25
+    assert Process.alive?(caller)
 
     nonce = make_ref()
     cooperative_ms = System.monotonic_time(:millisecond) + 4_000
