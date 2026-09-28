@@ -170,8 +170,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
                     ^proof_ref},
                    1_000
 
-    send(callback, :stop)
     callback_mon = Process.monitor(callback)
+    send(callback, :stop)
     assert_receive {:DOWN, ^callback_mon, :process, ^callback, :normal}, 1_000
     assert_receive {:empty_retirement_requested, ^candidate, ^call_ref, ^proof_ref}, 1_000
     assert_down(candidate)
