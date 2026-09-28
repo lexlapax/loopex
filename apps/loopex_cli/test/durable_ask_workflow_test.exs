@@ -26,6 +26,82 @@ defmodule LoopexCli.DurableAskWorkflowTest do
     end
   end
 
+  test "callback raise, throw and exit reap the linked reader and restore trap exits" do
+    caller = self()
+    previous = Process.flag(:trap_exit, false)
+
+    try do
+      for kind <- [:raise, :throw, :exit] do
+        clock = fn ->
+          case kind do
+            :raise -> raise "callback fault"
+            :throw -> throw(:callback_fault)
+            :exit -> exit(:callback_fault)
+          end
+        end
+
+        seams = [
+          facade: fn _, _, _ ->
+            receive do
+              :never -> :ok
+            end
+          end,
+          monotonic_ms: clock,
+          spawn_reader: fn function ->
+            {pid, monitor} = :erlang.spawn_opt(function, [:link, :monitor])
+            send(caller, {:started_reader, pid})
+            {pid, monitor}
+          end
+        ]
+
+        case kind do
+          :raise ->
+            assert_raise RuntimeError, "callback fault", fn ->
+              FollowReader.follow(:runtime, "session-1", "cli-prompt", 0, 1, [], seams)
+            end
+
+          :throw ->
+            assert catch_throw(
+                     FollowReader.follow(:runtime, "session-1", "cli-prompt", 0, 1, [], seams)
+                   ) == :callback_fault
+
+          :exit ->
+            assert catch_exit(
+                     FollowReader.follow(:runtime, "session-1", "cli-prompt", 0, 1, [], seams)
+                   ) == :callback_fault
+        end
+
+        assert_receive {:started_reader, reader}
+        refute Process.alive?(reader)
+        assert Process.info(self(), :trap_exit) == {:trap_exit, false}
+      end
+    after
+      Process.flag(:trap_exit, previous)
+    end
+  end
+
+  test "missing reader DOWN discards the projection and returns only its fixed diagnostic" do
+    caller = self()
+
+    seams = [
+      facade: fn Loopex, :attach, _ -> {:error, :unavailable} end,
+      monotonic_ms: fn -> System.monotonic_time(:millisecond) end,
+      spawn_reader: fn function ->
+        reader = spawn_link(function)
+        send(caller, {:started_reader, reader})
+        {reader, make_ref()}
+      end
+    ]
+
+    started_at = System.monotonic_time(:millisecond)
+
+    assert FollowReader.follow(:runtime, "session-1", "cli-prompt", started_at, 1, [], seams) ==
+             {:diagnostic, :follow_reader_cleanup_unconfirmed}
+
+    assert_receive {:started_reader, reader}
+    refute Process.alive?(reader)
+  end
+
   test "fresh durable ask orders ownership, tracks before attach and renders after release" do
     {seams, calls} = harness(&completed_events/1)
 
@@ -219,6 +295,78 @@ defmodule LoopexCli.DurableAskWorkflowTest do
 
     refute :status in observed
     refute :prompt in observed
+  end
+
+  test "catalog digest, disposition and tuple mismatches never activate a skill" do
+    manifest = manifest([pack("alpha"), pack("zulu")])
+    {:ok, digest, normalized} = Loopex.ResourcePack.digest(manifest)
+
+    entries =
+      Enum.map(normalized["packs"], fn pack ->
+        %{
+          "source_id" => pack["source_id"],
+          "name" => pack["name"],
+          "pack_digest" => Loopex.ResourcePack.pack_digest(pack)
+        }
+      end)
+
+    valid = %{
+      "configured_manifest_digest" => digest,
+      "admitted_manifest_digest" => digest,
+      "decision_disposition" => "active",
+      "entries" => entries
+    }
+
+    invalid = [
+      %{valid | "configured_manifest_digest" => "wrong"},
+      %{valid | "admitted_manifest_digest" => "wrong"},
+      %{valid | "decision_disposition" => "revoked"},
+      %{valid | "entries" => tl(entries)},
+      %{valid | "entries" => [hd(entries) | entries]},
+      %{valid | "entries" => [%{hd(entries) | "pack_digest" => "wrong"} | tl(entries)]},
+      %{valid | "entries" => [:malformed | tl(entries)]}
+    ]
+
+    for catalog <- invalid do
+      {seams, calls} =
+        harness(&completed_events/1, manifest: manifest, catalog: {:ok, catalog})
+
+      assert %{status: 1, stdout: "", stderr: "loopex: resource_admission_failed\n"} =
+               DurableAsk.run(options(), @cwd, "prompt", seams)
+
+      observed = Agent.get(calls, & &1.calls)
+      assert Enum.count(observed, &(&1 == :resource_command)) == 1
+      refute :prompt in observed
+    end
+  end
+
+  test "each activation failure stops before the next skill and prompt" do
+    manifest = manifest([pack("alpha"), pack("zulu")])
+
+    for failing_activation <- 1..2 do
+      {:ok, count} = Agent.start_link(fn -> 0 end)
+
+      reply = fn command ->
+        if command.type == :activate_skill do
+          index = Agent.get_and_update(count, fn n -> {n + 1, n + 1} end)
+
+          if index == failing_activation,
+            do: {:accepted, "wrong-id"},
+            else: {:accepted, command.command_id}
+        else
+          {:accepted, command.command_id}
+        end
+      end
+
+      {seams, calls} =
+        harness(&completed_events/1, manifest: manifest, resource_reply: reply)
+
+      assert %{status: 1, stdout: "", stderr: "loopex: skill_activation_failed\n"} =
+               DurableAsk.run(options(), @cwd, "prompt", seams)
+
+      assert Agent.get(count, & &1) == failing_activation
+      refute :prompt in Agent.get(calls, & &1.calls)
+    end
   end
 
   test "precomposition refusals keep their first boundary and avoid later authority" do
@@ -556,6 +704,47 @@ defmodule LoopexCli.DurableAskWorkflowTest do
     object = JSON.decode!(String.trim_trailing(stdout, "\n"))
     assert object["run_id"] == "run-1"
     assert object["details"]["reason"] == "session_unavailable"
+  end
+
+  test "reader attachment, sequence, join and process loss stay resumable" do
+    malformed = [
+      {fn _prompt_id -> [] end, [reader_attach: {:error, :unavailable}]},
+      {fn prompt_id ->
+         [event(0, "user.message_appended", "run-1", %{"command_id" => prompt_id})]
+       end, []},
+      {fn prompt_id ->
+         [event(1, "user.message_appended", "", %{"command_id" => prompt_id})]
+       end, []},
+      {fn prompt_id ->
+         [
+           event(1, "user.message_appended", "run-1", %{"command_id" => prompt_id}),
+           {:return, {:ok, %{event_sequence: 1, kind: "run.finished"}}}
+         ]
+       end, []}
+    ]
+
+    for {events, overrides} <- malformed do
+      {seams, calls} = harness(events, overrides)
+      %{status: 6, stdout: stdout} = DurableAsk.run(options(), @cwd, "prompt", seams)
+      object = JSON.decode!(String.trim_trailing(stdout, "\n"))
+      assert object["outcome"] == "no_ending"
+      assert object["details"]["reason"] == "session_unavailable"
+      assert :prompt in Agent.get(calls, & &1.calls)
+    end
+
+    {seams, _calls} = harness(&completed_events/1)
+    original = Keyword.fetch!(seams, :facade)
+
+    lost = fn
+      Loopex, :next_event, _arguments -> exit(:reader_fault)
+      module, function, arguments -> original.(module, function, arguments)
+    end
+
+    %{status: 6, stdout: stdout} =
+      DurableAsk.run(options(), @cwd, "prompt", Keyword.put(seams, :facade, lost))
+
+    assert JSON.decode!(String.trim_trailing(stdout, "\n"))["details"]["reason"] ==
+             "session_unavailable"
   end
 
   test "selected text cuts on a UTF-8 boundary and tools retain the newest 256" do
