@@ -19,6 +19,7 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
 
   defmodule Facade do
     @moduledoc false
+    @uint64_max 18_446_744_073_709_551_615
 
     def create_session(_runtime, %{"surface" => "embedded"}, command_id: "create") do
       Process.put(:events, [])
@@ -105,6 +106,38 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
             "prompt" => "Continue?",
             "choices" => [%{"id" => "yes", "label" => "Yes"}],
             "expires_at" => 1_800_000_000,
+            kind: "interaction.requested"
+          })
+
+          {:accepted, command.command_id}
+
+        mode
+        when mode in [
+               "question-max",
+               "turn-zero",
+               "turn-overflow",
+               "expiry-zero",
+               "expiry-overflow"
+             ] ->
+          begin_run(command)
+
+          {turn, expires_at} =
+            case mode do
+              "question-max" -> {@uint64_max, @uint64_max}
+              "turn-zero" -> {0, 1}
+              "turn-overflow" -> {@uint64_max + 1, 1}
+              "expiry-zero" -> {1, 0}
+              "expiry-overflow" -> {1, @uint64_max + 1}
+            end
+
+          enqueue(%{
+            "run_id" => Process.get(:run_id),
+            "interaction_id" => "numeric-interaction",
+            "turn" => turn,
+            "tool_call_id" => "numeric-call",
+            "prompt" => "Continue?",
+            "choices" => [%{"id" => "yes", "label" => "Yes"}],
+            "expires_at" => expires_at,
             kind: "interaction.requested"
           })
 
@@ -259,6 +292,34 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
     assert_receive {:prompt_dispatched, _, @second_prompt_id, "identity-abort"}
     assert :ok = Ephemeral.stop_session(session)
     assert_receive {:abort_dispatched, _, @abort_id}
+  end
+
+  test "malformed pending interaction numbers never become a public question", %{tmp: tmp} do
+    for mode <- ["turn-zero", "turn-overflow", "expiry-zero", "expiry-overflow"] do
+      session = start_session(tmp)
+
+      assert {:error, {:cleanup_unproved, %{pending: pending, ending: :none, root: root}}} =
+               Ephemeral.ask(session, mode)
+
+      assert :run_ending in pending
+      assert File.dir?(root)
+      assert {:error, :session_unavailable} = Ephemeral.last_result(session)
+    end
+
+    session = start_session(tmp)
+
+    assert {:error,
+            {:interaction_pending,
+             %{
+               "interaction_id" => "numeric-interaction",
+               "turn" => @uint64_max,
+               "expires_at" => @uint64_max
+             }}} = Ephemeral.ask(session, "question-max")
+
+    assert {:ok, %{outcome: :completed}} =
+             Ephemeral.answer(session, "numeric-interaction", "yes")
+
+    assert :ok = Ephemeral.stop_session(session)
   end
 
   test "an admitted timeout continues to a later ending without a second prompt", %{tmp: tmp} do
