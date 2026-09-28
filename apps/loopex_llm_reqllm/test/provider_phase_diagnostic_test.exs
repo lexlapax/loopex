@@ -1,11 +1,10 @@
 Code.require_file("support/provider_phase_diagnostic.exs", __DIR__)
 
 defmodule Loopex.LLM.ReqLLM.ProviderPhaseDiagnosticTest do
-  # Async because the trace pattern it sets names the `Control` module defined
-  # in this file, which no other module calls; the pattern is still a VM-wide
-  # breakpoint, and the `trace_delivered(:all)` barrier in the support file
-  # waits behind any other tracer in this VM.
-  use ExUnit.Case, async: true
+  # The Control pattern is unique, but trace_delivered(:all) waits behind
+  # unrelated tracers in this VM. Keep the collector's bounded handshake
+  # isolated from other high-volume trace tests.
+  use ExUnit.Case, async: false
   import ExUnit.CaptureIO
   alias Loopex.LLM.ReqLLM.ProviderPhaseDiagnostic, as: Diagnostic
 
