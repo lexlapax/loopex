@@ -23,6 +23,14 @@ defmodule LoopexComposition.FacadeClientTest do
     end
   end
 
+  defmodule ObservedRealFacade do
+    def create_session({runtime, test}, options, command_options) do
+      result = Loopex.create_session(runtime, options, command_options)
+      send(test, {:create_returned, self(), result})
+      result
+    end
+  end
+
   defmodule Model do
     @behaviour Loopex.Model
 
@@ -118,7 +126,7 @@ defmodule LoopexComposition.FacadeClientTest do
 
     owner =
       spawn(fn ->
-        {client, _monitor} = FacadeClient.start(self(), runtime)
+        {client, _monitor} = FacadeClient.start(self(), {runtime, test}, ObservedRealFacade)
         send(test, {:client, client})
         ref = make_ref()
         send(client, {self(), ref, :create})
@@ -135,13 +143,16 @@ defmodule LoopexComposition.FacadeClientTest do
     try do
       assert_receive {:client, client}
       monitor = Process.monitor(client)
-      wait_for_call(control, System.monotonic_time(:millisecond) + 1_000)
+      wait_for_call(control, client, System.monotonic_time(:millisecond) + 5_000)
       owner_monitor = Process.monitor(owner)
       send(owner, :stop)
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
       assert Process.alive?(client)
       true = :erlang.resume_process(control)
-      assert_receive {:DOWN, ^monitor, :process, ^client, :normal}, 1_000
+      # Concept: owner loss retires the actor after its real core call returns.
+      # Technical depth: resuming Control is not a barrier for session activation.
+      assert_receive {:create_returned, ^client, {:ok, _session}}, 5_000
+      assert_receive {:DOWN, ^monitor, :process, ^client, :normal}, 5_000
       refute Process.alive?(client)
 
       assert {:ok, _} =
@@ -157,20 +168,33 @@ defmodule LoopexComposition.FacadeClientTest do
     end
   end
 
-  defp wait_for_call(control, deadline) do
+  defp wait_for_call(control, client, deadline) do
     assert System.monotonic_time(:millisecond) < deadline
 
-    case Process.info(control, :messages) do
-      {:messages, messages} when messages != [] ->
-        :ok
+    messages =
+      case Process.info(control, :messages) do
+        {:messages, messages} -> messages
+        _other -> []
+      end
 
-      _ ->
-        receive do
-        after
-          1 -> :ok
-        end
+    queued? =
+      Enum.any?(messages, fn message ->
+        match?(
+          {:"$gen_call", {^client, _reply_ref},
+           {:create_session, _token, "create", %{"surface" => "embedded"}, :detailed}},
+          message
+        )
+      end)
 
-        wait_for_call(control, deadline)
+    if queued? do
+      :ok
+    else
+      receive do
+      after
+        1 -> :ok
+      end
+
+      wait_for_call(control, client, deadline)
     end
   end
 

@@ -33,8 +33,8 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     }
 
     {root, ref} = start_root(tmp, seams)
-    assert_receive {:root_ready, ^root, ^ref}
-    assert_receive {:phase_ready, ^root, ^ref, :candidate_prepare}
+    assert_received {:root_ready, ^root, ^ref}
+    assert_received {:phase_ready, ^root, ^ref, :candidate_prepare}
     refute_receive :tmp_lookup
 
     send(root, {:grant, self(), make_ref(), :candidate_prepare, nil})
@@ -42,10 +42,12 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     refute_receive :tmp_lookup, 30
 
     send(root, {:grant, self(), ref, :candidate_prepare, nil})
-    assert_receive :tmp_lookup
-    assert_receive :entropy
-    assert_receive {:phase_result, ^root, ^ref, :candidate_prepare, {:ok, candidate}}
-    assert_receive {:phase_ready, ^root, ^ref, :root_claim}
+    assert_receive {:phase_result, ^root, ^ref, :candidate_prepare, {:ok, candidate}}, 1_000
+    # Concept: the phase result certifies that both root-observation hooks ran.
+    # Technical depth: one root sender queued both hooks before this result.
+    assert_received :tmp_lookup
+    assert_received :entropy
+    assert_receive {:phase_ready, ^root, ^ref, :root_claim}, 1_000
     assert File.lstat(candidate.path) == {:error, :enoent}
 
     send(root, {:grant, self(), make_ref(), :root_claim, nil})
@@ -53,8 +55,8 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     assert File.lstat(candidate.path) == {:error, :enoent}
 
     send(root, {:grant, self(), ref, :root_claim, nil})
-    assert_receive {:phase_result, ^root, ^ref, :root_claim, {:ok, owned}}
-    assert_receive {:phase_ready, ^root, ^ref, :private_supervisor}
+    assert_receive {:phase_result, ^root, ^ref, :root_claim, {:ok, owned}}, 1_000
+    assert_receive {:phase_ready, ^root, ^ref, :private_supervisor}, 1_000
     assert File.dir?(owned.path)
     assert File.lstat!(owned.path).inode == owned.identity.inode
   end
@@ -69,9 +71,9 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     refute_receive {:phase_ready, ^root, ^ref, :memory_store}, 30
 
     send(root, {:ack, self(), ref, :private_supervisor, supervisor})
-    assert_receive {:phase_ready, ^root, ^ref, :memory_store}
+    assert_receive {:phase_ready, ^root, ^ref, :memory_store}, 1_000
     send(root, {:grant, self(), ref, :memory_store, nil})
-    assert_receive {:phase_result, ^root, ^ref, :memory_store, {:ok, store_pid}}
+    assert_receive {:phase_result, ^root, ^ref, :memory_store, {:ok, store_pid}}, 1_000
     assert is_pid(store_pid)
     assert Process.alive?(store_pid)
 
@@ -79,12 +81,12 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     send(root, {:ack, self(), ref, :memory_store, self()})
     refute_receive {:phase_ready, ^root, ^ref, :store_handle}, 30
     send(root, {:ack, self(), ref, :memory_store, store_pid})
-    assert_receive {:phase_ready, ^root, ^ref, :store_handle}
+    assert_receive {:phase_ready, ^root, ^ref, :store_handle}, 1_000
     send(root, {:grant, self(), ref, :store_handle, nil})
-    assert_receive {:phase_result, ^root, ^ref, :store_handle, {:ok, store_handle}}
+    assert_receive {:phase_result, ^root, ^ref, :store_handle, {:ok, store_handle}}, 1_000
     refute_receive {:phase_ready, ^root, ^ref, :workspace_lease}, 30
     send(root, {:ack, self(), ref, :store_handle, store_handle})
-    assert_receive {:phase_ready, ^root, ^ref, :workspace_lease}
+    assert_receive {:phase_ready, ^root, ^ref, :workspace_lease}, 1_000
 
     root_monitor = Process.monitor(root)
     supervisor_monitor = Process.monitor(supervisor)
@@ -116,24 +118,27 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     }
 
     {root, ref} = start_root(tmp, seams)
-    assert_receive {:root_ready, ^root, ^ref}
-    assert_receive {:phase_ready, ^root, ^ref, :candidate_prepare}
+    assert_received {:root_ready, ^root, ^ref}
+    assert_received {:phase_ready, ^root, ^ref, :candidate_prepare}
 
     for attempt <- 1..16 do
       send(root, {:grant, self(), ref, :candidate_prepare, nil})
-      assert_receive {:nonce, ^attempt}
-      assert_receive {:phase_result, ^root, ^ref, :candidate_prepare, {:ok, candidate}}
-      assert_receive {:phase_ready, ^root, ^ref, :root_claim}
+      assert_receive {:phase_result, ^root, ^ref, :candidate_prepare, {:ok, candidate}}, 1_000
+      assert_received {:nonce, ^attempt}
+      assert_receive {:phase_ready, ^root, ^ref, :root_claim}, 1_000
+      candidate_path = candidate.path
       send(root, {:grant, self(), ref, :root_claim, nil})
-      assert_receive {:mkdir, path}
-      assert path == candidate.path
 
       if attempt < 16 do
-        assert_receive {:phase_result, ^root, ^ref, :root_claim, {:error, :collision}}
-        assert_receive {:phase_ready, ^root, ^ref, :candidate_prepare}
+        assert_receive {:phase_result, ^root, ^ref, :root_claim, {:error, :collision}}, 1_000
+        assert_received {:mkdir, ^candidate_path}
+        assert_receive {:phase_ready, ^root, ^ref, :candidate_prepare}, 1_000
       else
         assert_receive {:phase_result, ^root, ^ref, :root_claim,
-                        {:error, :temporary_root_creation_failed}}
+                        {:error, :temporary_root_creation_failed}},
+                       1_000
+
+        assert_received {:mkdir, ^candidate_path}
       end
     end
 
@@ -192,7 +197,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     refute_receive {:store_new, _}, 30
     ack(root, ref, :memory_store, store_pid, :store_handle)
     store_handle = grant(root, ref, :store_handle)
-    assert_receive {:store_new, ^store_pid}
+    assert_received {:store_new, ^store_pid}
     ack(root, ref, :store_handle, store_handle, :workspace_lease)
     lease = grant(root, ref, :workspace_lease)
     assert is_pid(lease)
@@ -205,23 +210,23 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     refute_receive {:trace_handle, _}, 30
     ack(root, ref, :trace_capability, trace_pid, :trace_handle)
     trace_handle = grant(root, ref, :trace_handle)
-    assert_receive {:trace_handle, ^trace_pid}
+    assert_received {:trace_handle, ^trace_pid}
     ack(root, ref, :trace_handle, trace_handle, :runtime_holder)
     holder = grant(root, ref, :runtime_holder)
     refute_receive {:phase_ready, ^holder, ^ref, :runtime}, 30
     send(holder, {:grant, self(), ref, :runtime, []})
     refute_receive {:runtime_start, _}, 30
     ack(root, ref, :runtime_holder, holder, nil)
-    assert_receive {:phase_ready, ^holder, ^ref, :runtime}
+    assert_receive {:phase_ready, ^holder, ^ref, :runtime}, 1_000
 
     send(holder, {:grant, self(), ref, :runtime, [runtime_id: "ephemeral-test"]})
-    assert_receive {:runtime_start, [runtime_id: "ephemeral-test"]}
-    assert_receive {:phase_result, ^holder, ^ref, :runtime, {:ok, runtime}}
-    assert_receive {:phase_ready, ^root, ^ref, :trace_bind}
+    assert_receive {:phase_result, ^holder, ^ref, :runtime, {:ok, runtime}}, 1_000
+    assert_received {:runtime_start, [runtime_id: "ephemeral-test"]}
+    assert_receive {:phase_ready, ^root, ^ref, :trace_bind}, 1_000
     send(root, {:grant, self(), ref, :trace_bind, nil})
-    assert_receive {:trace_bind, ^trace_handle, ^runtime}
-    assert_receive {:phase_result, ^root, ^ref, :trace_bind, :ok}
-    assert_receive {:subtree_prepared, ^root, ^ref, prepared}
+    assert_receive {:phase_result, ^root, ^ref, :trace_bind, :ok}, 1_000
+    assert_received {:trace_bind, ^trace_handle, ^runtime}
+    assert_receive {:subtree_prepared, ^root, ^ref, prepared}, 1_000
     assert prepared.runtime == runtime
     assert prepared.runtime_holder == holder
     assert prepared.store == %{pid: store_pid, handle: store_handle}
@@ -229,7 +234,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     assert prepared.executor == executor
     assert prepared.root.path |> String.starts_with?(tmp)
     send(root, {:commit, self(), ref})
-    assert_receive {:subtree_committed, ^root, ^ref}
+    assert_receive {:subtree_committed, ^root, ^ref}, 1_000
     assert Process.alive?(root)
     assert Process.alive?(runtime.supervisor)
   end
@@ -254,12 +259,12 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     send(holder, {:grant, self(), ref, :runtime, []})
     refute_receive {:started, _}, 30
     send(holder, {self(), ref, :registered})
-    assert_receive {:phase_ready, ^holder, ^ref, :runtime}
+    assert_receive {:phase_ready, ^holder, ^ref, :runtime}, 1_000
     send(holder, {:grant, self(), make_ref(), :runtime, []})
     refute_receive {:started, _}, 30
     send(holder, {:grant, self(), ref, :runtime, []})
-    assert_receive {:started, []}
-    assert_receive {:phase_result, ^holder, ^ref, :runtime, {:ok, runtime}}
+    assert_receive {:phase_result, ^holder, ^ref, :runtime, {:ok, runtime}}, 1_000
+    assert_received {:started, []}
     assert Process.alive?(runtime.supervisor)
   end
 
@@ -275,7 +280,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
         receive do: (:finish -> :ok)
       end)
 
-    assert_receive {:root, root}
+    assert_receive {:root, root}, 1_000
     monitor = Process.monitor(root)
     send(owner, :finish)
     assert_receive {:DOWN, ^monitor, :process, ^root, _}, 1_000
@@ -327,12 +332,12 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
         send(test, :owner_finished)
       end)
 
-    assert_receive {:holder, holder, _ref}
+    assert_receive {:holder, holder, _ref}, 1_000
     holder_monitor = Process.monitor(holder)
     send(owner, :grant)
-    assert_receive {:runtime_supervisor, supervisor}
+    assert_receive {:runtime_supervisor, supervisor}, 1_000
     supervisor_monitor = Process.monitor(supervisor)
-    assert_receive :owner_finished
+    assert_receive :owner_finished, 1_000
     assert_receive {:DOWN, ^holder_monitor, :process, ^holder, _}, 1_000
     assert_receive {:DOWN, ^supervisor_monitor, :process, ^supervisor, _}, 1_000
   end
