@@ -93,6 +93,147 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert second_request =~ "needle.txt"
   end
 
+  test "a tool reply arriving after stop starts no effect and leaves a peer session usable" do
+    root =
+      Path.join(System.tmp_dir!(), "loopex-stopped-tool-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    {port, server} =
+      start_held_server({:tool, "write", %{"path" => "late.txt", "content" => "late"}})
+
+    assert {:ok, session} =
+             Ephemeral.start_session(
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :coding,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    asking = Task.async(fn -> Ephemeral.ask(session, "write late.txt") end)
+    assert_receive {:held_model_request, ^server, request}, 15_000
+    assert request =~ "POST /v1/chat/completions HTTP/1.1"
+
+    assert :ok = Ephemeral.stop_session(session)
+    send(server, :release)
+    assert {:ok, {:error, {:run, :cancelled, _}}} = Task.yield(asking, 5_000)
+    refute File.exists?(Path.join(root, "late.txt"))
+    assert {:error, :session_closed} = Ephemeral.ask(session, "try again")
+
+    peer_port = start_server(["peer answer"])
+
+    assert {:ok, %{outcome: :completed, text: "peer answer"}} =
+             Ephemeral.run("peer prompt",
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{peer_port}/v1",
+               cwd: root,
+               tools: :read_only,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert_receive {:model_request, peer_request}, 15_000
+    assert peer_request =~ "peer prompt"
+    refute File.exists?(Path.join(root, "late.txt"))
+  end
+
+  test "unproved root removal seals one real session without stopping its peer" do
+    workspace =
+      Path.join(System.tmp_dir!(), "loopex-isolated-peer-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(workspace)
+    on_exit(fn -> File.rm_rf!(workspace) end)
+
+    assert {:ok, {:loopex_ephemeral_session, owner, _cell} = session} =
+             Ephemeral.start_session(
+               policy: Policy,
+               model: "ollama:llama3.2",
+               cwd: workspace,
+               tools: :coding,
+               timeout: 15_000
+             )
+
+    owned = :sys.get_state(owner).startup.owned_root.path
+    File.write!(Path.join(owned, "retained-marker"), "still here")
+    on_exit(fn -> File.rm_rf!(owned) end)
+
+    # Concept: uncertain cleanup must seal this session, not its peer.
+    # Technical depth: invalidate only the stored removal identity. Moving the
+    # live root would also move the executor ledger and test a different failure.
+    :sys.replace_state(owner, fn state ->
+      root = state.startup.owned_root
+      invalid_identity = %{root.identity | inode: root.identity.inode + 1}
+      put_in(state, [:startup, :owned_root], %{root | identity: invalid_identity})
+    end)
+
+    assert {:error,
+            {:cleanup_unproved, %{pending: [:root_removal], root: ^owned, root_ownership: :owned}}} =
+             Ephemeral.stop_session(session)
+
+    assert File.read!(Path.join(owned, "retained-marker")) == "still here"
+    assert {:error, :session_unavailable} = Ephemeral.ask(session, "write a file")
+
+    peer_port = start_server(["peer survived"])
+
+    assert {:ok, %{outcome: :completed, text: "peer survived"}} =
+             Ephemeral.run("answer in the peer session",
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{peer_port}/v1",
+               cwd: workspace,
+               tools: :read_only,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert_receive {:model_request, peer_request}, 15_000
+    assert peer_request =~ "answer in the peer session"
+  end
+
+  defp start_held_server(answer) do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
+
+    {:ok, {_, port}} = :inet.sockname(listener)
+    parent = self()
+
+    server =
+      spawn(fn ->
+        with {:ok, socket} <- :gen_tcp.accept(listener, 15_000),
+             {:ok, request} <- read_request(socket, <<>>) do
+          send(parent, {:held_model_request, self(), request})
+
+          receive do
+            :release ->
+              body = response(answer)
+
+              :gen_tcp.send(socket, [
+                "HTTP/1.1 200 OK\r\n",
+                "content-type: application/json\r\n",
+                "content-length: ",
+                Integer.to_string(byte_size(body)),
+                "\r\nconnection: close\r\n\r\n",
+                body
+              ])
+          end
+
+          :gen_tcp.close(socket)
+        end
+      end)
+
+    on_exit(fn ->
+      :gen_tcp.close(listener)
+      if Process.alive?(server), do: Process.exit(server, :kill)
+    end)
+
+    {port, server}
+  end
+
   defp start_server(answers, delay_ms \\ 0) do
     {:ok, listener} =
       :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])

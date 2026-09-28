@@ -99,6 +99,67 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
                     _, {:ok, {:session_grant, ^generation, :tool_grant, _, ^dispatch, _}}}
   end
 
+  test "a queued tool grant closes if its session seals during delayed model retirement" do
+    generation = make_ref()
+    instance = make_ref()
+    cell = :atomics.new(2, [])
+
+    state =
+      ModelCensus.new(generation, cell)
+      |> ModelCensus.bind_executor(self(), instance)
+      |> ModelCensus.activate_tools(true)
+
+    call = make_ref()
+    begin_operation = {:begin_model, self(), call}
+    state = ModelCensus.handle(state, admission(self(), generation, begin_operation))
+
+    assert_receive {:loopex_session_admission_result, _, _, ^generation, ^begin_operation, _,
+                    {:ok, _}}
+
+    dispatch = make_ref()
+    tool_operation = {:tool_grant, self(), instance, dispatch}
+
+    state =
+      ModelCensus.handle(state, admission_with_ref(self(), dispatch, generation, tool_operation))
+
+    refute_receive {:loopex_session_admission_result, _, ^dispatch, ^generation, ^tool_operation,
+                    _, _},
+                   0
+
+    :atomics.put(cell, 1, 3)
+    cancel = {:cancel_model, call, :no_proxy}
+    state = ModelCensus.handle(state, admission(self(), generation, cancel))
+    assert_receive {:loopex_session_admission_result, _, _, ^generation, ^cancel, _, {:ok, _}}
+    assert_receive {:model_tool_reconcile, token}, 100
+    state = ModelCensus.handle(state, {:model_tool_reconcile, token})
+
+    assert_receive {:loopex_session_admission_result, _, ^dispatch, ^generation, ^tool_operation,
+                    _, {:error, :session_admission_closed}}
+
+    assert state.tool_wait == nil
+
+    peer_generation = make_ref()
+    peer_instance = make_ref()
+    peer_cell = :atomics.new(2, [])
+
+    peer =
+      ModelCensus.new(peer_generation, peer_cell)
+      |> ModelCensus.bind_executor(self(), peer_instance)
+      |> ModelCensus.activate_tools(true)
+
+    peer_dispatch = make_ref()
+    peer_operation = {:tool_grant, self(), peer_instance, peer_dispatch}
+
+    _peer =
+      ModelCensus.handle(
+        peer,
+        admission_with_ref(self(), peer_dispatch, peer_generation, peer_operation)
+      )
+
+    assert_receive {:loopex_session_admission_result, _, ^peer_dispatch, ^peer_generation,
+                    ^peer_operation, _, {:ok, _}}
+  end
+
   test "cleanup-only route rejects every work operation without messaging the owner" do
     generation = make_ref()
     call = make_ref()
