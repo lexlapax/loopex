@@ -131,11 +131,12 @@ command() {
   local_run "$M6_DEMO_COMMAND" -p 'Say hello.' --policy allow-all \
     --model "ollama:loopex-m6-absent-$$-$RANDOM" --tools none \
     --cwd "$M6_DEMO_WORKSPACE" --output json \
-    >"$M6_DEMO_WORKSPACE/failed.json" || status=$?
+    >"$M6_DEMO_WORKSPACE/failed.json" 2>"$M6_DEMO_WORKSPACE/failed.stderr" || status=$?
   [ "$status" -eq 2 ] || {
     echo 'm6-demonstration: failed run must exit 2' >&2
     return 1
   }
+  assert_quiet_stderr "$M6_DEMO_WORKSPACE/failed.stderr" || return
   assert_json "$M6_DEMO_WORKSPACE/failed.json" failed ephemeral no
 }
 
