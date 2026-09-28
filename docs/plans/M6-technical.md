@@ -2559,8 +2559,8 @@ in the manifest. Existing discovery already takes both
   A refused or malformed command reply, catalog error or mismatch, call raise,
   caller exit or session loss stops the sequence at its first failure. In the
   ephemeral profile the admission command and every catalog call or validation
-  failure map to `{:composition, :resource_admission_failed}`; an activation step maps to
-  `{:composition, :skill_activation_failed}`, and startup rollback destroys all
+  failure retain startup cause `{:resource_admission, :failed}`; an activation step
+  retains `{:skill_activation, :failed}`, and startup rollback destroys all
   partially committed memory-store state under the fixed cause above. No prompt,
   provider call or tool effect may precede the final acceptance. So ADR 0025's
   separation holds: only activated skills enter context, and the selection limit
