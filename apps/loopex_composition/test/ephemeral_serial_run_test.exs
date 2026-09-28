@@ -10,6 +10,14 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
   end
 
   test "real core settles an injected empty candidate before a second ask" do
+    real_core_barrier_case(:waiting)
+  end
+
+  test "a timed-out real-core ask stays open through empty-candidate settlement" do
+    real_core_barrier_case(:background)
+  end
+
+  defp real_core_barrier_case(mode) do
     workspace =
       Path.join(System.tmp_dir!(), "loopex-serial-#{System.unique_integer([:positive])}")
 
@@ -42,10 +50,34 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
       if Process.alive?(owner), do: Ephemeral.stop_session(session)
     end)
 
-    first = Task.async(fn -> Ephemeral.ask(session, "first prompt") end)
+    test = self()
+
+    first =
+      Task.async(fn ->
+        result =
+          Ephemeral.ask(
+            session,
+            "first prompt",
+            timeout: if(mode == :background, do: 700, else: 15_000)
+          )
+
+        if mode == :background do
+          send(test, {:first_ask_result, self(), result})
+
+          receive do
+            :audit_borrower_mailbox ->
+              {:messages, messages} = Process.info(self(), :messages)
+              {result, messages}
+          end
+        else
+          result
+        end
+      end)
+
     assert_receive {:model_request, ^server, 1, first_request}, 15_000
     assert first_request =~ "POST /v1/chat/completions HTTP/1.1"
     assert first_request =~ "first prompt"
+    first_wait_deadline = :sys.get_state(owner).session.active.wait_deadline
 
     first_pending =
       await(owner, fn state ->
@@ -83,7 +115,6 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
     # empty-candidate state is injected; the facade, terminal event, status
     # read and following run all remain the real core workflow.
     assert :erlang.suspend_process(coordinator)
-    test = self()
     state = :sys.get_state(owner)
     generation = state.model_census.generation
     call = state.session.model_binding.call
@@ -95,10 +126,17 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
           {:release_empty_invocation, ^generation, ^call, pid, ^proof, release_ref, deadline}
           when pid == self() ->
             send(test, {:empty_release, self(), release_ref, deadline})
-            send(owner, {:empty_invocation_released, self(), release_ref})
 
             receive do
-              :finish -> :ok
+              :ack_release ->
+                send(owner, {:empty_invocation_released, self(), release_ref})
+
+                receive do
+                  :finish -> :ok
+                end
+
+              :finish ->
+                :ok
             end
         end
       end)
@@ -137,20 +175,92 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
       end
     end)
 
-    assert nil == Task.yield(first, 10)
+    assert :sys.get_state(owner).session.active.wait_deadline == first_wait_deadline
+
+    timed_out_run_id =
+      if mode == :background do
+        assert_receive {:first_ask_result, first_pid, {:error, {:timeout, %{run_id: run_id}}}},
+                       2_000
+
+        assert first_pid == first.pid
+        assert is_binary(run_id)
+        assert {:error, {:timeout, %{run_id: ^run_id}}} = Ephemeral.last_result(session)
+        assert {:error, :run_open} = Ephemeral.ask(session, "premature second prompt")
+        run_id
+      else
+        assert nil == Task.yield(first, 10)
+        nil
+      end
+
     refute_receive {:empty_release, ^candidate, _, _}, 10
     resume(coordinator)
 
     assert_receive {:empty_release, ^candidate, release_ref, deadline}, 1_000
     assert is_reference(release_ref)
     assert deadline > System.monotonic_time()
-    assert nil == Task.yield(first, 10)
+    if mode == :waiting, do: assert(nil == Task.yield(first, 10))
     assert Process.alive?(candidate)
+
+    if mode == :waiting,
+      do: assert(:sys.get_state(owner).session.active.wait_deadline == first_wait_deadline)
+
+    owner_monitor = :sys.get_state(owner).model_census.pending.candidate_monitor
+    send(owner, {:DOWN, make_ref(), :process, candidate, :normal})
+    send(owner, {:DOWN, owner_monitor, :process, self(), :normal})
+    assert :sys.get_state(owner).model_census.pending.candidate == candidate
+    assert :atomics.get(cell, 2) == 1
+
+    send(owner, {:empty_invocation_released, candidate, make_ref()})
+    send(owner, {:empty_invocation_released, self(), release_ref})
+
+    refute :sys.get_state(owner).session.settlement.acked
+
+    if mode == :waiting, do: assert(nil == Task.yield(first, 25))
+    assert :atomics.get(cell, 2) == 1
+    assert {:error, :run_open} = Ephemeral.ask(session, "premature second prompt")
+
+    if mode == :waiting do
+      send(candidate, :ack_release)
+
+      await(owner, fn state ->
+        if state.session.settlement.acked, do: {:ok, :acked}, else: :wait
+      end)
+    else
+      refute :sys.get_state(owner).session.settlement.acked
+    end
+
+    if mode == :waiting, do: assert(nil == Task.yield(first, 10))
+    assert :atomics.get(cell, 2) == 1
+    assert {:error, :run_open} = Ephemeral.ask(session, "premature second prompt")
+
+    if mode == :background do
+      assert {:error, {:timeout, _}} = Ephemeral.last_result(session)
+    end
+
     send(candidate, :finish)
     assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 1_000
 
-    assert {:ok, {:ok, %{outcome: :completed, text: "first answer"}}} =
-             Task.yield(first, 2_000)
+    if mode == :waiting do
+      assert {:ok, {:ok, %{outcome: :completed, text: "first answer"}}} =
+               Task.yield(first, 2_000)
+    else
+      await(owner, fn _state ->
+        case Ephemeral.last_result(session) do
+          {:ok, %{outcome: :completed, text: "first answer", run_id: ^timed_out_run_id} = result} ->
+            {:ok, result}
+
+          _ ->
+            :wait
+        end
+      end)
+
+      send(first.pid, :audit_borrower_mailbox)
+
+      assert {{:error, {:timeout, %{run_id: ^timed_out_run_id}}}, messages} =
+               Task.await(first, 2_000)
+
+      refute Enum.any?(messages, &match?({^owner, _, _}, &1))
+    end
 
     assert :atomics.get(cell, 2) == 0
     second = Task.async(fn -> Ephemeral.ask(session, "second prompt") end)
@@ -186,6 +296,55 @@ defmodule LoopexComposition.Ephemeral.SerialRunTest do
 
     assert :ok = Ephemeral.stop_session(session)
     refute File.exists?(root)
+  end
+
+  test "a timed-out real-core ask later settles and permits a second prompt" do
+    workspace =
+      Path.join(System.tmp_dir!(), "loopex-serial-timeout-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(workspace)
+    on_exit(fn -> File.rm_rf!(workspace) end)
+    {port, server} = held_server()
+
+    assert {:ok, {:loopex_ephemeral_session, owner, _cell} = session} =
+             Ephemeral.start_session(
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: workspace,
+               tools: :none,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    on_exit(fn -> if Process.alive?(owner), do: Ephemeral.stop_session(session) end)
+
+    first = Task.async(fn -> Ephemeral.ask(session, "first prompt", timeout: 100) end)
+    assert_receive {:model_request, ^server, 1, first_request}, 15_000
+    assert first_request =~ "first prompt"
+    assert {:error, {:timeout, %{run_id: run_id}}} = Task.await(first, 3_000)
+    assert is_binary(run_id)
+    assert {:error, :run_open} = Ephemeral.ask(session, "premature second prompt")
+
+    send(server, {:reply, 1})
+
+    assert %{outcome: :completed, text: "first answer", run_id: ^run_id} =
+             await(owner, fn _state ->
+               case Ephemeral.last_result(session) do
+                 {:ok, result} -> {:ok, result}
+                 _ -> :wait
+               end
+             end)
+
+    second = Task.async(fn -> Ephemeral.ask(session, "second prompt") end)
+    assert_receive {:model_request, ^server, 2, second_request}, 15_000
+    assert second_request =~ "second prompt"
+    send(server, {:reply, 2})
+
+    assert {:ok, {:ok, %{outcome: :completed, text: "second answer"}}} =
+             Task.yield(second, 5_000)
+
+    assert :ok = Ephemeral.stop_session(session)
   end
 
   defp held_server do
