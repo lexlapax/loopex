@@ -293,6 +293,55 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "creator exit seals a borrowed session and removes its root after cleanup", %{tmp: tmp} do
+    test = self()
+
+    creator =
+      spawn(fn ->
+        session = start_session(tmp, detach_supervisor: true, supervisor_recipient: test)
+        {owner, _actor} = owner_and_actor(session)
+        startup = :sys.get_state(owner).startup
+        send(test, {:created, session, startup.owned_root.path, startup.process_monitors})
+        receive do: (:creator_exit -> :ok)
+      end)
+
+    assert_receive {:detached_supervisor, supervisor}, 6_000
+    on_exit(fn -> if Process.alive?(supervisor), do: Process.exit(supervisor, :shutdown) end)
+    assert_receive {:created, session, root, subtree}, 6_000
+    {:loopex_ephemeral_session, owner, cell} = session
+    {_owner, actor} = owner_and_actor(session)
+    owner_monitor = Process.monitor(owner)
+    subtree_monitors = Enum.map(Map.keys(subtree), &{&1, Process.monitor(&1)})
+    assert File.dir?(root)
+
+    borrower = Task.async(fn -> Ephemeral.ask(session, "held", timeout: 7_000) end)
+    assert_receive {:facade_command, :prompt, "held", ^actor}, 2_000
+
+    assert %{admission: :granted, facade: %{stage: :dispatched}} =
+             :sys.get_state(owner).session.active
+
+    creator_monitor = Process.monitor(creator)
+    send(creator, :creator_exit)
+    assert_receive {:DOWN, ^creator_monitor, :process, ^creator, :normal}
+    assert eventually(fn -> :atomics.get(cell, 1) == 1 end)
+    assert Process.alive?(actor)
+    assert File.dir?(root)
+    assert {:error, :session_unavailable} = Ephemeral.ask(session, "after-creator-exit")
+
+    send(actor, :release_held_prompt)
+    assert_receive {:facade_command, :abort, nil, ^actor}, 2_000
+    assert {:error, {:run, :cancelled, _}} = Task.await(borrower, 7_000)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 7_000
+
+    Enum.each(subtree_monitors, fn {pid, monitor} ->
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 7_000
+    end)
+
+    assert :atomics.get(cell, 1) == 2
+    refute File.exists?(root)
+    assert {:error, :session_closed} = Ephemeral.last_result(session)
+  end
+
   test "creator exit and a concurrent stop remove the same owned root", %{tmp: tmp} do
     test = self()
 
