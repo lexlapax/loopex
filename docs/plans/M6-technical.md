@@ -1277,17 +1277,23 @@ and user information are nil.
 Before credential resolution, the caller binds one `route_fingerprint` to the
 tag and owner: `%{provider: provider, surface: surface, method: :post,
 base_url: normalized_base, path: final_path, query: nil}`. For Anthropic and
-OpenAI it obtains the surface through credential-free
-`ReqLLM.plan(model_spec, :chat, planning_options)`
-(`deps/req_llm/lib/req_llm.ex:420-423`). The planning options are exactly, in
-this order,
+OpenAI it first probes the surface through credential-free
+`ReqLLM.plan(model_spec, :chat, probe_options)`
+(`deps/req_llm/lib/req_llm.ex:420-423`). The probe uses the same ordered
+generation options below but omits only `req_http_options`, because those
+options contain the fingerprint whose path depends on the selected surface.
+After forming the fingerprint, it calls `ReqLLM.plan/3` again with the complete
+planning options and requires the second surface and route to equal the probe;
+any mismatch refuses before credential resolution or dispatch. Only the second
+plan is authoritative. Its planning options are exactly, in this order,
 `max_tokens`, `tools`, `total_timeout: :infinity`,
 `receive_timeout: :infinity`, `max_retries: 0`, `base_url` and the complete
 `req_http_options` stated above; no `api_key`, `operation` or `cache` member is
 present. The literal `:chat` matches the `generate_text/3` path.
-Planning is network-free with default compiled metadata or a preloaded
-non-fetching snapshot. A host-selected cold remote catalog can perform the
-separate host-owned effects above before any selected provider key is read.
+Both planning passes are network-free with default compiled metadata or a
+preloaded non-fetching snapshot. A host-selected cold remote catalog can
+perform the separate host-owned effects above before any selected provider key
+is read.
 The generation options are byte-for-byte the same keyword list for Ollama and,
 for a hosted provider, that list with only `api_key: resolved_value` prepended
 immediately after the final guard and token verification. Thus planning and
