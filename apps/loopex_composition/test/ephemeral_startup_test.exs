@@ -70,7 +70,10 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
 
     def command(%Loopex.Attachment{runtime: runtime}, command) do
       send(runtime.token.test, {:command, command})
-      {:accepted, command.command_id}
+
+      if Map.get(runtime.token, :refuse) == command.command_id,
+        do: {:error, :scripted_failure},
+        else: {:accepted, command.command_id}
     end
 
     def resource_catalog(runtime, "ephemeral-session") do
@@ -283,6 +286,61 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
 
     assert_receive :status_read
     Process.exit(supervisor, :shutdown)
+  end
+
+  for {refused_command, expected_cause} <- [
+        {"admit-resources", {:resource_admission, :failed}},
+        {"activate-skill-2", {:skill_activation, :failed}}
+      ] do
+    test "refusing #{refused_command} rolls back the named-skill startup", %{tmp: tmp} do
+      test = self()
+      refused_command = unquote(refused_command)
+      expected_cause = unquote(Macro.escape(expected_cause))
+      {:ok, _digest, manifest} = Loopex.ResourcePack.digest(skill_manifest())
+
+      configuration =
+        configuration(tmp, %{
+          runtime_holder: %{
+            runtime_start: fn _options ->
+              supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
+
+              {:ok,
+               %Runtime{
+                 supervisor: supervisor,
+                 token: %{test: test, manifest: manifest, refuse: refused_command}
+               }}
+            end
+          },
+          trace_bind: fn _handle, _runtime -> :ok end
+        })
+        |> Map.put(:test_facade, SkillFacade)
+        |> put_in([:skills, :manifest], manifest)
+
+      {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+      {:ok, activation} = OwnerActivation.start(supervisor)
+      owner = OwnerActivation.owner(activation)
+      {:ok, cell} = OwnerActivation.begin(activation)
+
+      assert {:error, ^expected_cause} = SessionOwner.start_session(owner, configuration, 6_000)
+      assert_receive :created
+      assert_receive :attached
+      assert_receive {:command, %{command_id: "admit-resources"}}
+
+      if refused_command == "admit-resources" do
+        refute_received :catalog_read
+      else
+        assert_receive :catalog_read
+        assert_receive {:command, %{command_id: "activate-skill-1", name: "alpha"}}
+        assert_receive {:command, %{command_id: "activate-skill-2", name: "zeta"}}
+      end
+
+      refute_received {:command, _}
+      refute_received :status_read
+      assert File.ls!(tmp) == []
+      assert :atomics.get(cell, 1) == 2
+      assert Process.alive?(supervisor)
+      Process.exit(supervisor, :shutdown)
+    end
   end
 
   test "a phase failure before mkdir names no root", %{tmp: tmp} do
