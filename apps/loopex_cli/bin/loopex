@@ -52,12 +52,21 @@ fi
 #
 # Technical depth: SIGTERM is the one the escript's own handler installs on, so
 # all four arrive there as SIGTERM rather than being passed through unchanged.
-# The trap is armed before the child exists so a signal delivered in the moment
-# after the fork is not the one signal this launcher misses; it names the child
-# by variable, which is read when the signal arrives rather than when the trap
-# is set.
+# For ask/-p, a signal before the child PID is assigned is retained and
+# forwarded as soon as that PID is known. Later signals use the same trap and
+# the existing wait loop still reports the child's status.
+ask_mode=''
+pending_signal=''
+case ${1-} in
+  ask|-p)
+    ask_mode=1
+    ERL_CRASH_DUMP=/dev/null
+    ERL_CRASH_DUMP_SECONDS=0
+    export ERL_CRASH_DUMP ERL_CRASH_DUMP_SECONDS
+    ;;
+esac
 child=''
-trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; fi' INT TERM HUP QUIT
+trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; elif [ -n "$ask_mode" ]; then pending_signal=1; fi' INT TERM HUP QUIT
 
 # Preserve a pipe or terminal before the shell gives an asynchronous command
 # its default /dev/null input. Redirections are applied left to right: the child
@@ -65,6 +74,9 @@ trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; fi' INT TERM HUP
 exec 3<&0 || exit 1
 "$escript" "$@" <&3 3<&- &
 child=$!
+if [ -n "$pending_signal" ]; then
+  kill -TERM "$child" 2>/dev/null
+fi
 exec 3<&-
 
 wait "$child"
