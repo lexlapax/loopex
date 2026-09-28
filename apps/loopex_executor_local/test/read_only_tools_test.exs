@@ -35,7 +35,8 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
           {"[-a]", ["-", "a"], ["b"]},
           {"[a-]", ["-", "a"], ["b"]},
           {"[\\^\\-\\]]", ["^", "-", "]"], ["a"]},
-          {"\\*\\?", ["*?"], ["ab"]}
+          {"\\*\\?", ["*?"], ["ab"]},
+          {"a\\/b.txt", ["a/b.txt"], ["ab.txt", "a/x/b.txt"]}
         ] do
       assert {:ok, matcher} = ToolGlob.compile(pattern)
       for path <- yes, do: assert(Regex.match?(matcher, path), "#{pattern} should match #{path}")
@@ -58,12 +59,24 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
           "[^]",
           "[z-a]",
           "[a/b]",
+          "[a\\/b]",
           "[a",
           "a\\",
           "[a\\"
         ] do
       assert {:error, _} = ToolGlob.compile(pattern), "invalid glob admitted: #{inspect(pattern)}"
     end
+  end
+
+  test "quoted slash matches a workspace-relative path in grep and find", %{root: root} do
+    File.mkdir!(Path.join(root, "a"))
+    File.write!(Path.join(root, "a/b.txt"), "needle\n")
+
+    assert {:completed, "M\ta/b.txt\t1\tneedle\n"} =
+             execute(root, "grep", %{"pattern" => "needle", "glob" => "a\\/b.txt"})
+
+    assert {:completed, "P\ta/b.txt\n"} =
+             execute(root, "find", %{"pattern" => "a\\/b.txt"})
   end
 
   test "encoding preserves printable bytes and encodes every record delimiter and UTF-8 byte" do

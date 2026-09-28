@@ -2,7 +2,7 @@ defmodule Loopex.Executor.Local.ToolGlob do
   @moduledoc false
 
   def compile(pattern) do
-    segments = String.split(pattern, "/")
+    segments = split_segments(String.codepoints(pattern), [], [])
 
     if Enum.any?(segments, &(&1 in ["", ".", ".."])) do
       {:error, :invalid_glob}
@@ -15,6 +15,21 @@ defmodule Loopex.Executor.Local.ToolGlob do
       end
     end
   end
+
+  # Concept: a quoted slash is a literal matcher scalar, not a pattern boundary.
+  # Technical depth: retain escape pairs for the segment and class parser, and
+  # split only an unquoted slash before applying whole-segment ** rules.
+  defp split_segments([], current, segments),
+    do: Enum.reverse([Enum.reverse(current) | segments]) |> Enum.map(&Enum.join/1)
+
+  defp split_segments(["\\", next | rest], current, segments),
+    do: split_segments(rest, [next, "\\" | current], segments)
+
+  defp split_segments(["/" | rest], current, segments),
+    do: split_segments(rest, [], [Enum.reverse(current) | segments])
+
+  defp split_segments([point | rest], current, segments),
+    do: split_segments(rest, [point | current], segments)
 
   defp segments([]), do: ""
   defp segments(["**"]), do: "(?:[^/]+(?:/[^/]+)*)?"
