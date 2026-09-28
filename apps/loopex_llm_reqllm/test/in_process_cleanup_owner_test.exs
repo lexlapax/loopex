@@ -512,6 +512,94 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
     refute_receive {:in_process_model_result, ^candidate, _, _, _}, 20
   end
 
+  test "a retired activated invocation cannot be released as empty", %{supervisor: supervisor} do
+    {:ok, _started} = Application.ensure_all_started(:req)
+    observer = self()
+    callback = spawn(fn -> forward_callback(observer) end)
+    start_ref = make_ref()
+    proxy = proxy()
+    {:ok, candidate} = start(supervisor, callback, proxy, start_ref, future())
+    candidate_monitor = Process.monitor(candidate)
+
+    assert_receive {:callback, ^callback,
+                    {:model_candidate_ready, ^candidate, ^start_ref, ^proxy}}
+
+    send(proxy, {:retire, candidate, start_ref})
+
+    generation = make_ref()
+    call = make_ref()
+    proof = make_ref()
+    stop_ref = make_ref()
+    cell = :atomics.new(2, [])
+    send(candidate, custody(start_ref, make_ref(), generation, call, candidate, proof))
+    assert_receive {:model_custody_prepared, ^candidate, _, ^generation, ^call, ^proof}
+    send(candidate, {:registration_pending, callback, stop_ref})
+
+    assert_receive {:callback, ^callback,
+                    {:registration_pending_ack, ^candidate, ^start_ref, ^stop_ref}}
+
+    token = make_ref()
+    prepare_ref = make_ref()
+    deadline = System.monotonic_time() + System.convert_time_unit(4_000, :millisecond, :native)
+    full_handle = {AdmissionProbe, self(), generation, cell}
+
+    send(
+      candidate,
+      {:in_process_activation_prepare, callback, start_ref, prepare_ref,
+       {:managed, self(), 5_000}, token, proof, AdmissionProbe, full_handle, cell, deadline}
+    )
+
+    assert_receive {:callback, ^callback,
+                    {:in_process_activation_prepared, ^candidate, ^start_ref, ^prepare_ref}}
+
+    base = "http://127.0.0.1:11434"
+    {:ok, fingerprint} = Route.fingerprint(:ollama, :ollama_chat_completions, base)
+    grant = {:session_grant, generation, :register_model, callback, make_ref(), deadline}
+    begin_ref = make_ref()
+
+    send(
+      candidate,
+      {:in_process_activation_begin, callback, start_ref, begin_ref, token, grant, call, base,
+       fingerprint, make_ref(), deadline}
+    )
+
+    assert_receive {:callback, ^callback,
+                    {:in_process_activation_begun, ^candidate, ^start_ref, ^begin_ref}}
+
+    assert_receive {:callback, ^callback,
+                    {:in_process_caller_input_ready, ^candidate, ^call, caller, _, _}},
+                   2_000
+
+    assert_received {:resources_recorded, ^candidate, ^call, 1, [{:process, :root, root}]}
+    assert_received {:resources_recorded, ^candidate, ^call, 6, [{:process, :caller, ^caller}]}
+    send(callback, :stop)
+    assert_receive {:empty_retirement_requested, ^candidate, ^call, ^proof}, 2_000
+
+    release_ref = make_ref()
+
+    send(
+      candidate,
+      {:release_empty_invocation, generation, call, candidate, proof, release_ref, future()}
+    )
+
+    refute_receive {:empty_invocation_released, ^candidate, ^release_ref}, 50
+    assert Process.alive?(candidate)
+    refute Process.alive?(caller)
+    refute Process.alive?(root)
+
+    nonce = make_ref()
+    cooperative_ms = System.monotonic_time(:millisecond) + 1_000
+
+    send(
+      candidate,
+      {:loopex_provider_resource_stop, stop_ref, nonce, self(), cooperative_ms,
+       cooperative_ms + 1_000}
+    )
+
+    assert_receive {:loopex_provider_resource_stopped, ^nonce, ^candidate}, 1_000
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 1_000
+  end
+
   test "a bad activation token cannot create the root or caller", %{supervisor: supervisor} do
     start_ref = make_ref()
     proxy = proxy()
@@ -650,6 +738,17 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
         :stop -> :ok
       end
     end)
+  end
+
+  defp forward_callback(observer) do
+    receive do
+      :stop ->
+        :ok
+
+      message ->
+        send(observer, {:callback, self(), message})
+        forward_callback(observer)
+    end
   end
 
   defp custody(start_ref, staging_ref, generation, call_ref, candidate, proof_ref) do
