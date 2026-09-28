@@ -7,14 +7,15 @@ Technical depth:
 [What a run makes durable](how-a-run-works-technical.md#technical-depth).
 
 You stand in a repository, type one sentence, and a few seconds later files on
-your disk have changed. This page is the picture of what happened in between: in
-what order, who decided what, and which of it survives if the terminal dies
-halfway through. Read it to know what to expect from a run, where to look when
-one goes wrong, and what the safety properties do and do not cover.
+your disk have changed. This page follows the durable `loopex run` path: in
+what order it acts, who decides what, and which of it survives if the terminal
+dies halfway through. `loopex ask` without `--state-root` runs the same kernel
+with an in-memory store; it has no journal to reopen, resumable session or
+recovery claim. See [Getting started](getting-started.md) for that one-shot path.
 
 It is a walkthrough rather than a reference. The references are
 [Coding sessions](coding-sessions.md#concept) for the commands and their flags,
-[Tools and policy](tools-and-policy.md#concept) for the four tools and the
+[Tools and policy](tools-and-policy.md#concept) for the coding and read-only tools and the
 authority in front of them, [The daemon](daemon.md#concept) for sessions that
 outlive a command, and [Runtime operations](runtime.md#concept) for driving the
 same loop from a host program. To try it first, follow
@@ -379,7 +380,7 @@ installed, and with no compatibility promise.
 
 - [Getting started](getting-started.md) — build the command and run a first session.
 - [Coding sessions](coding-sessions.md#concept) — the commands, their flags, streaming, steering and stopping.
-- [Tools and policy](tools-and-policy.md#concept) — the four tools, host authority, artifacts and what is kept on disk.
+- [Tools and policy](tools-and-policy.md#concept) — coding and read-only tools, host authority, artifacts and what is kept on disk.
 - [Runtime operations](runtime.md#concept) — driving the same loop from a host program.
 - [What a run makes durable](how-a-run-works-technical.md#technical-depth) — this page's technical companion.
 - [Operator documentation index](README.md).

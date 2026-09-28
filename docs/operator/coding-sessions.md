@@ -5,11 +5,14 @@
 
 Technical depth: [Commands, state, bounds and interrupts](#technical-depth).
 
-The `loopex` command runs a coding task from your terminal. You stand in a
-repository, describe a change in ordinary words, and watch a session read files,
-edit them and run commands until the work is done. The answer streams as it is
-produced. The session outlives the terminal: `loopex sessions` finds it again
-and `loopex resume` picks it back up.
+The durable `loopex run` command runs a coding task from your terminal. You
+stand in a repository, describe a change in ordinary words, and watch a session
+read files, edit them and run commands until the work is done. The answer
+streams as it is produced. The session outlives the terminal: `loopex sessions`
+finds it again and `loopex resume` picks it back up. This page describes that
+durable path and its offline commands. For a one-shot answer without a state
+root, use [`loopex ask`](getting-started.md); it does not leave a
+session to resume.
 
 This page covers the command on its own, where each invocation composes a
 runtime for itself and stops it when it ends. The same sessions can also be

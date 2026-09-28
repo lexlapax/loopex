@@ -6,9 +6,12 @@
 Concept: [How a run works](how-a-run-works.md#concept).
 
 This companion gives the ordering, the file layout, the numbers and the refusals
-behind the walkthrough: what is durable, what is not, and what each failure
-leaves behind. Mechanisms an operator does not act on are specified in the
-developer guides this page links to rather than repeated here.
+behind the durable `loopex run` walkthrough: what is durable, what is not, and
+what each failure leaves behind. The state-root and replay claims below do not
+apply to `loopex ask` without `--state-root`; that profile uses an in-memory
+store and leaves no resumable session. Mechanisms an operator does not act on
+are specified in the developer guides this page links to rather than repeated
+here.
 
 <a id="technical-run-planes"></a>
 ## Two Planes Reach Your Terminal
