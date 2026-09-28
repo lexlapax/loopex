@@ -2859,11 +2859,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       reply =
         case result do
           :ok ->
-            cond do
-              not state.stop.run_proved -> {:error, :session_unavailable}
-              state.stop.ending == :none -> {:error, :session_closed}
-              true -> state.stop.ending
-            end
+            if state.stop.run_proved and state.stop.ending != :none,
+              do: state.stop.ending,
+              else: {:error, :session_unavailable}
 
           _ ->
             result
