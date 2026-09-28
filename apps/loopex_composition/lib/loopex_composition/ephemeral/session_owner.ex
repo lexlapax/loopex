@@ -22,10 +22,13 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   alias Loopex.Runtime
   alias Loopex.Store
   alias Loopex.Trace.Capability.Handle, as: TraceHandle
+  alias Loopex.Attachment
+  alias Loopex.ResourcePack
   alias LoopexComposition.SessionAdmission
-  alias LoopexComposition.Ephemeral.{SessionRoot, TempRoot}
+  alias LoopexComposition.Ephemeral.{FacadeClient, SessionRoot, TempRoot}
 
   @startup_ms 5_000
+  @startup_wait_ms 16_000
   @phase_order [
     :candidate_prepare,
     :root_claim,
@@ -50,7 +53,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   @doc false
   @spec start_session(pid(), map(), pos_integer()) ::
-          {:ok, {:subtree_committed, map()}} | {:error, term()}
+          {:ok, :session_ready} | {:error, term()}
   def start_session(owner, configuration, timeout_ms)
       when is_pid(owner) and is_map(configuration) and is_integer(timeout_ms) and timeout_ms > 0 do
     reference = make_ref()
@@ -65,7 +68,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       {:DOWN, ^monitor, :process, ^owner, _reason} ->
         {:error, :session_unavailable}
     after
-      timeout_ms ->
+      max(timeout_ms, @startup_wait_ms) ->
         send(owner, {self(), reference, :cancel_start})
         Process.demonitor(monitor, [:flush])
         {:error, :session_unavailable}
@@ -109,7 +112,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
          phase: :blocked,
          token: nil,
          startup_deadline: nil,
-         startup: nil
+         startup: nil,
+         abort: nil
        }}
     else
       {:stop, :expired_owner_start}
@@ -206,7 +210,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   def handle_info({:startup_deadline, ref}, %{ref: ref, phase: :starting} = state) do
     if fresh?(state.startup_deadline),
       do: {:noreply, state},
-      else: {:noreply, fail_start(state, :startup_deadline_expired, :unknown)}
+      else: {:noreply, fail_start(state, timeout_cause(state.startup), :unknown)}
   end
 
   def handle_info(
@@ -247,6 +251,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         } = state
       ) do
     if sender == expected_sender(startup, phase) do
+      # The exact return ends this grant, including a returned failure. A
+      # later rollback must not classify it as an unknown child start.
+      state = %{state | startup: %{startup | granted: false}}
       {:noreply, accept_phase_result(state, phase, result)}
     else
       {:noreply, state}
@@ -270,21 +277,89 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   def handle_info(
-        {:DOWN, monitor, :process, root, _reason},
-        %{phase: :aborting, startup: %{root: root, process_monitors: monitors}} = state
+        {:DOWN, monitor, :process, pid, reason},
+        %{phase: :aborting, startup: startup, abort: abort} = state
       ) do
-    if Map.get(monitors, root) == monitor do
-      {:noreply, finish_abort(state, true)}
-    else
-      {:noreply, state}
+    cond do
+      abort.worker && abort.worker.pid == pid && abort.worker.monitor == monitor ->
+        {:noreply, finish_abort_worker(state, reason)}
+
+      Map.get(startup.process_monitors, pid) == monitor ->
+        next = %{state | abort: %{abort | down: MapSet.put(abort.down, pid)}}
+        {:noreply, continue_abort(next)}
+
+      true ->
+        {:noreply, state}
     end
   end
 
   def handle_info(
-        {:startup_reap_deadline, reference},
+        {:abort_deadline, reference},
         %{phase: :aborting, startup: %{reference: reference}} = state
       ) do
-    {:noreply, finish_abort(state, false)}
+    if fresh?(state.abort.deadline) do
+      {:noreply, state}
+    else
+      if state.abort.worker, do: Process.exit(state.abort.worker.pid, :kill)
+      {:noreply, state |> mark_abort_timeout() |> finish_abort()}
+    end
+  end
+
+  def handle_info(
+        {:abort_facade_deadline, reference},
+        %{phase: :aborting, startup: %{reference: reference}, abort: %{stage: :facade_reap}} =
+          state
+      ) do
+    {:noreply, state |> mark_abort_timeout() |> finish_abort()}
+  end
+
+  def handle_info(
+        {:abort_operation_cutoff, reference},
+        %{phase: :aborting, abort: %{worker: %{reference: reference} = worker}} = state
+      ) do
+    if not worker.finish_sent, do: Process.exit(worker.pid, :kill)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:abort_slot_deadline, reference},
+        %{phase: :aborting, abort: %{worker: %{reference: reference} = worker}} = state
+      ) do
+    Process.exit(worker.pid, :kill)
+    {:noreply, state |> mark_abort_timeout() |> finish_abort()}
+  end
+
+  def handle_info(
+        {worker_pid, reference, phase, :result, result, completed_at},
+        %{
+          phase: :aborting,
+          abort:
+            %{worker: %{pid: worker_pid, reference: reference, phase: phase} = worker} = abort
+        } = state
+      ) do
+    valid = completed_at <= worker.cutoff and valid_abort_result?(phase, result, worker.nonce)
+    updated = %{worker | result: valid}
+    next = %{state | abort: %{abort | worker: updated}}
+
+    if valid,
+      do: {:noreply, maybe_finish_abort_worker(next)},
+      else:
+        (
+          Process.exit(worker_pid, :kill)
+          {:noreply, next}
+        )
+  end
+
+  def handle_info(
+        {executor, instance, nonce, :groups_empty},
+        %{
+          phase: :aborting,
+          startup: %{executor_instance: instance, registered: %{executor: executor}},
+          abort: %{worker: %{phase: :process_groups, nonce: nonce} = worker} = abort
+        } = state
+      ) do
+    next = %{state | abort: %{abort | worker: %{worker | certificate: true}}}
+    {:noreply, maybe_finish_abort_worker(next)}
   end
 
   def handle_info(
@@ -295,15 +370,71 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         } = state
       ) do
     if fresh?(startup.deadline) and live_subtree?(startup) do
-      send(
-        state.creator,
-        {self(), startup.request, {:ok, {:subtree_committed, startup.prepared}}}
-      )
-
-      {:noreply, %{state | phase: :subtree_committed}}
+      {:noreply, start_facade(state)}
     else
-      {:noreply, fail_start(state, :startup_deadline_expired, :unknown)}
+      {:noreply, fail_start(state, :dependency_start_failed, :unknown)}
     end
+  end
+
+  def handle_info(
+        {client, reference, :ready},
+        %{
+          phase: :starting,
+          startup:
+            %{facade: %{pid: client, reference: reference, stage: :await_ready} = facade} =
+              startup
+        } = state
+      ) do
+    if fresh?(startup.deadline) and fresh?(facade.handshake_deadline) do
+      operation_deadline = System.monotonic_time() + native(5_000)
+      send(client, {self(), reference, :dispatch, operation_deadline})
+      next_facade = %{facade | stage: :dispatched, operation_deadline: operation_deadline}
+      {:noreply, %{state | startup: %{startup | facade: next_facade}}}
+    else
+      {:noreply, cancel_facade(state)}
+    end
+  end
+
+  def handle_info(
+        {client, reference, :cancelled},
+        %{
+          phase: :starting,
+          startup: %{facade: %{pid: client, reference: reference, stage: :cancelling} = facade}
+        } = state
+      ) do
+    {:noreply, fail_start(state, facade_failure(facade.operation), :known)}
+  end
+
+  def handle_info(
+        {client, reference, result},
+        %{
+          phase: :starting,
+          startup: %{facade: %{pid: client, reference: reference, stage: :dispatched}}
+        } = state
+      ) do
+    {:noreply, accept_facade_result(state, result)}
+  end
+
+  def handle_info(
+        {:facade_handshake_deadline, reference},
+        %{
+          phase: :starting,
+          startup: %{facade: %{reference: reference, stage: :await_ready} = facade}
+        } = state
+      ) do
+    if fresh?(facade.handshake_deadline),
+      do: {:noreply, state},
+      else: {:noreply, cancel_facade(state)}
+  end
+
+  def handle_info(
+        {:facade_cancel_deadline, reference},
+        %{
+          phase: :starting,
+          startup: %{facade: %{reference: reference, stage: :cancelling} = facade}
+        } = state
+      ) do
+    {:noreply, fail_start(state, facade_failure(facade.operation), :known)}
   end
 
   def handle_info(
@@ -312,7 +443,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       ) do
     if Map.get(monitors, root) == monitor do
       failed = fail_start(state, :dependency_start_failed, :unknown)
-      {:noreply, finish_abort(failed, true)}
+      abort = %{failed.abort | down: MapSet.put(failed.abort.down, root)}
+      {:noreply, continue_abort(%{failed | abort: abort})}
     else
       {:noreply, state}
     end
@@ -320,20 +452,22 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   def handle_info(
         {:DOWN, monitor, :process, pid, _reason},
-        %{phase: :subtree_committed, startup: startup} = state
+        %{phase: :ready, startup: startup} = state
       ) do
     cond do
+      {monitor, pid} == {state.monitors.creator, state.creator} ->
+        {:noreply, fail_start(state, :session_unavailable, :known)}
+
       {monitor, pid} in [
-        {state.monitors.creator, state.creator},
         {state.monitors.proxy, state.proxy},
         {state.monitors.supervisor, state.supervisor}
       ] ->
         {:stop, :normal, state}
 
       Map.get(startup.process_monitors, pid) == monitor ->
-        :atomics.put(state.cell, 1, 3)
-        if Process.alive?(startup.root), do: Process.exit(startup.root, :shutdown)
-        {:noreply, %{state | phase: :sealed}}
+        failed = fail_start(state, :dependency_start_failed, :unknown)
+        abort = %{failed.abort | down: MapSet.put(failed.abort.down, pid)}
+        {:noreply, continue_abort(%{failed | abort: abort})}
 
       true ->
         {:noreply, state}
@@ -341,26 +475,34 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
-    if {monitor, pid} in [
-         {state.monitors.creator, state.creator},
-         {state.monitors.proxy, state.proxy},
-         {state.monitors.supervisor, state.supervisor}
-       ] do
-      {:stop, :normal, state}
-    else
-      if state.phase == :starting and
-           Enum.any?(state.startup.process_monitors, fn {registered_pid, registered_monitor} ->
-             registered_pid == pid and registered_monitor == monitor
-           end) do
-        {:noreply, fail_start(state, :dependency_start_failed, :unknown)}
-      else
+    cond do
+      state.phase == :starting and
+          {monitor, pid} ==
+            {state.monitors.creator, state.creator} ->
+        {:noreply, fail_start(state, :session_unavailable, :known)}
+
+      {monitor, pid} in [
+        {state.monitors.creator, state.creator},
+        {state.monitors.proxy, state.proxy},
+        {state.monitors.supervisor, state.supervisor}
+      ] ->
+        {:stop, :normal, state}
+
+      state.phase == :starting and
+          Map.get(state.startup.process_monitors, pid) == monitor ->
+        failed = fail_start(state, :dependency_start_failed, :unknown)
+        abort = %{failed.abort | down: MapSet.put(failed.abort.down, pid)}
+        {:noreply, continue_abort(%{failed | abort: abort})}
+
+      true ->
         {:noreply, state}
-      end
     end
   end
 
   def handle_info({:EXIT, supervisor, _reason}, %{supervisor: supervisor} = state),
     do: {:stop, :normal, state}
+
+  def handle_info(:retire_sealed, %{phase: :sealed} = state), do: {:stop, :normal, state}
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -374,6 +516,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
         startup = %{
           request: request,
+          replied: false,
+          owner: self(),
           reference: reference,
           deadline: state.startup_deadline,
           configuration: configuration,
@@ -388,7 +532,14 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           registered: %{},
           process_monitors: %{root => monitor},
           prepared: nil,
-          generation: make_ref()
+          generation: make_ref(),
+          executor_instance: make_ref(),
+          facade: nil,
+          session_id: nil,
+          attachment: nil,
+          skill_index: 0,
+          manifest_digest: nil,
+          owner_epoch: nil
         }
 
         {:noreply, %{state | phase: :starting, startup: startup}}
@@ -397,6 +548,253 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         send(state.creator, {self(), request, {:error, {:composition, :dependency_start_failed}}})
         {:noreply, close_proved(state)}
     end
+  end
+
+  defp start_facade(state) do
+    startup = state.startup
+
+    case ResourcePack.digest(startup.configuration.skills.manifest) do
+      {:ok, digest, %{"packs" => packs}} when is_list(packs) ->
+        try do
+          {client, monitor} =
+            FacadeClient.start(
+              self(),
+              startup.registered.runtime,
+              test_facade(startup.configuration)
+            )
+
+          process_monitors = Map.put(startup.process_monitors, client, monitor)
+
+          state = %{
+            state
+            | startup: %{
+                startup
+                | manifest_digest: digest,
+                  process_monitors: process_monitors,
+                  registered: Map.put(startup.registered, :facade_client, client)
+              }
+          }
+
+          start_facade_operation(state, :create)
+        catch
+          _, _ -> fail_start(state, :client_start_failed, :known)
+        end
+
+      _ ->
+        fail_start(state, :resource_admission_failed, :known)
+    end
+  end
+
+  defp start_facade_operation(state, operation) do
+    startup = state.startup
+    client = Map.fetch!(startup.registered, :facade_client)
+    reference = make_ref()
+    handshake_deadline = min(System.monotonic_time() + native(1_000), startup.deadline)
+    send(client, {self(), reference, operation})
+
+    Process.send_after(
+      self(),
+      {:facade_handshake_deadline, reference},
+      remaining(handshake_deadline)
+    )
+
+    facade = %{
+      pid: client,
+      reference: reference,
+      operation: operation,
+      stage: :await_ready,
+      handshake_deadline: handshake_deadline,
+      operation_deadline: nil
+    }
+
+    %{state | startup: %{startup | facade: facade}}
+  end
+
+  defp cancel_facade(state) do
+    startup = state.startup
+    facade = startup.facade
+    send(facade.pid, {self(), facade.reference, :cancel})
+
+    Process.send_after(
+      self(),
+      {:facade_cancel_deadline, facade.reference},
+      min(1_000, remaining(startup.deadline))
+    )
+
+    %{state | startup: %{startup | facade: %{facade | stage: :cancelling}}}
+  end
+
+  defp accept_facade_result(state, result) do
+    startup = state.startup
+
+    if fresh?(startup.deadline) do
+      case facade_transition(state, startup.facade.operation, result) do
+        {:next, next_state, operation} ->
+          start_facade_operation(next_state, operation)
+
+        {:ready, ready_state} ->
+          send(state.creator, {self(), startup.request, {:ok, :session_ready}})
+          %{ready_state | phase: :ready, startup: %{ready_state.startup | replied: true}}
+
+        {:error, cause} ->
+          fail_start(state, cause, :known)
+      end
+    else
+      fail_start(state, facade_failure(startup.facade.operation), :known)
+    end
+  end
+
+  defp facade_transition(state, :create, {:ok, session_id})
+       when is_binary(session_id) and byte_size(session_id) in 1..256 do
+    if String.valid?(session_id) do
+      {:next, put_in(state.startup.session_id, session_id), :attach}
+    else
+      {:error, :session_create_failed}
+    end
+  end
+
+  defp facade_transition(state, :attach, {:ok, %Attachment{session_id: session_id} = attachment}) do
+    if session_id == state.startup.session_id and
+         attachment.runtime == state.startup.registered.runtime and
+         is_binary(attachment.attachment_id) and
+         is_binary(attachment.incarnation_id) and is_map(attachment.snapshot) do
+      state = put_in(state.startup.attachment, attachment)
+      packs = state.startup.configuration.skills.manifest["packs"]
+
+      if packs == [],
+        do: {:next, state, :session_status},
+        else: {:next, state, {:command, admit_command(state)}}
+    else
+      {:error, :attach_failed}
+    end
+  end
+
+  defp facade_transition(
+         state,
+         {:command, %{type: :admit_resources, command_id: id}},
+         {:accepted, id}
+       ) do
+    {:next, state, :resource_catalog}
+  end
+
+  defp facade_transition(state, :resource_catalog, {:ok, catalog}) do
+    if catalog_matches?(state.startup, catalog) do
+      {:next, state, {:command, activation_command(state, 0)}}
+    else
+      {:error, :resource_admission_failed}
+    end
+  end
+
+  defp facade_transition(
+         state,
+         {:command, %{type: :activate_skill, command_id: id}},
+         {:accepted, id}
+       ) do
+    next_index = state.startup.skill_index + 1
+    state = put_in(state.startup.skill_index, next_index)
+    packs = state.startup.configuration.skills.manifest["packs"]
+
+    if next_index == length(packs),
+      do: {:next, state, :session_status},
+      else: {:next, state, {:command, activation_command(state, next_index)}}
+  end
+
+  defp facade_transition(state, :session_status, {:ok, status}) when is_map(status) do
+    owner_epoch = Map.get(status, :owner_epoch)
+
+    if Map.get(status, :status) == :active and is_integer(owner_epoch) and
+         owner_epoch >= 0 and Map.has_key?(status, :active_run_id) and
+         Map.get(status, :active_run_id) == nil and
+         Map.get(status, :pending_work_ids) == [] do
+      {:ready, put_in(state.startup.owner_epoch, owner_epoch)}
+    else
+      {:error, :attach_failed}
+    end
+  end
+
+  defp facade_transition(_state, operation, _result), do: {:error, facade_failure(operation)}
+
+  defp admit_command(state) do
+    manifest = state.startup.configuration.skills.manifest
+    digest = state.startup.manifest_digest
+    issued_at = issued_at(state.startup.configuration)
+
+    %{
+      type: :admit_resources,
+      command_id: fresh_command_id("admit-resources"),
+      manifest_digest: digest,
+      decision: %{
+        manifest_digest: digest,
+        workspace_ref: manifest["workspace_ref"],
+        trust_scope: "project_skills",
+        decision_source: "host_supplied",
+        issued_at: issued_at,
+        expires_at: nil,
+        revocation_state: "active"
+      }
+    }
+  end
+
+  defp activation_command(state, index) do
+    pack = state.startup.configuration.skills.manifest["packs"] |> Enum.at(index)
+
+    %{
+      type: :activate_skill,
+      command_id: fresh_command_id("activate-skill-#{index + 1}"),
+      manifest_digest: state.startup.manifest_digest,
+      source_id: pack["source_id"],
+      name: pack["name"],
+      pack_digest: ResourcePack.pack_digest(pack),
+      supporting_labels: []
+    }
+  end
+
+  defp catalog_matches?(startup, %{
+         "configured_manifest_digest" => configured,
+         "admitted_manifest_digest" => admitted,
+         "decision_disposition" => "active",
+         "entries" => entries
+       })
+       when is_list(entries) do
+    digest = startup.manifest_digest
+    packs = startup.configuration.skills.manifest["packs"]
+    expected = Enum.map(packs, &{&1["source_id"], &1["name"], ResourcePack.pack_digest(&1)})
+    actual = Enum.map(entries, &catalog_tuple/1)
+
+    configured == digest and admitted == digest and length(actual) == length(expected) and
+      Enum.sort(actual) == Enum.sort(expected)
+  end
+
+  defp catalog_matches?(_startup, _catalog), do: false
+
+  defp catalog_tuple(%{"source_id" => source, "name" => name, "pack_digest" => digest})
+       when is_binary(source) and is_binary(name) and is_binary(digest),
+       do: {source, name, digest}
+
+  defp catalog_tuple(_entry), do: :invalid
+
+  defp fresh_command_id(prefix),
+    do: prefix <> "-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+
+  defp facade_failure(:create), do: :session_create_failed
+  defp facade_failure(:attach), do: :attach_failed
+  defp facade_failure(:session_status), do: :attach_failed
+  defp facade_failure(:resource_catalog), do: :resource_admission_failed
+  defp facade_failure({:command, %{type: :admit_resources}}), do: :resource_admission_failed
+  defp facade_failure({:command, %{type: :activate_skill}}), do: :skill_activation_failed
+
+  if Mix.env() == :test do
+    defp test_facade(configuration), do: Map.get(configuration, :test_facade, Loopex)
+
+    defp issued_at(configuration) do
+      now = Map.get(configuration, :test_now, fn -> DateTime.utc_now() end).()
+      now |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+    end
+  else
+    defp test_facade(_configuration), do: Loopex
+
+    defp issued_at(_configuration),
+      do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
   end
 
   defp maybe_grant(%{phase: :starting, startup: startup} = state) do
@@ -428,13 +826,18 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp accept_phase_result(
          state,
          :root_claim,
-         {:error, {:claim_unproved, %{candidate: candidate, ownership: ownership}}}
+         {:error, {:claim_unproved, %{candidate: candidate, ownership: ownership} = claim}}
        )
        when ownership in [:owned, :unknown] do
     startup = state.startup
 
     if candidate.path == startup.candidate.path and candidate.nonce == startup.candidate.nonce do
-      %{state | startup: %{startup | candidate: candidate}}
+      owned =
+        if ownership == :owned and is_map(Map.get(claim, :identity)),
+          do: Map.put(candidate, :identity, claim.identity),
+          else: nil
+
+      %{state | startup: %{startup | candidate: candidate, owned_root: owned}}
       |> fail_start(:temporary_root_creation_failed, ownership)
     else
       fail_start(state, :temporary_root_creation_failed, :unknown)
@@ -558,6 +961,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp phase_payload(state, :executor) do
     [
       session_owner: self(),
+      session_instance: state.startup.executor_instance,
       session_generation: state.startup.generation,
       session_cell: state.cell,
       session_admission: SessionAdmission.handle(self(), state.startup.generation, state.cell),
@@ -599,7 +1003,15 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       store: Map.fetch!(startup.registered, :store_handle),
       policy: config.policy,
       policy_identity: %{"id" => inspect(config.policy), "revision" => "0.2.0"},
-      executor: Map.fetch!(startup.registered, :executor),
+      executor: %{
+        module: Loopex.Executor.Local,
+        reference: Map.fetch!(startup.registered, :executor),
+        identity: "executor-local",
+        epoch: 1,
+        fencing_token: 1,
+        workspace_ref: config.skills.manifest["workspace_ref"],
+        workspace_lease: "workspace"
+      },
       tools: tools,
       active_tools: active,
       model: model,
@@ -650,22 +1062,326 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp failure_cause(:runtime), do: :runtime_start_failed
   defp failure_cause(:trace_bind), do: :trace_capability_bind_failed
 
+  defp timeout_cause(%{facade: %{operation: operation}}), do: facade_failure(operation)
+  defp timeout_cause(%{expected: phase}) when phase in @phase_order, do: failure_cause(phase)
+  defp timeout_cause(_startup), do: :dependency_start_failed
+
+  # Concept: rollback observes the same one-session proof obligations as stop.
+  # Technical depth: an exact returned failure is not a lost grant. Cleanup
+  # attempts never block this receive loop and never remove an unowned path.
   defp fail_start(%{startup: startup} = state, cause, ownership) do
-    if is_pid(startup.root) and Process.alive?(startup.root),
-      do: Process.exit(startup.root, :shutdown)
-
     :atomics.put(state.cell, 1, 1)
-    Process.send_after(self(), {:startup_reap_deadline, startup.reference}, 1_000)
+    deadline = System.monotonic_time() + native(state.cleanup_grace_ms + 5_000)
+    Process.send_after(self(), {:abort_deadline, startup.reference}, remaining(deadline))
 
-    %{
+    unknown_start =
+      startup.expected in @phase_order and
+        startup.expected not in [:candidate_prepare, :root_claim] and
+        (startup.granted or (ownership == :unknown and cause == failure_cause(startup.expected)))
+
+    possible_root =
+      cond do
+        is_map(startup.owned_root) ->
+          startup.owned_root.path
+
+        startup.expected == :root_claim and is_map(startup.candidate) and
+            (startup.granted or ownership in [:owned, :unknown]) ->
+          startup.candidate.path
+
+        true ->
+          nil
+      end
+
+    next = %{
       state
       | phase: :aborting,
-        startup: Map.merge(startup, %{cause: cause, ownership: ownership})
+        startup:
+          Map.merge(startup, %{
+            cause: startup_cause(cause),
+            ownership: ownership,
+            possible_root: possible_root
+          }),
+        abort: %{
+          deadline: deadline,
+          stage: :facade_reap,
+          down: MapSet.new(),
+          worker: nil,
+          unknown_start: unknown_start,
+          group_proved: false,
+          group_failed: false,
+          subtree_failed: false,
+          root_failed: false,
+          root_proved: false
+        }
     }
+
+    case Map.get(startup.registered, :facade_client) do
+      client when is_pid(client) ->
+        Process.exit(client, :kill)
+        Process.send_after(self(), {:abort_facade_deadline, startup.reference}, 1_000)
+
+      _ ->
+        :ok
+    end
+
+    continue_abort(next)
   end
 
-  defp finish_abort(%{startup: startup} = state, root_down) do
-    result = aborted_result(startup, root_down)
+  defp continue_abort(%{abort: %{stage: :facade_reap} = abort} = state) do
+    client = Map.get(state.startup.registered, :facade_client)
+
+    if not is_pid(client) or MapSet.member?(abort.down, client),
+      do: start_group_drain(state),
+      else: state
+  end
+
+  defp continue_abort(%{abort: %{stage: :await_subtree} = abort} = state) do
+    if all_subtree_down?(state.startup, abort.down), do: after_subtree(state), else: state
+  end
+
+  defp continue_abort(state), do: state
+
+  defp start_group_drain(state) do
+    startup = state.startup
+    abort = state.abort
+    executor = Map.get(startup.registered, :executor)
+
+    cond do
+      not is_pid(executor) and startup.expected == :executor and startup.granted ->
+        start_runtime_stop(%{state | abort: %{abort | group_failed: true}})
+
+      not is_pid(executor) ->
+        start_runtime_stop(%{state | abort: %{abort | group_proved: true}})
+
+      MapSet.member?(abort.down, executor) or not Process.alive?(executor) ->
+        start_runtime_stop(%{state | abort: %{abort | group_failed: true}})
+
+      true ->
+        start_abort_worker(state, :process_groups, make_ref())
+    end
+  end
+
+  defp start_runtime_stop(state) do
+    runtime = Map.get(state.startup.registered, :runtime)
+
+    if match?(%Runtime{}, runtime) and
+         not MapSet.member?(state.abort.down, runtime.supervisor) do
+      start_abort_worker(state, :runtime_stop, nil)
+    else
+      start_subtree_stop(state)
+    end
+  end
+
+  defp start_subtree_stop(state) do
+    if MapSet.member?(state.abort.down, state.startup.root),
+      do: await_subtree(state),
+      else: start_abort_worker(state, :subtree_stop, nil)
+  end
+
+  defp await_subtree(state) do
+    next = %{state | abort: %{state.abort | stage: :await_subtree}}
+    continue_abort(next)
+  end
+
+  defp after_subtree(%{abort: abort, startup: startup} = state) do
+    cond do
+      abort.unknown_start or abort.group_failed or abort.subtree_failed ->
+        finish_abort(state)
+
+      is_map(startup.owned_root) ->
+        start_abort_worker(state, :root_removal, nil)
+
+      startup.possible_root != nil ->
+        finish_abort(%{state | abort: %{abort | root_failed: true}})
+
+      true ->
+        finish_abort(%{state | abort: %{abort | root_proved: true}})
+    end
+  end
+
+  defp start_abort_worker(state, phase, nonce) do
+    owner = self()
+    reference = make_ref()
+    now = System.monotonic_time()
+    cutoff = min(now + native(500), state.abort.deadline)
+    slot = min(now + native(1_000), state.abort.deadline)
+
+    {pid, monitor} =
+      :erlang.spawn_opt(
+        fn ->
+          Process.flag(:sensitive, true)
+
+          result =
+            try do
+              abort_operation(state, phase, nonce, cutoff)
+            rescue
+              _ -> {:error, :operation_failed}
+            catch
+              _, _ -> {:error, :operation_failed}
+            end
+
+          send(owner, {self(), reference, phase, :result, result, System.monotonic_time()})
+
+          receive do
+            {^owner, ^reference, :finish} -> :ok
+          after
+            remaining(slot) -> exit(:finish_not_received)
+          end
+        end,
+        [:link, :monitor]
+      )
+
+    Process.send_after(self(), {:abort_operation_cutoff, reference}, remaining(cutoff))
+    Process.send_after(self(), {:abort_slot_deadline, reference}, remaining(slot))
+
+    worker = %{
+      pid: pid,
+      monitor: monitor,
+      reference: reference,
+      phase: phase,
+      nonce: nonce,
+      cutoff: cutoff,
+      result: false,
+      certificate: false,
+      finish_sent: false
+    }
+
+    %{state | abort: %{state.abort | stage: phase, worker: worker}}
+  end
+
+  defp abort_operation(state, :process_groups, nonce, deadline) do
+    startup = state.startup
+
+    group_drain(startup.configuration).(
+      startup.registered.executor,
+      startup.executor_instance,
+      self_owner(state),
+      nonce,
+      deadline
+    )
+  end
+
+  defp abort_operation(state, :runtime_stop, _nonce, _deadline),
+    do: Loopex.stop(state.startup.registered.runtime)
+
+  defp abort_operation(state, :subtree_stop, _nonce, _deadline) do
+    Process.exit(state.startup.root, :shutdown)
+    :ok
+  end
+
+  defp abort_operation(state, :root_removal, _nonce, _deadline),
+    do: TempRoot.remove(state.startup.owned_root)
+
+  defp abort_operation(state, :root_absence, _nonce, _deadline) do
+    case File.lstat(state.startup.owned_root.path) do
+      {:error, :enoent} -> :ok
+      _ -> {:error, :root_removal_unproved}
+    end
+  end
+
+  defp self_owner(state), do: state.startup.owner
+
+  defp valid_abort_result?(:process_groups, {:ok, nonce}, nonce), do: true
+
+  defp valid_abort_result?(phase, :ok, _nonce)
+       when phase in [:runtime_stop, :subtree_stop, :root_removal, :root_absence], do: true
+
+  defp valid_abort_result?(_phase, _result, _nonce), do: false
+
+  defp maybe_finish_abort_worker(%{abort: %{worker: worker}} = state) do
+    if worker.result and (worker.phase != :process_groups or worker.certificate) and
+         not worker.finish_sent do
+      send(worker.pid, {self(), worker.reference, :finish})
+      put_in(state.abort.worker.finish_sent, true)
+    else
+      state
+    end
+  end
+
+  defp finish_abort_worker(%{abort: %{worker: worker} = abort} = state, reason) do
+    success =
+      worker.result and worker.finish_sent and reason == :normal and
+        (worker.phase != :process_groups or worker.certificate)
+
+    next = %{state | abort: %{abort | worker: nil}}
+
+    case worker.phase do
+      :process_groups ->
+        next = %{next | abort: %{next.abort | group_proved: success, group_failed: not success}}
+        start_runtime_stop(next)
+
+      :runtime_stop ->
+        start_subtree_stop(next)
+
+      :subtree_stop ->
+        next = %{next | abort: %{next.abort | subtree_failed: not success}}
+        await_subtree(next)
+
+      :root_removal ->
+        if success,
+          do: start_abort_worker(next, :root_absence, nil),
+          else: finish_abort(%{next | abort: %{next.abort | root_failed: true}})
+
+      :root_absence ->
+        finish_abort(%{
+          next
+          | abort: %{next.abort | root_proved: success, root_failed: not success}
+        })
+    end
+  end
+
+  defp mark_abort_timeout(state) do
+    phase = state.abort.stage
+    abort = state.abort
+
+    abort =
+      cond do
+        phase == :process_groups ->
+          %{abort | group_failed: true}
+
+        phase in [:root_removal, :root_absence] ->
+          %{abort | root_failed: true}
+
+        phase in [:runtime_stop, :subtree_stop, :await_subtree, :facade_reap] ->
+          %{abort | subtree_failed: true}
+
+        true ->
+          abort
+      end
+
+    %{state | abort: abort}
+  end
+
+  defp all_subtree_down?(startup, down) do
+    Enum.all?(Map.keys(startup.process_monitors), &MapSet.member?(down, &1))
+  end
+
+  defp finish_abort(%{phase: :aborting, startup: startup, abort: abort} = state) do
+    pending =
+      []
+      |> maybe_pending(abort.group_failed, :process_groups)
+      |> maybe_pending(
+        abort.unknown_start or abort.subtree_failed or
+          not all_subtree_down?(startup, abort.down) or
+          (abort.worker != nil and abort.worker.phase not in [:root_removal, :root_absence]),
+        :session_subtree
+      )
+      |> maybe_pending(abort.root_failed, :root_removal)
+
+    result =
+      if pending == [] and (abort.root_proved or startup.possible_root == nil) do
+        {:error, startup.cause}
+      else
+        {:error,
+         {:cleanup_unproved,
+          %{
+            root: startup.possible_root,
+            root_ownership: if(is_map(startup.owned_root), do: :owned, else: :unknown),
+            pending: pending,
+            ending: :none,
+            cause: startup.cause
+          }}}
+      end
 
     :atomics.put(
       state.cell,
@@ -673,51 +1389,45 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       if(match?({:error, {:cleanup_unproved, _}}, result), do: 3, else: 2)
     )
 
-    send(state.creator, {self(), startup.request, result})
+    unless startup.replied, do: send(state.creator, {self(), startup.request, result})
+    send(self(), :retire_sealed)
     %{state | phase: :sealed}
   end
 
-  defp aborted_result(startup, root_down) do
-    root =
-      cond do
-        is_map(startup.owned_root) ->
-          startup.owned_root.path
+  defp maybe_pending(pending, true, item), do: pending ++ [item]
+  defp maybe_pending(pending, false, _item), do: pending
 
-        startup.expected == :root_claim and startup.granted and
-            is_map(startup.candidate) ->
-          startup.candidate.path
+  defp startup_cause(:session_create_failed), do: {:session_create, :failed}
+  defp startup_cause(:client_start_failed), do: {:client_start, :failed}
+  defp startup_cause(:attach_failed), do: {:attach, :failed}
+  defp startup_cause(:resource_admission_failed), do: {:resource_admission, :failed}
+  defp startup_cause(:skill_activation_failed), do: {:skill_activation, :failed}
+  defp startup_cause(cause), do: {:composition, cause}
 
-        true ->
-          nil
-      end
+  if Mix.env() == :test do
+    defp group_drain(configuration),
+      do:
+        get_in(configuration, [:test_seams, :group_drain]) ||
+          default_group_drain()
+  else
+    defp group_drain(_configuration), do: default_group_drain()
+  end
 
-    cond do
-      root == nil and root_down ->
-        {:error, {:composition, startup.cause}}
-
-      true ->
-        pending =
-          cond do
-            not root_down -> [:session_subtree, :root_removal]
-            root == nil -> [:session_subtree]
-            is_map(startup.owned_root) -> [:session_subtree, :root_removal]
-            true -> [:root_removal]
-          end
-
-        {:error,
-         {:cleanup_unproved,
-          %{
-            root: root,
-            root_ownership: if(is_map(startup.owned_root), do: :owned, else: startup.ownership),
-            pending: pending,
-            ending: :none,
-            cause: startup.cause
-          }}}
+  defp default_group_drain do
+    fn executor, instance, owner, nonce, deadline ->
+      apply(Loopex.Executor.Local, :drain_process_groups, [
+        executor,
+        instance,
+        owner,
+        nonce,
+        deadline
+      ])
     end
   end
 
   defp close_proved(state) do
     :atomics.put(state.cell, 1, 2)
+    send(self(), :retire_sealed)
     %{state | phase: :sealed}
   end
 
