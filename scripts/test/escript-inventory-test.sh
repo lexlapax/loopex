@@ -57,4 +57,11 @@ if elixir scripts/escript-inventory.exs "$fixture/good" "$fixture/invalid" \
   exit 1
 fi
 grep -q 'invalid escript archive' "$fixture/invalid.log"
-printf 'escript-inventory-test: PASS prefixed, missing, empty, duplicate and invalid controls\n'
+ln -s "$fixture/good" "$fixture/good-link"
+if elixir scripts/escript-inventory.exs "$fixture/good" "$fixture/good-link" \
+  >"$fixture/link.log" 2>&1; then
+  echo 'escript-inventory-test: symlinked escript was accepted' >&2
+  exit 1
+fi
+grep -q 'missing escript' "$fixture/link.log"
+printf 'escript-inventory-test: PASS prefixed, missing, empty, duplicate, invalid and symlink controls\n'

@@ -110,6 +110,52 @@ defmodule Loopex.ClosureArchiveCompareTest do
              compare(%{fixture | admin_path: path})
   end
 
+  test "matching forged file digests in both manifests cannot impersonate the commits", fixture do
+    tested_copy = copy_manifest(fixture, fixture.tested_path)
+    admin_copy = copy_manifest(fixture, fixture.admin_path)
+    digest = Base.encode16(:crypto.hash(:sha256, "unchanged source\n"), case: :lower)
+    original = Enum.join(["f", "644", "source.txt", digest, ""], <<0>>)
+    forged = Enum.join(["f", "644", "source.txt", String.duplicate("0", 64), ""], <<0>>)
+
+    for path <- [tested_copy, admin_copy] do
+      bytes = File.read!(path)
+      assert :binary.match(bytes, original) != :nomatch
+      File.write!(path, :binary.replace(bytes, original, forged))
+    end
+
+    assert {:error, "archive content differs from its commit blob"} =
+             compare(%{fixture | tested_path: tested_copy, admin_path: admin_copy})
+  end
+
+  test "matching forged link targets in both manifests cannot impersonate the commits", fixture do
+    tested_copy = copy_manifest(fixture, fixture.tested_path)
+    admin_copy = copy_manifest(fixture, fixture.admin_path)
+    original = Enum.join(["l", "0", "newline-link", "target\n", ""], <<0>>)
+    forged = Enum.join(["l", "0", "newline-link", "forged\n", ""], <<0>>)
+
+    for path <- [tested_copy, admin_copy] do
+      bytes = File.read!(path)
+      assert :binary.match(bytes, original) != :nomatch
+      File.write!(path, :binary.replace(bytes, original, forged))
+    end
+
+    assert {:error, "archive content differs from its commit blob"} =
+             compare(%{fixture | tested_path: tested_copy, admin_path: admin_copy})
+  end
+
+  test "an excluded administrative document still has to match its own Git blob", fixture do
+    path = copy_manifest(fixture)
+    bytes = File.read!(path)
+    digest = Base.encode16(:crypto.hash(:sha256, "administrative\n"), case: :lower)
+    original = Enum.join(["f", "644", "docs/README.md", digest, ""], <<0>>)
+    forged = Enum.join(["f", "644", "docs/README.md", String.duplicate("0", 64), ""], <<0>>)
+    assert :binary.match(bytes, original) != :nomatch
+    File.write!(path, :binary.replace(bytes, original, forged))
+
+    assert {:error, "archive content differs from its commit blob"} =
+             compare(%{fixture | admin_path: path})
+  end
+
   test "a changed mode fails the complete projection before exclusions", fixture do
     path = copy_manifest(fixture)
 
@@ -212,6 +258,25 @@ defmodule Loopex.ClosureArchiveCompareTest do
 
     assert {:error, "the complete archive projections differ"} =
              compare(%{fixture | admin: extra, admin_path: path})
+  end
+
+  test "a tracked build-output root cannot hide behind the manifest producer's prune", fixture do
+    repo = Path.join(fixture.root, "tracked-build-repo")
+    git!(fixture.repo, ["clone", "-q", fixture.repo, repo])
+    git!(repo, ["switch", "-q", "--detach", fixture.admin])
+    git!(repo, ["config", "user.name", "Loopex Test"])
+    git!(repo, ["config", "user.email", "loopex-test@example.invalid"])
+    File.mkdir_p!(Path.join(repo, "deps"))
+    File.write!(Path.join(repo, "deps/tracked.txt"), "tracked build input\n")
+    git!(repo, ["add", "-f", "deps/tracked.txt"])
+    git!(repo, ["commit", "-qm", "tracked build output"])
+    extra = git!(repo, ["rev-parse", "HEAD"]) |> String.trim()
+    path = Path.join(fixture.root, "tracked-build.manifest")
+    stage = Path.join(LoopexTest.Repo.root(), "scripts/stage-archive-manifest.sh")
+    {_, 0} = System.cmd("bash", [stage, extra, path], cd: repo, stderr_to_stdout: true)
+
+    assert {:error, "an archive kind/mode/path projection differs from its commit"} =
+             compare(%{fixture | repo: repo, admin: extra, admin_path: path})
   end
 
   defp compare(%{

@@ -148,9 +148,11 @@ fi
 tree="$fresh/src"
 printf 'check-release: fresh-source extraction of %s\n' "$commit"
 (umask 0777; (umask 022; mkdir "$tree" && git archive "$commit" | tar -x -C "$tree"))
+manifest_producer="$logs/source-archive-manifest.sh"
+cp "$tree/scripts/source-archive-manifest.sh" "$manifest_producer"
 release_retain_source_identity \
   "$tree/SOURCE_IDENTITY" "$retain/source-archive-manifest.source-identity"
-bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest"
+bash "$manifest_producer" "$tree" >"$retain/source-archive-manifest"
 git ls-files -z >"$retain/source-inventory"
 elixir scripts/source-archive-check.exs verify \
   "$retain/source-archive-manifest" "$retain/source-inventory" "$commit" "$tree"
@@ -170,7 +172,7 @@ elixir "$tree/scripts/escript-inventory.exs" \
   >"$retain/escript-inventory.log"
 cat "$retain/escript-inventory.log"
 release_retain_identity "$retain/escript-inventory.log"
-bash "$tree/scripts/source-archive-manifest.sh" "$tree" >"$retain/source-archive-manifest.after"
+bash "$manifest_producer" "$tree" >"$retain/source-archive-manifest.after"
 elixir scripts/source-archive-check.exs unchanged \
   "$retain/source-archive-manifest" "$retain/source-archive-manifest.after"
 grep -q "\"source\" => \"$commit\"\|<<\"source\">> => <<\"$commit\">>" \

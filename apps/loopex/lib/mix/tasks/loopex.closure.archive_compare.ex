@@ -15,8 +15,9 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
   producer. Their adjacent `.source-identity` files are ordinary files whose
   bytes must match the corresponding Git commit and manifest entry. Complete
   kind/mode/path projections must cover every independently enumerated Git
-  archive member and match Git-tree modes, then match each other;
-  only then are content tuples compared after the documented exclusions. No
+  archive member and match Git-tree modes, then match each other. Shipped
+  tuples are compared after the documented exclusions, and each manifest's
+  file digests and link targets are independently bound to its Git blobs. No
   archive or evidence file is written by this task.
   """
 
@@ -109,6 +110,13 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
              if shipped(tested) == shipped(admin),
                do: {:ok, :matched},
                else: {:error, "archive tuples outside the exclusions differ"}
+           end),
+         {:ok, _} <-
+           step("commit-bound archive contents", fn ->
+             with :ok <- contents_match_tree(tested, tested_tree),
+                  :ok <- contents_match_tree(admin, admin_tree) do
+               {:ok, :matched}
+             end
            end) do
       :ok
     end
@@ -233,11 +241,7 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
 
   defp archive_path({name, type, _, _, _, _, _})
        when type in [:regular, :directory, :symlink] and is_list(name) do
-    path = List.to_string(name)
-
-    if path in ["_build", "deps"] or String.starts_with?(path, ["_build/", "deps/"]),
-      do: :metadata,
-      else: {:ok, path}
+    {:ok, List.to_string(name)}
   end
 
   defp archive_path(_), do: :invalid
@@ -249,8 +253,8 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
       case :binary.split(entry, "\t") do
         [metadata, path] when path != "" ->
           case :binary.split(metadata, " ", [:global]) do
-            [mode, _type, _object] ->
-              {:cont, {:ok, Map.put(acc, path, mode)}}
+            [mode, _type, object] ->
+              {:cont, {:ok, Map.put(acc, path, {mode, object})}}
 
             _ ->
               {:halt, {:error, "Git tree has malformed metadata"}}
@@ -275,10 +279,38 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
     MapSet.new(records, &elem(&1, 2)) == members and
       Enum.all?(records, fn {kind, mode, path, _} ->
         case Map.fetch(tree, path) do
-          {:ok, git_entry_mode} -> git_mode(git_entry_mode) == {:ok, {kind, mode}}
+          {:ok, {git_entry_mode, _object}} -> git_mode(git_entry_mode) == {:ok, {kind, mode}}
           :error -> false
         end
       end)
+  end
+
+  defp contents_match_tree(records, tree) do
+    Enum.reduce_while(records, :ok, fn
+      {"f", _mode, "SOURCE_IDENTITY", _digest}, :ok ->
+        {:cont, :ok}
+
+      {"d", _mode, _path, _value}, :ok ->
+        {:cont, :ok}
+
+      {kind, _mode, path, value}, :ok when kind in ["f", "l"] ->
+        {_mode, object} = Map.fetch!(tree, path)
+
+        case git(["cat-file", "blob", object]) do
+          {:ok, bytes} ->
+            expected =
+              if kind == "f",
+                do: Base.encode16(:crypto.hash(:sha256, bytes), case: :lower),
+                else: bytes
+
+            if value == expected,
+              do: {:cont, :ok},
+              else: {:halt, {:error, "archive content differs from its commit blob"}}
+
+          {:error, _reason} ->
+            {:halt, {:error, "Git could not read one archive blob"}}
+        end
+    end)
   end
 
   defp identity_matches(records, sidecar, sha) do

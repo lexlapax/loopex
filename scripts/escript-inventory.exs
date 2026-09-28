@@ -7,10 +7,11 @@ defmodule LoopexEscriptInventory do
 
   ## Technical depth
 
-  An escript has a text preamble before its ZIP payload. Inspect the ZIP
-  directory with OTP, reject duplicate entries, and require nonempty bytes for
-  each named application entry. This script needs no dependency beyond the
-  accepted Elixir/OTP toolchain.
+  An escript has a text preamble before its ZIP payload. Require an ordinary
+  file without following a symlink, inspect the ZIP directory with OTP, reject
+  duplicate entries, and require nonempty bytes for each named application
+  entry. This script needs no dependency beyond the accepted Elixir/OTP
+  toolchain.
   """
 
   @required ~w(
@@ -52,7 +53,7 @@ defmodule LoopexEscriptInventory do
   end
 
   defp check(path) do
-    with true <- File.regular?(path),
+    with {:ok, %File.Stat{type: :regular}} <- File.lstat(path),
          {:ok, bytes} <- File.read(path),
          {:ok, payload} <- zip_payload(bytes),
          {:ok, entries} <- :zip.table(payload),
@@ -66,7 +67,8 @@ defmodule LoopexEscriptInventory do
         true -> :ok
       end
     else
-      false -> {:error, "missing escript"}
+      {:ok, _other} -> {:error, "missing escript"}
+      {:error, :enoent} -> {:error, "missing escript"}
       {:error, :duplicate} -> {:error, "duplicate archive entries"}
       {:error, _} -> {:error, "invalid escript archive"}
     end
