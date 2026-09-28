@@ -164,6 +164,8 @@ if [ "$mode" = --docs ]; then
   exit 0
 fi
 step "release runner fixtures" bash scripts/test/check-release-test.sh
+step "attended release fixtures" bash scripts/test/attended-release-test.sh
+step "floor lane fixtures" bash scripts/test/floor-lane-test.sh
 step "dependency budget and direction" mix loopex.deps_budget
 step "one version across applications" mix loopex.version_train
 step "test build" env MIX_ENV=test mix compile --warnings-as-errors
