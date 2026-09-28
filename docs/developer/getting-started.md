@@ -90,9 +90,9 @@ Technical depth: [A one-call host and durable embedded host](getting-started-tec
 
 The policy is the one boundary every host implements. It receives a bounded
 description of one tool call — which tool, its arguments, its effect class, the
-workspace — and answers allow, deny, or defer. Anything other than a well-formed
-allow is a denial: a policy that crashes, blocks, or answers malformed data
-denies, and a denial is reported to the model and never retried.
+workspace — and answers allow, deny, or defer. A well-formed defer pauses for a
+host decision. A policy that crashes, blocks, or answers malformed data denies.
+That denial is reported to the model and never retried.
 
 Defer is how a host asks its operator: it poses one bounded multiple-choice
 question, and when an answer arrives the same policy is asked again with the

@@ -47,7 +47,7 @@ or alternate loop.
 | Use a deterministic model for a credential-free demonstration | Available |
 | Use the ReqLLM adapter with a real provider | Available |
 | Run an ephemeral session with an in-memory Store and an in-VM model call | Available: `LoopexComposition.Ephemeral` |
-| Execute tools in separate operating-system processes | Available |
+| Run `bash` jobs in separate operating-system process groups. Run file and read-only tools in the VM | Available |
 | Retain sessions, events and tool receipts, and resume after process loss | Available |
 | Drive sessions with the `loopex` command | Available: [coding sessions](coding-sessions.md#concept) |
 | Keep sessions alive for several local clients over a Unix-domain socket | Available: [the daemon](daemon.md#concept) |

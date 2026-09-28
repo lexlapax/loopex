@@ -122,15 +122,15 @@ whose path or explicit fragment does not resolve.
   steering, resuming, and stopping a coding task with the `loopex` command, the
   project-resource trust decision, the configuration a resumed session recovers,
   and what stopping does and does not promise.
-- [Tools and policy](operator/tools-and-policy.md#concept) — the four coding
-  tools, what local execution reaches, host authority, artifacts and how to read
-  one back, and what the local store keeps on disk.
+- [Tools and policy](operator/tools-and-policy.md#concept) — the four coding and
+  three read-only tools, what local execution reaches, host authority, artifacts
+  and how to read one back, and what the local store keeps on disk.
 - [Runtime operations](operator/runtime.md#concept) — the embedded runtime, a
   credential-free demonstration of the loop, lifecycle, credentials, and crash
   recovery.
 - [Operator getting started](operator/getting-started.md) — build Loopex from
-  source, run and observe a first coding session, stop it cleanly, and run it
-  through a daemon.
+  source, get a one-shot answer without a state root, then run and stop a durable
+  coding session or use the daemon.
 - [The daemon](operator/daemon.md#concept) — running the durable local daemon,
   connecting clients, observing and taking over a session, stopping it, and its
   exit statuses.

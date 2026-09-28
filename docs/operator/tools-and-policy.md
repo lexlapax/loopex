@@ -130,10 +130,11 @@ request is durably staged. A process loss before that staging does not spend the
 duration; once staging commits, time an owner spends dead counts, and recovery
 never extends the instant.
 
-Every tool child runs in its own process group, and termination signals the
-group rather than its leader, so a leader that spawned children and exited
-cannot leave them running unattended. Each job runs under the earliest of the
-run's committed deadline, the wall-time budget the session declared for it, and
+Each `bash` child runs in its own process group. Termination signals the group
+rather than its leader, so a leader that spawned children and exited cannot
+leave them running unattended. File and read-only tools run in the VM and have
+no child process group. Each job runs under the earliest of the run's committed
+deadline, the wall-time budget the session declared for it, and
 the budget the tool's own definition names, so a bound cannot be widened by
 declaring a larger one. The receipt records the instant the work actually ran
 under.

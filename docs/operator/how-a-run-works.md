@@ -213,7 +213,7 @@ flowchart TB
     WS["the workspace — your repository"]
     NET["the provider, over the network"]
 
-    subgraph KIDS["tool child processes"]
+    subgraph KIDS["bash child processes"]
       SH["each in its own process group<br/>PATH only, no credential"]
     end
 
@@ -226,6 +226,7 @@ flowchart TB
     EXEC --> REC
     EXEC --> ART
     EXEC --> KIDS
+    EXEC --> WS
     KIDS --> WS
     LLM --> COMP
     COMP --> NET
@@ -239,18 +240,20 @@ artifacts go to the state root; the tools change files in the workspace. Point
 `--state-root` somewhere of your choosing and it will not litter the repository
 you are working in.
 
-**The tool children are separate processes, and they are the only thing that
-executes model-supplied commands.** Each starts in its own process group with a
-fixed `PATH` and nothing else in its environment. Ordinary descendants stay in
-that group and are stopped together. An unsandboxed command can deliberately
-escape or sabotage cleanup; then Loopex reports the effect unproven and
-quarantines the executor's ledger rather than claiming a clean stop.
+**Only `bash` tool calls start operating-system children.** Each `bash` child
+starts in its own process group with a fixed `PATH` and nothing else in its
+environment. Ordinary descendants stay in that group and are stopped
+together. File and read-only tools run in the VM. An unsandboxed `bash` command
+can deliberately escape or sabotage cleanup; then Loopex reports the effect
+unproven and quarantines the executor's ledger rather than claiming a clean stop.
 
-**The provider is the only thing off the machine.** The command reads the
-credential once, when it composes its runtime, into private custody. For each model call it is
-delivered to the protected companion only after that process proves its entry
-and build identity. It is never written to the journal, never given to a tool
-child, and never printed.
+**Model traffic goes to the provider through a protected companion.** A
+permitted `bash` job can make its own network calls; Loopex does not sandbox
+that network access. The command reads the provider credential once, when it
+composes its runtime, into private custody. For each model call it delivers the
+credential to the companion only after that process proves its entry and build
+identity. Loopex never writes the credential to the journal, gives it to a tool
+child, or prints it.
 
 <a id="concept-run-interrupt"></a>
 ## Where Ctrl-C Enters
