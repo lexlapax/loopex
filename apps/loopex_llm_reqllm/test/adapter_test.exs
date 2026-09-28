@@ -58,12 +58,13 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
     Fixture.assert_gone(fixture)
   end
 
-  test "the adapter library has no credential environment read" do
-    # Concept: credentials enter through host-owned custody only.
-    # Technical depth: the worker still reads its non-secret crash policy and
-    # the launcher enumerates names solely to scrub the first child image.
-    # Pool creation and shared guard checks read only the named non-secret
-    # settings. Neither is an exception for provider-key or ambient reads.
+  test "only the ephemeral provider edge reads a selected credential environment variable" do
+    # Concept: the durable provider path still receives credentials through
+    # host-owned custody; the accepted ephemeral profile resolves one selected
+    # variable in the host VM immediately before its provider call.
+    # Technical depth: the worker reads its non-secret crash policy and the
+    # launcher enumerates names solely to scrub the first child image. Pool
+    # creation and shared guards read only named non-secret settings.
     for path <- Path.wildcard(Path.join(__DIR__, "../lib/**/*.ex")) do
       source = File.read!(path)
 
@@ -85,6 +86,9 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
 
           "loopex/llm/req_llm/in_process/guards.ex" ->
             ["\"TIDEWAVE_REPL\"", "\"SSLKEYLOGFILE\""]
+
+          "loopex/llm/req_llm/in_process.ex" ->
+            ["variable"]
 
           _ ->
             []
