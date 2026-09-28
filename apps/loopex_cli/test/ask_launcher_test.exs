@@ -99,7 +99,9 @@ defmodule LoopexCli.AskLauncherTest do
   end
 
   defp temporary_directory do
-    root = Path.join(System.tmp_dir!(), "loopex-ask-launcher-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(System.tmp_dir!(), "loopex-ask-launcher-#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(root)
     root
   end

@@ -2,11 +2,10 @@ defmodule LoopexCli.Interrupt do
   @moduledoc """
   ## Concept
 
-  Turns an interrupt signal delivered to a running `loopex` process into the
-  same public abort any other caller would submit, and then lets the run report
-  what actually happened before the process goes. Nothing about stopping a run is
-  private to this command: it signals no process, writes no control file, and
-  opens no channel of its own.
+  Turns an interrupt signal delivered to a running durable `loopex` process
+  into the same public abort any other caller would submit. An ephemeral `ask`
+  instead notifies its session-handle owner, which stops its own session before
+  the command reports what happened.
 
   ## Technical depth
 
@@ -81,6 +80,7 @@ defmodule LoopexCli.Interrupt do
                    "processes were killed"
 
   @observation_ms 1_000
+  @manager_probe_ms 100
   @manager_claim {__MODULE__, :installed}
 
   @doc """
@@ -128,6 +128,146 @@ defmodule LoopexCli.Interrupt do
     _ = do_install(attachment, backstop_ms(cleanup_grace_ms), nil, nil)
     :ok
   end
+
+  @doc """
+  ## Concept
+
+  Installs one correlated interrupt handler for an ephemeral `ask` command.
+
+  ## Technical depth
+
+  The caller is the session-handle owner. A monitored installer performs the
+  potentially queued manager mutation, while this call has one 1,000 ms bound.
+  If the bound expires, the installer cancels any late installation by its
+  exact reference before it retires. No ask worker starts before this returns
+  the exact signal-manager PID.
+  """
+  @spec install_ask(pid(), reference()) :: {:ok, pid()} | {:error, atom()}
+  def install_ask(main_pid, reference)
+      when main_pid == self() and is_reference(reference) do
+    case Process.whereis(:erl_signal_server) do
+      manager when is_pid(manager) ->
+        token = make_ref()
+
+        {installer, monitor} =
+          spawn_monitor(fn -> ask_installer(main_pid, manager, reference, token) end)
+
+        result =
+          receive do
+            {^installer, ^token, {:ok, ^manager}} ->
+              if Process.whereis(:erl_signal_server) == manager do
+                send(installer, {self(), token, :admit})
+                {:ok, manager}
+              else
+                send(installer, {self(), token, :cancel})
+                {:error, :interrupt_handler_unavailable}
+              end
+
+            {^installer, ^token, _refusal} ->
+              send(installer, {self(), token, :cancel})
+              {:error, :interrupt_handler_unavailable}
+
+            {:DOWN, ^monitor, :process, ^installer, _reason} ->
+              {:error, :interrupt_handler_unavailable}
+          after
+            @observation_ms ->
+              send(installer, {self(), token, :cancel})
+              {:error, :interrupt_handler_unavailable}
+          end
+
+        Process.demonitor(monitor, [:flush])
+        result
+
+      _ ->
+        {:error, :interrupt_handler_unavailable}
+    end
+  end
+
+  def install_ask(_, _), do: {:error, :interrupt_handler_unavailable}
+
+  @doc """
+  ## Concept
+
+  Finishes an ephemeral `ask` after its session stop has returned.
+
+  ## Technical depth
+
+  The exact manager serializes this decision with signal callbacks. Its
+  matching handler swaps back to OTP's default signal handler in that turn.
+  """
+  @spec finish_ask(pid(), reference()) ::
+          {:ok, :ordinary | :interrupted} | {:error, :interrupt_handler_unavailable}
+  def finish_ask(manager, reference) when is_pid(manager) and is_reference(reference) do
+    if Process.whereis(:erl_signal_server) == manager do
+      case :gen_event.call(manager, __MODULE__, {:finish_ask, reference}, @observation_ms) do
+        {:ok, decision} = result when decision in [:ordinary, :interrupted] ->
+          if Process.whereis(:erl_signal_server) == manager, do: result, else: unavailable_ask()
+
+        _ ->
+          {:error, :interrupt_handler_unavailable}
+      end
+    else
+      {:error, :interrupt_handler_unavailable}
+    end
+  catch
+    :exit, _ -> {:error, :interrupt_handler_unavailable}
+  end
+
+  def finish_ask(_, _), do: {:error, :interrupt_handler_unavailable}
+
+  defp unavailable_ask, do: {:error, :interrupt_handler_unavailable}
+
+  @doc """
+  ## Concept
+
+  Checks that the exact ephemeral ask handler still owns signal delivery.
+
+  ## Technical depth
+
+  A manager PID can remain live after its handler crashes or its registered
+  name is replaced. The command probes both facts while it waits for the ask
+  worker; a missing or unresponsive handler cannot justify a normal result.
+  """
+  @spec ask_live(pid(), reference()) :: boolean()
+  def ask_live(manager, reference) when is_pid(manager) and is_reference(reference) do
+    Process.whereis(:erl_signal_server) == manager and
+      :gen_event.call(manager, __MODULE__, {:ask_live, reference}, @manager_probe_ms) == :ok and
+      Process.whereis(:erl_signal_server) == manager
+  catch
+    :exit, _ -> false
+  end
+
+  def ask_live(_, _), do: false
+
+  @doc """
+  ## Concept
+
+  Checks whether this handler has actually admitted the first ask interrupt.
+
+  ## Technical depth
+
+  A mailbox tuple does not authenticate its sender. The exact handler's
+  serialized phase is the authority for an interrupt notice; a copied or
+  replayed tuple cannot turn an idle handler into a stopping one.
+  """
+  @spec ask_phase(pid(), reference()) :: :idle | :stopping | :unavailable
+  def ask_phase(manager, reference) when is_pid(manager) and is_reference(reference) do
+    if Process.whereis(:erl_signal_server) == manager do
+      case :gen_event.call(manager, __MODULE__, {:ask_phase, reference}, @manager_probe_ms) do
+        phase when phase in [:idle, :stopping] ->
+          if Process.whereis(:erl_signal_server) == manager, do: phase, else: :unavailable
+
+        _ ->
+          :unavailable
+      end
+    else
+      :unavailable
+    end
+  catch
+    :exit, _ -> :unavailable
+  end
+
+  def ask_phase(_, _), do: :unavailable
 
   @doc """
   ## Concept
@@ -758,6 +898,123 @@ defmodule LoopexCli.Interrupt do
     end
   end
 
+  # Concept: an installation that completes after the command's admission
+  # bound cannot become an orphaned signal owner.
+  # Technical depth: the installer is deliberately not killed on timeout: a
+  # queued gen_event swap can still run after its caller dies. The installer
+  # waits for an exact admit/cancel decision and retries cancellation while its
+  # original manager remains alive. The handler also monitors the main PID.
+  defp ask_installer(main_pid, manager, reference, token) do
+    main_monitor = Process.monitor(main_pid)
+    manager_monitor = Process.monitor(manager)
+
+    result =
+      try do
+        ask_install_on(manager, main_pid, reference)
+      catch
+        :exit, _ -> {:error, :interrupt_handler_unavailable}
+      end
+
+    send(main_pid, {self(), token, result})
+
+    if result == {:ok, manager} do
+      receive do
+        {^main_pid, ^token, :admit} ->
+          :ok
+
+        {^main_pid, ^token, :cancel} ->
+          cancel_ask_until_removed(manager, reference)
+
+        {:DOWN, ^main_monitor, :process, ^main_pid, _} ->
+          cancel_ask_until_removed(manager, reference)
+
+        {:DOWN, ^manager_monitor, :process, ^manager, _} ->
+          :ok
+      end
+    end
+  end
+
+  defp ask_install_on(manager, main_pid, reference) do
+    state = %{
+      attachment: nil,
+      terminal: main_pid,
+      grace_ms: @grace_ms,
+      ask: %{main_pid: main_pid, ref: reference, phase: :idle}
+    }
+
+    with {:ok, handlers} <- observe_handlers(manager),
+         true <- handlers in [[], [:erl_signal_handler]],
+         :ok <- ask_install_observed(manager, main_pid, reference),
+         :ok <- install_handler(manager, handlers, state) do
+      case handle_ask_signals() do
+        :ok ->
+          {:ok, manager}
+
+        {:error, :interrupt_handler_unavailable} = refusal ->
+          cancel_ask_until_removed(manager, reference)
+          refusal
+      end
+    else
+      _ -> {:error, :interrupt_handler_unavailable}
+    end
+  end
+
+  defp handle_ask_signals do
+    Enum.reduce_while(@signals, :ok, fn signal, :ok ->
+      try do
+        case :os.set_signal(signal, :handle) do
+          :ok -> {:cont, :ok}
+          _ -> {:halt, unavailable_ask()}
+        end
+      rescue
+        _ -> {:halt, unavailable_ask()}
+      catch
+        _, _ -> {:halt, unavailable_ask()}
+      end
+    end)
+  end
+
+  if Mix.env() == :test do
+    # Concept: the late-install witness pauses at the last read-only point.
+    # Technical depth: the fixture can then queue a swap into a suspended
+    # manager after the caller's 1,000 ms bound, and prove exact-ref retirement
+    # when that manager resumes. Production has no pause path.
+    defp ask_install_observed(manager, main_pid, reference) do
+      case Application.get_env(:loopex_cli, :ask_install_observed) do
+        {observer, gate} when is_pid(observer) and is_reference(gate) ->
+          send(observer, {:ask_install_observed, self(), manager, main_pid, reference})
+
+          receive do
+            {:ask_install_continue, ^gate} -> :ok
+          end
+
+        _ ->
+          :ok
+      end
+    end
+  else
+    defp ask_install_observed(_manager, _main_pid, _reference), do: :ok
+  end
+
+  defp cancel_ask_until_removed(manager, reference) do
+    case :gen_event.call(manager, __MODULE__, {:cancel_ask, reference}, @observation_ms) do
+      :ok -> :ok
+      {:error, :ask_not_installed} -> :ok
+      {:error, :bad_module} -> :ok
+      _ -> cancel_ask_again(manager, reference)
+    end
+  catch
+    :exit, reason ->
+      if Process.alive?(manager) and reason != {:bad_module, __MODULE__},
+        do: cancel_ask_again(manager, reference),
+        else: :ok
+  end
+
+  defp cancel_ask_again(manager, reference) do
+    Process.sleep(20)
+    cancel_ask_until_removed(manager, reference)
+  end
+
   # Concept: installation claims one handler in the exact manager that owns
   # signal delivery. Concurrent candidates cannot replace the incumbent.
   #
@@ -915,9 +1172,19 @@ defmodule LoopexCli.Interrupt do
         claim = make_ref()
         Process.put(@manager_claim, claim)
 
+        ask =
+          case Map.get(state, :ask) do
+            %{main_pid: main_pid} = selected when is_pid(main_pid) ->
+              Map.put(selected, :monitor, Process.monitor(main_pid))
+
+            _ ->
+              nil
+          end
+
         {:ok,
-         %{abort: nil, backstop: nil, activation: nil, holder: nil}
+         %{abort: nil, backstop: nil, activation: nil, holder: nil, ask: ask}
          |> Map.merge(state)
+         |> Map.put(:ask, ask)
          |> Map.put(:claim, claim)}
 
       _incumbent ->
@@ -934,6 +1201,15 @@ defmodule LoopexCli.Interrupt do
   def terminate(_reason, state) when is_map(state) do
     if Map.get(state, :claim) == Process.get(@manager_claim),
       do: Process.delete(@manager_claim)
+
+    case Map.get(state, :ask) do
+      %{monitor: monitor} ->
+        Process.demonitor(monitor, [:flush])
+        disarm(Map.get(state, :backstop))
+
+      _ ->
+        :ok
+    end
 
     case Map.get(state, :holder) do
       holder when is_pid(holder) -> release(holder)
@@ -966,6 +1242,15 @@ defmodule LoopexCli.Interrupt do
   # stall delivery of every later signal, which is the same reason the admission
   # itself is not performed here.
   @impl :gen_event
+  def handle_event(signal, %{ask: %{phase: :stopping}} = _state) when signal in @signals,
+    do: halt_owning_nothing()
+
+  def handle_event(signal, %{ask: %{phase: :idle} = ask} = state) when signal in @signals do
+    backstop = state.backstop || spawn(fn -> backstop(ask.main_pid, state.grace_ms) end)
+    send(ask.main_pid, {self(), ask.ref, :interrupt})
+    {:ok, %{state | ask: %{ask | phase: :stopping}, backstop: backstop}}
+  end
+
   def handle_event(signal, state) when signal in @signals do
     if joining?(state) do
       _ = spawn(fn -> IO.puts(:stderr, @still_stopping) end)
@@ -1006,6 +1291,27 @@ defmodule LoopexCli.Interrupt do
   def handle_call({:prepared_holder, _other}, state),
     do: {:ok, {:error, :prepared_activation_not_installed}, state}
 
+  def handle_call({:ask_live, reference}, %{ask: %{ref: reference}} = state),
+    do: {:ok, :ok, state}
+
+  def handle_call({:ask_phase, reference}, %{ask: %{ref: reference, phase: phase}} = state),
+    do: {:ok, phase, state}
+
+  def handle_call({:finish_ask, reference}, %{ask: %{ref: reference} = ask} = state) do
+    decision = if ask.phase == :idle, do: :ordinary, else: :interrupted
+
+    {:swap_handler, {:ok, decision}, :ask_finished, state, :erl_signal_handler, []}
+  end
+
+  def handle_call({:cancel_ask, reference}, %{ask: %{ref: reference}} = state),
+    do: {:swap_handler, :ok, :ask_cancelled, state, :erl_signal_handler, []}
+
+  def handle_call({operation, _other}, %{ask: %{}} = state)
+      when operation in [:ask_live, :ask_phase, :finish_ask, :cancel_ask],
+      do: {:ok, {:error, :ask_not_installed}, state}
+
+  def handle_call({:ask_live, _other}, state), do: {:ok, {:error, :ask_not_installed}, state}
+
   # Concept: a failed owner handoff leaves the interrupt path live but advertises
   # no process as a capability holder.
   #
@@ -1035,6 +1341,12 @@ defmodule LoopexCli.Interrupt do
   # identity frozen and the backstop armed, because a timeout is not a verdict
   # about whether the abort committed.
   @impl :gen_event
+  def handle_info(
+        {:DOWN, monitor, :process, main_pid, _reason},
+        %{ask: %{main_pid: main_pid, monitor: monitor}} = state
+      ),
+      do: {:swap_handler, :ask_main_down, state, :erl_signal_handler, []}
+
   def handle_info({:loopex_interrupt_result, command_id, result}, state) do
     case state.abort do
       %{command_id: ^command_id} = abort ->

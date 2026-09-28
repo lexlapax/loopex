@@ -133,8 +133,14 @@ defmodule LoopexCli.AskRunnerTest do
                discard_credential: fn ->
                  send(parent, :durable_credential_discarded)
                  :ok
-               end
-             ) == diagnostic(:interrupt_handler_unavailable)
+               end,
+               quiet_logger: fn -> :ok end,
+               install_interrupt: fn _, _ -> {:ok, parent} end,
+               signal_manager: fn -> parent end,
+               handler_live: fn _, _ -> true end,
+               finish_interrupt: fn _, _ -> {:ok, :ordinary} end,
+               start_session: fn _ -> {:error, {:composition, :dependency_start_failed}} end
+             ) == diagnostic(:composition_unavailable)
 
       assert_receive :durable_credential_discarded
     end

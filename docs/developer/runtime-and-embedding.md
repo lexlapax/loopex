@@ -275,6 +275,10 @@ a bounded partial observation; the owner continues draining the admitted run.
 `stop_session/1` returns `:ok` only after its cleanup proof. If proof is
 unavailable, `{:error, {:cleanup_unproved, details}}` names the retained root
 and pending obligations. The session is not silently reported as closed.
+Before startup knows any root path, an unproved pre-claim child instead returns
+`root: nil`, unknown ownership, only `[:session_subtree]` pending, and no
+ending. That session is sealed; the child cannot claim a directory without
+the owner's grant, and the missing path grants no cleanup or deletion authority.
 
 This profile is not a credential sandbox. Hosted keys, HTTP/TLS state, crash
 reports and host-installed telemetry or logger handlers can be observed by

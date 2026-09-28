@@ -251,6 +251,33 @@ defmodule LoopexCli.AskResultTest do
     assert AskResult.render(:none, :proved, :json) == AskResult.diagnostic(:session_unavailable)
   end
 
+  test "only a pre-claim subtree failure can render an unnamed root" do
+    preclaim = %{root: nil, root_ownership: :unknown, pending: [:session_subtree], ending: :none}
+
+    assert AskResult.render(:none, {:unproved, preclaim}, :json) == %{
+             status: 1,
+             stdout: "",
+             stderr:
+               "loopex: cleanup_unproved root=null ownership=unknown pending=session_subtree\n"
+           }
+
+    assert AskResult.render(:none, {:unproved, %{preclaim | root_ownership: :owned}}, :json) ==
+             AskResult.diagnostic(:command_failed)
+
+    assert AskResult.render(:none, {:unproved, %{preclaim | pending: [:root_removal]}}, :json) ==
+             AskResult.diagnostic(:command_failed)
+
+    assert AskResult.render(:none, {:unproved, Map.delete(preclaim, :ending)}, :json) ==
+             AskResult.diagnostic(:command_failed)
+
+    terminal =
+      {:error,
+       {:run, :cancelled, observation(:ephemeral, :cancelled, %{"cleanup_grace_ms" => 10})}}
+
+    assert AskResult.render(terminal, {:unproved, preclaim}, :json) ==
+             AskResult.diagnostic(:command_failed)
+  end
+
   test "unproved terminal cleanup keeps the run status and appends its root line" do
     observation = %{
       observation(:ephemeral, :cancelled, %{"cleanup_grace_ms" => 10})

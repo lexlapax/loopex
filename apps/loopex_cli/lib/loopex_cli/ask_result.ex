@@ -105,6 +105,7 @@ defmodule LoopexCli.AskResult do
     do: diagnostic(:session_unavailable)
 
   defp do_render(ending, cleanup, mode) when mode in [:text, :json] do
+    require!(not match?({:unproved, %{root: nil}}, cleanup))
     {status, outcome, observation, details} = ending!(ending)
     profile = Map.fetch!(observation, :profile)
     require!(profile in [:ephemeral, :durable])
@@ -261,10 +262,24 @@ defmodule LoopexCli.AskResult do
     root = Map.fetch!(source, :root)
     ownership = Map.fetch!(source, :root_ownership)
     pending = Map.fetch!(source, :pending)
-    require!(bounded_text?(root, 65_536, false) and :binary.match(root, <<0>>) == :nomatch)
     require!(ownership in [:owned, :unknown])
     require!(bounded_list?(pending, 5, &(&1 in @pending)) and pending != [])
     require!(pending == Enum.filter(@pending, &(&1 in pending)))
+
+    require!(
+      case root do
+        nil ->
+          ownership == :unknown and pending == [:session_subtree] and
+            Map.fetch(source, :ending) == {:ok, :none}
+
+        value when is_binary(value) ->
+          bounded_text?(value, 65_536, false) and :binary.match(value, <<0>>) == :nomatch
+
+        _ ->
+          false
+      end
+    )
+
     pending_names = Enum.map(pending, &Atom.to_string/1)
 
     line =

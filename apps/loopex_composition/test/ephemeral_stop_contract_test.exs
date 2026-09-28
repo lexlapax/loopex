@@ -192,6 +192,28 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
     assert {:error, :session_unavailable} = Ephemeral.stop_session(session)
   end
 
+  test "a matching certificate forged by the drain worker cannot close", %{tmp: tmp} do
+    session =
+      start_session(tmp,
+        fake_group_attestation: false,
+        group_drain: fn executor, instance, owner, nonce, _deadline ->
+          send(owner, {executor, instance, nonce, :groups_empty})
+          {:ok, nonce}
+        end
+      )
+
+    {:loopex_ephemeral_session, owner, cell} = session
+    root = owned_root(owner)
+
+    assert {:error,
+            {:cleanup_unproved,
+             %{pending: [:process_groups], root: ^root, root_ownership: :owned}}} =
+             Ephemeral.stop_session(session)
+
+    assert :atomics.get(cell, 1) == 3
+    assert File.dir?(root)
+  end
+
   test "root-removal refusal retains a retryable root and retry gets a new deadline", %{
     tmp: tmp
   } do
@@ -268,6 +290,15 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
     temp_root =
       if options[:rm_rf], do: Map.put(temp_root, :rm_rf, options[:rm_rf]), else: temp_root
 
+    test_seams = %{temp_root: temp_root, group_drain: drain}
+
+    test_seams =
+      if Keyword.get(options, :fake_group_attestation, true) do
+        Map.put(test_seams, :group_attest, fn _executor, _instance, _nonce, _deadline -> :ok end)
+      else
+        test_seams
+      end
+
     configuration = %{
       cwd: tmp,
       model: "ollama:test",
@@ -282,7 +313,7 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
       context_token_budget: 8_192,
       timeout: 60_000,
       test_facade: Facade,
-      test_seams: %{temp_root: temp_root, group_drain: drain}
+      test_seams: test_seams
     }
 
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)

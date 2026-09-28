@@ -730,6 +730,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
       test_seams:
         seams
         |> Map.put_new(:temp_root, %{tmp: fn -> tmp end})
+        |> Map.put_new(:group_attest, fn _executor, _instance, _nonce, _deadline -> :ok end)
         |> Map.put_new(:group_drain, fn executor, instance, owner, nonce, _deadline ->
           send(owner, {executor, instance, nonce, :groups_empty})
           {:ok, nonce}

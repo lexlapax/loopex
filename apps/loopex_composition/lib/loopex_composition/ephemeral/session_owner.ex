@@ -2799,9 +2799,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   defp finish_abort_worker(%{abort: %{worker: worker} = abort} = state, reason) do
+    completed = worker.result and worker.finish_sent and reason == :normal
+
     success =
-      worker.result and worker.finish_sent and reason == :normal and
-        (worker.phase != :process_groups or worker.certificate)
+      completed and
+        (worker.phase != :process_groups or
+           (worker.certificate and attest_groups(state, worker.nonce) == :ok))
 
     next = %{state | abort: %{abort | worker: nil}}
 
@@ -2981,6 +2984,38 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         deadline
       ])
     end
+  end
+
+  # Concept: the drain worker cannot certify its own process-group result.
+  # Technical depth: its closure contains the nonce and the owner PID, so a
+  # matching certificate tuple is not sender authentication. After the exact
+  # worker DOWN, only this owner asks the live executor for its recorded proof.
+  if Mix.env() == :test do
+    defp attest_groups(state, nonce) do
+      case get_in(state.startup.configuration, [:test_seams, :group_attest]) do
+        callback when is_function(callback, 4) ->
+          callback.(
+            state.startup.registered.executor,
+            state.startup.executor_instance,
+            nonce,
+            state.abort.deadline
+          )
+
+        _ ->
+          default_attest_groups(state, nonce)
+      end
+    end
+  else
+    defp attest_groups(state, nonce), do: default_attest_groups(state, nonce)
+  end
+
+  defp default_attest_groups(state, nonce) do
+    apply(Loopex.Executor.Local, :attest_process_groups, [
+      state.startup.registered.executor,
+      state.startup.executor_instance,
+      nonce,
+      state.abort.deadline
+    ])
   end
 
   defp close_proved(state) do

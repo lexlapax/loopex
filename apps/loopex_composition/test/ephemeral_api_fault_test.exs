@@ -506,6 +506,7 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
       test_seams: %{
         command_nonce: Keyword.get(opts, :command_nonce),
         temp_root: %{tmp: fn -> tmp end},
+        group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end,
         group_drain: fn executor, instance, owner, nonce, _deadline ->
           send(test, {:group_drain, executor, instance})
           send(owner, {executor, instance, nonce, :groups_empty})

@@ -3,17 +3,17 @@ defmodule LoopexCli.Ask do
   ## Concept
 
   Admits one standalone question before starting an application or session.
-  A durable question then uses the existing one-shot durable workflow.
+  A durable question uses the existing one-shot durable workflow. An ephemeral
+  question owns one temporary session through its stop and signal decision.
 
   ## Technical depth
 
   The command's common admission order is fixed: argv, workspace, prompt.
-  The ephemeral execution path is joined here only when its correlated signal
-  handler and public session API are available. No provisional result is printed
-  by this module.
+  Both profiles return complete output bytes instead of printing provisional
+  results from the runner.
   """
 
-  alias LoopexCli.{AskOptions, AskPrompt, AskResult, DurableAsk}
+  alias LoopexCli.{AskOptions, AskPrompt, AskResult, DurableAsk, EphemeralAsk}
   alias LoopexComposition.WorkspaceIdentity
 
   @doc """
@@ -105,10 +105,8 @@ defmodule LoopexCli.Ask do
 
   def execute_durable(_, _), do: AskResult.diagnostic(:command_failed)
 
-  # The session/signal integration is deliberately left closed while the exact
-  # correlated interrupt handler is being authorized and implemented.
-  defp execute_ephemeral(_prepared, _seams),
-    do: AskResult.diagnostic(:interrupt_handler_unavailable)
+  defp execute_ephemeral(%{options: options, cwd: cwd, prompt: prompt}, seams),
+    do: EphemeralAsk.run(options, cwd, prompt, seams)
 
   # Concept: selecting the ephemeral profile removes only the durable CLI
   # credential, after input admission and before starting that profile.

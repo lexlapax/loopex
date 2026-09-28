@@ -91,6 +91,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0037 — host configuration and path discovery | [Decision](adr/0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](adr/0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
 | 0038 — installed distribution and release artifact | [Decision](adr/0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](adr/0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
 | 0039 — ephemeral embedded profile | [Decision](adr/0039-ephemeral-embedded-profile.md#concept) | [Technical depth](adr/0039-ephemeral-embedded-profile-technical.md#technical-depth) |
+| 0040 — ephemeral startup interrupt and unnamed root | [Decision](adr/0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept) | [Technical depth](adr/0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

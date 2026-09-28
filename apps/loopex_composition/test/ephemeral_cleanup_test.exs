@@ -316,7 +316,11 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
       timeout: 60_000,
       test_seams:
         Map.merge(
-          %{temp_root: temp_root, group_drain: drain},
+          %{
+            temp_root: temp_root,
+            group_drain: drain,
+            group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end
+          },
           Map.new(Keyword.take(options, [:subtree_stop]))
         )
     }

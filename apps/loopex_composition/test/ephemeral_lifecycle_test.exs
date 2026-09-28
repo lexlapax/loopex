@@ -483,6 +483,66 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "an unresponsive owner cannot hold a public stop caller forever", %{tmp: tmp} do
+    session = start_session(tmp)
+    {:loopex_ephemeral_session, owner, _cell} = session
+    true = :erlang.suspend_process(owner)
+
+    on_exit(fn ->
+      if Process.alive?(owner) and Process.info(owner, :status) == {:status, :suspended},
+        do: :erlang.resume_process(owner)
+    end)
+
+    started = System.monotonic_time(:millisecond)
+    assert {:error, :session_unavailable} = Ephemeral.stop_session(session)
+    elapsed = System.monotonic_time(:millisecond) - started
+    assert elapsed >= 11_000 and elapsed < 12_500
+
+    true = :erlang.resume_process(owner)
+    assert :ok = Ephemeral.stop_session(session)
+    refute_receive {^owner, _reference, _late_reply}, 0
+  end
+
+  test "a stop requester retires when its borrower dies", %{tmp: tmp} do
+    session = start_session(tmp)
+    {:loopex_ephemeral_session, owner, _cell} = session
+    true = :erlang.suspend_process(owner)
+
+    on_exit(fn ->
+      if Process.alive?(owner) and Process.info(owner, :status) == {:status, :suspended},
+        do: :erlang.resume_process(owner)
+    end)
+
+    borrower = spawn(fn -> Ephemeral.stop_session(session) end)
+    requester = await_stop_requester(borrower, System.monotonic_time(:millisecond) + 1_000)
+    requester_monitor = Process.monitor(requester)
+    Process.exit(borrower, :kill)
+    assert_receive {:DOWN, ^requester_monitor, :process, ^requester, :normal}, 1_000
+
+    true = :erlang.resume_process(owner)
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  defp await_stop_requester(borrower, deadline) do
+    {:monitors, monitors} = Process.info(borrower, :monitors)
+
+    case Enum.find(monitors, fn
+           {:process, pid} when is_pid(pid) -> true
+           _ -> false
+         end) do
+      {:process, requester} ->
+        requester
+
+      nil ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("stop requester was not monitored")
+        else
+          Process.sleep(10)
+          await_stop_requester(borrower, deadline)
+        end
+    end
+  end
+
   defp start_session(tmp, options \\ []) do
     {:ok, _digest, manifest} =
       Loopex.ResourcePack.digest(%{
@@ -513,6 +573,7 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
       test_facade: Facade,
       test_seams: %{
         temp_root: temp_root,
+        group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end,
         group_drain: fn executor, instance, owner, nonce, _deadline ->
           send(owner, {executor, instance, nonce, :groups_empty})
           {:ok, nonce}

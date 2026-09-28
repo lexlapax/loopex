@@ -1751,9 +1751,11 @@ defmodule LoopexCli do
 
     --policy is required for anything that runs tools. There is no default.
 
-    Ctrl-C stops the run and reports what happened, when this command is started
-    through `bin/loopex`; the escript run directly cannot see that signal. Either
-    way the session survives — `loopex cancel <session>` reconciles the run.
+    Ctrl-C reaches commands started through `bin/loopex`; the escript run
+    directly cannot see that signal. Durable run and resume keep their session
+    for `loopex cancel <session>` or later recovery. Ephemeral ask stops its
+    temporary session; it cannot be resumed. An unproved cleanup names any
+    known retained root instead of claiming removal.
     """
   end
 

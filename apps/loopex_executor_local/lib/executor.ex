@@ -455,6 +455,40 @@ defmodule Loopex.Executor.Local do
   def drain_process_groups(_executor, _instance, _owner, _nonce, _deadline),
     do: {:error, :process_groups_unproved}
 
+  @doc """
+  ## Concept
+
+  Confirms a process-group drain to its recorded session owner.
+
+  ## Technical depth
+
+  The drain caller knows the nonce and can copy a certificate message. This
+  separate call must originate from the owner process itself, after the drain
+  worker has exited. Only the executor's own successful drain record answers it;
+  the answer consumes that record and is bounded by the cleanup deadline.
+  """
+  @spec attest_process_groups(pid(), reference(), reference(), integer()) ::
+          :ok | {:error, :process_groups_unproved}
+  def attest_process_groups(executor, instance, nonce, deadline)
+      when is_pid(executor) and is_reference(instance) and is_reference(nonce) and
+             is_integer(deadline) do
+    remaining =
+      deadline
+      |> Kernel.-(System.monotonic_time())
+      |> System.convert_time_unit(:native, :millisecond)
+
+    if remaining > 0 do
+      GenServer.call(executor, {:attest_process_groups, instance, nonce}, min(remaining, 500))
+    else
+      {:error, :process_groups_unproved}
+    end
+  catch
+    :exit, _ -> {:error, :process_groups_unproved}
+  end
+
+  def attest_process_groups(_executor, _instance, _nonce, _deadline),
+    do: {:error, :process_groups_unproved}
+
   # Concept: waiting out an admitted period is one wait spent in slices, not one
   # timer the VM refuses to arm.
   #
@@ -1278,6 +1312,7 @@ defmodule Loopex.Executor.Local do
          dispatch_closed: false,
          dispatch_cell: :atomics.new(1, signed: false),
          drain: nil,
+         drain_proof: nil,
          inflight_table: table,
          reserved: %{},
          reservation_monitors: %{},
@@ -1563,6 +1598,20 @@ defmodule Loopex.Executor.Local do
 
   def handle_call(:process_probe, _from, state),
     do: {:reply, state.process_probe, state}
+
+  def handle_call(
+        {:attest_process_groups, instance, nonce},
+        {owner, _tag},
+        %{
+          session: %{owner: owner, instance: instance},
+          drain_proof: {instance, nonce}
+        } = state
+      ) do
+    {:reply, :ok, %{state | drain_proof: nil}}
+  end
+
+  def handle_call({:attest_process_groups, _, _}, _from, state),
+    do: {:reply, {:error, :process_groups_unproved}, state}
 
   def handle_call(
         {:drain_process_groups, instance, owner, nonce, deadline},
@@ -2024,7 +2073,12 @@ defmodule Loopex.Executor.Local do
       GenServer.reply(drain.from, {:error, :process_groups_unproved})
     end
 
-    {:noreply, %{state | drain: nil}}
+    {:noreply,
+     %{
+       state
+       | drain: nil,
+         drain_proof: if(proved, do: {state.session.instance, drain.nonce}, else: nil)
+     }}
   end
 
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do

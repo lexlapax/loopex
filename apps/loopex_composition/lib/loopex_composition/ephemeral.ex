@@ -19,6 +19,7 @@ defmodule LoopexComposition.Ephemeral do
 
   @uint64_max 18_446_744_073_709_551_615
   @prompt_max 32_768
+  @stop_response_ms 11_000
 
   @opaque session() :: {:loopex_ephemeral_session, pid(), :atomics.atomics_ref()}
   @type reason() :: term()
@@ -191,14 +192,85 @@ defmodule LoopexComposition.Ephemeral do
 
   defp request(:proved_closed, :stop), do: :ok
 
-  defp request(owner, operation) do
+  # Concept: a stop whose owner cannot answer is unavailable, never proved.
+  # Technical depth: the owner's own cleanup deadline is 5,000 ms of grace
+  # plus 5,000 ms of teardown. The requester has 11,000 ms to answer and
+  # at most 1,000 ms more to be reaped. The helper owns any late owner reply;
+  # its answer to the host goes through a process alias that is retired before
+  # this function returns, so even a helper whose DOWN is delayed cannot put
+  # a stale result in the host mailbox.
+  defp request(owner, :stop) do
+    parent = self()
+    tag = make_ref()
+    reply_to = Process.alias()
+
+    {worker, monitor} =
+      spawn_monitor(fn ->
+        parent_monitor = Process.monitor(parent)
+
+        case request_owner(owner, :stop, parent_monitor, parent) do
+          :parent_down -> :ok
+          result -> send(reply_to, {self(), tag, result})
+        end
+      end)
+
+    try do
+      await_stop(worker, monitor, tag, System.monotonic_time(:millisecond) + @stop_response_ms)
+    after
+      Process.unalias(reply_to)
+
+      receive do
+        {^worker, ^tag, _result} -> :ok
+      after
+        0 -> :ok
+      end
+    end
+  end
+
+  defp request(owner, operation), do: request_owner(owner, operation)
+
+  defp request_owner(owner, operation, parent_monitor \\ nil, parent \\ nil) do
     reference = make_ref()
     monitor = Process.monitor(owner)
     send(owner, {self(), reference, :public, operation})
-    await(owner, reference, monitor)
+    await(owner, reference, monitor, parent_monitor, parent)
   end
 
-  defp await(owner, reference, monitor) do
+  defp await_stop(worker, monitor, tag, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {^worker, ^tag, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^worker, _reason} ->
+        receive do
+          {^worker, ^tag, result} -> result
+        after
+          0 -> {:error, :session_unavailable}
+        end
+    after
+      remaining ->
+        Process.exit(worker, :kill)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+        after
+          1_000 -> :ok
+        end
+
+        receive do
+          {^worker, ^tag, _result} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :session_unavailable}
+    end
+  end
+
+  defp await(owner, reference, monitor, parent_monitor, parent) do
     receive do
       {^owner, ^reference, result} ->
         Process.demonitor(monitor, [:flush])
@@ -206,8 +278,12 @@ defmodule LoopexComposition.Ephemeral do
 
       {:DOWN, ^monitor, :process, ^owner, _reason} ->
         {:error, :session_unavailable}
+
+      {:DOWN, ^parent_monitor, :process, ^parent, _reason} ->
+        Process.demonitor(monitor, [:flush])
+        :parent_down
     after
-      1_000 -> await(owner, reference, monitor)
+      1_000 -> await(owner, reference, monitor, parent_monitor, parent)
     end
   end
 

@@ -108,6 +108,18 @@ defmodule Loopex.Executor.LocalTest do
     assert_receive {^executor, ^instance, ^nonce, :groups_empty}, 1_000
     refute_receive {^executor, _, _, :groups_empty}, 25
 
+    assert {:error, :process_groups_unproved} =
+             Local.attest_process_groups(executor, instance, make_ref(), deadline)
+
+    sibling =
+      Task.async(fn -> Local.attest_process_groups(executor, instance, nonce, deadline) end)
+
+    assert {:error, :process_groups_unproved} = Task.await(sibling)
+    assert :ok = Local.attest_process_groups(executor, instance, nonce, deadline)
+
+    assert {:error, :process_groups_unproved} =
+             Local.attest_process_groups(executor, instance, nonce, deadline)
+
     {later, later_grant} = job_and_grant(fixture, "after-proof", "loopex.demo.write")
 
     assert {:error, {:refused_before_effect, :session_admission_closed}} =

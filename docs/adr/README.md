@@ -49,6 +49,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0037 | Host configuration and path discovery | Proposed | [Decision](0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
 | 0038 | Installed distribution and release artifact | Proposed | [Decision](0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
 | 0039 | Ephemeral embedded profile | Accepted | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
+| 0040 | Ephemeral startup interrupt and unnamed root | Proposed | [Decision](0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept) | [Technical depth](0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.

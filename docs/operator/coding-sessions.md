@@ -523,14 +523,24 @@ had become could no longer be signalled on its behalf, and it hands the child
 its original standard input so the project-resource prompt and piped input keep
 working.
 
-Inside the escript, the command sets `SIGTERM`, `SIGHUP` and `SIGQUIT` to be
-handled, replaces the emulator's default signal handler — which would otherwise
-stop the emulator on `SIGTERM` before the run could commit what it observed —
-and turns each signal into the ordinary public abort. However many signals
-arrive, one stop is submitted. A backstop derived from the session's committed
-cleanup period is armed once and extended once after the abort is admitted; its
-expiry is never read as a cleanup verdict. If it expires, the command exits
-`130`, and it never halts a terminal that has already reported and exited.
+Inside a durable-session escript, the command sets `SIGTERM`, `SIGHUP` and
+`SIGQUIT` to be handled, replaces the emulator's default signal handler —
+which would otherwise stop the emulator on `SIGTERM` before the run could
+commit what it observed — and turns each signal into the ordinary public
+abort. However many signals arrive, one stop is submitted. A backstop derived
+from the session's committed cleanup period is armed once and extended once
+after the abort is admitted; its expiry is never read as a cleanup verdict. If
+it expires, the command exits `130`, and it never halts a terminal that has
+already reported and exited.
+
+An ephemeral `ask` or `-p` installs its correlated signal handler before it
+starts a session. A first signal during startup is held while the handler
+remains alive. If a handle returns before a second signal or backstop expiry,
+the command stops it before starting a prompt worker; before a handle exists
+there is no session cleanup or result promise. After a handle exists, a first signal stops that session and
+exits `130` after the stop and signal decision. Its backstop is a fixed 10
+seconds, not the durable session's selected cleanup period. A second handled
+signal or backstop expiry can hard-stop the command without a cleanup result.
 
 `resume` hands recovered work to the interrupt handler before any of that work
 runs, so there is no moment in which recovered work is running and an interrupt

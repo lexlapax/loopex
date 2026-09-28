@@ -301,7 +301,8 @@ defmodule LoopexCli.ResourceAdmissionWorkflowTest do
           group_drain: fn executor, instance, owner, nonce, _deadline ->
             send(owner, {executor, instance, nonce, :groups_empty})
             {:ok, nonce}
-          end
+          end,
+          group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end
         }
       }
 

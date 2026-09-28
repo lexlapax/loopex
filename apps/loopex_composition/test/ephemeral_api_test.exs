@@ -605,6 +605,7 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
       test_seams:
         Map.merge(extra_seams, %{
           temp_root: Map.put(temp_root_seams, :tmp, fn -> tmp end),
+          group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end,
           group_drain: fn executor, instance, owner, nonce, _deadline ->
             send(test, {:group_drain, executor, instance})
             send(owner, {executor, instance, nonce, :groups_empty})
