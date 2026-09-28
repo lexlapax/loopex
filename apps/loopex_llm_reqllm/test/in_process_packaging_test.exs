@@ -164,6 +164,18 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
     end
   end
 
+  test "packaged ask admission and durable startup keep the provider graph load-only", fixture do
+    for mode <- ["ask_invalid", "ask_durable"] do
+      output = packaged_driver(fixture, mode, "unused", "unused", "unused", fixture.extracted, [])
+      assert output =~ "M6_PACKAGED_#{String.upcase(mode)}_OK"
+    end
+  end
+
+  test "packaged ephemeral ask starts composition without starting the durable CLI graph",
+       fixture do
+    call(fixture, "ask_ephemeral", "ollama:loopex-fixture:latest", "/v1/chat/completions", :chat)
+  end
+
   defp call(fixture, mode, model, path, type) do
     hosted? = not String.starts_with?(model, "ollama:")
     scheme = if hosted?, do: :https, else: :http
@@ -232,6 +244,26 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
         {name, if(name == variable, do: synthetic, else: nil)}
       end
 
+    try do
+      output = packaged_driver(fixture, mode, model, base, ca, workspace, environment)
+      assert output =~ "M6_PACKAGED_#{String.upcase(mode)}_OK"
+
+      for _ <- 1..count do
+        assert_receive {:packaged_request, ^reference, request}, 2_000
+
+        if mode == "ask_ephemeral",
+          do: assert_ask_request(request, model, path, synthetic),
+          else: assert_request(request, model, path, type, synthetic)
+      end
+
+      assert_receive {:packaged_server_done, ^reference}, 2_000
+    after
+      close(scheme, listener)
+      if Process.alive?(server), do: Process.exit(server, :kill)
+    end
+  end
+
+  defp packaged_driver(fixture, mode, model, base, ca, workspace, environment) do
     arguments =
       ["+S", "2:2", "+SDcpu", "1", "+SDio", "1", "+A", "2", "-noshell", "-noinput"] ++
         Enum.flat_map(fixture.paths, &["-pa", &1]) ++
@@ -247,27 +279,15 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
           fixture.extracted
         ]
 
-    try do
-      {output, status} =
-        System.cmd(System.find_executable("erl"), arguments,
-          cd: workspace,
-          env: [{"ERL_CRASH_DUMP", "/dev/null"} | environment],
-          stderr_to_stdout: true
-        )
+    {output, status} =
+      System.cmd(System.find_executable("erl"), arguments,
+        cd: workspace,
+        env: [{"ERL_CRASH_DUMP", "/dev/null"} | environment],
+        stderr_to_stdout: true
+      )
 
-      assert status == 0, "#{model} #{mode} packaged VM failed:\n#{output}"
-      assert output =~ "M6_PACKAGED_#{String.upcase(mode)}_OK"
-
-      for _ <- 1..count do
-        assert_receive {:packaged_request, ^reference, request}, 2_000
-        assert_request(request, model, path, type, synthetic)
-      end
-
-      assert_receive {:packaged_server_done, ^reference}, 2_000
-    after
-      close(scheme, listener)
-      if Process.alive?(server), do: Process.exit(server, :kill)
-    end
+    assert status == 0, "#{model} #{mode} packaged VM failed:\n#{output}"
+    output
   end
 
   defp credential_variable("openai:" <> _), do: "OPENAI_API_KEY"
@@ -439,5 +459,20 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
       nil -> refute request.headers =~ synthetic
       _ -> assert request.headers =~ "authorization: Bearer #{synthetic}\r\n"
     end
+  end
+
+  defp assert_ask_request(request, model, path, synthetic) do
+    assert request.head == "POST #{path} HTTP/1.1"
+    {:ok, body} = JSON.decode(request.body)
+    selected_model = model |> String.split(":", parts: 2) |> List.last()
+    assert body["model"] == selected_model
+    assert body["stream"] == false
+    assert is_integer(body["max_tokens"]) and body["max_tokens"] > 0
+
+    assert Enum.map(body["tools"], &get_in(&1, ["function", "name"])) ==
+             ~w(read grep find ls)
+
+    assert List.last(body["messages"]) == %{"role" => "user", "content" => @prompt}
+    refute request.headers =~ synthetic
   end
 end

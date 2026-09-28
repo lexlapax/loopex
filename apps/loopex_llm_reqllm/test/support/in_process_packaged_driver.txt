@@ -2,7 +2,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
   @moduledoc """
   ## Concept
 
-  Runs the public embedded call from code extracted from the shipped escript.
+  Runs embedded calls and ask admission from code extracted from the shipped
+  escript.
 
   ## Technical depth
 
@@ -20,6 +21,31 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
     def decide(_request), do: {:allow, nil}
   end
 
+  @project_apps [
+    :loopex,
+    :loopex_app_server,
+    :loopex_cli,
+    :loopex_composition,
+    :loopex_daemon,
+    :loopex_executor_local,
+    :loopex_llm_reqllm,
+    :loopex_protocol,
+    :loopex_reference_client,
+    :loopex_store_local,
+    :loopex_telemetry
+  ]
+
+  @durable_apps [
+    :loopex,
+    :loopex_cli,
+    :loopex_composition,
+    :loopex_daemon,
+    :loopex_executor_local,
+    :loopex_llm_reqllm,
+    :loopex_protocol,
+    :loopex_store_local
+  ]
+
   def main do
     [mode, model, base, ca, workspace, extracted] =
       :init.get_plain_arguments() |> Enum.map(&List.to_string/1)
@@ -36,6 +62,15 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
       do: raise("provider dependency auto-started")
 
     {:ok, _} = Application.ensure_all_started(:elixir)
+
+    if mode in ["ask_invalid", "ask_durable"] do
+      run_ask_startup(mode, workspace, started)
+    else
+      run_provider(mode, model, base, ca, workspace, extracted, started)
+    end
+  end
+
+  defp run_provider(mode, model, base, ca, workspace, extracted, started) do
     {:ok, _} = Application.ensure_all_started(:public_key)
 
     :ok = :public_key.cacerts_load(String.to_charlist(ca))
@@ -65,6 +100,9 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
 
         "normal" ->
           nil
+
+        "ask_ephemeral" ->
+          nil
       end
 
     unless System.get_env("LOOPEX_PACKAGED_DOTENV_CANARY") == nil,
@@ -85,15 +123,19 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
 
     catalogs =
       for _ <- 1..count do
-        case apply(:"Elixir.LoopexComposition.Ephemeral", :run, [
-               "Answer with fixture reply.",
-               options
-             ]) do
-          {:ok, %{outcome: :completed, text: "packaged answer"}} ->
-            :ok
+        if mode == "ask_ephemeral" do
+          run_ephemeral_ask(model, base, started)
+        else
+          case apply(:"Elixir.LoopexComposition.Ephemeral", :run, [
+                 "Answer with fixture reply.",
+                 options
+               ]) do
+            {:ok, %{outcome: :completed, text: "packaged answer"}} ->
+              :ok
 
-          other ->
-            raise "packaged run failed: #{inspect(other)}"
+            other ->
+              raise "packaged run failed: #{inspect(other)}"
+          end
         end
 
         :persistent_term.get(:llm_db_store, nil)
@@ -141,11 +183,94 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
       {"skip", _} ->
         unless after_call == nil, do: raise("skip-packaged-load control was ignored")
 
+      {"ask_ephemeral", _} ->
+        unless after_call == nil, do: raise("ephemeral ask loaded unrelated catalog")
+
       {mode, _} when mode in ["empty", "preloaded"] ->
         unless after_call == initial, do: raise("host catalog was replaced")
     end
 
     IO.puts("M6_PACKAGED_#{String.upcase(mode)}_OK")
+  end
+
+  defp run_ephemeral_ask(model, base, started) do
+    assert_project_apps([], started)
+
+    result =
+      LoopexCli.Ask.run(
+        [
+          "ask",
+          "--policy",
+          "allow-all",
+          "--tools",
+          "read-only",
+          "--model",
+          model,
+          "Answer with fixture reply."
+        ],
+        install_interrupt: fn _, _ -> {:ok, self()} end,
+        signal_manager: fn -> self() end,
+        handler_live: fn _, _ -> true end,
+        interrupt_phase: fn _, _ -> :idle end,
+        finish_interrupt: fn _, _ -> {:ok, :ordinary} end,
+        start_session: fn options ->
+          assert_project_apps([], started)
+          LoopexComposition.Ephemeral.start_session(Keyword.put(options, :base_url, base))
+        end
+      )
+
+    unless result == %{status: 0, stdout: "packaged answer\n", stderr: "ending completed\n"},
+      do: raise("packaged ephemeral ask failed: #{inspect(result)}")
+
+    unless :loopex_composition in started.() and :loopex_cli not in started.(),
+      do: raise("ephemeral ask started the wrong application graph")
+  end
+
+  defp run_ask_startup(mode, workspace, started) do
+    assert_project_apps([], started)
+
+    case mode do
+      "ask_invalid" ->
+        for command <- ["ask", "-p"] do
+          result = LoopexCli.Ask.run([command, "--output", "wrong", "fixture"])
+
+          unless result.status == 1 and result.stdout == "" and
+                   result.stderr == "loopex: invalid_output\n" do
+            raise "packaged invalid ask returned wrong diagnostic: #{inspect(result)}"
+          end
+
+          assert_project_apps([], started)
+        end
+
+      "ask_durable" ->
+        result =
+          LoopexCli.Ask.run(
+            ["-p", "--policy", "allow-all", "--state-root", Path.join(workspace, "root"), "fixture"],
+            durable_run: fn _, _, _ ->
+              assert_project_apps(@durable_apps, started)
+              assert_load_only_dependencies(started)
+              %{status: 0, stdout: "durable fixture\n", stderr: ""}
+            end
+          )
+
+        unless result == %{status: 0, stdout: "durable fixture\n", stderr: ""},
+          do: raise("packaged durable ask failed: #{inspect(result)}")
+
+        assert_project_apps(@durable_apps, started)
+        assert_load_only_dependencies(started)
+    end
+
+    IO.puts("M6_PACKAGED_#{String.upcase(mode)}_OK")
+  end
+
+  defp assert_project_apps(expected, started) do
+    actual = Enum.filter(@project_apps, &(&1 in started.()))
+    unless actual == expected, do: raise("wrong project application graph: #{inspect(actual)}")
+  end
+
+  defp assert_load_only_dependencies(started) do
+    unless Enum.all?([:req_llm, :req, :finch], &(&1 not in started.())),
+      do: raise("durable startup auto-started provider dependencies")
   end
 
   defp same_catalog?(actual, expected) do

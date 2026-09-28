@@ -67,6 +67,94 @@ defmodule LoopexCli.AskLauncherTest do
     end
   end
 
+  test "real ask child is reaped when each signal arrives before handler installation" do
+    elixir = System.find_executable("elixir") || flunk("elixir executable unavailable")
+
+    paths =
+      Enum.map_join(:code.get_path(), " ", fn path ->
+        "-pa " <> shell_quote(List.to_string(path))
+      end)
+
+    for signal <- ["INT", "TERM", "HUP", "QUIT"] do
+      root = temporary_directory()
+      launcher = Path.join(root, "loopex")
+      stand_in = Path.join(root, "stand-in")
+      assigned_pid = Path.join(root, "assigned-pid")
+      running_pid = Path.join(root, "running-pid")
+      source = File.read!(@launcher)
+      anchor = "child=$!\n"
+      assert length(:binary.matches(source, anchor)) == 1
+
+      File.write!(
+        launcher,
+        String.replace(
+          source,
+          anchor,
+          anchor <> "printf '%s\\n' \"$child\" > \"$LOOPEX_CHILD_PID_FILE\"\n",
+          global: false
+        )
+      )
+
+      File.chmod!(launcher, 0o755)
+
+      File.write!(stand_in, """
+      #!/bin/sh
+      exec #{shell_quote(elixir)} #{paths} -e 'File.write!(System.fetch_env!("LOOPEX_CHILD_READY"), System.pid()); LoopexCli.main(System.argv())' -- "$@"
+      """)
+
+      File.chmod!(stand_in, 0o755)
+
+      port =
+        Port.open({:spawn_executable, launcher}, [
+          :binary,
+          :exit_status,
+          :hide,
+          :use_stdio,
+          args: ["ask", "--policy", "refuse-all"],
+          env: [
+            {~c"LOOPEX_ESCRIPT", String.to_charlist(stand_in)},
+            {~c"LOOPEX_CHILD_PID_FILE", String.to_charlist(assigned_pid)},
+            {~c"LOOPEX_CHILD_READY", String.to_charlist(running_pid)}
+          ]
+        ])
+
+      try do
+        assert {:os_pid, launcher_pid} = Port.info(port, :os_pid)
+        assert_file(assigned_pid)
+        assert_file(running_pid)
+        child_pid = String.trim(File.read!(assigned_pid))
+        assert child_pid == String.trim(File.read!(running_pid))
+        assert {_, 0} = System.cmd("/bin/kill", ["-0", child_pid])
+
+        # No prompt words and an open Port stdin hold the real command in
+        # AskPrompt.admit/2, before its signal handler is installed.
+        Process.sleep(100)
+        refute_receive {^port, {:exit_status, _}}, 0
+        assert {_, 0} = System.cmd("/bin/kill", ["-#{signal}", Integer.to_string(launcher_pid)])
+
+        {status, output} = await_exit(port, "", System.monotonic_time(:millisecond) + 10_000)
+        assert status == 0 or status in 128..255
+        refute output =~ "loopex:"
+        refute output =~ "ending "
+        assert {_, 1} = System.cmd("/bin/kill", ["-0", child_pid], stderr_to_stdout: true)
+      after
+        case Port.info(port, :os_pid) do
+          {:os_pid, launcher_pid} ->
+            _ =
+              System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher_pid)],
+                stderr_to_stdout: true
+              )
+
+          _ ->
+            :ok
+        end
+
+        if Port.info(port), do: Port.close(port)
+        File.rm_rf!(root)
+      end
+    end
+  end
+
   test "crash dumps are disabled only for ask and its alias" do
     root = temporary_directory()
     stand_in = Path.join(root, "stand-in")
@@ -104,6 +192,19 @@ defmodule LoopexCli.AskLauncherTest do
 
     File.mkdir_p!(root)
     root
+  end
+
+  defp shell_quote(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
+
+  defp await_exit(port, output, deadline) do
+    remaining = max(0, deadline - System.monotonic_time(:millisecond))
+
+    receive do
+      {^port, {:data, bytes}} -> await_exit(port, output <> bytes, deadline)
+      {^port, {:exit_status, status}} -> {status, output}
+    after
+      remaining -> flunk("real ask child did not exit after launcher signal")
+    end
   end
 
   defp assert_file(path) do

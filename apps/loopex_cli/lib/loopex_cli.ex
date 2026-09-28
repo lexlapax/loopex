@@ -72,7 +72,7 @@ defmodule LoopexCli do
   # Concept: the escript defers application startup to command classification;
   # released commands still start the same application graph before dispatch.
   # Technical depth: this reproduces Mix's generated escript start failure for
-  # an application error. The future ask branch uses a separate fixed diagnostic
+  # an application error. The ask branch uses a separate fixed diagnostic
   # and validates its closed grammar before starting an application.
   defp start_legacy_application_or_halt do
     case Application.ensure_all_started(:loopex_cli) do
