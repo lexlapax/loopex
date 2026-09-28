@@ -113,8 +113,10 @@ this is the short form.
 Hosted CI — `.github/workflows/agent-bootstrap.yml` — runs
 `bash scripts/check.sh --select` on every push to `main` and every pull
 request, on the current toolchain pair, with
-`LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. Nothing merges to `main` without that
-run green on the candidate and an independent review of its diff.
+`LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. Nothing merges to `main` without a
+green candidate check, either in hosted CI or in a clean local run whose
+complete output and exact SHA are retained, and an independent review of its
+diff.
 
 Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour

@@ -477,8 +477,9 @@ end
 
 Select a shipped stance by name, or start the runtime yourself with
 `policy: YourModule` through `LoopexComposition.start/1` or
-`Loopex.start_link/1`. Omitting the policy refuses runtime start with
-`:host_policy_required`.
+`Loopex.start_link/1`. The reference composition requires a policy. A direct
+`Loopex.start_link/1` with active tools also refuses a missing policy with
+`:host_policy_required`; a runtime with no active tools may omit it.
 
 The decision is made on the generation triple, not on the model-supplied name,
 so a policy cannot be steered by what the model chose to call a tool. The

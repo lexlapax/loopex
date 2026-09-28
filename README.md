@@ -10,7 +10,8 @@
 An agent is a loop around an LLM. Loopex makes that loop an OTP-native,
 embeddable runtime for durable coding-agent sessions and controlled effects:
 a small, provider-neutral model loop with truthful recovery, versioned client
-contracts, location-transparent tool execution, and governed live extensions.
+contracts and location-transparent tool execution. Governed live extensions
+remain future scope in the M9 draft.
 It is a minimal terminal coding harness on its own, and small enough to
 disappear inside a larger host.
 
@@ -198,9 +199,9 @@ without entering the kernel.
   process, isolated container/microVM, or trusted remote worker — behind one
   job/receipt protocol. Distribution connects trusted gateways only; the
   sandbox is the OS boundary, never the BEAM.
-- **Governed live extensions:** trusted OTP applications activate as
-  quiescent generations with tested migration and exact rollback — code
-  evolves, session history survives.
+- **Future governed live extensions:** the M9 draft targets quiescent trusted
+  OTP generations with tested migration and exact rollback. No extension
+  manifest or lifecycle API ships in the current source.
 - **A seven-tool coding surface** (`read write edit bash grep find ls`)
   inside a system prompt budgeted under 1,000 tokens. The coding and
   read-only presets select four tools each, and the selected definitions are
@@ -237,7 +238,7 @@ Two commands, both run from the repository root and described in
 
 ```bash
 bash scripts/check.sh            # the fast check, credential-free
-LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh
+bash scripts/check-release.sh    # after securely exporting LOOPEX_PROVIDER_API_KEY
 ```
 
 `scripts/check.sh` runs warning-free compilation, formatting, the repository
@@ -248,14 +249,16 @@ slow one: the real-provider workflows, the independent Node client, the
 fresh-source archive build and the long-duration bound proofs; it needs a
 provider credential and the pinned Node, and runs once before closure. An
 unchanged-source release reuses that evidence and runs only its pre-tag
-administrative-SHA proofs.
+administrative-SHA proofs. [DEVELOPMENT.md](DEVELOPMENT.md) shows a
+history-safe way to load the credential.
 
 Hosted CI — `.github/workflows/agent-bootstrap.yml` — runs
 `bash scripts/check.sh --select` on every push to `main` and every pull
 request, on the current toolchain pair. It is a replaceable runner of the
 repository's own command, not a second definition of the check. Nothing merges
-to `main` without a green CI run on the candidate and an independent review of
-its diff.
+to `main` without a green candidate check, either in hosted CI or in a clean
+local run whose complete output and exact SHA are retained, and an independent
+review of its diff.
 
 The [verification guide](docs/developer/verification.md#concept) and its
 [technical companion](docs/developer/verification-technical.md#technical-depth)

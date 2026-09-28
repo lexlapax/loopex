@@ -414,12 +414,16 @@ Concept: [Contributing: toolchain and checks](getting-started.md#concept-getting
 | The fast check, once per integration candidate | `bash scripts/check.sh` |
 | The fast check for a prose-only change | `bash scripts/check.sh --docs` |
 | The mode CI picks from the diff | `bash scripts/check.sh --select` |
-| The slow check, once before a milestone closes | `LOOPEX_PROVIDER_API_KEY=... bash scripts/check-release.sh` |
+| The slow check, once before a milestone closes | `bash scripts/check-release.sh` after a history-safe credential export |
 
 A local pre-merge fast check counts only from a clean candidate. Retain its
 complete output and exact HEAD SHA outside the repository; otherwise use the
 hosted CI result for that candidate. The [milestone guide](milestones.md#concept-milestones-close)
 owns branch-candidate rejoin and the separate closure matrix.
+
+For the slow check, load `LOOPEX_PROVIDER_API_KEY` using the
+[history-safe input pattern](../../DEVELOPMENT.md) before running the command;
+do not put its value in a shell command line.
 
 Each application's test helper excludes the release-only tags —
 `real_provider`, `long_bound`, `node_client`, and `cross_uid` where they occur —

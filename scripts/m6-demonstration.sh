@@ -106,6 +106,13 @@ assert_json() {
   ' -- "$@"
 }
 
+assert_quiet_stderr() {
+  [ ! -s "$1" ] || {
+    echo "m6-demonstration: proved JSON ask wrote to stderr ($1)" >&2
+    return 1
+  }
+}
+
 command() {
   [ -x "$M6_DEMO_COMMAND" ] || {
     echo 'm6-demonstration: build the loopex escript and companion first' >&2
@@ -114,7 +121,9 @@ command() {
   local_run "$M6_DEMO_COMMAND" -p "$M6_DEMO_PROMPT" --policy allow-all \
     --model "$M6_DEMO_LOCAL_MODEL" --tools coding --cwd "$M6_DEMO_WORKSPACE" \
     --skill-dir "$M6_DEMO_SKILL" \
-    --deadline-ms 120000 --max-steps 8 --output json >"$M6_DEMO_WORKSPACE/ask.json" || return
+    --deadline-ms 120000 --max-steps 8 --output json \
+    >"$M6_DEMO_WORKSPACE/ask.json" 2>"$M6_DEMO_WORKSPACE/ask.stderr" || return
+  assert_quiet_stderr "$M6_DEMO_WORKSPACE/ask.stderr" || return
   assert_json "$M6_DEMO_WORKSPACE/ask.json" completed ephemeral yes || return
   local status=0
   # An absent local model reaches the provider, producing a failed run rather
@@ -142,7 +151,8 @@ delegation() {
        "--deadline-ms", "120000", "--max-steps", "8", "--output", "json"])
     unless status == 0, do: raise("delegated command did not complete")
     File.write!(Path.join(System.fetch_env!("M6_DEMO_WORKSPACE"), "delegated.json"), output)
-  ' || return
+  ' 2>"$M6_DEMO_WORKSPACE/delegated.stderr" || return
+  assert_quiet_stderr "$M6_DEMO_WORKSPACE/delegated.stderr" || return
   assert_json "$M6_DEMO_WORKSPACE/delegated.json" completed ephemeral yes
 }
 
@@ -155,7 +165,9 @@ durable() {
     --model "$M6_DEMO_DURABLE_MODEL" --tools coding --cwd "$M6_DEMO_WORKSPACE" \
     --skill-dir "$M6_DEMO_SKILL" \
     --state-root "$M6_DEMO_WORKSPACE/state" --deadline-ms 120000 --max-steps 8 \
-    --output json >"$M6_DEMO_WORKSPACE/durable.json" || return
+    --output json >"$M6_DEMO_WORKSPACE/durable.json" \
+    2>"$M6_DEMO_WORKSPACE/durable.stderr" || return
+  assert_quiet_stderr "$M6_DEMO_WORKSPACE/durable.stderr" || return
   assert_json "$M6_DEMO_WORKSPACE/durable.json" completed durable yes || return
   local session
   session=$(elixir -e 'IO.puts(:json.decode(File.read!(hd(System.argv())))["session_id"])' \

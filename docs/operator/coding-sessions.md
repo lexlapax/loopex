@@ -44,8 +44,10 @@ Developer detail: [Agent loop and tools](../developer/agent-loop-and-tools.md#co
 <a id="operator-sessions-running"></a>
 ## Running a Task
 
-Build the command once from a clean checkout, then run it from the repository
-you want it to work on:
+Set `LOOPEX_HOME` and `LOOPEX_PROVIDER_API_KEY` as in
+[Getting started](getting-started.md#operator-start-credential). Build the
+command once from a clean checkout, then run it from the repository you want
+it to work on:
 
 ```text
 MIX_ENV=prod mix cmd --app loopex_cli mix escript.build
