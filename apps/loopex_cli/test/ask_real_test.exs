@@ -86,18 +86,44 @@ defmodule LoopexCli.AskRealTest do
   end
 
   defp assert_local_model_available!(model) do
-    assert {:ok, _} = Application.ensure_all_started(:inets)
+    body = JSON.encode!(%{"model" => String.replace_prefix(model, "ollama:", "")})
 
-    response =
-      :httpc.request(
-        :post,
-        {~c"http://127.0.0.1:11434/api/show", [], ~c"application/json",
-         JSON.encode!(%{"model" => String.replace_prefix(model, "ollama:", "")})},
-        [timeout: 3_000, connect_timeout: 3_000],
-        body_format: :binary
-      )
+    available =
+      case :gen_tcp.connect(
+             {127, 0, 0, 1},
+             11_434,
+             [:binary, active: false, packet: :line],
+             3_000
+           ) do
+        {:ok, socket} ->
+          try do
+            request = [
+              "POST /api/show HTTP/1.1\r\n",
+              "host: 127.0.0.1:11434\r\n",
+              "content-type: application/json\r\n",
+              "content-length: ",
+              Integer.to_string(byte_size(body)),
+              "\r\nconnection: close\r\n\r\n",
+              body
+            ]
 
-    assert match?({:ok, {{_, 200, _}, _, _}}, response),
+            with :ok <- :gen_tcp.send(socket, request),
+                 {:ok, <<"HTTP/1.", version, " 200 ", _::binary>>} <-
+                   :gen_tcp.recv(socket, 0, 3_000),
+                 true <- version in [?0, ?1] do
+              true
+            else
+              _ -> false
+            end
+          after
+            :gen_tcp.close(socket)
+          end
+
+        _ ->
+          false
+      end
+
+    assert available,
            "release evidence unavailable: local Ollama does not have #{model} on 127.0.0.1:11434"
   end
 end
