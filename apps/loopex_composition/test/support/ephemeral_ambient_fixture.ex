@@ -175,16 +175,12 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
           caller = await_caller(owner, System.monotonic_time(:millisecond) + 5_000)
           assert is_pid(caller)
 
-          assert {:messages, messages} = Process.info(capability, :messages)
-
-          assert Enum.any?(messages, fn
-                   {:"$gen_call", {^caller, _reference},
-                    {:exclude, _incarnation, ^caller, _functions}} ->
-                     true
-
-                   _other ->
-                     false
-                 end)
+          assert :ok =
+                   await_exclusion_request(
+                     capability,
+                     caller,
+                     System.monotonic_time(:millisecond) + 5_000
+                   )
 
           [trace_session] =
             Enum.filter(:trace.session_info(:all), fn
@@ -217,17 +213,11 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       control_state = :sys.get_state(children.control)
       tracer_state = :sys.get_state(children.tracer)
 
-      assert MapSet.member?(
-               control_state.trace_excluded[caller].functions,
-               {Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1}
-             )
+      exact_inventory = MapSet.new([{Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1}])
+      assert control_state.trace_excluded[caller].functions == exact_inventory
 
       assert MapSet.member?(tracer_state.excluded_pids, caller)
-
-      assert MapSet.member?(
-               tracer_state.excluded_mfas,
-               {Loopex.LLM.ReqLLM.InProcess.Caller, :run, 1}
-             )
+      assert tracer_state.excluded_mfas == exact_inventory
 
       assert {:flags, []} = :trace.info(trace_session, caller, :flags)
 
@@ -238,6 +228,9 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
                  :traced
                )
 
+      assert :ok = await_trace_delivery(trace_session, caller)
+      assert :ok = await_trace_delivery(trace_session, :all)
+      :sys.get_state(children.tracer)
       :sys.get_state(children.dispatcher)
       before_reply = drain_diagnostics([])
 
@@ -295,6 +288,10 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       })
 
       assert_receive {:ambient_server_done, ^server}, 3_000
+      assert :ok = await_trace_delivery(trace_session, caller)
+      assert :ok = await_trace_delivery(trace_session, :all)
+      :sys.get_state(children.tracer)
+      :sys.get_state(children.dispatcher)
       assert :ok = Loopex.trace_stop(runtime)
       :sys.get_state(children.tracer)
       :sys.get_state(children.dispatcher)
@@ -338,6 +335,42 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       true ->
         Process.sleep(10)
         await_caller(owner, deadline)
+    end
+  end
+
+  defp await_exclusion_request(capability, caller, deadline) do
+    assert {:messages, messages} = Process.info(capability, :messages)
+
+    queued? =
+      Enum.any?(messages, fn
+        {:"$gen_call", {^caller, _reference}, {:exclude, _incarnation, ^caller, _functions}} ->
+          true
+
+        _other ->
+          false
+      end)
+
+    cond do
+      queued? ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("caller did not queue its trace exclusion")
+
+      true ->
+        Process.sleep(10)
+        await_exclusion_request(capability, caller, deadline)
+    end
+  end
+
+  defp await_trace_delivery(session, target) do
+    reference = :trace.delivered(session, target)
+    assert is_reference(reference)
+
+    receive do
+      {:trace_delivered, ^target, ^reference} -> :ok
+    after
+      5_000 -> flunk("trace delivery did not finish")
     end
   end
 
