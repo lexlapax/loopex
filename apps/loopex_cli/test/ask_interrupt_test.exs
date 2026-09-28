@@ -37,6 +37,54 @@ defmodule LoopexCli.AskInterruptTest do
     refute Interrupt.ask_live(manager, reference)
   end
 
+  if Code.ensure_loaded?(:prim_tty_sighandler) do
+    test "the OTP tty handler remains installed through ask and finish", %{manager: manager} do
+      tty_state = %{parent: self(), reader: make_ref()}
+      assert :ok = :gen_event.add_handler(manager, :prim_tty_sighandler, tty_state)
+      reference = make_ref()
+
+      assert {:ok, ^manager} = Interrupt.install_ask(self(), reference)
+
+      assert Enum.sort(:gen_event.which_handlers(manager)) ==
+               Enum.sort([Interrupt, :prim_tty_sighandler])
+
+      assert {:ok, :ordinary} = Interrupt.finish_ask(manager, reference)
+
+      assert Enum.sort(:gen_event.which_handlers(manager)) ==
+               [:erl_signal_handler, :prim_tty_sighandler]
+    end
+
+    test "ask can install with only OTP's tty handler and restores the default", %{
+      manager: manager
+    } do
+      assert :ok = :gen_event.delete_handler(manager, :erl_signal_handler, [])
+      tty_state = %{parent: self(), reader: make_ref()}
+      assert :ok = :gen_event.add_handler(manager, :prim_tty_sighandler, tty_state)
+      reference = make_ref()
+
+      assert {:ok, ^manager} = Interrupt.install_ask(self(), reference)
+
+      assert Enum.sort(:gen_event.which_handlers(manager)) ==
+               Enum.sort([Interrupt, :prim_tty_sighandler])
+
+      assert {:ok, :ordinary} = Interrupt.finish_ask(manager, reference)
+
+      assert Enum.sort(:gen_event.which_handlers(manager)) ==
+               [:erl_signal_handler, :prim_tty_sighandler]
+    end
+  end
+
+  test "an unrelated pre-existing handler is refused without changing ownership", %{
+    manager: manager
+  } do
+    foreign = {:erl_signal_handler, :foreign}
+    assert :ok = :gen_event.add_handler(manager, foreign, [])
+    before = :gen_event.which_handlers(manager)
+
+    assert {:error, :interrupt_handler_unavailable} = Interrupt.install_ask(self(), make_ref())
+    assert :gen_event.which_handlers(manager) == before
+  end
+
   test "a first signal wins only when serialized before finish", %{manager: manager} do
     reference = make_ref()
     assert {:ok, ^manager} = Interrupt.install_ask(self(), reference)

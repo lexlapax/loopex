@@ -943,7 +943,7 @@ defmodule LoopexCli.Interrupt do
     }
 
     with {:ok, handlers} <- observe_handlers(manager),
-         true <- handlers in [[], [:erl_signal_handler]],
+         true <- ask_handlers_supported?(handlers),
          :ok <- ask_install_observed(manager, main_pid, reference),
          :ok <- install_handler(manager, handlers, state) do
       case handle_ask_signals() do
@@ -957,6 +957,18 @@ defmodule LoopexCli.Interrupt do
     else
       _ -> {:error, :interrupt_handler_unavailable}
     end
+  end
+
+  # OTP's tty handler owns SIGCONT and SIGWINCH and ignores the three signals
+  # owned by ask. Preserve it during the default-handler swap; refuse any other
+  # handler present at the installation observation.
+  defp ask_handlers_supported?(handlers) do
+    Enum.sort(handlers) in [
+      [],
+      [:erl_signal_handler],
+      [:prim_tty_sighandler],
+      [:erl_signal_handler, :prim_tty_sighandler]
+    ]
   end
 
   defp handle_ask_signals do

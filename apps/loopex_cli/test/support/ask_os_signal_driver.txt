@@ -1,0 +1,146 @@
+defmodule LoopexCli.AskOSSignalDriver do
+  @moduledoc """
+  ## Concept
+
+  Drives the real ask signal handler in a separate VM at test-controlled phases.
+
+  ## Technical depth
+
+  This file is compiled into a test-owned directory, never the command archive.
+  A local packet-framed socket carries phase markers and releases without using
+  the command's stdout or stderr. The only model-independent real resource is
+  the ephemeral session, which is stopped through its public API.
+  """
+
+  alias LoopexCli.{Ask, Interrupt}
+  alias LoopexComposition.Ephemeral
+
+  def main do
+    scenario = System.fetch_env!("LOOPEX_SIGNAL_SCENARIO")
+    port = System.fetch_env!("LOOPEX_SIGNAL_PORT") |> String.to_integer()
+    workspace = System.fetch_env!("LOOPEX_SIGNAL_WORKSPACE")
+
+    {:ok, socket} =
+      :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false, packet: 4], 5_000)
+
+    send_control(socket, {:pid, System.pid()})
+    send_control(socket, {:manager_before, is_pid(Process.whereis(:erl_signal_server))})
+    send_control(socket, {:handlers_before, :gen_event.which_handlers(:erl_signal_server)})
+
+    seams = [
+      install_interrupt: fn main, reference ->
+        case Interrupt.install_ask(main, reference) do
+          {:ok, manager} = installed ->
+            send_control(socket, {:install, :ok})
+            spawn(fn -> watch_phase(socket, manager, reference, 1_000) end)
+            installed
+
+          other ->
+            send_control(socket, {:install, other})
+            other
+        end
+      end,
+      start_session: fn options ->
+        if scenario == "startup" do
+          send_control(socket, :startup_enter)
+          await_release(socket)
+        end
+
+        if scenario in ["double", "backstop"] do
+          {:ok, :fixture_session}
+        else
+          Ephemeral.start_session(
+            Keyword.merge(options,
+              base_url: "http://127.0.0.1:1/v1",
+              model: "ollama:loopex-signal-fixture"
+            )
+          )
+        end
+      end,
+      start_worker: fn work ->
+        if scenario == "pre_worker" do
+          spawn_monitor(fn ->
+            send_control(socket, :worker_enter)
+
+            receive do
+              :continue -> work.()
+            end
+          end)
+        else
+          spawn_monitor(work)
+        end
+      end,
+      ask: fn _, _ ->
+        send_control(socket, :ask_enter)
+        {:ok, observation()}
+      end,
+      stop_session: fn session ->
+        send_control(socket, :stop_enter)
+
+        if scenario in ["stop", "pre_worker", "double", "backstop"], do: await_release(socket)
+
+        result = if scenario in ["double", "backstop"], do: :ok, else: Ephemeral.stop_session(session)
+        send_control(socket, {:stop_returned, result})
+        result
+      end
+    ]
+
+    result =
+      Ask.run(
+        ["ask", "--policy", "allow-all", "--tools", "none", "--cwd", workspace, "hello"],
+        seams
+      )
+
+    send_control(socket, {:handlers_after, :gen_event.which_handlers(:erl_signal_server)})
+    send_control(socket, {:result, result})
+    if result.stdout != "", do: IO.binwrite(:stdio, result.stdout)
+    if result.stderr != "", do: IO.binwrite(:stderr, result.stderr)
+    System.halt(result.status)
+  end
+
+  defp observation do
+    %{
+      profile: :ephemeral,
+      outcome: :completed,
+      session_id: "signal-session",
+      run_id: "signal-run",
+      text: "signal answer",
+      text_truncated: false,
+      tools: [],
+      tools_truncated: false,
+      shadowed_skills: [],
+      details: %{"cleanup_grace_ms" => 5_000}
+    }
+  end
+
+  defp watch_phase(_socket, _manager, _reference, 0), do: :ok
+
+  defp watch_phase(socket, manager, reference, remaining) do
+    case Interrupt.ask_phase(manager, reference) do
+      :stopping ->
+        send_control(socket, {:phase, :stopping})
+
+      :idle ->
+        Process.sleep(5)
+        watch_phase(socket, manager, reference, remaining - 1)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp await_release(socket) do
+    case :gen_tcp.recv(socket, 0, 20_000) do
+      {:ok, bytes} ->
+        case :erlang.binary_to_term(bytes, [:safe]) do
+          :release -> :ok
+          other -> raise "unexpected signal release: #{inspect(other)}"
+        end
+
+      other ->
+        raise "signal release unavailable: #{inspect(other)}"
+    end
+  end
+
+  defp send_control(socket, term), do: :gen_tcp.send(socket, :erlang.term_to_binary(term))
+end
