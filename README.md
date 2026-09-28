@@ -32,7 +32,7 @@ while the session lives; a session "brain" can coordinate local or remote
 
 ## What Loopex Provides
 
-At source version `0.2.0`, Loopex is a working single-machine coding harness
+At source version `0.3.0`, Loopex is a working single-machine coding harness
 and the runtime underneath it. It runs from a source checkout on macOS and
 Linux. It is not yet a published package, and its client protocol is
 experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.

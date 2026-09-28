@@ -39,7 +39,7 @@ fi
 
 started=$SECONDS
 commit=$(git rev-parse HEAD)
-release_version=0.2.0
+release_version=0.3.0
 printf 'check-release: candidate %s on %s %s mode=%s selectors=%s\n' "$commit" "$platform" "$(uname -m)" "$release_mode" "${release_selectors:-all}"
 logs=$(mktemp -d "${TMPDIR:-/tmp}/loopex-release.XXXXXX")
 fresh=$(mktemp -d "${TMPDIR:-/tmp}/loopex-fresh.XXXXXX")

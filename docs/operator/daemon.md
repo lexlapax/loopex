@@ -75,7 +75,7 @@ When it is ready the daemon writes exactly one line to standard output and
 nothing else there:
 
 ```text
-{"record":"daemon_ready","root":"/home/me/.loopex","socket":"/home/me/.loopex/daemon/daemon.sock","incarnation":"…","version":"0.2.0"}
+{"record":"daemon_ready","root":"/home/me/.loopex","socket":"/home/me/.loopex/daemon/daemon.sock","incarnation":"…","version":"0.3.0"}
 ```
 
 Logs go to standard error at `info` level, so a running daemon's standard error

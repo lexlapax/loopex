@@ -69,7 +69,9 @@ defmodule LoopexCli.MultiClientWorkflowTest do
         [:use_stdio]
       )
 
-    assert %{"record" => "daemon_ready", "version" => "0.2.0"} =
+    expected_version = LoopexDaemon.version()
+
+    assert %{"record" => "daemon_ready", "version" => ^expected_version} =
              daemon |> await_line(60_000) |> JSON.decode!()
 
     {0, run_output} = cli(["run", "--daemon", socket, "go"])

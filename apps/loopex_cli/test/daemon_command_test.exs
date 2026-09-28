@@ -155,12 +155,13 @@ defmodule LoopexCli.DaemonCommandTest do
 
     {port, os_pid} = start_daemon_process(arguments)
     line = await_line(port, 60_000)
+    expected_version = LoopexDaemon.version()
 
     assert %{
              "record" => "daemon_ready",
              "root" => root,
              "socket" => ^socket,
-             "version" => "0.2.0"
+             "version" => ^expected_version
            } = JSON.decode!(line)
 
     assert root == context.state_root
@@ -218,7 +219,7 @@ defmodule LoopexCli.DaemonCommandTest do
            "no incarnation in #{inspect(output)}"
 
     assert output ==
-             ~s({"record":"daemon_ready","root":"#{escaped_root}","socket":"#{escaped_root}/daemon/daemon.sock","incarnation":"#{incarnation}","version":"0.2.0"}\n)
+             ~s({"record":"daemon_ready","root":"#{escaped_root}","socket":"#{escaped_root}/daemon/daemon.sock","incarnation":"#{incarnation}","version":"#{LoopexDaemon.version()}"}\n)
 
     assert JSON.decode!(output)["socket"] == socket
 
