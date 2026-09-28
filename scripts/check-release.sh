@@ -165,7 +165,7 @@ printf 'build-evidence: command_status=%s tee_status=%s duration_seconds=%s\n' \
 release_retain_identity "$retain/fresh-source-build.log"
 [ "${build_statuses[0]}" -eq 0 ] && [ "${build_statuses[1]}" -eq 0 ] ||
   { echo 'check-release: fresh-source build RED' >&2; exit 1; }
-python3 "$tree/scripts/escript-inventory.py" \
+elixir "$tree/scripts/escript-inventory.exs" \
   "$tree/apps/loopex_cli/loopex" "$tree/_build/prod/loopex_provider" \
   >"$retain/escript-inventory.log"
 cat "$retain/escript-inventory.log"
