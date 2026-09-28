@@ -8,7 +8,7 @@ release_select() {
     [ "$1" = --only ] && [ "$#" -ge 2 ] ||
       { echo 'check-release: usage: check-release.sh [--only NAME ...]' >&2; return 2; }
     case "$2" in
-      real_provider | node_client | long_bound | cross_uid | real-provider-[3-9] | real-provider-10 | real-provider-11) ;;
+      real_provider | node_client | long_bound | cross_uid | rollback | real-provider-[3-9] | real-provider-10 | real-provider-11) ;;
       real-provider-1 | real-provider-2)
         echo 'check-release: attended rows cannot be selected; run the full closure matrix' >&2
         return 2 ;;

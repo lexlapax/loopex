@@ -20,7 +20,8 @@ expect_refusal() {
 }
 release_select
 for row in 1 2 3 4 5 6 7 8 9 10 11; do release_selected "real-provider-$row" || fail "full omitted row $row"; done
-release_selected node_client && release_selected long_bound && release_selected cross_uid || fail 'full omitted a group'
+release_selected node_client && release_selected long_bound && release_selected cross_uid &&
+  release_selected rollback || fail 'full omitted a group'
 release_select --only real_provider --only real-provider-5 --only long_bound
 count=0
 for row in 1 2 3 4 5 6 7 8 9 10 11; do
@@ -43,7 +44,10 @@ release_select --only node_client
 release_needs_node || fail 'node_client omitted its Node preflight'
 if release_needs_provider; then fail 'node_client spuriously requires a credential'; fi
 expect_refusal --only
-expect_refusal --only rollback
+release_select --only rollback
+release_selected rollback || fail 'rollback selector did not select its lane'
+if release_needs_provider || release_needs_node; then fail 'rollback has unrelated preflights'; fi
+release_select --only long_bound
 expect_refusal --only real-provider-1
 expect_refusal --only real-provider-2
 expect_refusal --only real-provider-12
@@ -196,7 +200,7 @@ preflight() {
     [ ! -e "$entry" ] || fail 'preflight created release staging'
   done
 }
-for selector in rollback real-provider-1 real-provider-2 real-provider-12; do
+for selector in real-provider-1 real-provider-2 real-provider-12; do
   preflight 2 --only "$selector"
   [ ! -s "$RELEASE_TEST_MARKER" ] || fail 'invalid selector reached Node or staging'
 done
@@ -208,6 +212,8 @@ grep -q 'LOOPEX_PROVIDER_API_KEY is required' "$work/preflight-output" || fail '
 [ ! -s "$RELEASE_TEST_MARKER" ] || fail 'missing credential reached Node or staging'
 preflight 77 --only long_bound
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'long_bound queried Node or refused the absent credential'
+preflight 77 --only rollback
+[ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'rollback queried Node or required a real credential'
 preflight 77 --only real-provider-10
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'local Ollama row queried Node or required a credential'
 preflight 77 --only node_client
