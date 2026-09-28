@@ -903,7 +903,7 @@ defmodule Loopex.RuntimeQuiesceTest do
     fixture = fixture("quiesce-status-population-bound")
 
     {_control, session_ids, coordinators} =
-      install_probe_entries(fixture.runtime, 64, :block_status)
+      install_probe_entries(fixture.runtime, 64, :block_status_after_release_gate)
 
     # Only the shared status-work cutoff is under test. Give the unrelated
     # admission, termination, and fence phases their own seconds-long budgets.
@@ -912,7 +912,7 @@ defmodule Loopex.RuntimeQuiesceTest do
         admission_ms: 4_000,
         initial_gate_ms: 2_000,
         worker_reap_ms: 500,
-        status_census_ms: 2_000,
+        status_census_ms: 10_000,
         status_work_ms: 300,
         coordinator_termination_ms: 4_000,
         termination_projection_ms: 2_000,
@@ -925,13 +925,17 @@ defmodule Loopex.RuntimeQuiesceTest do
 
     assert Map.keys(receive_probe_calls(:admit, session_ids)) |> Enum.sort() == session_ids
     assert Map.keys(receive_probe_calls(:release, session_ids)) |> Enum.sort() == session_ids
+    status_anchor_ms = System.monotonic_time(:millisecond)
+    send(hd(coordinators), :release_status_gate)
     status_calls = receive_timed_status_calls(session_ids)
     assert Map.keys(status_calls) |> Enum.sort() == session_ids
     :ok = await_pids_down(Enum.map(status_calls, fn {_id, {pid, _at}} -> pid end), 1_500)
-    first_status_at = status_calls |> Map.values() |> Enum.map(&elem(&1, 1)) |> Enum.min()
-    status_elapsed_ms = System.monotonic_time(:millisecond) - first_status_at
+    finished_at_ms = System.monotonic_time(:millisecond)
+    first_status_at_ms = status_calls |> Map.values() |> Enum.map(&elem(&1, 1)) |> Enum.min()
+    status_elapsed_ms = finished_at_ms - status_anchor_ms
     assert status_elapsed_ms >= bounds.status_work_ms
-    assert status_elapsed_ms < 1_500
+    assert status_elapsed_ms < 8_000
+    assert finished_at_ms - first_status_at_ms < 1_500
 
     assert {:ok, result} = Task.await(quiesce, 12_000)
     assert result.unsettled == session_ids
@@ -1442,6 +1446,13 @@ defmodule Loopex.RuntimeQuiesceTest do
     receive do
       {:"$gen_call", from, {:release_quiesce_cleanup, _owner, ^drain_id, ^phase_owner}} ->
         send(observer, {:quiesce_probe_call, :release, session_id, elem(from, 0)})
+
+        if mode == :block_status_after_release_gate and String.ends_with?(session_id, "-01") do
+          receive do
+            :release_status_gate -> :ok
+          end
+        end
+
         GenServer.reply(from, :ok)
 
         send(
@@ -1458,7 +1469,7 @@ defmodule Loopex.RuntimeQuiesceTest do
            System.monotonic_time(:millisecond)}
         )
 
-        unless mode == :block_status do
+        unless mode in [:block_status, :block_status_after_release_gate] do
           GenServer.reply(from, {:ok, %{active_run_id: nil, pending_work_ids: []}})
         end
 

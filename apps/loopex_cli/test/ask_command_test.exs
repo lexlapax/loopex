@@ -8,9 +8,10 @@ defmodule LoopexCli.AskCommandTest do
   ## Technical depth
 
   The invalid-input case builds a fresh escript from this run's compiled beams.
-  The tool case runs Ask.run in a child VM with a local model endpoint seam,
-  since the public command has no endpoint flag. It installs the one-shot
-  notice mode selected by main/1. Shell capture keeps stdout and stderr apart.
+  The tool case calls main/1 in a child VM with a test-only local model
+  endpoint seam, since the public command has no endpoint flag. A direct
+  Ask.run/2 call is the positive notice control. Shell capture keeps stdout
+  and stderr apart.
   """
 
   use ExUnit.Case, async: false
@@ -48,16 +49,18 @@ defmodule LoopexCli.AskCommandTest do
     refute File.exists?(state_root)
   end
 
-  test "one-shot JSON ask is quiet while direct Ask.run still announces a real tool decision" do
+  test "main keeps JSON ask quiet and text ask announces a real tool decision" do
     elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
 
     code_paths =
       Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end)
 
-    for {mode, policy} <- [
-          {"one-shot", "allow-all"},
-          {"one-shot", "shell-allowlist"},
-          {"direct", "allow-all"}
+    for {mode, policy, command, output} <- [
+          {"one-shot", "allow-all", "ask", "json"},
+          {"one-shot", "shell-allowlist", "ask", "json"},
+          {"one-shot", "allow-all", "-p", "json"},
+          {"one-shot-text", "allow-all", "ask", "text"},
+          {"direct", "allow-all", "ask", "json"}
         ] do
       root = temporary_directory()
       on_exit(fn -> File.rm_rf!(root) end)
@@ -74,7 +77,7 @@ defmodule LoopexCli.AskCommandTest do
               "-e",
               tool_ask_source(),
               "--",
-              "ask",
+              command,
               "read note.txt",
               "--policy",
               policy,
@@ -89,7 +92,7 @@ defmodule LoopexCli.AskCommandTest do
               "--deadline-ms",
               "20000",
               "--output",
-              "json"
+              output
             ],
           root,
           state_root,
@@ -102,20 +105,28 @@ defmodule LoopexCli.AskCommandTest do
 
       assert status == 0
 
-      if mode == "one-shot" do
-        assert stderr == ""
+      if output == "text" do
+        assert stdout == "read complete\n"
+
+        assert stderr ==
+                 LoopexCli.Policy.AllowAll.notice() <>
+                   "\ntool completed \"loopex.read\"\nending completed\n"
       else
-        assert stderr == LoopexCli.Policy.AllowAll.notice() <> "\n"
+        if mode == "one-shot" do
+          assert stderr == ""
+        else
+          assert stderr == LoopexCli.Policy.AllowAll.notice() <> "\n"
+        end
+
+        assert [encoded, ""] = String.split(stdout, "\n")
+
+        assert %{
+                 "schema" => "loopex.ask/1",
+                 "outcome" => "completed",
+                 "text" => "read complete",
+                 "tools" => [%{"tool_id" => "loopex.read", "outcome" => "completed"}]
+               } = JSON.decode!(encoded)
       end
-
-      assert [encoded, ""] = String.split(stdout, "\n")
-
-      assert %{
-               "schema" => "loopex.ask/1",
-               "outcome" => "completed",
-               "text" => "read complete",
-               "tools" => [%{"tool_id" => "loopex.read", "outcome" => "completed"}]
-             } = JSON.decode!(encoded)
 
       assert_receive {:model_request, first}, 15_000
       assert first =~ "POST /v1/chat/completions HTTP/1.1"
@@ -215,7 +226,6 @@ defmodule LoopexCli.AskCommandTest do
     port = System.fetch_env!("LOOPEX_TEST_PORT")
     mode = System.fetch_env!("LOOPEX_TEST_ASK_MODE")
     policy = System.fetch_env!("LOOPEX_TEST_POLICY")
-    if mode == "one-shot", do: LoopexCli.Policy.Notice.silence_ask_json()
     manager = spawn(fn -> receive do :release -> :ok end end)
     seams = [
       install_interrupt: fn _, _ -> {:ok, manager} end,
@@ -233,19 +243,24 @@ defmodule LoopexCli.AskCommandTest do
         )
       end
     ]
-    %{status: status, stdout: stdout, stderr: stderr} = LoopexCli.Ask.run(System.argv(), seams)
-    notice_key = case policy do
-      "allow-all" -> {LoopexCli.Policy.AllowAll, :announced}
-      "shell-allowlist" -> {LoopexCli.Policy.ShellAllowlist, :notice}
+    if mode in ["one-shot", "one-shot-text"] do
+      Process.put({LoopexCli.Ask, :test_seams}, seams)
+      LoopexCli.main(System.argv())
+    else
+      %{status: status, stdout: stdout, stderr: stderr} =
+        LoopexCli.Ask.run(System.argv(), seams)
+
+      notice_key = case policy do
+        "allow-all" -> {LoopexCli.Policy.AllowAll, :announced}
+        "shell-allowlist" -> {LoopexCli.Policy.ShellAllowlist, :notice}
+      end
+      announced = :persistent_term.get(notice_key, :not_announced)
+      if announced == :not_announced,
+        do: IO.puts(:stderr, "policy notice was not marked as announced")
+      if stdout != "", do: IO.binwrite(:stdio, stdout)
+      if stderr != "", do: IO.binwrite(:stderr, stderr)
+      System.halt(status)
     end
-    announced = :persistent_term.get(notice_key, :not_announced)
-    if mode == "one-shot" and announced != :not_announced,
-      do: IO.puts(:stderr, "policy notice marked as announced")
-    if mode == "direct" and announced == :not_announced,
-      do: IO.puts(:stderr, "policy notice was not marked as announced")
-    if stdout != "", do: IO.binwrite(:stdio, stdout)
-    if stderr != "", do: IO.binwrite(:stderr, stderr)
-    System.halt(status)
     """
   end
 

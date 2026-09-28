@@ -283,7 +283,7 @@ defmodule LoopexCli.ResourceAdmissionWorkflowTest do
           temp_root: %{tmp: fn -> tmp end},
           runtime_holder: %{
             runtime_start: fn _options ->
-              supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
+              {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
 
               {:ok,
                %Runtime{

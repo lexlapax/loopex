@@ -57,24 +57,24 @@ defmodule LoopexComposition.BootstrapTest do
   test "requester loss cannot transfer session authority or kill a peer bootstrap" do
     test = self()
 
-    requester =
-      spawn(fn ->
+    {requester, requester_monitor} =
+      spawn_monitor(fn ->
         Bootstrap.start(fn requester, ref ->
-          send(test, {:held_worker, self()})
+          test_monitor = Process.monitor(test)
+          send(test, {:held_worker, self(), Process.info(self(), :links)})
+          Process.exit(requester, :kill)
 
           receive do
             :release -> send(requester, {self(), ref, {:ok, []}, System.monotonic_time()})
-          after
-            1_000 -> :ok
+            {:DOWN, ^test_monitor, :process, ^test, _} -> :ok
           end
         end)
       end)
 
-    assert_receive {:held_worker, worker}
+    assert_receive {:held_worker, worker, {:links, links}}, 5_000
+    refute requester in links
     worker_monitor = Process.monitor(worker)
-    requester_monitor = Process.monitor(requester)
-    Process.exit(requester, :kill)
-    assert_receive {:DOWN, ^requester_monitor, :process, ^requester, :killed}
+    assert_receive {:DOWN, ^requester_monitor, :process, ^requester, :killed}, 5_000
     assert Process.alive?(worker)
 
     assert :ok =
@@ -83,7 +83,7 @@ defmodule LoopexComposition.BootstrapTest do
              end)
 
     send(worker, :release)
-    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 5_000
   end
 
   test "an in-time success without worker completion is killed at the reap bound" do

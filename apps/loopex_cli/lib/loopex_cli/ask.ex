@@ -27,8 +27,11 @@ defmodule LoopexCli.Ask do
   graph starts. The selected profile is fixed by `--state-root`; invalid input
   never starts either profile.
   """
+  @spec run(term()) :: map()
+  def run(argv), do: run(argv, entry_seams())
+
   @spec run(term(), keyword()) :: map()
-  def run(argv, seams \\ []) do
+  def run(argv, seams) do
     case prepare(argv, seams) do
       {:ok, %{options: %{profile: :durable}} = prepared} ->
         execute_durable(prepared, seams)
@@ -39,6 +42,12 @@ defmodule LoopexCli.Ask do
       %{status: 1, stdout: "", stderr: _} = diagnostic ->
         diagnostic
     end
+  end
+
+  if Mix.env() == :test do
+    defp entry_seams, do: Process.get({__MODULE__, :test_seams}, [])
+  else
+    defp entry_seams, do: []
   end
 
   @doc """
