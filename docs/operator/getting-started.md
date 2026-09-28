@@ -150,9 +150,10 @@ commands. `--model`, `--tools`,
 tool preset, named skill directories and bounds. The command does not silently
 discover a home or project skill.
 
-If cleanup is unproved without a run ending, `ask` emits no JSON result and
-names the pending obligation on standard error. An unproved cleanup with a
-known run ending may still emit one result marked `cleanup.proved: false`.
+If cleanup is unproved and no public run observation exists, `ask` emits no
+JSON result and names the pending obligation on standard error. A retained
+terminal ending or partial no-ending snapshot may still produce one result
+marked `cleanup.proved: false`; the no-ending result exits with status `6`.
 A pre-claim startup failure can report
 `root=null`: no temporary-root path was known, and that value is not permission
 to remove a guessed directory. Any known retained root is printed as a

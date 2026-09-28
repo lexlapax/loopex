@@ -238,97 +238,23 @@ defmodule LoopexComposition.SessionContainmentTest do
   test "real worker retention keeps an unregistered candidate until exact release and DOWN", %{
     workspace: workspace
   } do
-    {port, server} = held_server("second answer")
-
-    assert {:ok, {:loopex_ephemeral_session, owner, cell} = session} =
-             Ephemeral.start_session(
-               policy: Policy,
-               model: "ollama:llama3.2",
-               base_url: "http://127.0.0.1:#{port}/v1",
-               cwd: workspace,
-               tools: :coding,
-               max_tokens: 128,
-               timeout: 15_000
-             )
-
-    :ok = TestRegisterRendezvous.open!()
-    release_table = :ets.new(:loopex_test_empty_release, [:named_table, :public, :set])
-    nonce = make_ref()
-    :ok = TestRegisterRendezvous.arm!(cell, self(), nonce)
-    first = Task.async(fn -> Ephemeral.ask(session, "first call") end)
-
-    assert_receive {:before_provider_register, ^nonce, callback, call, candidate}, 5_000
-    owner_state = :sys.get_state(owner)
-    runtime = owner_state.startup.registered.runtime
-    session_id = owner_state.startup.session_id
-    {:ok, %{control: control}} = RuntimeSupervisor.children(runtime.supervisor)
-    coordinator = :sys.get_state(control).sessions[session_id].coordinator
-
-    [{_task_ref, {:model, run_id, worker, %{guard: guard, reference: reference}}}] =
-      await(coordinator, fn state ->
-        models =
-          Enum.filter(state.in_flight, fn
-            {_task_ref, {:model, _run_id, _worker, _tree}} -> true
-            _other -> false
-          end)
-
-        if models == [], do: :wait, else: {:ok, models}
-      end)
-
-    assert Process.alive?(callback)
-    assert Process.alive?(candidate)
-    assert Process.alive?(worker)
-    assert Process.alive?(guard)
-    assert is_binary(run_id)
-    assert is_reference(reference)
-    assert true = :erlang.suspend_process(worker)
+    %{
+      server: server,
+      owner: owner,
+      cell: cell,
+      session: session,
+      first: first,
+      callback: callback,
+      candidate: candidate,
+      call: call,
+      run_id: run_id,
+      runtime: runtime,
+      session_id: session_id
+    } =
+      fixture = retained_unregistered_fixture(workspace)
 
     try do
-      send(callback, {:continue_provider_register, nonce})
-
-      {:loopex_provider_resource_offered, ^reference, ^callback, ^candidate, stop_ref, offer_ref} =
-        await_process_message(worker, fn
-          {:loopex_provider_resource_offered, ^reference, ^callback, ^candidate, stop, offer}
-          when is_reference(stop) and is_reference(offer) ->
-            true
-
-          _other ->
-            false
-        end)
-
-      assert true = :erlang.suspend_process(callback)
-
       try do
-        assert true = :erlang.resume_process(worker)
-
-        assert {:loopex_provider_resource_retained_by_worker, ^reference, ^offer_ref, ^worker} =
-                 await_process_message(callback, fn
-                   {:loopex_provider_resource_retained_by_worker, ^reference, ^offer_ref, ^worker} ->
-                     true
-
-                   _other ->
-                     false
-                 end)
-
-        assert {:monitors, worker_monitors} = Process.info(worker, :monitors)
-        assert {:process, candidate} in worker_monitors
-        assert {:messages, guard_messages} = Process.info(guard, :messages)
-
-        refute Enum.any?(guard_messages, fn
-                 {:loopex_provider_resource_register, ^reference, ^callback, ^candidate,
-                  ^stop_ref, _registration} ->
-                   true
-
-                 _other ->
-                   false
-               end)
-
-        assert {:dictionary, guard_dictionary} = Process.info(guard, :dictionary)
-
-        refute Enum.any?(guard_dictionary, fn {key, _value} ->
-                 key == {{Loopex.Runtime.SessionCoordinator, :provider_resource}, reference}
-               end)
-
         held_state = :sys.get_state(owner)
         executor = held_state.startup.registered.executor
         {job, grant} = write_job(held_state, "held-effect", workspace)
@@ -345,25 +271,9 @@ defmodule LoopexComposition.SessionContainmentTest do
         assert nil == Task.yield(effect, 0)
         refute File.exists?(Path.join(workspace, "held-effect.txt"))
 
-        release_nonce = make_ref()
-        true = :ets.insert_new(release_table, {cell, self(), release_nonce})
-        {:ok, attachment} = Loopex.attach(runtime, session_id)
+        %{release: release, deadline: deadline} =
+          defer_empty_release(fixture, runtime, session_id, owner, cell, candidate, call)
 
-        assert {:accepted, _} =
-                 Loopex.command(attachment, %{
-                   type: :abort,
-                   command_id: "retained-unregistered-abort"
-                 })
-
-        assert_receive {:empty_release_deferred, ^release_nonce, ^owner, ^candidate,
-                        {:release_empty_invocation, generation, ^call, ^candidate, proof,
-                         release_ref, deadline} = release},
-                       5_000
-
-        assert is_reference(generation)
-        assert is_reference(proof)
-        assert is_reference(release_ref)
-        assert deadline > System.monotonic_time()
         Process.put({__MODULE__, :held_release}, {candidate, release})
         assert Process.alive?(candidate)
         assert :atomics.get(cell, 2) == 1
@@ -435,14 +345,309 @@ defmodule LoopexComposition.SessionContainmentTest do
         resume_fixture_process(callback)
       end
     after
-      resume_fixture_process(worker)
-      send(callback, {:continue_provider_register, nonce})
-      release_held_by_fixture(owner, candidate)
-      :ets.delete(release_table)
-      TestRegisterRendezvous.close!()
-
-      if Process.alive?(owner), do: Ephemeral.stop_session(session)
+      cleanup_retained_fixture(fixture)
     end
+  end
+
+  test "wrong, early, and exact ACK-before-DOWN do not free the real candidate", %{
+    workspace: workspace
+  } do
+    %{
+      server: server,
+      owner: owner,
+      cell: cell,
+      session: session,
+      first: first,
+      candidate: candidate,
+      call: call,
+      runtime: runtime,
+      session_id: session_id
+    } =
+      fixture = retained_unregistered_fixture(workspace)
+
+    try do
+      send(owner, {:empty_invocation_released, candidate, make_ref()})
+      assert %{settlement: nil} = :sys.get_state(owner).session
+
+      %{release: release, release_ref: release_ref} =
+        defer_empty_release(fixture, runtime, session_id, owner, cell, candidate, call)
+
+      Process.put({__MODULE__, :held_release}, {candidate, release})
+      send(owner, {:empty_invocation_released, candidate, make_ref()})
+      send(owner, {:empty_invocation_released, self(), release_ref})
+
+      assert %{stage: :release, acked: false, release_ref: ^release_ref} =
+               :sys.get_state(owner).session.settlement
+
+      # The exact ACK is adversarially sent before the real candidate exits.
+      send(owner, {:empty_invocation_released, candidate, release_ref})
+
+      assert %{stage: :release, acked: true, candidate: ^candidate} =
+               :sys.get_state(owner).session.settlement
+
+      assert Process.alive?(candidate)
+      assert :atomics.get(cell, 2) == 1
+      assert {:error, :run_open} = Ephemeral.ask(session, "wrong ack did not free slot")
+      refute_receive {:model_request, ^server, _request}, 0
+      assert nil == Task.yield(first, 0)
+
+      monitor = Process.monitor(candidate)
+      send(candidate, release)
+      Process.delete({__MODULE__, :held_release})
+      assert_receive {:DOWN, ^monitor, :process, ^candidate, _reason}, 1_000
+      assert {:ok, {:error, {:run, outcome, _}}} = Task.yield(first, 5_000)
+      assert outcome in [:cancelled, :bound_reached]
+      assert :atomics.get(cell, 2) == 0
+      assert :ok = Ephemeral.stop_session(session)
+    after
+      cleanup_retained_fixture(fixture)
+    end
+  end
+
+  test "withheld exact release expires without reopening the real session", %{
+    workspace: workspace
+  } do
+    %{
+      server: server,
+      owner: owner,
+      cell: cell,
+      session: session,
+      first: first,
+      candidate: candidate,
+      call: call,
+      runtime: runtime,
+      session_id: session_id
+    } =
+      fixture = retained_unregistered_fixture(workspace)
+
+    try do
+      %{release: release, deadline: deadline} =
+        defer_empty_release(fixture, runtime, session_id, owner, cell, candidate, call)
+
+      Process.put({__MODULE__, :held_release}, {candidate, release})
+
+      assert %{stage: :release, candidate: ^candidate} =
+               :sys.get_state(owner).session.settlement
+
+      assert Process.alive?(candidate)
+      assert :atomics.get(cell, 2) == 1
+      assert {:error, :run_open} = Ephemeral.ask(session, "release still withheld")
+      assert nil == Task.yield(first, 0)
+      refute_receive {:model_request, ^server, _request}, 0
+      assert deadline > System.monotonic_time()
+      assert {:ok, {:error, {:run, :cancelled, _}}} = Task.yield(first, 5_000)
+      assert {:error, :session_closed} = Ephemeral.ask(session, "after expiry")
+      refute_receive {:model_request, ^server, _request}, 0
+      refute Process.alive?(candidate)
+      assert :atomics.get(cell, 2) == 0
+    after
+      cleanup_retained_fixture(fixture)
+    end
+  end
+
+  test "public stop bypasses a withheld continuing-session release", %{
+    workspace: workspace
+  } do
+    %{
+      server: server,
+      owner: owner,
+      cell: cell,
+      session: session,
+      first: first,
+      candidate: candidate,
+      call: call,
+      runtime: runtime,
+      session_id: session_id
+    } =
+      fixture = retained_unregistered_fixture(workspace)
+
+    try do
+      %{release: release, deadline: deadline} =
+        defer_empty_release(fixture, runtime, session_id, owner, cell, candidate, call)
+
+      Process.put({__MODULE__, :held_release}, {candidate, release})
+      monitor = Process.monitor(candidate)
+      assert deadline > System.monotonic_time()
+      assert :ok = Ephemeral.stop_session(session)
+      assert_receive {:DOWN, ^monitor, :process, ^candidate, _reason}, 1_000
+      assert :atomics.get(cell, 2) == 0
+      refute_receive {:model_request, ^server, _request}, 0
+      assert {:ok, {:error, {:run, :cancelled, _}}} = Task.yield(first, 5_000)
+    after
+      cleanup_retained_fixture(fixture)
+    end
+  end
+
+  defp retained_unregistered_fixture(workspace) do
+    {port, server} = held_server("second answer")
+
+    assert {:ok, {:loopex_ephemeral_session, owner, cell} = session} =
+             Ephemeral.start_session(
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: workspace,
+               tools: :coding,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    setup_key = {__MODULE__, :retained_unregistered_setup}
+    Process.put(setup_key, %{owner: owner, session: session})
+
+    try do
+      :ok = TestRegisterRendezvous.open!()
+      remember_fixture_setup(setup_key, %{rendezvous_open: true})
+      release_table = :ets.new(:loopex_test_empty_release, [:named_table, :public, :set])
+      remember_fixture_setup(setup_key, %{release_table: release_table})
+      nonce = make_ref()
+      :ok = TestRegisterRendezvous.arm!(cell, self(), nonce)
+      remember_fixture_setup(setup_key, %{nonce: nonce})
+      first = Task.async(fn -> Ephemeral.ask(session, "first call") end)
+
+      assert_receive {:before_provider_register, ^nonce, callback, call, candidate}, 5_000
+      remember_fixture_setup(setup_key, %{callback: callback, candidate: candidate})
+      owner_state = :sys.get_state(owner)
+      runtime = owner_state.startup.registered.runtime
+      session_id = owner_state.startup.session_id
+      {:ok, %{control: control}} = RuntimeSupervisor.children(runtime.supervisor)
+      coordinator = :sys.get_state(control).sessions[session_id].coordinator
+
+      [{_task_ref, {:model, run_id, worker, %{guard: guard, reference: reference}}}] =
+        await(coordinator, fn state ->
+          models =
+            Enum.filter(state.in_flight, fn
+              {_task_ref, {:model, _run_id, _worker, _tree}} -> true
+              _other -> false
+            end)
+
+          if models == [], do: :wait, else: {:ok, models}
+        end)
+
+      remember_fixture_setup(setup_key, %{worker: worker})
+
+      assert Process.alive?(callback)
+      assert Process.alive?(candidate)
+      assert Process.alive?(worker)
+      assert Process.alive?(guard)
+      assert is_binary(run_id)
+      assert is_reference(reference)
+      assert true = :erlang.suspend_process(worker)
+      send(callback, {:continue_provider_register, nonce})
+
+      {:loopex_provider_resource_offered, ^reference, ^callback, ^candidate, stop_ref, offer_ref} =
+        await_process_message(worker, fn
+          {:loopex_provider_resource_offered, ^reference, ^callback, ^candidate, stop, offer}
+          when is_reference(stop) and is_reference(offer) ->
+            true
+
+          _other ->
+            false
+        end)
+
+      assert true = :erlang.suspend_process(callback)
+      assert true = :erlang.resume_process(worker)
+
+      assert {:loopex_provider_resource_retained_by_worker, ^reference, ^offer_ref, ^worker} =
+               await_process_message(callback, fn
+                 {:loopex_provider_resource_retained_by_worker, ^reference, ^offer_ref, ^worker} ->
+                   true
+
+                 _other ->
+                   false
+               end)
+
+      assert {:monitors, worker_monitors} = Process.info(worker, :monitors)
+      assert {:process, candidate} in worker_monitors
+      assert {:messages, guard_messages} = Process.info(guard, :messages)
+
+      refute Enum.any?(guard_messages, fn
+               {:loopex_provider_resource_register, ^reference, ^callback, ^candidate, ^stop_ref,
+                _registration} ->
+                 true
+
+               _other ->
+                 false
+             end)
+
+      assert {:dictionary, guard_dictionary} = Process.info(guard, :dictionary)
+
+      refute Enum.any?(guard_dictionary, fn {key, _value} ->
+               key == {{Loopex.Runtime.SessionCoordinator, :provider_resource}, reference}
+             end)
+
+      fixture = %{
+        server: server,
+        owner: owner,
+        cell: cell,
+        session: session,
+        first: first,
+        callback: callback,
+        worker: worker,
+        candidate: candidate,
+        call: call,
+        run_id: run_id,
+        runtime: runtime,
+        session_id: session_id,
+        release_table: release_table,
+        nonce: nonce
+      }
+
+      Process.delete(setup_key)
+      fixture
+    catch
+      kind, reason ->
+        partial = Process.delete(setup_key)
+
+        try do
+          cleanup_retained_fixture(partial)
+        catch
+          _cleanup_kind, _cleanup_reason -> :ok
+        end
+
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  defp remember_fixture_setup(key, fields) do
+    Process.put(key, Map.merge(Process.get(key), fields))
+  end
+
+  defp defer_empty_release(fixture, runtime, session_id, owner, cell, candidate, call) do
+    release_nonce = make_ref()
+    true = :ets.insert_new(fixture.release_table, {cell, self(), release_nonce})
+    {:ok, attachment} = Loopex.attach(runtime, session_id)
+
+    assert {:accepted, _} =
+             Loopex.command(attachment, %{
+               type: :abort,
+               command_id: "retained-unregistered-abort"
+             })
+
+    assert_receive {:empty_release_deferred, ^release_nonce, ^owner, ^candidate,
+                    {:release_empty_invocation, generation, ^call, ^candidate, proof, release_ref,
+                     deadline} = release},
+                   5_000
+
+    assert is_reference(generation)
+    assert is_reference(proof)
+    assert is_reference(release_ref)
+    assert deadline > System.monotonic_time()
+    %{release: release, deadline: deadline, release_ref: release_ref}
+  end
+
+  defp cleanup_retained_fixture(fixture) do
+    if is_pid(fixture[:callback]), do: resume_fixture_process(fixture.callback)
+    if is_pid(fixture[:worker]), do: resume_fixture_process(fixture.worker)
+
+    if is_pid(fixture[:callback]) and is_reference(fixture[:nonce]),
+      do: send(fixture.callback, {:continue_provider_register, fixture.nonce})
+
+    if is_pid(fixture[:candidate]), do: release_held_by_fixture(fixture.owner, fixture.candidate)
+    if is_reference(fixture[:release_table]), do: :ets.delete(fixture.release_table)
+    if fixture[:rendezvous_open] || fixture[:release_table], do: TestRegisterRendezvous.close!()
+
+    if Process.alive?(fixture.owner), do: Ephemeral.stop_session(fixture.session)
   end
 
   defp write_job(state, label, workspace) do
