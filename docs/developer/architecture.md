@@ -315,8 +315,8 @@ sit behind the Executor port — the local executor validates bounded arguments
 against a fixed code-owned tool, holds a monitored workspace lease for the job's
 whole lifetime, and durably retains its receipt before replying. Only the shell
 tool starts an operating-system child, in its own process group and with an
-environment built from nothing; the read, write, and edit tools run inside the
-runtime against the leased workspace.
+environment built from nothing; the read, write, edit, grep, find, and ls tools
+run in the local executor's VM against the leased workspace.
 
 The host keeps everything Loopex deliberately does not own: identity, policy,
 credentials, tenancy, quotas, placement, retention, and presentation. Authority
