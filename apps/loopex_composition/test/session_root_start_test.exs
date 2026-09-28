@@ -134,8 +134,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
         assert_received {:mkdir, ^candidate_path}
         assert_receive {:phase_ready, ^root, ^ref, :candidate_prepare}, 1_000
       else
-        assert_receive {:phase_result, ^root, ^ref, :root_claim,
-                        {:error, :temporary_root_creation_failed}},
+        assert_receive {:phase_result, ^root, ^ref, :root_claim, {:error, :collision_exhausted}},
                        1_000
 
         assert_received {:mkdir, ^candidate_path}

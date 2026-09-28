@@ -66,31 +66,55 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   @doc false
+  # Concept: timeout leaves neither a late startup reply nor a ready orphan.
+  # Technical depth: OTP's reply alias drops sends after deactivation; a queued
+  # reply is consumed before cancellation, and a late ready state accepts cancel.
   @spec start_session(pid(), map(), pos_integer()) ::
           {:ok, :session_ready} | {:error, term()}
   def start_session(owner, configuration, timeout_ms)
       when is_pid(owner) and is_map(configuration) and is_integer(timeout_ms) and timeout_ms > 0 do
-    reference = make_ref()
+    reference = :erlang.alias([:reply])
     monitor = Process.monitor(owner)
     send(owner, {self(), reference, :start_session, configuration})
 
-    receive do
-      {^owner, ^reference, result} ->
-        Process.demonitor(monitor, [:flush])
-        result
+    result =
+      receive do
+        {^owner, ^reference, reply} ->
+          reply
 
-      {:DOWN, ^monitor, :process, ^owner, _reason} ->
-        {:error, :session_unavailable}
+        {:DOWN, ^monitor, :process, ^owner, _reason} ->
+          {:error, :session_unavailable}
+      after
+        max(timeout_ms, @startup_wait_ms) ->
+          :erlang.unalias(reference)
+
+          receive do
+            {^owner, ^reference, reply} ->
+              reply
+          after
+            0 ->
+              send(owner, {self(), reference, :cancel_start})
+              {:error, :session_unavailable}
+          end
+      end
+
+    :erlang.unalias(reference)
+    Process.demonitor(monitor, [:flush])
+
+    receive do
+      {^owner, ^reference, _late_reply} -> :ok
     after
-      max(timeout_ms, @startup_wait_ms) ->
-        send(owner, {self(), reference, :cancel_start})
-        Process.demonitor(monitor, [:flush])
-        {:error, :session_unavailable}
+      0 -> :ok
     end
+
+    result
   end
 
   def start_session(_owner, _configuration, _timeout_ms),
     do: {:error, :session_unavailable}
+
+  defp send_start_reply(reference, result),
+    do: send(reference, {self(), reference, result})
 
   @impl true
   def init({creator, proxy, ref, expiry}) do
@@ -242,7 +266,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     if fresh?(state.startup_deadline) do
       start_subtree(state, request, configuration)
     else
-      send(creator, {self(), request, {:error, :session_unavailable}})
+      send_start_reply(request, {:error, :session_unavailable})
       {:noreply, close_proved(state)}
     end
   end
@@ -251,8 +275,23 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {creator, request, :cancel_start},
         %{creator: creator, startup: %{request: request}, phase: :starting} = state
       ) do
-    {:noreply, fail_start(state, :session_unavailable, :unknown)}
+    {:noreply,
+     state
+     |> put_in([:startup, :no_waiter], true)
+     |> fail_start(:session_unavailable, :unknown)}
   end
+
+  def handle_info(
+        {creator, request, :cancel_start},
+        %{creator: creator, startup: %{request: request}, phase: :aborting} = state
+      ),
+      do: {:noreply, put_in(state.startup.no_waiter, true)}
+
+  def handle_info(
+        {creator, request, :cancel_start},
+        %{creator: creator, startup: %{request: request}, phase: :ready} = state
+      ),
+      do: {:noreply, begin_stop(state, nil)}
 
   def handle_info({:startup_deadline, ref}, %{ref: ref, phase: :begun} = state) do
     if fresh?(state.startup_deadline) do
@@ -340,7 +379,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:noreply, finish_abort_worker(state, reason)}
 
       {monitor, pid} == {state.monitors.creator, state.creator} ->
-        {:noreply, put_in(state.stop.no_retry, true)}
+        next =
+          if state.stop,
+            do: put_in(state.stop.no_retry, true),
+            else: put_in(state.startup.no_waiter, true)
+
+        {:noreply, next}
 
       Map.get(startup.process_monitors, pid) == monitor ->
         next = %{state | abort: %{abort | down: MapSet.put(abort.down, pid)}}
@@ -803,7 +847,10 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       state.phase == :starting and
           {monitor, pid} ==
             {state.monitors.creator, state.creator} ->
-        {:noreply, fail_start(state, :session_unavailable, :known)}
+        {:noreply,
+         state
+         |> put_in([:startup, :no_waiter], true)
+         |> fail_start(:session_unavailable, :known)}
 
       {monitor, pid} in [
         {state.monitors.creator, state.creator},
@@ -1020,6 +1067,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         startup = %{
           request: request,
           replied: false,
+          no_waiter: false,
           owner: self(),
           reference: reference,
           deadline: state.startup_deadline,
@@ -1029,6 +1077,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           expected: :candidate_prepare,
           ready: false,
           granted: false,
+          root_claim_granted: false,
           early_trace_bind: false,
           candidate: nil,
           owned_root: nil,
@@ -1049,7 +1098,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:noreply, %{state | phase: :starting, startup: startup, model_census: census}}
 
       _failure ->
-        send(state.creator, {self(), request, {:error, {:composition, :dependency_start_failed}}})
+        send_start_reply(request, {:error, {:composition, :dependency_start_failed}})
         {:noreply, close_proved(state)}
     end
   end
@@ -1156,7 +1205,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
             )
 
           ready_state = %{ready_state | model_census: census}
-          send(state.creator, {self(), startup.request, {:ok, :session_ready}})
+          send_start_reply(startup.request, {:ok, :session_ready})
 
           %{
             ready_state
@@ -2223,13 +2272,25 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
   end
 
+  # Concept: a known candidate path is not permission to create or remove it.
+  # Technical depth: the per-candidate claim-grant bit survives an exact phase
+  # return, which clears `granted`, and resets for a fresh candidate or collision.
   defp maybe_grant(%{phase: :starting, startup: startup} = state) do
     if startup.ready and startup.root_ready and not startup.granted and
          fresh?(startup.deadline) do
       phase = startup.expected
       sender = expected_sender(startup, phase)
       send(sender, {:grant, self(), startup.reference, phase, phase_payload(state, phase)})
-      %{state | startup: %{startup | ready: false, granted: true}}
+
+      %{
+        state
+        | startup: %{
+            startup
+            | ready: false,
+              granted: true,
+              root_claim_granted: startup.root_claim_granted or phase == :root_claim
+          }
+      }
     else
       state
     end
@@ -2248,6 +2309,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   defp accept_phase_result(state, :root_claim, {:error, :collision}),
     do: advance(state, :candidate_prepare, %{candidate: nil})
+
+  defp accept_phase_result(state, :root_claim, {:error, :collision_exhausted}) do
+    startup = %{state.startup | candidate: nil, root_claim_granted: false}
+    %{state | startup: startup} |> fail_start(:temporary_root_creation_failed, :known)
+  end
 
   defp accept_phase_result(
          state,
@@ -2322,7 +2388,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       |> Map.merge(%{
         expected: phase,
         ready: phase == :trace_bind and state.startup.early_trace_bind,
-        granted: false
+        granted: false,
+        root_claim_granted:
+          if(phase in [:candidate_prepare, :root_claim],
+            do: false,
+            else: state.startup.root_claim_granted
+          )
       })
 
     %{state | startup: startup} |> maybe_grant()
@@ -2523,13 +2594,14 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
            (unregistered_granted_result? and ownership == :unknown and
               cause == failure_cause(startup.expected)))
 
+    # A candidate can be known before the claim grant. Preserve that path for
+    # an unproved subtree report without treating knowledge as mkdir authority.
     possible_root =
       cond do
         is_map(startup.owned_root) ->
           startup.owned_root.path
 
-        startup.expected == :root_claim and is_map(startup.candidate) and
-            (startup.granted or ownership in [:owned, :unknown]) ->
+        startup.expected == :root_claim and is_map(startup.candidate) ->
           startup.candidate.path
 
         true ->
@@ -2656,8 +2728,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       is_map(startup.owned_root) ->
         start_abort_worker(state, :root_removal, nil)
 
-      startup.possible_root != nil ->
+      startup.possible_root != nil and startup.root_claim_granted ->
         finish_abort(%{state | abort: %{abort | root_failed: true}})
+
+      startup.possible_root != nil ->
+        finish_abort(%{state | abort: %{abort | root_proved: true}})
 
       true ->
         finish_abort(%{state | abort: %{abort | root_proved: true}})
@@ -2904,7 +2979,19 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     if state.stop do
       finish_stop_abort(state, result, pending)
     else
-      unless startup.replied, do: send(state.creator, {self(), startup.request, result})
+      no_waiter = startup.no_waiter or not Process.alive?(state.creator)
+
+      # A caller may deactivate its reply alias before the owner reads cancel.
+      # Log every unproved startup cleanup so that ordering cannot hide it.
+      if match?({:error, {:cleanup_unproved, _}}, result),
+        do:
+          Logger.error(
+            "ephemeral cleanup unproved possible_root=#{inspect(startup.possible_root)} root_ownership=#{if(is_map(startup.owned_root), do: :owned, else: :unknown)} pending=#{inspect(pending)}"
+          )
+
+      unless startup.replied or no_waiter,
+        do: send_start_reply(startup.request, result)
+
       send(self(), :retire_sealed)
       %{state | phase: :sealed}
     end

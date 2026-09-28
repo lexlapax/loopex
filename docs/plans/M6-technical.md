@@ -2185,6 +2185,12 @@ loses its former application startup.
    It reports ready and performs no path lookup, root mutation or dependency
    start until the owner's matching phase grant. The same cell is passed to
    model/executor private constructors; no public option supplies a different one.
+   The caller's startup request reference is an OTP reply alias. On timeout it
+   deactivates that alias, consumes a reply already queued before deactivation
+   if present, and otherwise sends correlated cancellation. A late owner send
+   to the inactive alias is dropped; cancellation also stops an already-ready
+   session. Every unproved startup cleanup is logged independently of whether
+   cancellation reached the owner before its abort deadline.
 4. Under `candidate_prepare`, SessionRoot obtains System.tmp_dir! through a
    private zero-arity seam and 32 entropy bytes through a private one-arity seam.
    Production supplies only the actual functions. It proposes
@@ -2200,8 +2206,12 @@ loses its former application startup.
    killed/reaped within startup deadline. Missing DOWN returns
    `cleanup_unproved` with `root: nil`, unknown ownership, only
    `session_subtree` pending and no ending; it grants no claim and names or
-   deletes no path. A lost mkdir result names an ownership-unknown possible
-   path, never deletes it and returns cleanup_unproved with root_removal pending
+   deletes no path. An exact collision retires only that attempt's candidate.
+   If a current candidate is known before its claim grant, an unproved subtree
+   names that path, while proved subtree shutdown returns the bare startup
+   failure without trying to remove it. A lost mkdir result names an
+   ownership-unknown possible path, never deletes it and returns
+   cleanup_unproved with root_removal pending
    after actor proof, or session_subtree while actor proof remains missing.
 5. SessionRoot becomes the lifetime parent of a zero-restart-intensity private
    one-for-all supervisor. It reports its exact PID and waits for owner monitor

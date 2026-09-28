@@ -179,7 +179,7 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
         })
 
       {:error, :collision} ->
-        fail_phase(state, :root_claim, {:error, :temporary_root_creation_failed})
+        fail_phase(state, :root_claim, {:error, :collision_exhausted})
 
       error ->
         fail_phase(state, :root_claim, error)
@@ -319,6 +319,7 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
   defp advance(state, phase, result, next, changes) do
     send(state.owner, {:phase_result, self(), state.ref, phase, result})
     next_state = state |> Map.merge(changes) |> Map.put(:phase, next)
+    candidate_ready_gate(next_state)
     ready(next_state)
     {:noreply, next_state}
   end
@@ -370,6 +371,9 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
       if is_function(seams[:trace_handle], 1),
         do: Process.put({__MODULE__, :trace_handle}, seams.trace_handle)
 
+      if is_function(seams[:candidate_ready], 1),
+        do: Process.put({__MODULE__, :candidate_ready}, seams.candidate_ready)
+
       :ok
     end
 
@@ -386,11 +390,23 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
 
     defp obtain_trace_handle(pid),
       do: Process.get({__MODULE__, :trace_handle}, &Capability.handle/1).(pid)
+
+    # The test can hold the exact interval after candidate disclosure but
+    # before the owner can grant the directory-creation phase.
+    defp candidate_ready_gate(%{phase: :root_claim, candidate: candidate}) do
+      case Process.get({__MODULE__, :candidate_ready}) do
+        callback when is_function(callback, 1) -> callback.(candidate)
+        _ -> :ok
+      end
+    end
+
+    defp candidate_ready_gate(_state), do: :ok
   else
     defp install_test_seams(_seams), do: :ok
     defp runtime_holder_test_seams, do: %{}
     defp bind_trace(handle, runtime), do: Capability.bind(handle, runtime)
     defp make_store_handle(module, pid), do: Store.new(module, pid)
     defp obtain_trace_handle(pid), do: Capability.handle(pid)
+    defp candidate_ready_gate(_state), do: :ok
   end
 end

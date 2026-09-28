@@ -234,6 +234,28 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     Process.exit(supervisor, :shutdown)
   end
 
+  test "cancellation stops a ready session whose startup reply was dropped", %{tmp: tmp} do
+    configuration = configuration(tmp, %{})
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+    {:ok, activation} = OwnerActivation.start(supervisor)
+    owner = OwnerActivation.owner(activation)
+    {:ok, cell} = OwnerActivation.begin(activation)
+    request = :erlang.alias([:reply])
+    owner_monitor = Process.monitor(owner)
+
+    send(owner, {self(), request, :start_session, configuration})
+    :erlang.unalias(request)
+    assert eventually(fn -> :sys.get_state(owner).phase == :ready end)
+    assert :atomics.get(cell, 1) == 0
+
+    send(owner, {self(), request, :cancel_start})
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 6_000
+    assert :atomics.get(cell, 1) == 2
+    refute_received {^owner, ^request, _}
+    assert File.ls!(tmp) == []
+    Process.exit(supervisor, :shutdown)
+  end
+
   test "named skills are admitted, checked and activated in canonical order", %{tmp: tmp} do
     test = self()
     manifest = skill_manifest()
