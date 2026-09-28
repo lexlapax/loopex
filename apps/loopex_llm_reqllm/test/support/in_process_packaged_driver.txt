@@ -25,17 +25,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
       :init.get_plain_arguments() |> Enum.map(&List.to_string/1)
 
     extracted = Path.expand(extracted)
-    otp = :code.root_dir() |> List.to_string() |> Path.expand()
     :code.del_path(~c".")
-
-    for path <- :code.get_path() do
-      path = path |> List.to_string() |> Path.expand()
-
-      unless path == otp or String.starts_with?(path, otp <> "/") or
-               String.starts_with?(path, extracted <> "/") do
-        raise "foreign code path in packaged VM"
-      end
-    end
+    assert_packaged_paths(extracted)
 
     unless :persistent_term.get(:llm_db_store, nil) == nil,
       do: raise("catalog populated before packaged startup")
@@ -119,6 +110,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
     unless System.get_env("LOOPEX_PACKAGED_DOTENV_CANARY") == nil,
       do: raise("packaged startup loaded dotenv")
 
+    assert_packaged_paths(extracted)
+
     after_call = List.last(catalogs)
 
     case {mode, String.starts_with?(model, "anthropic:")} do
@@ -158,5 +151,18 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
   defp same_catalog?(actual, expected) do
     Map.delete(actual, :meta) == Map.delete(expected, :meta) and
       Map.delete(actual.meta, :loaded_at) == Map.delete(expected.meta, :loaded_at)
+  end
+
+  defp assert_packaged_paths(extracted) do
+    otp = :code.root_dir() |> List.to_string() |> Path.expand()
+
+    for path <- :code.get_path() do
+      path = path |> List.to_string() |> Path.expand()
+
+      unless path == otp or String.starts_with?(path, otp <> "/") or
+               String.starts_with?(path, extracted <> "/") do
+        raise "foreign code path in packaged VM"
+      end
+    end
   end
 end

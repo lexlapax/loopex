@@ -25,6 +25,10 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
     "req/ebin/req.app",
     "finch/ebin/finch.app"
   ]
+  @system "loopex.system.v1: You are a coding agent working in a real workspace. " <>
+            "Use the tools you are given to inspect and change files, and run commands " <>
+            "when you need to. Continue until the task is done, then stop."
+  @prompt "Answer with fixture reply."
 
   setup_all do
     root =
@@ -36,27 +40,47 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
     source = Path.join(root, "source")
     File.mkdir!(source)
     archive = Path.join(root, "source.tar")
-    {bytes, 0} = System.cmd("git", ["archive", "HEAD"], cd: @source_root)
+    {commit, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: @source_root)
+    commit = String.trim(commit)
+    assert byte_size(commit) == 40
+    {bytes, 0} = System.cmd("git", ["archive", commit], cd: @source_root)
     File.write!(archive, bytes)
     {"", 0} = System.cmd("tar", ["-xf", archive, "-C", source])
+    assert File.read!(Path.join(source, "SOURCE_IDENTITY")) =~ "commit #{commit}\n"
+    lock = File.read!(Path.join(source, "mix.lock"))
 
-    build = Path.join(root, "build")
+    # Concept: the code under test is a production escript pair, not a test
+    # build whose compiled modules could include test-only hooks.
+    # Technical depth: copy the locked dependency sources into the archive
+    # extraction, then compile the entire pair under MIX_ENV=prod. The child
+    # later sees neither these sources nor the production build directory.
     deps = Path.join(@source_root, "deps")
-    compiled = Path.join(@source_root, "_build/test/lib")
-    assert File.dir?(compiled)
-    File.mkdir!(build)
-    File.cp_r!(compiled, Path.join(build, "lib"))
+    assert File.dir?(deps)
+    File.cp_r!(deps, Path.join(source, "deps"))
+    build = Path.join(source, "_build/prod")
 
     environment = [
-      {"MIX_ENV", "test"},
-      {"MIX_BUILD_PATH", build},
-      {"MIX_DEPS_PATH", deps},
+      {"MIX_ENV", "prod"},
+      {"MIX_BUILD_PATH", nil},
+      {"MIX_DEPS_PATH", nil},
       {"HEX_OFFLINE", "1"},
       {"LOOPEX_PROVIDER_API_KEY", nil},
       {"OPENAI_API_KEY", nil},
       {"ANTHROPIC_API_KEY", nil},
       {"OPENROUTER_API_KEY", nil}
     ]
+
+    {dependency_output, dependency_status} =
+      System.cmd("mix", ["deps.get"],
+        cd: source,
+        env: environment,
+        stderr_to_stdout: true
+      )
+
+    assert dependency_status == 0,
+           "isolated dependency materialization failed:\n#{dependency_output}"
+
+    assert File.read!(Path.join(source, "mix.lock")) == lock
 
     {output, status} =
       System.cmd("mix", ["escript.build"],
@@ -66,6 +90,10 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
       )
 
     assert status == 0, "isolated escript pair build failed:\n#{output}"
+    assert File.read!(Path.join(source, "mix.lock")) == lock
+
+    assert String.trim(elem(System.cmd("git", ["rev-parse", "HEAD"], cd: @source_root), 0)) ==
+             commit
 
     cli = Path.join(source, "apps/loopex_cli/loopex")
     companion = Path.join(build, "loopex_provider")
@@ -365,12 +393,46 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
   defp assert_request(request, model, path, type, synthetic) do
     assert request.head == "POST #{path} HTTP/1.1"
     {:ok, body} = JSON.decode(request.body)
-    assert body["stream"] == false
-    refute Map.has_key?(body, "tools")
-    refute Map.has_key?(body, "thinking")
-    refute Map.has_key?(body, "reasoning")
-    assert body["model"] == model |> String.split(":", parts: 2) |> List.last()
-    assert body[if(type == :responses, do: "max_output_tokens", else: "max_tokens")] == 32
+    selected_model = model |> String.split(":", parts: 2) |> List.last()
+
+    expected =
+      case type do
+        :chat ->
+          chat = %{
+            "model" => selected_model,
+            "messages" => [
+              %{"role" => "system", "content" => @system},
+              %{"role" => "user", "content" => @prompt}
+            ],
+            "max_tokens" => 32,
+            "stream" => false
+          }
+
+          if String.starts_with?(model, "openrouter:"), do: Map.put(chat, "n", 1), else: chat
+
+        :responses ->
+          %{
+            "model" => selected_model,
+            "input" => [
+              %{"role" => "system", "content" => [%{"type" => "input_text", "text" => @system}]},
+              %{"role" => "user", "content" => [%{"type" => "input_text", "text" => @prompt}]}
+            ],
+            "max_output_tokens" => 32,
+            "stream" => false
+          }
+
+        :anthropic ->
+          %{
+            "model" => selected_model,
+            "system" => @system,
+            "messages" => [%{"role" => "user", "content" => @prompt}],
+            "max_tokens" => 32,
+            "stream" => false
+          }
+      end
+
+    if body != expected,
+      do: flunk("#{type} normalized body mismatch; keys=#{inspect(Map.keys(body))}")
 
     case credential_variable(model) do
       "ANTHROPIC_API_KEY" -> assert request.headers =~ "x-api-key: #{synthetic}\r\n"
