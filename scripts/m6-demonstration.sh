@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The four-step M6 demonstration. This fails until the embedded API and ask exist.
-# Retain closure evidence only from the exact clean candidate on both platforms.
+# The four-step M6 demonstration. Build the command/provider pair from the
+# exact clean candidate before attributing any result to it.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 if [ -n "${LOOPEX_HOME+x}" ]; then
@@ -166,6 +166,24 @@ durable() {
   grep -q 'M6_DEMONSTRATION_READ_OK' "$M6_DEMO_WORKSPACE/resumed.txt"
 }
 
+candidate=$(git rev-parse HEAD)
+if [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+  echo 'm6-demonstration: the source checkout must be clean' >&2
+  exit 2
+fi
+# The pair build checks the source identity before and after compiling, forces
+# both archives from that source, and embeds the companion launch digest in the
+# command. A pre-existing escript is never accepted as demonstration evidence.
+(
+  unset MIX_BUILD_PATH MIX_BUILD_ROOT
+  local_run env MIX_ENV=prod mix cmd --app loopex_cli mix escript.build
+)
+if [ "$(git rev-parse HEAD)" != "$candidate" ] ||
+   [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+  echo 'm6-demonstration: source changed after the command build' >&2
+  exit 1
+fi
+
 M6_DEMO_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/loopex-m6-demo.XXXXXX")
 export M6_DEMO_WORKSPACE="$M6_DEMO_ROOT/workspace"
 export M6_DEMO_SKILL="$M6_DEMO_ROOT/skills/m6-demo"
@@ -173,7 +191,7 @@ mkdir "$M6_DEMO_WORKSPACE"
 export M6_DEMO_COMMAND="$PWD/apps/loopex_cli/loopex"
 export M6_DEMO_PROMPT='Perform the coding task defined by the supplied m6-demo skill.'
 printf 'm6-demonstration: candidate %s on %s; workspace %s\n' \
-  "$(git rev-parse HEAD)" "$(uname -s)" "$M6_DEMO_WORKSPACE"
+  "$candidate" "$(uname -s)" "$M6_DEMO_WORKSPACE"
 # Keep this exclusively created workspace for inspection and durable evidence.
 # It contains no real user state. Never delete an unproved ephemeral session root.
 step embedded embedded
