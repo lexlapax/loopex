@@ -111,7 +111,7 @@ as your operating-system user.
 
 ```bash
 cd ~/code/my-project
-loopex ask --policy shell-allowlist "summarise this repository"
+loopex ask --policy shell-allowlist --tools read-only "summarise this repository"
 ```
 
 This form prints only the final answer to standard output. It needs neither
@@ -121,11 +121,14 @@ socket and its TLS controller may drain afterward. For another agent or a
 shell script, use:
 
 ```bash
-loopex -p "summarise this repository" --policy shell-allowlist --output json
+loopex -p "summarise this repository" --policy shell-allowlist \
+  --tools read-only --output json
 ```
 
 The result is one JSON object on standard output and the exit status identifies
-the outcome. `--model`, `--tools`,
+the outcome. These read-only examples name their tool preset explicitly;
+omitting `--tools` selects the coding preset, which includes writes and shell
+commands. `--model`, `--tools`,
 `--skill-dir`, `--max-steps`, and `--deadline-ms` select this call's model,
 tool preset, named skill directories and bounds. The command does not silently
 discover a home or project skill.
