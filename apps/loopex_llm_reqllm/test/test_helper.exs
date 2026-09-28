@@ -1,6 +1,7 @@
-# Concept: the real-provider lane is opt-in. `real_provider` is excluded here, so
-# an ordinary `mix test` never reaches a provider no matter which key sits in the
-# operator's environment; only an explicit `--only real_provider` runs it.
+# Concept: the real-provider and transport-drain lanes are opt-in. An ordinary
+# `mix test` never reaches a provider no matter which key sits in the
+# operator's environment; the isolated, timed transport census also requires
+# its explicit `--only long_bound` selector.
 #
 # Technical depth: the exclusion lives in this application's own helper rather
 # than in a root configuration, because the umbrella root runs no tests of its
@@ -33,4 +34,4 @@ end
 
 System.at_exit(fn _status -> File.rm_rf(root) end)
 
-ExUnit.start(exclude: [:real_provider])
+ExUnit.start(exclude: [:real_provider, :long_bound])
