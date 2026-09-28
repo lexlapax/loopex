@@ -16,12 +16,19 @@ The repository checks require:
 - Git;
 - Bash;
 - a POSIX userland providing `awk`, `cat`, `grep`, `readlink`, `sed`, and `tr`;
+- Python 3 and the platform's `script(1)` for the M6 attended-release fixture;
 - the accepted Elixir/OTP toolchain, which supplies `mix`.
 
 That is the whole development baseline. The client hooks read a tool call
 through `scripts/json-field.sh`, which uses `awk` from the baseline rather than
 an added dependency. Adding another development dependency requires the
 ordinary dependency decision.
+
+The M6 `scripts/attended-release.sh` closure helper uses Python's standard
+library to redact either mode's transcript and to provide a controlling PTY
+for authorized `--answer-attended` runs. A person answers by default through
+`script(1)`. Neither tool is a Loopex runtime dependency or a prerequisite for
+running `scripts/check-release.sh` directly.
 
 The release check adds one prerequisite that is not part of the baseline: the
 independent consumer in `clients/node` runs under the Node version pinned in
