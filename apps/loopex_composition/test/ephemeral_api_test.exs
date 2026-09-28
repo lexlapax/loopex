@@ -306,6 +306,50 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "real core projects a failed run through the embedded API", %{tmp: tmp} do
+    assert {:ok, session} =
+             Ephemeral.start_session(
+               policy: Policy,
+               model: "ollama:llama3.2",
+               cwd: tmp,
+               tools: :none,
+               context_token_budget: 1,
+               timeout: 15_000
+             )
+
+    assert {:error,
+            {:run, :failed,
+             %{
+               outcome: :failed,
+               profile: :ephemeral,
+               session_id: session_id,
+               run_id: run_id,
+               text: "",
+               text_truncated: false,
+               tools: [],
+               tools_truncated: false,
+               shadowed_skills: [],
+               details: %{
+                 "reason" => nil,
+                 "failure" => %{
+                   "category" => "context_budget_exceeded",
+                   "dimension" => "context_tokens",
+                   "retryable" => false,
+                   "observed" => observed,
+                   "limit" => 1
+                 },
+                 "cleanup_grace_ms" => cleanup_grace_ms
+               }
+             } = observation}} = Ephemeral.ask(session, "required context cannot fit")
+
+    assert is_binary(session_id) and byte_size(session_id) > 0
+    assert is_binary(run_id) and byte_size(run_id) > 0
+    assert is_integer(observed) and observed > 1
+    assert is_integer(cleanup_grace_ms) and cleanup_grace_ms > 0
+    assert {:error, {:run, :failed, ^observation}} = Ephemeral.last_result(session)
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
   test "timely second ask clears the prior ending while it follows the new run", %{tmp: tmp} do
     {:loopex_ephemeral_session, owner, _cell} =
       session = start_private_session(tmp, ScriptedFacade)
@@ -329,6 +373,32 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
 
     assert {:error, :run_open} = Ephemeral.ask(session, "second")
     assert {:error, :invalid_interaction_answer} = Ephemeral.answer(session, "bad", "yes")
+
+    assert {:ok, %{text: "choice: yes", outcome: :completed}} =
+             Ephemeral.answer(session, "interaction-1", "yes")
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "malformed and unoffered choices leave the current question pending", %{tmp: tmp} do
+    session = start_private_session(tmp, ScriptedFacade)
+
+    assert {:error,
+            {:interaction_pending,
+             %{
+               "interaction_id" => "interaction-1",
+               "status" => "pending",
+               "choices" => [%{"id" => "yes"}]
+             } = question}} =
+             Ephemeral.ask(session, "question")
+
+    for choice <- [nil, 17, "", <<255>>, String.duplicate("x", 65), "not-offered"] do
+      assert {:error, :invalid_interaction_answer} =
+               Ephemeral.answer(session, "interaction-1", choice)
+
+      assert {:error, {:interaction_pending, ^question}} = Ephemeral.last_result(session)
+      assert {:error, :run_open} = Ephemeral.ask(session, "another prompt")
+    end
 
     assert {:ok, %{text: "choice: yes", outcome: :completed}} =
              Ephemeral.answer(session, "interaction-1", "yes")
