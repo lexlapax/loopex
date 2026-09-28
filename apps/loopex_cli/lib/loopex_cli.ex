@@ -1012,8 +1012,6 @@ defmodule LoopexCli do
     end
   end
 
-  @credential_host :"$loopex_cli_credential_host"
-
   @store_unreadable "its state store could not be opened or read"
 
   # Concept: an operator is told which session failed and what kind of thing
@@ -1476,8 +1474,7 @@ defmodule LoopexCli do
   end
 
   defp hosted_plane do
-    with {:ok, host} <- credential_host(),
-         do: LoopexComposition.CredentialHost.plane(host)
+    LoopexCli.CredentialCache.plane()
   end
 
   # Concept: the credential is taken into custody before this command starts
@@ -1489,22 +1486,9 @@ defmodule LoopexCli do
     if Keyword.has_key?(options, :runtime_starter) do
       :ok
     else
-      with {:ok, _host} <- credential_host(),
+      with {:ok, _host} <- LoopexCli.CredentialCache.host(),
            do: :ok,
            else: ({:error, reason} -> {:error, reason})
-    end
-  end
-
-  defp credential_host do
-    case Process.get(@credential_host) do
-      nil ->
-        with {:ok, host} <- LoopexComposition.CredentialHost.open() do
-          Process.put(@credential_host, host)
-          {:ok, host}
-        end
-
-      host ->
-        {:ok, host}
     end
   end
 

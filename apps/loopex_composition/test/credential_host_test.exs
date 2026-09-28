@@ -39,6 +39,24 @@ defmodule LoopexComposition.CredentialHostTest do
     assert System.get_env(variable) == nil
   end
 
+  test "a capability handle refusal reaps the started capability" do
+    key = {CredentialHost, :capability_handle}
+
+    Process.put(key, fn pid ->
+      send(self(), {:capability_started, pid})
+      {:error, :unavailable}
+    end)
+
+    try do
+      host = %CredentialHost{registry: :registry, token: :token}
+      assert CredentialHost.plane(host) == {:error, :unavailable}
+      assert_receive {:capability_started, pid}
+      refute Process.alive?(pid)
+    after
+      Process.delete(key)
+    end
+  end
+
   test "one read serves two sequential compositions, each with its own capability", context do
     credential = "credential-host-canary"
     System.put_env(context.variable, credential)

@@ -129,21 +129,44 @@ defmodule LoopexComposition.CredentialHost do
   """
   @spec plane(t()) :: {:ok, map()} | {:error, term()}
   def plane(%__MODULE__{registry: registry, token: token}) do
-    with {:ok, capability_pid} <- Capability.start_link([]),
-         {:ok, capability} <- Capability.handle(capability_pid) do
-      Logger.debug("reference host composition capability started")
+    case Capability.start_link([]) do
+      {:ok, capability_pid} ->
+        try do
+          case capability_handle(capability_pid) do
+            {:ok, capability} ->
+              Logger.debug("reference host composition capability started")
 
-      {:ok,
-       %{
-         capability: capability,
-         capability_pid: capability_pid,
-         model_options: [
-           credential_token: token,
-           credential_registry: registry,
-           tracing_capability: capability
-         ]
-       }}
+              {:ok,
+               %{
+                 capability: capability,
+                 capability_pid: capability_pid,
+                 model_options: [
+                   credential_token: token,
+                   credential_registry: registry,
+                   tracing_capability: capability
+                 ]
+               }}
+
+            failure ->
+              release_plane(%{capability_pid: capability_pid})
+              failure
+          end
+        catch
+          kind, reason ->
+            release_plane(%{capability_pid: capability_pid})
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        end
+
+      failure ->
+        failure
     end
+  end
+
+  if Mix.env() == :test do
+    defp capability_handle(pid),
+      do: Process.get({__MODULE__, :capability_handle}, &Capability.handle/1).(pid)
+  else
+    defp capability_handle(pid), do: Capability.handle(pid)
   end
 
   @doc false
