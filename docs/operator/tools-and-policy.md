@@ -57,6 +57,18 @@ budgets are under [declared budgets](#operator-tools-budgets).
 | `find` | Workspace paths matching a bounded glob |
 | `ls` | Entries under a workspace path, optionally recursive |
 
+`grep` takes a required Unicode-regex `pattern`, plus optional `path` and
+glob. `find` takes a required glob `pattern` and optional `path`. `ls` takes
+optional `path` and boolean `recursive` (false by default). Each path defaults
+to `.`; an absolute path is allowed when it and its resolved parents stay
+inside the workspace. A final symlink can point outside, but the search tools
+only report the link entry and do not follow or open its target.
+Globs match the complete workspace-relative path: `*` stays within a path
+segment and a whole `**` segment can cross directories. These are tool
+arguments, not shell commands. See the
+[developer reference](../developer/agent-loop-and-tools.md#technical-loop-read-only-tools)
+for their exact arguments and `M`, `P`, and `N` output records.
+
 All three are `read_only` and `safe_retry`. They do not follow a final symbolic
 link, stop at fixed traversal, file and output limits, and report truncation or
 skipped entries. They are not a filesystem sandbox: a same-user process can

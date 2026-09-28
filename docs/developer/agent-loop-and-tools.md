@@ -694,6 +694,33 @@ selection and the ephemeral `:read_only` preset:
 | `loopex.find` | `read_only` | `safe_retry` | 16384 bytes |
 | `loopex.ls` | `read_only` | `safe_retry` | 16384 bytes |
 
+<a id="technical-loop-read-only-tools"></a>
+Each search tool admits only its listed argument keys. A path defaults to `.`
+and may be relative or absolute if it is lexically inside the workspace and
+its existing parent chain resolves inside it. A final symbolic link is reported
+as an entry, not followed or opened; it may point outside the workspace.
+Regexes and globs are nonempty UTF-8 strings of at most 4,096 bytes.
+
+| Tool | Arguments | Complete output records |
+| --- | --- | --- |
+| `grep` | Required `pattern` (Unicode regex); optional `path` and `glob` | `M<TAB>path<TAB>line<TAB>text<LF>` for each matching line, at most 1,000, sorted by path then line. Omitted `glob` means no path filter. |
+| `find` | Required `pattern` (anchored glob); optional `path` | `P<TAB>path<LF>` for each matching entry, at most 2,000 in path order. |
+| `ls` | Optional `path` and boolean `recursive` (default `false`) | `P<TAB>path<LF>` for each entry, at most 2,000 in path order; a directory path ends in `/` before encoding. Recursive depth is at most 8. |
+
+The glob matches the complete workspace-relative path, not a shell-expanded
+filesystem path. `*` matches within one path segment, `?` one scalar, bracket
+classes one scalar, and `**` as a whole segment matches zero or more segments;
+dotfiles are not special. Fields percent-encode control, non-ASCII and `%`
+bytes as uppercase `%HH`, so a newline inside a filename cannot add a record.
+Skipped entries add one `N<TAB>skipped<TAB>...<LF>` notice with
+`invalid_name`, `too_large`, `invalid_utf8`, `changed`, and `unreadable` counts.
+A reached traversal, result, cumulative 16 MiB grep-read or output bound adds
+the final `N<TAB>truncated<LF>` notice. A grep file over its 1 MiB per-file
+limit is instead skipped with `too_large` counted. `<TAB>` and `<LF>` denote
+single bytes, not literal angle-bracket text. See the
+[M6 tool contract](../plans/M6-technical.md#technical-plan-tools)
+for the exact grammar, encoding and ceilings.
+
 A 16,384-byte inline ceiling leaves three quarters of the Store's
 65,536-byte private record for the executor receipt and the next staged-context
 envelope. Local reserves capacity for the receipt before admitting an effect and
@@ -705,10 +732,10 @@ Containment is checked against the *resolved* path, not the requested one.
 `resolve/2` resolves the workspace root, expands the requested path against it,
 resolves the deepest ancestor that exists on disk while following symlinks, and
 then compares against the resolved root with a trailing separator, so a relative
-escape, an absolute path, a symlink pointing elsewhere, and a sibling directory
-whose name shares a prefix all fail the same single comparison. A path that does
-not exist yet resolves its existing parent instead, which is what lets `write`
-create a file while still being confined.
+escape, an absolute path outside the workspace, a symlink pointing elsewhere,
+and a sibling directory whose name shares a prefix all fail the same single
+comparison. A path that does not exist yet resolves its existing parent
+instead, which is what lets `write` create a file while still being confined.
 
 `read` returns bounded content and reports truncation. `write` creates or
 replaces a file beneath the root, creating intermediate directories. `edit`

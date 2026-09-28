@@ -129,6 +129,15 @@ loopex -p "summarise this repository" --policy shell-allowlist \
   --tools read-only --output json
 ```
 
+With no prompt words, `ask` reads standard input byte-for-byte as the prompt;
+one or more prompt words are joined with spaces and suppress standard-input
+reading. `--` ends flag parsing, so later words that start with `--` are prompt
+text. This sends the trailing newline too:
+
+```bash
+printf 'Explain this file\n' | loopex ask --policy shell-allowlist --tools read-only
+```
+
 For a public run outcome, the result is one JSON object on standard output, with schema
 `loopex.ask/1`, session and run IDs, profile, outcome, text, tool summaries,
 shadowed skills, cleanup proof and outcome details. Status `0` means completed;
@@ -158,8 +167,10 @@ wins and the result reports the shadowed user skill.
 
 `--state-root DIR` changes `ask` to the durable profile. It then needs the
 built provider companion and `LOOPEX_PROVIDER_API_KEY`, and the resulting
-session can be resumed. The rest of this guide shows that profile through the
-existing session commands. See [tools and policy](tools-and-policy.md#concept)
+session can be resumed. That profile refuses an `ollama:` model; use a supported
+hosted model for durable `ask`. The rest of this guide shows that profile
+through the existing session commands. See
+[tools and policy](tools-and-policy.md#concept)
 before allowing writes or shell commands.
 
 An Elixir host can make the same local call without the command. From the

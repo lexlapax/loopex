@@ -3,8 +3,10 @@ defmodule Loopex.Executor.Local.CodingTools do
   ## Concept
 
   The coding tools include `read`, `write`, `edit`, and
-  `bash`. They act on a real workspace, and the three that take a path are
-  confined to it.
+  `bash`. M6 also defines `grep`, `find` and `ls` for read-only workspace
+  inspection. All seven act on a real workspace. The original three path
+  tools resolve their targets; the search tools check parent containment but
+  can report a final symbolic link without following its target.
 
   `bash` is not, and the difference is worth stating plainly rather than
   rounding off. It takes a command, not a path; a command names its own files,
@@ -16,10 +18,11 @@ defmodule Loopex.Executor.Local.CodingTools do
   in the same words, because a moduledoc claiming a containment the code does
   not perform is worse than no claim at all.
 
-  For the three that do take a path, containment is the load-bearing property
+  For the original three that take a path, containment is the load-bearing property
   and is deliberately checked against the resolved path rather than the
   requested one. A path that looks contained can leave the workspace through
-  `..`, through an absolute path, or through a symlink that points elsewhere —
+  `..`, through an absolute path outside the root, or through a symlink that
+  points elsewhere —
   and the last of those is invisible to any amount of string inspection.
   Resolving first and comparing afterwards is the only check that catches all
   three. Resolution and effect are not one kernel operation; the residual window
@@ -238,9 +241,9 @@ defmodule Loopex.Executor.Local.CodingTools do
 
   The requested path is joined to the root and then *fully resolved*, following
   symlinks, before it is compared with the resolved root. A relative escape, an
-  absolute path, and a symlink that points outside all fail the same comparison,
-  which is why the check is one comparison rather than three string rules that
-  each miss a case the others catch.
+  absolute path outside the root, and a symlink that points outside all fail the
+  same comparison, which is why the check is one comparison rather than three
+  string rules that each miss a case the others catch.
 
   A path that does not exist yet resolves its parent instead, so `write` can
   create a file while still being confined: the file is not there to resolve,

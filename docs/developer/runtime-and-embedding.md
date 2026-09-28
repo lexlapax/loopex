@@ -245,6 +245,44 @@ no resume or migration to the durable profile.
 IO.puts(result.text)
 ```
 
+For a conversation, keep the opaque handle and stop it when finished:
+
+```elixir
+{:ok, session} =
+  LoopexComposition.Ephemeral.start_session(
+    policy: MyHost.ReadOnly,
+    model: "ollama:llama3.2",
+    tools: :read_only,
+    cwd: File.cwd!()
+  )
+
+try do
+  first = LoopexComposition.Ephemeral.ask(session, "List the files here.")
+  second = LoopexComposition.Ephemeral.ask(session, "Which one has the entrypoint?")
+  {first, second, LoopexComposition.Ephemeral.history(session)}
+after
+  :ok = LoopexComposition.Ephemeral.stop_session(session)
+end
+```
+
+The second `ask/3` is admitted only after the first run ends. If a policy
+defers, `ask/3` returns `{:error, {:interaction_pending, question}}`; pass the
+question's exact interaction ID and one offered choice ID to `answer/3`.
+`answer/3` returns the next pending question or that run's terminal result.
+Until the open run ends, a new `ask/3` returns `{:error, :run_open}`. A refused
+or stale answer returns `{:error, :invalid_interaction_answer}` and leaves the
+question pending.
+
+| Observation | Return shape |
+| --- | --- |
+| `last_result/1` | Starts at `:none`. A pending question, admitted wait timeout, or ending stores the corresponding `{:error, {:interaction_pending, question}}`, `{:error, {:timeout, partial}}`, or terminal `{:ok, observation}` / `{:error, {:run, outcome, observation}}`. A newly accepted ask or answer clears the prior observation unless its waiter has already timed out; a command cancelled before a facade grant leaves the prior value unchanged. |
+| `history/1` | `{:ok, %{entries: entries, truncated: boolean}}`; entries are committed user and assistant messages or tool outcomes in order, keeping at most the newest 256. Message text is capped at 64 KiB with its own `text_truncated` flag. |
+
+Always check `stop_session/1`: `:ok` proves cleanup; an
+`{:error, {:cleanup_unproved, details}}` result names the retained root and
+pending obligations. The example's match makes an unproved stop visible rather
+than treating it as a successful release.
+
 The host must supply `:policy`; neither composition supplies one. `:model`
 defaults to `LOOPEX_MODEL` or `"ollama:llama3.2"`. Accepted model prefixes are
 `ollama:`, `openai:`, `anthropic:` and `openrouter:`. The selected hosted key is
