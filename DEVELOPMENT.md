@@ -24,11 +24,11 @@ through `scripts/json-field.sh`, which uses `awk` from the baseline rather than
 an added dependency. Adding another development dependency requires the
 ordinary dependency decision.
 
-The M6 `scripts/attended-release.sh` closure helper uses Python's standard
-library to redact either mode's transcript and to provide a controlling PTY
-for authorized `--answer-attended` runs. A person answers by default through
-`script(1)`. Neither tool is a Loopex runtime dependency or a prerequisite for
-running `scripts/check-release.sh` directly.
+The M6 `scripts/attended-release.sh` closure helper uses an Elixir byte-stream
+redactor for a person's `script(1)` run. Only authorized
+`--answer-attended` uses Python's standard library for its controlling PTY and
+transcript redaction. Neither Python nor `script(1)` is a Loopex runtime
+dependency or a prerequisite for running `scripts/check-release.sh` directly.
 
 The release check adds one prerequisite that is not part of the baseline: the
 independent consumer in `clients/node` runs under the Node version pinned in

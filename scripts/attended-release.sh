@@ -5,12 +5,27 @@
 # the PTY controller owns automatic terminal answers; published output is redacted.
 set -euo pipefail
 
+safe_line() {
+  local channel=$1 message=$2 name value candidate
+  candidate=$'\n'"$message"$'\n'
+  for name in LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY; do
+    value=${!name:-}
+    if [ -n "$value" ]; then
+      case "$candidate" in *"$value"*) return 0 ;; esac
+    fi
+  done
+  if [ "$channel" -eq 2 ]; then
+    printf '\n%s\n' "$message" >&2
+  else
+    printf '\n%s\n' "$message"
+  fi
+}
 usage() {
-  printf 'usage: attended-release.sh --output LOG [--answer-attended --disposition ANCHOR --milestone NAME --authority-sha AUTH_SHA]\n' >&2
+  safe_line 2 'usage: attended-release.sh --output LOG [--answer-attended --disposition ANCHOR --milestone NAME --authority-sha AUTH_SHA]'
   exit 2
 }
 
-fail() { printf 'attended-release: %s\n' "$1" >&2; exit 1; }
+fail() { safe_line 2 "attended-release: $1"; exit 1; }
 
 output=''
 automatic=0
@@ -44,6 +59,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$output" ] || usage
+case "$output" in *$'\n'*|*$'\r'*) fail invalid_output_path ;; esac
 if [ "$automatic" -eq 1 ]; then
   [ -n "$anchor" ] && [ -n "$milestone" ] && [ -n "$authority_sha" ] || usage
 else
@@ -57,11 +73,27 @@ esac
 [ -d "$(dirname "$output")" ] || fail output_parent_missing
 output_parent=$(cd "$(dirname "$output")" && pwd -P)
 output="$output_parent/$(basename "$output")"
+case "$output" in *$'\n'*|*$'\r'*) fail invalid_output_path ;; esac
 sidecar="$output.authority"
 [ ! -e "$output" ] && [ ! -L "$output" ] &&
   [ ! -e "$sidecar" ] && [ ! -L "$sidecar" ] || fail output_exists
 
 script_dir=$(cd "$(dirname "$0")" && pwd -P)
+redact_human() {
+  env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+    -u OPENROUTER_API_KEY ERL_CRASH_DUMP=/dev/null ERL_CRASH_DUMP_SECONDS=0 \
+    elixir "$script_dir/attended-redact.exs" \
+    3< <(printf '%s\0%s\0%s\0%s\0' \
+      "${LOOPEX_PROVIDER_API_KEY:-}" "${OPENAI_API_KEY:-}" \
+      "${ANTHROPIC_API_KEY:-}" "${OPENROUTER_API_KEY:-}")
+}
+redact_record() {
+  if [ "$automatic" -eq 1 ]; then
+    python3 "$script_dir/attended-pty.py" --redact-stdin
+  else
+    redact_human
+  fi
+}
 checkout=$(git rev-parse --show-toplevel 2>/dev/null) || fail not_a_repository
 checkout=$(cd "$checkout" && pwd -P)
 cd "$checkout"
@@ -71,9 +103,11 @@ tested_sha=$(git rev-parse HEAD)
 [[ "$tested_sha" =~ ^[0-9a-f]{40}$ ]] || fail invalid_tested_sha
 platform=$(uname -s)
 case "$platform" in Darwin|Linux) ;; *) fail unsupported_platform ;; esac
-command -v python3 >/dev/null 2>&1 || fail python3_unavailable
-if [ "$automatic" -eq 0 ]; then
+if [ "$automatic" -eq 1 ]; then
+  command -v python3 >/dev/null 2>&1 || fail python3_unavailable
+else
   command -v script >/dev/null 2>&1 || fail script_unavailable
+  command -v elixir >/dev/null 2>&1 || fail elixir_unavailable
 fi
 
 # The four release-provider names are the supported credential set. Refusing
@@ -120,33 +154,24 @@ if [ "$automatic" -eq 1 ]; then
   ' "$scratch/authority" || fail disposition_mismatch
   # The sidecar must remain exact source bytes. A disposition that happens to
   # contain a live provider credential cannot be published as that sidecar.
-  awk '
-    BEGIN {
-      names[1] = "LOOPEX_PROVIDER_API_KEY"; names[2] = "OPENAI_API_KEY"
-      names[3] = "ANTHROPIC_API_KEY"; names[4] = "OPENROUTER_API_KEY"
-    }
-    {
-      for (i = 1; i <= 4; i++) {
-        secret = ENVIRON[names[i]]
-        if (secret != "" && index($0, secret) > 0) found = 1
-      }
-    }
-    END { exit found }
-  ' "$scratch/authority" || fail disposition_contains_credential
+  python3 "$script_dir/attended-pty.py" --check-no-keys "$scratch/authority" ||
+    fail disposition_contains_credential
 fi
 
 umask 077
 if ! (set -C; : >"$output") 2>/dev/null; then fail output_unavailable; fi
 if [ "$automatic" -eq 1 ]; then
   if ! (set -C; : >"$sidecar") 2>/dev/null; then
-    printf 'ATTENDED_AUTHORITY=unavailable\nRELEASE_EXIT=not_started\nATTENDED_ANSWERS=0\n' >>"$output"
+    printf 'ATTENDED_AUTHORITY=unavailable\nRELEASE_EXIT=not_started\nATTENDED_ANSWERS=0\n' |
+      redact_record >>"$output" || true
     fail authority_publication_failed
   fi
   if ! cat "$scratch/authority" >"$sidecar"; then
     # A failed sidecar publication is an executed failure, but it must not
     # start the release check or leave a partial authority claim.
     rm -f "$sidecar"
-    printf 'ATTENDED_AUTHORITY=unavailable\nRELEASE_EXIT=not_started\nATTENDED_ANSWERS=0\n' >>"$output"
+    printf 'ATTENDED_AUTHORITY=unavailable\nRELEASE_EXIT=not_started\nATTENDED_ANSWERS=0\n' |
+      redact_record >>"$output" || true
     fail authority_publication_failed
   fi
   if command -v sha256sum >/dev/null 2>&1; then
@@ -191,17 +216,17 @@ if [ "$automatic" -eq 1 ]; then
   trap - HUP INT TERM
   [ "$controller_status" -eq 0 ] || fail release_check_failed
 else
-  script_command | python3 "$script_dir/attended-pty.py" --redact-stdin | tee -a "$output"
+  script_command 2>&1 | redact_human | tee -a "$output"
   statuses=("${PIPESTATUS[@]}")
 fi
 set -e
 
 if [ "$automatic" -eq 0 ]; then
-  printf 'RELEASE_EXIT=%s\nATTENDED_ANSWERS=0\nDURATION_S=%s\n' \
+  printf '\nRELEASE_EXIT=%s\nATTENDED_ANSWERS=0\nDURATION_S=%s\n' \
     "${statuses[0]}" "$((SECONDS - started))" |
-    python3 "$script_dir/attended-pty.py" --redact-stdin | tee -a "$output" ||
+    redact_human | tee -a "$output" ||
     fail summary_record_failed
   [ "${statuses[0]}" -eq 0 ] && [ "${statuses[1]}" -eq 0 ] &&
     [ "${statuses[2]}" -eq 0 ] || fail release_check_failed
 fi
-printf 'attended-release: PASS transcript=%s\n' "$output"
+safe_line 1 'attended-release: PASS'

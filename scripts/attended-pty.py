@@ -38,6 +38,19 @@ KEY_NAMES = (
     "ANTHROPIC_API_KEY",
     "OPENROUTER_API_KEY",
 )
+MARKERS = (b"[REDACTED]", b"<REDACTED>", b"{REDACTED}", b"~REDACTED~")
+
+
+def replacement_for(keys):
+    # A key cannot cross the marker boundary when neither marker edge byte
+    # occurs in any key. A marker must also contain no whole key of its own.
+    for marker in (*MARKERS, *(bytes((byte,)) for byte in range(33, 127)), b"\0"):
+        if all(
+            key not in marker and marker[:1] not in key and marker[-1:] not in key
+            for key in keys
+        ):
+            return marker
+    raise ValueError("credential_value_unredactable")
 
 
 def extract_authority(context_path, anchor):
@@ -54,7 +67,10 @@ def extract_authority(context_path, anchor):
         return 1
     end = re.search(rb"(?m)^<a id=\"", context[starts[0] + len(marker) :])
     stop = starts[0] + len(marker) + end.start() if end else len(context)
-    write_all(sys.stdout.fileno(), context[starts[0] : stop])
+    selected = context[starts[0] : stop]
+    if b"\0" in selected:
+        return 1
+    write_all(sys.stdout.fileno(), selected)
     return 0
 
 
@@ -65,6 +81,7 @@ class Redactor:
         self.keys = sorted((key for key in keys if key), key=len, reverse=True)
         self.width = max((len(key) for key in self.keys), default=1)
         self.pending = b""
+        self.replacement = replacement_for(self.keys)
 
     def feed(self, data, final=False):
         content = self.pending + data
@@ -84,7 +101,7 @@ class Redactor:
                 cursor = safe
                 break
             output.extend(content[cursor:position])
-            output.extend(b"[REDACTED]")
+            output.extend(self.replacement)
             cursor = position + len(key)
         self.pending = content[cursor:]
         return bytes(output)
@@ -142,9 +159,20 @@ def credential_keys():
     return keys
 
 
+def check_no_keys(path):
+    try:
+        with open(path, "rb") as source:
+            data = source.read()
+        return 1 if any(key in data for key in credential_keys()) else 0
+    except (OSError, ValueError):
+        return 1
+
+
 def main():
     if len(sys.argv) == 4 and sys.argv[1] == "--extract-context":
         return extract_authority(sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 3 and sys.argv[1] == "--check-no-keys":
+        return check_no_keys(sys.argv[2])
     if sys.argv[1:] == ["--redact-stdin"]:
         try:
             redactor = Redactor(credential_keys())

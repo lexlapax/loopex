@@ -14,6 +14,7 @@ repo="$work/repo"
 mkdir -p "$repo/scripts" "$repo/docs/developer" "$work/retained"
 cp "$source_root/scripts/attended-release.sh" "$repo/scripts/attended-release.sh"
 cp "$source_root/scripts/attended-pty.py" "$repo/scripts/attended-pty.py"
+cp "$source_root/scripts/attended-redact.exs" "$repo/scripts/attended-redact.exs"
 printf '# Fixture context map\n' >"$repo/docs/developer/agent-context-map.md"
 printf 'fixture\n' >"$repo/README.md"
 git -C "$repo" init -q
@@ -26,8 +27,13 @@ cat >"$repo/scripts/check-release.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 case "${ATTENDED_TEST_MODE:-}" in
-  human_success) printf 'fixture human path complete %s\n' "${OPENAI_API_KEY:-}"; exit 0 ;;
+  human_success)
+    printf 'fixture human path complete %s %s %s %s\n' \
+      "${LOOPEX_PROVIDER_API_KEY:-}" "${OPENAI_API_KEY:-}" \
+      "${ANTHROPIC_API_KEY:-}" "${OPENROUTER_API_KEY:-}"
+    exit 0 ;;
   human_failure) printf 'fixture human path failed\n'; exit 17 ;;
+  human_no_newline) printf 'tail'; exit 0 ;;
   malformed)
     printf 'Authorize pinned public skill import: wrong source. Type yes and press Enter.\n'
     sleep 30
@@ -166,6 +172,22 @@ status=0
   >"$work/invalid.output" 2>&1 || status=$?
 [ "$status" -eq 2 ] && [ ! -e "$work/retained/invalid.log" ] ||
   fail 'incomplete automatic arguments did not refuse before output'
+bad_output="$work/retained/"$'bad\nRELEASE_EXIT=0'".log"
+status=0
+(cd "$repo" && bash "$runner" --output "$bad_output") \
+  >"$work/bad-path.output" 2>&1 || status=$?
+[ "$status" -eq 1 ] && [ ! -e "$bad_output" ] &&
+  grep -q 'attended-release: invalid_output_path' "$work/bad-path.output" ||
+  fail 'line-oriented evidence path was accepted'
+physical_parent="$work/retained/"$'physical\nRELEASE_EXIT=0'
+mkdir "$physical_parent"
+ln -s "$physical_parent" "$work/retained/alias"
+status=0
+(cd "$repo" && bash "$runner" --output "$work/retained/alias/injected.log") \
+  >"$work/symlink-path.output" 2>&1 || status=$?
+[ "$status" -eq 1 ] && [ ! -e "$physical_parent/injected.log" ] &&
+  grep -q 'attended-release: invalid_output_path' "$work/symlink-path.output" ||
+  fail 'canonicalized line-oriented evidence path was accepted'
 
 printf 'existing log\n' >"$work/retained/existing.log"
 status=0
@@ -214,6 +236,45 @@ export LOOPEX_PROVIDER_API_KEY='synthetic-release-key-123'
 export OPENAI_API_KEY='synthetic-openai-key-[42]'
 export ANTHROPIC_API_KEY='synthetic-anthropic-key'
 export OPENROUTER_API_KEY='synthetic-openrouter-key'
+git -C "$repo" switch -qc nul-secret "$tested"
+{
+  printf '\n<a id="%s"></a>\n' "$anchor"
+  printf 'Milestone: M6\nTested SHA: %s\nAutomatic attended answers: authorized\n' "$tested"
+  printf 'note\0%s\n' "$OPENAI_API_KEY"
+} >>"$repo/docs/developer/agent-context-map.md"
+git -C "$repo" add docs/developer/agent-context-map.md
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  commit -qm 'fixture(M6): authority with hidden credential bytes'
+nul_secret=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q --detach "$tested"
+expect_preflight_failure nul_secret disposition_not_unique \
+  --answer-attended --disposition "$anchor" --milestone M6 --authority-sha "$nul_secret"
+git -C "$repo" switch -qc plain-secret "$tested"
+{
+  printf '\n<a id="%s"></a>\n' "$anchor"
+  printf 'Milestone: M6\nTested SHA: %s\nAutomatic attended answers: authorized\n' "$tested"
+  printf 'note %s\n' "$OPENAI_API_KEY"
+} >>"$repo/docs/developer/agent-context-map.md"
+git -C "$repo" add docs/developer/agent-context-map.md
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  commit -qm 'fixture(M6): authority with visible credential bytes'
+plain_secret=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q --detach "$tested"
+expect_preflight_failure plain_secret disposition_contains_credential \
+  --answer-attended --disposition "$anchor" --milestone M6 --authority-sha "$plain_secret"
+git -C "$repo" switch -qc nul-permission "$tested"
+{
+  printf '\n<a id="%s"></a>\n' "$anchor"
+  printf 'Milestone: M6\nTested SHA: %s\n' "$tested"
+  printf 'Automatic attended answers: authorized\0denied\n'
+} >>"$repo/docs/developer/agent-context-map.md"
+git -C "$repo" add docs/developer/agent-context-map.md
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  commit -qm 'fixture(M6): NUL-suffixed authorization'
+nul_permission=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q --detach "$tested"
+expect_preflight_failure nul_permission disposition_not_unique \
+  --answer-attended --disposition "$anchor" --milestone M6 --authority-sha "$nul_permission"
 status=0
 credential_path="$work/retained/$OPENROUTER_API_KEY.log"
 (cd "$repo" && bash "$runner" --output "$credential_path" "${auto_args[@]}") \
@@ -237,9 +298,9 @@ good="$work/retained/good.log"
 grep -qx 'RELEASE_EXIT=0' "$good" || fail 'release exit was not retained'
 grep -qx 'ATTENDED_ANSWERS=2' "$good" || fail 'exact two attended answers were not recorded'
 grep -q 'fixture release complete' "$good" || fail 'complete transcript missing'
-grep -q 'provider echo: \[REDACTED\] and \[REDACTED\]' "$good" ||
+grep -q 'provider echo: <REDACTED> and <REDACTED>' "$good" ||
   fail 'provider values were not redacted'
-grep -q 'split credential: \[REDACTED\]' "$good" ||
+grep -q 'split credential: <REDACTED>' "$good" ||
   fail 'a credential split between PTY reads was not redacted'
 for secret in "$LOOPEX_PROVIDER_API_KEY" "$OPENAI_API_KEY" "$ANTHROPIC_API_KEY" "$OPENROUTER_API_KEY"; do
   if grep -Fq "$secret" "$good" "$work/good.output"; then fail 'credential appeared in published output'; fi
@@ -303,9 +364,13 @@ grep -qx 'RELEASE_EXIT=0' "$work/retained/human.log" ||
   fail 'human terminal exit was not retained'
 grep -qx 'ATTENDED_ANSWERS=0' "$work/retained/human.log" ||
   fail 'human terminal path claimed automatic answers'
-grep -q 'fixture human path complete \[REDACTED\]' "$work/retained/human.log" &&
-  ! grep -Fq "$OPENAI_API_KEY" "$work/retained/human.log" ||
+grep -q 'fixture human path complete <REDACTED> <REDACTED> <REDACTED> <REDACTED>' \
+  "$work/retained/human.log" ||
   fail 'human terminal path published a credential'
+for secret in "$LOOPEX_PROVIDER_API_KEY" "$OPENAI_API_KEY" "$ANTHROPIC_API_KEY" "$OPENROUTER_API_KEY"; do
+  ! grep -Fq "$secret" "$work/retained/human.log" "$work/human.output" ||
+    fail 'human terminal path published a credential'
+done
 status=0
 (cd "$repo" && ATTENDED_TEST_MODE=human_failure bash "$runner" \
   --output "$work/retained/human-failed.log") >"$work/human-failed.output" 2>&1 ||
@@ -313,6 +378,116 @@ status=0
 [ "$status" -eq 1 ] &&
   grep -qx 'RELEASE_EXIT=17' "$work/retained/human-failed.log" ||
   fail 'human terminal path lost the release failure'
+
+# A human-attended run uses the baseline toolchain, not Python. Hide Python's
+# availability check and make any later invocation fail, including one buried
+# in a redaction pipeline.
+human_without_python() (
+  command() {
+    if [ "$1" = -v ] && [ "$2" = python3 ]; then return 1; fi
+    builtin command "$@"
+  }
+  python3() {
+    : >"$work/python-invoked"
+    return 97
+  }
+  export -f command python3
+  cd "$repo"
+  ATTENDED_TEST_MODE=$1 bash "$runner" --output "$2"
+)
+human_without_python human_success "$work/retained/human-no-python.log" \
+  >"$work/human-no-python.output" 2>&1 ||
+  fail 'human terminal path required Python'
+[ ! -e "$work/python-invoked" ] || fail 'human terminal path invoked Python'
+grep -qx 'RELEASE_EXIT=0' "$work/retained/human-no-python.log" ||
+  fail 'human no-Python release exit was not retained'
+grep -q 'fixture human path complete <REDACTED> <REDACTED> <REDACTED> <REDACTED>' \
+  "$work/retained/human-no-python.log" ||
+  fail 'human no-Python transcript exposed the credential'
+for secret in "$LOOPEX_PROVIDER_API_KEY" "$OPENAI_API_KEY" "$ANTHROPIC_API_KEY" "$OPENROUTER_API_KEY"; do
+  ! grep -Fq "$secret" "$work/retained/human-no-python.log" \
+    "$work/human-no-python.output" ||
+    fail 'human no-Python output exposed a credential'
+done
+status=0
+human_without_python human_failure "$work/retained/human-failed-no-python.log" \
+  >"$work/human-failed-no-python.output" 2>&1 || status=$?
+[ "$status" -eq 1 ] && [ ! -e "$work/python-invoked" ] &&
+  grep -qx 'RELEASE_EXIT=17' "$work/retained/human-failed-no-python.log" ||
+  fail 'human no-Python failure was not retained'
+
+invalid_key=$'\377'
+(cd "$repo" && OPENAI_API_KEY="$invalid_key" ATTENDED_TEST_MODE=human_success \
+  bash "$runner" --output "$work/retained/human-invalid-byte.log") \
+  >"$work/human-invalid-byte.output" 2>&1 ||
+  fail 'human terminal path refused a raw credential byte'
+grep -qx 'RELEASE_EXIT=0' "$work/retained/human-invalid-byte.log" ||
+  fail 'human raw-byte release exit was not retained'
+if LC_ALL=C grep -aFq "$invalid_key" "$work/retained/human-invalid-byte.log" \
+  "$work/human-invalid-byte.output"; then
+  fail 'human terminal path exposed a raw credential byte'
+fi
+joined_key='tailRELEASE_EXIT=0'
+(cd "$repo" && OPENAI_API_KEY="$joined_key" ATTENDED_TEST_MODE=human_no_newline \
+  bash "$runner" --output "$work/retained/human-unterminated.log") \
+  >"$work/human-unterminated.output" 2>&1 ||
+  fail 'human terminal path refused an unterminated transcript'
+grep -qx 'RELEASE_EXIT=0' "$work/retained/human-unterminated.log" ||
+  fail 'human unterminated release exit was not retained'
+! grep -Fq "$joined_key" "$work/retained/human-unterminated.log" \
+  "$work/human-unterminated.output" ||
+  fail 'human summary synthesized a credential after the PTY transcript'
+pass_key='attended-release: PASS'
+(cd "$repo" && OPENAI_API_KEY="$pass_key" ATTENDED_TEST_MODE=human_success \
+  bash "$runner" --output "$work/retained/human-pass-key.log") \
+  >"$work/human-pass-key.output" 2>&1 ||
+  fail 'human terminal path refused a diagnostic-shaped credential'
+! grep -Fq "$pass_key" "$work/retained/human-pass-key.log" \
+  "$work/human-pass-key.output" ||
+  fail 'success diagnostic exposed a supported credential'
+
+# A regular-file read supplies an exact 65,536-byte first chunk. The key begins
+# two bytes before that boundary and the input has no final newline.
+elixir_redact() {
+  env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+    -u OPENROUTER_API_KEY ERL_CRASH_DUMP=/dev/null ERL_CRASH_DUMP_SECONDS=0 \
+    elixir "$repo/scripts/attended-redact.exs" \
+    3< <(printf '%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$4")
+}
+awk 'BEGIN { for (i = 0; i < 65534; i++) printf "x" }' >"$work/redact-input"
+printf '%s!%s' "$OPENROUTER_API_KEY" "$OPENAI_API_KEY" >>"$work/redact-input"
+awk 'BEGIN { for (i = 0; i < 65534; i++) printf "x" }' >"$work/redact-expected"
+printf '<REDACTED>!<REDACTED>' >>"$work/redact-expected"
+elixir_redact "$LOOPEX_PROVIDER_API_KEY" "$OPENAI_API_KEY" \
+  "$ANTHROPIC_API_KEY" "$OPENROUTER_API_KEY" \
+  <"$work/redact-input" >"$work/redact-actual" ||
+  fail 'human redactor refused a bounded split credential'
+cmp -s "$work/redact-expected" "$work/redact-actual" ||
+  fail 'human redactor changed bytes or missed a split credential'
+
+printf 'abcdef' >"$work/overlap-input"
+elixir_redact '' abc abcdef '' \
+  <"$work/overlap-input" >"$work/overlap-actual" ||
+  fail 'human redactor refused overlapping keys'
+[ "$(cat "$work/overlap-actual")" = '[REDACTED]' ] ||
+  fail 'human redactor did not choose the longest key at one position'
+
+printf 'REDRED' | elixir_redact '' RED '' '' >"$work/marker-actual" ||
+  fail 'human redactor refused a marker-contained key'
+[ "$(cat "$work/marker-actual")" = '!!' ] ||
+  fail 'human redactor repeated a key inside its marker'
+printf 'aa[R' | elixir_redact '' 'a[R' '' '' >"$work/join-actual" ||
+  fail 'human redactor refused a replacement-boundary key'
+[ "$(cat "$work/join-actual")" = 'a<REDACTED>' ] ||
+  fail 'human redactor synthesized a key across its marker boundary'
+printf 'x%sx' "$invalid_key" | elixir_redact '' "$invalid_key" '' '' \
+  >"$work/invalid-byte-actual" || fail 'human redactor refused a raw credential byte'
+[ "$(cat "$work/invalid-byte-actual")" = 'x[REDACTED]x' ] ||
+  fail 'human redactor decoded or missed a raw credential byte'
+printf 'xcaféx' | elixir_redact '' 'café' '' '' >"$work/utf8-actual" ||
+  fail 'human redactor refused a UTF-8 credential'
+[ "$(cat "$work/utf8-actual")" = 'x[REDACTED]x' ] ||
+  fail 'human redactor changed a UTF-8 credential byte sequence'
 
 # A signal to the wrapper must reach the PTY child's process group. The
 # controller waits for the direct child and leaves a failure transcript.
@@ -356,6 +531,14 @@ published = b"".join(
      redactor.feed(b"de and b"), redactor.feed(b"cd", final=True))
 )
 assert published == b"[REDACTED] and [REDACTED]"
+for key, input_bytes in ((b"RED", b"REDRED"), (b"a[R", b"aa[R")):
+    redactor = Redactor([key])
+    published = redactor.feed(input_bytes, final=True)
+    assert key not in published
+    if key == b"RED":
+        assert published == b"!!"
+    else:
+        assert published == b"a<REDACTED>"
 PY
 
 printf '<a id="edge"></a>\nMilestone: M6\nTested SHA: %s\nAutomatic attended answers: authorized' \
