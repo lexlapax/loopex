@@ -48,6 +48,26 @@ composition. The second writes `apps/loopex_cli/loopex` and its launcher
 [Coding sessions](../operator/coding-sessions.md#operator-sessions-running)
 explains.
 
+If you embed the ephemeral profile in your own OTP release, list `:req_llm`,
+`:req`, and `:finch` as `:load` applications in that host release's Mix
+configuration. The Loopex dependency declarations use `runtime: false` for
+these applications. Loading their code does not start them; the guarded
+ephemeral composition starts ReqLLM when it needs a model call.
+
+```elixir
+releases: [
+	my_host: [
+		applications: [req_llm: :load, req: :load, finch: :load]
+	]
+]
+```
+
+Merge this entry with your host's other release applications. The host also
+controls its logger, telemetry handlers, and crash dumps; treat them as able
+to contain request data or a selected hosted-provider key. The
+[ephemeral trust boundary](runtime-and-embedding.md#technical-embedding-ephemeral)
+names what cleanup does and does not prove.
+
 No application is published as a package. The examples below run inside this
 umbrella — from `mix run` or `iex -S mix` at the repository root — which is how
 the shipped hosts are built.

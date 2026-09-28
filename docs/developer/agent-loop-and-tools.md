@@ -26,19 +26,22 @@ not. Nothing infers an outcome from silence.
 **Authority stays with the host.** Every executor-backed call consults
 `Loopex.Policy` — a read-only tool asks exactly as a process-spawning one does —
 and anything that is not a well-formed allow is a denial, including a policy
-that raises or blocks. A policy may instead defer to a durable question the
-operator answers; the answer is evidence for a new decision, never a grant. A
-denial is a committed outcome the model is told about and is never retried. A
-runtime that has any tool active and no policy configured refuses to start.
+that raises or blocks. A policy may instead defer to a question the operator
+answers; the answer is evidence for a new decision, never a grant. A durable
+session retains that question across restarts. An ephemeral session keeps it
+only while the session lives. A denial is a committed outcome the model is told
+about and is never retried. A runtime that has any tool active and no policy
+configured refuses to start.
 
 **A tool is bounded plain data**, not a function or a module: an identity, the
 bytes a model is shown, and the declared class of effect and cost that running
 it may incur. Its identity is the generation triple `{tool_id, tool_version,
 definition_digest}`, and a staged request carries the complete definitions it
-used, so what a model was shown stays reconstructible from the journal after
-the registry that held them has changed. Registration is append-only and scoped
-to one runtime; being registered and being offered to a model are separate
-facts. The reference distribution ships seven tools under the reserved
+used, so what a model was shown stays reconstructible from session records
+after the registry that held them has changed. Those records persist only in
+the durable profile. Registration is append-only and scoped to one runtime.
+A registered tool is not necessarily offered to a model. The reference
+distribution ships seven tools under the reserved
 `loopex.` namespace: `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`.
 The durable default offers the original four coding tools.
 
@@ -50,11 +53,12 @@ content (a root `AGENTS.md` the operator trusted, and selected project skills)
 is added only where it fits whole, never trimmed, and changes no tool
 definition, policy result, or grant.
 
-**Output is bounded and nothing is silently lost.** A tool's model-facing result
-is bounded; output beyond the bound is retained as an artifact an operator can
-read back, and the result names it. Progress streams while work runs but is
-never durable truth; a consumer that misses a stream's closing item falls back
-to the durable record.
+**Output is bounded; retention depends on the profile.** A tool's model-facing
+result is bounded. The durable composition retains excess output as an artifact
+that an operator can read back. The ephemeral composition has no artifact
+store: its result marks truncation, and the excess bytes are lost. Progress
+streams while work runs but is never committed truth; a consumer that misses a
+stream's closing item falls back to the session record while that session lives.
 
 The reference local executor requires `/bin/bash` for its internal supervision
 scripts, while raw tool commands stay on `/bin/sh` and argv calls remain
@@ -653,9 +657,9 @@ artifact store — the executor's `:artifacts` option is optional — and a stor
 that refuses the write both fall back to a plain truncation marker, which names
 no reference. **In both cases the bytes beyond the bound are gone**, not merely
 unretrievable: nothing else holds them. The receipt then records an empty
-artifact list, which is true rather than a silent absence. The shipped
-composition always supplies a store, so an operator using `loopex` does not take
-that path.
+artifact list, which is true rather than a silent absence. The durable
+composition supplies a store; the ephemeral composition does not. An ephemeral
+artifact transfer returns `artifact_transfer_unsupported`.
 
 Artifact retention is part of settlement and runs in a monitored worker under
 the workspace lease and the run's remaining bound. A store refusal or a worker

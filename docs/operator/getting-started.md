@@ -153,6 +153,32 @@ session can be resumed. The rest of this guide shows that profile through the
 existing session commands. See [tools and policy](tools-and-policy.md#concept)
 before allowing writes or shell commands.
 
+An Elixir host can make the same local call without the command. From the
+Loopex source checkout, save this as `ephemeral.exs`, then run
+`mix run ephemeral.exs` while Ollama serves `llama3.2`:
+
+```elixir
+defmodule ReadOnlyPolicy do
+	@behaviour Loopex.Policy
+	@impl Loopex.Policy
+	def decide(%{effect_class: "read_only"}), do: {:allow, nil}
+	def decide(_request), do: {:deny, :effect_class_not_permitted}
+end
+
+{:ok, result} =
+	LoopexComposition.Ephemeral.run("List this workspace.",
+		policy: ReadOnlyPolicy,
+		model: "ollama:llama3.2",
+		tools: :read_only,
+		cwd: File.cwd!()
+	)
+
+IO.puts(result.text)
+```
+
+The policy is host code, even for read-only tools. This example uses the source
+checkout as its workspace; set `cwd` to another directory to inspect it.
+
 <a id="operator-start-credential"></a>
 ## 4. Name a State Root and the Credential
 

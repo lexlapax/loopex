@@ -94,6 +94,42 @@ takes you from a checkout to a first session. The
 [developer getting-started guide](docs/developer/getting-started.md#concept)
 covers building on Loopex and contributing to it.
 
+After [building from source](docs/operator/getting-started.md#operator-start-build),
+you can use the same loop three ways. For an embedded local call, save this as
+`ephemeral.exs` in the checkout and run `mix run ephemeral.exs` while Ollama
+serves `llama3.2`:
+
+```elixir
+defmodule ReadOnlyPolicy do
+	@behaviour Loopex.Policy
+	@impl Loopex.Policy
+	def decide(%{effect_class: "read_only"}), do: {:allow, nil}
+	def decide(_request), do: {:deny, :effect_class_not_permitted}
+end
+
+{:ok, result} =
+	LoopexComposition.Ephemeral.run("List this workspace.",
+		policy: ReadOnlyPolicy,
+		model: "ollama:llama3.2",
+		tools: :read_only,
+		cwd: File.cwd!()
+	)
+
+IO.puts(result.text)
+```
+
+The standalone command needs no state root for the same local model. A durable
+session uses a state root and the provider companion built with the command:
+
+```bash
+loopex ask --policy shell-allowlist --tools read-only "List this workspace."
+LOOPEX_HOME="$HOME/.loopex" loopex run --policy shell-allowlist "Summarise this repository."
+```
+
+The durable command also needs `LOOPEX_PROVIDER_API_KEY`. The
+[operator guide](docs/operator/getting-started.md#operator-start-credential)
+shows how to supply it without putting it in command history.
+
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.
 

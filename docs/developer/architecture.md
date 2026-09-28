@@ -181,12 +181,14 @@ present at the boundary. Fixed by
 [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept), and
 [ADR 0012](../adr/0012-executor-cancellation-capability.md#concept).
 
-**ArtifactStore** is where a tool's output goes when there is more of it than
-the model should be shown. The model receives a bounded result that says what
-was truncated, and the whole of it is retained where an operator can read it
-back. An artifact has two identities: the *object* is the stored bytes, so
-identical bytes are one object however often they are retained, and the *use*
-is why one caller retained them. A store may also offer an optional bounded
+**ArtifactStore** is where a durable composition puts tool output when there
+is more of it than the model should be shown. The model receives a bounded
+result that says what was truncated, and the durable composition retains the
+excess for an operator to read back. The ephemeral composition has no
+ArtifactStore: it marks truncation and loses the excess bytes. A retained
+artifact has two identities. The *object* is the stored bytes, so identical
+bytes are one object however often they are retained. The *use* records why
+one caller retained them. A store may also offer an optional bounded
 transfer, so a caller holding a reference reads the object back in verified
 chunks rather than all at once. Fixed by
 [ADR 0015](../adr/0015-artifact-object-and-use-identity.md#concept) and
@@ -199,9 +201,10 @@ dispatch branch nothing policed. Resolution is exhaustive and fails closed: a
 policy that is broken, slow, or malformed denies, and a denial is a truthful
 committed outcome that is never retried. A policy may also defer — ask the
 operator one bounded question instead of deciding. The session commits that
-question as a durable interaction and suspends the tool call; when an answer
-commits, the same host policy is asked again with the answer attached, and only
-its allow can lead to a grant. Fixed by
+question and suspends the tool call. A durable session retains it across
+restarts; an ephemeral session retains it only while the session lives. When
+an answer commits, the same host policy is asked again with the answer
+attached, and only its allow can lead to a grant. Fixed by
 [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) and
 [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
 
@@ -210,9 +213,9 @@ Technical depth: [Callbacks, adding an adapter, and the conformance suites](arch
 <a id="concept-arch-truth-planes"></a>
 ## Five Truth Planes
 
-The most common way a durable system tells an operator something untrue is by
-mixing evidence classes. Loopex keeps five apart, and their guarantees differ by
-design.
+The most common way a session tells an operator something untrue is by mixing
+evidence classes. Loopex keeps five apart, and their guarantees differ by
+design. The table describes the durable profile's persistence guarantees.
 
 | Plane | Guarantee | Who may put something on it |
 | --- | --- | --- |
@@ -221,6 +224,10 @@ design.
 | Authoritative snapshots | A replaceable projection anchored to a public event sequence. | The runtime, derived from committed outbox rows. |
 | Transient progress | Best-effort deltas within one attempt's stream domain; may be coalesced or dropped. | A model adapter or executor through its progress callback, relayed by the owner. |
 | Administrative diagnostics | Operational observation; not session history and not an input to behavior. | The runtime, the telemetry edge's handler, and a host-started trace session — all bounded and redacted, none durable. |
+
+The ephemeral profile keeps the same serial commit and event order in memory.
+Its records, events, and pending interactions disappear with the session; they
+cannot be replayed after the VM ends.
 
 Two rules connect them. A fact is committed before it is published, and an
 effect's intent is committed before the effect is dispatched — so a published
@@ -267,8 +274,9 @@ Technical depth: [The publication fence and each plane's owner](architecture-tec
 <a id="concept-arch-session-owner"></a>
 ## One Serial Session Owner
 
-Each session has exactly one process that may write its durable truth, and
-ownership is a Store fact rather than an inference from process liveness.
+Each session has exactly one process that may write its truth, and ownership is
+a Store fact rather than an inference from process liveness. The durable Store
+persists that fact; the ephemeral Store keeps it only in memory.
 
 **Runtime Control** is the serial, runtime-local owner of session creation,
 coordinator routing, provider-dispatch permits, and post-commit consequences.
@@ -312,8 +320,9 @@ Technical depth: [Succession, the post-commit fence, and the invariants](archite
 The runtime is the brain: it coordinates sessions, orders commits, and decides
 what happens next. Hands own workspaces and operating-system effects, and they
 sit behind the Executor port — the local executor validates bounded arguments
-against a fixed code-owned tool, holds a monitored workspace lease for the job's
-whole lifetime, and durably retains its receipt before replying. Only the shell
+against a fixed code-owned tool and holds a monitored workspace lease for the
+job's whole lifetime. It retains a receipt through the session's Store before
+replying; only the durable Store persists that receipt. Only the shell
 tool starts an operating-system child, in its own process group and with an
 environment built from nothing; the read, write, edit, grep, find, and ls tools
 run in the local executor's VM against the leased workspace.
@@ -327,7 +336,7 @@ operation, attempt, digest, lease, expiry, and fence before any effect starts.
 
 Surfaces are peers. The command, the reference client, the app server, the
 daemon, and any embedder reach the same semantic contract, and none of them owns
-a loop, a cursor, or durable session truth. The app server and the daemon add a
+a loop, a cursor, or session truth. The app server and the daemon add a
 wire and a process boundary, not a second semantics: an independent program in
 another language drives a session over either, as the Node consumer in
 [`clients/node`](../../clients/node/README.md) does. If a surface disappeared,

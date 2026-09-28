@@ -126,8 +126,10 @@ your own host, follow the
   secrecy from trusted host code. See
   [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept).
 - The trusted-local executor is not a sandbox. It runs only its registered
-  tools beneath a held workspace lease, and each tool process receives an
-  explicit environment containing only `PATH`. See
+  tools beneath a held workspace lease. The `bash` child receives an explicit
+  environment containing only `PATH`; in-VM file and search tools, and trusted
+  host code, can inspect ambient variables. In the ephemeral profile this
+  includes hosted-provider keys. See
   [what local execution can reach](tools-and-policy.md#operator-tools-reach).
 - The reference executor needs `/bin/bash` for its own supervision and `/bin/ps`
   to confirm cleanup; see the

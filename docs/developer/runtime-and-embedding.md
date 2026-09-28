@@ -66,6 +66,10 @@ Six constraints shape every embedding:
   tools and host-installed handlers may observe or copy it. Cleanup uncertainty
   seals only that session. The durable profile retains its separate-process
   credential and persistent-state contracts.
+- **The library host owns its release and observers.** Its OTP release loads
+  `:req_llm`, `:req`, and `:finch` for the ephemeral path; composition starts
+  ReqLLM when needed. The host owns logger configuration, crash dumps, and
+  telemetry handlers that can see request data or the selected key.
 - **Catalog loading remains host-owned.** A host-selected cold model catalog can
   use ordinary Req transport and ambient GitHub credentials, and retain shared
   cache and metadata outside the call-owned model pool. Its load lock spends the
@@ -279,6 +283,10 @@ selected key into its own records or diagnostics and rejects its exact value
 from provider-controlled reply fields. A call-owned HTTP/1 pool and caller are
 proved gone before a result or successful cleanup acknowledgement; a checked-
 out socket and TLS controller may drain afterward without a result route. A
+host's OTP release must list `:req_llm`, `:req`, and `:finch` as `:load` because
+the library dependencies use `runtime: false`. The guarded composition start
+starts ReqLLM later. The host controls its logger, crash dumps, and telemetry
+handlers, including any copies of request data and credentials they retain. A
 host-selected cold catalog source is a separate dependency path: it may use
 ordinary Req and `GH_TOKEN` or `GITHUB_TOKEN`, retain shared cache and metadata
 after call cleanup, and spend the model deadline waiting on its shared load
