@@ -180,7 +180,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
         runtime_holder: %{
           runtime_start: fn options ->
             send(test, {:runtime_options, options})
-            supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
+            {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
             {:ok, %Runtime{supervisor: supervisor, token: test}}
           end
         },
@@ -265,7 +265,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
       configuration(tmp, %{
         runtime_holder: %{
           runtime_start: fn _options ->
-            supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
+            {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
             {:ok, %Runtime{supervisor: supervisor, token: %{test: test, manifest: normalized}}}
           end
         },
@@ -324,7 +324,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
         configuration(tmp, %{
           runtime_holder: %{
             runtime_start: fn _options ->
-              supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
+              {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
 
               {:ok,
                %Runtime{
@@ -427,7 +427,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
         runtime_holder: %{
           runtime_start: fn _options ->
             send(test, :runtime_started)
-            runtime_supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
+            {:ok, runtime_supervisor} = Supervisor.start_link([], strategy: :one_for_one)
             {:ok, %Runtime{supervisor: runtime_supervisor, token: test}}
           end
         },
@@ -466,7 +466,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
         configuration(tmp, %{
           runtime_holder: %{
             runtime_start: fn _options ->
-              supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
+              {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
               {:ok, %Runtime{supervisor: supervisor, token: %{test: test, failure: fault}}}
             end
           },

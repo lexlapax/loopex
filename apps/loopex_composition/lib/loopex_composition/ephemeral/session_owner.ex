@@ -2679,6 +2679,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           unknown_start: unknown_start,
           group_proved: false,
           group_failed: false,
+          runtime_proved: false,
           subtree_failed: false,
           root_failed: false,
           root_proved: false,
@@ -2735,14 +2736,21 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     end
   end
 
+  # Concept: a dead runtime root is not proof that its dynamic children ended.
+  # Technical depth: only an in-time successful Loopex.stop certifies teardown;
+  # retain that certificate across a retry of later root removal.
   defp start_runtime_stop(state) do
     runtime = Map.get(state.startup.registered, :runtime)
 
-    if match?(%Runtime{}, runtime) and
-         not MapSet.member?(state.abort.down, runtime.supervisor) do
-      start_abort_worker(state, :runtime_stop, nil)
-    else
-      start_subtree_stop(state)
+    cond do
+      not match?(%Runtime{}, runtime) or state.abort.runtime_proved ->
+        start_subtree_stop(state)
+
+      MapSet.member?(state.abort.down, runtime.supervisor) ->
+        start_subtree_stop(state)
+
+      true ->
+        start_abort_worker(state, :runtime_stop, nil)
     end
   end
 
@@ -2759,7 +2767,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   defp after_subtree(%{abort: abort, startup: startup} = state) do
     cond do
-      abort.unknown_start or abort.group_failed or abort.subtree_failed ->
+      abort.unknown_start or abort.group_failed or abort.subtree_failed or
+          (match?(%Runtime{}, Map.get(startup.registered, :runtime)) and
+             not abort.runtime_proved) ->
         finish_abort(state)
 
       state.stop && (not state.stop.run_proved or not state.stop.effect_proved) ->
@@ -2943,7 +2953,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         start_runtime_stop(next)
 
       :runtime_stop ->
-        start_subtree_stop(next)
+        start_subtree_stop(%{next | abort: %{next.abort | runtime_proved: success}})
 
       :subtree_stop ->
         next = %{next | abort: %{next.abort | subtree_failed: not success}}
@@ -3002,6 +3012,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       |> maybe_pending(abort.group_failed, :process_groups)
       |> maybe_pending(
         abort.unknown_start or abort.subtree_failed or
+          (match?(%Runtime{}, Map.get(startup.registered, :runtime)) and
+             not abort.runtime_proved) or
           not model_settled?(state) or
           not all_subtree_down?(startup, abort.down) or
           (abort.worker != nil and abort.worker.phase not in [:root_removal, :root_absence]),

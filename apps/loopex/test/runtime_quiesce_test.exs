@@ -905,27 +905,38 @@ defmodule Loopex.RuntimeQuiesceTest do
     {_control, session_ids, coordinators} =
       install_probe_entries(fixture.runtime, 64, :block_status)
 
+    # Only the shared status-work cutoff is under test. Give the unrelated
+    # admission, termination, and fence phases their own seconds-long budgets.
     bounds =
       fast_bounds(%{
-        status_census_ms: 400,
-        status_work_ms: 300
+        admission_ms: 4_000,
+        initial_gate_ms: 2_000,
+        worker_reap_ms: 500,
+        status_census_ms: 2_000,
+        status_work_ms: 300,
+        coordinator_termination_ms: 4_000,
+        termination_projection_ms: 2_000,
+        fence_budget_ms: 4_000,
+        fence_reap_ms: 500
       })
-
-    started_at = System.monotonic_time(:millisecond)
 
     quiesce =
       Task.async(fn -> Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token, bounds) end)
 
     assert Map.keys(receive_probe_calls(:admit, session_ids)) |> Enum.sort() == session_ids
     assert Map.keys(receive_probe_calls(:release, session_ids)) |> Enum.sort() == session_ids
-    assert Map.keys(receive_probe_calls(:status, session_ids)) |> Enum.sort() == session_ids
-    assert {:ok, result} = Task.await(quiesce, 3_000)
-    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+    status_calls = receive_timed_status_calls(session_ids)
+    assert Map.keys(status_calls) |> Enum.sort() == session_ids
+    :ok = await_pids_down(Enum.map(status_calls, fn {_id, {pid, _at}} -> pid end), 1_500)
+    first_status_at = status_calls |> Map.values() |> Enum.map(&elem(&1, 1)) |> Enum.min()
+    status_elapsed_ms = System.monotonic_time(:millisecond) - first_status_at
+    assert status_elapsed_ms >= bounds.status_work_ms
+    assert status_elapsed_ms < 1_500
+
+    assert {:ok, result} = Task.await(quiesce, 12_000)
     assert result.unsettled == session_ids
     assert result.settled == []
     assert result.absent == []
-    assert elapsed_ms >= bounds.status_work_ms
-    assert elapsed_ms < 3_000
     assert Enum.all?(coordinators, &(not Process.alive?(&1)))
   end
 
@@ -1441,7 +1452,11 @@ defmodule Loopex.RuntimeQuiesceTest do
         quiesce_probe(observer, session_id, mode, drain_id, phase_owner)
 
       {:"$gen_call", from, {:session_status, _owner}} ->
-        send(observer, {:quiesce_probe_call, :status, session_id, elem(from, 0)})
+        send(
+          observer,
+          {:quiesce_probe_call, :status, session_id, elem(from, 0),
+           System.monotonic_time(:millisecond)}
+        )
 
         unless mode == :block_status do
           GenServer.reply(from, {:ok, %{active_run_id: nil, pending_work_ids: []}})
@@ -1454,10 +1469,24 @@ defmodule Loopex.RuntimeQuiesceTest do
   defp receive_probe_calls(phase, session_ids) do
     Map.new(session_ids, fn expected_id ->
       receive do
+        {:quiesce_probe_call, ^phase, session_id, caller, _at} ->
+          {session_id, caller}
+
         {:quiesce_probe_call, ^phase, session_id, caller} ->
           {session_id, caller}
       after
         5_000 -> flunk("missing #{phase} call for #{expected_id}")
+      end
+    end)
+  end
+
+  defp receive_timed_status_calls(session_ids) do
+    Map.new(session_ids, fn expected_id ->
+      receive do
+        {:quiesce_probe_call, :status, session_id, caller, at} ->
+          {session_id, {caller, at}}
+      after
+        5_000 -> flunk("missing status call for #{expected_id}")
       end
     end)
   end

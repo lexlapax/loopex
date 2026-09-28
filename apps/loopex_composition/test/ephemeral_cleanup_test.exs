@@ -131,6 +131,82 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     refute File.exists?(root)
   end
 
+  test "a lost runtime root cannot certify a surviving session child", %{tmp: tmp} do
+    test = self()
+
+    drain = fn executor, instance, owner, nonce, _deadline ->
+      send(test, {:drain_entered, self()})
+
+      receive do
+        :release ->
+          send(owner, {executor, instance, nonce, :groups_empty})
+          {:ok, nonce}
+      end
+    end
+
+    session = start_session(tmp, drain)
+    {:loopex_ephemeral_session, owner, cell} = session
+
+    %{startup: %{owned_root: %{path: root}, registered: %{runtime: %Runtime{} = runtime}}} =
+      :sys.get_state(owner)
+
+    assert {:ok, %{owner_groups: owner_groups}} = Runtime.children(runtime)
+
+    [{_, group, :worker, _}] = DynamicSupervisor.which_children(owner_groups)
+    suspension = suspend_process(group)
+    on_exit(fn -> send(suspension, {self(), :release}) end)
+
+    runtime_monitor = Process.monitor(runtime.supervisor)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert_receive {:drain_entered, worker}, 3_000
+
+    Process.exit(runtime.supervisor, :kill)
+    assert_receive {:DOWN, ^runtime_monitor, :process, _, :killed}, 1_000
+    assert Process.alive?(group)
+    send(worker, :release)
+
+    assert {:error,
+            {:cleanup_unproved,
+             %{pending: [:session_subtree], root: ^root, root_ownership: :owned}}} =
+             Task.await(stop, 7_000)
+
+    assert :atomics.get(cell, 1) == 3
+    assert Process.alive?(group)
+    assert File.dir?(root)
+
+    group_monitor = Process.monitor(group)
+    send(suspension, {self(), :release})
+    assert_receive {^suspension, :released}, 1_000
+    if Process.alive?(group), do: Process.exit(group, :kill)
+    assert_receive {:DOWN, ^group_monitor, :process, ^group, _}, 1_000
+  end
+
+  test "a failed runtime-stop worker cannot certify the session subtree", %{tmp: tmp} do
+    session = start_session(tmp, successful_drain())
+    {:loopex_ephemeral_session, owner, cell} = session
+
+    %{startup: %{owned_root: %{path: root}, registered: %{runtime: %Runtime{} = runtime}}} =
+      :sys.get_state(owner)
+
+    suspension = suspend_runtime(runtime.supervisor)
+    on_exit(fn -> send(suspension, {self(), :release}) end)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert %{stage: :runtime_stop, worker: %{pid: worker}} = await_runtime_stop(owner)
+    monitor = Process.monitor(worker)
+    Process.exit(worker, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 1_000
+    send(suspension, {self(), :release})
+    assert_receive {^suspension, :released}, 1_000
+
+    assert {:error,
+            {:cleanup_unproved,
+             %{pending: [:session_subtree], root: ^root, root_ownership: :owned}}} =
+             Task.await(stop, 7_000)
+
+    assert :atomics.get(cell, 1) == 3
+    assert File.dir?(root)
+  end
+
   test "subtree stop waits for its worker result, finish, and exact DOWN", %{tmp: tmp} do
     test = self()
 
@@ -366,7 +442,9 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     end)
   end
 
-  defp suspend_runtime(runtime_supervisor) do
+  defp suspend_runtime(runtime_supervisor), do: suspend_process(runtime_supervisor)
+
+  defp suspend_process(target) do
     test = self()
 
     # Concept: hold the real runtime stop worker while forged completions arrive.
@@ -375,16 +453,16 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     suspension =
       spawn(fn ->
         test_monitor = Process.monitor(test)
-        true = :erlang.suspend_process(runtime_supervisor)
+        true = :erlang.suspend_process(target)
         send(test, {self(), :suspended})
 
         receive do
           {requester, :release} ->
-            true = :erlang.resume_process(runtime_supervisor)
+            if Process.alive?(target), do: :erlang.resume_process(target)
             send(requester, {self(), :released})
 
           {:DOWN, ^test_monitor, :process, ^test, _} ->
-            :erlang.resume_process(runtime_supervisor)
+            if Process.alive?(target), do: :erlang.resume_process(target)
         end
       end)
 
