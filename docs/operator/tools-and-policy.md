@@ -545,8 +545,10 @@ returning empty content.
 For the durable reference composition, the provider credential is read from
 `LOOPEX_PROVIDER_API_KEY` once, by the host that composes the runtime — the
 `loopex` command, the daemon, the app server, or your own host — which moves it
-into private custody and removes it from its own environment. A second durable
-composition in the same process refuses rather than finding it again.
+into private custody and removes it from its own environment. A second
+independent durable composition in the same process refuses rather than finding
+it again; a host can [share one credential plane](../developer/runtime-and-embedding.md#technical-embedding-composition)
+across its compositions.
 
 Every durable executor spawn removes that variable explicitly, including the launcher
 and the executor's own process-management helpers, and a model-supplied command

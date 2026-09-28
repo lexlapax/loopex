@@ -4070,13 +4070,17 @@ defmodule Loopex.Executor.Local do
   defp abandoned_outcome(:effect_owner_lost, _arguments, true), do: :outcome_unknown
 
   defp abandoned_outcome(:worker_stopped, %{kind: kind}, true)
-       when kind in [:read, :grep, :find, :ls], do: :failed
+       when kind in [:read, :grep, :find, :ls] do
+    :failed
+  end
 
   defp abandoned_outcome(:worker_stopped, _arguments, true), do: :outcome_unknown
   defp abandoned_outcome(:guardian_stopped, _arguments, _stopped), do: :outcome_unknown
 
   defp abandoned_outcome(:deadline, %{kind: kind}, true)
-       when kind in [:read, :grep, :find, :ls], do: :failed
+       when kind in [:read, :grep, :find, :ls] do
+    :failed
+  end
 
   defp abandoned_outcome(:deadline, _arguments, true), do: :outcome_unknown
 
@@ -4103,10 +4107,14 @@ defmodule Loopex.Executor.Local do
   end
 
   defp effect_text(:deadline, %{kind: kind}, true)
-       when kind in [:read, :grep, :find, :ls], do: "Nothing was read."
+       when kind in [:read, :grep, :find, :ls] do
+    "Nothing was read."
+  end
 
   defp effect_text(:worker_stopped, %{kind: kind}, true)
-       when kind in [:read, :grep, :find, :ls], do: "Nothing was returned."
+       when kind in [:read, :grep, :find, :ls] do
+    "Nothing was returned."
+  end
 
   defp effect_text(_cause, %{kind: kind}, _stopped),
     do: "Whether #{kind} changed the workspace is unproven."

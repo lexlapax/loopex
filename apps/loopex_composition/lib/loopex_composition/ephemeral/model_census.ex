@@ -315,13 +315,13 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
   end
 
   defp transition(
-         %__MODULE__{pending: %{phase: :begun, callback: requester, call: call} = pending} = state,
+         %__MODULE__{pending: %{phase: :begun, callback: requester} = pending} = state,
          {requester, _reference,
           {:stage_model, call, candidate, proof, stop_ref,
            {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, candidate,
             candidate_monitor}}, expiry} = envelope
        )
-       when is_pid(candidate) and is_pid(proxy) and is_reference(proof) and
+       when pending.call === call and is_pid(candidate) and is_pid(proxy) and is_reference(proof) and
               is_reference(stop_ref) and is_reference(start_ref) and
               is_reference(proxy_monitor) and is_reference(candidate_monitor) do
     if proof != elem(envelope, 1) and not MapSet.member?(pending.seen_refs, proof) and
@@ -412,7 +412,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
                callback: requester,
                call: call,
                candidate: candidate,
-               candidate_start_monitor: candidate_monitor,
+               candidate_start_monitor: monitor,
                stage_ref: stage_ref,
                stage_issued: true,
                callback_down: nil,
@@ -420,8 +420,8 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
              } = pending
          } = state,
          {requester, _reference,
-          {:cancel_model, call,
-           {:registrar_not_entered, stage_ref, candidate, candidate_monitor, reason}}, _expiry} =
+          {:cancel_model, call, {:registrar_not_entered, stage_ref, candidate, monitor, reason}},
+          _expiry} =
            envelope
        )
        when reason in [:normal, :killed] do
@@ -804,9 +804,7 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
            pending: %{
              phase: :cancelling,
              cancel:
-               {_callback, _reference,
-                {:cancel_model, _call,
-                 {:registrar_not_entered, _stage_ref, _candidate, _monitor, reason}}, _expiry} =
+               {_, _, {:cancel_model, _, {:registrar_not_entered, _, _, _, reason}}, _} =
                  envelope,
              candidate_down: true,
              candidate_down_reason: reason

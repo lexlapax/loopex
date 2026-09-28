@@ -116,9 +116,11 @@ your own host, follow the
 - In the durable profile, keep the provider credential in the host. Its
   reference composition reads
   `LOOPEX_PROVIDER_API_KEY` once, moves it into private custody and removes it
-  from the process environment; a second composition in the same
-  operating-system process refuses with `provider_credential_required` rather
-  than finding it again. The credential never belongs in session options,
+  from the process environment. A second independent composition without a
+  shared credential plane in the same operating-system process refuses with
+  `provider_credential_required` rather than finding it again; a host running
+  multiple compositions may [share one credential plane](../developer/runtime-and-embedding.md#technical-embedding-composition).
+  The credential never belongs in session options,
   commands, Store data, executor jobs, receipts, events, diagnostics, fixtures
   or logs. Where it does go is described under
   [credential boundary](tools-and-policy.md#operator-tools-credential).
@@ -149,8 +151,9 @@ order.
 1. Start the durable local Store for its log path.
 2. Start the workspace lease and the trusted-local executor for the workspace
    and receipt-ledger paths.
-3. Start Loopex with an explicit `runtime_id`, Store, model, executor, tools and
-   host policy. A runtime with no policy refuses to start.
+3. Start Loopex with an explicit `runtime_id`, Store, model, executor and tools.
+   Active tools require a host policy; a model-less, tool-less runtime may omit
+   one.
 4. Create or resume a session, attach at a durable event cursor, and submit a
    prompt.
 5. Consume committed events. `user.message_appended`, `run.started`,

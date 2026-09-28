@@ -1676,7 +1676,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   defp answer_matches?(%{"interaction_id" => id, "choices" => choices}, id, choice)
-       when is_list(choices), do: Enum.any?(choices, &(Map.get(&1, "id") == choice))
+       when is_list(choices) do
+    Enum.any?(choices, &(Map.get(&1, "id") == choice))
+  end
 
   defp answer_matches?(_interaction, _id, _choice), do: false
 
@@ -2923,7 +2925,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp valid_abort_result?(:process_groups, {:ok, nonce}, nonce), do: true
 
   defp valid_abort_result?(phase, :ok, _nonce)
-       when phase in [:runtime_stop, :subtree_stop, :root_removal, :root_absence], do: true
+       when phase in [:runtime_stop, :subtree_stop, :root_removal, :root_absence] do
+    true
+  end
 
   defp valid_abort_result?(_phase, _result, _nonce), do: false
 

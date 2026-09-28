@@ -123,7 +123,8 @@ The standalone command needs no state root for the same local model. A durable
 session uses a state root and the provider companion built with the command:
 
 ```bash
-loopex ask --policy shell-allowlist --tools read-only "List this workspace."
+loopex ask --policy shell-allowlist --model ollama:llama3.2 \
+  --tools read-only "List this workspace."
 LOOPEX_HOME="$HOME/.loopex" loopex run --policy shell-allowlist "Summarise this repository."
 ```
 

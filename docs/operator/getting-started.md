@@ -115,7 +115,8 @@ as your operating-system user.
 
 ```bash
 cd ~/code/my-project
-loopex ask --policy shell-allowlist --tools read-only "summarise this repository"
+loopex ask --policy shell-allowlist --model ollama:llama3.2 \
+  --tools read-only "summarise this repository"
 ```
 
 This form prints only the final answer to standard output. It needs neither
@@ -126,7 +127,7 @@ shell script, use:
 
 ```bash
 loopex -p "summarise this repository" --policy shell-allowlist \
-  --tools read-only --output json
+  --model ollama:llama3.2 --tools read-only --output json
 ```
 
 With no prompt words, `ask` reads standard input byte-for-byte as the prompt;
@@ -135,7 +136,8 @@ reading. `--` ends flag parsing, so later words that start with `--` are prompt
 text. This sends the trailing newline too:
 
 ```bash
-printf 'Explain this file\n' | loopex ask --policy shell-allowlist --tools read-only
+printf 'Explain this file\n' | loopex ask --policy shell-allowlist \
+  --model ollama:llama3.2 --tools read-only
 ```
 
 For a public run outcome, the result is one JSON object on standard output, with schema
@@ -379,11 +381,13 @@ daemon`); the run carries on in the daemon. The
 [daemon runbook](daemon.md#concept) covers taking over control, reconnection
 and limits.
 
-To stop the daemon, press Ctrl-C in its terminal or send it `SIGTERM`. It drains
-every session through the runtime, tells connected clients it is stopping,
-releases the state root and exits `0`. Give it time to finish; the
-[signals section](daemon.md#operator-daemon-signals) explains the stop and its
-bound. After it exits, the offline commands work against the root again.
+To stop the daemon, press Ctrl-C in its terminal or send it `SIGTERM`. On a
+successful orderly stop, it drains every session through the runtime, tells
+connected clients it is stopping, releases the state root and exits `0`. Give
+it time to finish. If a component fails during stop, the exit status may be
+nonzero; follow the
+[signals and recovery guidance](daemon.md#operator-daemon-signals) before using
+offline commands against the root.
 
 <a id="operator-start-troubleshooting"></a>
 ## When Something Is Refused

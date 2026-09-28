@@ -144,9 +144,9 @@ A trace session covers the processes the runtime owns. The daemon's listener,
 connections and lease owners are host processes above the runtime, so a trace
 does not flag them. Their lifecycle lines are fixed and identity-free and are
 logged at `debug`, which `loopex daemon` does not print: it logs at `info` to
-standard error, so a running daemon's standard error carries only warnings,
-failures and its stop lines. Read the daemon's own state with
-`loopex sessions --daemon SOCKET --status`; see
+standard error. A running daemon's standard error can also carry a selected
+policy's first-tool notice, warnings, failures and stop lines. Read the daemon's
+own state with `loopex sessions --daemon SOCKET --status`; see
 [listing and status](daemon.md#operator-daemon-listing).
 
 <a id="operator-observability-telemetry"></a>
