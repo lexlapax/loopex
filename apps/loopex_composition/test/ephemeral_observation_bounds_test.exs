@@ -150,6 +150,20 @@ defmodule LoopexComposition.Ephemeral.ObservationBoundsTest do
     {:ok, tmp: tmp}
   end
 
+  test "text projection preserves UTF-8 at the 65,536-byte boundary" do
+    ascii_limit = String.duplicate("a", 65_536)
+    multibyte_limit = String.duplicate("a", 65_534) <> "é"
+    split_multibyte = String.duplicate("a", 65_535) <> "é"
+    split_prefix = String.duplicate("a", 65_535)
+
+    assert {^ascii_limit, false} = SessionOwner.text_projection_probe(ascii_limit)
+    assert {^multibyte_limit, false} = SessionOwner.text_projection_probe(multibyte_limit)
+    assert {^split_prefix, true} = SessionOwner.text_projection_probe(split_multibyte)
+
+    assert {^ascii_limit, true} =
+             SessionOwner.text_projection_probe(String.duplicate("a", 65_537))
+  end
+
   test "history and tool projections cut at 256 entries and retain the newest entries", %{
     tmp: tmp
   } do

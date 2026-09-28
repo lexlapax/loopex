@@ -2106,6 +2106,20 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     |> Map.put_new("limit", nil)
   end
 
+  if Mix.env() == :test do
+    @doc """
+    ## Concept
+
+    Exposes the bounded text projection to test its UTF-8 byte boundary.
+
+    ## Technical depth
+
+    This function is absent from production builds. The Store event envelope cannot
+    admit a text event large enough to exercise the boundary through a session.
+    """
+    def text_projection_probe(content) when is_binary(content), do: bounded_text(content)
+  end
+
   defp bounded_text(content) when byte_size(content) <= @text_max, do: {content, false}
   defp bounded_text(content), do: {valid_prefix(binary_part(content, 0, @text_max)), true}
 
