@@ -932,6 +932,15 @@ asynchronous cache installation before its single second handshake. A test-only
 cache callback in the isolated VM delegates unchanged to OTP's default cache
 and emits credential-free readiness after the matching client host/port/session
 update; server cache installation is likewise observed before reconnect.
+On OTP 27, `:session_resumption` remains false even for a resumed TLS 1.2
+handshake. The fixture therefore reports TLS 1.2 resumption only when the
+accepted server socket repeats a nonempty `:session_id` seen on a prior
+handshake; it tracks every prior ID so either production call resuming any
+earlier session fails. OTP 27's `ssl_session.erl:117-127` retains the suggested
+ID only for a resumed session and generates a new ID otherwise; its
+`ssl_gen_statem.erl:1946-1974` exposes the ID through
+`:ssl.connection_information/2`. TLS 1.3 continues to use the reported
+`:session_resumption` flag.
 OTP's cache-manager can re-init with roleless arguments after initial explicit
 role binding (floor `ssl_manager.erl:531-533`, current `:543-545`). The delegating
 probe remembers the role in that same process and normalizes the roleless args;

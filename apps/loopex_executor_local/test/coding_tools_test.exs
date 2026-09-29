@@ -3803,6 +3803,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     end)
 
     assert_receive {:bounded_worker_ready, worker}, 2_000
+    guardian = monitored_guardian(waiter, [lease, worker])
+    assert is_pid(guardian)
     assert :erlang.suspend_process(waiter)
     send(worker, :finish_bounded_work)
 
@@ -3827,6 +3829,32 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert_receive {:bounded_waiter_result, {:done, :retained}}, 2_000
     refute Process.alive?(worker), "bounded work returned before its effect process stopped"
+    refute Process.alive?(guardian), "bounded work returned before its guardian stopped"
+  end
+
+  test "the caller requires the exact guardian DOWN before exposing its decision" do
+    # Concept: a tool result never outruns its session-owned guardian process.
+    #
+    # Technical depth: the send/exit interval is too narrow for a scheduling
+    # fixture to force reliably. Pin the receive ordering as well as the real
+    # process census in the neighboring bounded-work test.
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    [decision_branch] =
+      Regex.run(
+        ~r/\{\^tag, decision\} ->\n(.*?)\n      \{\^tag, :guardian_effect,/s,
+        source,
+        capture: :all_but_first
+      )
+
+    assert decision_branch =~ "Process.exit(guardian, :kill)"
+
+    assert decision_branch =~
+             ~r/\{:DOWN, \^reference, :process, \^guardian, _reason\} ->\n\s+demonitor_guardian_effect\(effect_state\)\n\s+decision/,
+           "the decision can be returned without the guardian's exact DOWN"
+
+    assert decision_branch =~ "{:guardian_stopped, :decision_reap_unconfirmed,",
+           "an unproved guardian DOWN cannot preserve a successful decision"
   end
 
   test "a lease certified result survives lease loss queued ahead of guardian observation" do

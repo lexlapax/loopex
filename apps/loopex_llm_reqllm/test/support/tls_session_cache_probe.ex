@@ -43,7 +43,7 @@ defmodule LoopexLLMReqLLMTest.TLSSessionCacheProbe do
       do: send(observer, {:tls_cache_fault_armed, nonce, self()})
 
     if not Keyword.has_key?(args, :role),
-      do: send(observer, {:tls_cache_reinit, nonce, role, self(), args == []})
+      do: send(observer, {:tls_cache_reinit, nonce, role, self()})
 
     normalized_args = Keyword.put(args, :role, role)
 

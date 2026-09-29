@@ -72,6 +72,7 @@ uncommitted or untracked changes, because it records the exact source revision
 it was made from.
 
 ```bash
+mkdir -p ~/src
 git clone https://github.com/lexlapax/loopex.git ~/src/loopex
 cd ~/src/loopex
 mix local.hex --force
@@ -142,7 +143,8 @@ printf 'Explain this file\n' | loopex ask --policy shell-allowlist \
 
 For a public run outcome, the result is one JSON object on standard output, with schema
 `loopex.ask/1`, session and run IDs, profile, outcome, text, tool summaries,
-shadowed skills, cleanup proof and outcome details. Status `0` means completed;
+shadowed skills, cleanup and outcome details. Ephemeral `ask` reports its
+cleanup proof; durable `ask` has `"cleanup": null`. Status `0` means completed;
 `1` means command refusal or lifecycle failure; `2` failed; `3` bound reached;
 `4` outcome unknown; `5` cancelled; `6` no ending observed; and `130`
 interrupted. These read-only examples name their tool preset explicitly;
@@ -396,7 +398,8 @@ offline commands against the root.
 | --- | --- | --- |
 | `loopex: no built command at …` (exit 127) | The launcher found no escript beside it | Rebuild from a clean checkout, or set `LOOPEX_ESCRIPT` to the escript's path |
 | `loopex: :loopex_home_required` | A durable command has neither `--state-root` nor `LOOPEX_HOME` | Export `LOOPEX_HOME` or pass `--state-root`; ephemeral `ask` needs neither |
-| `loopex: :provider_credential_required` | The durable profile's `LOOPEX_PROVIDER_API_KEY` is missing, empty or too large | Export the key in this shell before the durable command; local Ollama `ask` needs no key |
+| `loopex: set LOOPEX_PROVIDER_API_KEY to the provider credential; it is read once and removed` | Durable `run` or `resume` has no usable provider credential | Export the key in this shell before the command |
+| `loopex: provider_credential_required` | Durable `ask` has no usable provider credential | Export the key before durable `ask`; local Ollama ephemeral `ask` needs no key |
 | `loopex: --policy is required; there is no default host authority` | `run` or `resume` was given no policy | Name `shell-allowlist` or `allow-all` |
 | `loopex: another loopex process (pid N) is using this state root; …` | Another command or a daemon holds the state root | Use the daemon's live forms, stop the other process, or pass another `--state-root` |
 | `loopex daemon` exits 85 (`session_index_upgrade_required`) | The root has offline sessions and no daemon index | Run `loopex daemon prepare-index` with nothing else holding the root |

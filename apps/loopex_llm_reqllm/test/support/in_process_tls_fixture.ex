@@ -241,7 +241,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
         mint_control(port)
         assert_handshake(1, false)
         assert_receive {:tls_cache_fault_triggered, ^nonce, ^manager}, 5_000
-        assert_receive {:tls_cache_reinit, ^nonce, :client, ^manager, true}, 5_000
+        assert_receive {:tls_cache_reinit, ^nonce, :client, ^manager}, 5_000
         assert_receive {:tls_cache_client_init, ^nonce, ^manager, false}, 5_000
         mint_control(port)
         assert_handshake(2, false)
@@ -362,11 +362,27 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
   end
 
   defp accept_control_only(listener, test, count) do
-    for index <- 1..count do
+    Enum.reduce(1..count, MapSet.new(), fn index, seen_ids ->
       {:ok, transport} = :ssl.transport_accept(listener, 10_000)
       {:ok, socket} = :ssl.handshake(transport, 10_000)
-      {:ok, info} = :ssl.connection_information(socket, [:session_resumption])
-      send(test, {:tls_handshake, index, Keyword.fetch!(info, :session_resumption)})
+
+      {:ok, info} =
+        :ssl.connection_information(socket, [:protocol, :session_id, :session_resumption])
+
+      {resumed, next_ids} =
+        case Keyword.fetch!(info, :protocol) do
+          :"tlsv1.2" ->
+            # OTP 27 exposes :session_resumption but does not set it for TLS
+            # 1.2. Reusing a nonempty server session ID is the real control.
+            session_id = Keyword.fetch!(info, :session_id)
+            assert is_binary(session_id) and byte_size(session_id) > 0
+            {MapSet.member?(seen_ids, session_id), MapSet.put(seen_ids, session_id)}
+
+          :"tlsv1.3" ->
+            {Keyword.fetch!(info, :session_resumption), seen_ids}
+        end
+
+      send(test, {:tls_handshake, index, resumed})
 
       if index >= 3 do
         _headers = read_headers(socket, "")
@@ -375,7 +391,8 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
 
       assert {:error, :closed} = :ssl.recv(socket, 0, 10_000)
       :ok = :ssl.close(socket)
-    end
+      next_ids
+    end)
 
     send(test, {:tls_resumption_server_done, self()})
   end

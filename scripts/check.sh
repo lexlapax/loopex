@@ -5,7 +5,7 @@
 #
 # The test suite runs one application per VM, several at once, heaviest first,
 # so the wall-clock time is the longest application rather than the sum. Set
-# LOOPEX_CHECK_JOBS to bound the concurrency; the default is half the cores.
+# LOOPEX_CHECK_JOBS to bound the concurrency; the default is at most four VMs.
 # While the suite runs, a line every 30 seconds names what is still running.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -82,6 +82,7 @@ suite() {
   cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
   jobs=${LOOPEX_CHECK_JOBS:-$((cores / 2))}
   [ "$jobs" -ge 1 ] || jobs=1
+  if [ -z "${LOOPEX_CHECK_JOBS:-}" ] && [ "$jobs" -gt 4 ]; then jobs=4; fi
   logs=$(mktemp -d "${TMPDIR:-/tmp}/loopex-check.XXXXXX")
   export LOOPEX_CHECK_LOGS=$logs
 
@@ -92,14 +93,21 @@ suite() {
     [ -d "$app/test" ] || continue
     case " ${ordered[*]} " in *" $app "*) ;; *) ordered+=("$app") ;; esac
   done
-  # An application named in LOOPEX_CHECK_ALONE runs with the box to itself
-  # before the rest share it. The provider suite boots a real child VM per
+  # Composition uses fixed cleanup and startup bounds while its tests start
+  # many real roots and OS effects; sharing the box with other application VMs
+  # makes the runner, not the product, consume those bounds. Applications named
+  # in LOOPEX_CHECK_ALONE also run with the box to themselves before the rest
+  # share it. The provider suite boots a real child VM per
   # case under the product's ten-second deadline; on a four-core hosted runner
   # that boot starved behind another application's compile and crossed the
   # deadline, which is the runner measuring itself, not the product. The knob
   # is empty by default so a developer box keeps the fully parallel run.
   local alone=() shared=()
   for app in "${ordered[@]}"; do
+    if [ "$app" = apps/loopex_composition ]; then
+      alone+=("$app")
+      continue
+    fi
     case " ${LOOPEX_CHECK_ALONE:-} " in
       *" ${app#apps/} "*) alone+=("$app") ;;
       *) shared+=("$app") ;;

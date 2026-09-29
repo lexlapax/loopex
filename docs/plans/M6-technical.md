@@ -3540,6 +3540,13 @@ installation through the ADR's isolated test-only delegating callback, then
 performs exactly one second handshake; missing readiness or non-resumption
 fails or is unavailable evidence, never a retry-to-pass loop. Production's
 disabled retention must prevent reuse.
+On the floor toolchain, OTP 27 leaves `:session_resumption` false for TLS 1.2
+even when it resumes. The fixture instead requires the accepted server socket's
+nonempty `:session_id` to repeat for the positive control and to be new for
+each production call, comparing with every earlier ID. OTP 27's
+`ssl_session.erl:117-127` retains the ID only for a resumed handshake, and
+`ssl_gen_statem.erl:1946-1974` exposes it. TLS 1.3 keeps its explicit
+`:session_resumption` proof.
 
 The TLS 1.2 probe is test-only `LoopexLLMReqLLMTest.TLSSessionCacheProbe`,
 implementing `:ssl_session_cache_api`: `init/1`, `terminate/1`, `lookup/2`,

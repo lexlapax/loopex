@@ -3353,9 +3353,22 @@ defmodule Loopex.Executor.Local do
   defp await_guardian_decision(guardian, reference, tag, effect_state, remaining) do
     receive do
       {^tag, decision} ->
-        Process.demonitor(reference, [:flush])
-        demonitor_guardian_effect(effect_state)
-        decision
+        # The send is the guardian's final expression, but the message can
+        # reach this caller before the guardian exits. Reap that exact process
+        # before exposing its decision to the session cleanup proof.
+        Process.exit(guardian, :kill)
+
+        receive do
+          {:DOWN, ^reference, :process, ^guardian, _reason} ->
+            demonitor_guardian_effect(effect_state)
+            decision
+        after
+          guardian_confirmation_wait(remaining) ->
+            Process.demonitor(reference, [:flush])
+
+            {:guardian_stopped, :decision_reap_unconfirmed,
+             stop_guardian_effect(effect_state, remaining)}
+        end
 
       {^tag, :guardian_effect, ^guardian, effect} when is_pid(effect) ->
         effect_monitor = Process.monitor(effect)

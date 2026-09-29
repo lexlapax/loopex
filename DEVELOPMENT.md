@@ -67,7 +67,8 @@ archive-manifest, attended-release, and floor-lane fixtures,
 `mix loopex.deps_budget`,
 `mix loopex.version_train`, the test build, and the credential-free suite, one
 application per VM with several at once (`LOOPEX_CHECK_JOBS` bounds how many;
-the default is half the cores; `LOOPEX_CHECK_ALONE` names applications that
+the default is half the cores capped at four; composition always runs alone,
+and `LOOPEX_CHECK_ALONE` names other applications that
 run one at a time before the rest share the box, which hosted CI sets to
 `loopex_llm_reqllm` because its child VMs boot under the product's deadline
 and a four-core runner starved that boot behind another application's
