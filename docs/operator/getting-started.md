@@ -159,15 +159,20 @@ commands. `--model`, `--tools`,
 tool preset, named skill directories and bounds. The command does not silently
 discover a home or project skill.
 
-If cleanup is unproved and no public run observation exists, `ask` emits no
-JSON result and names the pending obligation on standard error. A retained
-terminal ending or partial no-ending snapshot may still produce one result
-marked `cleanup.proved: false`; the no-ending result exits with status `6`.
-A pre-claim startup failure can report
-`root=null`: no temporary-root path was known, and that value is not permission
-to remove a guessed directory. Any known retained root is printed as a
-JSON-encoded path with its ownership label. `unknown` ownership is diagnostic,
-not deletion authority.
+When `ask` receives an unproved cleanup report and no public run observation
+exists, it emits no JSON result and names the pending obligation on standard
+error. A retained terminal ending or partial no-ending snapshot may still
+produce one result marked `cleanup.proved: false`; the no-ending result exits
+with status `6`. A pre-claim startup failure can report `root=null`: no
+temporary-root path was known, and that value is not permission to remove a
+guessed directory. When the report names a retained root, `ask`
+prints it as a JSON-encoded path with its ownership label. `unknown` ownership
+is diagnostic, not deletion authority. An unmarked owner loss can instead
+print only `loopex: session_unavailable` and exit `1` with no JSON result or
+root path, even if a temporary root remains. Before another `ask`, make sure
+the previous ask process has exited. Use independent host records to
+investigate an unnamed root; do not guess a path or remove a directory based
+on the diagnostic.
 
 For `interrupt_handler_unavailable` or `cleanup_unproved`, read the plain-English
 line after the fixed error code or cleanup detail. Before another `ask`, make
@@ -423,7 +428,7 @@ offline commands against the root.
 | `loopex: another loopex process (pid N) is using this state root; …` | Another command or a daemon holds the state root | Use the daemon's live forms, stop the other process, or pass another `--state-root` |
 | `loopex daemon` exits 85 (`session_index_upgrade_required`) | The root has offline sessions and no daemon index | Run `loopex daemon prepare-index` with nothing else holding the root |
 | `loopex daemon` exits 76 (`placement_active`) | Another daemon or command holds this root | Stop it, or use another state root |
-| `loopex: failed model_call_failed` | The provider call failed; its details are withheld on purpose | Check the key, the network and the provider's status, then run again |
+| `ending failed` (exit `2`) for `ask` text mode; JSON `details.reason: "model_call_failed"`; `loopex: failed model_call_failed` for durable `run` or `resume` | The provider call failed; private provider details are withheld | Check the key, the network and the provider's status, then run again |
 
 Every `loopex daemon` exit status is listed in the
 [daemon reference](daemon.md#technical-depth).

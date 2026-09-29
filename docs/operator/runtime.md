@@ -65,11 +65,14 @@ with an explicit host policy, then `ask/3`, `answer/3`, `history/1` or
 one prompt and returns a result only after cleanup. The process that calls
 `start_session/1` owns the session: passing the opaque handle to another
 process does not extend its lifetime, and creator exit starts cleanup. A
-successful stop proves
-the session's provider and tool subtree ended. If cleanup cannot be proved,
-`stop_session/1` returns `cleanup_unproved`, retains the temporary root, and
-seals only that session. No later process can resume this profile. Use the
-durable profile when recovery and retained history are required.
+successful stop proves the session's provider and tool subtree ended. If
+cleanup is unproved and the owner replies, `stop_session/1` returns
+`cleanup_unproved` and seals that session. Its report names a retained root
+when the owner knows the path. If the owner dies before replying,
+`stop_session/1` can return bare `session_unavailable` even when a retained
+root exists; that path goes unnamed. A reported path never authorizes
+deletion. No later process can resume this profile. Use the durable profile
+when recovery and retained history are required.
 
 <a id="operator-runtime-first-run"></a>
 ## Run the Working Loop
@@ -218,8 +221,11 @@ states the full match.
 - For durable composition, a missing provider credential is a configuration
   error before the run starts. An ephemeral hosted session reads its selected
   key at each model call, so a prompt may already be admitted when a missing
-  key ends that call as `model_call_failed`. Neither case is a skipped success;
-  inspect ephemeral cleanup before starting another `ask`.
+  key ends that call as `model_call_failed`. For `loopex ask`, a failed provider
+  call prints `ending failed` in text mode and exits `2`; JSON reports
+  `details.reason` as `model_call_failed`. Durable `run` and `resume` retain
+  their `loopex: failed model_call_failed` diagnostic. Neither case is a skipped
+  success; inspect ephemeral cleanup before starting another `ask`.
 - `commit_unknown` fences its mutation domain until the exact transaction is
   re-presented and reaches a retained resolution. Nothing is acknowledged,
   published or dispatched through that fence.
