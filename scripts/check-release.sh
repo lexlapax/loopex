@@ -242,13 +242,15 @@ elixir scripts/source-archive-check.exs verify \
 set +e
 (cd "$tree" && without_credential mix deps.get &&
   MIX_ENV=prod without_credential mix cmd --app loopex_cli mix escript.build) 2>&1 |
-  tee "$retain/fresh-source-build.log"
+  release_redact | tee "$retain/fresh-source-build.log"
 build_statuses=("${PIPESTATUS[@]}")
 set -e
-printf 'build-evidence: command_status=%s tee_status=%s duration_seconds=%s\n' \
-  "${build_statuses[0]}" "${build_statuses[1]}" "$((SECONDS - fresh_started))" >>"$retain/fresh-source-build.log"
+printf 'build-evidence: command_status=%s redactor_status=%s tee_status=%s duration_seconds=%s\n' \
+  "${build_statuses[0]}" "${build_statuses[1]}" "${build_statuses[2]}" \
+  "$((SECONDS - fresh_started))" >>"$retain/fresh-source-build.log"
 release_retain_identity "$retain/fresh-source-build.log"
-[ "${build_statuses[0]}" -eq 0 ] && [ "${build_statuses[1]}" -eq 0 ] ||
+[ "${build_statuses[0]}" -eq 0 ] && [ "${build_statuses[1]}" -eq 0 ] &&
+  [ "${build_statuses[2]}" -eq 0 ] ||
   { echo 'check-release: fresh-source build RED' >&2; exit 1; }
 elixir "$tree/scripts/escript-inventory.exs" \
   "$tree/apps/loopex_cli/loopex" "$tree/_build/prod/loopex_provider" \
@@ -362,13 +364,16 @@ if release_selected rollback; then
     "$retain" "$rollback_old" "$retain/rollback-old.archive.tar" \
     "$retain/rollback-old.projection" "$retain/rollback-old.identity" \
     "$commit" "$retain/rollback-new.archive.tar" \
-    "$retain/rollback-new.projection" "$retain/rollback-new.identity" 2>&1 | tee "$rollback_log"
+    "$retain/rollback-new.projection" "$retain/rollback-new.identity" 2>&1 |
+    release_redact | tee "$rollback_log"
   rollback_statuses=("${PIPESTATUS[@]}")
   set -e
-  printf 'rollback-evidence: command_status=%s tee_status=%s duration_seconds=%s\n' \
-    "${rollback_statuses[0]}" "${rollback_statuses[1]}" "$((SECONDS - rollback_started))" >>"$rollback_log"
+  printf 'rollback-evidence: command_status=%s redactor_status=%s tee_status=%s duration_seconds=%s\n' \
+    "${rollback_statuses[0]}" "${rollback_statuses[1]}" "${rollback_statuses[2]}" \
+    "$((SECONDS - rollback_started))" >>"$rollback_log"
   release_retain_identity "$rollback_log"
-  [ "${rollback_statuses[0]}" -eq 0 ] && [ "${rollback_statuses[1]}" -eq 0 ] ||
+  [ "${rollback_statuses[0]}" -eq 0 ] && [ "${rollback_statuses[1]}" -eq 0 ] &&
+    [ "${rollback_statuses[2]}" -eq 0 ] ||
     { echo 'check-release: rollback RED' >&2; exit 1; }
 fi
 printf 'check-release: total=%ss\n' "$((SECONDS - started))"

@@ -314,6 +314,76 @@ grep -q 'command_status=0 tee_status=24 summary_status=0' "$retain/tee-failed.lo
   ! grep -Fq "$LOOPEX_PROVIDER_API_KEY" "$retain/redactor-failed.log" "$work/redactor-failed.output" ||
     fail 'raw output escaped after redactor failure'
 )
+# Run the runner's build and rollback pipeline blocks with disposable commands.
+# All four names share one value to exercise the redactor's collision path.
+mkdir -p "$work/pipeline-bin"
+cat >"$work/pipeline-bin/mix" <<'EOF'
+#!/usr/bin/env bash
+printf 'build emitted %s\n' "$RELEASE_TEST_SECRET"
+EOF
+cat >"$tree/scripts/rollback-lane.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'rollback emitted %s\n' "$RELEASE_TEST_SECRET"
+EOF
+chmod +x "$work/pipeline-bin/mix"
+awk '
+  /^\(cd "\$tree" && without_credential mix deps.get/ { inside = 1 }
+  inside && /^elixir "\$tree\/scripts\/escript-inventory.exs"/ { exit }
+  inside { print }
+' "$root/scripts/check-release.sh" >"$work/build-pipeline.sh"
+awk '
+  /^  without_credential bash "\$tree\/scripts\/rollback-lane.sh"/ { inside = 1 }
+  inside && /^fi$/ { exit }
+  inside { print }
+' "$root/scripts/check-release.sh" >"$work/rollback-pipeline.sh"
+[ -s "$work/build-pipeline.sh" ] && [ -s "$work/rollback-pipeline.sh" ] ||
+  fail 'release pipeline fixture could not find the runner blocks'
+for pipeline in build rollback; do
+  for redactor in live failed; do
+    status=0
+    output="$work/$pipeline-$redactor.output"
+    pipeline_retain="$work/pipeline-retained/$pipeline-$redactor"
+    mkdir -p "$pipeline_retain"
+    if [ "$pipeline" = build ]; then
+      log="$pipeline_retain/fresh-source-build.log"
+    else
+      log="$pipeline_retain/rollback.log"
+    fi
+    (
+      retain=$pipeline_retain
+      export RELEASE_TEST_SECRET=release-pipeline-collision-synthetic
+      export LOOPEX_PROVIDER_API_KEY=$RELEASE_TEST_SECRET
+      export OPENAI_API_KEY=$RELEASE_TEST_SECRET
+      export ANTHROPIC_API_KEY=$RELEASE_TEST_SECRET
+      export OPENROUTER_API_KEY=$RELEASE_TEST_SECRET
+      export PATH="$work/pipeline-bin:$PATH"
+      if [ "$redactor" = failed ]; then release_redact() { return 27; }; fi
+      fresh_started=$SECONDS
+      rollback_started=$SECONDS
+      rollback_old=old
+      commit=new
+      rollback_log=$log
+      set +e
+      if [ "$pipeline" = build ]; then
+        source "$work/build-pipeline.sh"
+      else
+        source "$work/rollback-pipeline.sh"
+      fi
+    ) >"$output" 2>&1 || status=$?
+    if [ "$redactor" = failed ]; then
+      [ "$status" -eq 1 ] || fail "$pipeline passed after redactor failure (status=$status)"
+      grep -q 'redactor_status=27' "$log" || fail "$pipeline lost redactor failure status"
+    else
+      [ "$status" -eq 0 ] || fail "$pipeline fixture returned $status"
+      grep -q 'command_status=0 redactor_status=0 tee_status=0' "$log" ||
+        fail "$pipeline lost pipeline statuses"
+      grep -Fq '[REDACTED]' "$log" && grep -Fq '[REDACTED]' "$output" ||
+        fail "$pipeline did not redact the shared value"
+    fi
+    ! grep -Fq 'release-pipeline-collision-synthetic' "$log" "$output" ||
+      fail "$pipeline published a supported credential value"
+  done
+done
 before=$(release_digest "$retain/green.log")
 status=0
 (lane green fixture 1 without_credential bash -c 'printf "replacement\n"') >"$work/duplicate-log.output" 2>&1 || status=$?
