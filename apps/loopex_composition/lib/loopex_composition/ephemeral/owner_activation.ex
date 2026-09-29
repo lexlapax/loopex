@@ -57,19 +57,36 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
   end
 
   @doc false
-  def owner({:owner_activation, owner, _creator, _ref, _token, _monitor}), do: owner
+  def owner({:owner_activation, owner, _creator, _ref, _token, _monitor, _expiry}),
+    do: owner
 
   @doc false
-  def begin({:owner_activation, owner, creator, ref, token, monitor})
+  # Concept: begin cannot extend the admission window fixed before proxy spawn.
+  # Technical depth: the receive uses the same absolute expiry as the proxy and owner.
+  def begin({:owner_activation, owner, creator, ref, token, monitor, expiry})
       when creator == self() do
     reply_ref = make_ref()
     send(owner, {creator, ref, :begin, token, reply_ref})
 
     receive do
-      {^owner, ^reply_ref, :begun, cell} when is_reference(cell) -> {:ok, cell}
-      {:DOWN, ^monitor, :process, ^owner, _reason} -> @failure
+      {^owner, ^reply_ref, :begun, cell} when is_reference(cell) ->
+        {:ok, cell}
+
+      {:DOWN, ^monitor, :process, ^owner, reason} ->
+        safe_reason =
+          if reason in [:normal, :expired_owner_start, :killed], do: reason, else: :other
+
+        trace_failed_start(%{stage: :begin, outcome: :owner_down, reason: safe_reason})
+        @failure
     after
-      @start_ms -> @failure
+      remaining(expiry) ->
+        trace_failed_start(%{
+          stage: :begin,
+          outcome: :timeout,
+          owner_alive: Process.alive?(owner)
+        })
+
+        @failure
     end
   end
 
@@ -202,7 +219,7 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
       {owner, ref, :prepared} when owner == state.candidate and ref == state.ref ->
         {:ok,
          {:owner_activation, owner, state.creator, state.ref, state.token,
-          state.candidate_monitor}}
+          state.candidate_monitor, state.expiry}}
 
       {:DOWN, monitor, :process, owner, _reason}
       when monitor == state.candidate_monitor and owner == state.candidate ->
@@ -213,6 +230,19 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
   end
 
   defp fail(state) do
+    failure = %{
+      expired: System.monotonic_time() >= state.expiry,
+      direct: state.direct,
+      provisional: state.provisional,
+      owned: state.owned,
+      retiring: state.retiring,
+      proxy_down: state.proxy_down,
+      candidate_down: state.candidate_down,
+      candidate_seen: is_pid(state.candidate),
+      returned_seen: is_pid(state.returned),
+      identity_challenge: is_reference(state.identity_challenge)
+    }
+
     observed_monitor =
       if state.direct and not state.owned,
         do: Process.monitor(state.candidate),
@@ -230,7 +260,19 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
     if state.direct and not state.candidate_down,
       do: await_down(observed_monitor, state.candidate, reap_until)
 
+    trace_failed_start(failure)
     @failure
+  end
+
+  if Mix.env() == :test do
+    defp trace_failed_start(failure) do
+      case System.get_env("LOOPEX_TEST_TRACE") do
+        nil -> :ok
+        path -> File.write(path, "owner_activation_failure=#{inspect(failure)}\n", [:append])
+      end
+    end
+  else
+    defp trace_failed_start(_failure), do: :ok
   end
 
   defp await_down(nil, _pid, _deadline), do: :ok

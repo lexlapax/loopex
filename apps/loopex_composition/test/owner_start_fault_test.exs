@@ -39,7 +39,7 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
   test "wrong begin token has no authority" do
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 
-    assert {:ok, {:owner_activation, owner, creator, ref, _token, _monitor} = activation} =
+    assert {:ok, {:owner_activation, owner, creator, ref, _token, _monitor, _expiry} = activation} =
              OwnerActivation.start(supervisor)
 
     wrong_reply = make_ref()
@@ -56,6 +56,35 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
     monitor = Process.monitor(owner)
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 1_200
     assert @failure = OwnerActivation.begin(activation)
+    Process.exit(supervisor, :shutdown)
+  end
+
+  test "begin cannot extend the original owner activation deadline" do
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+
+    assert {:ok, activation} =
+             OwnerActivation.start(supervisor, fn sup, spec ->
+               {:ok, owner} = DynamicSupervisor.start_child(sup, spec)
+               Process.sleep(450)
+               {:ok, owner}
+             end)
+
+    owner = OwnerActivation.owner(activation)
+    monitor = Process.monitor(owner)
+    assert :erlang.suspend_process(owner)
+
+    {result, elapsed_ms} =
+      try do
+        started_ms = System.monotonic_time(:millisecond)
+        result = OwnerActivation.begin(activation)
+        {result, System.monotonic_time(:millisecond) - started_ms}
+      after
+        :erlang.resume_process(owner)
+      end
+
+    assert @failure = result
+    assert elapsed_ms < 850
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :expired_owner_start}, 1_000
     Process.exit(supervisor, :shutdown)
   end
 
