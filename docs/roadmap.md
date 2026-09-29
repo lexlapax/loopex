@@ -133,8 +133,9 @@ leaving core's runtime library unchanged. [ADR 0039](adr/0039-ephemeral-embedded
 governs the ephemeral profile's host-VM credential scope and cleanup limits.
 Acceptance authorizes implementation, not a release or a public-surface freeze.
 
-The subsequent draft sequence is M7's installed durable operator, M8's store
-engine successor, and M9's governed extension runtime. Those
+The subsequent draft sequence is the coding-agent proof, placed first as M7
+on 2026-09-29, then the installed durable operator, the store engine
+successor, and the governed extension runtime. Those
 [drafts](drafts/README.md) are not accepted plans; their scope and release
 versions remain decisions for their own acceptance.
 

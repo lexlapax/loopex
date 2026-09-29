@@ -11,6 +11,10 @@ Its version labels moved one minor with it: `0.4.0` is this rung's candidate,
 and `0.3` is the M6 minimal release before it. Where it says the `0.2` root
 format, that format is still the local store's, unchanged by M6.
 
+On 2026-09-29 the maintainer placed the
+[coding-agent proof](m7-coding-agent.md#concept) first, as M7. This draft
+follows it and is renumbered when M6 closes.
+
 <a id="concept-plan-purpose"></a>
 ### Purpose
 
