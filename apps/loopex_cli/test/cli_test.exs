@@ -1148,7 +1148,11 @@ defmodule LoopexCliTest do
     assert usage =~ "loopex cancel"
 
     assert {:error, no_command} = LoopexCli.dispatch([])
-    assert no_command =~ "choose one command"
+
+    assert String.starts_with?(
+             no_command,
+             "choose one command: run, ask, -p, sessions, resume, attach, cancel, artifact, skill, or daemon\n\n"
+           )
 
     # Naming both leaves the caller unable to say which they meant, and it is
     # refused before a runtime, a store, or an executor is started.

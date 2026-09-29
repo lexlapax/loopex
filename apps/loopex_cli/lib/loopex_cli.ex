@@ -149,7 +149,7 @@ defmodule LoopexCli do
   def dispatch([], _options),
     do:
       {:error,
-       "choose one command: run, sessions, resume, attach, cancel, artifact, or skill\n\n" <>
+       "choose one command: run, ask, -p, sessions, resume, attach, cancel, artifact, skill, or daemon\n\n" <>
          usage()}
 
   def dispatch([unknown | _rest], _options),

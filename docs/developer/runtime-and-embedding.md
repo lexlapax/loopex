@@ -170,6 +170,19 @@ current defaults for the retained values.
 The host-facing sequence uses the public facade only:
 
 ```elixir
+defmodule MyHost.RunEvents do
+  def until_finished(attachment, backoff \\ 10) do
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"} = event} -> {:ok, event}
+      {:ok, _event} -> until_finished(attachment, 10)
+      {:error, :empty} ->
+        Process.sleep(backoff)
+        until_finished(attachment, min(backoff * 2, 500))
+      other -> other
+    end
+  end
+end
+
 {:ok, runtime} = Loopex.start_link(runtime_options)
 {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-1")
 {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
@@ -177,9 +190,13 @@ The host-facing sequence uses the public facade only:
 {:accepted, "prompt-1"} =
   Loopex.command(attachment, %{type: :prompt, command_id: "prompt-1", content: "Do it"})
 
-{:ok, event} = Loopex.next_event(attachment)
+{:ok, %{kind: "run.finished"} = event} = MyHost.RunEvents.until_finished(attachment)
 :ok = Loopex.stop(runtime)
 ```
+
+`command/2` acceptance records the prompt, not its completion. The reader
+retries an empty queue and returns disconnection or another error instead of
+claiming that the run finished.
 
 | Group | Functions |
 | --- | --- |
