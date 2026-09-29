@@ -168,11 +168,14 @@ not deletion authority.
 For `interrupt_handler_unavailable` or `cleanup_unproved`, read the plain-English
 line after the fixed error code or cleanup detail. Before another `ask`, make
 sure the previous ask process has exited. A repeated handler error means the
-host's signal-handler setup needs repair; starting another prompt in that
-process is not a fix. For `root=null`, do not remove a guessed directory. For
-a named root, inspect the exact path and verify ownership before completing
-any pending removal. A cleanup warning is not proof that the previous session
-stopped or that a named path is safe to delete.
+host must restore signal handling so Loopex can safely handle Ctrl-C and
+termination signals; starting another prompt in that process is not a
+fix. For `root=null`, do not remove a guessed directory. For a named root,
+inspect the exact path and use independent host records to verify that this
+session created it before removing anything. The ownership label in the
+diagnostic alone is not that proof. If you cannot verify ownership, leave the
+path untouched and investigate. A cleanup warning is not proof that the
+previous session stopped or that a named path is safe to delete.
 
 You may name up to four existing directories with `--skill-dir`. A directory
 at `<workspace>/.agents/skills/<name>` contributes a project skill; a directory

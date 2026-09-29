@@ -93,7 +93,7 @@ defmodule LoopexCli.AskResult do
 
     guidance =
       if fixed == :interrupt_handler_unavailable do
-        "loopex: The interrupt handler is unavailable. Before running ask again, make sure the previous ask process has exited and start a fresh command. If this repeats, repair the host's signal-handler setup.\n"
+        "loopex: The interrupt handler is unavailable. Before running ask again, make sure the previous ask process has exited and start a fresh command. If this repeats, fix the host's signal handling so Loopex can safely handle Ctrl-C and termination signals.\n"
       else
         ""
       end
@@ -324,7 +324,7 @@ defmodule LoopexCli.AskResult do
   end
 
   defp cleanup_guidance(_root, [:root_removal]) do
-    "loopex: Removal of the temporary root is unconfirmed. Before running ask again, inspect the root named above and complete its cleanup only after verifying that it belongs to this session.\n"
+    "loopex: Removal of the temporary root is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above. Remove it only if you can independently verify this session created it; otherwise leave it untouched and investigate.\n"
   end
 
   defp cleanup_guidance(_root, _pending) do

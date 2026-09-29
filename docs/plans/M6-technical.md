@@ -3243,7 +3243,7 @@ stderr line, without inspecting a failure term or claiming whether a session
 was created:
 
 ```text
-loopex: The interrupt handler is unavailable. Before running ask again, make sure the previous ask process has exited and start a fresh command. If this repeats, repair the host's signal-handler setup.
+loopex: The interrupt handler is unavailable. Before running ask again, make sure the previous ask process has exited and start a fresh command. If this repeats, fix the host's signal handling so Loopex can safely handle Ctrl-C and termination signals.
 ```
 
 All other fixed-code status-1 diagnostics remain exactly one line.
@@ -3262,7 +3262,7 @@ root and pending set:
 | Cleanup shape | Exact second stderr line |
 | --- | --- |
 | `root: nil` | `loopex: Loopex could not confirm that the temporary session stopped, and no root path is known. Before running ask again, make sure the previous ask process has exited; do not remove a guessed directory.` |
-| Known root, only `root_removal` pending | `loopex: Removal of the temporary root is unconfirmed. Before running ask again, inspect the root named above and complete its cleanup only after verifying that it belongs to this session.` |
+| Known root, only `root_removal` pending | `loopex: Removal of the temporary root is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above. Remove it only if you can independently verify this session created it; otherwise leave it untouched and investigate.` |
 | Known root, any other pending set | `loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.` |
 
 Each exact instruction ends with one LF. It interpolates no root, credential,
