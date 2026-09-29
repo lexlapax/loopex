@@ -6104,3 +6104,16 @@ now expressly requires exactly the four named calls, in order, with no
 exploration or reread; the eight-step and deadline bounds and all result
 assertions remain unchanged. The focused demonstration fixture now proves that
 an absent final edited value or missing write effect is rejected.
+
+At `3c3c4320e3bb750665665da51fe1c52f698a2ee1`, Linux passed all four
+steps. The first macOS attempt stopped before a step because the sandbox
+denied Mix's local lock; the permitted run passed the first three steps, then
+the durable model completed four ordered tools but wrote
+`M6_DEMONSTRATION_EDIT_OK` instead of `M6_AFTER_EDIT`. The retained journal's
+first committed model request contains the expected value and not the wrong
+one; the wrong value first appears in a provider result and its tool intent.
+This is a real failed demonstration, not a script pass. The demonstration now
+uses the already-supported `anthropic:claude-sonnet-4-5` as its hosted test
+model, while the product's Haiku default and the demonstration's prompt,
+eight-step bound, deadline and assertions stay unchanged. The demonstration
+proves hosted durable workflow, not a particular model's instruction fidelity.

@@ -8,7 +8,7 @@ if [ -n "${LOOPEX_HOME+x}" ]; then
   exit 2
 fi
 export M6_DEMO_LOCAL_MODEL="${M6_DEMO_LOCAL_MODEL:-ollama:llama3.2}"
-export M6_DEMO_DURABLE_MODEL="${M6_DEMO_DURABLE_MODEL:-anthropic:claude-haiku-4-5}"
+export M6_DEMO_DURABLE_MODEL="${M6_DEMO_DURABLE_MODEL:-anthropic:claude-sonnet-4-5}"
 case "$M6_DEMO_LOCAL_MODEL" in
   ollama:*) ;;
   *) echo 'm6-demonstration: a local Ollama model is required' >&2; exit 2 ;;
