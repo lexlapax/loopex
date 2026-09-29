@@ -428,7 +428,7 @@ offline commands against the root.
 | `loopex: another loopex process (pid N) is using this state root; …` | Another command or a daemon holds the state root | Use the daemon's live forms, stop the other process, or pass another `--state-root` |
 | `loopex daemon` exits 85 (`session_index_upgrade_required`) | The root has offline sessions and no daemon index | Run `loopex daemon prepare-index` with nothing else holding the root |
 | `loopex daemon` exits 76 (`placement_active`) | Another daemon or command holds this root | Stop it, or use another state root |
-| `ending failed` (exit `2`) for `ask` text mode; JSON `details.reason: "model_call_failed"`; `loopex: failed model_call_failed` for durable `run` or `resume` | The provider call failed; private provider details are withheld | Check the key, the network and the provider's status, then run again |
+| `ending failed` (exit `2`) for `ask` text mode; JSON `details.reason: "model_call_failed"`; `loopex: failed model_call_failed` for durable `run` or `resume` | The provider call failed; private provider details are withheld | For local Ollama, check that Ollama is running and the selected model is available. For a hosted provider, check its key, the network and the provider's status, then run again |
 
 Every `loopex daemon` exit status is listed in the
 [daemon reference](daemon.md#technical-depth).
