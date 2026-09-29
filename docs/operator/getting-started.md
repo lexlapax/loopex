@@ -122,10 +122,12 @@ loopex ask --policy shell-allowlist --model ollama:llama3.2 \
 ```
 
 This form prints only the final answer to standard output. It needs neither
-`LOOPEX_HOME` nor `LOOPEX_PROVIDER_API_KEY`; Loopex proves its owned session,
-caller and provider-pool subtree gone before reporting success. A checked-out
-socket and its TLS controller may drain afterward. For another agent or a
-shell script, use:
+`LOOPEX_HOME` nor `LOOPEX_PROVIDER_API_KEY`. When cleanup is proved, Loopex has
+confirmed its owned session, caller and provider-pool subtree are gone. A run
+can complete and exit `0` while cleanup is unproved; check the JSON cleanup
+field or the standard-error warning before starting another `ask`. A checked-out
+socket and its TLS controller may drain after proved cleanup. For another agent
+or a shell script, use:
 
 ```bash
 loopex -p "summarise this repository" --policy shell-allowlist \
@@ -145,8 +147,10 @@ printf 'Explain this file\n' | loopex ask --policy shell-allowlist \
 With `--output json`, a public run outcome is one JSON object on standard output, with schema
 `loopex.ask/1`, session and run IDs, profile, outcome, text, tool summaries,
 shadowed skills, cleanup and outcome details. Ephemeral `ask` reports its
-cleanup proof; durable `ask` has `"cleanup": null`. Status `0` means completed;
-`1` means command refusal or lifecycle failure; `2` failed; `3` bound reached;
+cleanup proof; durable `ask` has `"cleanup": null`. Status `0` means the run
+completed, not that ephemeral cleanup was proved. Inspect `cleanup.proved` in
+JSON or the standard-error warning in text mode. Status `1` means command
+refusal or lifecycle failure; `2` failed; `3` bound reached;
 `4` outcome unknown; `5` cancelled; `6` no ending observed; and `130`
 interrupted. These read-only examples name their tool preset explicitly;
 omitting `--tools` selects the coding preset, which includes writes and shell
@@ -170,12 +174,14 @@ line after the fixed error code or cleanup detail. Before another `ask`, make
 sure the previous ask process has exited. A repeated handler error means the
 host must restore signal handling so Loopex can safely handle Ctrl-C and
 termination signals; starting another prompt in that process is not a
-fix. For `root=null`, do not remove a guessed directory. For a named root,
-inspect the exact path and use independent host records to verify that this
-session created it before removing anything. The ownership label in the
-diagnostic alone is not that proof. If you cannot verify ownership, leave the
-path untouched and investigate. A cleanup warning is not proof that the
-previous session stopped or that a named path is safe to delete.
+fix. For `root=null`, do not remove a guessed directory. If `pending` includes
+`run_ending`, `effect_cleanup`, `process_groups` or `session_subtree`, preserve
+any named root while those obligations remain unproved. Ownership alone is not
+permission to remove it. When `pending` is only `root_removal`, first make sure
+the previous ask process has exited, then inspect the exact path and use
+independent host records to verify that this session created it before removing
+anything. The ownership label in the diagnostic alone is not that proof. If
+you cannot verify ownership, leave the path untouched and investigate.
 
 You may name up to four existing directories with `--skill-dir`. A directory
 at `<workspace>/.agents/skills/<name>` contributes a project skill; a directory

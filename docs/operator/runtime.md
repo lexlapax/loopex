@@ -215,8 +215,11 @@ states the full match.
 <a id="operator-runtime-failures"></a>
 ## Reading Failures
 
-- A missing provider credential is a configuration error. The run did not
-  happen; it is never a skipped success.
+- For durable composition, a missing provider credential is a configuration
+  error before the run starts. An ephemeral hosted session reads its selected
+  key at each model call, so a prompt may already be admitted when a missing
+  key ends that call as `model_call_failed`. Neither case is a skipped success;
+  inspect ephemeral cleanup before starting another `ask`.
 - `commit_unknown` fences its mutation domain until the exact transaction is
   re-presented and reaches a retained resolution. Nothing is acknowledged,
   published or dispatched through that fence.
