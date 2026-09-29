@@ -70,6 +70,7 @@ defmodule LoopexCli.AskCommandTest do
       {port, server} = start_tool_server()
       server_monitor = Process.monitor(server)
       state_root = Path.join(root, "unused-state-root")
+      started_ms = System.monotonic_time(:millisecond)
 
       {status, stdout, stderr} =
         capture(
@@ -105,7 +106,14 @@ defmodule LoopexCli.AskCommandTest do
           ]
         )
 
-      assert status == 0
+      elapsed_ms = System.monotonic_time(:millisecond) - started_ms
+      stdout_excerpt = binary_part(stdout, 0, min(byte_size(stdout), 4_096))
+      stderr_excerpt = binary_part(stderr, 0, min(byte_size(stderr), 4_096))
+
+      assert status == 0,
+             "ask case #{inspect({mode, policy, command, output})} exited #{status} " <>
+               "after #{elapsed_ms} ms; stdout=#{inspect(stdout_excerpt)} " <>
+               "stderr=#{inspect(stderr_excerpt)}"
 
       if output == "text" do
         assert stdout == "read complete\n"
