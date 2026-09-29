@@ -66,8 +66,8 @@ embedded() {
       "with M6_AFTER_EDIT. " <>
       "Step 4: use bash with argv [\"cat\", \"generated.txt\"] " <>
       "to verify the final file. After the successful bash result, do not " <>
-      "call another tool. Answer in plain text with M6_DEMONSTRATION_READ_OK, " <>
-      "M6_AFTER_EDIT and M6_SKILL_LOADED_OK.\n")
+      "call another tool. Answer in plain text with the exact final content " <>
+      "of generated.txt.\n")
     options = [policy: M6Demonstration.Policy, cwd: workspace,
                model: System.fetch_env!("M6_DEMO_LOCAL_MODEL"),
                tools: :coding, skills: [skill], max_steps: 8, deadline_ms: 120_000]
@@ -78,16 +78,20 @@ embedded() {
       inspect(result, limit: :infinity, printable_limit: :infinity) <> "\n", [:exclusive])
     case result do
       {:ok, %{outcome: :completed, text: text, tools: tools}} ->
-        markers = for marker <- ["M6_DEMONSTRATION_READ_OK", "M6_AFTER_EDIT",
-                                "M6_SKILL_LOADED_OK"],
-                      into: %{}, do: {marker, String.contains?(text, marker)}
         completed = for tool <- tools, tool.outcome == "completed", do: tool.tool_id
         required = ~w(loopex.read loopex.write loopex.edit loopex.bash)
+        remaining = Enum.reduce(completed, required, fn id, pending ->
+          case pending do
+            [^id | rest] -> rest
+            _ -> pending
+          end
+        end)
+        answer_ok = is_binary(text) and String.contains?(text, "M6_AFTER_EDIT")
         file_ok = File.read(Path.join(workspace, "generated.txt")) == {:ok, "M6_AFTER_EDIT"}
-        unless Enum.all?(markers, fn {_marker, found} -> found end) and
-               Enum.all?(required, &(&1 in completed)) and file_ok,
+        unless answer_ok and remaining == [] and file_ok,
           do: raise("embedded demonstration coding task mismatch: " <>
-                    inspect(%{markers: markers, completed_tools: completed, file_ok: file_ok}))
+                    inspect(%{answer_ok: answer_ok, completed_tools: completed,
+                              ordered_tools_ok: remaining == [], file_ok: file_ok}))
       _ -> raise "embedded demonstration did not complete with proved cleanup"
     end
   '
@@ -115,18 +119,22 @@ assert_json() {
         unless value["cleanup"] == :null, do: raise("durable cleanup must be null")
     end
     if coding_required == "yes" do
-      markers = for marker <- ["M6_DEMONSTRATION_READ_OK", "M6_AFTER_EDIT",
-                              "M6_SKILL_LOADED_OK"],
-                    into: %{}, do: {marker, String.contains?(value["text"], marker)}
       completed = for tool <- value["tools"], tool["outcome"] == "completed",
-                      do: tool["tool_id"]
+                    do: tool["tool_id"]
       required = ~w(loopex.read loopex.write loopex.edit loopex.bash)
+      remaining = Enum.reduce(completed, required, fn id, pending ->
+        case pending do
+          [^id | rest] -> rest
+          _ -> pending
+        end
+      end)
+      answer_ok = String.contains?(value["text"], "M6_AFTER_EDIT")
       file_ok = File.read(Path.join(System.fetch_env!("M6_DEMO_WORKSPACE"),
         "generated.txt")) == {:ok, "M6_AFTER_EDIT"}
-      unless Enum.all?(markers, fn {_marker, found} -> found end) and
-             Enum.all?(required, &(&1 in completed)) and file_ok,
+      unless answer_ok and remaining == [] and file_ok,
         do: raise("command demonstration coding task mismatch: " <>
-                  inspect(%{markers: markers, completed_tools: completed, file_ok: file_ok}))
+                  inspect(%{answer_ok: answer_ok, completed_tools: completed,
+                            ordered_tools_ok: remaining == [], file_ok: file_ok}))
     end
   ' -- "$@"
 }
@@ -193,7 +201,7 @@ durable() {
   durable_run "$M6_DEMO_COMMAND" resume "$session" --policy allow-all \
     --workspace "$M6_DEMO_WORKSPACE" --state-root "$M6_DEMO_STATE_ROOT" \
     >"$M6_DEMO_WORKSPACE/resumed.txt" || return
-  grep -q 'M6_DEMONSTRATION_READ_OK' "$M6_DEMO_WORKSPACE/resumed.txt"
+  grep -q 'M6_AFTER_EDIT' "$M6_DEMO_WORKSPACE/resumed.txt"
 }
 
 candidate=$(git rev-parse HEAD)
@@ -219,7 +227,7 @@ M6_DEMO_STATE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/loopex-m6-state.XXXXXX")
 export M6_DEMO_STATE_ROOT
 export M6_DEMO_SKILL="$M6_DEMO_ROOT/skills/m6-demo"
 export M6_DEMO_COMMAND="$PWD/apps/loopex_cli/bin/loopex"
-export M6_DEMO_PROMPT='Perform every step of the supplied m6-demo skill in order. Use each tool result before the next action. After verification, answer in plain text by copying on separate lines the exact content read from evidence.txt, the final exact content of generated.txt, and the completion marker specified by the skill. Do not omit or paraphrase any of the three. Do not call another tool after verification.'
+export M6_DEMO_PROMPT='Perform the coding task defined by the supplied m6-demo skill.'
 printf 'm6-demonstration: candidate %s on %s; workspace root %s\n' \
   "$candidate" "$(uname -s)" "$M6_DEMO_ROOT"
 printf 'm6-demonstration: durable state root %s\n' "$M6_DEMO_STATE_ROOT"

@@ -6075,3 +6075,22 @@ superseded passing run. No retry-until-pass procedure is authorized.
 These exceptions authorize completion of the evidence package, not M6 closure,
 merge to `main`, a tag, release or publication. The administrative direct-child
 closure and subsequent publication authorization rules remain in force.
+
+<a id="disposition-m6-demonstration-oracle-2026-09-29"></a>
+### M6 demonstration witness correction, 2026-09-29
+
+The maintainer approved replacing two final-answer prose markers after the
+retained two-platform runs showed completed read, write, edit and bash calls
+and the exact edited file, while local models omitted a read or skill marker
+in the final sentence. The generic prompt names only the skill. Its private
+directory is the sole source of the four-step task and expected file bytes.
+The demonstration now requires the four completed tools in order, the exact
+edited file, an answer containing its final value, the existing run outcome,
+JSON shape, exit, cleanup and durable-resume checks. This proves the skill-
+directed coding workflow without making verbatim repetition of unrelated
+markers a condition of success. Existing resource-admission suites separately
+prove the selected skill content reaches model context. The prior failed runs
+remain failures with their actual SHAs and output digests; the earlier empty
+Linux answer after only two tools remains unexplained. No assertion is waived
+for that incomplete task. This decision changes the demonstration witness,
+not the M6 outcomes or the separate closure and publication authority.
