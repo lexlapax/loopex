@@ -23,12 +23,13 @@ What you can do here:
   from the executor's receipt ledger;
 - read the runtime's refusals as the stop conditions they are.
 
-Constraints: one active run per session, no network transport, remote executor
-or distribution, and no production credential manager. The one-active-runtime
-rule applies to each durable Store and `runtime_id`. An ephemeral handle and
-its in-memory conversation end with its host VM or proved stop; it cannot be
-resumed by a later process. Keeping sessions alive between processes for
-several local clients is the job of [the daemon](daemon.md#concept).
+Only one run can be active per session. Loopex does not provide network session
+transport, a remote executor, distribution, or a production credential manager.
+The one-active-runtime rule applies to each durable Store and `runtime_id`. An
+ephemeral handle and its in-memory conversation end when its host VM exits or
+stop is proved. A later process cannot resume it. Keeping sessions alive
+between processes for several local clients is the job of
+[the daemon](daemon.md#concept).
 
 Developer composition details:
 [Runtime and embedding](../developer/runtime-and-embedding.md#technical-depth).

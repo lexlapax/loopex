@@ -250,6 +250,10 @@ process borrows the handle. This API uses the same kernel and policy port as the
 durable facade, but stores session truth only in memory. VM loss ends it, with
 no resume or migration to the durable profile.
 
+These snippets assume that `MyHost.ReadOnly` is loaded. The
+[runnable embedded example](getting-started-technical.md#technical-getting-started-embedding)
+defines the policy module.
+
 ```elixir
 {:ok, result} =
   LoopexComposition.Ephemeral.run("List the files here.",
