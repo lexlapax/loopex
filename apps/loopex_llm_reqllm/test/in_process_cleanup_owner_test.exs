@@ -93,6 +93,60 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
     assert Process.alive?(candidate)
   end
 
+  test "staged cleanup custody can be acknowledged after the model start deadline", %{
+    supervisor: supervisor
+  } do
+    start_ref = make_ref()
+    proxy = proxy()
+
+    model_deadline =
+      System.monotonic_time() + System.convert_time_unit(300, :millisecond, :native)
+
+    {:ok, candidate} = start(supervisor, self(), proxy, start_ref, model_deadline)
+    assert_receive {:model_candidate_ready, ^candidate, ^start_ref, ^proxy}
+    candidate_monitor = Process.monitor(candidate)
+    staging_ref = make_ref()
+    generation = make_ref()
+    call_ref = make_ref()
+    proof_ref = make_ref()
+    cleanup_deadline = future()
+
+    send(
+      candidate,
+      {:model_custody_prepare, start_ref, staging_ref,
+       System.monotonic_time() + System.convert_time_unit(2_000, :millisecond, :native),
+       AdmissionProbe,
+       {:model_cleanup_custody, self(), generation, call_ref, candidate, proof_ref}}
+    )
+
+    refute_receive {:model_custody_prepared, ^candidate, _, _, _, _}, 20
+
+    send(
+      candidate,
+      {:model_custody_prepare, start_ref, staging_ref, cleanup_deadline, AdmissionProbe,
+       {:model_cleanup_custody, self(), generation, call_ref, candidate, proof_ref}}
+    )
+
+    Process.sleep(
+      max(
+        System.convert_time_unit(model_deadline - System.monotonic_time(), :native, :millisecond) +
+          10,
+        0
+      )
+    )
+
+    assert System.monotonic_time() > model_deadline
+    assert Process.alive?(candidate)
+    send(proxy, {:retire, candidate, start_ref})
+
+    assert_receive {:model_custody_prepared, ^candidate, ^staging_ref, ^generation, ^call_ref,
+                    ^proof_ref},
+                   1_000
+
+    Process.exit(candidate, :kill)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}, 1_000
+  end
+
   test "wrong candidate identity cannot acquire custody", %{supervisor: supervisor} do
     start_ref = make_ref()
     proxy = proxy()

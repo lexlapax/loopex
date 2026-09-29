@@ -3,6 +3,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
 
   alias Loopex.LLM.ReqLLM.InProcess
   alias Loopex.LLM.ReqLLM.InProcess.Caller
+  alias Loopex.LLM.ReqLLM.Deadline
   alias Loopex.Model
   alias Loopex.Runtime.ProviderLifetime
   alias Loopex.Runtime.ProviderLifetime.Starter
@@ -49,6 +50,18 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
       end
     end
 
+    def request(
+          {__MODULE__, owner, generation, _cell},
+          {:cancel_model, _call,
+           {:model_start_proof, _, _, _, :normal, :not_started, {:error, :unavailable}}} =
+            operation,
+          deadline
+        ) do
+      send(owner, {:no_child_cancel_deadline, self(), deadline})
+      send(owner, {:admission_seen, :cancel_model, self(), operation})
+      grant(generation, operation, make_ref(), deadline)
+    end
+
     def request({__MODULE__, owner, generation, _cell}, operation, deadline) do
       send(owner, {:admission_seen, elem(operation, 0), self(), operation})
       grant(generation, operation, make_ref(), deadline)
@@ -81,7 +94,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
 
     def request(
           {__MODULE__, observer, generation, _cell},
-          {:stage_model, call, candidate, proof, _stop, start_proof},
+          {:stage_model, call, candidate, proof, _stop, start_proof} = operation,
           deadline
         ) do
       start_ref = elem(start_proof, 1)
@@ -103,6 +116,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
           receive do
             {:stage_result, ^candidate, :lost_ack} ->
               {:error, :session_admission_closed}
+
+            {:stage_result, ^candidate, :grant} ->
+              grant(generation, operation, deadline)
           after
             1_000 -> {:error, :session_admission_closed}
           end
@@ -118,6 +134,18 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
         ) do
       send(observer, {:retirement_requested, candidate, call, proof})
       grant(generation, operation, deadline)
+    end
+
+    def request(
+          {__MODULE__, observer, generation, _cell},
+          {:cancel_model, _call, {:registrar_not_entered, _, candidate, _, :killed}} = operation,
+          deadline
+        ) do
+      send(observer, {:admission_seen, :cancel_model, self(), operation})
+
+      if Process.alive?(candidate),
+        do: {:error, :session_admission_closed},
+        else: grant(generation, operation, deadline)
     end
 
     def request(_handle, _operation, _deadline), do: {:error, :session_admission_closed}
@@ -147,11 +175,11 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     :ok
   end
 
-  defp request(model) do
+  defp request(model, timeout_ms \\ 10_000) do
     {:ok, request} =
       Model.request(model, [%{"role" => "user", "content" => "hello"}],
         sampling: %{"max_tokens" => 16},
-        deadline: System.system_time(:millisecond) + 10_000
+        deadline: System.system_time(:millisecond) + timeout_ms
       )
 
     request
@@ -322,6 +350,25 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     refute_receive {:admission_seen, :stage_model, _, _}, 30
   end
 
+  test "proved no-child cancellation gets a fresh cleanup deadline" do
+    starter = Starter.new(fn _child -> {:error, :unavailable} end)
+    model_request = request("ollama:small", 400)
+
+    model_deadline =
+      Deadline.invocation_deadline(model_request.deadline, System.time_offset(:native))
+
+    result =
+      ProviderLifetime.scoped(fn _, _ -> flunk("registrar entered") end, starter, fn ->
+        InProcess.complete(model_request, callback_options(), fn _ -> :ok end)
+      end)
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} = result
+    assert_receive {:no_child_cancel_deadline, callback, cleanup_deadline}, 1_000
+    assert callback == self()
+    assert cleanup_deadline > model_deadline
+    refute_receive {:admission_seen, :stage_model, _, _}, 20
+  end
+
   test "a managed callback stages the candidate, registers it, and waits for owner proof" do
     {:ok, supervisor} = Task.Supervisor.start_link()
     on_exit(fn -> stop_fixture_supervisor(supervisor) end)
@@ -410,29 +457,117 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     refute_receive :registrar_entered, 20
   end
 
+  test "candidate expiry during staging accepts the owner's clean cancellation" do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+    on_exit(fn -> stop_fixture_supervisor(supervisor) end)
+    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    {options, cell} = stage_race_options()
+    model_request = request("ollama:small", 650)
+    {callback, callback_monitor} = stage_race_callback(model_request, options, starter)
+
+    assert_receive {:stage_requested, ^callback, candidate, _call, _proof, _start_ref}, 1_000
+    candidate_monitor = Process.monitor(candidate)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 1_000
+    assert System.system_time(:millisecond) >= model_request.deadline
+    send(callback, {:stage_result, candidate, :clean_cancel})
+
+    assert_receive {:callback_outcome,
+                    {:return, {:error, {:not_dispatched, "model_call_failed"}}}},
+                   1_000
+
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 1_000
+    assert :atomics.get(cell, 1) == 0
+    refute_receive :registrar_entered, 20
+  end
+
+  test "model expiry after staging custody cancels the inert candidate before returning" do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+    on_exit(fn -> stop_fixture_supervisor(supervisor) end)
+    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    {options, cell} = stage_race_options()
+    model_request = request("ollama:small", 650)
+    {callback, callback_monitor} = stage_race_callback(model_request, options, starter)
+
+    assert_receive {:stage_requested, ^callback, candidate, call, proof, _start_ref}, 1_000
+    candidate_monitor = Process.monitor(candidate)
+    send(callback, {:stage_result, candidate, :deliver_custody})
+    assert_receive {:model_custody_prepared, ^candidate, _, _, ^call, ^proof}, 1_000
+
+    Process.sleep(max(model_request.deadline - System.system_time(:millisecond) + 10, 0))
+    assert System.system_time(:millisecond) > model_request.deadline
+    send(callback, {:stage_result, candidate, :grant})
+
+    assert_receive {:admission_seen, :cancel_model, ^callback,
+                    {:cancel_model, ^call,
+                     {:registrar_not_entered, _, ^candidate, cancel_monitor, :killed}}},
+                   1_000
+
+    assert is_reference(cancel_monitor)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}, 1_000
+
+    assert_receive {:callback_outcome,
+                    {:return, {:error, {:not_dispatched, "model_call_failed"}}}},
+                   1_000
+
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 1_000
+    assert :atomics.get(cell, 1) == 0
+    refute_receive :registrar_entered, 20
+  end
+
+  test "model expiry while pending acknowledgement is delayed cancels before registrar" do
+    {:ok, supervisor} = Task.Supervisor.start_link()
+    on_exit(fn -> stop_fixture_supervisor(supervisor) end)
+    starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
+    {options, cell} = stage_race_options()
+    model_request = request("ollama:small", 650)
+    {callback, callback_monitor} = stage_race_callback(model_request, options, starter)
+
+    assert_receive {:stage_requested, ^callback, candidate, call, proof, _start_ref}, 1_000
+    candidate_monitor = Process.monitor(candidate)
+    send(callback, {:stage_result, candidate, :deliver_custody})
+    assert_receive {:model_custody_prepared, ^candidate, _, _, ^call, ^proof}, 1_000
+
+    assert :erlang.suspend_process(candidate)
+    assert :erlang.trace(callback, true, [:send]) == 1
+
+    try do
+      assert System.system_time(:millisecond) < model_request.deadline
+      send(callback, {:stage_result, candidate, :grant})
+
+      assert_receive {:trace, ^callback, :send, {:registration_pending, ^callback, _stop_ref},
+                      ^candidate},
+                     500
+
+      Process.sleep(max(model_request.deadline - System.system_time(:millisecond) + 10, 0))
+      assert System.system_time(:millisecond) > model_request.deadline
+    after
+      :erlang.trace(callback, false, [:send])
+      if Process.alive?(candidate), do: :erlang.resume_process(candidate)
+    end
+
+    assert_receive {:admission_seen, :cancel_model, ^callback,
+                    {:cancel_model, ^call,
+                     {:registrar_not_entered, _, ^candidate, cancel_monitor, :killed}}},
+                   1_000
+
+    assert is_reference(cancel_monitor)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}, 1_000
+
+    assert_receive {:callback_outcome,
+                    {:return, {:error, {:not_dispatched, "model_call_failed"}}}},
+                   1_000
+
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 1_000
+    assert :atomics.get(cell, 1) == 0
+    refute_receive :registrar_entered, 20
+  end
+
   test "lost stage acknowledgement leaves provisionally owned candidate to retire" do
     {:ok, supervisor} = Task.Supervisor.start_link()
     on_exit(fn -> stop_fixture_supervisor(supervisor) end)
     starter = Starter.new(fn child -> Task.Supervisor.start_child(supervisor, child) end)
-    test = self()
     {options, cell} = stage_race_options()
-
-    {callback, callback_monitor} =
-      spawn_monitor(fn ->
-        outcome =
-          try do
-            {:return,
-             ProviderLifetime.scoped(
-               fn _, _ -> send(test, :registrar_entered) end,
-               starter,
-               fn -> InProcess.complete(request("ollama:small"), options, fn _ -> :ok end) end
-             )}
-          catch
-            :exit, reason -> {:exit, reason}
-          end
-
-        send(test, {:callback_outcome, outcome})
-      end)
+    {callback, callback_monitor} = stage_race_callback(request("ollama:small"), options, starter)
 
     assert_receive {:stage_requested, ^callback, candidate, call, proof, _start_ref}, 1_000
     candidate_monitor = Process.monitor(candidate)
@@ -472,6 +607,26 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
     ]
 
     {options, cell}
+  end
+
+  defp stage_race_callback(model_request, options, starter) do
+    observer = self()
+
+    spawn_monitor(fn ->
+      outcome =
+        try do
+          {:return,
+           ProviderLifetime.scoped(
+             fn _, _ -> send(observer, :registrar_entered) end,
+             starter,
+             fn -> InProcess.complete(model_request, options, fn _ -> :ok end) end
+           )}
+        catch
+          :exit, reason -> {:exit, reason}
+        end
+
+      send(observer, {:callback_outcome, outcome})
+    end)
   end
 
   defp stop_fixture_supervisor(supervisor) do

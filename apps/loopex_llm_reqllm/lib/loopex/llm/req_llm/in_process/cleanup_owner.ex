@@ -127,6 +127,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
 
   defp loop_wait(%{cleanup_attempted: true}), do: :infinity
   defp loop_wait(%{custody: %{acked: true}}), do: :infinity
+  defp loop_wait(%{custody: %{acked: false, deadline: deadline}}), do: remaining_ms(deadline)
   defp loop_wait(%{deadline: deadline}), do: remaining_ms(deadline)
 
   defp expired(%{cleanup: cleanup} = state) when not is_nil(cleanup),
@@ -191,7 +192,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
        when ref == state.start_ref and is_nil(state.custody) and is_reference(staging_ref) and
               is_integer(expiry) and is_pid(owner) and is_reference(generation) and
               is_reference(call_ref) and candidate == self() and is_reference(proof_ref) do
-    if valid_module?(module) and live_deadline?(expiry) and live?(owner) and state.callback do
+    if valid_module?(module) and live_control_deadline?(expiry) and live?(owner) and
+         state.callback do
       handle = {:model_cleanup_custody, owner, generation, call_ref, candidate, proof_ref}
 
       state
@@ -203,6 +205,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
         generation: generation,
         call: call_ref,
         proof: proof_ref,
+        deadline: expiry,
         acked: false
       })
       |> Map.put(:owner_mon, Process.monitor(owner))
@@ -834,7 +837,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
         System.convert_time_unit(@cleanup_ms, :millisecond, :native)
 
   defp maybe_ack_custody(%{custody: %{acked: false} = custody, proxy_down: true} = state) do
-    if live_deadline?(state.deadline) and not state.cleanup_attempted and
+    if live_deadline?(custody.deadline) and not state.cleanup_attempted and
          not is_nil(state.callback) and live?(state.callback) do
       send(
         custody.owner,
@@ -875,6 +878,13 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
 
   defp live?(pid), do: Process.alive?(pid)
   defp live_deadline?(deadline), do: System.monotonic_time() < deadline
+
+  defp live_control_deadline?(deadline) do
+    now = System.monotonic_time()
+
+    deadline > now and
+      deadline <= now + System.convert_time_unit(@cleanup_ms, :millisecond, :native)
+  end
 
   @doc false
   def pool_timeout(deadline, sampled_now) when is_integer(deadline) and is_integer(sampled_now) do

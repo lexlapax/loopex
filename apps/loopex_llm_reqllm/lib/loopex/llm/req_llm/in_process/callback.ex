@@ -128,7 +128,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
                        config.module,
                        config.handle,
                        {:cancel_model, call_ref, proof},
-                       deadline
+                       control_deadline()
                      ) do
                   {:ok, _grant} -> @not_dispatched
                   _closed -> unknown_start(proved, config.cell)
@@ -263,35 +263,41 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
     operation =
       {:stage_model, call_ref, state.candidate, proof_ref, stop_ref, proof}
 
-    case Admission.request(config.module, config.handle, operation, deadline) do
+    stage_deadline = control_deadline()
+
+    case Admission.request(config.module, config.handle, operation, stage_deadline) do
       {:ok, {:session_grant, _generation, :stage_model, _callback, staging_ref, _expiry}} ->
-        send(state.candidate, {:registration_pending, self(), stop_ref})
+        if live?(deadline) do
+          send(state.candidate, {:registration_pending, self(), stop_ref})
 
-        case await_candidate(
-               state,
-               {:registration_pending_ack, state.candidate, state.start_ref, stop_ref},
-               deadline
-             ) do
-          :ok ->
-            before_provider_register(config.cell, call_ref, state.candidate)
+          case await_candidate(
+                 state,
+                 {:registration_pending_ack, state.candidate, state.start_ref, stop_ref},
+                 stage_deadline
+               ) do
+            :ok ->
+              before_provider_register(config.cell, call_ref, state.candidate)
 
-            register(
-              state,
-              prepared,
-              fingerprint,
-              config,
-              call_ref,
-              deadline,
-              proof_ref,
-              stop_ref,
-              staging_ref
-            )
+              register(
+                state,
+                prepared,
+                fingerprint,
+                config,
+                call_ref,
+                deadline,
+                proof_ref,
+                stop_ref,
+                staging_ref
+              )
 
-          {:down, reason} ->
-            no_registrar(%{state | candidate_down: true}, config, call_ref, staging_ref, reason)
+            {:down, reason} ->
+              no_registrar(%{state | candidate_down: true}, config, call_ref, staging_ref, reason)
 
-          :timeout ->
-            abandon_staging()
+            :timeout ->
+              cancel_staged(state, config, call_ref, staging_ref)
+          end
+        else
+          cancel_staged(state, config, call_ref, staging_ref)
         end
 
       {:error, :model_stage_cancelled} ->
@@ -362,18 +368,22 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
           exit(:provider_lifetime_registration_failed)
       end
     else
-      reason = candidate_reason(state, control_deadline())
+      cancel_staged(state, config, call_ref, staging_ref)
+    end
+  end
 
-      if reason in [:normal, :killed],
-        do:
-          no_registrar(
-            %{state | candidate_down: true},
-            config,
-            call_ref,
-            staging_ref,
-            reason
-          ),
-        else: unknown_start(state, config.cell)
+  # Concept: an expired model call can still cancel its staged, inert child.
+  # Technical depth: the callback is the sole registrar; exact child DOWN and
+  # the owner's no-registrar acknowledgement must precede a clean return.
+  defp cancel_staged(state, config, call_ref, staging_ref) do
+    if Process.alive?(state.candidate), do: Process.exit(state.candidate, :kill)
+
+    case candidate_reason(state, control_deadline()) do
+      reason when reason in [:normal, :killed] ->
+        no_registrar(%{state | candidate_down: true}, config, call_ref, staging_ref, reason)
+
+      _unknown ->
+        unknown_start(state, config.cell)
     end
   end
 

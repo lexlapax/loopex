@@ -561,6 +561,69 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
     assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
   end
 
+  test "killed staged candidate cancels before the registrar and admits another model" do
+    generation = make_ref()
+    cell = :atomics.new(2, [])
+    {owner, owner_monitor} = census_owner(generation, cell)
+    handle = SessionAdmission.handle(owner, generation, cell)
+    call = make_ref()
+    proof = make_ref()
+    start_ref = make_ref()
+    {proxy, proxy_monitor} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^proxy_monitor, :process, ^proxy, :normal}
+
+    {candidate, candidate_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:model_custody_prepare, ^start_ref, staging_ref, _expiry, SessionAdmission,
+           {:model_cleanup_custody, ^owner, ^generation, ^call, _candidate, ^proof}} ->
+            send(owner, {:model_custody_prepared, self(), staging_ref, generation, call, proof})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    assert {:ok, _} = SessionAdmission.request(handle, {:begin_model, self(), call}, deadline())
+
+    start_proof =
+      {:model_start_proof, start_ref, proxy, proxy_monitor, :normal, candidate, candidate_monitor}
+
+    assert {:ok, {:session_grant, ^generation, :stage_model, _, staging_ref, _}} =
+             SessionAdmission.request(
+               handle,
+               {:stage_model, call, candidate, proof, make_ref(), start_proof},
+               deadline()
+             )
+
+    Process.exit(candidate, :kill)
+    assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :killed}
+
+    cancel =
+      {:cancel_model, call,
+       {:registrar_not_entered, staging_ref, candidate, candidate_monitor, :killed}}
+
+    assert {:ok, {:session_grant, ^generation, :cancel_model, _, _, _}} =
+             SessionAdmission.request(handle, cancel, deadline())
+
+    assert :atomics.get(cell, 1) == 0
+    assert :atomics.get(cell, 2) == 0
+    refute Process.alive?(candidate)
+
+    next_call = make_ref()
+
+    assert {:ok, _} =
+             SessionAdmission.request(handle, {:begin_model, self(), next_call}, deadline())
+
+    assert :atomics.get(cell, 2) == 1
+
+    assert {:ok, _} =
+             SessionAdmission.request(handle, {:cancel_model, next_call, :no_proxy}, deadline())
+
+    assert :atomics.get(cell, 2) == 0
+
+    send(owner, :stop)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+  end
+
   test "the live session owner and request helper complete exact no-registration cancellation" do
     generation = make_ref()
     cell = :atomics.new(2, [])
