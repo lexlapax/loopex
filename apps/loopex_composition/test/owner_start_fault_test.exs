@@ -49,6 +49,22 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
     Process.exit(supervisor, :shutdown)
   end
 
+  test "begin retires its activation monitor before exposing the owner" do
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+
+    assert {:ok,
+            {:owner_activation, owner, _creator, _ref, _token, activation_monitor, _expiry} =
+              activation} =
+             OwnerActivation.start(supervisor)
+
+    assert {:ok, _cell} = OwnerActivation.begin(activation)
+    observer = Process.monitor(owner)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^observer, :process, ^owner, :killed}, 1_000
+    refute_receive {:DOWN, ^activation_monitor, :process, ^owner, _reason}, 20
+    Process.exit(supervisor, :shutdown)
+  end
+
   test "an unbegun owner expires without gaining a session root" do
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     assert {:ok, activation} = OwnerActivation.start(supervisor)
@@ -62,16 +78,14 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
   test "begin cannot extend the original owner activation deadline" do
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 
-    assert {:ok, activation} =
-             OwnerActivation.start(supervisor, fn sup, spec ->
-               {:ok, owner} = DynamicSupervisor.start_child(sup, spec)
-               Process.sleep(450)
-               {:ok, owner}
-             end)
+    assert {:ok,
+            {:owner_activation, _owner, _creator, _ref, _token, activation_monitor, _expiry} =
+              activation} = OwnerActivation.start(supervisor)
 
     owner = OwnerActivation.owner(activation)
     monitor = Process.monitor(owner)
     assert :erlang.suspend_process(owner)
+    Process.sleep(750)
 
     {result, elapsed_ms} =
       try do
@@ -85,6 +99,7 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
     assert @failure = result
     assert elapsed_ms < 850
     assert_receive {:DOWN, ^monitor, :process, ^owner, :expired_owner_start}, 1_000
+    refute_receive {:DOWN, ^activation_monitor, :process, ^owner, _reason}, 20
     Process.exit(supervisor, :shutdown)
   end
 

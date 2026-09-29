@@ -62,32 +62,37 @@ defmodule LoopexComposition.Ephemeral.OwnerActivation do
 
   @doc false
   # Concept: begin cannot extend the admission window fixed before proxy spawn.
-  # Technical depth: the receive uses the same absolute expiry as the proxy and owner.
+  # Technical depth: the receive uses the same absolute expiry as the proxy and
+  # owner. Its monitor covers only this handshake; startup installs a new one.
   def begin({:owner_activation, owner, creator, ref, token, monitor, expiry})
       when creator == self() do
     reply_ref = make_ref()
     send(owner, {creator, ref, :begin, token, reply_ref})
 
-    receive do
-      {^owner, ^reply_ref, :begun, cell} when is_reference(cell) ->
-        {:ok, cell}
+    result =
+      receive do
+        {^owner, ^reply_ref, :begun, cell} when is_reference(cell) ->
+          {:ok, cell}
 
-      {:DOWN, ^monitor, :process, ^owner, reason} ->
-        safe_reason =
-          if reason in [:normal, :expired_owner_start, :killed], do: reason, else: :other
+        {:DOWN, ^monitor, :process, ^owner, reason} ->
+          safe_reason =
+            if reason in [:normal, :expired_owner_start, :killed], do: reason, else: :other
 
-        trace_failed_start(%{stage: :begin, outcome: :owner_down, reason: safe_reason})
-        @failure
-    after
-      remaining(expiry) ->
-        trace_failed_start(%{
-          stage: :begin,
-          outcome: :timeout,
-          owner_alive: Process.alive?(owner)
-        })
+          trace_failed_start(%{stage: :begin, outcome: :owner_down, reason: safe_reason})
+          @failure
+      after
+        remaining(expiry) ->
+          trace_failed_start(%{
+            stage: :begin,
+            outcome: :timeout,
+            owner_alive: Process.alive?(owner)
+          })
 
-        @failure
-    end
+          @failure
+      end
+
+    Process.demonitor(monitor, [:flush])
+    result
   end
 
   def begin(_activation), do: @failure
