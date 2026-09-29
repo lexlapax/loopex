@@ -95,9 +95,13 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
         assert controllers == []
       end
 
-      {caller_down, result} =
+      # The anchor precedes the action that can end the caller. A DOWN message
+      # can wait in this process's mailbox, so sampling after its receipt would
+      # let a transport that drained too late pass this witness.
+      {pre_down, result} =
         case mode do
           :normal ->
+            pre_down = System.monotonic_time(:millisecond)
             send(server, :respond)
             assert_receive {:loopex_one_shot_teardown, ^caller, teardown_ref, ^tag}, 2_000
             stop_pool(root)
@@ -108,36 +112,36 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
                            2_000
 
             assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 2_000
-            {System.monotonic_time(:millisecond), :completed}
+            {pre_down, :completed}
 
           :stop ->
+            pre_down = System.monotonic_time(:millisecond)
             Process.exit(caller, :kill)
             assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 2_000
-            instant = System.monotonic_time(:millisecond)
             stop_pool(root)
             assert_pool_gone(root)
-            {instant, :stopped}
+            {pre_down, :stopped}
 
           :deadline ->
             timer = Process.send_after(self(), {:model_deadline, caller}, 25)
             assert_receive {:model_deadline, ^caller}, 1_000
             Process.cancel_timer(timer)
+            pre_down = System.monotonic_time(:millisecond)
             Process.exit(caller, :kill)
             assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 2_000
-            instant = System.monotonic_time(:millisecond)
             stop_pool(root)
             assert_pool_gone(root)
-            {instant, :deadline}
+            {pre_down, :deadline}
         end
 
       assert_receive {:drain_server_eof, ^server}, @drain_ms
-      drained = await_transport_drain(controllers, ports, caller_down + @drain_ms)
-      assert drained - caller_down <= @drain_ms
+      drained = await_transport_drain(controllers, ports, pre_down + @drain_ms)
+      assert drained - pre_down <= @drain_ms
 
       IO.puts(
         "transport_drain kind=#{transport} tls_version=#{inspect(tls_version)} " <>
-          "mode=#{result} caller_down_ms=#{caller_down} " <>
-          "drain_elapsed_ms=#{drained - caller_down} " <>
+          "mode=#{result} pre_down_anchor_ms=#{pre_down} " <>
+          "drain_elapsed_ms=#{drained - pre_down} " <>
           "in_flight_processes=#{inspect(in_flight_processes)} " <>
           "in_flight_ports=#{inspect(in_flight_ports)} " <>
           "client_controllers=#{inspect(controllers)} client_ports=#{inspect(ports)} " <>
