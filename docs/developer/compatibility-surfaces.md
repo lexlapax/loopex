@@ -55,6 +55,13 @@ reach you through the facade you call. Internal process topology, process
 messages, supervision structure, and private structs are not a surface at all
 and are not listed.
 
+The M6 command boots standard input in byte mode so OTP 27 cannot decode an
+`ask` prompt before admission. Legacy commands restore Unicode output and keep
+ASCII `y`/`yes` confirmations. A prefetched confirmation padded with Unicode
+whitespace may be rejected, an explicitly
+[accepted compatibility limit](agent-context-map.md#disposition-m6-stdio-2026-09-29).
+Use plain ASCII confirmation input; persistent state is unchanged.
+
 Operator-facing consequences:
 [Coding sessions](../operator/coding-sessions.md#concept) and
 [Tools and policy](../operator/tools-and-policy.md#concept).

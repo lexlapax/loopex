@@ -20,7 +20,7 @@ defmodule LoopexCli.AskCommandTest do
 
   @moduletag timeout: 120_000
 
-  test "fresh command refuses invalid ask and -p without stdout or a state root" do
+  test "built command refuses invalid input and preserves standard IO bytes" do
     root = temporary_directory()
     on_exit(fn -> File.rm_rf!(root) end)
     command = build_command(root)
@@ -49,6 +49,7 @@ defmodule LoopexCli.AskCommandTest do
     assert stdout == ""
     assert String.starts_with?(stderr, "loopex: choose one command:")
     refute File.exists?(state_root)
+    assert_boot_io(command, root)
   end
 
   test "main keeps JSON ask quiet and text ask announces a real tool decision" do
@@ -237,7 +238,8 @@ defmodule LoopexCli.AskCommandTest do
     {status, stdout, stderr} =
       capture(
         elixir,
-        code_paths ++
+        ["--erl", "-kernel standard_io_encoding latin1"] ++
+          code_paths ++
           [
             "-e",
             outcome_ask_source(),
@@ -258,6 +260,43 @@ defmodule LoopexCli.AskCommandTest do
     assert stdout == "réponse π\n"
     assert stderr == "tool denied null\nending completed\n"
     refute File.exists?(state_root)
+  end
+
+  defp assert_boot_io(command, root) do
+    state_root = Path.join(root, "durable-state")
+    {:ok, sections} = :escript.extract(String.to_charlist(command), [])
+
+    assert List.to_string(Keyword.fetch!(sections, :emu_args)) =~
+             "-kernel standard_io_encoding latin1"
+
+    # A valid prompt reaches credential admission without making a provider
+    # call. OTP 27 eagerly reads stdin before main/1 can change its encoding.
+    {status, stdout, stderr} =
+      capture(
+        command,
+        ["ask", "--policy", "refuse-all", "--state-root", state_root, "--output", "json"],
+        root,
+        state_root,
+        [],
+        "é π"
+      )
+
+    assert status == 1
+    assert stdout == ""
+    assert stderr == "loopex: provider_credential_required\n"
+
+    {status, stdout, stderr} =
+      capture(command, ["ask", "--policy", "refuse-all"], root, state_root, [], <<255>>)
+
+    assert status == 1
+    assert stdout == ""
+    assert stderr == "loopex: invalid_prompt_invalid_utf8\n"
+
+    {status, stdout, stderr} = capture(command, ["éπ"], root, state_root)
+    assert status == 1
+    assert stdout == ""
+    assert String.starts_with?(stderr, "loopex: unknown command éπ\n")
+    assert String.valid?(stderr)
   end
 
   defp temporary_directory do

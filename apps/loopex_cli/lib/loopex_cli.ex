@@ -53,8 +53,8 @@ defmodule LoopexCli do
   @spec main([binary()]) :: no_return()
   def main([command | _rest] = argv) when command in ["ask", "-p"] do
     # Concept: ask admits and emits exact bytes, including non-ASCII UTF-8.
-    # Technical depth: the standard IO servers otherwise transcode even
-    # IO.binread/binwrite under a Unicode locale. Latin-1 mode preserves bytes.
+    # Technical depth: the escript boots in Latin-1 mode before OTP can read
+    # ahead. Keep that mode for IO.binread/binwrite's byte-preserving requests.
     if ask_binary_stdio() != :ok do
       LoopexCli.AskResult.diagnostic(:command_failed) |> halt_ask()
     end
@@ -113,6 +113,14 @@ defmodule LoopexCli do
   # an application error. The ask branch uses a separate fixed diagnostic
   # and validates its closed grammar before starting an application.
   defp start_legacy_application_or_halt do
+    # Concept: legacy commands retain Unicode terminal output and ASCII
+    # confirmations. Ask alone uses byte-oriented IO for its closed result.
+    # Technical depth: boot-time Latin-1 protects ask's prefetched input on
+    # OTP 27. Restoring Unicode cannot repair a prefetched Unicode-whitespace
+    # confirmation; the maintainer accepted that fail-closed limitation.
+    :ok = :io.setopts(:standard_io, encoding: :unicode)
+    :ok = :io.setopts(:standard_error, encoding: :unicode)
+
     case Application.ensure_all_started(:loopex_cli) do
       {:ok, _applications} ->
         :ok

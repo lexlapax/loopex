@@ -6028,3 +6028,21 @@ The decision supersedes only the three startup and root clauses of ADR 0039
 that it names; the remaining ephemeral and durable boundaries stay in force.
 It authorizes the conditioned M6 implementation and evidence, not milestone
 closure, merge to `main`, a tag, release or publication.
+
+<a id="disposition-m6-stdio-2026-09-29"></a>
+### M6 command startup encoding, 2026-09-29
+
+The maintainer approved startup byte mode and its stated legacy whitespace
+limitation after the OTP 27 floor test at `71fdf61d861eba8a03fbcb4d19318e52563d72eb`
+showed that changing encoding in `main/1` was too late. OTP 27 can decode
+redirected input before that function runs; selecting Latin-1 at VM startup
+preserves the original bytes for `ask` and `-p`.
+
+The escript starts with `-kernel standard_io_encoding latin1`. Legacy commands
+restore Unicode rendering before application startup and retain documented
+ASCII `y`/`yes` confirmations. A prefetched legacy confirmation padded with
+Unicode whitespace, such as nonbreaking spaces around `yes`, may now be
+rejected. The maintainer accepted this fail-closed compatibility limit instead
+of requiring a broader I/O redesign. Use plain ASCII confirmations. No stored
+data changes, migrations or rollback conversions follow from this choice.
+This authorizes the scoped fix and its tests, not milestone closure or release.

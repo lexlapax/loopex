@@ -134,6 +134,11 @@ loopex -p "summarise this repository" --policy shell-allowlist \
   --model ollama:llama3.2 --tools read-only --output json
 ```
 
+The built command selects byte encoding before the VM reads standard input,
+including on OTP 27. Legacy commands retain Unicode output; answer their
+confirmation prompts with plain ASCII `y` or `yes`. Piped confirmations padded
+with Unicode whitespace may be rejected.
+
 With no prompt words, `ask` reads standard input byte-for-byte as the prompt;
 one or more prompt words are joined with spaces and suppress standard-input
 reading. `--` ends flag parsing, so later words that start with `--` are prompt

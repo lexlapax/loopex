@@ -21,7 +21,15 @@ defmodule LoopexCli.MixProject do
       # The command an operator types is `loopex`. Without an explicit name the
       # escript takes the application's, and the documentation would be
       # describing a command that does not exist under that name.
-      escript: [app: nil, main_module: LoopexCli, name: :loopex],
+      # Concept: standalone ask admits the original stdin bytes.
+      # Technical depth: OTP 27 reads ahead before main/1, so encoding must be
+      # selected at VM boot. Legacy entrypoints restore Unicode rendering.
+      escript: [
+        app: nil,
+        main_module: LoopexCli,
+        name: :loopex,
+        emu_args: "-kernel standard_io_encoding latin1"
+      ],
       aliases: ["escript.build": [&build_pair/1]],
       deps: deps()
     ]
