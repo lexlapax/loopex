@@ -110,18 +110,15 @@ retained_logs=("$check_log")
 active_pid=
 tee_pid=
 interrupted_status=0
-kill_tree() {
-  local pid=$1 signal=$2 child
-  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
-    kill_tree "$child" "$signal"
-  done
-  kill -"$signal" "$pid" 2>/dev/null || true
-}
+# Give each background command its own process group. A descendant can be
+# reparented between TERM and KILL, but it remains in this group and cannot
+# keep the log FIFO open after interruption.
+set -m
 terminate_active() {
   [[ -n $active_pid ]] || return 0
-  kill_tree "$active_pid" TERM
+  kill -TERM -- "-$active_pid" 2>/dev/null || true
   sleep 1
-  kill_tree "$active_pid" KILL
+  kill -KILL -- "-$active_pid" 2>/dev/null || true
 }
 on_signal() {
   [[ $interrupted_status -eq 0 ]] || return 0

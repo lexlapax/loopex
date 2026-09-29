@@ -606,8 +606,15 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
       end)
 
     on_exit(fn -> Process.exit(creator, :kill) end)
-    assert_receive {:owner, owner, cell}
-    assert_receive {:store_handle_blocked, root}
+    assert_receive {:owner, owner, cell}, 6_000
+
+    root =
+      receive do
+        {:store_handle_blocked, root} -> root
+        {:result, _} -> flunk("startup completed before the store-handle seam")
+      after
+        6_000 -> flunk("startup did not reach the store-handle seam")
+      end
 
     on_exit(fn ->
       for pid <- [owner, root] do

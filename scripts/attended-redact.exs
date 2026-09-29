@@ -7,10 +7,16 @@ defmodule LoopexAttendedRedact do
 
   def main do
     try do
-      :ok = :io.setopts(:standard_io, encoding: :latin1)
-
       case credentials() do
-        {:ok, keys} -> stream(keys, max_key_width(keys), replacement(keys), <<>>)
+        {:ok, keys} ->
+          # The shell gives these raw inherited descriptors. Standard IO
+          # transcodes bytes under a UTF-8 locale, even with IO.binread/write.
+          # A bidirectional port does not reliably report EOF for a regular
+          # input file, so the input uses raw file reads and the port writes.
+          {:ok, input} = :file.open(~c"/dev/fd/4", [:read, :binary, :raw])
+          output = Port.open({:fd, 4, 5}, [:binary, :out])
+          stream(input, output, keys, max_key_width(keys), replacement(keys), <<>>)
+
         {:error, reason} -> fail(reason)
       end
     rescue
@@ -68,16 +74,18 @@ defmodule LoopexAttendedRedact do
   defp max_key_width([]), do: 1
   defp max_key_width(keys), do: keys |> Enum.map(&byte_size/1) |> Enum.max()
 
-  defp stream(keys, width, replacement, pending) do
-    case IO.binread(:standard_io, 65_536) do
+  defp stream(input, output, keys, width, replacement, pending) do
+    case :file.read(input, 65_536) do
       :eof ->
-        {output, <<>>} = redact(pending, keys, width, replacement, true)
-        publish(output)
+        {redacted, <<>>} = redact(pending, keys, width, replacement, true)
+        publish(output, redacted)
+        :ok = :file.close(input)
+        Port.close(output)
 
-      data when is_binary(data) ->
-        {output, remaining} = redact(pending <> data, keys, width, replacement, false)
-        publish(output)
-        stream(keys, width, replacement, remaining)
+      {:ok, data} ->
+        {redacted, remaining} = redact(pending <> data, keys, width, replacement, false)
+        publish(output, redacted)
+        stream(input, output, keys, width, replacement, remaining)
 
       _ ->
         fail("redaction_failed")
@@ -127,11 +135,11 @@ defmodule LoopexAttendedRedact do
     end)
   end
 
-  defp publish(bytes) do
-    case IO.binwrite(:standard_io, bytes) do
-      :ok -> :ok
-      _ -> fail("redaction_failed")
-    end
+  defp publish(_port, <<>>), do: :ok
+
+  defp publish(port, bytes) do
+    true = Port.command(port, bytes)
+    :ok
   end
 
   defp fail(code) do

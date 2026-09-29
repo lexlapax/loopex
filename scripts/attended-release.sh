@@ -85,7 +85,8 @@ redact_human() {
     elixir "$script_dir/attended-redact.exs" \
     3< <(printf '%s\0%s\0%s\0%s\0' \
       "${LOOPEX_PROVIDER_API_KEY:-}" "${OPENAI_API_KEY:-}" \
-      "${ANTHROPIC_API_KEY:-}" "${OPENROUTER_API_KEY:-}")
+      "${ANTHROPIC_API_KEY:-}" "${OPENROUTER_API_KEY:-}") \
+    4<&0 5>&1 </dev/null >/dev/null
 }
 redact_record() {
   if [ "$automatic" -eq 1 ]; then

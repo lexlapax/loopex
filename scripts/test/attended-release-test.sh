@@ -459,7 +459,8 @@ elixir_redact() {
   env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
     -u OPENROUTER_API_KEY ERL_CRASH_DUMP=/dev/null ERL_CRASH_DUMP_SECONDS=0 \
     elixir "$repo/scripts/attended-redact.exs" \
-    3< <(printf '%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$4")
+    3< <(printf '%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$4") \
+    4<&0 5>&1 </dev/null >/dev/null
 }
 awk 'BEGIN { for (i = 0; i < 65534; i++) printf "x" }' >"$work/redact-input"
 printf '%s!%s' "$OPENROUTER_API_KEY" "$OPENAI_API_KEY" >>"$work/redact-input"

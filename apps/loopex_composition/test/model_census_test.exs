@@ -1228,9 +1228,11 @@ defmodule LoopexComposition.Ephemeral.ModelCensusTest do
       )
 
     assert state.pending.phase == :cancelling
-    assert {_, token} = state.pending.timer
-    assert_receive {:model_census_lost_callback, ^token} = timeout, 650
-    state = ModelCensus.handle(state, timeout)
+    assert {timer, token} = state.pending.timer
+    remaining = :erlang.read_timer(timer)
+    assert remaining == false or (is_integer(remaining) and remaining <= 350)
+    Process.cancel_timer(timer)
+    state = ModelCensus.handle(state, {:model_census_lost_callback, token})
     assert state.pending.phase == :unproved
     assert :atomics.get(cell, 1) == 3
     assert :atomics.get(cell, 2) == 1

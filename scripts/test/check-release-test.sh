@@ -13,6 +13,18 @@ cp "$root/scripts/suite-summary.sh" "$tree/scripts/"
 without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
 
 fail() { printf 'check-release-test: %s\n' "$*" >&2; exit 1; }
+special_digest_path="$work/retained\\name"
+printf 'retained evidence\n' >"$special_digest_path"
+special_digest=$(release_digest "$special_digest_path")
+[[ $special_digest =~ ^[0-9a-f]{64}$ ]] ||
+  fail 'retained digest changed shape for a path with a backslash'
+if command -v sha256sum >/dev/null 2>&1; then
+  expected_digest=$(sha256sum <"$special_digest_path" | awk '{print $1}')
+else
+  expected_digest=$(shasum -a 256 <"$special_digest_path" | awk '{print $1}')
+fi
+[ "$special_digest" = "$expected_digest" ] ||
+  fail 'retained digest did not hash the file bytes'
 expect_refusal() {
   local status=0
   (release_select "$@") >"$work/parser-output" 2>&1 || status=$?

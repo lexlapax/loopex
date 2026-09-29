@@ -6204,10 +6204,9 @@ defmodule LoopexDaemon.OwnerTest do
       end)
 
     assert %{pending: 1} = wait_for_relay_pending(components.relay)
-    suspend_task = Task.async(fn -> :sys.suspend(owner) end)
-    :sys.resume(lease_owner)
     assert {:ok, :accepted, ^lease_owner, ^owner_incarnation} = Task.await(release_task, 500)
-    assert :ok = Task.await(suspend_task, 500)
+    assert :ok = :sys.suspend(owner)
+    :sys.resume(lease_owner)
     assert_receive {:worker_go, ^release_worker, ^release_origin}, 500
     assert :ok = wait_for_lease_owner(lease_owner, &(&1.phase == :release_pending))
     :sys.suspend(lease_owner)

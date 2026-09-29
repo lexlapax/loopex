@@ -31,7 +31,11 @@ printf '%s\n' '#!/usr/bin/env bash' \
   'printf "fixture fast stderr\n" >&2' \
   'printf "fixture fast native encoding=%s\n" "$(locale charmap)"' \
   'if [[ -n ${FLOOR_TEST_FAST_SLEEP:-} ]]; then' \
-  '  sleep "$FLOOR_TEST_FAST_SLEEP" &' \
+  '  if [[ -n ${FLOOR_TEST_FAST_IGNORE_TERM:-} ]]; then' \
+  '    (trap "" TERM; exec sleep "$FLOOR_TEST_FAST_SLEEP") &' \
+  '  else' \
+  '    sleep "$FLOOR_TEST_FAST_SLEEP" &' \
+  '  fi' \
   '  child=$!' \
   '  printf "CHILD_PID=%s\n" "$child"' \
   '  wait "$child"' \
@@ -243,6 +247,39 @@ for ((attempt = 0; attempt < 20; attempt++)); do
   sleep 0.05
 done
 ! kill -0 "$child_pid" 2>/dev/null || fail 'signalled check left its sleep child alive'
+
+# A TERM-ignoring grandchild must not retain the log FIFO after its parent
+# exits; the second signal targets the original process group, not a fresh
+# descendant census of a parent that may already be gone.
+stubborn=$retained/stubborn
+PATH="$bin:$PATH" FLOOR_TEST_FAST_SLEEP=30 FLOOR_TEST_FAST_IGNORE_TERM=1 \
+  bash "$runner" "$sha" --output-dir "$stubborn" \
+  >"$work/stubborn.stdout" 2>"$work/stubborn.stderr" &
+runner_pid=$!
+seen_child=0
+for ((attempt = 0; attempt < 100; attempt++)); do
+  if [[ -f $stubborn/check.log ]] && grep -q '^CHILD_PID=' "$stubborn/check.log"; then
+    seen_child=1
+    break
+  fi
+  sleep 0.05
+done
+[[ $seen_child -eq 1 ]] || fail 'stubborn fixture never reached the running check'
+child_pid=$(sed -n 's/^CHILD_PID=//p' "$stubborn/check.log" | tail -n 1)
+kill -TERM "$runner_pid" || fail 'could not signal the stubborn floor runner'
+set +e
+wait "$runner_pid"
+signal_status=$?
+set -e
+[[ $signal_status -eq 143 ]] || fail "stubborn runner exited $signal_status, expected 143"
+grep -qx 'TOTAL_EXIT=143' "$stubborn/check.log" ||
+  fail 'stubborn signal exit was not retained'
+assert_retained_identity "$work/stubborn.stdout" "$stubborn/check.log"
+for ((attempt = 0; attempt < 20; attempt++)); do
+  kill -0 "$child_pid" 2>/dev/null || break
+  sleep 0.05
+done
+! kill -0 "$child_pid" 2>/dev/null || fail 'stubborn check child survived the group KILL'
 
 long_failure=$retained/failed-long
 if PATH="$bin:$PATH" FLOOR_TEST_LONG_EXIT=8 \
