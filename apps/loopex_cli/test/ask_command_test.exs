@@ -158,7 +158,8 @@ defmodule LoopexCli.AskCommandTest do
           {"timeout", 6, "no_ending", %{"reason" => "timeout", "waited_ms" => "25"}, ""},
           {"session-loss", 6, "no_ending",
            %{"reason" => "session_unavailable", "waited_ms" => "25"},
-           "loopex: cleanup_unproved root=\"/tmp/ask-retained\" ownership=owned pending=run_ending,root_removal\n"}
+           "loopex: cleanup_unproved root=\"/tmp/ask-retained\" ownership=owned pending=run_ending,root_removal\n" <>
+             "loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.\n"}
         ] do
       root = temporary_directory()
       on_exit(fn -> File.rm_rf!(root) end)

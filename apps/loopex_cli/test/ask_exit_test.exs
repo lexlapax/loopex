@@ -229,7 +229,8 @@ defmodule LoopexCli.AskExitTest do
   end
 
   defp root_line(root, pending \\ "run_ending,root_removal") do
-    "loopex: cleanup_unproved root=#{JSON.encode!(root)} ownership=owned pending=#{pending}\n"
+    "loopex: cleanup_unproved root=#{JSON.encode!(root)} ownership=owned pending=#{pending}\n" <>
+      "loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.\n"
   end
 
   defp one_json(stdout) do

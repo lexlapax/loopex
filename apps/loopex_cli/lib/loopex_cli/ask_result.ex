@@ -90,7 +90,15 @@ defmodule LoopexCli.AskResult do
   @spec diagnostic(term()) :: %{status: 1, stdout: <<>>, stderr: binary()}
   def diagnostic(code) do
     fixed = if code in @diagnostics, do: code, else: :command_failed
-    %{status: 1, stdout: "", stderr: "loopex: #{fixed}\n"}
+
+    guidance =
+      if fixed == :interrupt_handler_unavailable do
+        "loopex: The interrupt handler is unavailable. Before running ask again, make sure the previous ask process has exited and start a fresh command. If this repeats, repair the host's signal-handler setup.\n"
+      else
+        ""
+      end
+
+    %{status: 1, stdout: "", stderr: "loopex: #{fixed}\n" <> guidance}
   end
 
   defp do_render(:none, {:unproved, map}, mode) when mode in [:text, :json] do
@@ -306,10 +314,22 @@ defmodule LoopexCli.AskResult do
        root: root,
        root_ownership: Atom.to_string(ownership),
        pending: pending_names
-     }, line}
+     }, line <> cleanup_guidance(root, pending)}
   end
 
   defp cleanup!(_, _), do: invalid!()
+
+  defp cleanup_guidance(nil, _pending) do
+    "loopex: Loopex could not confirm that the temporary session stopped, and no root path is known. Before running ask again, make sure the previous ask process has exited; do not remove a guessed directory.\n"
+  end
+
+  defp cleanup_guidance(_root, [:root_removal]) do
+    "loopex: Removal of the temporary root is unconfirmed. Before running ask again, inspect the root named above and complete its cleanup only after verifying that it belongs to this session.\n"
+  end
+
+  defp cleanup_guidance(_root, _pending) do
+    "loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.\n"
+  end
 
   defp text_lines(object) do
     tools =

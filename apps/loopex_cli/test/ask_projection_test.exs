@@ -154,7 +154,8 @@ defmodule LoopexCli.AskProjectionTest do
     assert %{status: 6, stderr: stderr} = result
 
     assert stderr ==
-             "loopex: cleanup_unproved root=\"/tmp/retained\\n\" ownership=unknown pending=effect_cleanup,session_subtree,root_removal\n"
+             "loopex: cleanup_unproved root=\"/tmp/retained\\n\" ownership=unknown pending=effect_cleanup,session_subtree,root_removal\n" <>
+               "loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.\n"
 
     assert object(result) == %{
              "schema" => "loopex.ask/1",

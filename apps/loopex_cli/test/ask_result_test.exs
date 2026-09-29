@@ -254,7 +254,8 @@ defmodule LoopexCli.AskResultTest do
     }
 
     root_line =
-      "loopex: cleanup_unproved root=\"/temporary/α\\n\" ownership=unknown pending=run_ending,process_groups,root_removal\n"
+      "loopex: cleanup_unproved root=\"/temporary/α\\n\" ownership=unknown pending=run_ending,process_groups,root_removal\n" <>
+        "loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.\n"
 
     assert %{status: 6, stdout: json, stderr: ^root_line} =
              AskResult.render(
@@ -298,7 +299,8 @@ defmodule LoopexCli.AskResultTest do
              status: 1,
              stdout: "",
              stderr:
-               "loopex: cleanup_unproved root=null ownership=unknown pending=session_subtree\n"
+               "loopex: cleanup_unproved root=null ownership=unknown pending=session_subtree\n" <>
+                 "loopex: Loopex could not confirm that the temporary session stopped, and no root path is known. Before running ask again, make sure the previous ask process has exited; do not remove a guessed directory.\n"
            }
 
     assert AskResult.render(:none, {:unproved, %{preclaim | root_ownership: :owned}}, :json) ==
@@ -326,7 +328,10 @@ defmodule LoopexCli.AskResultTest do
 
     ending = {:error, {:run, :cancelled, observation}}
     cleanup = %{root: "/kept", root_ownership: :owned, pending: [:root_removal], ending: ending}
-    line = "loopex: cleanup_unproved root=\"/kept\" ownership=owned pending=root_removal\n"
+
+    line =
+      "loopex: cleanup_unproved root=\"/kept\" ownership=owned pending=root_removal\n" <>
+        "loopex: Removal of the temporary root is unconfirmed. Before running ask again, inspect the root named above and complete its cleanup only after verifying that it belongs to this session.\n"
 
     assert AskResult.render(
              ending,
@@ -445,8 +450,15 @@ defmodule LoopexCli.AskResultTest do
     )
 
     for code <- codes do
+      guidance =
+        if code == "interrupt_handler_unavailable" do
+          "loopex: The interrupt handler is unavailable. Before running ask again, make sure the previous ask process has exited and start a fresh command. If this repeats, repair the host's signal-handler setup.\n"
+        else
+          ""
+        end
+
       assert AskResult.diagnostic(String.to_existing_atom(code)) ==
-               %{status: 1, stdout: "", stderr: "loopex: #{code}\n"}
+               %{status: 1, stdout: "", stderr: "loopex: #{code}\n" <> guidance}
     end
   end
 

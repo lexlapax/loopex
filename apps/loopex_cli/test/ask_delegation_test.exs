@@ -136,7 +136,8 @@ defmodule LoopexCli.AskDelegationTest do
                "case" => "session-loss",
                "status" => 6,
                "stderr" =>
-                 "loopex: cleanup_unproved root=\"/tmp/ask-delegated-retained\" ownership=owned pending=run_ending,root_removal\n",
+                 "loopex: cleanup_unproved root=\"/tmp/ask-delegated-retained\" ownership=owned pending=run_ending,root_removal\n" <>
+                   "loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.\n",
                "outcome" => "no_ending",
                "details" => %{"reason" => "session_unavailable", "waited_ms" => "25"},
                "cleanup" => %{

@@ -113,7 +113,8 @@ defmodule LoopexCli.AskEphemeralTest do
              status: 1,
              stdout: "",
              stderr:
-               "loopex: cleanup_unproved root=\"/tmp/ask-kept\" ownership=owned pending=session_subtree\n"
+               "loopex: cleanup_unproved root=\"/tmp/ask-kept\" ownership=owned pending=session_subtree\n" <>
+                 "loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.\n"
            }
   end
 
@@ -248,7 +249,8 @@ defmodule LoopexCli.AskEphemeralTest do
              status: 1,
              stdout: "",
              stderr:
-               "loopex: cleanup_unproved root=\"/tmp/ask-kept\" ownership=owned pending=session_subtree\n"
+               "loopex: cleanup_unproved root=\"/tmp/ask-kept\" ownership=owned pending=session_subtree\n" <>
+                 "loopex: Session cleanup is unconfirmed. Before running ask again, make sure the previous ask process has exited and inspect the root named above; do not remove an unverified path.\n"
            }
   end
 
@@ -470,7 +472,8 @@ defmodule LoopexCli.AskEphemeralTest do
              status: 1,
              stdout: "",
              stderr:
-               "loopex: cleanup_unproved root=null ownership=unknown pending=session_subtree\n"
+               "loopex: cleanup_unproved root=null ownership=unknown pending=session_subtree\n" <>
+                 "loopex: Loopex could not confirm that the temporary session stopped, and no root path is known. Before running ask again, make sure the previous ask process has exited; do not remove a guessed directory.\n"
            }
 
     assert_receive :handler_finished

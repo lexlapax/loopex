@@ -319,9 +319,8 @@ defmodule LoopexCli.AskIntegrationTest do
 
     assert_receive {:stop_returned, :ok}, 15_000
 
-    assert_receive {:ask_returned,
-                    %{status: 1, stdout: "", stderr: "loopex: interrupt_handler_unavailable\n"}},
-                   15_000
+    assert_receive {:ask_returned, result}, 15_000
+    assert result == LoopexCli.AskResult.diagnostic(:interrupt_handler_unavailable)
 
     assert_receive {:DOWN, ^runner_monitor, :process, ^runner, :normal}, 1_000
     refute_receive {:stop_returned, _}, 0
