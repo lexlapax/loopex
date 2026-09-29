@@ -100,7 +100,7 @@ expect_failure unavailable 1 \
 M6_DEMO_COMMAND="$work/fake-ask"
 
 export M6_FAKE_EXIT=0
-export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_DEMONSTRATION_READ_OK M6_AFTER_EDIT M6_SKILL_LOADED_OK","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":[],"cleanup":{"proved":true},"details":{"cleanup_grace_ms":"5000"}}'
+export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_AFTER_EDIT","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":[],"cleanup":{"proved":true},"details":{"cleanup_grace_ms":"5000"}}'
 export M6_FAKE_DEST=stderr M6_FAKE_STDERR=
 expect_failure success_json_only_on_stderr 1 \
   'm6-demonstration: delegated command exit=0 exit_class=unrecognized'
@@ -110,16 +110,16 @@ expect_failure success_with_stderr 1 \
   'm6-demonstration: delegated command exit=0 exit_class=unrecognized'
 export M6_FAKE_STDERR=
 valid_json=$M6_FAKE_JSON
-export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_DEMONSTRATION_READ_OK M6_AFTER_EDIT M6_SKILL_LOADED_OK","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":[],"cleanup":{"proved":1},"details":{"cleanup_grace_ms":"5000"}}'
+export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_AFTER_EDIT","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":[],"cleanup":{"proved":1},"details":{"cleanup_grace_ms":"5000"}}'
 expect_failure success_numeric_cleanup 1 \
   'm6-demonstration: delegated command exit=0 exit_class=unrecognized'
-export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_DEMONSTRATION_READ_OK M6_AFTER_EDIT M6_SKILL_LOADED_OK","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed","secret":"SECRET_EXTRA_FIELD"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":[],"cleanup":{"proved":true},"details":{"cleanup_grace_ms":"5000"}}'
+export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_AFTER_EDIT","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed","secret":"SECRET_EXTRA_FIELD"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":[],"cleanup":{"proved":true},"details":{"cleanup_grace_ms":"5000"}}'
 expect_failure success_extra_tool_member 1 \
   'm6-demonstration: delegated command exit=0 exit_class=unrecognized'
-export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_DEMONSTRATION_READ_OK M6_AFTER_EDIT M6_SKILL_LOADED_OK","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":["not-a-skill"],"cleanup":{"proved":true},"details":{"cleanup_grace_ms":"5000"}}'
+export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_AFTER_EDIT","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":["not-a-skill"],"cleanup":{"proved":true},"details":{"cleanup_grace_ms":"5000"}}'
 expect_failure success_invalid_shadowed_skill 1 \
   'm6-demonstration: delegated command exit=0 exit_class=unrecognized'
-export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_DEMONSTRATION_READ_OK M6_AFTER_EDIT M6_SKILL_LOADED_OK","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":[],"cleanup":{"proved":true},"details":{"cleanup_grace_ms":"5000"}}'
+export M6_FAKE_JSON='{"schema":"loopex.ask/1","session_id":"session","run_id":"run","profile":"ephemeral","outcome":"completed","text":"M6_AFTER_EDIT","text_truncated":false,"tools":[{"tool_id":"loopex.read","outcome":"completed"},{"tool_id":"loopex.write","outcome":"completed"},{"tool_id":"loopex.edit","outcome":"completed"},{"tool_id":"loopex.bash","outcome":"completed"}],"tools_truncated":false,"shadowed_skills":[],"cleanup":{"proved":true},"details":{"cleanup_grace_ms":"5000"}}'
 export M6_FAKE_NO_LF=1
 expect_failure success_no_final_lf 1 \
   'm6-demonstration: delegated command exit=0 exit_class=unrecognized'
@@ -130,4 +130,14 @@ delegation >"$work/delegation.stdout" || fail 'completed delegation failed'
   fail 'completed delegation emitted output'
 [ "$(cat "$work/delegated.json")" = "$M6_FAKE_JSON" ] ||
   fail 'completed delegation changed the retained JSON'
+assert_json "$work/delegated.json" completed ephemeral yes ||
+  fail 'completed workflow oracle rejected the valid answer'
+printf '%s\n' "${valid_json/\"text\":\"M6_AFTER_EDIT\"/\"text\":\"unfinished\"}" >"$work/missing-answer.json"
+if assert_json "$work/missing-answer.json" completed ephemeral yes 2>/dev/null; then
+  fail 'workflow oracle admitted an answer without the edited result'
+fi
+printf '%s\n' "${valid_json/\"loopex.write\"/\"loopex.bash\"}" >"$work/missing-write.json"
+if assert_json "$work/missing-write.json" completed ephemeral yes 2>/dev/null; then
+  fail 'workflow oracle admitted a missing write effect'
+fi
 printf 'm6-demonstration-test: PASS\n'

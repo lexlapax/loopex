@@ -6094,3 +6094,13 @@ remain failures with their actual SHAs and output digests; the earlier empty
 Linux answer after only two tools remains unexplained. No assertion is waived
 for that incomplete task. This decision changes the demonstration witness,
 not the M6 outcomes or the separate closure and publication authority.
+
+The first run with this witness, at `739803cb7587cfca3c06e3c6aa5335b59b5ae2d8`,
+passed all four steps on macOS and the first three on Linux. Linux's durable
+model completed the required effects and left the exact edited file, but made
+four additional completed calls and reached the demonstration's eight-step
+bound before a final answer. That run remains failed. The skill instruction
+now expressly requires exactly the four named calls, in order, with no
+exploration or reread; the eight-step and deadline bounds and all result
+assertions remain unchanged. The focused demonstration fixture now proves that
+an absent final edited value or missing write effect is rejected.

@@ -58,7 +58,9 @@ embedded() {
     File.mkdir_p!(skill)
     File.write!(Path.join(skill, "SKILL.md"),
       "---\nname: m6-demo\ndescription: Perform the demonstration coding task.\n---\n" <>
-      "Work one step at a time and wait for each tool result before the next. " <>
+      "Make exactly four tool calls, in the order below. Do not explore the " <>
+      "workspace or reread a file: the named files are relative to your " <>
+      "working directory. Wait for each tool result before the next call. " <>
       "Step 1: use read on evidence.txt and remember its exact contents. " <>
       "Step 2: use write to create generated.txt containing exactly " <>
       "M6_BEFORE_EDIT with no newline. " <>
