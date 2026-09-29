@@ -22,13 +22,14 @@ already declared here. Back to the [evidence index](README.md).
 
 Each complete run records its exact source revision, platform, OTP/Elixir
 pair, result, measured duration, retained-output reference and SHA-256.
-The candidate's current-pair CI run counts rather than being rerun locally.
+A current-pair CI run of the exact candidate counts when available. Otherwise,
+retain a clean local run of the same fast check with its complete output.
 
 | Run | Revision | Platform and toolchain | Result and duration | Retained-output reference | SHA-256 |
 | --- | --- | --- | --- | --- | --- |
 | Floor `bash scripts/check.sh` on Darwin | Pending | Pending | Pending | Pending | Pending |
 | Floor `bash scripts/check.sh` on Linux | Pending | Pending | Pending | Pending | Pending |
-| Current-pair CI `bash scripts/check.sh --select` | Pending | Pending | Pending | Pending | Pending |
+| Current-pair `bash scripts/check.sh` (CI or local) | Pending | Pending | Pending | Pending | Pending |
 | Floor `--long-bound` transport drain on Darwin | Pending | Pending | Pending | Pending | Pending |
 | Floor `--long-bound` transport drain on Linux | Pending | Pending | Pending | Pending | Pending |
 
