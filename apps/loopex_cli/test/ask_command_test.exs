@@ -227,6 +227,39 @@ defmodule LoopexCli.AskCommandTest do
     end
   end
 
+  test "main reads and writes exact UTF-8 bytes through real standard IO" do
+    elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")
+    code_paths = Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end)
+    root = temporary_directory()
+    on_exit(fn -> File.rm_rf!(root) end)
+    state_root = Path.join(root, "unused-state-root")
+
+    {status, stdout, stderr} =
+      capture(
+        elixir,
+        code_paths ++
+          [
+            "-e",
+            outcome_ask_source(),
+            "--",
+            "ask",
+            "--policy",
+            "refuse-all",
+            "--output",
+            "text"
+          ],
+        root,
+        state_root,
+        [{"LOOPEX_TEST_ASK_CASE", "unicode"}],
+        "é"
+      )
+
+    assert status == 0, "stderr=#{inspect(stderr)}"
+    assert stdout == "réponse π\n"
+    assert stderr == "tool denied null\nending completed\n"
+    refute File.exists?(state_root)
+  end
+
   defp temporary_directory do
     root =
       Path.join(System.tmp_dir!(), "loopex-ask-command-#{System.unique_integer([:positive])}")
@@ -280,18 +313,31 @@ defmodule LoopexCli.AskCommandTest do
     command
   end
 
-  defp capture(command, argv, root, state_root, extra_env \\ []) do
+  defp capture(command, argv, root, state_root, extra_env \\ [], stdin_bytes \\ nil) do
     number = System.unique_integer([:positive])
     stdout_path = Path.join(root, "stdout-#{number}")
     stderr_path = Path.join(root, "stderr-#{number}")
+    stdin_path = Path.join(root, "stdin-#{number}")
+
+    if is_binary(stdin_bytes), do: File.write!(stdin_path, stdin_bytes)
 
     script =
-      "command=$1; stdout=$2; stderr=$3; shift 3; exec \"$command\" \"$@\" >\"$stdout\" 2>\"$stderr\""
+      "command=$1; stdout=$2; stderr=$3; stdin=$4; shift 4; " <>
+        "if [ -n \"$stdin\" ]; then exec \"$command\" \"$@\" <\"$stdin\" >\"$stdout\" 2>\"$stderr\"; " <>
+        "else exec \"$command\" \"$@\" >\"$stdout\" 2>\"$stderr\"; fi"
 
     {shell_output, status} =
       System.cmd(
         "/bin/sh",
-        ["-c", script, "capture", command, stdout_path, stderr_path] ++ argv,
+        [
+          "-c",
+          script,
+          "capture",
+          command,
+          stdout_path,
+          stderr_path,
+          if(is_binary(stdin_bytes), do: stdin_path, else: "")
+        ] ++ argv,
         cd: root,
         env:
           [
@@ -369,7 +415,7 @@ defmodule LoopexCli.AskCommandTest do
     manager = spawn(fn -> receive do :release -> :ok end end)
     observation = %{
       profile: :ephemeral, outcome: :completed, session_id: "session-1", run_id: "run-1",
-      text: "partial answer", text_truncated: false,
+      text: if(mode == "unicode", do: "réponse π", else: "partial answer"), text_truncated: false,
       tools: [%{tool_id: nil, outcome: "denied", private: "not public"}],
       tools_truncated: false, shadowed_skills: [], details: %{}, private: "not public"
     }
@@ -388,6 +434,7 @@ defmodule LoopexCli.AskCommandTest do
         {:error, {:run, :bound_reached, bounded}}
       "timeout" -> {:error, {:timeout, snapshot}}
       "session-loss" -> {:ok, %{observation | details: %{"cleanup_grace_ms" => 5_000}}}
+      "unicode" -> {:ok, %{observation | details: %{"cleanup_grace_ms" => 5_000}}}
     end
     stop = case mode do
       "session-loss" ->
@@ -404,7 +451,10 @@ defmodule LoopexCli.AskCommandTest do
       interrupt_phase: fn _, _ -> :idle end,
       finish_interrupt: fn _, _ -> {:ok, :ordinary} end,
       start_session: fn _ -> {:ok, :session} end,
-      ask: fn _, _ -> ending end,
+      ask: fn _, prompt ->
+        if mode == "unicode" and prompt != "é", do: raise("stdin bytes changed")
+        ending
+      end,
       stop_session: fn _ -> stop end
     ]
     Process.put({LoopexCli.Ask, :test_seams}, seams)

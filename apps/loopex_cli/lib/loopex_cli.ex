@@ -52,6 +52,13 @@ defmodule LoopexCli do
   """
   @spec main([binary()]) :: no_return()
   def main([command | _rest] = argv) when command in ["ask", "-p"] do
+    # Concept: ask admits and emits exact bytes, including non-ASCII UTF-8.
+    # Technical depth: the standard IO servers otherwise transcode even
+    # IO.binread/binwrite under a Unicode locale. Latin-1 mode preserves bytes.
+    if ask_binary_stdio() != :ok do
+      LoopexCli.AskResult.diagnostic(:command_failed) |> halt_ask()
+    end
+
     # Concept: a standalone ask prints only its own result in either profile.
     # Technical depth: Logger startup reloads its app level, so persist :none
     # before any profile starts it and set the live primary level as well.
@@ -76,6 +83,17 @@ defmodule LoopexCli do
     result = dispatch(argv, install_live_signals: true)
     release_placement()
     halt(result)
+  end
+
+  defp ask_binary_stdio do
+    with :ok <- :io.setopts(:standard_io, encoding: :latin1),
+         :ok <- :io.setopts(:standard_error, encoding: :latin1) do
+      :ok
+    else
+      _ -> :error
+    end
+  catch
+    _, _ -> :error
   end
 
   # Concept: only an admitted JSON ask silences policy notices in this VM.
