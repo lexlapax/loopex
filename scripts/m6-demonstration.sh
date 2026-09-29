@@ -35,6 +35,13 @@ step() {
   fi
 }
 
+prepare_workspace() {
+  # A prior step's edited file would make the next surface skip or repeat tools.
+  export M6_DEMO_WORKSPACE="$M6_DEMO_ROOT/$1"
+  mkdir "$M6_DEMO_WORKSPACE"
+  printf 'M6_DEMONSTRATION_READ_OK\n' >"$M6_DEMO_WORKSPACE/evidence.txt"
+}
+
 embedded() {
   local_run mix run --no-start -e '
     unless Code.ensure_loaded?(LoopexComposition.Ephemeral) and
@@ -49,14 +56,18 @@ embedded() {
     workspace = System.fetch_env!("M6_DEMO_WORKSPACE")
     skill = System.fetch_env!("M6_DEMO_SKILL")
     File.mkdir_p!(skill)
-    File.write!(Path.join(workspace, "evidence.txt"), "M6_DEMONSTRATION_READ_OK\n")
     File.write!(Path.join(skill, "SKILL.md"),
       "---\nname: m6-demo\ndescription: Perform the demonstration coding task.\n---\n" <>
-      "Use each of the four coding tools for this task. Read evidence.txt with read. " <>
-      "Write generated.txt with content M6_BEFORE_EDIT using write. " <>
-      "Use edit to replace M6_BEFORE_EDIT with M6_AFTER_EDIT. " <>
-      "Use bash with argv [\"cat\", \"generated.txt\"] to verify the edit. " <>
-      "Answer with the evidence.txt contents, M6_AFTER_EDIT and M6_SKILL_LOADED_OK.\n")
+      "Work one step at a time and wait for each tool result before the next. " <>
+      "Step 1: use read on evidence.txt and remember its exact contents. " <>
+      "Step 2: use write to create generated.txt containing exactly " <>
+      "M6_BEFORE_EDIT with no newline. " <>
+      "Step 3: use edit on generated.txt to replace exactly M6_BEFORE_EDIT " <>
+      "with M6_AFTER_EDIT. " <>
+      "Step 4: use bash with argv [\"cat\", \"generated.txt\"] " <>
+      "to verify the final file. After the successful bash result, do not " <>
+      "call another tool. Answer in plain text with M6_DEMONSTRATION_READ_OK, " <>
+      "M6_AFTER_EDIT and M6_SKILL_LOADED_OK.\n")
     options = [policy: M6Demonstration.Policy, cwd: workspace,
                model: System.fetch_env!("M6_DEMO_LOCAL_MODEL"),
                tools: :coding, skills: [skill], max_steps: 8, deadline_ms: 120_000]
@@ -98,14 +109,18 @@ assert_json() {
         unless value["cleanup"] == nil, do: raise("durable cleanup must be null")
     end
     if coding_required == "yes" do
-      unless Enum.all?(["M6_DEMONSTRATION_READ_OK", "M6_AFTER_EDIT", "M6_SKILL_LOADED_OK"],
-                 &String.contains?(value["text"], &1)) and
-               Enum.all?(~w(loopex.read loopex.write loopex.edit loopex.bash), fn id ->
-                 Enum.any?(value["tools"],
-                   &(&1["tool_id"] == id and &1["outcome"] == "completed"))
-               end) and File.read!(Path.join(System.fetch_env!("M6_DEMO_WORKSPACE"),
-                 "generated.txt")) == "M6_AFTER_EDIT",
-        do: raise("command demonstration did not execute the skill coding task")
+      markers = for marker <- ["M6_DEMONSTRATION_READ_OK", "M6_AFTER_EDIT",
+                              "M6_SKILL_LOADED_OK"],
+                    into: %{}, do: {marker, String.contains?(value["text"], marker)}
+      completed = for tool <- value["tools"], tool["outcome"] == "completed",
+                      do: tool["tool_id"]
+      required = ~w(loopex.read loopex.write loopex.edit loopex.bash)
+      file_ok = File.read(Path.join(System.fetch_env!("M6_DEMO_WORKSPACE"),
+        "generated.txt")) == {:ok, "M6_AFTER_EDIT"}
+      unless Enum.all?(markers, fn {_marker, found} -> found end) and
+             Enum.all?(required, &(&1 in completed)) and file_ok,
+        do: raise("command demonstration coding task mismatch: " <>
+                  inspect(%{markers: markers, completed_tools: completed, file_ok: file_ok}))
     end
   ' -- "$@"
 }
@@ -202,16 +217,18 @@ if [ "$(git rev-parse HEAD)" != "$candidate" ] ||
 fi
 
 M6_DEMO_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/loopex-m6-demo.XXXXXX")
-export M6_DEMO_WORKSPACE="$M6_DEMO_ROOT/workspace"
 export M6_DEMO_SKILL="$M6_DEMO_ROOT/skills/m6-demo"
-mkdir "$M6_DEMO_WORKSPACE"
 export M6_DEMO_COMMAND="$PWD/apps/loopex_cli/bin/loopex"
 export M6_DEMO_PROMPT='Perform the coding task defined by the supplied m6-demo skill.'
-printf 'm6-demonstration: candidate %s on %s; workspace %s\n' \
-  "$candidate" "$(uname -s)" "$M6_DEMO_WORKSPACE"
-# Keep this exclusively created workspace for inspection and durable evidence.
-# It contains no real user state. Never delete an unproved ephemeral session root.
+printf 'm6-demonstration: candidate %s on %s; workspace root %s\n' \
+  "$candidate" "$(uname -s)" "$M6_DEMO_ROOT"
+# Keep these exclusively created workspaces for inspection and durable evidence.
+# They contain no real user state. Never delete an unproved ephemeral session root.
+prepare_workspace embedded
 step embedded embedded
+prepare_workspace command
 step command command
+prepare_workspace delegation
 step delegation delegation
+prepare_workspace durable
 step durable durable
