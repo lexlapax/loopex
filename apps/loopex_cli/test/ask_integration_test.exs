@@ -250,6 +250,85 @@ defmodule LoopexCli.AskIntegrationTest do
     assert :gen_event.which_handlers(manager) == [:erl_signal_handler]
   end
 
+  test "loss of the installed manager after a real handle stops before a prompt", %{
+    manager: manager
+  } do
+    workspace = temporary_workspace()
+    {port, _server} = start_server(:hold)
+    parent = self()
+
+    seams =
+      Keyword.merge(command_seams(port),
+        start_session: fn options ->
+          result =
+            Ephemeral.start_session(
+              Keyword.merge(options,
+                base_url: "http://127.0.0.1:#{port}/v1",
+                max_tokens: 128,
+                timeout: 15_000
+              )
+            )
+
+          send(parent, {:handle_started, result})
+
+          receive do
+            :release_start -> result
+          end
+        end,
+        ask: fn _session, _prompt ->
+          send(parent, :worker_started)
+          flunk("worker started after signal manager loss")
+        end,
+        stop_session: fn session ->
+          result = Ephemeral.stop_session(session)
+          send(parent, {:stop_returned, result})
+          result
+        end
+      )
+
+    {runner, runner_monitor} =
+      spawn_monitor(fn ->
+        result =
+          Ask.run(
+            [
+              "-p",
+              "one question",
+              "--policy",
+              "allow-all",
+              "--model",
+              "ollama:llama3.2",
+              "--tools",
+              "none",
+              "--cwd",
+              workspace,
+              "--output",
+              "json"
+            ],
+            seams
+          )
+
+        send(parent, {:ask_returned, result})
+      end)
+
+    assert_receive {:handle_started, {:ok, _handle}}, 15_000
+    manager_monitor = Process.monitor(manager)
+    Process.exit(manager, :kill)
+    assert_receive {:DOWN, ^manager_monitor, :process, ^manager, :killed}, 1_000
+    assert Process.whereis(:erl_signal_server) == nil
+    send(runner, :release_start)
+
+    assert_receive {:stop_returned, :ok}, 15_000
+
+    assert_receive {:ask_returned,
+                    %{status: 1, stdout: "", stderr: "loopex: interrupt_handler_unavailable\n"}},
+                   15_000
+
+    assert_receive {:DOWN, ^runner_monitor, :process, ^runner, :normal}, 1_000
+    refute_receive {:stop_returned, _}, 0
+    refute_receive :worker_started, 0
+    refute_receive {:model_request, _}, 0
+  end
+
   test "a copied exact-reference notice cannot stop an idle handler", %{manager: manager} do
     workspace = temporary_workspace()
     {port, server} = start_server({:hold, "forged notice ignored"})
