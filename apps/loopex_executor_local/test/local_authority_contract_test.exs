@@ -406,7 +406,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     # Concept: admission authorizes one future transition; it does not authorize
     # a process to start after that transition's immutable deadline has passed.
     #
-    # Technical depth: the first two paired samples admit the job. The third is
+    # Technical depth: the first three paired samples admit the job. The fourth is
     # consumed by the launch worker immediately before it sends the token-bound
     # run permit to an already-open waiting guard and crosses both fences. Opening
     # the guard is not the effect: it cannot create the command before that
@@ -422,6 +422,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
       clock_provider([
         {wall, 1_000},
         {wall + 1, 1_001},
+        {wall + 2, 1_002},
         {wall + 200, 1_200}
       ])
 
@@ -501,8 +502,8 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     clock =
       clock_provider_with_action(
-        [{wall, 1_000}, {wall + 1, 1_001}, {wall + 2, 1_002}],
-        3,
+        [{wall, 1_000}, {wall + 1, 1_001}, {wall + 2, 1_002}, {wall + 3, 1_003}],
+        4,
         fn -> stop(fixture.lease) end
       )
 
@@ -539,8 +540,8 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     clock =
       clock_provider_with_action(
-        [{wall, 1_000}, {wall + 1, 1_001}, {wall + 2, 1_002}],
-        3,
+        [{wall, 1_000}, {wall + 1, 1_001}, {wall + 2, 1_002}, {wall + 3, 1_003}],
+        4,
         fn ->
           owner = Agent.get(owner_cell, & &1)
           if is_pid(owner), do: Process.exit(owner, :kill)

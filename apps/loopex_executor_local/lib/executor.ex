@@ -2744,13 +2744,14 @@ defmodule Loopex.Executor.Local do
     now + div(max(retention_until() - now, 0), @claim_share)
   end
 
-  # Concept: the deadline is derived from one sample, and the permit is decided
-  # by another taken immediately before it.
+  # Concept: the deadline is derived from one sample, and both fences are checked
+  # again after the session grant, immediately before durable admission.
   #
   # Technical depth: the first paired sample fixes the private monotonic action
-  # deadline for this job and is never taken again. The second is the last
-  # effect-authorizing transition before publication, and it rechecks both fences
-  # independently: current wall time must precede the job's immutable
+  # deadline for this job and is never taken again. An early check avoids waiting
+  # for a grant when authority has already expired. The final check follows the
+  # grant wait and precedes publication; it rechecks both fences independently:
+  # current wall time must precede the job's immutable
   # `effective_job_deadline`, and current monotonic time must precede the derived
   # action deadline. A backward wall jump between the two therefore cannot extend
   # authority past the monotonic fence, and a forward one expires it by wall
@@ -2765,6 +2766,7 @@ defmodule Loopex.Executor.Local do
            reserve_receipt_output(state, job, tool, arguments, wall),
          :ok <- authorize_effect(state, job, action),
          {:ok, grant_expiry} <- session_tool_grant(state, action),
+         :ok <- authorize_effect(state, job, action),
          :ok <-
            Ledger.admit(
              state.ledger,

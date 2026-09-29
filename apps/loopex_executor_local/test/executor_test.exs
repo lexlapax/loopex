@@ -11,8 +11,13 @@ defmodule Loopex.Executor.LocalTest do
     @behaviour Loopex.Executor.Local.EphemeralAdmission
 
     @impl true
-    def request({__MODULE__, test, generation, _cell}, operation, deadline) do
+    def request({__MODULE__, test, generation, cell}, operation, deadline) do
       send(test, {:session_tool_grant_requested, self(), operation, deadline})
+
+      case cell do
+        {:advance_clock, offset, milliseconds} -> :atomics.put(offset, 1, milliseconds)
+        _ -> :ok
+      end
 
       case operation do
         {:tool_grant, executor, _instance, dispatch} ->
@@ -72,6 +77,49 @@ defmodule Loopex.Executor.LocalTest do
 
     refute_receive {:session_tool_grant_requested, _, _, _}, 25
     refute File.exists?(Path.join(fixture.workspace, "sealed-tool.txt"))
+  end
+
+  test "a session grant cannot publish admission after the job wall deadline" do
+    cell = :atomics.new(2, signed: false)
+    offset = :atomics.new(1, signed: true)
+    generation = make_ref()
+    instance = make_ref()
+
+    clock = fn ->
+      {System.system_time(:millisecond) + :atomics.get(offset, 1),
+       System.monotonic_time(:millisecond)}
+    end
+
+    fixture =
+      fixture("session-grant-deadline",
+        session_owner: self(),
+        session_generation: generation,
+        session_instance: instance,
+        session_cell: cell,
+        session_admission: {SessionHost, self(), generation, {:advance_clock, offset, 120_000}},
+        clock_provider: clock
+      )
+
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "grant-deadline", "loopex.demo.write")
+    {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+    assert {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
+    reservation_ref = Map.fetch!(placement, :reservation_ref)
+
+    assert {:error, {:refused_before_effect, :effective_deadline_reached}} =
+             GenServer.call(fixture.executor, {:permit, job, grant, reservation_ref}, 10_000)
+
+    assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
+
+    assert {:ok,
+            %{
+              :ledger_kind => "local_pre_effect_refusal_v1",
+              "reason" => %{"code" => "effective_deadline_reached"}
+            }} = Ledger.read_marker(prepared, job.job_id)
+
+    refute Ledger.open?(prepared, job.job_id)
+    refute File.exists?(Path.join(fixture.workspace, "grant-deadline.txt"))
+    GenServer.cast(fixture.executor, {:release, job.job_id, reservation_ref})
   end
 
   test "drain cannot prove an admitted filesystem effect paused after its final fence" do
