@@ -113,8 +113,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
   This is the sole sensitive MFA for the in-VM adapter. The owner must already
   have started and recorded the tagged pool before it sends the matching begin
   message. The caller reports a fixed result and native completion instant,
-  then remains alive for owner-controlled teardown. No successful Model port
-  entrypoint invokes it until the active cleanup-owner handoff is implemented.
+  then remains alive for owner-controlled teardown.
   """
 
   alias Loopex.LLM.ReqLLM.InProcess.{Guards, Route}
