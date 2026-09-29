@@ -389,7 +389,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
       now
     else
       assert now < deadline,
-             "call-created transport outlived 5,000 ms after caller DOWN: " <>
+             "call-created transport remained live past the pre-DOWN proof window: " <>
                inspect({controllers, ports})
 
       Process.sleep(10)
