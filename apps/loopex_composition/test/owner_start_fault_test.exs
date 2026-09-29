@@ -49,6 +49,43 @@ defmodule LoopexComposition.Ephemeral.OwnerStartFaultTest do
     Process.exit(supervisor, :shutdown)
   end
 
+  test "prepare waits for the owner's own proxy DOWN" do
+    creator = self()
+    ref = make_ref()
+    token = make_ref()
+    proxy = spawn(fn -> receive do: (:retire -> :ok) end)
+    monitor = Process.monitor(proxy)
+
+    state = %{
+      creator: creator,
+      ref: ref,
+      proxy: proxy,
+      monitors: %{proxy: monitor},
+      expiry: System.monotonic_time() + System.convert_time_unit(30_000, :millisecond, :native),
+      retiring: false,
+      phase: :blocked,
+      token: nil
+    }
+
+    # Concept: the creator's proxy DOWN does not order the owner's DOWN.
+    # Technical depth: impose the valid cross-sender ordering directly so this
+    # witness fails when blocked-phase prepare is discarded by the owner.
+    assert {:noreply, retired} =
+             SessionOwner.handle_info({proxy, ref, :proxy_retiring}, state)
+
+    assert {:noreply, waiting} =
+             SessionOwner.handle_info({creator, ref, :prepare, token}, retired)
+
+    refute_receive {_, ^ref, :prepared}, 0
+    send(proxy, :retire)
+    assert_receive {:DOWN, ^monitor, :process, ^proxy, :normal}, 1_000
+
+    assert {:noreply, %{phase: :prepared, token: ^token}} =
+             SessionOwner.handle_info({:DOWN, monitor, :process, proxy, :normal}, waiting)
+
+    assert_receive {^creator, ^ref, :prepared}, 100
+  end
+
   test "begin retires its activation monitor before exposing the owner" do
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 

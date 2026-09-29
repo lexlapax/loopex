@@ -216,9 +216,24 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:DOWN, monitor, :process, proxy, :normal},
         %{proxy: proxy, monitors: %{proxy: monitor}, retiring: true, phase: :blocked} = state
       ) do
-    if Process.alive?(proxy),
-      do: {:noreply, state},
-      else: {:noreply, %{state | phase: :ready}}
+    cond do
+      Process.alive?(proxy) -> {:noreply, state}
+      is_reference(state.token) -> prepare_owner(state, state.token)
+      true -> {:noreply, %{state | phase: :ready}}
+    end
+  end
+
+  # Concept: the creator may see proxy retirement before this owner does.
+  # Technical depth: remember the creator's token but acknowledge it only
+  # after this owner's own normal proxy DOWN, preserving the start fence.
+  def handle_info(
+        {creator, ref, :prepare, token},
+        %{creator: creator, ref: ref, phase: :blocked, token: nil} = state
+      )
+      when is_reference(token) do
+    if fresh?(state.expiry),
+      do: {:noreply, %{state | token: token}},
+      else: {:stop, :expired_owner_start, state}
   end
 
   def handle_info(
@@ -226,12 +241,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         %{creator: creator, ref: ref, phase: :ready} = state
       )
       when is_reference(token) do
-    if fresh?(state.expiry) do
-      send(creator, {self(), ref, :prepared})
-      {:noreply, %{state | phase: :prepared, token: token}}
-    else
-      {:stop, :expired_owner_start, state}
-    end
+    prepare_owner(state, token)
   end
 
   def handle_info(
@@ -924,6 +934,15 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp prepare_owner(state, token) do
+    if fresh?(state.expiry) do
+      send(state.creator, {self(), state.ref, :prepared})
+      {:noreply, %{state | phase: :prepared, token: token}}
+    else
+      {:stop, :expired_owner_start, state}
+    end
+  end
 
   defp handle_model_message(%{model_census: %ModelCensus{} = census} = state, message) do
     state = %{state | model_census: ModelCensus.handle(census, message)}
