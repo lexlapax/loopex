@@ -109,11 +109,13 @@ defmodule LoopexCli.AskCommandTest do
       elapsed_ms = System.monotonic_time(:millisecond) - started_ms
       stdout_excerpt = binary_part(stdout, 0, min(byte_size(stdout), 4_096))
       stderr_excerpt = binary_part(stderr, 0, min(byte_size(stderr), 4_096))
+      trace_path = Path.join(root, "ask-trace")
+      trace = if File.regular?(trace_path), do: File.read!(trace_path), else: ""
 
       assert status == 0,
              "ask case #{inspect({mode, policy, command, output})} exited #{status} " <>
                "after #{elapsed_ms} ms; stdout=#{inspect(stdout_excerpt)} " <>
-               "stderr=#{inspect(stderr_excerpt)}"
+               "stderr=#{inspect(stderr_excerpt)} trace=#{inspect(trace)}"
 
       if output == "text" do
         assert stdout == "read complete\n"
@@ -301,7 +303,8 @@ defmodule LoopexCli.AskCommandTest do
             {"OPEN_ROUTER_API_KEY", nil},
             {"ERL_LIBS", nil},
             {"ERL_AFLAGS", nil},
-            {"ERL_ZFLAGS", nil}
+            {"ERL_ZFLAGS", nil},
+            {"LOOPEX_TEST_TRACE", Path.join(root, "ask-trace")}
           ] ++ extra_env
       )
 
@@ -314,6 +317,7 @@ defmodule LoopexCli.AskCommandTest do
     port = System.fetch_env!("LOOPEX_TEST_PORT")
     mode = System.fetch_env!("LOOPEX_TEST_ASK_MODE")
     policy = System.fetch_env!("LOOPEX_TEST_POLICY")
+    trace = System.fetch_env!("LOOPEX_TEST_TRACE")
     manager = spawn(fn -> receive do :release -> :ok end end)
     seams = [
       install_interrupt: fn _, _ -> {:ok, manager} end,
@@ -322,13 +326,18 @@ defmodule LoopexCli.AskCommandTest do
       interrupt_phase: fn _, _ -> :idle end,
       finish_interrupt: fn _, _ -> {:ok, :ordinary} end,
       start_session: fn options ->
-        LoopexComposition.Ephemeral.start_session(
+        result = LoopexComposition.Ephemeral.start_session(
           Keyword.merge(options,
             base_url: "http://127.0.0.1:" <> port <> "/v1",
             max_tokens: 128,
             timeout: 15_000
           )
         )
+        case result do
+          {:error, reason} -> File.write!(trace, "start_session_error=#{inspect(reason, limit: 10)}\n")
+          {:ok, _session} -> :ok
+        end
+        result
       end
     ]
     if mode in ["one-shot", "one-shot-text"] do
