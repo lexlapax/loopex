@@ -341,9 +341,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     :erlang.trace(guardian, true, [:receive, {:tracer, self()}])
     send(caller, :continue)
 
-    assert_receive {:trace, ^guardian, :receive,
-                    {:provider_frame, _, {:ok, :dispatch_started, _}}},
-                   Fixture.until_settled(call)
+    await_dispatch_handler(guardian, call)
 
     assert :erlang.suspend_process(guardian)
     Fixture.release(fixture)
@@ -372,9 +370,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     :erlang.trace(guardian, true, [:receive, {:tracer, self()}])
     send(caller, :continue)
 
-    assert_receive {:trace, ^guardian, :receive,
-                    {:provider_frame, _, {:ok, :dispatch_started, _}}},
-                   Fixture.until_settled(call)
+    await_dispatch_handler(guardian, call)
 
     assert :erlang.suspend_process(guardian)
     Fixture.release(fixture)
@@ -418,9 +414,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     :erlang.trace(guardian, true, [:receive, {:tracer, self()}])
     send(caller, :continue)
 
-    assert_receive {:trace, ^guardian, :receive,
-                    {:provider_frame, _, {:ok, :dispatch_started, _}}},
-                   Fixture.until_settled(call)
+    await_dispatch_handler(guardian, call)
 
     assert :erlang.suspend_process(guardian)
     pid = Fixture.pid(fixture)
@@ -489,5 +483,18 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
 
     {:messages, messages} = Process.info(guardian, :messages)
     Enum.find(messages, predicate)
+  end
+
+  defp await_dispatch_handler(guardian, call) do
+    assert_receive {:trace, ^guardian, :receive,
+                    {:provider_frame, _, {:ok, :dispatch_started, _}}},
+                   Fixture.until_settled(call)
+
+    # A receive trace precedes the handler's acknowledgement to the frame
+    # reader. On the valid dispatch path, the ignored marker is received only
+    # after that handler sends :next and returns to the loop.
+    barrier = {:dispatch_handler_barrier, make_ref()}
+    send(guardian, barrier)
+    assert_receive {:trace, ^guardian, :receive, ^barrier}, Fixture.until_settled(call)
   end
 end
