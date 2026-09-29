@@ -78,6 +78,57 @@ defmodule Loopex.ClosureArchiveCompareTest do
     assert :ok == compare(fixture)
   end
 
+  test "replacement refs cannot make changed source compare as the administrative archive",
+       fixture do
+    repo = Path.join(fixture.root, "replacement-#{System.unique_integer([:positive])}")
+    git!(fixture.repo, ["clone", "-q", fixture.repo, repo])
+    git!(repo, ["switch", "-q", "--detach", fixture.admin])
+    git!(repo, ["config", "user.name", "Loopex Test"])
+    git!(repo, ["config", "user.email", "loopex-test@example.invalid"])
+    File.write!(Path.join(repo, "source.txt"), "changed source\n")
+    git!(repo, ["add", "source.txt"])
+    git!(repo, ["commit", "-qm", "changed source"])
+    changed = git!(repo, ["rev-parse", "HEAD"]) |> String.trim()
+    git!(repo, ["replace", changed, fixture.admin])
+
+    path = Path.join(fixture.root, "replaced-#{System.unique_integer([:positive])}.manifest")
+    stage = Path.join(LoopexTest.Repo.root(), "scripts/stage-archive-manifest.sh")
+    {_, 0} = System.cmd("bash", [stage, changed, path], cd: repo, stderr_to_stdout: true)
+
+    assert {:error, "archive tuples outside the exclusions differ"} =
+             compare(%{fixture | repo: repo, admin: changed, admin_path: path})
+  end
+
+  test "a replaced source blob cannot validate matching forged manifests", fixture do
+    repo = Path.join(fixture.root, "blob-replacement-#{System.unique_integer([:positive])}")
+    git!(fixture.repo, ["clone", "-q", fixture.repo, repo])
+    git!(repo, ["switch", "-q", "--detach", fixture.admin])
+
+    original_blob = git!(repo, ["rev-parse", "#{fixture.admin}:source.txt"]) |> String.trim()
+    replacement = Path.join(repo, "replacement-blob.txt")
+    File.write!(replacement, "forged source\n")
+    replacement_blob = git!(repo, ["hash-object", "-w", replacement]) |> String.trim()
+    git!(repo, ["replace", original_blob, replacement_blob])
+    assert "forged source\n" == git!(repo, ["cat-file", "blob", original_blob])
+
+    assert "unchanged source\n" ==
+             git!(repo, ["--no-replace-objects", "cat-file", "blob", original_blob])
+
+    tested_path = copy_manifest(fixture, fixture.tested_path)
+    admin_path = copy_manifest(fixture, fixture.admin_path)
+    original_digest = Base.encode16(:crypto.hash(:sha256, "unchanged source\n"), case: :lower)
+    replacement_digest = Base.encode16(:crypto.hash(:sha256, "forged source\n"), case: :lower)
+
+    for path <- [tested_path, admin_path] do
+      bytes = File.read!(path)
+      assert :binary.match(bytes, original_digest) != :nomatch
+      File.write!(path, :binary.replace(bytes, original_digest, replacement_digest))
+    end
+
+    assert {:error, "archive content differs from its commit blob"} =
+             compare(%{fixture | repo: repo, tested_path: tested_path, admin_path: admin_path})
+  end
+
   test "the command requires every argument and exact commit identities", fixture do
     assert_raise Mix.Error, ~r/usage: mix loopex.closure.archive_compare/, fn ->
       ArchiveCompare.run([fixture.tested_path, fixture.admin_path, fixture.tested])

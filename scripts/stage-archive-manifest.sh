@@ -29,7 +29,7 @@ if [ -e "$out" ] || [ -L "$out" ] || [ -e "$sidecar" ] || [ -L "$sidecar" ]; the
   fail output_exists
 fi
 
-[ "$(git cat-file -t "$sha" 2>/dev/null || true)" = commit ] || fail invalid_sha
+[ "$(git --no-replace-objects cat-file -t "$sha" 2>/dev/null || true)" = commit ] || fail invalid_sha
 
 umask 077
 manifest_tmp=''
@@ -70,7 +70,7 @@ if ! (
   (
     umask 022
     printf 'EXTRACTION_UMASK=%s\n' "$(umask)" >&2
-    mkdir "$tree" && git archive "$sha" | tar -x -C "$tree"
+    mkdir "$tree" && git --no-replace-objects archive "$sha" | tar -x -C "$tree"
   )
 ); then
   fail archive_extraction_failed

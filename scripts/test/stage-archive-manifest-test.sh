@@ -45,6 +45,34 @@ cmp -s "$work/expected-tree/SOURCE_IDENTITY" "$out.source-identity" ||
   fail 'sidecar differs from exact archive bytes'
 grep -q "^commit $sha$" "$out.source-identity" || fail 'sidecar does not name archived commit'
 
+# A local replacement ref must not change the archive selected by a full SHA.
+printf 'replacement bytes\n' >"$repo/README.md"
+git -C "$repo" add README.md
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm replacement
+replacement_sha=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" replace "$sha" "$replacement_sha"
+replacement_out="$work/retained/replacement-safe"
+(cd "$repo" && bash "$stage" "$sha" "$replacement_out") >"$work/replacement.stdout" 2>"$work/replacement.stderr" ||
+  fail 'staging failed with a local replacement ref'
+cmp -s "$out" "$replacement_out" || fail 'replacement ref changed staged manifest'
+cmp -s "$out.source-identity" "$replacement_out.source-identity" ||
+  fail 'replacement ref changed staged source identity'
+git -C "$repo" replace -d "$sha" >/dev/null
+
+# A replacement of one source blob is just as unsafe as a commit replacement.
+original_blob=$(git -C "$repo" rev-parse "$sha:README.md")
+replacement_blob=$(printf 'blob replacement bytes\n' | git -C "$repo" hash-object -w --stdin)
+git -C "$repo" replace "$original_blob" "$replacement_blob"
+[ "$(git -C "$repo" cat-file blob "$original_blob")" = 'blob replacement bytes' ] ||
+  fail 'blob replacement control did not take effect'
+blob_out="$work/retained/blob-safe"
+(cd "$repo" && bash "$stage" "$sha" "$blob_out") >"$work/blob.stdout" 2>"$work/blob.stderr" ||
+  fail 'staging failed with a blob replacement ref'
+cmp -s "$out" "$blob_out" || fail 'blob replacement ref changed staged manifest'
+cmp -s "$out.source-identity" "$blob_out.source-identity" ||
+  fail 'blob replacement ref changed staged source identity'
+git -C "$repo" replace -d "$original_blob" >/dev/null
+
 mkdir "$work/sort-fault-bin" "$work/sort-tree"
 printf 'fixture bytes\n' >"$work/sort-tree/item"
 printf '%s\n' '#!/bin/sh' "printf './item\\000'" 'exit 9' >"$work/sort-fault-bin/sort"

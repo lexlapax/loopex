@@ -206,7 +206,7 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
   end
 
   defp archive_members(sha) do
-    case System.cmd("git", ["archive", "--format=tar", sha]) do
+    case System.cmd("git", ["--no-replace-objects", "archive", "--format=tar", sha]) do
       {archive, 0} ->
         case :erl_tar.table({:binary, archive}, [:verbose]) do
           {:ok, entries} -> archive_paths(entries)
@@ -335,7 +335,7 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
   end
 
   defp git(args) do
-    case System.cmd("git", args, stderr_to_stdout: true) do
+    case System.cmd("git", ["--no-replace-objects" | args], stderr_to_stdout: true) do
       {output, 0} -> {:ok, output}
       {_output, _status} -> {:error, "Git could not read the named commit"}
     end
