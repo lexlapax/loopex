@@ -136,9 +136,9 @@ if release_selected rollback; then
         { printf 'check-release: rollback retained path unavailable: %s\n' "$retain/rollback-$label.$suffix" >&2; exit 2; }
     done
     if [ "$label" = old ]; then stage_sha=$rollback_old; else stage_sha=$commit; fi
-    git archive "$stage_sha" >"$retain/rollback-$label.archive.tar"
-    git ls-tree -rz -r -t --full-tree "$stage_sha" >"$retain/rollback-$label.projection"
-    git show -s --format='commit %H%ncommitter-date %cI' "$stage_sha" >"$retain/rollback-$label.identity"
+    git --no-replace-objects archive "$stage_sha" >"$retain/rollback-$label.archive.tar"
+    git --no-replace-objects ls-tree -rz -r -t --full-tree "$stage_sha" >"$retain/rollback-$label.projection"
+    git --no-replace-objects show -s --format='commit %H%ncommitter-date %cI' "$stage_sha" >"$retain/rollback-$label.identity"
     printf 'check-release: rollback staged %s %s\n' "$label" "$stage_sha"
     for suffix in archive.tar projection identity; do
       release_retain_identity "$retain/rollback-$label.$suffix"
@@ -147,7 +147,7 @@ if release_selected rollback; then
 fi
 tree="$fresh/src"
 printf 'check-release: fresh-source extraction of %s\n' "$commit"
-(umask 0777; (umask 022; mkdir "$tree" && git archive "$commit" | tar -x -C "$tree"))
+(umask 0777; (umask 022; mkdir "$tree" && git --no-replace-objects archive "$commit" | tar -x -C "$tree"))
 manifest_producer="$logs/source-archive-manifest.sh"
 cp "$tree/scripts/source-archive-manifest.sh" "$manifest_producer"
 release_retain_source_identity \

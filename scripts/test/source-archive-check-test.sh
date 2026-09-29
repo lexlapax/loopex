@@ -32,6 +32,27 @@ bash "$producer" "$tree" >"$work/before"
   >"$work/positive.log"
 grep -q 'source-archive-check: verified' "$work/positive.log"
 
+# A forged blob can make both the extraction and manifest agree while the
+# underlying commit still contains different bytes.
+original_blob=$(git -C "$repo" rev-parse "$sha:source.txt")
+printf 'forged source bytes\n' >"$work/forged-source"
+replacement_blob=$(git -C "$repo" hash-object -w "$work/forged-source")
+git -C "$repo" replace "$original_blob" "$replacement_blob"
+[ "$(git -C "$repo" cat-file blob "$original_blob")" = 'forged source bytes' ] || {
+  echo 'source-archive-check-test: blob replacement control did not take effect' >&2
+  exit 1
+}
+printf 'forged source bytes\n' >"$tree/source.txt"
+bash "$producer" "$tree" >"$work/replaced-blob-manifest"
+if (cd "$repo" && elixir "$checker" verify "$work/replaced-blob-manifest" \
+  "$work/inventory" "$sha" "$tree") >"$work/replaced-blob.log" 2>&1; then
+  echo 'source-archive-check-test: replaced blob validated forged source bytes' >&2
+  exit 1
+fi
+grep -q "file content differs from the commit's blob" "$work/replaced-blob.log"
+git -C "$repo" replace -d "$original_blob" >/dev/null
+printf 'committed bytes\n' >"$tree/source.txt"
+
 printf 'unmanifested bytes\n' >"$tree/extra.txt"
 if (cd "$repo" && elixir "$checker" verify "$work/before" "$work/inventory" "$sha" "$tree") \
   >"$work/extra-file.log" 2>&1; then

@@ -132,11 +132,11 @@ if [ "$automatic" -eq 1 ]; then
   [[ "$milestone" =~ ^M[0-9]+$ ]] || fail invalid_milestone
   [[ "$authority_sha" =~ ^[0-9a-f]{40}$ ]] || fail invalid_authority_sha
   [ "$authority_sha" != "$tested_sha" ] || fail authority_not_descendant
-  [ "$(git cat-file -t "$authority_sha" 2>/dev/null || true)" = commit ] ||
+  [ "$(git --no-replace-objects cat-file -t "$authority_sha" 2>/dev/null || true)" = commit ] ||
     fail invalid_authority_sha
-  git merge-base --is-ancestor "$tested_sha" "$authority_sha" || fail authority_not_descendant
+  git --no-replace-objects merge-base --is-ancestor "$tested_sha" "$authority_sha" || fail authority_not_descendant
 
-  git show "$authority_sha:docs/developer/agent-context-map.md" >"$scratch/context" 2>/dev/null ||
+  git --no-replace-objects show "$authority_sha:docs/developer/agent-context-map.md" >"$scratch/context" 2>/dev/null ||
     fail authority_context_unavailable
   awk -v anchor="$anchor" '
     $0 == "<a id=\"" anchor "\"></a>" { count++ }

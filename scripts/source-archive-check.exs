@@ -78,12 +78,19 @@ defmodule SourceArchiveCheck do
             end
           end
 
-        _mismatch -> fail("kind or mode of one path differs from the commit's tree")
+        _mismatch ->
+          fail("kind or mode of one path differs from the commit's tree")
       end
     end)
 
     {expected, 0} =
-      System.cmd("git", ["show", "-s", "--format=commit %H%ncommitter-date %cI", commit])
+      System.cmd("git", [
+        "--no-replace-objects",
+        "show",
+        "-s",
+        "--format=commit %H%ncommitter-date %cI",
+        commit
+      ])
 
     identity = File.read!(Path.join(tree, "SOURCE_IDENTITY"))
 
@@ -94,7 +101,7 @@ defmodule SourceArchiveCheck do
              {"f", "644", "SOURCE_IDENTITY", value} -> value == digest(identity)
              _ -> false
            end),
-      do: fail("SOURCE_IDENTITY manifest digest differs from the staged commit")
+           do: fail("SOURCE_IDENTITY manifest digest differs from the staged commit")
 
     IO.puts("source-archive-check: verified #{length(records)} records for #{commit}")
   end
@@ -160,7 +167,16 @@ defmodule SourceArchiveCheck do
   end
 
   defp git_projection(commit) do
-    {listing, 0} = System.cmd("git", ["ls-tree", "-rz", "-r", "-t", "--full-tree", commit])
+    {listing, 0} =
+      System.cmd("git", [
+        "--no-replace-objects",
+        "ls-tree",
+        "-rz",
+        "-r",
+        "-t",
+        "--full-tree",
+        commit
+      ])
 
     listing
     |> String.split(<<0>>, trim: true)
@@ -183,7 +199,7 @@ defmodule SourceArchiveCheck do
   end
 
   defp git_blob!(object) do
-    case System.cmd("git", ["cat-file", "blob", object]) do
+    case System.cmd("git", ["--no-replace-objects", "cat-file", "blob", object]) do
       {bytes, 0} -> bytes
       _ -> fail("the commit's blob could not be read")
     end
@@ -235,6 +251,7 @@ defmodule SourceArchiveCheck do
       {"f", {:ok, %File.Stat{type: :regular, mode: bits}}} ->
         observed_mode = if Bitwise.band(bits, 0o111) == 0, do: "644", else: "755"
         if mode != observed_mode, do: fail("file mode differs from the extracted tree")
+
         unless value == digest(File.read!(full_path)),
           do: fail("file content differs from the extracted tree")
 

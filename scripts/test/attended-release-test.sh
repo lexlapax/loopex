@@ -155,6 +155,10 @@ wrong_record=$(git -C "$repo" rev-parse HEAD)
 git -C "$repo" switch -q --detach "$tested"
 expect_preflight_failure wrong_record disposition_mismatch \
   --answer-attended --disposition "$anchor" --milestone M6 --authority-sha "$wrong_record"
+git -C "$repo" replace "$wrong_record" "$authority"
+expect_preflight_failure replaced_wrong_record disposition_mismatch \
+  --answer-attended --disposition "$anchor" --milestone M6 --authority-sha "$wrong_record"
+git -C "$repo" replace -d "$wrong_record" >/dev/null
 
 git -C "$repo" switch -qc missing-permission "$tested"
 cat >>"$repo/docs/developer/agent-context-map.md" <<EOF
