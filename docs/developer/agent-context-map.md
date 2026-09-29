@@ -6007,3 +6007,24 @@ implementation obligation and must exist before a provider-touching merge.
 An unavailable lane is unavailable evidence, never PASS. This direction grants
 implementation and checkpoint pushes on m6, not milestone closure, a merge to
 main, a tag, release or publication.
+
+<a id="disposition-m6-adr-0040-acceptance-2026-09-28"></a>
+### ADR 0040 acceptance — 2026-09-28
+
+The maintainer accepted ADR 0040 on condition that an `ask` error or warning
+plainly say what must be checked or corrected before another run. The condition
+was incorporated into the [Concept](../adr/0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept)
+and [Technical depth](../adr/0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth)
+pair at Proposed candidate `57b0c6ab725f6502047b21fa7745fd59ccc56850`.
+Asked to confirm that exact pair, the maintainer replied:
+
+> Adr040 confirm accepted.
+
+Acceptance binds the candidate's Concept digest
+`sha256:b09d673ce179fcc639cc3494e6fd641ac741d3a4ebfa3c21e17148472f17c5d4`
+and Technical depth digest
+`sha256:7d612590bd3935c305ffd035fe0d2064db74faef7605c55f173ab7a69742b2aa`.
+The decision supersedes only the three startup and root clauses of ADR 0039
+that it names; the remaining ephemeral and durable boundaries stay in force.
+It authorizes the conditioned M6 implementation and evidence, not milestone
+closure, merge to `main`, a tag, release or publication.

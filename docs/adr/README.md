@@ -48,8 +48,8 @@ a decision adds a new record rather than rewriting the old one.
 | 0036 | Daemon-grade store engine and migration | Proposed | [Decision](0036-daemon-grade-store-engine-and-migration.md#concept) | [Technical depth](0036-daemon-grade-store-engine-and-migration-technical.md#technical-depth) |
 | 0037 | Host configuration and path discovery | Proposed | [Decision](0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
 | 0038 | Installed distribution and release artifact | Proposed | [Decision](0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
-| 0039 | Ephemeral embedded profile | Accepted | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
-| 0040 | Ephemeral startup interrupt and unnamed root | Proposed | [Decision](0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept) | [Technical depth](0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth) |
+| 0039 | Ephemeral embedded profile | Accepted (startup-handler order, named-root and unknown-ownership clauses narrowly superseded by 0040) | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
+| 0040 | Ephemeral startup interrupt and unnamed root | Accepted | [Decision](0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept) | [Technical depth](0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -217,3 +217,9 @@ host-VM credential exposure, host-authorized tool audience and host-selected
 catalog effects are applied in all seven affected vision/AGENTS placements.
 The [acceptance disposition](../developer/agent-context-map.md#disposition-m6-adr-0039-acceptance-2026-09-27)
 binds the exact reviewed candidate and both pairs' digests.
+
+0040 is the accepted narrow correction to 0039's startup-handler order,
+unproved-startup root naming and unknown-ownership cases. It also requires
+plain-English stderr recovery guidance after the fixed `ask` diagnostic. The
+[acceptance disposition](../developer/agent-context-map.md#disposition-m6-adr-0040-acceptance-2026-09-28)
+binds its exact Proposed pair and leaves 0039's other decisions unchanged.
