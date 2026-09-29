@@ -514,11 +514,14 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
              %{
                root: root,
                root_ownership: :owned,
-               pending: [:process_groups, :session_subtree],
+               pending: pending,
                cause: {:composition, :runtime_start_failed}
              }}} =
              SessionOwner.start_session(owner, configuration, 6_000)
 
+    # Concept: a false group certificate keeps the root, even if subtree stop proves.
+    # Technical depth: worker DOWN and the owner slot timer may finish in either order.
+    assert pending in [[:process_groups], [:process_groups, :session_subtree]]
     assert_receive :runtime_start_attempted
     assert File.dir?(root)
     assert :atomics.get(cell, 1) == 3
