@@ -16,6 +16,7 @@ already declared here. Back to the [evidence index](README.md).
 | Administrative closure SHA | Located by the plans register's `Closed` transition and the tag; this page cannot name its own commit |
 | `v0.2.0` rollback source SHA | `3f81b04828901a6fb05b29e8b6bed211eed2d376` |
 | Core runtime comparison against `v0.2.0` | Pending result, retained-output reference and SHA-256 |
+| Independent `v0.2.0`–candidate `mix.lock` package-key comparison | Pending result, tested candidate SHA, retained sorted-key lists and comparison output reference, and SHA-256 |
 
 ## Fast-check matrix
 
