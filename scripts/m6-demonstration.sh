@@ -106,7 +106,8 @@ assert_json() {
         unless value["cleanup"]["proved"] == true,
           do: raise("ephemeral command did not prove cleanup")
       "durable" ->
-        unless value["cleanup"] == nil, do: raise("durable cleanup must be null")
+        # OTP json decodes JSON null to the atom :null.
+        unless value["cleanup"] == :null, do: raise("durable cleanup must be null")
     end
     if coding_required == "yes" do
       markers = for marker <- ["M6_DEMONSTRATION_READ_OK", "M6_AFTER_EDIT",
