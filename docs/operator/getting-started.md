@@ -141,7 +141,7 @@ printf 'Explain this file\n' | loopex ask --policy shell-allowlist \
   --model ollama:llama3.2 --tools read-only
 ```
 
-For a public run outcome, the result is one JSON object on standard output, with schema
+With `--output json`, a public run outcome is one JSON object on standard output, with schema
 `loopex.ask/1`, session and run IDs, profile, outcome, text, tool summaries,
 shadowed skills, cleanup and outcome details. Ephemeral `ask` reports its
 cleanup proof; durable `ask` has `"cleanup": null`. Status `0` means completed;

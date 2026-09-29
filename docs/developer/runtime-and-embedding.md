@@ -51,7 +51,7 @@ an alternate reducer, a policy engine, or event truth of its own. An embedder
 may also drive a server from another language over
 [the session protocol](app-server-protocol.md#concept).
 
-Six constraints shape every embedding:
+Seven constraints shape every embedding:
 
 - **The host names authority.** A runtime with any tool active refuses to start
   without a policy module, and a policy needs a stable identity so a question it

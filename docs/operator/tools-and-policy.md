@@ -14,9 +14,10 @@ tool call.
 
 Authority is the host's, not the runtime's. Loopex owns the mechanics of running
 a tool and stopping it truthfully; it has no opinion about whether a particular
-call should be allowed. That decision belongs to the host policy you name —
-`--policy` on the `loopex` command, `LOOPEX_POLICY` or `--policy` for a daemon or
-the app server — and there is no default.
+call should be allowed. That decision belongs to the host policy you name.
+Session-starting `loopex` commands use `--policy`; the daemon accepts `--policy`
+or `LOOPEX_POLICY`, and the app server reads `LOOPEX_POLICY`. There is no
+default.
 
 What this page lets you decide:
 

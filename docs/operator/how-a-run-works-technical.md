@@ -363,9 +363,10 @@ the run's deadline is specified in the
 What remains visible to your own operating-system account is stated under
 [credential boundary](tools-and-policy.md#operator-tools-credential).
 
-The shipped composition selects `anthropic:claude-haiku-4-5` and resolves its
-endpoint from the adapter's bundled catalog, without a network call and without
-the credential. Changing the model is a host decision, not a command flag.
+For `loopex run`, the shipped composition selects `anthropic:claude-haiku-4-5`
+and resolves its endpoint from the adapter's bundled catalog, without a network
+call and without the credential. Changing that command's model is a host
+decision; `loopex ask --state-root` accepts `--model`.
 
 ## Related
 
