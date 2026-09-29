@@ -16,8 +16,10 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
     assert is_pid(Process.whereis(Req.Finch.SupervisorRegistry))
     ca = trusted_fixture_ca()
 
-    for transport <- [:http, :tls], mode <- [:normal, :stop, :deadline] do
-      run_case(transport, mode, ca)
+    for {transport, tls_version} <-
+          [{:http, nil}, {:tls, :"tlsv1.2"}, {:tls, :"tlsv1.3"}],
+        mode <- [:normal, :stop, :deadline] do
+      run_case(transport, tls_version, mode, ca)
     end
   end
 
@@ -45,8 +47,8 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
     certificates
   end
 
-  defp run_case(transport, mode, certificates) do
-    fixture = listener(transport, mode, certificates)
+  defp run_case(transport, tls_version, mode, certificates) do
+    fixture = listener(transport, tls_version, mode, certificates)
     tag = make_ref()
     root = start_pool(fixture.base, tag)
     {:ok, fingerprint} = Route.fingerprint(:ollama, :ollama_chat_completions, fixture.base)
@@ -78,7 +80,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
       assert route.host == URI.parse(fixture.base).host
       assert route.path == "/chat/completions"
       send(caller, {:loopex_one_shot_grant, claim_ref, tag, root.worker})
-      assert_receive {:drain_request_seen, server, ^mode}, 2_000
+      assert_receive {:drain_request_seen, server, ^mode, ^tls_version}, 2_000
       assert server == fixture.server
 
       in_flight_processes = process_delta(before_processes)
@@ -133,7 +135,8 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
       assert drained - caller_down <= @drain_ms
 
       IO.puts(
-        "transport_drain kind=#{transport} mode=#{result} caller_down_ms=#{caller_down} " <>
+        "transport_drain kind=#{transport} tls_version=#{inspect(tls_version)} " <>
+          "mode=#{result} caller_down_ms=#{caller_down} " <>
           "drain_elapsed_ms=#{drained - caller_down} " <>
           "in_flight_processes=#{inspect(in_flight_processes)} " <>
           "in_flight_ports=#{inspect(in_flight_ports)} " <>
@@ -149,7 +152,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
     end
   end
 
-  defp listener(:http, mode, _certificates) do
+  defp listener(:http, nil, mode, _certificates) do
     {:ok, socket} =
       :gen_tcp.listen(0, [:binary, active: false, packet: :raw, reuseaddr: true])
 
@@ -159,12 +162,14 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
     %{socket: socket, server: server, port: port, base: "http://127.0.0.1:#{port}"}
   end
 
-  defp listener(:tls, mode, certificates) do
+  defp listener(:tls, tls_version, mode, certificates)
+       when tls_version in [:"tlsv1.2", :"tlsv1.3"] do
     {:ok, socket} =
       :ssl.listen(0, [
         :binary,
         active: false,
         reuseaddr: true,
+        versions: [tls_version],
         cert: certificates[:cert],
         key: certificates[:key]
       ])
@@ -183,9 +188,23 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
       end
 
     {:ok, socket} = accepted
-    socket = if transport == :tls, do: elem(:ssl.handshake(socket, 5_000), 1), else: socket
+
+    socket =
+      if transport == :tls do
+        {:ok, tls_socket} = :ssl.handshake(socket, 5_000)
+        tls_socket
+      else
+        socket
+      end
+
+    negotiated_version =
+      if transport == :tls do
+        {:ok, information} = :ssl.connection_information(socket, [:protocol])
+        Keyword.fetch!(information, :protocol)
+      end
+
     read_request(transport, socket, "")
-    send(test, {:drain_request_seen, self(), mode})
+    send(test, {:drain_request_seen, self(), mode, negotiated_version})
 
     if mode == :normal do
       receive do
