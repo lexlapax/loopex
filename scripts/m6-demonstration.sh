@@ -219,7 +219,7 @@ M6_DEMO_STATE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/loopex-m6-state.XXXXXX")
 export M6_DEMO_STATE_ROOT
 export M6_DEMO_SKILL="$M6_DEMO_ROOT/skills/m6-demo"
 export M6_DEMO_COMMAND="$PWD/apps/loopex_cli/bin/loopex"
-export M6_DEMO_PROMPT='Perform the coding task defined by the supplied m6-demo skill.'
+export M6_DEMO_PROMPT='Perform every step of the supplied m6-demo skill in order. Use each tool result before the next action. After verification, answer in plain text by copying on separate lines the exact content read from evidence.txt, the final exact content of generated.txt, and the completion marker specified by the skill. Do not omit or paraphrase any of the three. Do not call another tool after verification.'
 printf 'm6-demonstration: candidate %s on %s; workspace root %s\n' \
   "$candidate" "$(uname -s)" "$M6_DEMO_ROOT"
 printf 'm6-demonstration: durable state root %s\n' "$M6_DEMO_STATE_ROOT"
