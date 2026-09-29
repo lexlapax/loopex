@@ -27,8 +27,12 @@ and SHA-256. These fixed requirements remain outside the fillable cells.
 
 Each complete run records its exact source revision, platform, OTP/Elixir
 pair, result, measured duration, retained-output reference and SHA-256.
-A current-pair CI run of the exact candidate counts when available. Otherwise,
-retain a clean local run of the same fast check with its complete output.
+The default closure rule takes a current-pair CI run of the exact candidate,
+or a clean local run of the same fast check. For M6 only, the
+[approved reuse disposition](../developer/agent-context-map.md#disposition-m6-evidence-reuse-2026-09-29)
+allows a successful earlier run to cover unchanged code after the intervening
+diff and affected or missing checks are verified. Every cell names its actual
+revision; no reused run is represented as an exact-candidate execution.
 
 | Run | Revision | Platform and toolchain | Result and duration | Retained-output reference | SHA-256 |
 | --- | --- | --- | --- | --- | --- |
@@ -38,6 +42,19 @@ retain a clean local run of the same fast check with its complete output.
 | Floor `--long-bound` transport drain on Darwin | Pending | Pending | Pending | Pending | Pending |
 | Floor `--long-bound` transport drain on Linux | Pending | Pending | Pending | Pending | Pending |
 
+## Approved evidence-reuse reconciliation
+
+These fields bind the exceptional proof to the tested implementation SHA.
+The administrative closure commit fills only the reserved values; it does not
+add a new result, reference or digest field after the candidate was tested.
+
+| Proof | Actual revisions and result | Retained-output reference | SHA-256 |
+| --- | --- | --- | --- |
+| Complete intervening diff from the reused integration candidate to the tested implementation candidate | Pending | Pending | Pending |
+| Unchanged production code, dependency lock and core runtime comparison across that diff | Pending | Pending | Pending |
+| Affected and missing focused checks, including the corrected cross-UID fixture, rollback, demonstration oracle and documentation/examples | Pending | Pending | Pending |
+| Reused successful check inventory and excluded failed-run inventory, each with its actual revision | Pending | Pending | Pending |
+
 ## Current-pair release check on Linux and approved evidence reuse
 
 `LOOPEX_CROSS_UID_USER=<second user> bash scripts/check-release.sh` ran once
@@ -45,6 +62,7 @@ from a clean M6 integration candidate, with the provider credential, pinned
 Node and the required attended answers. Its actual result and every executed
 lane's complete output are retained separately; a failed full run is never
 relabeled `PASS`.
+
 For M6 only, the maintainer's
 [evidence-reuse disposition](../developer/agent-context-map.md#disposition-m6-evidence-reuse-2026-09-29)
 replaces the single exact-candidate full-run `PASS` requirement with successful
