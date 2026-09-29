@@ -959,7 +959,9 @@ No session/key/tree leaves the callback. Optional foldl/select_session are
 client-only. The M6
 fixture exercises that actual re-init shape in a separate fresh VM: arm a
 one-shot client-only size/1 exception for genuine handshake-triggered cache
-registration, clear its fault marker before raising, and preserve the role and
+registration, clear its fault marker before raising, and arm it only on the
+initial explicit-role init: OTP 27 can replay the original `fault: true` option
+in nonempty roleless recovery args. Preserve the role and
 credential-free observer/nonce in the real manager's process dictionary. The
 manager catches the exception, terminates the old cache and calls roleless
 init/1 (floor `ssl_manager.erl:510-533`, current `:514-545`). Observe that actual

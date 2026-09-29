@@ -3427,10 +3427,15 @@ defmodule Loopex.Executor.Local do
           end
         end)
 
+      # Concept: an effect ends only when its exact process has gone down.
+      # Technical depth: work/0 can send an ordinary EXIT-shaped tuple to this
+      # guardian; the private monitor reference makes that tuple non-evidence.
+      effect_monitor = Process.monitor(effect)
       send(caller, {guardian_tag, :guardian_effect, guardian, effect})
 
       arm_lease_guarded_work(
         effect,
+        effect_monitor,
         effect_tag,
         result_table,
         lease_pid,
@@ -3447,6 +3452,7 @@ defmodule Loopex.Executor.Local do
 
   defp arm_lease_guarded_work(
          effect,
+         effect_monitor,
          effect_tag,
          result_table,
          lease_pid,
@@ -3475,6 +3481,7 @@ defmodule Loopex.Executor.Local do
           finish_unstarted_phase(
             cause,
             effect,
+            effect_monitor,
             result_table,
             [lease_monitor, owner_monitor, caller_monitor],
             remaining
@@ -3484,6 +3491,7 @@ defmodule Loopex.Executor.Local do
 
           await_lease_guarded_work(
             effect,
+            effect_monitor,
             effect_tag,
             result_table,
             lease_pid,
@@ -3500,6 +3508,7 @@ defmodule Loopex.Executor.Local do
         finish_unstarted_phase(
           :workspace_lease_lost,
           effect,
+          effect_monitor,
           result_table,
           [owner_monitor, caller_monitor],
           remaining
@@ -3509,6 +3518,7 @@ defmodule Loopex.Executor.Local do
         finish_unstarted_phase(
           :effect_owner_lost,
           effect,
+          effect_monitor,
           result_table,
           [lease_monitor, caller_monitor],
           remaining
@@ -3518,6 +3528,7 @@ defmodule Loopex.Executor.Local do
         finish_unstarted_phase(
           :caller_lost,
           effect,
+          effect_monitor,
           result_table,
           [lease_monitor, owner_monitor],
           remaining
@@ -3528,6 +3539,7 @@ defmodule Loopex.Executor.Local do
           finish_unstarted_phase(
             :bound_reached,
             effect,
+            effect_monitor,
             result_table,
             [lease_monitor, owner_monitor, caller_monitor],
             remaining
@@ -3535,6 +3547,7 @@ defmodule Loopex.Executor.Local do
         else
           arm_lease_guarded_work(
             effect,
+            effect_monitor,
             effect_tag,
             result_table,
             lease_pid,
@@ -3550,15 +3563,16 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp finish_unstarted_phase(cause, effect, result_table, monitors, remaining) do
+  defp finish_unstarted_phase(cause, effect, effect_monitor, result_table, monitors, remaining) do
     Process.exit(effect, :kill)
-    stopped = await_effect_exit(effect, result_table, remaining)
+    stopped = await_effect_exit(effect, effect_monitor, result_table, remaining)
     demonitor_phase(monitors)
     {:abandoned, public_abandonment_cause(cause), stopped, :none}
   end
 
   defp await_lease_guarded_work(
          effect,
+         effect_monitor,
          effect_tag,
          result_table,
          lease_pid,
@@ -3576,6 +3590,7 @@ defmodule Loopex.Executor.Local do
         finish_abandoned_phase(
           :workspace_lease_lost,
           effect,
+          effect_monitor,
           effect_tag,
           result_table,
           [owner_monitor, caller_monitor],
@@ -3586,6 +3601,7 @@ defmodule Loopex.Executor.Local do
         finish_abandoned_phase(
           :effect_owner_lost,
           effect,
+          effect_monitor,
           effect_tag,
           result_table,
           [lease_monitor, caller_monitor],
@@ -3596,13 +3612,14 @@ defmodule Loopex.Executor.Local do
         finish_abandoned_phase(
           :caller_lost,
           effect,
+          effect_monitor,
           effect_tag,
           result_table,
           [lease_monitor, owner_monitor],
           remaining
         )
 
-      {:EXIT, ^effect, reason} ->
+      {:DOWN, ^effect_monitor, :process, ^effect, reason} ->
         demonitor_phase(lease_monitor, owner_monitor, caller_monitor)
 
         case take_bounded_result(result_table, effect_tag) do
@@ -3638,6 +3655,7 @@ defmodule Loopex.Executor.Local do
           finish_abandoned_phase(
             :bound_reached,
             effect,
+            effect_monitor,
             effect_tag,
             result_table,
             [lease_monitor, owner_monitor, caller_monitor],
@@ -3646,6 +3664,7 @@ defmodule Loopex.Executor.Local do
         else
           await_lease_guarded_work(
             effect,
+            effect_monitor,
             effect_tag,
             result_table,
             lease_pid,
@@ -3663,13 +3682,17 @@ defmodule Loopex.Executor.Local do
   defp finish_abandoned_phase(
          cause,
          effect,
+         effect_monitor,
          effect_tag,
          result_table,
          monitors,
          remaining
        ) do
     Process.exit(effect, :kill)
-    {stopped, late} = await_abandoned_effect(effect, result_table, effect_tag, remaining)
+
+    {stopped, late} =
+      await_abandoned_effect(effect, effect_monitor, result_table, effect_tag, remaining)
+
     demonitor_phase(monitors)
 
     case {stopped, cause, late} do
@@ -3685,11 +3708,11 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp await_abandoned_effect(effect, result_table, effect_tag, remaining) do
+  defp await_abandoned_effect(effect, effect_monitor, result_table, effect_tag, remaining) do
     wait = guardian_confirmation_wait(remaining)
 
     receive do
-      {:EXIT, ^effect, _reason} ->
+      {:DOWN, ^effect_monitor, :process, ^effect, _reason} ->
         late =
           case take_bounded_result(result_table, effect_tag) do
             {:ok, lease_held, owner_held, bound_held, completed_at, result} ->
@@ -3705,6 +3728,7 @@ defmodule Loopex.Executor.Local do
         {true, late}
     after
       wait ->
+        Process.demonitor(effect_monitor, [:flush])
         :ets.delete(result_table)
         {false, :none}
     end
@@ -3767,15 +3791,16 @@ defmodule Loopex.Executor.Local do
   # timeout remains unconfirmed rather than becoming a verdict.
   defp guardian_confirmation_wait(_remaining), do: @abandon_confirmation_ms
 
-  defp await_effect_exit(effect, result_table, remaining) do
+  defp await_effect_exit(effect, effect_monitor, result_table, remaining) do
     wait = guardian_confirmation_wait(remaining)
 
     receive do
-      {:EXIT, ^effect, _reason} ->
+      {:DOWN, ^effect_monitor, :process, ^effect, _reason} ->
         :ets.delete(result_table)
         true
     after
       wait ->
+        Process.demonitor(effect_monitor, [:flush])
         :ets.delete(result_table)
         false
     end

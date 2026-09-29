@@ -3857,6 +3857,55 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "an unproved guardian DOWN cannot preserve a successful decision"
   end
 
+  test "a forged effect exit cannot settle bounded work while the effect is alive" do
+    # Concept: only the effect process's actual death can release its authority.
+    #
+    # Technical depth: an effect may send an ordinary tuple shaped like a
+    # linked-process EXIT to its guardian. It traps the guardian's later exit
+    # and stays alive until this test explicitly releases it. The result must
+    # wait for the exact effect DOWN, not the forgeable tuple.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        result =
+          Local.bounded_work(
+            fn ->
+              Process.flag(:trap_exit, true)
+              {:links, [guardian]} = Process.info(self(), :links)
+              send(guardian, {:EXIT, self(), :normal})
+              send(parent, {:forged_exit_effect, self(), guardian})
+
+              receive do
+                :finish_after_forgery -> :completed
+              end
+            end,
+            5_000,
+            {Process.monitor(lease), lease}
+          )
+
+        send(parent, {:forged_exit_result, result})
+      end)
+
+    assert_receive {:forged_exit_effect, effect, guardian}, 2_000
+
+    on_exit(fn ->
+      if Process.alive?(effect), do: Process.exit(effect, :kill)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+      if Process.alive?(lease), do: Process.exit(lease, :kill)
+    end)
+
+    refute_receive {:forged_exit_result, _}, 100
+    assert Process.alive?(effect)
+    send(effect, :finish_after_forgery)
+    assert_receive {:forged_exit_result, {:done, :completed}}, 2_000
+    refute Process.alive?(effect)
+    refute Process.alive?(guardian)
+  end
+
   test "a lease certified result survives lease loss queued ahead of guardian observation" do
     # Concept: completion under a live lease is not reversed by a later revocation.
     #

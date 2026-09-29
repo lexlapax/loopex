@@ -3585,9 +3585,11 @@ are client-only optional callbacks (floor `ssl_session_cache_api.erl:120-158`),
 not calls to nonexistent server functions. The fixture explicitly exercises
 initial role binding and this actual roleless re-initialization in a separate
 fresh VM. Arm a one-shot client-only size/1 exception on genuine handshake-triggered
-cache registration; clear its fault marker before raising so recovery cannot
-rearm it. Keep the bound role plus a credential-free observer/nonce in that
-same real manager's process dictionary. OTP catches the exception, terminates
+cache registration; clear its fault marker before raising and arm only the
+initial explicit-role init, so recovery cannot rearm it when OTP 27 replays
+the original `fault: true` option in nonempty roleless args. Keep the bound role
+plus a credential-free observer/nonce in that same real manager's process
+dictionary. OTP catches the exception, terminates
 the old cache, invokes roleless init/1 and resets its order (floor
 `ssl_manager.erl:510-533`, current `:514-545`). Require that real recovery and
 successful delegation to the fresh client cache. The positive-resumption

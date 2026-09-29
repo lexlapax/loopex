@@ -32,14 +32,16 @@ defmodule LoopexLLMReqLLMTest.TLSSessionCacheProbe do
     Process.put(@role_key, role)
     Process.put(@observer_key, observer)
     Process.put(@nonce_key, nonce)
+    # OTP 27 replays the original nonempty args on roleless recovery. The
+    # one-shot fault belongs only to the initial explicit-role binding.
+    fault? = Keyword.has_key?(args, :role) and Keyword.get(args, :fault, false)
 
     if role == :client,
-      do:
-        send(observer, {:tls_cache_client_init, nonce, self(), Keyword.get(args, :fault, false)})
+      do: send(observer, {:tls_cache_client_init, nonce, self(), fault?})
 
-    if Keyword.get(args, :fault, false) and role == :client, do: Process.put(@fault_key, true)
+    if fault? and role == :client, do: Process.put(@fault_key, true)
 
-    if role == :client and Keyword.get(args, :fault, false),
+    if role == :client and fault?,
       do: send(observer, {:tls_cache_fault_armed, nonce, self()})
 
     if not Keyword.has_key?(args, :role),
