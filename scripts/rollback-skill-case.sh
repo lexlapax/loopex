@@ -5,7 +5,24 @@ set -euo pipefail
 scratch=$1
 source_dir=$(cd "$(dirname "$0")/.." && pwd -P)
 case_root=$(mktemp -d /tmp/loopex-rb-skill.XXXXXX)
-trap 'rm -rf "$case_root"' EXIT
+snapshot=''
+withheld=''
+restore_snapshot() {
+  if [ -n "$withheld" ] && [ -e "$withheld" ]; then
+    mv "$withheld" "$snapshot" || {
+      printf 'rollback: could not restore test-owned skill snapshot at %s\n' "$snapshot" >&2
+      return 1
+    }
+  fi
+}
+cleanup_case() {
+  local status=$1
+  trap - EXIT
+  restore_snapshot || exit 1
+  rm -rf "$case_root"
+  exit "$status"
+}
+trap 'cleanup_case "$?"' EXIT
 workspace="$case_root/workspace"
 state_root="$case_root/state"
 external="$case_root/external/control"
@@ -23,11 +40,13 @@ printf 'rollback fixture content\n' >"$workspace/notes.md"
 )
 session_id=$(<"$case_root/session-id")
 cli="$scratch/old/apps/loopex_cli/loopex"
-env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY \
-  LOOPEX_PROVIDER_API_KEY=loopex-rollback-inert-not-a-provider-key \
-  "$cli" resume "$session_id" --policy allow-all \
-    --state-root "$state_root" --workspace "$workspace" \
-    >"$scratch/old-user-skill-resume.out" 2>&1
+resume_old() {
+  env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY \
+    LOOPEX_PROVIDER_API_KEY=loopex-rollback-inert-not-a-provider-key \
+    "$cli" resume "$session_id" --policy allow-all \
+      --state-root "$state_root" --workspace "$workspace" >"$1" 2>&1
+}
+resume_old "$scratch/old-user-skill-resume.out"
 if grep -q 'admitted skill snapshot is unavailable' "$scratch/old-user-skill-resume.out"; then
   echo 'rollback: released CLI could not reload retained user snapshot' >&2
   exit 1
@@ -36,6 +55,26 @@ grep -q 'loopex: done' "$scratch/old-user-skill-resume.out" || {
   echo 'rollback: released CLI did not resume user-skill session' >&2
   exit 1
 }
+digest=$(<"$case_root/manifest-digest")
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+  echo 'rollback: writer produced an invalid skill manifest digest' >&2
+  exit 1
+}
+snapshot="$state_root/resource-packs/manifests/$digest.etf"
+withheld="$case_root/withheld-manifest.etf"
+[ -f "$snapshot" ] && [ ! -L "$snapshot" ] && [ ! -e "$withheld" ] || {
+  echo 'rollback: test-owned admitted skill snapshot is absent or unsafe to withhold' >&2
+  exit 1
+}
+mv "$snapshot" "$withheld"
+resume_old "$scratch/old-user-skill-missing-resume.out"
+grep -Fxq 'loopex: the admitted skill snapshot is unavailable; recovery continues with skill content withheld' \
+  "$scratch/old-user-skill-missing-resume.out" || {
+    echo 'rollback: released CLI did not report the withheld admitted snapshot' >&2
+    exit 1
+  }
+restore_snapshot
+withheld=''
 printf 'rollback: released CLI reloaded candidate-admitted user skill by digest\n'
 env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
   -u OPENROUTER_API_KEY "$cli" daemon prepare-index --state-root "$state_root" \
@@ -58,7 +97,7 @@ stop_daemon() {
     wait "$daemon_pid" || true
   fi
 }
-trap 'stop_daemon; rm -rf "$case_root"' EXIT
+trap 'status=$?; stop_daemon; cleanup_case "$status"' EXIT
 ready=0
 for _attempt in $(seq 1 300); do
   if grep -q '"record":"daemon_ready"' "$scratch/old-daemon.out"; then ready=1; break; fi
@@ -79,4 +118,4 @@ fi
     "$socket" "$case_root"
 )
 stop_daemon
-trap 'rm -rf "$case_root"' EXIT
+trap 'cleanup_case "$?"' EXIT
