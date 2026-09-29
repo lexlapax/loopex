@@ -27,6 +27,22 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     end
   end
 
+  defmodule ExpiringPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl true
+    def decide(_request) do
+      {:defer,
+       %{
+         kind: :choice,
+         prompt: "May the tool list this workspace?",
+         choices: [%{id: "allow", label: "Allow once"}],
+         expires_in_ms: 1_500
+       }}
+    end
+  end
+
   test "a real in-process model turn retires custody before a second ask and stop" do
     root = Path.join(System.tmp_dir!(), "loopex-model-#{System.unique_integer([:positive])}")
     File.mkdir!(root)
@@ -130,6 +146,109 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert_receive {:model_request, request}, 15_000
     assert request =~ "POST /v1/chat/completions HTTP/1.1"
     assert MapSet.difference(ephemeral_roots(), prior_roots) == MapSet.new()
+  end
+
+  test "an unanswered real-core interaction expires and frees the embedded session" do
+    root = Path.join(System.tmp_dir!(), "loopex-expiry-#{System.unique_integer([:positive])}")
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    port = start_server([{:tool, "ls", %{"path" => "."}}, "after expiry", "second answer"])
+
+    assert {:ok, session} =
+             Ephemeral.start_session(
+               policy: ExpiringPolicy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :read_only,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert {:error, {:interaction_pending, question}} =
+             Ephemeral.ask(session, "list the workspace")
+
+    assert {:error, :run_open} = Ephemeral.ask(session, "too early")
+
+    assert eventually(fn ->
+             match?(
+               {:ok,
+                %{
+                  outcome: :completed,
+                  text: "after expiry",
+                  tools: [%{tool_id: "loopex.ls", outcome: "denied"}]
+                }},
+               Ephemeral.last_result(session)
+             )
+           end)
+
+    assert {:error, :invalid_interaction_answer} =
+             Ephemeral.answer(session, question["interaction_id"], "allow")
+
+    assert {:ok, %{outcome: :completed, text: "second answer"}} =
+             Ephemeral.ask(session, "second prompt")
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "an answer queued behind expiry observation loses to core's committed expiry" do
+    root =
+      Path.join(System.tmp_dir!(), "loopex-expiry-race-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    port = start_server([{:tool, "ls", %{"path" => "."}}, "after expiry", "second answer"])
+
+    assert {:ok, session} =
+             Ephemeral.start_session(
+               policy: ExpiringPolicy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :read_only,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert {:error, {:interaction_pending, question}} =
+             Ephemeral.ask(session, "list the workspace")
+
+    {:loopex_ephemeral_session, owner, _cell} = session
+    state = :sys.get_state(owner)
+    runtime = state.startup.registered.runtime
+    session_id = state.startup.session_id
+    true = :erlang.suspend_process(owner)
+
+    on_exit(fn ->
+      if Process.alive?(owner) and Process.info(owner, :status) == {:status, :suspended},
+        do: :erlang.resume_process(owner)
+    end)
+
+    assert {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    assert eventually(
+             fn ->
+               match?({:ok, %{kind: "interaction.expired"}}, Loopex.next_event(attachment))
+             end,
+             300
+           )
+
+    request = make_ref()
+    send(owner, {self(), request, :public, {:answer, question["interaction_id"], "allow"}})
+    true = :erlang.resume_process(owner)
+    assert_receive {^owner, ^request, {:error, :invalid_interaction_answer}}, 5_000
+
+    assert eventually(fn ->
+             match?(
+               {:ok, %{outcome: :completed, text: "after expiry"}},
+               Ephemeral.last_result(session)
+             )
+           end)
+
+    assert {:ok, %{outcome: :completed, text: "second answer"}} =
+             Ephemeral.ask(session, "second prompt")
+
+    assert :ok = Ephemeral.stop_session(session)
   end
 
   test "a declared turn ceiling stops a tool run before another model call" do
@@ -461,5 +580,17 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
       ],
       usage: %{prompt_tokens: 12, completion_tokens: 3, total_tokens: 15}
     })
+  end
+
+  defp eventually(fun, attempts \\ 200)
+  defp eventually(_fun, 0), do: false
+
+  defp eventually(fun, attempts) do
+    if fun.() do
+      true
+    else
+      Process.sleep(20)
+      eventually(fun, attempts - 1)
+    end
   end
 end

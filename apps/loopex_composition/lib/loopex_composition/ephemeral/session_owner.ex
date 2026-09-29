@@ -653,30 +653,26 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       when is_pid(borrower) and is_reference(request) do
     interaction = state.session.interaction
 
-    if state.session.active || not answer_matches?(interaction, interaction_id, choice_id) do
-      send(borrower, {self(), request, {:error, :invalid_interaction_answer}})
-      {:noreply, state}
-    else
-      {command_id, session} = next_command_id(state.session, :answer)
+    cond do
+      not answer_matches?(interaction, interaction_id, choice_id) ->
+        send(borrower, {self(), request, {:error, :invalid_interaction_answer}})
+        {:noreply, state}
 
-      command = %{
-        type: :interaction_answer,
-        command_id: command_id,
-        interaction_id: interaction_id,
-        choice_id: choice_id
-      }
+      is_nil(state.session.active) ->
+        {:noreply, begin_live_answer(state, borrower, request, interaction_id, choice_id)}
 
-      next = %{state | session: session}
+      state.session.active.kind == :observe and
+          state.session.active.operation == :poll_scheduled ->
+        state = state |> put_in([:session, :active], nil) |> put_in([:session, :poll_marker], nil)
+        {:noreply, begin_live_answer(state, borrower, request, interaction_id, choice_id)}
 
-      {:noreply,
-       begin_live_command(
-         next,
-         borrower,
-         request,
-         :answer,
-         command,
-         state.startup.configuration.timeout
-       )}
+      state.session.active.kind == :observe and
+          state.session.active.operation == :next_event ->
+        {:noreply, reserve_live_answer(state, borrower, request, interaction_id, choice_id)}
+
+      true ->
+        send(borrower, {self(), request, {:error, :invalid_interaction_answer}})
+        {:noreply, state}
     end
   end
 
@@ -800,6 +796,25 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   def handle_info(
+        {:interaction_wake, marker},
+        %{
+          phase: :ready,
+          session: %{
+            poll_marker: marker,
+            active: nil,
+            interaction: %{},
+            interaction_wake_deadline: deadline
+          }
+        } = state
+      ) do
+    state = put_in(state.session.poll_marker, nil)
+
+    if not fresh?(deadline),
+      do: {:noreply, begin_interaction_observation(state)},
+      else: {:noreply, watch_interaction(state)}
+  end
+
+  def handle_info(
         {:public_tick, request},
         %{phase: :ready, session: %{active: %{request: request} = active}} = state
       ) do
@@ -882,7 +897,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       Map.get(startup.process_monitors, pid) == monitor ->
         {:noreply, begin_stop(state, nil) |> mark_stopped_child_down(pid)}
 
-      (state.session.active && state.session.active.borrower_monitor == monitor) and
+      is_map(state.session.active) and state.session.active.borrower_monitor == monitor and
           state.session.active.borrower == pid ->
         {:noreply, borrower_down(state)}
 
@@ -1639,6 +1654,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     active = state.session.active
 
     cond do
+      reserved_answer?(state) ->
+        state
+        |> put_in([:session, :active, :borrower], nil)
+        |> put_in([:session, :active, :borrower_monitor], nil)
+
       active.admission == :pregrant and active.facade.stage == :await_ready ->
         send(active.facade.pid, {self(), active.facade.reference, :cancel})
         Process.send_after(self(), {:live_cancel_deadline, active.facade.reference}, 1_000)
@@ -1697,6 +1717,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       run: nil,
       effect_unproved: false,
       interaction: nil,
+      interaction_wake_deadline: nil,
       last_result: :none,
       history: [],
       history_truncated: false,
@@ -1733,6 +1754,61 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   defp answer_matches?(_interaction, _id, _choice), do: false
 
+  defp begin_live_answer(state, borrower, request, interaction_id, choice_id) do
+    {command_id, session} = next_command_id(state.session, :answer)
+
+    command = %{
+      type: :interaction_answer,
+      command_id: command_id,
+      interaction_id: interaction_id,
+      choice_id: choice_id
+    }
+
+    %{state | session: session}
+    |> begin_live_command(
+      borrower,
+      request,
+      :answer,
+      command,
+      state.startup.configuration.timeout
+    )
+  end
+
+  # Concept: an answer arriving during the sole expiry reader still competes
+  # at core's journal; the reader cannot turn it into a local refusal.
+  # Technical depth: reserve one answer on the active poll and send its command
+  # only after that exact facade response. Its original public deadline runs
+  # while the poll finishes; no second attachment reader is created.
+  defp reserve_live_answer(state, borrower, request, interaction_id, choice_id) do
+    {command_id, session} = next_command_id(state.session, :answer)
+
+    command = %{
+      type: :interaction_answer,
+      command_id: command_id,
+      interaction_id: interaction_id,
+      choice_id: choice_id
+    }
+
+    started_at = System.monotonic_time()
+    monitor = Process.monitor(borrower)
+
+    active =
+      session.active
+      |> Map.merge(%{
+        borrower: borrower,
+        borrower_monitor: monitor,
+        request: request,
+        kind: :answer,
+        command_id: command_id,
+        started_at: started_at,
+        wait_deadline: started_at + native(state.startup.configuration.timeout),
+        admission: :pregrant,
+        queued_command: command
+      })
+
+    %{state | session: %{session | active: active}} |> schedule_public_tick()
+  end
+
   defp begin_live_command(state, borrower, request, kind, command, wait_ms) do
     started_at = System.monotonic_time()
     wait_deadline = started_at + native(wait_ms)
@@ -1753,7 +1829,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       cancel_reason: nil
     }
 
-    state = put_in(state.session.active, active)
+    state =
+      state
+      |> put_in([:session, :active], active)
+      |> put_in([:session, :poll_marker], nil)
+
     state = if kind == :ask, do: put_in(state.session.model_binding, nil), else: state
     state = live_facade_operation(state, {:command, command}, :command)
     schedule_public_tick(state)
@@ -1826,7 +1906,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         if is_reference(active.borrower_monitor),
           do: Process.demonitor(active.borrower_monitor, [:flush])
 
-        put_in(state.session.active, nil)
+        state |> put_in([:session, :active], nil) |> watch_interaction()
 
       true ->
         live_failure(state)
@@ -1840,7 +1920,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
       {:error, reason}
       when (active.kind == :ask and reason == :run_open) or
-             (active.kind == :answer and reason == :invalid_interaction_answer) ->
+             (active.kind == :answer and
+                reason in [
+                  :invalid_interaction_answer,
+                  :interaction_resolved,
+                  :interaction_absent
+                ]) ->
         refusal =
           if active.kind == :ask,
             do: {:error, :run_open},
@@ -1854,7 +1939,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           if is_reference(active.borrower_monitor),
             do: Process.demonitor(active.borrower_monitor, [:flush])
 
-          put_in(state.session.active, nil)
+          state |> put_in([:session, :active], nil) |> watch_interaction()
         end
 
       {:error, :no_active_run} when active.kind == :abort and state.phase == :stopping ->
@@ -1891,7 +1976,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
               )
         }
       else
-        %{session | interaction: nil}
+        %{session | interaction: nil, interaction_wake_deadline: nil}
       end
 
     last_result = active.timed_out || :none
@@ -1928,6 +2013,88 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     state |> live_facade_operation(:next_event, :next_event)
   end
 
+  # Concept: a pending question remains immediately answerable until its
+  # public expiry. Afterward the same attachment reader observes core's
+  # journaled resolution and the run ending; a clock alone proves neither.
+  # Technical depth: the initial wall-clock delta becomes a monotonic deadline.
+  # Long deadlines are sliced into one-minute wakeups, never rederived from a
+  # wall clock that can move while core's relative expiry timer is running.
+  defp watch_interaction(
+         %{
+           phase: :ready,
+           session: %{active: nil, interaction: %{}, interaction_wake_deadline: deadline}
+         } = state
+       )
+       when is_integer(deadline) do
+    delay = min(remaining(deadline), 60_000)
+    marker = make_ref()
+    Process.send_after(self(), {:interaction_wake, marker}, delay)
+    put_in(state.session.poll_marker, marker)
+  end
+
+  defp watch_interaction(state), do: state
+
+  defp begin_interaction_observation(state) do
+    now = System.monotonic_time()
+
+    active = %{
+      borrower: nil,
+      borrower_monitor: nil,
+      request: nil,
+      kind: :observe,
+      command_id: state.session.run.command_id,
+      started_at: now,
+      wait_deadline: now,
+      admission: :following,
+      operation: :next_event,
+      facade: nil,
+      timed_out: nil,
+      cancel_reason: nil,
+      queued_command: nil
+    }
+
+    state |> put_in([:session, :active], active) |> begin_live_poll()
+  end
+
+  defp retire_reserved_answer(state, refusal \\ nil) do
+    active = state.session.active
+
+    if is_pid(active.borrower) and refusal != nil,
+      do: send(active.borrower, {self(), active.request, refusal})
+
+    if is_reference(active.borrower_monitor),
+      do: Process.demonitor(active.borrower_monitor, [:flush])
+
+    now = System.monotonic_time()
+
+    active = %{
+      active
+      | borrower: nil,
+        borrower_monitor: nil,
+        request: nil,
+        kind: :observe,
+        command_id: state.session.run.command_id,
+        started_at: now,
+        wait_deadline: now,
+        admission: :following,
+        timed_out: nil,
+        queued_command: nil
+    }
+
+    put_in(state.session.active, active)
+  end
+
+  defp reserved_answer?(%{session: %{active: %{kind: :answer, queued_command: %{} = _command}}}),
+    do: true
+
+  defp reserved_answer?(_state), do: false
+
+  defp retire_stale_reserved_answer(state, ending) do
+    if reserved_answer?(state) and (is_nil(state.session.interaction) or ending != nil),
+      do: retire_reserved_answer(state, {:error, :invalid_interaction_answer}),
+      else: state
+  end
+
   defp schedule_live_poll(%{phase: :stopping, stop: %{abort_sent: false}} = state),
     do: stop_abort_or_cleanup(state)
 
@@ -1937,6 +2104,36 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     if fresh?(state.stop.grace_deadline),
       do: schedule_live_poll_fresh(state),
       else: finish_stop_run(state)
+  end
+
+  defp schedule_live_poll(%{phase: :ready} = state) when is_map(state.session.active) do
+    if reserved_answer?(state) do
+      active = state.session.active
+      command = active.queued_command
+
+      cond do
+        is_nil(active.borrower) ->
+          state |> retire_reserved_answer() |> schedule_live_poll_fresh()
+
+        not answer_matches?(state.session.interaction, command.interaction_id, command.choice_id) ->
+          state
+          |> retire_reserved_answer({:error, :invalid_interaction_answer})
+          |> schedule_live_poll_fresh()
+
+        not fresh?(active.wait_deadline) ->
+          state
+          |> timeout_live_request()
+          |> retire_reserved_answer()
+          |> schedule_live_poll_fresh()
+
+        true ->
+          state
+          |> put_in([:session, :active, :queued_command], nil)
+          |> live_facade_operation({:command, command}, :command)
+      end
+    else
+      schedule_live_poll_fresh(state)
+    end
   end
 
   defp schedule_live_poll(state), do: schedule_live_poll_fresh(state)
@@ -1965,7 +2162,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     with {:ok, sequence} <- event_sequence(event, state.session.cursor),
          {:ok, state} <- project_history(state, event),
          {:ok, state, ending} <- project_live_run(state, event) do
-      state = put_in(state.session.cursor, sequence)
+      state =
+        state |> put_in([:session, :cursor], sequence) |> retire_stale_reserved_answer(ending)
 
       case ending do
         nil ->
@@ -2133,6 +2331,25 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     if valid_interaction?(question), do: {:ok, state, {:question, question}}, else: :error
   end
 
+  defp project_selected_event(state, %{kind: kind} = event)
+       when kind in ["interaction.expired", "interaction.cancelled", "interaction.resolved"] do
+    interaction = state.session.interaction
+
+    if interaction && event["interaction_id"] == interaction["interaction_id"] &&
+         event["run_id"] == interaction["run_id"] do
+      session = %{
+        state.session
+        | interaction: nil,
+          interaction_wake_deadline: nil,
+          last_result: :none
+      }
+
+      {:ok, %{state | session: session}, nil}
+    else
+      {:ok, state, nil}
+    end
+  end
+
   defp project_selected_event(state, %{kind: "run.finished"} = event) do
     with {:ok, outcome} <- Map.fetch(@run_outcomes, Map.get(event, "outcome")),
          {:ok, details} <- terminal_details(outcome, event) do
@@ -2165,12 +2382,20 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         poll_marker: nil,
         last_result: result,
         interaction: interaction,
+        interaction_wake_deadline: interaction_wake_deadline(interaction),
         run_open: not is_nil(interaction),
         effect_unproved:
           state.session.effect_unproved or match?({:error, {:run, :outcome_unknown, _}}, result)
     }
 
-    %{state | session: session}
+    %{state | session: session} |> watch_interaction()
+  end
+
+  defp interaction_wake_deadline(nil), do: nil
+
+  defp interaction_wake_deadline(question) do
+    delay = max(question["expires_at"] - System.system_time(:millisecond), 0)
+    System.monotonic_time() + native(delay)
   end
 
   defp valid_interaction?(question) when is_map(question) do

@@ -315,6 +315,43 @@ defmodule LoopexComposition.Ephemeral.LifecycleTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "a dead answer borrower does not cancel the sole interaction reader", %{tmp: tmp} do
+    :persistent_term.put({Facade, :hold_empty_poll}, true)
+    on_exit(fn -> :persistent_term.erase({Facade, :hold_empty_poll}) end)
+    session = start_session(tmp)
+    {owner, actor} = owner_and_actor(session)
+
+    assert {:error, {:interaction_pending, %{"interaction_id" => "question-1"}}} =
+             Ephemeral.ask(session, "question")
+
+    assert_receive {:empty_poll_held, ^actor}, 2_000
+    test = self()
+
+    borrower =
+      spawn(fn ->
+        send(test, {:borrowed_answer, Ephemeral.answer(session, "question-1", "yes")})
+      end)
+
+    monitor = Process.monitor(borrower)
+
+    assert %{kind: :answer, operation: :next_event, queued_command: %{type: :interaction_answer}} =
+             await_active(owner, &match?(%{kind: :answer, queued_command: %{}}, &1))
+
+    Process.exit(borrower, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^borrower, :killed}, 2_000
+    :persistent_term.erase({Facade, :hold_empty_poll})
+    send(actor, :release_empty_poll)
+
+    assert eventually(fn ->
+             match?(%{kind: :observe, queued_command: nil}, :sys.get_state(owner).session.active)
+           end)
+
+    assert {:ok, %{text: "choice: yes"}} = Ephemeral.answer(session, "question-1", "yes")
+    assert_receive {:facade_command, :answer, "yes", ^actor}, 2_000
+    refute_receive {:borrowed_answer, _}, 0
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
   test "history reads committed entries during an active ask without another facade read", %{
     tmp: tmp
   } do
