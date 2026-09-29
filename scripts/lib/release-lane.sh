@@ -12,10 +12,10 @@ release_select() {
       real-provider-1 | real-provider-2)
         echo 'check-release: attended rows cannot be selected; run the full closure matrix' >&2
         return 2 ;;
-      *) printf 'check-release: unknown selector %s\n' "$2" >&2; return 2 ;;
+      *) echo 'check-release: unknown selector' >&2; return 2 ;;
     esac
     case " $release_selectors " in
-      *" $2 "*) printf 'check-release: duplicate selector %s\n' "$2" >&2; return 2 ;;
+      *" $2 "*) echo 'check-release: duplicate selector' >&2; return 2 ;;
     esac
     release_selectors="${release_selectors:+$release_selectors }$2"
     release_mode=selection-only
@@ -150,8 +150,22 @@ release_case_lane() {
   printf 'check-release: %s executed the named test at %s:%s\n' "$label" "$app/$file" "$line"
 }
 
-# A failed command or parser still has an immutable evidence log. The runner
-# supplies tree and retain; fixtures supply disposable trees with real judges.
+# The release shell holds the four supported values without exporting them to
+# unrelated helpers. A lane's redactor receives their raw bytes on a private
+# descriptor, not in argv or its environment, and publishes only masked bytes.
+release_redact() {
+  env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+    -u OPENROUTER_API_KEY ERL_CRASH_DUMP=/dev/null ERL_CRASH_DUMP_SECONDS=0 \
+    elixir "$tree/scripts/attended-redact.exs" \
+    3< <(printf '%s\0%s\0%s\0%s\0' \
+      "${LOOPEX_PROVIDER_API_KEY:-}" "${OPENAI_API_KEY:-}" \
+      "${ANTHROPIC_API_KEY:-}" "${OPENROUTER_API_KEY:-}") \
+    4<&0 5>&1 </dev/null >/dev/null
+}
+
+# A failed command, redactor or parser still has an immutable evidence log.
+# The runner supplies tree and retain; fixtures supply disposable trees with
+# real judges.
 lane() {
   local label=$1 app=$2 expected=$3 wrap=$4 lane_started=$SECONDS
   local log summary_status executed=unavailable duration append_status=0
@@ -164,7 +178,7 @@ lane() {
   fi
   printf 'check-release: %s\n' "$label"
   set +e
-  (cd "$tree/apps/$app" && "$wrap" "$@") 2>&1 | tee "$log"
+  (cd "$tree/apps/$app" && "$wrap" "$@") 2>&1 | release_redact | tee "$log"
   pipeline_statuses=("${PIPESTATUS[@]}")
   set -e
   if executed=$(bash "$tree/scripts/suite-summary.sh" "$log" --count); then
@@ -177,15 +191,18 @@ lane() {
     executed=unavailable
   fi
   duration=$((SECONDS - lane_started))
-  printf 'lane-evidence: command_status=%s tee_status=%s summary_status=%s executed_count=%s duration_seconds=%s\n' \
-    "${pipeline_statuses[0]}" "${pipeline_statuses[1]}" "$summary_status" "$executed" "$duration" >>"$log" || append_status=$?
+  printf 'lane-evidence: command_status=%s tee_status=%s summary_status=%s executed_count=%s duration_seconds=%s redactor_status=%s\n' \
+    "${pipeline_statuses[0]}" "${pipeline_statuses[2]}" "$summary_status" "$executed" "$duration" \
+    "${pipeline_statuses[1]}" >>"$log" || append_status=$?
   if [ "$append_status" -ne 0 ] || ! release_retain_identity "$log"; then
     printf 'check-release: %s retained digest unavailable\n' "$label" >&2
     return 1
   fi
-  if [ "${pipeline_statuses[0]}" -ne 0 ] || [ "${pipeline_statuses[1]}" -ne 0 ] || [ "$summary_status" -ne 0 ]; then
-    printf 'check-release: %s RED command=%s tee=%s summary=%s count=%s elapsed=%ss\n' \
-      "$label" "${pipeline_statuses[0]}" "${pipeline_statuses[1]}" "$summary_status" "$executed" "$duration" >&2
+  if [ "${pipeline_statuses[0]}" -ne 0 ] || [ "${pipeline_statuses[1]}" -ne 0 ] ||
+     [ "${pipeline_statuses[2]}" -ne 0 ] || [ "$summary_status" -ne 0 ]; then
+    printf 'check-release: %s RED command=%s redactor=%s tee=%s summary=%s count=%s elapsed=%ss\n' \
+      "$label" "${pipeline_statuses[0]}" "${pipeline_statuses[1]}" \
+      "${pipeline_statuses[2]}" "$summary_status" "$executed" "$duration" >&2
     return 1
   fi
   if [ "$executed" -eq 0 ] || { [ "$expected" != nonzero ] && [ "$executed" != "$expected" ]; }; then

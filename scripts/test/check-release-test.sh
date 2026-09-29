@@ -10,6 +10,7 @@ tree="$work/tree"
 retain="$work/retained"
 mkdir -p "$tree/apps/fixture" "$tree/scripts" "$retain"
 cp "$root/scripts/suite-summary.sh" "$tree/scripts/"
+cp "$root/scripts/attended-redact.exs" "$tree/scripts/"
 without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
 
 fail() { printf 'check-release-test: %s\n' "$*" >&2; exit 1; }
@@ -274,6 +275,20 @@ run_case() {
 }
 run_case green 0 1 1 bash -c 'printf "Result: 1 passed\n"'
 grep -q 'command_status=0 tee_status=0 summary_status=0' "$retain/green.log" || fail 'green statuses missing'
+(
+  export LOOPEX_PROVIDER_API_KEY=release-lane-selected-synthetic
+  export OPENAI_API_KEY=release-lane-openai-synthetic
+  export ANTHROPIC_API_KEY=release-lane-anthropic-synthetic
+  export OPENROUTER_API_KEY=release-lane-openrouter-synthetic
+  run_case credential-echo 0 1 1 bash -c '
+    printf "provider echo: release-lane-selected-synthetic release-lane-openai-synthetic release-lane-anthropic-synthetic release-lane-openrouter-synthetic\nResult: 1 passed\n"'
+  for secret in "$LOOPEX_PROVIDER_API_KEY" "$OPENAI_API_KEY" "$ANTHROPIC_API_KEY" "$OPENROUTER_API_KEY"; do
+    ! grep -Fq "$secret" "$retain/credential-echo.log" "$work/credential-echo.output" ||
+      fail 'a supported credential value reached retained or terminal lane output'
+  done
+  grep -Fq '[REDACTED]' "$retain/credential-echo.log" ||
+    fail 'the lane did not retain its redacted provider output'
+)
 run_case command-failed 1 1 1 bash -c 'printf "Result: 1 passed\n"; exit 23'
 grep -q 'command_status=23 tee_status=0 summary_status=0' "$retain/command-failed.log" || fail 'command failure status lost'
 run_case parser-failed 1 unavailable 1 bash -c 'printf "fixture emitted no ExUnit summary\n"'
@@ -286,6 +301,19 @@ tee() { command tee "$@"; return 24; }
 run_case tee-failed 1 1 1 bash -c 'printf "Result: 1 passed\n"'
 unset -f tee
 grep -q 'command_status=0 tee_status=24 summary_status=0' "$retain/tee-failed.log" || fail 'tee failure status lost'
+(
+  export LOOPEX_PROVIDER_API_KEY=release-lane-redactor-failure-synthetic
+  release_redact() { return 27; }
+  status=0
+  lane redactor-failed fixture 1 without_credential bash -c '
+    printf "release-lane-redactor-failure-synthetic\nResult: 1 passed\n"' \
+    >"$work/redactor-failed.output" 2>&1 || status=$?
+  [ "$status" -eq 1 ] || fail 'failed redaction passed a release lane'
+  grep -q 'redactor_status=27' "$retain/redactor-failed.log" ||
+    fail 'redactor failure status was not retained'
+  ! grep -Fq "$LOOPEX_PROVIDER_API_KEY" "$retain/redactor-failed.log" "$work/redactor-failed.output" ||
+    fail 'raw output escaped after redactor failure'
+)
 before=$(release_digest "$retain/green.log")
 status=0
 (lane green fixture 1 without_credential bash -c 'printf "replacement\n"') >"$work/duplicate-log.output" 2>&1 || status=$?
@@ -315,19 +343,41 @@ git -C "$fixture" add scripts/fixtures/m4/client-toolchain.txt
 git -C "$fixture" -c user.name=Fixture -c user.email=fixture@invalid -c commit.gpgsign=false commit -qm 'fixture(M6): seed preflight'
 cat >"$work/bin/node" <<'EOF'
 #!/usr/bin/env bash
+if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+  printf 'credential-in-node\n' >>"$RELEASE_TEST_MARKER"
+  exit 78
+fi
 printf 'node\n' >>"$RELEASE_TEST_MARKER"
 printf 'v%s\n' "$RELEASE_TEST_NODE"
 EOF
 cat >"$work/bin/mktemp" <<'EOF'
 #!/usr/bin/env bash
+if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+  printf 'credential-in-staging\n' >>"$RELEASE_TEST_MARKER"
+  exit 78
+fi
 printf 'staging\n' >>"$RELEASE_TEST_MARKER"
 exit 77
 EOF
 cat >"$work/bin/uname" <<'EOF'
 #!/usr/bin/env bash
+if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+  printf 'credential-in-uname\n' >>"$RELEASE_TEST_MARKER"
+  exit 78
+fi
 if [ "$1" = -s ]; then printf '%s\n' "$RELEASE_TEST_PLATFORM"; else printf 'fixture-arch\n'; fi
 EOF
-chmod +x "$work/bin/node" "$work/bin/mktemp" "$work/bin/uname"
+cat >"$work/bin/git" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+  printf 'credential-in-git\n' >>"$RELEASE_TEST_MARKER"
+  exit 78
+fi
+exec "$RELEASE_TEST_REAL_GIT" "$@"
+EOF
+chmod +x "$work/bin/node" "$work/bin/mktemp" "$work/bin/uname" "$work/bin/git"
+export RELEASE_TEST_REAL_GIT
+RELEASE_TEST_REAL_GIT=$(command -v git)
 export RELEASE_TEST_MARKER="$work/preflight-marker"
 export RELEASE_TEST_NODE
 RELEASE_TEST_NODE=$(awk -F= '$1 == "node" {print $2}' "$fixture/scripts/fixtures/m4/client-toolchain.txt")
@@ -338,6 +388,10 @@ preflight() {
   shift
   if [ -n "${RELEASE_TEST_CREDENTIAL:-}" ]; then credential_env+=("LOOPEX_PROVIDER_API_KEY=$RELEASE_TEST_CREDENTIAL"); fi
   if [ -n "${RELEASE_TEST_OLLAMA_MODEL:-}" ]; then credential_env+=("LOOPEX_RELEASE_OLLAMA_MODEL=$RELEASE_TEST_OLLAMA_MODEL"); fi
+  if [ -n "${RELEASE_TEST_RETAIN:-}" ]; then credential_env+=("LOOPEX_RELEASE_RETAIN=$RELEASE_TEST_RETAIN"); fi
+  if [ -n "${RELEASE_TEST_BASH_ENV:-}" ]; then
+    credential_env+=("BASH_ENV=$RELEASE_TEST_BASH_ENV" "RELEASE_TEST_REINJECT=synthetic")
+  fi
   : >"$RELEASE_TEST_MARKER"
   (cd "$fixture" && env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY -u LOOPEX_RELEASE_OLLAMA_MODEL \
     "${credential_env[@]}" bash "$root/scripts/check-release.sh" "$@") >"$work/preflight-output" 2>&1 || status=$?
@@ -375,6 +429,30 @@ preflight 77 --only real-provider-10
 preflight 77 --only node_client
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nstaging')" ] || fail 'node_client preflight selection is wrong'
 RELEASE_TEST_CREDENTIAL=synthetic
+preflight 2 --only synthetic
+! grep -Fq "$RELEASE_TEST_CREDENTIAL" "$work/preflight-output" ||
+  fail 'a provider credential supplied as a selector reached a diagnostic'
+[ ! -s "$RELEASE_TEST_MARKER" ] || fail 'credential-bearing selector reached preflight helpers'
+RELEASE_TEST_RETAIN="$work/synthetic-retained-output"
+preflight 2 --only real-provider-5
+grep -q 'provider credential appears in a release path' "$work/preflight-output" ||
+  fail 'credential-bearing retained path was not refused'
+[ ! -s "$RELEASE_TEST_MARKER" ] || fail 'credential-bearing retained path reached staging'
+unset RELEASE_TEST_RETAIN
+cat >"$work/reinject.bash" <<'EOF'
+export LOOPEX_PROVIDER_API_KEY="$RELEASE_TEST_REINJECT"
+export OPENAI_API_KEY="$RELEASE_TEST_REINJECT"
+export ANTHROPIC_API_KEY="$RELEASE_TEST_REINJECT"
+export OPENROUTER_API_KEY="$RELEASE_TEST_REINJECT"
+EOF
+BASH_ENV="$work/reinject.bash" RELEASE_TEST_REINJECT=synthetic bash -c '
+  test "$LOOPEX_PROVIDER_API_KEY" = synthetic && test "$OPENAI_API_KEY" = synthetic' ||
+  fail 'Bash startup-hook positive control did not re-export provider keys'
+RELEASE_TEST_BASH_ENV="$work/reinject.bash"
+preflight 77 --only real-provider-5
+[ "$(cat "$RELEASE_TEST_MARKER")" = staging ] ||
+  fail 'Bash startup hook reintroduced keys to release helpers'
+unset RELEASE_TEST_BASH_ENV
 preflight 77 --only real-provider-5
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'provider row 5 spuriously queried Node'
 preflight 77 --only real-provider-4

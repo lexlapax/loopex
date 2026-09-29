@@ -3892,7 +3892,7 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
 - **Executed witnesses.** Every derived number has an executed witness before
   closure: the exit statuses, the tool bounds, the defaults, and the release
   manifest's row count.
-- **Retained outputs.** Every release lane retains its complete output with a
+- **Retained outputs.** Every release lane retains its complete redacted output with a
   stable reference and a SHA-256 digest, recorded in
   `docs/evidence/M6-closure-runs.md`, which the tested candidate creates and
   indexes as a scaffold.
@@ -4018,35 +4018,38 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
   long-bound application loop. The current fresh-extraction command is
   `lane long-bound-loopex_llm_reqllm loopex_llm_reqllm 1 without_credential mix
   test test/in_process_transport_drain_test.exs --only long_bound`; it is not
-  an extra manifest row. The lane helper streams this complete output directly
-  to `$retain/long-bound-loopex_llm_reqllm.log`, including failure, before
-  judging exit status and requiring exactly one executed case.
+  an extra manifest row. The lane helper streams this complete output through
+  the exact-value redactor to `$retain/long-bound-loopex_llm_reqllm.log`,
+  including failure, before judging exit status and requiring exactly one
+  executed case.
   M6 closure must invoke `scripts/floor-lane.sh SHA --output-dir DIR
   --long-bound`. Its reqllm step uses the same exact file and selector,
   removes all four credential variables and `MIX_BUILD_PATH`, and preserves
   the pinned floor pair and absolute pair-specific build root used by its fast
   step. The runner selects a verified UTF-8 locale before starting any floor
   VM, or refuses before making an output directory. The release `lane()` helper
-  streams directly into its retained
-  `$retain/$label.log`, judge that same file and retain command/tee statuses,
-  executed count and measured duration before any failure exit. Disable errexit
+  streams command output through the staged Elixir byte redactor before its
+  terminal and retained `$retain/$label.log`, judges that same file and retains
+  command/redactor/tee statuses, executed count and measured duration before
+  any failure exit. Disable errexit
   only around the pipeline and capture its complete PIPESTATUS array as the
   immediately following command, before restoring errexit. Guard summary
   extraction with a guarded `if` around the command substitution running
   `bash scripts/suite-summary.sh "$retain/$label.log" --count`, recording its
   status and either a numeric count or the fixed unavailable marker; no failed
   substitution may trigger an early set -e exit. After the stream closes,
-  append command, tee and summary statuses, count and measured duration to
-  that same lane log. Emit its final retained path and SHA-256 in the release
+  append command, redactor, tee and summary statuses, count and measured
+  duration to that same lane log. Emit its final retained path and SHA-256 in the release
   transcript, for every lane including failed lanes. Reuse `release_digest()`
   in `scripts/lib/release-lane.sh`, not just its two fresh-source-file digest
   calls. Only after those records are retained may the helper enforce
-  command/tee/summary statuses and expected case count.
+  command/redactor/tee/summary statuses and expected case count.
   No log is changed after its digest. Missing log, count or digest is unavailable
   evidence, never PASS. A scripts/test/floor-lane-test.sh fixture plus a
-  release-lane-helper fixture in scripts/test/attended-release-test.sh must
-  drive a failing executed command and a failed count parser, and require the
-  retained status/count-or-unavailable/duration and SHA-256 line before nonzero
+  release-lane-helper fixture in scripts/test/check-release-test.sh must
+  drive a failing executed command, a failed redactor and a failed count
+  parser, and require the retained status/count-or-unavailable/duration and
+  SHA-256 line before nonzero
   exit. A failing command whose summary parser refuses is not claimed to have
   a numeric count. These fixtures execute the candidate's actual lane helper,
   not a copied implementation of it.
@@ -4060,6 +4063,19 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
   test or the eleven-case manifest, prove the separate 5,000 ms drain bound.
 - **Release credentials.** The release credential stays
   `LOOPEX_PROVIDER_API_KEY`, an Anthropic key.
+  - Both release runner shells clear the four keys' export flags before their
+    first external helper. The selected value remains shell-held for the
+    credentialed child and the redactors. The attended `script(1)` launcher or
+    Python PTY controller is a necessary transit process. Its forked child
+    briefly inherits controller memory, clears ambient environment names,
+    then execs the release check with only `LOOPEX_PROVIDER_API_KEY`.
+    Unrelated Git, Node, staging, build, summary and digest children inherit
+    none of the four named provider variables. After entry the
+    scripts disable inherited tracing and remove `BASH_ENV` and `ENV` so their
+    Bash children do not re-run caller startup hooks. Host code that already
+    ran before entry is outside this runner-controlled propagation claim.
+  - `with_credential` exports only `LOOPEX_PROVIDER_API_KEY` to durable
+    provider rows 1–9, without placing its value in command arguments.
   - `with_ephemeral_credential` passes it to row 11 as `ANTHROPIC_API_KEY` for
     that row's process only and removes `LOOPEX_PROVIDER_API_KEY` in the child.
   - `without_credential` unsets `LOOPEX_PROVIDER_API_KEY`, `OPENAI_API_KEY`,
@@ -4072,7 +4088,15 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
     receives that literal in its separate credential frame, not bootstrap
     metadata, and never contacts a real provider. Driver self-checks remain
     unchanged; a separate missing-variable child must refuse startup.
-  - The wrapper's self-check and its log redaction cover all four names.
+  - The wrapper's self-check proves an unwrapped helper sees no key and each
+    provider wrapper sees exactly its assigned one. Every lane redacts the
+    exact nonempty values of all four supported names before `tee` can publish
+    or retain bytes; command, redactor and tee failures each prevent PASS.
+    The attended transcript uses its separate redactor over the same four
+    exact values. Selectors and release paths containing a supported value
+    refuse before archive extraction; the canonical retained path is checked
+    before its first printed reference. Partial, transformed or encoded
+    disclosures are not covered.
 - **Release host precondition.** The release check requires
   `LOOPEX_RELEASE_OLLAMA_MODEL`, naming a model already pulled on a reachable
   local Ollama server. If it is missing or unreachable, the check fails as

@@ -24,8 +24,10 @@ through `scripts/json-field.sh`, which uses `awk` from the baseline rather than
 an added dependency. Adding another development dependency requires the
 ordinary dependency decision.
 
-The M6 `scripts/attended-release.sh` closure helper uses an Elixir byte-stream
-redactor for a person's `script(1)` run. Only authorized
+The direct M6 `scripts/check-release.sh` uses the existing Elixir byte-stream
+redactor before each release lane reaches the terminal or its retained log.
+The `scripts/attended-release.sh` closure helper uses the same redactor for a
+person's `script(1)` transcript. Only authorized
 `--answer-attended` uses Python's standard library for its controlling PTY and
 transcript redaction. Neither Python nor `script(1)` is a Loopex runtime
 dependency or a prerequisite for running `scripts/check-release.sh` directly.
@@ -113,16 +115,19 @@ It refuses without the credential, without the pinned Node, or on a dirty tree, 
 It first stages the candidate as a fresh source archive and builds it there
 (described below), then runs every test lane inside that extraction rather than
 in your checkout. The eleven real-provider cases run from a named manifest
-(application, file and exact case name), each in its own `mix test FILE:LINE`
-process and each executing exactly one test. The ninth is the operator takeover:
+(application, file and exact case name), each in its own `mix test FILE --only
+test:NAME` process and each executing exactly one test. The ninth is the
+operator takeover:
 `loopex daemon`, a CLI controller killed with `SIGKILL` and the Node observer
 taking over, each its own process, the observer's prompt answered by the real
 provider. The tenth drives local Ollama through `loopex -p` without a
 credential; the eleventh drives the embedded API against Anthropic with only
 `ANTHROPIC_API_KEY`. Rows one through nine receive the durable
-`LOOPEX_PROVIDER_API_KEY`. Every other lane removes all supported provider
-credential names. A wrapper self-check reports only presence or absence, never
-the values. The
+`LOOPEX_PROVIDER_API_KEY`. The runner keeps provider values shell-held while
+unrelated preflight, build, summary and digest helpers inherit none of those
+named provider variables. Every
+other lane removes all supported provider credential names. A wrapper
+self-check reports only presence or absence, never the values. The
 independent Node client runs with `--only node_client` over
 `loopex_app_server`, `loopex_protocol`, `loopex_daemon` and `loopex_cli`, the
 last being the operator takeover: a killed CLI controller and a Node observer
@@ -149,8 +154,15 @@ Linux run ending in a plain `PASS`. The separate `--only rollback` lane builds
 pristine `v0.2.0` and candidate source archives with a scripted provider and
 checks the documented N/N-1 interaction and skill behavior without a real
 credential. Every lane prints its executed count and
-elapsed time. The credential never goes in a command argument, log, fixture
-or retained evidence. Two of the real-provider tests are attended:
+elapsed time. Provider keys are not placed in command arguments; exact
+nonempty values of the four supported key names are masked before release-lane
+output reaches the terminal or retained evidence. The attended terminal
+launcher and redactors necessarily handle those values; partial, transformed
+or encoded disclosures are outside exact-value masking. The runner refuses a
+selector or release path containing a supported value before archive
+extraction and prevents inherited Bash startup hooks from running again in
+its children. Trusted host code that ran before the script starts remains the
+host's responsibility. Two of the real-provider tests are attended:
 they prompt on the controlling terminal for the operator's trust decisions
 (`Type yes and press Enter.`), so run the command from a terminal.
 

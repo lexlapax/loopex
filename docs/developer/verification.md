@@ -106,8 +106,8 @@ Selections run the shared fresh-source build first. They require a provider
 credential or pinned Node only when the selected cases need it. A selected
 `cross_uid` lane requires Linux and refuses elsewhere. A successful selection
 says `selection-only`, never full closure PASS. Each executed test lane retains
-its complete output and final status record with a SHA-256 digest, including
-failed lanes. No options still run the complete closure matrix.
+its complete redacted output and final status record with a SHA-256 digest,
+including failed lanes. No options still run the complete closure matrix.
 
 Hosted CI's green run on the candidate is fast-check evidence for that merge.
 A local run counts instead only when its complete output and the exact clean

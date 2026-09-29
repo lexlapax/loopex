@@ -33,11 +33,16 @@ ancestor=$(git -C "$repo" rev-parse HEAD)
 cat >"$repo/scripts/check-release.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ -n "${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+  printf 'ambient provider credential reached the release check\n'
+  exit 63
+fi
 case "${ATTENDED_TEST_MODE:-}" in
   human_success)
     printf 'fixture human path complete %s %s %s %s\n' \
-      "${LOOPEX_PROVIDER_API_KEY:-}" "${OPENAI_API_KEY:-}" \
-      "${ANTHROPIC_API_KEY:-}" "${OPENROUTER_API_KEY:-}"
+      "${LOOPEX_PROVIDER_API_KEY:-}" 'synthetic-openai-key-[42]' \
+      'synthetic-anthropic-key' 'synthetic-openrouter-key'
+    if [ -n "${ATTENDED_TEST_ECHO_FILE:-}" ]; then cat "$ATTENDED_TEST_ECHO_FILE"; fi
     exit 0 ;;
   human_failure) printf 'fixture human path failed\n'; exit 17 ;;
   human_no_newline) printf 'tail'; exit 0 ;;
@@ -76,8 +81,8 @@ if [ "${ATTENDED_TEST_MODE:-}" = duplicate_second ]; then
   sleep 30
   exit 94
 fi
-printf 'provider echo: %s and %s\n' "${LOOPEX_PROVIDER_API_KEY:-}" "${OPENAI_API_KEY:-}"
-value=${OPENROUTER_API_KEY:-}
+printf 'provider echo: %s and %s\n' "${LOOPEX_PROVIDER_API_KEY:-}" 'synthetic-openai-key-[42]'
+value=synthetic-openrouter-key
 printf 'split credential: %s' "${value:0:10}"
 sleep 0.05
 printf '%s\n' "${value:10}"
@@ -247,6 +252,28 @@ export LOOPEX_PROVIDER_API_KEY='synthetic-release-key-123'
 export OPENAI_API_KEY='synthetic-openai-key-[42]'
 export ANTHROPIC_API_KEY='synthetic-anthropic-key'
 export OPENROUTER_API_KEY='synthetic-openrouter-key'
+mkdir "$work/env-bin"
+cat >"$work/env-bin/git" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+  printf 'present\n' >>"$ATTENDED_TEST_ENV_MARKER"
+else
+  printf 'absent\n' >>"$ATTENDED_TEST_ENV_MARKER"
+fi
+exec "$ATTENDED_TEST_REAL_GIT" "$@"
+EOF
+chmod +x "$work/env-bin/git"
+export ATTENDED_TEST_REAL_GIT
+ATTENDED_TEST_REAL_GIT=$(command -v git)
+status=0
+(cd "$repo" && PATH="$work/env-bin:$PATH" ATTENDED_TEST_ENV_MARKER="$work/git-env-marker" \
+  bash "$runner" --output "$work/retained/credential-preflight.log" \
+  --answer-attended --disposition "$anchor" --milestone M6 --authority-sha "$tested") \
+  >"$work/credential-preflight.output" 2>&1 || status=$?
+[ "$status" -eq 1 ] && [ -s "$work/git-env-marker" ] ||
+  fail 'credential preflight did not exercise Git'
+! grep -qx present "$work/git-env-marker" ||
+  fail 'unrelated attended preflight inherited a provider credential'
 git -C "$repo" switch -qc nul-secret "$tested"
 {
   printf '\n<a id="%s"></a>\n' "$anchor"
@@ -316,6 +343,21 @@ grep -q 'split credential: <REDACTED>' "$good" ||
 for secret in "$LOOPEX_PROVIDER_API_KEY" "$OPENAI_API_KEY" "$ANTHROPIC_API_KEY" "$OPENROUTER_API_KEY"; do
   if grep -Fq "$secret" "$good" "$work/good.output"; then fail 'credential appeared in published output'; fi
 done
+cat >"$work/reinject.bash" <<'EOF'
+export LOOPEX_PROVIDER_API_KEY=synthetic-release-key-123
+export OPENAI_API_KEY='synthetic-openai-key-[42]'
+export ANTHROPIC_API_KEY=synthetic-anthropic-key
+export OPENROUTER_API_KEY=synthetic-openrouter-key
+EOF
+BASH_ENV="$work/reinject.bash" bash -c '
+  test "$OPENAI_API_KEY" = "synthetic-openai-key-[42]"' ||
+  fail 'attended Bash startup-hook positive control did not run'
+(cd "$repo" && BASH_ENV="$work/reinject.bash" bash "$runner" \
+  --output "$work/retained/startup-hook.log" "${auto_args[@]}") \
+  >"$work/startup-hook.output" 2>&1 ||
+  fail 'attended launch passed ambient keys from a Bash startup hook'
+grep -qx 'ATTENDED_ANSWERS=2' "$work/retained/startup-hook.log" ||
+  fail 'startup-hook run did not complete both authorized notices'
 expected=$(git -C "$repo" show "$authority:docs/developer/agent-context-map.md" |
   awk -v anchor="$anchor" '
     $0 == "<a id=\"" anchor "\"></a>" { in_section = 1 }
@@ -428,7 +470,9 @@ human_without_python human_failure "$work/retained/human-failed-no-python.log" \
   fail 'human no-Python failure was not retained'
 
 invalid_key=$'\377'
+printf '%s\n' "$invalid_key" >"$work/invalid-key-echo"
 (cd "$repo" && OPENAI_API_KEY="$invalid_key" ATTENDED_TEST_MODE=human_success \
+  ATTENDED_TEST_ECHO_FILE="$work/invalid-key-echo" \
   bash "$runner" --output "$work/retained/human-invalid-byte.log") \
   >"$work/human-invalid-byte.output" 2>&1 ||
   fail 'human terminal path refused a raw credential byte'
@@ -521,8 +565,11 @@ kill -TERM "$runner_pid"
 status=0
 wait "$runner_pid" || status=$?
 [ "$status" -ne 0 ] || fail 'interrupted runner passed'
-grep -qx 'ATTENDED_FAILURE=interrupted' "$signal_log" ||
+if ! grep -qx 'ATTENDED_FAILURE=interrupted' "$signal_log"; then
+  tail -n 16 "$signal_log" >&2
+  tail -n 16 "$work/signal.output" >&2
   fail 'signal did not retain interruption outcome'
+fi
 if kill -0 "$child_pid" 2>/dev/null; then fail 'PTY child survived interruption'; fi
 
 before=$(digest_file "$good")

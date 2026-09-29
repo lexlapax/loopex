@@ -4,6 +4,18 @@
 # Technical depth: automatic answers require an exact descendant disposition;
 # the PTY controller owns automatic terminal answers; published output is redacted.
 set -euo pipefail
+# Stop inherited tracing before any key expansion and keep caller startup
+# hooks from running again in this runner's Bash children.
+set +x
+unset BASH_ENV ENV
+# The runner needs shell-held values for exact-byte redaction. Git, staging,
+# digests and other unrelated children must not inherit caller-exported keys.
+export -n LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+
+with_redaction_keys() {
+  export LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+  exec "$@"
+}
 
 safe_line() {
   local channel=$1 message=$2 name value candidate
@@ -90,7 +102,7 @@ redact_human() {
 }
 redact_record() {
   if [ "$automatic" -eq 1 ]; then
-    python3 "$script_dir/attended-pty.py" --redact-stdin
+    (with_redaction_keys python3 "$script_dir/attended-pty.py" --redact-stdin)
   else
     redact_human
   fi
@@ -155,7 +167,7 @@ if [ "$automatic" -eq 1 ]; then
   ' "$scratch/authority" || fail disposition_mismatch
   # The sidecar must remain exact source bytes. A disposition that happens to
   # contain a live provider credential cannot be published as that sidecar.
-  python3 "$script_dir/attended-pty.py" --check-no-keys "$scratch/authority" ||
+  (with_redaction_keys python3 "$script_dir/attended-pty.py" --check-no-keys "$scratch/authority") ||
     fail disposition_contains_credential
 fi
 
@@ -183,18 +195,22 @@ if [ "$automatic" -eq 1 ]; then
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail authority_digest_unavailable
   printf 'ATTENDED_AUTHORITY tested_sha=%s authority_sha=%s ancestry=strict-descendant sidecar=%s sha256=%s\n' \
     "$tested_sha" "$authority_sha" "$sidecar" "$digest" |
-    python3 "$script_dir/attended-pty.py" --redact-stdin | tee -a "$output" ||
+    with_redaction_keys python3 "$script_dir/attended-pty.py" --redact-stdin | tee -a "$output" ||
     fail authority_record_failed
 fi
 
-script_command() {
+script_command() (
+  # The terminal launcher carries only the selected key into check-release;
+  # the three ambient provider names remain absent from that process tree.
+  unset OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+  export LOOPEX_PROVIDER_API_KEY
   if [ "$platform" = Darwin ]; then
     script -q -e -F /dev/null bash "$script_dir/check-release.sh"
   else
     SHELL=/bin/sh LOOPEX_ATTENDED_RELEASE_CHECK="$script_dir/check-release.sh" \
       script -q -e -f -c 'exec bash "$LOOPEX_ATTENDED_RELEASE_CHECK"' /dev/null
   fi
-}
+)
 
 started=$SECONDS
 set +e
@@ -206,7 +222,7 @@ if [ "$automatic" -eq 1 ]; then
     if [ -n "$controller" ]; then kill -TERM "$controller" 2>/dev/null || true; fi
   }
   trap forward_signal HUP INT TERM
-  python3 "$script_dir/attended-pty.py" --output "$output" \
+  with_redaction_keys python3 "$script_dir/attended-pty.py" --output "$output" \
     --check "$script_dir/check-release.sh" &
   controller=$!
   while true; do

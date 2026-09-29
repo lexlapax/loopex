@@ -6,22 +6,62 @@
 # on Linux, the cross-UID witness. An
 # unchanged-source release reuses that evidence and does not run this command
 # again. It needs a provider credential in LOOPEX_PROVIDER_API_KEY, which
-# reaches only the credentialed manifest test processes and is never printed. It also
+# is held by this runner and passed only to selected provider-test children or
+# the lane redactor; unrelated helpers do not inherit it. Exact supported values
+# in lane output are redacted before terminal or retained-log publication. It also
 # needs the Node version pinned in scripts/fixtures/m4/client-toolchain.txt
 # and, on Linux, a second unprivileged user named in LOOPEX_CROSS_UID_USER that
 # the current user may run a command as with `sudo -n`. Output streams as it
 # happens. Repeated --only selectors run unattended pre-merge lanes, not the
 # full closure matrix. Invalid selections refuse before staging or builds.
 set -euo pipefail
+# A caller's xtrace or Bash startup hook is not an evidence channel. Startup
+# code that ran before this script remains host-owned, but child Bash shells do
+# not re-run that hook through this runner.
+set +x
+unset BASH_ENV ENV
+# Keep caller-supplied values for selected rows and redaction, but ensure the
+# very first subprocess (including Git and preflight tools) inherits none.
+export -n LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+release_contains_key() {
+  local content=$1 name key
+  for name in LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY; do
+    key=${!name:-}
+    if [ -n "$key" ]; then
+      case "$content" in *"$key"*) return 0 ;; esac
+    fi
+  done
+  return 1
+}
+for release_arg in "$@"; do
+  if release_contains_key "$release_arg"; then
+    echo 'check-release: a provider credential appears in a selector; pass only a documented selector name' >&2
+    exit 2
+  fi
+done
+unset release_arg
 script_dir=$(cd "$(dirname "$0")" && pwd)
 source "$script_dir/lib/release-lane.sh"
 release_select "$@"
+for name in LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY; do
+  value=${!name:-}
+  case "$value" in
+    *$'\n'*|*$'\r'*) echo 'check-release: a provider credential contains a newline and cannot be redacted' >&2; exit 2 ;;
+  esac
+done
+unset value
 cd "$(git rev-parse --show-toplevel)"
+for release_path in "$script_dir" "$(pwd -P)" "${TMPDIR:-/tmp}" "${LOOPEX_RELEASE_RETAIN:-}"; do
+  if release_contains_key "$release_path"; then
+    echo 'check-release: a provider credential appears in a release path; use a path without that value' >&2
+    exit 2
+  fi
+done
+unset release_path
 
 if release_needs_provider; then
   [ -n "${LOOPEX_PROVIDER_API_KEY:-}" ] ||
     { echo 'check-release: LOOPEX_PROVIDER_API_KEY is required for the selected provider rows' >&2; exit 2; }
-  export LOOPEX_PROVIDER_API_KEY
 fi
 if release_needs_ollama; then
   [ -n "${LOOPEX_RELEASE_OLLAMA_MODEL:-}" ] ||
@@ -71,14 +111,26 @@ fi
 printf 'check-release: open-file limit %s\n' "$(ulimit -Sn)"
 
 # Reference composition consumes and deletes the credential, so each
-# credential-consuming case runs in its own operating-system process that
-# inherits it once; every other lane runs with the name removed.
-with_credential() { env -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
-with_ephemeral_credential() {
-  env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY \
-    ANTHROPIC_API_KEY="$LOOPEX_PROVIDER_API_KEY" "$@"
-}
-without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u OPENROUTER_API_KEY "$@"; }
+# credential-consuming case runs in its own operating-system process. A
+# subshell exports the selected name without putting its value in command argv;
+# unrelated lane commands and release helpers inherit no provider key.
+with_credential() (
+  unset OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+  export LOOPEX_PROVIDER_API_KEY
+  "$@"
+)
+with_ephemeral_credential() (
+  selected_credential=$LOOPEX_PROVIDER_API_KEY
+  unset LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY
+  ANTHROPIC_API_KEY=$selected_credential
+  unset selected_credential
+  export ANTHROPIC_API_KEY
+  "$@"
+)
+without_credential() (
+  unset LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+  "$@"
+)
 # The wrapper self-check plants a synthetic value and reports only whether each
 # wrapper's child sees the name, never a value.
 (
@@ -86,9 +138,16 @@ without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHR
   OPENAI_API_KEY=release-self-check-synthetic
   ANTHROPIC_API_KEY=release-self-check-synthetic
   OPENROUTER_API_KEY=release-self-check-synthetic
-  export LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+  export -n LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
   probe='if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then echo present; else echo absent; fi'
-  seen=$(with_credential sh -c "$probe")
+  unwrapped=$(sh -c "$probe")
+  seen=$(with_credential sh -c '
+    if [ "$LOOPEX_PROVIDER_API_KEY" = release-self-check-synthetic ] &&
+       [ -z "${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+      echo selected
+    else
+      echo invalid
+    fi')
   hosted=$(with_ephemeral_credential sh -c '
     if [ "$ANTHROPIC_API_KEY" = release-self-check-synthetic ] &&
        [ -z "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
@@ -97,9 +156,10 @@ without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHR
       echo invalid
     fi')
   unseen=$(without_credential sh -c "$probe")
-  printf 'check-release: credential self-check: durable=%s ephemeral=%s other=%s\n' \
-    "$seen" "$hosted" "$unseen"
-  [ "$seen" = present ] && [ "$hosted" = selected ] && [ "$unseen" = absent ]
+  printf 'check-release: credential self-check: helper=%s durable=%s ephemeral=%s other=%s\n' \
+    "$unwrapped" "$seen" "$hosted" "$unseen"
+  [ "$unwrapped" = absent ] && [ "$seen" = selected ] &&
+    [ "$hosted" = selected ] && [ "$unseen" = absent ]
 ) || { echo 'check-release: credential wrapper self-check RED' >&2; exit 1; }
 
 # The fresh-source lane: stage the exact candidate with `git archive` into a
@@ -110,9 +170,20 @@ without_credential() { env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHR
 # nothing but its declared outputs. The retained files stay after the run;
 # every later lane runs inside this extraction.
 fresh_started=$SECONDS
-retain=${LOOPEX_RELEASE_RETAIN:-$(mktemp -d "${TMPDIR:-/tmp}/loopex-retained.XXXXXX")}
+auto_retain=0
+if [ -n "${LOOPEX_RELEASE_RETAIN:-}" ]; then
+  retain=$LOOPEX_RELEASE_RETAIN
+else
+  retain=$(mktemp -d "${TMPDIR:-/tmp}/loopex-retained.XXXXXX")
+  auto_retain=1
+fi
 [ -d "$retain" ] || { echo 'check-release: retained output directory must exist' >&2; exit 2; }
 retain=$(cd "$retain" && pwd -P)
+if release_contains_key "$retain"; then
+  if [ "$auto_retain" -eq 1 ]; then rmdir "$retain" || true; fi
+  echo 'check-release: a provider credential appears in a release path; use a path without that value' >&2
+  exit 2
+fi
 checkout=$(pwd -P)
 case "$retain/" in
   "$checkout/"*) echo 'check-release: retained output must be outside the checkout' >&2; exit 2 ;;

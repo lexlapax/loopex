@@ -240,6 +240,12 @@ def main():
         child_pid, master_fd = pty.fork()
         if child_pid == 0:
             try:
+                # The controller needs all four values to redact its PTY
+                # transcript. The fork briefly copies that memory; remove
+                # ambient environment names before exec replaces it. The
+                # executed release check sees only the selected key name.
+                for name in KEY_NAMES[1:]:
+                    os.environ.pop(name, None)
                 os.execv("/bin/bash", ["bash", args.check])
             except OSError:
                 os._exit(127)

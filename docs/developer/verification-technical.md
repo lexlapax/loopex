@@ -149,17 +149,24 @@ the existing closure-incomplete result.
 
 The runner sources `scripts/lib/release-lane.sh`; the fixture command
 `bash scripts/test/check-release-test.sh` executes that same parser and lane
-helper. Each lane streams directly to `LOOPEX_RELEASE_RETAIN/LABEL.log`, or an
-automatically created retained directory outside the checkout. Logs use
-exclusive creation and are not removed by runner cleanup. After the pipeline,
-its complete status array is captured before another command can replace it.
+helper. Each lane streams through the staged byte redactor before the terminal
+or `LOOPEX_RELEASE_RETAIN/LABEL.log`, or an automatically created retained
+directory outside the checkout. The redactor receives the four shell-held
+supported values through a private descriptor, not argv or its environment.
+Logs use exclusive creation and are not removed by runner cleanup. After the
+command → redactor → tee pipeline, its complete status array is captured
+before another command can replace it.
 The guarded summary parser contributes its status and either the numeric
-executed count or `unavailable`. The helper appends command status, tee status,
-summary status, count and duration to that same file, then emits its path and
-SHA-256 before judging any failure. It never changes a log after its digest.
+executed count or `unavailable`. The helper appends command, redactor, tee and
+summary statuses, count and duration to that same file, then emits its path
+and SHA-256 before judging any failure. It never changes a log after its digest.
 Missing output or digest is unavailable evidence, not PASS. The fast check
-executes the fixtures, including command failure, parser failure, tee failure,
-count mismatch, unavailable digest, immutable logs and preflight refusal.
+executes the fixtures, including command failure, redactor failure, parser
+failure, tee failure, a synthetic-key echo, count mismatch, unavailable
+digest, immutable logs and preflight refusal. It checks Git, Node, `uname`
+and staging with a synthetic key, refuses a key-bearing selector or retained
+path without printing it, and uses a positive Bash startup-hook control to
+prove the runner removes that hook from its children.
 
 **Reproducing an executor race under contention.** The launch guard, its
 wrapper subshell and the tool share one pipe, and the hosted runner's four
