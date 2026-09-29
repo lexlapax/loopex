@@ -402,9 +402,11 @@ the content of the files the session read.
 
 The ephemeral profile keeps session truth in memory instead and removes its
 temporary executor root after proved cleanup. It creates no retained artifact
-store, but tools still change real workspace files. If cleanup is unproved, its
-temporary root is kept and named rather than silently deleted. Decide what to
-let a session read with both profiles in mind. If a repository contains
+store, but tools still change real workspace files. If cleanup is unproved and
+Loopex knows the root path, it keeps and names that root rather than silently
+deleting it. An unproved startup before a path is known reports `root=null`.
+Do not remove a guessed directory. Decide what to let a session read with both
+profiles in mind. If a repository contains
 material you would not want written to your state root in the clear, a session
 that reads it durably will write it there. The durable provider credential is
 not put into that record by Loopex; an authorized tool may nevertheless copy

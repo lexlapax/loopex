@@ -1562,7 +1562,7 @@ defmodule Loopex.StatusCheckTest do
           accepted
           | "Blockers" => "None; `#{name}` is in progress against its accepted plan pair",
             "Next transition" =>
-              "Create and index `docs/evidence/#{name}-closure-runs.md` as a scaffold, map " <>
+              "Ensure that `docs/evidence/#{name}-closure-runs.md` is indexed and maps " <>
                 "every outcome to evidence, then make the tested implementation commit by " <>
                 "moving `#{name}` to In review; run the closure matrix and independent " <>
                 "review from that exact SHA"

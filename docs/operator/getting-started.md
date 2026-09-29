@@ -46,7 +46,8 @@ Back to the [operator documentation index](README.md).
 
 You need:
 
-- Git and a POSIX shell with `awk`, `grep`, `sed` and `tr`.
+- Git and a POSIX shell with `awk`, `grep`, `sed` and `tr`. Run the interactive
+  credential examples below in Bash; they use Bash's silent `read -s` option.
 - Elixir and Erlang/OTP as one of the two supported pairs recorded in
   `.tool-versions`: Elixir 1.18.5 with OTP 27.3.4, or Elixir 1.20.3 with
   OTP 29.0.5. [DEVELOPMENT.md](../../DEVELOPMENT.md) shows how to install either

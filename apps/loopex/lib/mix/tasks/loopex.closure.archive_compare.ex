@@ -25,6 +25,12 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
 
   @sha ~r/\A[0-9a-f]{40}\z/
   @digest ~r/\A[0-9a-f]{64}\z/
+  @git_env [
+    {"GIT_NO_LAZY_FETCH", "1"},
+    {"GIT_NO_REPLACE_OBJECTS", "1"},
+    {"GIT_OPTIONAL_LOCKS", "0"},
+    {"LC_ALL", "C"}
+  ]
 
   @impl Mix.Task
   def run([tested_path, admin_path, tested_sha, admin_sha]) do
@@ -206,7 +212,9 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
   end
 
   defp archive_members(sha) do
-    case System.cmd("git", ["--no-replace-objects", "archive", "--format=tar", sha]) do
+    case System.cmd("git", ["--no-replace-objects", "archive", "--format=tar", sha],
+           env: @git_env
+         ) do
       {archive, 0} ->
         case :erl_tar.table({:binary, archive}, [:verbose]) do
           {:ok, entries} -> archive_paths(entries)
@@ -335,7 +343,10 @@ defmodule Mix.Tasks.Loopex.Closure.ArchiveCompare do
   end
 
   defp git(args) do
-    case System.cmd("git", ["--no-replace-objects" | args], stderr_to_stdout: true) do
+    case System.cmd("git", ["--no-replace-objects" | args],
+           env: @git_env,
+           stderr_to_stdout: true
+         ) do
       {output, 0} -> {:ok, output}
       {_output, _status} -> {:error, "Git could not read the named commit"}
     end

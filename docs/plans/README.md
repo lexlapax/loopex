@@ -25,7 +25,7 @@ its last `Closed` row identifies the last closed product baseline.
 | Blockers | None; `M6` is in progress against its accepted plan pair |
 | Authorized work | Implementation inside the accepted `M6` plan pair, landing on `main` in small reviewed changes |
 | Next maintainer decision | None until `M6` is ready for independent review |
-| Next transition | Create and index `docs/evidence/M6-closure-runs.md` as a scaffold, map every outcome to evidence, then make the tested implementation commit by moving `M6` to In review; run the closure matrix and independent review from that exact SHA |
+| Next transition | Ensure that `docs/evidence/M6-closure-runs.md` is indexed and maps every outcome to evidence, then make the tested implementation commit by moving `M6` to In review; run the closure matrix and independent review from that exact SHA |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 

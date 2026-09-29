@@ -78,6 +78,70 @@ defmodule Loopex.ClosureArchiveCompareTest do
     assert :ok == compare(fixture)
   end
 
+  test "every Git read refuses lazy fetches and optional locks", fixture do
+    real_git = System.find_executable("git") || flunk("Git is unavailable")
+    bin = Path.join(fixture.root, "git-shim")
+    calls = Path.join(fixture.root, "git-shim-calls")
+    File.mkdir_p!(bin)
+
+    shim = Path.join(bin, "git")
+
+    File.write!(
+      shim,
+      """
+      #!/bin/sh
+      printf '%s\n' "$2" >> "$LOOPEX_ARCHIVE_TEST_CALLS"
+      [ "$GIT_NO_LAZY_FETCH" = 1 ] || exit 71
+      [ "$GIT_OPTIONAL_LOCKS" = 0 ] || exit 72
+      [ "$GIT_NO_REPLACE_OBJECTS" = 1 ] || exit 73
+      [ "$LC_ALL" = C ] || exit 74
+      exec "$LOOPEX_ARCHIVE_TEST_REAL_GIT" "$@"
+      """
+    )
+
+    File.chmod!(shim, 0o755)
+
+    keys = [
+      "PATH",
+      "GIT_NO_LAZY_FETCH",
+      "GIT_OPTIONAL_LOCKS",
+      "GIT_NO_REPLACE_OBJECTS",
+      "LC_ALL",
+      "LOOPEX_ARCHIVE_TEST_REAL_GIT",
+      "LOOPEX_ARCHIVE_TEST_CALLS"
+    ]
+
+    saved = Map.new(keys, fn key -> {key, System.get_env(key)} end)
+
+    try do
+      System.put_env("PATH", bin <> ":" <> System.fetch_env!("PATH"))
+      System.put_env("GIT_NO_LAZY_FETCH", "0")
+      System.put_env("GIT_OPTIONAL_LOCKS", "1")
+      System.put_env("GIT_NO_REPLACE_OBJECTS", "0")
+      System.put_env("LC_ALL", "not-C")
+      System.put_env("LOOPEX_ARCHIVE_TEST_REAL_GIT", real_git)
+      System.put_env("LOOPEX_ARCHIVE_TEST_CALLS", calls)
+
+      assert :ok == compare(fixture)
+
+      frequencies =
+        calls
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.frequencies()
+
+      assert frequencies["ls-tree"] == 2
+      assert frequencies["archive"] == 2
+      assert frequencies["show"] == 2
+      assert frequencies["cat-file"] > 0
+    after
+      Enum.each(saved, fn
+        {key, nil} -> System.delete_env(key)
+        {key, value} -> System.put_env(key, value)
+      end)
+    end
+  end
+
   test "replacement refs cannot make changed source compare as the administrative archive",
        fixture do
     repo = Path.join(fixture.root, "replacement-#{System.unique_integer([:positive])}")
