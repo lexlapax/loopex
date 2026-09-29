@@ -16,7 +16,8 @@ The repository checks require:
 - Git;
 - Bash;
 - a POSIX userland providing `awk`, `cat`, `grep`, `readlink`, `sed`, and `tr`;
-- Python 3 and the platform's `script(1)` for the M6 attended-release fixture;
+- Python 3 for the M6 demonstration and attended-release fixtures, and the
+  platform's `script(1)` for the attended-release fixture;
 - the accepted Elixir/OTP toolchain, which supplies `mix`.
 
 That is the whole development baseline. The client hooks read a tool call
@@ -65,7 +66,7 @@ commit messages, branch and worktree hygiene, OTP application declarations, the
 suite-summary judge, and `mix loopex.status` over the current tree: paired
 documents, directory indexes, local links, and the status
 register), `mix loopex.docs_check`, the release-runner, escript-inventory,
-archive-manifest, attended-release, and floor-lane fixtures,
+archive-manifest, attended-release, floor-lane, and M6 demonstration fixtures,
 `mix loopex.deps_budget`,
 `mix loopex.version_train`, the test build, and the credential-free suite, one
 application per VM with several at once (`LOOPEX_CHECK_JOBS` bounds how many;

@@ -162,17 +162,9 @@ command() {
 
 delegation() {
   # A distinct process delegates through the command, never through a shared
-  # Loopex handle. It waits for the real command exit and retains its stdout.
-  local_run elixir -e '
-    {output, status} = System.cmd(System.fetch_env!("M6_DEMO_COMMAND"),
-      ["-p", System.fetch_env!("M6_DEMO_PROMPT"), "--policy", "allow-all",
-       "--model", System.fetch_env!("M6_DEMO_LOCAL_MODEL"), "--tools", "coding",
-       "--cwd", System.fetch_env!("M6_DEMO_WORKSPACE"), "--skill-dir",
-       System.fetch_env!("M6_DEMO_SKILL"),
-       "--deadline-ms", "120000", "--max-steps", "8", "--output", "json"])
-    unless status == 0, do: raise("delegated command did not complete")
-    File.write!(Path.join(System.fetch_env!("M6_DEMO_WORKSPACE"), "delegated.json"), output)
-  ' 2>"$M6_DEMO_WORKSPACE/delegated.stderr" || return
+  # Loopex handle. The helper retains child streams only in memory.
+  local_run python3 scripts/m6-delegation.py \
+    2>"$M6_DEMO_WORKSPACE/delegated.stderr" || return
   assert_quiet_stderr "$M6_DEMO_WORKSPACE/delegated.stderr" || return
   assert_json "$M6_DEMO_WORKSPACE/delegated.json" completed ephemeral yes
 }

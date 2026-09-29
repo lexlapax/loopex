@@ -145,9 +145,10 @@ Technical depth: [Adding an adapter](getting-started-technical.md#technical-gett
 <a id="concept-getting-started-contributing"></a>
 ## Contributing: Toolchain and Checks
 
-Development needs Git, Bash, ordinary POSIX tools, and the accepted Elixir and
-Erlang/OTP toolchain. The automatic attended release runner additionally needs
-Python 3. Two supported toolchain pairs are pinned,
+Development needs Git, Bash, ordinary POSIX tools, Python 3, and the accepted
+Elixir and Erlang/OTP toolchain. Python runs the M6 demonstration fixture in the
+fast check and the automatic attended release runner. Two supported toolchain
+pairs are pinned,
 and the older one is the floor. While editing, run the focused tests for what
 you touched. Before a change is integrated, the fast check runs once: formatting,
 warning-free compilation, dependency direction, documentation structure, and the

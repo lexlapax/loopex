@@ -178,6 +178,7 @@ step "archive source binding fixtures" bash scripts/test/source-archive-check-te
 step "rollback archive binding fixtures" bash scripts/test/rollback-archive-test.sh
 step "attended release fixtures" bash scripts/test/attended-release-test.sh
 step "floor lane fixtures" bash scripts/test/floor-lane-test.sh
+step "M6 demonstration fixtures" bash scripts/test/m6-demonstration-test.sh
 step "dependency budget and direction" mix loopex.deps_budget
 step "one version across applications" mix loopex.version_train
 step "test build" env MIX_ENV=test mix compile --warnings-as-errors
