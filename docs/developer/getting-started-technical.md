@@ -426,6 +426,11 @@ complete output and exact HEAD SHA outside the repository; otherwise use the
 hosted CI result for that candidate. The [milestone guide](milestones.md#concept-milestones-close)
 owns branch-candidate rejoin and the separate closure matrix.
 
+Before `floor-lane.sh`, fetch `origin/main` into the source checkout if it is
+absent. The runner pins that remote-tracking ref and carries it into its
+disposable clone so the commit-message check uses the same review base even
+when the source checkout has no local `main` branch.
+
 For the attended runner, load `LOOPEX_PROVIDER_API_KEY` using the
 [history-safe input pattern](../../DEVELOPMENT.md) before running it;
 do not put its value in a shell command line. The direct
