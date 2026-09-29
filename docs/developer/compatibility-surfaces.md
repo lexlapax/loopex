@@ -286,8 +286,12 @@ what makes an artifact locator beginning with `--` retrievable. The existing
 commands accept `allow-all` and `shell-allowlist` for `--policy`; `ask` also
 accepts `refuse-all`. `ask` defaults to the ephemeral profile, and
 `--state-root` selects the durable profile with its companion and credential
-requirements. `--output json` emits one bounded result object and an exit
-status for its outcome. `loopex artifact` reads objects through the
+requirements. After a run observation, `--output json` emits one bounded
+result object and an exit status for its outcome. A refusal before a run
+observation, including interrupt-handler installation failure or unproved
+startup cleanup, exits with empty standard output and a fixed standard-error
+diagnostic; the ADR 0040 cases also explain what to check before retrying.
+`loopex artifact` reads objects through the
 `Loopex.ArtifactStore`
 port. The command's cross-application interrupt entries —
 `LoopexCli.Interrupt.install/1`, `install/2`, `install_prepared/3`,
