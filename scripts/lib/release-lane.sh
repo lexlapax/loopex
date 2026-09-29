@@ -88,7 +88,8 @@ release_retain_source_identity() {
 }
 
 # Source text alone cannot distinguish an ExUnit case from a comment, string,
-# or quoted macro. Select only a parsed direct test definition in its module.
+# quoted form, or locally imported no-op macro. Require a direct fully rooted
+# ExUnit macro outside describe; the result is module TAB source line.
 release_definition_lines() {
   local source=$1 name=$2 script
   script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/release-test-definition.exs"
@@ -112,11 +113,41 @@ release_manifest_valid() {
     definitions=$(release_definition_lines "$source_tree/apps/$app/$file" "$name" || true)
     if [ -z "$definitions" ] ||
        [ "$(printf '%s\n' "$definitions" | wc -l | tr -d ' ')" != 1 ]; then
-      printf 'check-release: manifest row %s is not defined exactly once in %s\n' \
+      printf 'check-release: manifest row %s needs exactly one top-level Elixir.ExUnit.Case.test in %s\n' \
         "$rows" "$app/$file" >&2
       return 1
     fi
   done 4<"$manifest"
+}
+
+# Bind each real-provider result to the ExUnit event, not just the CLI count.
+# The sidecar is private retained evidence; an absent or mismatched event
+# refuses the lane even when a different test printed a green summary.
+release_case_lane() {
+  local label=$1 app=$2 file=$3 name=$4 module=$5 line=$6 wrap=$7
+  local sidecar="$retain/$label.identity" expected actual source_file status=0
+  if ! (umask 077; set -C; : >"$sidecar") 2>/dev/null; then
+    printf 'check-release: %s identity sidecar unavailable or reused\n' "$label" >&2
+    return 1
+  fi
+  export LOOPEX_RELEASE_TEST_IDENTITY_PATH="$sidecar"
+  lane "$label" "$app" 1 "$wrap" \
+    elixir -r "$tree/scripts/release-test-identity-formatter.exs" -S mix test "$file" \
+    --only "test:test $name" \
+    --formatter ExUnit.CLIFormatter \
+    --formatter LoopexReleaseTestIdentityFormatter || status=$?
+  unset LOOPEX_RELEASE_TEST_IDENTITY_PATH
+  release_retain_identity "$sidecar" || return 1
+  [ "$status" -eq 0 ] || return 1
+  source_file="$(cd "$(dirname "$tree/apps/$app/$file")" && pwd -P)/$(basename "$file")"
+  expected=$(printf '%s\ttest %s\t%s\t%s\ttrue\ttrue' \
+    "$module" "$name" "$source_file" "$line")
+  actual=$(cat "$sidecar") || return 1
+  if [ "$(wc -l <"$sidecar" | tr -d ' ')" != 1 ] || [ "$actual" != "$expected" ]; then
+    printf 'check-release: %s executed test identity does not match its manifest definition\n' "$label" >&2
+    return 1
+  fi
+  printf 'check-release: %s executed the named test at %s:%s\n' "$label" "$app/$file" "$line"
 }
 
 # A failed command or parser still has an immutable evidence log. The runner

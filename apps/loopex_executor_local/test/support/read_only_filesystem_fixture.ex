@@ -39,7 +39,7 @@ defmodule Loopex.Executor.Local.ReadOnlyFilesystemFixture do
       environment =
         environment ++
           [
-            {~c"ERL_FLAGS", ~c"+S 2:2 +SDcpu 1 +SDio 1"},
+            {~c"ERL_FLAGS", ~c"+fnu +S 2:2 +SDcpu 1 +SDio 1"},
             {~c"ERL_CRASH_DUMP", String.to_charlist(Path.join(root, "child.dump"))},
             {~c"ERL_CRASH_DUMP_SECONDS", ~c"0"},
             {~c"LOOPEX_HOME", String.to_charlist(Path.join(root, "home"))}

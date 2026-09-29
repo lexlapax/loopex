@@ -19,7 +19,7 @@ defmodule LoopexCli.AskRealTest do
 
   @tag :real_provider
   @tag timeout: 180_000
-  test "ephemeral ask answers from a local Ollama model through a separate process" do
+  Elixir.ExUnit.Case.test "ephemeral ask answers from a local Ollama model through a separate process" do
     command = Path.expand("../loopex", __DIR__)
     assert File.regular?(command) and Bitwise.band(File.stat!(command).mode, 0o111) != 0
 

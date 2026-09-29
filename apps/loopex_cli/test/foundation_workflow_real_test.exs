@@ -23,7 +23,7 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
   # digest-bound resource decision remain explicit human decisions.
   @tag :real_provider
   @tag timeout: 600_000
-  test "public pinned Git import and a real provider complete the admitted skill tool and artifact workflow" do
+  Elixir.ExUnit.Case.test "public pinned Git import and a real provider complete the admitted skill tool and artifact workflow" do
     terminal = require_attended_terminal!()
     root = owned_root()
     on_exit(fn -> File.rm_rf!(root) end)

@@ -29,6 +29,7 @@ cp "$source_root/scripts/suite-summary.sh" "$repo/scripts/suite-summary.sh"
 printf '%s\n' '#!/usr/bin/env bash' \
   'printf "fixture fast stdout\n"' \
   'printf "fixture fast stderr\n" >&2' \
+  'printf "fixture fast native encoding=%s\n" "$(locale charmap)"' \
   'if [[ -n ${FLOOR_TEST_FAST_SLEEP:-} ]]; then' \
   '  sleep "$FLOOR_TEST_FAST_SLEEP" &' \
   '  child=$!' \
@@ -126,12 +127,12 @@ for platform in Darwin Linux; do
     Linux) out=$retained/linux ;;
   esac
   if [[ $platform == Linux ]]; then
-    PATH="$bin:$PATH" FLOOR_TEST_PLATFORM=$platform \
+    PATH="$bin:$PATH" LC_ALL=C LANG=C FLOOR_TEST_PLATFORM=$platform \
       bash "$runner" "$sha" --output-dir "$out" --long-bound \
       >"$work/$platform.stdout" 2>"$work/$platform.stderr" ||
       fail "$platform fixture run failed"
   else
-    PATH="$bin:$PATH" FLOOR_TEST_PLATFORM=$platform \
+    PATH="$bin:$PATH" LC_ALL=C LANG=C FLOOR_TEST_PLATFORM=$platform \
       bash "$runner" "$sha" --output-dir "$out" \
       >"$work/$platform.stdout" 2>"$work/$platform.stderr" ||
       fail "$platform fixture run failed"
@@ -146,9 +147,13 @@ for platform in Darwin Linux; do
   [[ $mode == 700 ]] || fail "$platform output directory mode is $mode, not 700"
   grep -qx "SHA=$sha" "$out/check.log" || fail "$platform SHA was not retained"
   grep -qx "PLATFORM=$platform" "$out/check.log" || fail "$platform platform was not retained"
+  grep -qx 'NATIVE_ENCODING=UTF-8' "$out/check.log" ||
+    fail "$platform did not retain the selected native encoding"
   grep -qx 'RUN=fast-check' "$out/check.log" || fail "$platform fast command was not run"
   grep -qx 'fixture fast stdout' "$out/check.log" || fail "$platform lost stdout"
   grep -qx 'fixture fast stderr' "$out/check.log" || fail "$platform lost stderr"
+  grep -qx 'fixture fast native encoding=UTF-8' "$out/check.log" ||
+    fail "$platform did not select UTF-8 from a POSIX login locale"
   ! grep -q 'this dirty line must not run' "$out/check.log" ||
     fail "$platform used the working tree instead of the commit"
   grep -q '^DURATION_S=[0-9][0-9]*$' "$out/check.log" || fail "$platform lost duration"

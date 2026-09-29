@@ -64,7 +64,7 @@ done
 mkdir "$tree/apps/fixture/test"
 printf 'defmodule ManifestFixture do\n  use ExUnit.Case\n' >"$tree/apps/fixture/test/cases.exs"
 for index in 1 2 3; do
-  printf '  test "case %s" do\n  end\n' "$index" >>"$tree/apps/fixture/test/cases.exs"
+  printf '  Elixir.ExUnit.Case.test "case %s" do\n  end\n' "$index" >>"$tree/apps/fixture/test/cases.exs"
 done
 printf 'end\n' >>"$tree/apps/fixture/test/cases.exs"
 release_manifest_valid "$manifest" "$tree" 3 || fail 'valid complete manifest refused'
@@ -100,6 +100,104 @@ EOF
 if release_manifest_valid "$manifest" "$tree" 3 >"$work/manifest-output" 2>&1; then
   fail 'comment, string or quoted test replaced a required witness'
 fi
+cat >"$tree/apps/fixture/test/cases.exs" <<'EOF'
+defmodule NoopTest do
+  defmacro test(_name, do: _body), do: quote(do: :ok)
+end
+
+defmodule ManifestFixture do
+  use ExUnit.Case
+  import ExUnit.Case, except: [test: 2]
+  import NoopTest, only: [test: 2]
+  test "case 1" do
+    flunk("the no-op macro cannot run")
+  end
+end
+EOF
+printf 'fixture|test/cases.exs|case 1\n' >"$work/noop-manifest"
+if release_manifest_valid "$work/noop-manifest" "$tree" 1 >"$work/noop-output" 2>&1; then
+  fail 'a locally imported no-op test macro replaced a release witness'
+fi
+cat >"$tree/apps/fixture/test/cases.exs" <<'EOF'
+defmodule GeneratedDecoy do
+  defmacro make_case do
+    quote do
+      Elixir.ExUnit.Case.test "case 1" do
+        assert true
+      end
+    end
+  end
+end
+
+defmodule ManifestFixture do
+  use ExUnit.Case
+  require GeneratedDecoy
+  GeneratedDecoy.make_case()
+end
+EOF
+printf 'fixture|test/cases.exs|case 1\n' >"$work/generated-manifest"
+if release_manifest_valid "$work/generated-manifest" "$tree" 1 >"$work/generated-output" 2>&1; then
+  fail 'a generated test with no direct source definition replaced a release witness'
+fi
+
+# Mix must run the actual direct test and the formatter must retain its
+# module/name/file/line/tag event. A separate wrong event cannot pass just
+# because the CLI reports one green test.
+cat >"$tree/apps/fixture/mix.exs" <<'EOF'
+defmodule ReleaseFixture.MixProject do
+  use Mix.Project
+
+  def project, do: [app: :release_fixture, version: "0.1.0", elixir: ">= 1.18.0"]
+  def application, do: [extra_applications: [:logger]]
+end
+EOF
+printf 'ExUnit.start()\n' >"$tree/apps/fixture/test/test_helper.exs"
+cp "$root/scripts/release-test-identity-formatter.exs" "$tree/scripts/"
+cat >"$tree/apps/fixture/test/cases.exs" <<'EOF'
+defmodule ManifestFixture do
+  use ExUnit.Case
+
+  @tag :real_provider
+  Elixir.ExUnit.Case.test "case 1" do
+    assert true
+  end
+
+  Elixir.ExUnit.Case.test "excluded sibling" do
+    flunk("the exact case filter must not run this sibling")
+  end
+end
+EOF
+definition=$(release_definition_lines "$tree/apps/fixture/test/cases.exs" 'case 1')
+IFS=$'\t' read -r module line <<<"$definition"
+[ "$module" = Elixir.ManifestFixture ] && [ "$line" = 5 ] || fail 'source case identity changed'
+release_case_lane witness-positive fixture test/cases.exs 'case 1' "$module" "$line" without_credential \
+  >"$work/witness-positive-output" 2>&1 ||
+  { cat "$work/witness-positive-output" >&2; cat "$retain/witness-positive.identity" >&2; fail 'real ExUnit case identity was refused'; }
+grep -q 'executed the named test' "$work/witness-positive-output" || fail 'identity result absent'
+grep -qE 'sha256=[0-9a-f]{64}$' "$work/witness-positive-output" || fail 'identity sidecar digest absent'
+expected_identity=$(printf '%s\ttest case 1\t%s\t5\ttrue\ttrue' \
+  "$module" "$(cd "$tree/apps/fixture/test" && pwd -P)/cases.exs")
+[ "$(cat "$retain/witness-positive.identity")" = "$expected_identity" ] || fail 'formatter recorded the wrong test'
+
+cp "$tree/apps/fixture/test/cases.exs" "$work/cases-before-shift.exs"
+{ printf '# shifted after source admission\n'; cat "$work/cases-before-shift.exs"; } \
+  >"$tree/apps/fixture/test/cases.exs"
+if release_case_lane witness-mismatch fixture test/cases.exs 'case 1' "$module" "$line" without_credential \
+    >"$work/witness-mismatch-output" 2>&1; then
+  fail 'a mismatched runtime ExUnit source line passed'
+fi
+grep -q 'does not match its manifest definition' "$work/witness-mismatch-output" ||
+  fail 'runtime mismatch was not explicit'
+cp "$work/cases-before-shift.exs" "$tree/apps/fixture/test/cases.exs"
+sed 's/@tag :real_provider/@tag :fixture_only/' "$work/cases-before-shift.exs" \
+  >"$tree/apps/fixture/test/cases.exs"
+if release_case_lane witness-untagged fixture test/cases.exs 'case 1' "$module" "$line" without_credential \
+    >"$work/witness-untagged-output" 2>&1; then
+  fail 'an untagged test passed the real-provider identity check'
+fi
+grep -q 'does not match its manifest definition' "$work/witness-untagged-output" ||
+  fail 'missing real-provider tag was not explicit'
+cp "$work/cases-before-shift.exs" "$tree/apps/fixture/test/cases.exs"
 
 # Source/build identities use the same guarded helper as the actual runner.
 release_retain_identity "$manifest" >"$work/source-identity-output"

@@ -83,7 +83,7 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
           "make no further tool calls."
 
   @tag :real_provider
-  test "an extracted source archive follows the operator guide to serve the shipped host and complete the chain against a real provider" do
+  Elixir.ExUnit.Case.test "an extracted source archive follows the operator guide to serve the shipped host and complete the chain against a real provider" do
     credential = credential!()
     node_executable = System.find_executable("node") || flunk("Node is unavailable")
     elixir = System.find_executable("elixir") || flunk("Elixir is unavailable")

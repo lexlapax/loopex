@@ -48,7 +48,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
   end
 
   @tag :real_provider
-  test "one real non-streaming model call receives the committed canonical request bytes and digest and completes inside a session" do
+  Elixir.ExUnit.Case.test "one real non-streaming model call receives the committed canonical request bytes and digest and completes inside a session" do
     # The phase diagnostic's legacy tracer would trace the runtime it spawns,
     # and a traced credential sender refuses the credential (ADR 0034), so this
     # runtime-level case keeps only its own bounded session diagnostics.

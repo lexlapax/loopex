@@ -255,7 +255,7 @@ defmodule LoopexCli.CodingTaskTest do
 
   @tag :real_provider
   @tag timeout: 600_000
-  test "one real provider task streams edits a real repository across several turns and the operator sees the committed result" do
+  Elixir.ExUnit.Case.test "one real provider task streams edits a real repository across several turns and the operator sees the committed result" do
     {root, workspace} = Demonstration.repository("real-task")
     state_root = Path.join(root, "state")
     on_exit(fn -> File.rm_rf(root) end)
@@ -446,7 +446,7 @@ defmodule LoopexCli.CodingTaskTest do
 
   @tag :real_provider
   @tag timeout: 300_000
-  test "one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce" do
+  Elixir.ExUnit.Case.test "one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce" do
     {root, _workspace} = Demonstration.repository("real-reply")
     on_exit(fn -> File.rm_rf(root) end)
     # The adapter resolves its credential per invocation from host custody

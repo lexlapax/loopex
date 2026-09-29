@@ -26,7 +26,7 @@ defmodule LoopexComposition.Ephemeral.RealTest do
 
   @tag :real_provider
   @tag timeout: 180_000
-  test "the embedded API answers in-process from Anthropic with the release credential" do
+  Elixir.ExUnit.Case.test "the embedded API answers in-process from Anthropic with the release credential" do
     root =
       Path.join(
         System.tmp_dir!(),

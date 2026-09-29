@@ -164,7 +164,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
         System.find_executable("elixir"),
         [
           "-pa",
-          Path.expand("../../../../_build/test/lib/*/ebin", __DIR__),
+          Path.join([Mix.Project.build_path(), "lib", "*", "ebin"]),
           "-r",
           __ENV__.file,
           "-e",

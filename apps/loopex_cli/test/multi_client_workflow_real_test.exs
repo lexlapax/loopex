@@ -24,7 +24,7 @@ defmodule LoopexCli.MultiClientWorkflowRealTest do
 
   @tag :real_provider
   @tag timeout: 900_000
-  test "a Node observer takes over from a killed CLI controller and a real provider answers it" do
+  Elixir.ExUnit.Case.test "a Node observer takes over from a killed CLI controller and a real provider answers it" do
     # Consumed as a host consumes it: read and deleted in one step, so this
     # VM's environment names it no longer and only the daemon child is handed
     # it; the release check runs each real-provider case in a VM of its own.

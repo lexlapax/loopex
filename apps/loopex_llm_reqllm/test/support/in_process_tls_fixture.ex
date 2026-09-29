@@ -35,7 +35,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
       System.find_executable("elixir"),
       [
         "-pa",
-        Path.expand("../../../../_build/test/lib/*/ebin", __DIR__),
+        Path.join([Mix.Project.build_path(), "lib", "*", "ebin"]),
         "-r",
         __ENV__.file,
         "-e",
@@ -60,7 +60,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
       System.find_executable("elixir"),
       [
         "-pa",
-        Path.expand("../../../../_build/test/lib/*/ebin", __DIR__),
+        Path.join([Mix.Project.build_path(), "lib", "*", "ebin"]),
         "-r",
         Path.expand("tls_session_cache_probe.ex", __DIR__),
         "-r",

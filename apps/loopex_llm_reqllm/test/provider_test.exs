@@ -27,7 +27,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
   @prompt "Reply with exactly one word: loopex"
 
   @tag :real_provider
-  test "one real model call completes through the model boundary" do
+  Elixir.ExUnit.Case.test "one real model call completes through the model boundary" do
     model_spec = Adapter.default_model()
 
     root =

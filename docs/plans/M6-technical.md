@@ -3863,8 +3863,17 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
   stable reference and a SHA-256 digest, recorded in
   `docs/evidence/M6-closure-runs.md`, which the tested candidate creates and
   indexes as a scaffold.
-- **Release rows.** The manifest (`scripts/check-release.sh:194-209`) has eleven
-  real-provider rows, and its header comment matches. The
+- **Release rows.** The manifest in `scripts/check-release.sh` has eleven
+  real-provider rows, and its header comment matches. Each row names one
+  direct, fully rooted `Elixir.ExUnit.Case.test` definition outside a
+  `describe` block. The runner selects its exact ExUnit test name, requires
+  one executed case, and checks the completed ExUnit event against the parsed
+  module, source file and line, name, `real_provider` tag and successful state.
+  It retains the private event-identity sidecar and its SHA-256 alongside the
+  lane output; a different or missing test cannot satisfy the row by printing
+  a one-case summary. The fixture also rejects a locally imported no-op test
+  macro paired with a generated decoy, and a real event from the wrong source
+  line. The
   `rollback` lane is a separate `--only rollback` lane beside them, requiring
   no real provider credential because it drives a scripted model:
   - row 10, `loopex_cli|test/ask_real_test.exs|ephemeral ask answers from a
@@ -3872,7 +3881,7 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
     against a local Ollama model, driven through `loopex -p --output json` from
     a separate OS process, which is also the real-provider agent-delegation
     case. It runs under `without_credential`; the manifest loop selects its
-    per-row credential mode (`scripts/check-release.sh:225-232`);
+    per-row credential mode in its manifest loop;
   - row 11, `loopex_composition|test/ephemeral_real_test.exs|the embedded API
     answers in-process from Anthropic with the release credential`. The
     ephemeral profile's embedded API runs an Anthropic model in-process.
@@ -3983,7 +3992,9 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
   --long-bound`. Its reqllm step uses the same exact file and selector,
   removes all four credential variables and `MIX_BUILD_PATH`, and preserves
   the pinned floor pair and absolute pair-specific build root used by its fast
-  step. Change the release lane() helper to stream directly into its retained
+  step. The runner selects a verified UTF-8 locale before starting any floor
+  VM, or refuses before making an output directory. The release `lane()` helper
+  streams directly into its retained
   `$retain/$label.log`, judge that same file and retain command/tee statuses,
   executed count and measured duration before any failure exit. Disable errexit
   only around the pipeline and capture its complete PIPESTATUS array as the
@@ -3994,8 +4005,8 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
   substitution may trigger an early set -e exit. After the stream closes,
   append command, tee and summary statuses, count and measured duration to
   that same lane log. Emit its final retained path and SHA-256 in the release
-  transcript, for every lane including failed lanes. Reuse the existing digest
-  helper (`check-release.sh:102-103`), not just its two fresh-source-file digest
+  transcript, for every lane including failed lanes. Reuse `release_digest()`
+  in `scripts/lib/release-lane.sh`, not just its two fresh-source-file digest
   calls. Only after those records are retained may the helper enforce
   command/tee/summary statuses and expected case count.
   No log is changed after its digest. Missing log, count or digest is unavailable
@@ -4007,8 +4018,8 @@ leaves `run`, daemon and app-server guidance correct for the durable profile.
   a numeric count. These fixtures execute the candidate's actual lane helper,
   not a copied implementation of it.
   EXIT cleanup removes only disposable extractions/scratch, not retained logs.
-  The current temporary-log helper (`check-release.sh:34,118-122`) cannot satisfy
-  this without that explicit change. It retains
+  The former temporary-log helper could not satisfy this; the direct-stream
+  `lane()` helper now retains
   `DIR/long-bound-loopex_llm_reqllm.log` and also requires
   exactly one executed case. Each pair's output records tested SHA, toolchain,
   result, measured duration, retained reference and SHA-256. The other apps keep

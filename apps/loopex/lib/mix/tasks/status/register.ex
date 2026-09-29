@@ -858,6 +858,17 @@ defmodule Loopex.Checks.Register do
         capsule
 
       unresolved ->
+        links = join_and(prerequisite_links(unresolved))
+
+        next_decision =
+          case capsule["Next maintainer decision"] do
+            "None until " <> later ->
+              "Record disposition #{links} now; afterward, none until #{later}"
+
+            current ->
+              "#{current}; disposition #{links}"
+          end
+
         capsule
         |> Map.put(
           "Blockers",
@@ -865,11 +876,7 @@ defmodule Loopex.Checks.Register do
             "#{join_and(prerequisite_names(unresolved))} before the outcomes that depend on " <>
             "#{prerequisite_pronoun(unresolved)}"
         )
-        |> Map.put(
-          "Next maintainer decision",
-          "#{capsule["Next maintainer decision"]}; disposition " <>
-            "#{join_and(prerequisite_links(unresolved))}"
-        )
+        |> Map.put("Next maintainer decision", next_decision)
     end
   end
 

@@ -49,6 +49,29 @@ case "$platform" in
   Darwin | Linux) ;;
   *) refuse "unsupported platform: $platform" ;;
 esac
+# Elixir and OTP require UTF-8 native names. A remote login shell can inherit
+# the POSIX locale even when the floor toolchain itself is correct; that would
+# change filesystem bytes and contaminate exact-output child-VM witnesses.
+native_encoding=$(locale charmap 2>/dev/null || true)
+case "$native_encoding" in
+  UTF-8 | utf8) ;;
+  *)
+    selected_locale=
+    for candidate in C.UTF-8 en_US.UTF-8; do
+      candidate_encoding=$(LC_ALL="$candidate" locale charmap 2>/dev/null || true)
+      case "$candidate_encoding" in
+        UTF-8 | utf8) selected_locale=$candidate; break ;;
+      esac
+    done
+    [[ -n $selected_locale ]] || refuse 'a UTF-8 locale is required for the floor lane'
+    export LC_ALL="$selected_locale" LANG="$selected_locale"
+    ;;
+esac
+native_encoding=$(locale charmap 2>/dev/null || true)
+case "$native_encoding" in
+  UTF-8 | utf8) ;;
+  *) refuse 'the selected floor locale is not UTF-8' ;;
+esac
 command -v mise >/dev/null 2>&1 || refuse 'mise is required for the floor toolchain'
 observed=$(mise exec erlang@27.3.4 elixir@1.18.5-otp-27 -- \
   elixir -e 'IO.puts(System.version() <> ":" <> to_string(:erlang.system_info(:otp_release)))' \
@@ -134,8 +157,8 @@ finish() {
   exit "$status"
 }
 trap finish EXIT
-printf 'SHA=%s\nPLATFORM=%s\nTOOLCHAIN=erlang@27.3.4 elixir@1.18.5-otp-27\nOPEN_FILES=%s\nSOURCE=%s\nBUILD_ROOT=%s\n' \
-  "$sha" "$platform" "$soft_files" "$clone_dir" "$build_root" | tee -a "$check_log"
+printf 'SHA=%s\nPLATFORM=%s\nTOOLCHAIN=erlang@27.3.4 elixir@1.18.5-otp-27\nNATIVE_ENCODING=%s\nOPEN_FILES=%s\nSOURCE=%s\nBUILD_ROOT=%s\n' \
+  "$sha" "$platform" "$native_encoding" "$soft_files" "$clone_dir" "$build_root" | tee -a "$check_log"
 
 # The first file is the required retained transcript. The optional second
 # file isolates one app's ExUnit summary without losing the combined stream.

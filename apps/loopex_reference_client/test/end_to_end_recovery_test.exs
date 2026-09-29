@@ -177,7 +177,7 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
   # noticing.
   @tag timeout: 600_000
   @tag :real_provider
-  test "one real-provider trace forces a credential-free tool survives an untrappable runtime-tree kill after receipt before fact reconciles one effect without redispatch preserves its fact and completes a second real call" do
+  Elixir.ExUnit.Case.test "one real-provider trace forces a credential-free tool survives an untrappable runtime-tree kill after receipt before fact reconciles one effect without redispatch preserves its fact and completes a second real call" do
     # The credential is consumed here, as a host consumes it, and handed to
     # each trace child on its standard input. It is not put back: the release
     # check runs every real-provider case in a VM of its own, and a restored

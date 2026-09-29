@@ -62,6 +62,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
     environment = [
       {"MIX_ENV", "prod"},
       {"MIX_BUILD_PATH", nil},
+      {"MIX_BUILD_ROOT", nil},
       {"MIX_DEPS_PATH", nil},
       {"HEX_OFFLINE", "1"},
       {"LOOPEX_PROVIDER_API_KEY", nil},

@@ -192,7 +192,8 @@ done
 printf 'check-release: fresh-source elapsed=%ss\n' "$((SECONDS - fresh_started))"
 
 # The real-provider manifest: application, test file and exact case name. Each
-# name must be defined exactly once; its current line selects that case alone.
+# name must be a fully rooted ExUnit test defined exactly once. The source
+# module/line and the runtime ExUnit event must identify the same case.
 manifest="$logs/real-provider-manifest"
 cat >"$manifest" <<'EOF'
 loopex_cli|test/foundation_workflow_real_test.exs|public pinned Git import and a real provider complete the admitted skill tool and artifact workflow
@@ -220,8 +221,10 @@ while IFS='|' read -r -u 3 app file name; do
   rows=$((rows + 1))
   definitions=$(release_definition_lines "$tree/apps/$app/$file" "$name" || true)
   [ -n "$definitions" ] && [ "$(printf '%s\n' "$definitions" | wc -l | tr -d ' ')" = 1 ] ||
-    { printf 'check-release: manifest row %s is not defined exactly once in %s\n' "$rows" "$app/$file" >&2; exit 1; }
-  line=$definitions
+    { printf 'check-release: manifest row %s needs exactly one top-level Elixir.ExUnit.Case.test in %s\n' "$rows" "$app/$file" >&2; exit 1; }
+  IFS=$'\t' read -r module line <<<"$definitions"
+  [ -n "$module" ] && [[ "$line" =~ ^[1-9][0-9]*$ ]] ||
+    { printf 'check-release: manifest row %s has an invalid module or line\n' "$rows" >&2; exit 1; }
   if release_selected "real-provider-$rows"; then
     selected_rows=$((selected_rows + 1))
     case "$rows" in
@@ -229,7 +232,7 @@ while IFS='|' read -r -u 3 app file name; do
       11) credential_mode=with_ephemeral_credential ;;
       *) credential_mode=with_credential ;;
     esac
-    lane "real-provider-$rows" "$app" 1 "$credential_mode" mix test "$file:$line" --only real_provider
+    release_case_lane "real-provider-$rows" "$app" "$file" "$name" "$module" "$line" "$credential_mode"
   fi
 done 3<"$manifest"
 [ "$rows" -eq 11 ] || { printf 'check-release: the manifest contains %s rows, expected 11\n' "$rows" >&2; exit 1; }

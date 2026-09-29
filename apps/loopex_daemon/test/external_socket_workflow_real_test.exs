@@ -29,7 +29,7 @@ defmodule LoopexDaemon.ExternalSocketWorkflowRealTest do
   # absence is evidence unavailable, never a pass.
   @tag :real_provider
   @tag timeout: 900_000
-  test "a controller and observer complete the documented daemon workflow against a real provider" do
+  Elixir.ExUnit.Case.test "a controller and observer complete the documented daemon workflow against a real provider" do
     credential = System.get_env("LOOPEX_PROVIDER_API_KEY")
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
     if credential in [nil, ""], do: flunk("provider credential unavailable: evidence unavailable")

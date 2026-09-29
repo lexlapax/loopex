@@ -587,6 +587,16 @@ defmodule Loopex.StatusCheckTest do
 
           assert capsule["Next maintainer decision"] =~ "disposition [#{adr_name}]"
 
+          if state in ["Accepted", "In progress"] do
+            assert String.starts_with?(
+                     capsule["Next maintainer decision"],
+                     "Record disposition [#{adr_name}]("
+                   )
+
+            assert capsule["Next maintainer decision"] =~
+                     "now; afterward, none until `#{name}` is ready for independent review"
+          end
+
           for other <- others do
             refute capsule["Blockers"] =~ other
           end
