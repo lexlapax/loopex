@@ -120,10 +120,8 @@ defmodule LoopexCli.AskLauncherTest do
 
       try do
         assert {:os_pid, launcher_pid} = Port.info(port, :os_pid)
-        assert_file(assigned_pid)
-        assert_file(running_pid)
-        child_pid = String.trim(File.read!(assigned_pid))
-        assert child_pid == String.trim(File.read!(running_pid))
+        child_pid = await_pid(assigned_pid)
+        assert_pid(running_pid, child_pid)
         assert {_, 0} = System.cmd("/bin/kill", ["-0", child_pid])
 
         # No prompt words and an open Port stdin hold the real command in
@@ -222,6 +220,40 @@ defmodule LoopexCli.AskLauncherTest do
         Process.sleep(10)
         assert_file(path, deadline)
       end
+    end
+  end
+
+  defp await_pid(path), do: await_pid_file(path, :pid_line)
+
+  defp assert_pid(path, expected), do: await_pid_file(path, expected)
+
+  defp await_pid_file(path, expected) do
+    deadline = System.monotonic_time(:millisecond) + 5_000
+    await_pid_file(path, expected, deadline)
+  end
+
+  defp await_pid_file(path, expected, deadline) do
+    actual =
+      case File.read(path) do
+        {:ok, contents} -> contents
+        {:error, :enoent} -> :missing
+        {:error, reason} -> flunk("could not read PID file #{path}: #{inspect(reason)}")
+      end
+
+    cond do
+      expected == :pid_line and is_binary(actual) and
+          Regex.match?(~r/\A[1-9][0-9]*\n\z/, actual) ->
+        String.trim_trailing(actual)
+
+      actual == expected ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("PID file #{path} expected #{inspect(expected)}, got #{inspect(actual)}")
+
+      true ->
+        Process.sleep(10)
+        await_pid_file(path, expected, deadline)
     end
   end
 
