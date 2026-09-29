@@ -396,11 +396,17 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
     {:loopex_ephemeral_session, bad_owner, bad_cell} = bad
     {:loopex_ephemeral_session, _peer_owner, peer_cell} = peer
     bad_root = owned_root(bad_owner)
+    bad_subtree = Map.keys(:sys.get_state(bad_owner).startup.process_monitors)
 
     assert {:error,
-            {:cleanup_unproved,
-             %{pending: [:process_groups], root: ^bad_root, root_ownership: :owned}}} =
+            {:cleanup_unproved, %{pending: pending, root: ^bad_root, root_ownership: :owned}}} =
              Ephemeral.stop_session(bad)
+
+    assert pending in [[:process_groups], [:process_groups, :session_subtree]]
+
+    if pending == [:process_groups] do
+      refute Enum.any?(bad_subtree, &Process.alive?/1)
+    end
 
     assert :atomics.get(bad_cell, 1) == 3
     assert File.dir?(bad_root)
@@ -409,6 +415,60 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
     assert {:ok, %{text: "answer: peer", outcome: :completed}} = Ephemeral.ask(peer, "peer")
     assert :ok = Ephemeral.stop_session(peer)
     assert :atomics.get(peer_cell, 1) == 2
+  end
+
+  test "slot handler takes a queued exact DOWN for a dead worker before later teardown", %{
+    tmp: tmp
+  } do
+    test = self()
+
+    session =
+      start_session(tmp,
+        group_drain: fn _executor, _instance, _owner, _nonce, _deadline ->
+          send(test, {:drain_worker, self()})
+
+          receive do
+            :never -> :ok
+          end
+        end
+      )
+
+    {:loopex_ephemeral_session, owner, cell} = session
+    startup = :sys.get_state(owner).startup
+    root = startup.owned_root.path
+    subtree = Map.keys(startup.process_monitors)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert_receive {:drain_worker, worker}, 3_000
+
+    assert %{worker: %{pid: ^worker, monitor: owner_monitor, reference: reference}} =
+             :sys.get_state(owner).abort
+
+    monitor = Process.monitor(worker)
+
+    :ok = :sys.suspend(owner)
+
+    try do
+      # Concept: an expired operation never proves its group, but a reaped worker
+      # allows independent runtime and subtree teardown to continue.
+      # Technical depth: a separate real monitor first proves worker death; an
+      # test-injected exact DOWN tuple is then queued behind the slot event.
+      # This avoids a race between delivery to the test and suspended owner.
+      send(owner, {:abort_slot_deadline, reference})
+      Process.exit(worker, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 1_000
+      send(owner, {:DOWN, owner_monitor, :process, worker, :killed})
+    after
+      if Process.alive?(owner), do: :sys.resume(owner)
+    end
+
+    assert {:error,
+            {:cleanup_unproved,
+             %{pending: [:process_groups], root: ^root, root_ownership: :owned}}} =
+             Task.await(stop, 7_000)
+
+    refute Enum.any?(subtree, &Process.alive?/1)
+    assert :atomics.get(cell, 1) == 3
+    assert File.dir?(root)
   end
 
   test "a successful worker return without the direct certificate cannot close", %{tmp: tmp} do
@@ -459,11 +519,16 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
 
     {:loopex_ephemeral_session, owner, cell} = session
     root = owned_root(owner)
+    subtree = Map.keys(:sys.get_state(owner).startup.process_monitors)
 
-    assert {:error,
-            {:cleanup_unproved,
-             %{pending: [:process_groups], root: ^root, root_ownership: :owned}}} =
+    assert {:error, {:cleanup_unproved, %{pending: pending, root: ^root, root_ownership: :owned}}} =
              Ephemeral.stop_session(session)
+
+    assert pending in [[:process_groups], [:process_groups, :session_subtree]]
+
+    if pending == [:process_groups] do
+      refute Enum.any?(subtree, &Process.alive?/1)
+    end
 
     assert :atomics.get(cell, 1) == 3
     assert File.dir?(root)

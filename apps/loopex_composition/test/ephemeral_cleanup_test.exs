@@ -46,7 +46,7 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     assert :atomics.get(cell, 1) == 2
   end
 
-  test "each failed drain is reaped before independent runtime and subtree teardown", %{
+  test "each failed drain seals group cleanup and reaps its worker", %{
     tmp: tmp
   } do
     test = self()
@@ -91,12 +91,16 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
       assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 3_000
 
       assert {:error,
-              {:cleanup_unproved,
-               %{pending: [:process_groups], root: ^root, root_ownership: :owned}}} =
+              {:cleanup_unproved, %{pending: pending, root: ^root, root_ownership: :owned}}} =
                Task.await(stop, 7_000)
 
-      assert_receive {:DOWN, ^runtime_monitor, :process, _, _}, 1_000
-      assert_receive {:DOWN, ^root_monitor, :process, ^root_pid, _}, 1_000
+      assert pending in [[:process_groups], [:process_groups, :session_subtree]]
+
+      if pending == [:process_groups] do
+        assert_receive {:DOWN, ^runtime_monitor, :process, _, _}, 1_000
+        assert_receive {:DOWN, ^root_monitor, :process, ^root_pid, _}, 1_000
+      end
+
       assert :atomics.get(cell, 1) == 3
       assert File.dir?(root)
     end

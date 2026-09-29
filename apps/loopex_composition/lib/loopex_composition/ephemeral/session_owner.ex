@@ -452,7 +452,27 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         %{phase: :aborting, abort: %{worker: %{reference: reference} = worker}} = state
       ) do
     Process.exit(worker.pid, :kill)
-    {:noreply, state |> mark_abort_timeout() |> finish_abort()}
+    %{pid: pid, monitor: monitor} = worker
+
+    # Concept: an expired phase cannot prove its result, but an already-ended
+    # worker must not prevent independent later teardown.
+    # Technical depth: take only this worker's exact monitored DOWN without
+    # waiting; otherwise keep the subtree unproved and start no next phase.
+    next =
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, reason} ->
+          if Process.alive?(pid) do
+            state |> mark_abort_timeout() |> finish_abort()
+          else
+            state
+            |> put_in([:abort, :worker, :result], false)
+            |> finish_abort_worker(reason)
+          end
+      after
+        0 -> state |> mark_abort_timeout() |> finish_abort()
+      end
+
+    {:noreply, next}
   end
 
   def handle_info(
