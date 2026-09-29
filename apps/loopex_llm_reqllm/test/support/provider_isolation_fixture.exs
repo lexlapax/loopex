@@ -226,10 +226,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         if Process.alive?(probe), do: Process.exit(probe, :kill)
         :gen_tcp.close(listener)
         :gen_tcp.close(probe_listener)
-        if Process.alive?(events), do: Agent.stop(events)
-        if Process.alive?(transport_events), do: Agent.stop(transport_events)
-        if Process.alive?(probe_events), do: Agent.stop(probe_events)
-        if Process.alive?(request_headers), do: Agent.stop(request_headers)
+        stop_agent(events)
+        stop_agent(transport_events)
+        stop_agent(probe_events)
+        stop_agent(request_headers)
         if Runtime.alive?(runtime), do: Loopex.stop(runtime)
         stop_if_alive(workers)
         stop_if_alive(capability_pid)
@@ -518,6 +518,25 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     if Process.alive?(pid), do: GenServer.stop(pid)
   catch
     :exit, _reason -> :ok
+  end
+
+  # Concept: fixture cleanup proves each linked Agent has ended even when the
+  # test process's shutdown races an explicit stop from the on-exit process.
+  # Technical depth: only an already-stopping or absent Agent is tolerated;
+  # a hung stop still fails, and every path waits for its monitored DOWN.
+  defp stop_agent(pid) do
+    monitor = Process.monitor(pid)
+
+    try do
+      if Process.alive?(pid), do: Agent.stop(pid)
+    catch
+      :exit, :noproc -> :ok
+      :exit, :shutdown -> :ok
+      :exit, {:noproc, _} -> :ok
+      :exit, {:shutdown, _} -> :ok
+    end
+
+    assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 1_000
   end
 
   defp write_worker(root, mode, port, probe_port) do
