@@ -463,6 +463,17 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
     assert_one_write(safe_call)
     stop(safe_call)
 
+    partial_name = "read-synthetic-echo-cred"
+
+    partial_name_call =
+      start(runtime, "openai:gpt-4", tool_reply(partial_name, "call-partial", %{}), tls: trusted)
+
+    {partial_name_result, partial_name_call} = partial_name_call |> begin() |> result()
+
+    assert {:ok, %{tool_calls: [%{name: ^partial_name}]}} = partial_name_result
+    assert_one_write(partial_name_call)
+    stop(partial_name_call)
+
     partial = start(runtime, "openai:gpt-4", wire(:chat, "synthetic-echo-cred"), tls: trusted)
     {partial_result, partial} = partial |> begin() |> result()
     assert {:ok, %{text: "synthetic-echo-cred"}} = partial_result
@@ -473,6 +484,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
           {wire(:chat, "echo " <> key), []},
           {wire(:chat, "safe"), [header_id: key]},
           {tool_reply("read", "call-" <> key, %{}), []},
+          {tool_reply("read-" <> key, "call", %{}), []},
           {tool_reply("read", "call", %{key => "literal-key"}), []},
           {tool_reply("read", "call", %{"nested" => [%{key => "nested-key"}]}), []},
           {tool_reply("read", "call", %{"nested" => [%{"inside" => key}]}), []},

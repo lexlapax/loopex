@@ -10,8 +10,12 @@ defmodule LoopexComposition.Ephemeral.AmbientDisclosureTest do
   end
 
   test "a provider-only hosted call keeps the selected key out of session state and planes" do
-    {output, status} = LoopexComposition.Ephemeral.AmbientFixture.run_in_child(:provider_only)
-    assert status == 0, output
-    assert output =~ "EPHEMERAL_PROVIDER_ONLY_EXCLUSION_PASSED"
+    for provider <- [:openai, :anthropic, :openrouter] do
+      {output, status} =
+        LoopexComposition.Ephemeral.AmbientFixture.run_in_child(:provider_only, provider)
+
+      assert status == 0, output
+      assert output =~ "EPHEMERAL_PROVIDER_ONLY_EXCLUSION_PASSED provider=#{provider}"
+    end
   end
 end

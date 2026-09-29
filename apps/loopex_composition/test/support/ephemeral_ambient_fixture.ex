@@ -7,11 +7,11 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
 
   ## Technical depth
 
-  The child trusts only a generated localhost CA and uses a synthetic provider
-  value. One case starts a named trace before creating the session, arms the
-  exact hosted caller while it is blocked before exclusion, and holds its TLS
-  call while inspecting trace membership, owner, coordinator and Store. It
-  then inspects their settled state and planes.
+  The child trusts only a generated localhost CA and uses a distinct synthetic
+  value for each hosted provider. One case starts a named trace before creating
+  the session, arms the exact hosted caller while it is blocked before exclusion,
+  and holds its TLS call while inspecting trace membership, owner, coordinator
+  and Store. It then inspects their settled state and planes.
   The other drives two TLS calls around a host-authorized read tool effect;
   its policy deliberately copies the ambient value to a workspace file.
   The fixture reports no credential or request bytes to the parent.
@@ -22,6 +22,26 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
   alias LoopexComposition.Ephemeral.{OwnerActivation, Preflight, SessionOwner}
 
   @credential "synthetic-ambient-boundary-value"
+  @provider_profiles %{
+    openai: %{
+      provider: :openai,
+      model: "openai:gpt-4",
+      key_name: "OPENAI_API_KEY",
+      credential: "synthetic-openai-provider-only-value"
+    },
+    anthropic: %{
+      provider: :anthropic,
+      model: "anthropic:claude-haiku-4-5",
+      key_name: "ANTHROPIC_API_KEY",
+      credential: "synthetic-anthropic-provider-only-value"
+    },
+    openrouter: %{
+      provider: :openrouter,
+      model: "openrouter:openai/gpt-4o-mini",
+      key_name: "OPENROUTER_API_KEY",
+      credential: "synthetic-openrouter-provider-only-value"
+    }
+  }
 
   defmodule Policy do
     @moduledoc false
@@ -34,7 +54,9 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
     end
   end
 
-  def run_in_child(mode \\ :disclosure) when mode in [:disclosure, :provider_only] do
+  def run_in_child(mode \\ :disclosure, provider \\ :openai)
+      when mode in [:disclosure, :provider_only] and
+             provider in [:openai, :anthropic, :openrouter] do
     System.cmd(
       System.find_executable("elixir"),
       [
@@ -43,13 +65,15 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
         "-r",
         __ENV__.file,
         "-e",
-        "LoopexComposition.Ephemeral.AmbientFixture.probe(#{inspect(mode)})"
+        "LoopexComposition.Ephemeral.AmbientFixture.probe(#{inspect(mode)}, #{inspect(provider)})"
       ],
       stderr_to_stdout: true
     )
   end
 
-  def probe(mode) when mode in [:disclosure, :provider_only] do
+  def probe(mode, provider)
+      when mode in [:disclosure, :provider_only] and
+             provider in [:openai, :anthropic, :openrouter] do
     {:ok, _} = Application.ensure_all_started(:loopex_composition)
     {:ok, _} = Application.ensure_all_started(:ssl)
     certificate = certificate()
@@ -69,16 +93,30 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       ca_path = Path.join(directory, "ca.pem")
       File.write!(ca_path, pem)
       :ok = :public_key.cacerts_load(String.to_charlist(ca_path))
-      System.put_env("OPENAI_API_KEY", @credential)
+
+      profile =
+        if mode == :disclosure,
+          do: %{provider: :openai, credential: @credential, key_name: "OPENAI_API_KEY"},
+          else: Map.fetch!(@provider_profiles, provider)
+
+      for name <- [
+            "LOOPEX_PROVIDER_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENROUTER_API_KEY",
+            "OPEN_ROUTER_API_KEY"
+          ],
+          do: System.delete_env(name)
+
+      System.put_env(profile.key_name, profile.credential)
       System.put_env("LOOPEX_TEST_AMBIENT_WORKSPACE", workspace)
-      System.delete_env("LOOPEX_PROVIDER_API_KEY")
 
       case mode do
         :disclosure ->
           disclosure_case(certificate, workspace)
 
         :provider_only ->
-          provider_only_case(certificate, workspace)
+          provider_only_case(certificate, workspace, profile)
       end
     after
       File.rm_rf!(directory)
@@ -108,13 +146,19 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
     IO.puts("EPHEMERAL_AMBIENT_DISCLOSURE_PASSED")
   end
 
-  defp provider_only_case(certificate, workspace) do
-    {port, server} = start_server(certificate, [answer_reply("provider-only answer")], true)
+  defp provider_only_case(certificate, workspace, profile) do
+    {port, server} =
+      start_server(
+        certificate,
+        [provider_answer_reply(profile, "provider-only answer")],
+        true,
+        expected_auth(profile)
+      )
 
     assert {:ok, configuration} =
              Preflight.prepare(
                policy: Policy,
-               model: "openai:gpt-4",
+               model: profile.model,
                base_url: "https://localhost:#{port}",
                cwd: workspace,
                tools: :none,
@@ -208,7 +252,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
         end
 
       assert_receive {:ambient_model_request, ^server, request, true}, 5_000
-      refute String.contains?(request, @credential)
+      refute String.contains?(request, profile.credential)
 
       control_state = :sys.get_state(children.control)
       tracer_state = :sys.get_state(children.tracer)
@@ -248,16 +292,23 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
              end)
 
       {:messages, raw_trace_messages} = Process.info(children.tracer, :messages)
-      assert_no_provider_key({raw_trace_messages, :sys.get_state(children.tracer)})
 
-      assert_no_provider_key({
-        runtime,
-        :sys.get_state(owner),
-        :sys.get_state(startup.registered.runtime_holder),
-        :sys.get_state(children.control),
-        :sys.get_state(coordinator),
-        :sys.get_state(store)
-      })
+      assert_no_provider_key(
+        {raw_trace_messages, :sys.get_state(children.tracer)},
+        profile.credential
+      )
+
+      assert_no_provider_key(
+        {
+          runtime,
+          :sys.get_state(owner),
+          :sys.get_state(startup.registered.runtime_holder),
+          :sys.get_state(children.control),
+          :sys.get_state(coordinator),
+          :sys.get_state(store)
+        },
+        profile.credential
+      )
 
       send(server, {:ambient_release, self()})
 
@@ -272,20 +323,23 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
 
       assert records != [] and events != []
 
-      assert_no_provider_key({
-        result,
-        records,
-        events,
-        Loopex.snapshot(attachment),
-        status,
-        history,
-        Ephemeral.last_result(session),
-        :sys.get_state(owner),
-        :sys.get_state(startup.registered.runtime_holder),
-        :sys.get_state(children.control),
-        :sys.get_state(coordinator),
-        :sys.get_state(store)
-      })
+      assert_no_provider_key(
+        {
+          result,
+          records,
+          events,
+          Loopex.snapshot(attachment),
+          status,
+          history,
+          Ephemeral.last_result(session),
+          :sys.get_state(owner),
+          :sys.get_state(startup.registered.runtime_holder),
+          :sys.get_state(children.control),
+          :sys.get_state(coordinator),
+          :sys.get_state(store)
+        },
+        profile.credential
+      )
 
       assert_receive {:ambient_server_done, ^server}, 3_000
       assert :ok = await_trace_delivery(trace_session, caller)
@@ -295,19 +349,19 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       assert :ok = Loopex.trace_stop(runtime)
       :sys.get_state(children.tracer)
       :sys.get_state(children.dispatcher)
-      assert_no_provider_key({before_reply, drain_diagnostics([])})
-      IO.puts("EPHEMERAL_PROVIDER_ONLY_EXCLUSION_PASSED")
+      assert_no_provider_key({before_reply, drain_diagnostics([])}, profile.credential)
+      IO.puts("EPHEMERAL_PROVIDER_ONLY_EXCLUSION_PASSED provider=#{profile.provider}")
     after
       send(server, {:ambient_release, self()})
       if Process.alive?(owner), do: Ephemeral.stop_session(session)
     end
   end
 
-  defp assert_no_provider_key(value) do
-    assert :binary.match(:erlang.term_to_binary({:positive_control, @credential}), @credential) !=
+  defp assert_no_provider_key(value, credential) do
+    assert :binary.match(:erlang.term_to_binary({:positive_control, credential}), credential) !=
              :nomatch
 
-    assert :binary.match(:erlang.term_to_binary(value), @credential) == :nomatch
+    assert :binary.match(:erlang.term_to_binary(value), credential) == :nomatch
   end
 
   defp drain_diagnostics(entries) do
@@ -385,7 +439,12 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
     })
   end
 
-  defp start_server(certificate, bodies \\ [tool_reply(), answer_reply()], held \\ false) do
+  defp start_server(
+         certificate,
+         bodies \\ [tool_reply(), answer_reply()],
+         held \\ false,
+         auth \\ {"authorization", "Bearer " <> @credential}
+       ) do
     {:ok, listener} =
       :ssl.listen(0, [
         :binary,
@@ -404,7 +463,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
           {:ok, socket} = :ssl.transport_accept(listener, 10_000)
           {:ok, socket} = :ssl.handshake(socket, 10_000)
           {headers, request} = read_request(socket, <<>>)
-          send(parent, {:ambient_model_request, self(), request, selected_auth?(headers)})
+          send(parent, {:ambient_model_request, self(), request, selected_auth?(headers, auth)})
 
           if held do
             receive do
@@ -475,12 +534,31 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
     })
   end
 
-  defp selected_auth?(headers) do
+  defp provider_answer_reply(%{provider: :anthropic}, content) do
+    Jason.encode!(%{
+      "id" => "msg-provider-only",
+      "type" => "message",
+      "role" => "assistant",
+      "model" => "fixture",
+      "content" => [%{"type" => "text", "text" => content}],
+      "stop_reason" => "end_turn",
+      "usage" => %{"input_tokens" => 1, "output_tokens" => 2}
+    })
+  end
+
+  defp provider_answer_reply(_profile, content), do: answer_reply(content)
+
+  defp expected_auth(%{provider: :anthropic, credential: credential}),
+    do: {"x-api-key", credential}
+
+  defp expected_auth(%{credential: credential}),
+    do: {"authorization", "Bearer " <> credential}
+
+  defp selected_auth?(headers, {expected_name, expected_value}) do
     Enum.any?(String.split(headers, "\r\n"), fn line ->
       case String.split(line, ":", parts: 2) do
         [name, value] ->
-          String.downcase(name) == "authorization" and
-            String.trim(value) == "Bearer " <> @credential
+          String.downcase(name) == expected_name and String.trim(value) == expected_value
 
         _ ->
           false
