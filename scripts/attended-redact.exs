@@ -11,13 +11,27 @@ defmodule LoopexAttendedRedact do
         {:ok, keys} ->
           # The shell gives these raw inherited descriptors. Standard IO
           # transcodes bytes under a UTF-8 locale, even with IO.binread/write.
-          # A bidirectional port does not reliably report EOF for a regular
-          # input file, so the input uses raw file reads and the port writes.
-          {:ok, input} = :file.open(~c"/dev/fd/4", [:read, :binary, :raw])
-          output = Port.open({:fd, 4, 5}, [:binary, :out])
-          stream(input, output, keys, max_key_width(keys), replacement(keys), <<>>)
+          # A bidirectional port reports pipe data promptly, but does not
+          # reliably report EOF for a regular input file.
+          width = max_key_width(keys)
+          marker = replacement(keys)
 
-        {:error, reason} -> fail(reason)
+          case File.stat!("/dev/fd/4").type do
+            :regular ->
+              {:ok, input} = :file.open(~c"/dev/fd/4", [:read, :binary, :raw])
+              output = Port.open({:fd, 4, 5}, [:binary, :out])
+              stream_file(input, output, keys, width, marker, <<>>)
+
+            :other ->
+              port = Port.open({:fd, 4, 5}, [:binary, :eof])
+              stream_pipe(port, keys, width, marker, <<>>)
+
+            _ ->
+              fail("redaction_failed")
+          end
+
+        {:error, reason} ->
+          fail(reason)
       end
     rescue
       _ -> fail("redaction_failed")
@@ -74,7 +88,7 @@ defmodule LoopexAttendedRedact do
   defp max_key_width([]), do: 1
   defp max_key_width(keys), do: keys |> Enum.map(&byte_size/1) |> Enum.max()
 
-  defp stream(input, output, keys, width, replacement, pending) do
+  defp stream_file(input, output, keys, width, replacement, pending) do
     case :file.read(input, 65_536) do
       :eof ->
         {redacted, <<>>} = redact(pending, keys, width, replacement, true)
@@ -85,7 +99,24 @@ defmodule LoopexAttendedRedact do
       {:ok, data} ->
         {redacted, remaining} = redact(pending <> data, keys, width, replacement, false)
         publish(output, redacted)
-        stream(input, output, keys, width, replacement, remaining)
+        stream_file(input, output, keys, width, replacement, remaining)
+
+      _ ->
+        fail("redaction_failed")
+    end
+  end
+
+  defp stream_pipe(port, keys, width, replacement, pending) do
+    receive do
+      {^port, {:data, data}} when is_binary(data) ->
+        {redacted, remaining} = redact(pending <> data, keys, width, replacement, false)
+        publish(port, redacted)
+        stream_pipe(port, keys, width, replacement, remaining)
+
+      {^port, :eof} ->
+        {redacted, <<>>} = redact(pending, keys, width, replacement, true)
+        publish(port, redacted)
+        Port.close(port)
 
       _ ->
         fail("redaction_failed")
@@ -93,7 +124,19 @@ defmodule LoopexAttendedRedact do
   end
 
   defp redact(content, keys, width, replacement, final?) do
-    safe = if final?, do: byte_size(content), else: max(0, byte_size(content) - width + 1)
+    # Credential values exclude CR and LF, so no key can cross a completed
+    # line. Release that line even when it is shorter than the longest key.
+    line_end =
+      case :binary.matches(content, ["\r", "\n"]) do
+        [] -> 0
+        positions -> positions |> List.last() |> elem(0) |> Kernel.+(1)
+      end
+
+    safe =
+      if final?,
+        do: byte_size(content),
+        else: max(line_end, max(0, byte_size(content) - width + 1))
+
     scan(content, keys, safe, replacement, 0, [])
   end
 

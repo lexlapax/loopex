@@ -510,6 +510,50 @@ elixir_redact() {
     3< <(printf '%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$4") \
     4<&0 5>&1 </dev/null >/dev/null
 }
+
+# Keep the pipe open after a short prompt. It must reach the reader before a
+# longer credential is completed or the producer closes its end of the pipe.
+stream_gate="$work/redact-stream-release"
+(
+  printf 'yes?\na-very-long-'
+  while [ ! -e "$stream_gate" ]; do sleep 0.05; done
+  printf 'credential-value\n'
+) | elixir_redact '' 'a-very-long-credential-value' '' '' \
+  >"$work/redact-stream-actual" &
+stream_pid=$!
+prompt_seen=0
+for _ in $(seq 1 200); do
+  if grep -qx 'yes?' "$work/redact-stream-actual"; then prompt_seen=1; break; fi
+  kill -0 "$stream_pid" 2>/dev/null || break
+  sleep 0.05
+done
+if [ "$prompt_seen" -ne 1 ]; then
+  touch "$stream_gate"
+  wait "$stream_pid" || true
+  fail 'redactor withheld a short prompt until pipe EOF'
+fi
+partial_seen=0
+if grep -Fq 'a-very-long-' "$work/redact-stream-actual"; then partial_seen=1; fi
+touch "$stream_gate"
+stream_status=0
+wait "$stream_pid" || stream_status=$?
+[ "$partial_seen" -eq 0 ] || fail 'redactor published a partial credential'
+[ "$stream_status" -eq 0 ] || fail 'redactor failed after a streaming prompt'
+printf 'yes?\n[REDACTED]\n' >"$work/redact-stream-expected"
+cmp -s "$work/redact-stream-expected" "$work/redact-stream-actual" ||
+  fail 'redactor changed the streamed prompt or split credential'
+
+# Descriptor/setup errors must stop before any unredacted transcript is sent.
+status=0
+env -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+  -u OPENROUTER_API_KEY ERL_CRASH_DUMP=/dev/null ERL_CRASH_DUMP_SECONDS=0 \
+  elixir "$repo/scripts/attended-redact.exs" \
+  3< <(printf 'secret\0\0\0\0') 4<&- 5>&1 </dev/null \
+  >"$work/redact-failed-actual" 2>"$work/redact-failed-error" || status=$?
+[ "$status" -ne 0 ] && [ ! -s "$work/redact-failed-actual" ] &&
+  grep -qx 'attended-redact: redaction_failed' "$work/redact-failed-error" ||
+  fail 'redactor accepted a missing input descriptor'
+
 awk 'BEGIN { for (i = 0; i < 65534; i++) printf "x" }' >"$work/redact-input"
 printf '%s!%s' "$OPENROUTER_API_KEY" "$OPENAI_API_KEY" >>"$work/redact-input"
 awk 'BEGIN { for (i = 0; i < 65534; i++) printf "x" }' >"$work/redact-expected"
