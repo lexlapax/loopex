@@ -507,14 +507,20 @@ Start the runtime with `diagnostics_to: self()`, then:
 {:ok, _config} = Loopex.trace(runtime, %{modules: [Loopex.Runtime.Control], level: :calls})
 {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-1")
 {:ok, status} = Loopex.trace_status(runtime)
+IO.inspect(status, label: "Trace counts")
 :ok = Loopex.trace_stop(runtime)
 
 receive do
   {:loopex_diagnostic, entry} -> IO.inspect(entry)
+after
+  1_000 -> IO.puts("No diagnostic entry arrived")
 end
 ```
 
-Each entry is bounded plain data such as
+The receive waits at most one second. An empty receive is not necessarily a
+failure. The named call may not have been observed, or the tracer may have
+dropped an entry. Check the emitted and dropped counts in `status` before
+treating an empty receive as a problem. Each entry is bounded plain data such as
 `%{"kind" => "trace_call", "module" => "Loopex.Runtime.Control", "function" => "handle_info", "arity" => 2, ...}`,
 and `trace_status/1` reports how many entries were emitted and dropped.
 `modules` takes exact module names or the namespace wildcards `:loopex` and
