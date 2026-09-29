@@ -424,8 +424,17 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         {:abort_operation_cutoff, reference},
         %{phase: :aborting, abort: %{worker: %{reference: reference} = worker}} = state
       ) do
-    if not worker.finish_sent, do: Process.exit(worker.pid, :kill)
-    {:noreply, state}
+    if fresh?(worker.slot) do
+      next = reconcile_abort_mailbox(state)
+
+      if match?(%{abort: %{worker: %{reference: ^reference, result: false}}}, next),
+        do: Process.exit(worker.pid, :kill)
+
+      {:noreply, next}
+    else
+      Process.exit(worker.pid, :kill)
+      {:noreply, state |> mark_abort_timeout() |> finish_abort()}
+    end
   end
 
   def handle_info(
@@ -444,7 +453,10 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
             %{worker: %{pid: worker_pid, reference: reference, phase: phase} = worker} = abort
         } = state
       ) do
-    valid = completed_at <= worker.cutoff and valid_abort_result?(phase, result, worker.nonce)
+    valid =
+      is_integer(completed_at) and completed_at <= worker.cutoff and
+        valid_abort_result?(phase, result, worker.nonce)
+
     updated = %{worker | result: valid}
     next = %{state | abort: %{abort | worker: updated}}
 
@@ -2806,11 +2818,24 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   defp start_abort_worker(state, phase, nonce) do
+    if fresh?(state.abort.deadline) do
+      launch_abort_worker(state, phase, nonce)
+    else
+      state
+      |> put_in([:abort, :stage], phase)
+      |> mark_abort_timeout()
+      |> finish_abort()
+    end
+  end
+
+  defp launch_abort_worker(state, phase, nonce) do
+    notify_abort_phase_start(state.startup.configuration, phase)
     owner = self()
     reference = make_ref()
     now = System.monotonic_time()
-    cutoff = min(now + native(500), state.abort.deadline)
-    slot = min(now + native(1_000), state.abort.deadline)
+    {cutoff_ms, slot_ms} = abort_phase_window(state.startup.configuration)
+    cutoff = min(now + native(cutoff_ms), state.abort.deadline)
+    slot = min(now + native(slot_ms), state.abort.deadline)
 
     {pid, monitor} =
       :erlang.spawn_opt(
@@ -2819,15 +2844,27 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           install_temp_root_test_seam(state.startup.configuration)
 
           result =
-            try do
-              abort_operation(state, phase, nonce, cutoff)
-            rescue
-              _ -> {:error, :operation_failed}
-            catch
-              _, _ -> {:error, :operation_failed}
+            if fresh?(cutoff) do
+              try do
+                abort_operation(state, phase, nonce, cutoff)
+              rescue
+                _ -> {:error, :operation_failed}
+              catch
+                _, _ -> {:error, :operation_failed}
+              end
+            else
+              {:error, :operation_timeout}
             end
 
-          send(owner, {self(), reference, phase, :result, result, System.monotonic_time()})
+          completed_at = System.monotonic_time()
+          send(owner, {self(), reference, phase, :result, result, completed_at})
+
+          notify_abort_result_enqueued(
+            state.startup.configuration,
+            phase,
+            reference,
+            completed_at
+          )
 
           receive do
             {^owner, ^reference, :finish} -> :ok
@@ -2848,6 +2885,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       phase: phase,
       nonce: nonce,
       cutoff: cutoff,
+      slot: slot,
       result: false,
       certificate: false,
       finish_sent: false
@@ -2864,6 +2902,34 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   if Mix.env() == :test do
+    defp abort_phase_window(configuration) do
+      case get_in(configuration, [:test_seams, :abort_phase_window_ms]) do
+        {cutoff, slot}
+        when is_integer(cutoff) and cutoff > 0 and is_integer(slot) and slot > cutoff ->
+          {cutoff, slot}
+
+        _ ->
+          {500, 1_000}
+      end
+    end
+
+    defp notify_abort_result_enqueued(configuration, phase, reference, completed_at) do
+      case get_in(configuration, [:test_seams, :result_enqueued]) do
+        pid when is_pid(pid) ->
+          send(pid, {:abort_result_enqueued, self(), reference, phase, completed_at})
+
+        _ ->
+          :ok
+      end
+    end
+
+    defp notify_abort_phase_start(configuration, phase) do
+      case get_in(configuration, [:test_seams, :phase_started]) do
+        pid when is_pid(pid) -> send(pid, {:abort_phase_started, phase})
+        _ -> :ok
+      end
+    end
+
     defp install_temp_root_test_seam(configuration) do
       case get_in(configuration, [:test_seams, :temp_root]) do
         seams when is_map(seams) -> Process.put({TempRoot, :dependencies}, seams)
@@ -2872,6 +2938,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     end
   else
     defp install_temp_root_test_seam(_configuration), do: :ok
+  end
+
+  if Mix.env() != :test do
+    defp abort_phase_window(_configuration), do: {500, 1_000}
+    defp notify_abort_result_enqueued(_configuration, _phase, _reference, _completed_at), do: :ok
+    defp notify_abort_phase_start(_configuration, _phase), do: :ok
   end
 
   defp abort_operation(state, :process_groups, nonce, deadline) do
@@ -2931,9 +3003,55 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
   defp valid_abort_result?(_phase, _result, _nonce), do: false
 
+  # Concept: the operation cutoff cannot discard an already-queued in-time
+  # result, but the slot deadline cannot infer when an un-timestamped DOWN arose.
+  # Technical depth: inspect only the current worker's result and independent
+  # certificate at cutoff; exact normal DOWN must be handled before slot expiry.
+  defp reconcile_abort_mailbox(state), do: reconcile_abort_mailbox(state, 2)
+
+  defp reconcile_abort_mailbox(
+         %{
+           phase: :aborting,
+           startup: %{registered: registered, executor_instance: instance},
+           abort: %{
+             worker: %{
+               pid: pid,
+               reference: reference,
+               phase: phase,
+               nonce: nonce
+             }
+           }
+         } = state,
+         remaining
+       )
+       when remaining > 0 do
+    executor = Map.get(registered, :executor)
+
+    message =
+      receive do
+        {^pid, ^reference, ^phase, :result, _, _} = result ->
+          result
+
+        {^executor, ^instance, ^nonce, :groups_empty} = certificate
+        when phase == :process_groups ->
+          certificate
+      after
+        0 -> nil
+      end
+
+    if message do
+      {:noreply, next} = handle_info(message, state)
+      reconcile_abort_mailbox(next, remaining - 1)
+    else
+      state
+    end
+  end
+
+  defp reconcile_abort_mailbox(state, _remaining), do: state
+
   defp maybe_finish_abort_worker(%{abort: %{worker: worker}} = state) do
     if worker.result and (worker.phase != :process_groups or worker.certificate) and
-         not worker.finish_sent do
+         not worker.finish_sent and fresh?(worker.slot) do
       send(worker.pid, {self(), worker.reference, :finish})
       put_in(state.abort.worker.finish_sent, true)
     else
@@ -2942,7 +3060,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   defp finish_abort_worker(%{abort: %{worker: worker} = abort} = state, reason) do
-    completed = worker.result and worker.finish_sent and reason == :normal
+    completed = worker.result and worker.finish_sent and reason == :normal and fresh?(worker.slot)
 
     success =
       completed and

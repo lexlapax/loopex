@@ -143,6 +143,246 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
     assert :ok = Ephemeral.stop_session(session)
   end
 
+  test "queued in-time drain proof survives cutoff and exact DOWN precedes slot", %{tmp: tmp} do
+    test = self()
+
+    drain = fn executor, instance, owner, nonce, _deadline ->
+      send(test, {:queued_drain_started, self()})
+
+      receive do
+        :release_queued_drain ->
+          send(owner, {executor, instance, nonce, :groups_empty})
+          {:ok, nonce}
+      end
+    end
+
+    session =
+      start_session(tmp,
+        group_drain: drain,
+        result_enqueued: test,
+        abort_phase_window_ms: {5_000, 6_000}
+      )
+
+    {:loopex_ephemeral_session, owner, cell} = session
+    root = owned_root(owner)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert_receive {:queued_drain_started, worker}, 3_000
+
+    assert %{worker: %{pid: ^worker, reference: reference, cutoff: cutoff}} =
+             :sys.get_state(owner).abort
+
+    on_exit(fn ->
+      if Process.alive?(owner), do: :sys.resume(owner)
+
+      if Process.info(worker, :status) == {:status, :suspended},
+        do: :erlang.resume_process(worker)
+    end)
+
+    assert :ok = :sys.suspend(owner)
+    send(owner, {:abort_operation_cutoff, reference})
+    send(worker, :release_queued_drain)
+
+    assert_receive {:abort_result_enqueued, ^worker, ^reference, :process_groups, completed_at},
+                   1_000
+
+    assert completed_at <= cutoff
+    assert true = :erlang.suspend_process(worker)
+    assert :ok = :sys.resume(owner)
+
+    assert eventually(fn ->
+             case :sys.get_state(owner).abort do
+               %{worker: %{pid: ^worker, result: true, certificate: true, finish_sent: true}} ->
+                 true
+
+               _ ->
+                 false
+             end
+           end)
+
+    assert Process.alive?(worker)
+
+    monitor = Process.monitor(worker)
+    assert true = :erlang.resume_process(worker)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+
+    assert :ok = Task.await(stop, 7_000)
+    assert :atomics.get(cell, 1) == 2
+    refute File.exists?(root)
+  end
+
+  test "a normal DOWN observed after slot cannot prove cleanup before its timer arrives", %{
+    tmp: tmp
+  } do
+    test = self()
+
+    drain = fn executor, instance, owner, nonce, _deadline ->
+      send(test, {:late_down_drain_started, self()})
+
+      receive do
+        :release_late_down_drain ->
+          send(owner, {executor, instance, nonce, :groups_empty})
+          {:ok, nonce}
+      end
+    end
+
+    session =
+      start_session(tmp,
+        group_drain: drain,
+        result_enqueued: test,
+        abort_phase_window_ms: {2_000, 3_000}
+      )
+
+    {:loopex_ephemeral_session, owner, cell} = session
+    root = owned_root(owner)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert_receive {:late_down_drain_started, worker}, 3_000
+    assert %{worker: %{pid: ^worker, reference: reference}} = :sys.get_state(owner).abort
+
+    on_exit(fn ->
+      if Process.alive?(owner), do: :sys.resume(owner)
+
+      if Process.info(worker, :status) == {:status, :suspended},
+        do: :erlang.resume_process(worker)
+    end)
+
+    assert :ok = :sys.suspend(owner)
+    send(worker, :release_late_down_drain)
+    assert_receive {:abort_result_enqueued, ^worker, ^reference, :process_groups, _}, 1_000
+    assert true = :erlang.suspend_process(worker)
+    assert :ok = :sys.resume(owner)
+
+    assert eventually(fn ->
+             case :sys.get_state(owner).abort do
+               %{worker: %{pid: ^worker, result: true, certificate: true, finish_sent: true}} ->
+                 true
+
+               _ ->
+                 false
+             end
+           end)
+
+    :sys.replace_state(owner, fn state ->
+      put_in(state.abort.worker.slot, System.monotonic_time() - 1)
+    end)
+
+    monitor = Process.monitor(worker)
+    assert true = :erlang.resume_process(worker)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+
+    assert {:error, {:cleanup_unproved, %{pending: pending, root: ^root}}} =
+             Task.await(stop, 7_000)
+
+    assert :process_groups in pending
+    assert :atomics.get(cell, 1) == 3
+    assert File.dir?(root)
+  end
+
+  test "a queued drain result completed after the stored cutoff cannot prove cleanup", %{
+    tmp: tmp
+  } do
+    test = self()
+
+    drain = fn executor, instance, owner, nonce, _deadline ->
+      send(test, {:late_drain_started, self()})
+
+      receive do
+        :release_late_drain ->
+          send(owner, {executor, instance, nonce, :groups_empty})
+          {:ok, nonce}
+      end
+    end
+
+    session =
+      start_session(tmp,
+        group_drain: drain,
+        result_enqueued: test,
+        abort_phase_window_ms: {2_000, 3_000}
+      )
+
+    {:loopex_ephemeral_session, owner, cell} = session
+    root = owned_root(owner)
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert_receive {:late_drain_started, worker}, 3_000
+
+    assert %{worker: %{pid: ^worker, reference: reference}} =
+             :sys.get_state(owner).abort
+
+    :sys.replace_state(owner, fn state ->
+      put_in(state.abort.worker.cutoff, System.monotonic_time() - 1)
+    end)
+
+    assert %{worker: %{cutoff: cutoff}} = :sys.get_state(owner).abort
+
+    on_exit(fn -> if Process.alive?(owner), do: :sys.resume(owner) end)
+
+    assert :ok = :sys.suspend(owner)
+    send(owner, {:abort_operation_cutoff, reference})
+
+    send(worker, :release_late_drain)
+
+    assert_receive {:abort_result_enqueued, ^worker, ^reference, :process_groups, completed_at},
+                   2_000
+
+    assert completed_at > cutoff
+    assert :ok = :sys.resume(owner)
+
+    assert {:error, {:cleanup_unproved, %{pending: pending, root: ^root}}} =
+             Task.await(stop, 7_000)
+
+    assert :process_groups in pending
+    assert :atomics.get(cell, 1) == 3
+    assert File.dir?(root)
+  end
+
+  test "drain completion after the cleanup deadline starts no next cleanup operation", %{
+    tmp: tmp
+  } do
+    test = self()
+
+    drain = fn executor, instance, owner, nonce, _deadline ->
+      send(test, {:deadline_drain_started, self()})
+
+      receive do
+        :release_deadline_drain ->
+          send(owner, {executor, instance, nonce, :groups_empty})
+          {:ok, nonce}
+      end
+    end
+
+    session =
+      start_session(tmp,
+        group_drain: drain,
+        phase_started: test,
+        result_enqueued: test,
+        abort_phase_window_ms: {5_000, 6_000}
+      )
+
+    {:loopex_ephemeral_session, owner, cell} = session
+    root = owned_root(owner)
+    runtime = :sys.get_state(owner).startup.registered.runtime
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert_receive {:deadline_drain_started, worker}, 3_000
+    assert_receive {:abort_phase_started, :process_groups}, 1_000
+
+    :sys.replace_state(owner, fn state ->
+      put_in(state.abort.deadline, System.monotonic_time() - 1)
+    end)
+
+    assert %{worker: %{pid: ^worker, reference: reference}} = :sys.get_state(owner).abort
+    send(worker, :release_deadline_drain)
+    assert_receive {:abort_result_enqueued, ^worker, ^reference, :process_groups, _}, 1_000
+
+    assert {:error, {:cleanup_unproved, %{pending: pending, root: ^root}}} =
+             Task.await(stop, 7_000)
+
+    refute_receive {:abort_phase_started, :runtime_stop}, 0
+    refute :process_groups in pending
+    assert :session_subtree in pending
+    assert Process.alive?(runtime.supervisor)
+    assert :atomics.get(cell, 1) == 3
+    assert File.dir?(root)
+  end
+
   test "a direct certificate cannot replace a failed drain result", %{tmp: tmp} do
     bad =
       start_session(tmp,
@@ -184,7 +424,11 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
 
     assert {:error,
             {:cleanup_unproved,
-             %{pending: [:process_groups], root: ^root, root_ownership: :owned}}} =
+             %{
+               pending: [:process_groups, :session_subtree],
+               root: ^root,
+               root_ownership: :owned
+             }}} =
              Ephemeral.stop_session(session)
 
     assert :atomics.get(cell, 1) == 3
@@ -292,6 +536,15 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
       if options[:rm_rf], do: Map.put(temp_root, :rm_rf, options[:rm_rf]), else: temp_root
 
     test_seams = %{temp_root: temp_root, group_drain: drain}
+
+    test_seams =
+      Enum.reduce([:phase_started, :result_enqueued, :abort_phase_window_ms], test_seams, fn key,
+                                                                                             seams ->
+        case Keyword.fetch(options, key) do
+          {:ok, value} -> Map.put(seams, key, value)
+          :error -> seams
+        end
+      end)
 
     test_seams =
       if Keyword.get(options, :fake_group_attestation, true) do

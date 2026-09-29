@@ -514,7 +514,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
              %{
                root: root,
                root_ownership: :owned,
-               pending: [:process_groups],
+               pending: [:process_groups, :session_subtree],
                cause: {:composition, :runtime_start_failed}
              }}} =
              SessionOwner.start_session(owner, configuration, 6_000)
