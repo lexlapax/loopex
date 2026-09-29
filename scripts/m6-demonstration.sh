@@ -185,7 +185,7 @@ durable() {
   durable_run "$M6_DEMO_COMMAND" -p "$M6_DEMO_PROMPT" --policy allow-all \
     --model "$M6_DEMO_DURABLE_MODEL" --tools coding --cwd "$M6_DEMO_WORKSPACE" \
     --skill-dir "$M6_DEMO_SKILL" \
-    --state-root "$M6_DEMO_WORKSPACE/state" --deadline-ms 120000 --max-steps 8 \
+    --state-root "$M6_DEMO_STATE_ROOT" --deadline-ms 120000 --max-steps 8 \
     --output json >"$M6_DEMO_WORKSPACE/durable.json" \
     2>"$M6_DEMO_WORKSPACE/durable.stderr" || return
   assert_quiet_stderr "$M6_DEMO_WORKSPACE/durable.stderr" || return
@@ -194,7 +194,7 @@ durable() {
   session=$(elixir -e 'IO.puts(:json.decode(File.read!(hd(System.argv())))["session_id"])' \
     -- "$M6_DEMO_WORKSPACE/durable.json") || return
   durable_run "$M6_DEMO_COMMAND" resume "$session" --policy allow-all \
-    --workspace "$M6_DEMO_WORKSPACE" --state-root "$M6_DEMO_WORKSPACE/state" \
+    --workspace "$M6_DEMO_WORKSPACE" --state-root "$M6_DEMO_STATE_ROOT" \
     >"$M6_DEMO_WORKSPACE/resumed.txt" || return
   grep -q 'M6_DEMONSTRATION_READ_OK' "$M6_DEMO_WORKSPACE/resumed.txt"
 }
@@ -218,11 +218,14 @@ if [ "$(git rev-parse HEAD)" != "$candidate" ] ||
 fi
 
 M6_DEMO_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/loopex-m6-demo.XXXXXX")
+M6_DEMO_STATE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/loopex-m6-state.XXXXXX")
+export M6_DEMO_STATE_ROOT
 export M6_DEMO_SKILL="$M6_DEMO_ROOT/skills/m6-demo"
 export M6_DEMO_COMMAND="$PWD/apps/loopex_cli/bin/loopex"
 export M6_DEMO_PROMPT='Perform the coding task defined by the supplied m6-demo skill.'
 printf 'm6-demonstration: candidate %s on %s; workspace root %s\n' \
   "$candidate" "$(uname -s)" "$M6_DEMO_ROOT"
+printf 'm6-demonstration: durable state root %s\n' "$M6_DEMO_STATE_ROOT"
 # Keep these exclusively created workspaces for inspection and durable evidence.
 # They contain no real user state. Never delete an unproved ephemeral session root.
 prepare_workspace embedded
