@@ -57,15 +57,16 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
            {:ok, base_url} <- Keyword.fetch(options, :base_url),
            {:ok, variable} <- Keyword.fetch(options, :credential_variable),
            {:ok, trace} <- Keyword.fetch(options, :trace_capability) do
-        {:ok,
-         %{
-           module: module,
-           handle: handle,
-           cell: cell,
-           base_url: base_url,
-           credential_variable: variable,
-           trace: trace
-         }}
+        config = %{
+          module: module,
+          handle: handle,
+          cell: cell,
+          base_url: base_url,
+          credential_variable: variable,
+          trace: trace
+        }
+
+        {:ok, install_test_probe(config, options)}
       else
         _invalid -> :error
       end
@@ -81,7 +82,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
 
     {proxy, proxy_monitor} =
       spawn_monitor(fn ->
-        proxy(callback, starter, start_ref, start_deadline)
+        proxy(callback, starter, start_ref, start_deadline, Map.get(config, :test_probe))
       end)
 
     state = %{
@@ -155,8 +156,9 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
 
   # Concept: an unlinked proxy moves only the opaque child-start route.
   # Technical depth: its child closure captures four identities, never the
-  # request, activation token, options, result, starter or credential.
-  defp proxy(callback, starter, start_ref, deadline) do
+  # request, activation token, options, result, starter or credential. Test
+  # builds may also pass a credential-free constructor probe.
+  defp proxy(callback, starter, start_ref, deadline, test_probe) do
     callback_monitor = Process.monitor(callback)
     send(callback, {:model_proxy_ready, self(), start_ref})
 
@@ -167,12 +169,14 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
 
           result =
             ProviderLifetime.start_child(starter, fn ->
-              CleanupOwner.run(%{
+              spec = %{
                 callback: callback,
                 proxy: proxy_pid,
                 start_ref: start_ref,
                 deadline: deadline
-              })
+              }
+
+              CleanupOwner.run(attach_test_probe(spec, test_probe))
             end)
 
           send(callback, {:model_proxy_return, self(), start_ref, result})
@@ -604,4 +608,25 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
 
   defp remaining(deadline),
     do: min(@control_ms, Deadline.remaining_timeout(deadline, System.monotonic_time()))
+
+  if Mix.env() == :test do
+    defp install_test_probe(config, options) do
+      case Keyword.get(options, :cleanup_owner_test_probe) do
+        %{observer: observer, ref: ref, variable: variable, inject_bad_state: inject_bad_state} =
+            probe
+        when is_pid(observer) and is_reference(ref) and is_binary(variable) and
+               byte_size(variable) > 0 and is_boolean(inject_bad_state) and map_size(probe) == 4 ->
+          Map.put(config, :test_probe, probe)
+
+        _other ->
+          config
+      end
+    end
+
+    defp attach_test_probe(spec, nil), do: spec
+    defp attach_test_probe(spec, probe), do: Map.put(spec, :test_probe, probe)
+  else
+    defp install_test_probe(config, _options), do: config
+    defp attach_test_probe(spec, _probe), do: spec
+  end
 end

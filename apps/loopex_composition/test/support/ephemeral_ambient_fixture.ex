@@ -167,10 +167,32 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
              )
 
     observer = self()
+    probe_ref = make_ref()
+
+    # Concept: inspect owner state without copying the selected credential into
+    # the runtime's model options.
+    # Technical depth: the existing test starter captures only a variable name,
+    # observer and reference; the owner reads the canary inside its own process.
+    probe = %{
+      observer: observer,
+      ref: probe_ref,
+      variable: profile.key_name,
+      inject_bad_state: false
+    }
 
     runtime_start = fn options ->
+      model = Keyword.fetch!(options, :model)
+
+      options =
+        options
+        |> Keyword.put(:diagnostics_to, observer)
+        |> Keyword.put(:model, %{
+          model
+          | options: Keyword.put(model.options, :cleanup_owner_test_probe, probe)
+        })
+
       with {:ok, runtime} <-
-             Loopex.Runtime.start_link(Keyword.put(options, :diagnostics_to, observer)),
+             Loopex.Runtime.start_link(options),
            {:ok, %{level: :arguments, sink: :diagnostics}} <-
              Loopex.trace(runtime, %{
                modules: [
@@ -254,6 +276,15 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       assert_receive {:ambient_model_request, ^server, request, true}, 5_000
       refute String.contains?(request, profile.credential)
 
+      assert_receive {:cleanup_owner_canary, ^probe_ref, cleanup_owner, cleanup_start_ref,
+                      :before_activation, before_match?},
+                     5_000
+
+      refute before_match?
+
+      assert %{candidate: ^cleanup_owner, start_ref: ^cleanup_start_ref} =
+               :sys.get_state(owner).model_census.pending
+
       control_state = :sys.get_state(children.control)
       tracer_state = :sys.get_state(children.tracer)
 
@@ -315,6 +346,8 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       assert {:ok, %{outcome: :completed, text: "provider-only answer"} = result} =
                Task.await(ask, 15_000)
 
+      assert_owner_scan(probe_ref, cleanup_owner, cleanup_start_ref, :mapped_reply)
+
       assert {:ok, records} = Loopex.Store.Memory.load_records(store, session_id, 0, 1_000)
       assert {:ok, events} = Loopex.Store.Memory.load_events(store, session_id, 0, 1_000)
       assert {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
@@ -350,11 +383,21 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       :sys.get_state(children.tracer)
       :sys.get_state(children.dispatcher)
       assert_no_provider_key({before_reply, drain_diagnostics([])}, profile.credential)
+      assert :ok = Ephemeral.stop_session(session)
+      assert_owner_scan(probe_ref, cleanup_owner, cleanup_start_ref, :cleanup)
       IO.puts("EPHEMERAL_PROVIDER_ONLY_EXCLUSION_PASSED provider=#{profile.provider}")
     after
       send(server, {:ambient_release, self()})
       if Process.alive?(owner), do: Ephemeral.stop_session(session)
     end
+  end
+
+  defp assert_owner_scan(probe_ref, cleanup_owner, cleanup_start_ref, phase) do
+    assert_receive {:cleanup_owner_canary, ^probe_ref, ^cleanup_owner, ^cleanup_start_ref, ^phase,
+                    matched?},
+                   5_000
+
+    refute matched?
   end
 
   defp assert_no_provider_key(value, credential) do

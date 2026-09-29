@@ -36,6 +36,39 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
   def run(%{callback: callback, proxy: proxy, start_ref: start_ref, deadline: deadline} = spec)
       when map_size(spec) == 4 and is_pid(callback) and is_pid(proxy) and
              is_reference(start_ref) and is_integer(deadline) do
+    run_valid(spec)
+  end
+
+  if Mix.env() == :test do
+    def run(
+          %{
+            callback: callback,
+            proxy: proxy,
+            start_ref: start_ref,
+            deadline: deadline,
+            test_probe:
+              %{
+                observer: observer,
+                ref: ref,
+                variable: variable,
+                inject_bad_state: inject_bad_state
+              } = probe
+          } = spec
+        )
+        when map_size(spec) == 5 and is_pid(callback) and is_pid(proxy) and
+               is_reference(start_ref) and is_integer(deadline) and is_pid(observer) and
+               is_reference(ref) and is_binary(variable) and byte_size(variable) > 0 and
+               is_boolean(inject_bad_state) and map_size(probe) == 4 do
+      run_valid(spec)
+    end
+  end
+
+  def run(_), do: :ok
+
+  defp run_valid(
+         %{callback: callback, proxy: proxy, start_ref: start_ref, deadline: deadline} =
+           spec
+       ) do
     Process.flag(:sensitive, true)
 
     with {:ok, parent} <- actual_parent(),
@@ -47,7 +80,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
       if live?(callback) and live?(proxy) and live_deadline?(deadline) do
         send(callback, {:model_candidate_ready, self(), start_ref, proxy})
 
-        loop(%{
+        state = %{
           callback: callback,
           callback_mon: callback_mon,
           proxy: proxy,
@@ -68,14 +101,17 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
           cleanup: nil,
           core_stop: nil,
           unproved: false
-        })
+        }
+
+        state
+        |> install_test_probe(spec)
+        |> observe(:before_activation)
+        |> loop()
       end
     end
 
     :ok
   end
-
-  def run(_), do: :ok
 
   defp actual_parent do
     case {Process.get(:"$ancestors"), Process.info(self(), :links)} do
@@ -592,7 +628,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
     if state.cleanup == nil and work.result == nil and valid_result?(result) and
          (pre_adapter_failure or returned_from_adapter) and
          finished_at_native <= work.deadline and :atomics.get(state.activation.cell, 1) == 0 do
-      state = %{state | work: %{work | result: result}}
+      state = %{state | work: %{work | result: result}} |> observe(:mapped_reply)
 
       if pre_adapter_failure and not (work.root_down and work.root_stopped) do
         stop_root(state)
@@ -725,7 +761,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
         do: min(state.core_stop.deadline, control_deadline()),
         else: control_deadline()
 
-    state = %{state | cleanup: %{deadline: deadline, reason: reason}}
+    state = %{state | cleanup: %{deadline: deadline, reason: reason}} |> observe(:cleanup)
     if work.caller && not work.caller_down, do: Process.exit(work.caller, :kill)
     maybe_finish(state)
   end
@@ -902,5 +938,41 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
     else
       min(1_000, max(1, System.convert_time_unit(native, :native, :millisecond)))
     end
+  end
+
+  if Mix.env() == :test do
+    # Concept: the isolated witness inspects this sensitive process from inside
+    # its code, without copying owner state or the selected credential to a peer.
+    # Technical depth: only construction installs the probe. The positive control
+    # puts the environment canary into the retained state before the same scan.
+    defp install_test_probe(state, %{test_probe: probe}) do
+      state = Map.put(state, :test_probe, probe)
+
+      if probe.inject_bad_state do
+        Map.put(state, :test_bad_state, System.fetch_env!(probe.variable))
+      else
+        state
+      end
+    end
+
+    defp install_test_probe(state, _spec), do: state
+
+    defp observe(%{test_probe: probe} = state, phase) do
+      matched? =
+        :binary.match(:erlang.term_to_binary(state), System.fetch_env!(probe.variable)) !=
+          :nomatch
+
+      send(
+        probe.observer,
+        {:cleanup_owner_canary, probe.ref, self(), state.start_ref, phase, matched?}
+      )
+
+      state
+    end
+
+    defp observe(state, _phase), do: state
+  else
+    defp install_test_probe(state, _spec), do: state
+    defp observe(state, _phase), do: state
   end
 end

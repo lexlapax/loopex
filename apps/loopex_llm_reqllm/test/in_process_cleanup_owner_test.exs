@@ -56,6 +56,42 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
     assert CleanupOwner.pool_timeout(now, now) == 1
   end
 
+  test "constructor probe detects a deliberately retained canary", %{supervisor: supervisor} do
+    variable = "LOOPEX_TEST_CLEANUP_OWNER_CANARY"
+    previous = System.get_env(variable)
+    System.put_env(variable, "synthetic-owner-state-canary")
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env(variable, previous),
+        else: System.delete_env(variable)
+    end)
+
+    for injected? <- [false, true] do
+      start_ref = make_ref()
+      probe_ref = make_ref()
+      proxy = proxy()
+
+      probe = %{
+        observer: self(),
+        ref: probe_ref,
+        variable: variable,
+        inject_bad_state: injected?
+      }
+
+      {:ok, candidate} = start(supervisor, self(), proxy, start_ref, future(), probe)
+
+      assert_receive {:cleanup_owner_canary, ^probe_ref, ^candidate, ^start_ref,
+                      :before_activation, matched?},
+                     1_000
+
+      assert matched? == injected?
+      assert_receive {:model_candidate_ready, ^candidate, ^start_ref, ^proxy}, 1_000
+      Process.exit(proxy, :kill)
+      assert_down(candidate)
+    end
+  end
+
   test "the actual Task.Supervisor child starts inert and reports exact identity", %{
     supervisor: supervisor
   } do
@@ -774,14 +810,16 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwnerTest do
     assert_receive {:DOWN, ^candidate_monitor, :process, ^candidate, :normal}, 2_000
   end
 
-  defp start(supervisor, callback, proxy, start_ref, deadline) do
+  defp start(supervisor, callback, proxy, start_ref, deadline, test_probe \\ nil) do
     Task.Supervisor.start_child(supervisor, fn ->
-      CleanupOwner.run(%{
+      spec = %{
         callback: callback,
         proxy: proxy,
         start_ref: start_ref,
         deadline: deadline
-      })
+      }
+
+      CleanupOwner.run(if(test_probe, do: Map.put(spec, :test_probe, test_probe), else: spec))
     end)
   end
 
