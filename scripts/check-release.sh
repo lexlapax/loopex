@@ -147,7 +147,19 @@ if release_selected rollback; then
 fi
 tree="$fresh/src"
 printf 'check-release: fresh-source extraction of %s\n' "$commit"
-(umask 0777; (umask 022; mkdir "$tree" && git --no-replace-objects archive "$commit" | tar -x -C "$tree"))
+(
+  umask 0777
+  caller_umask=$(umask)
+  printf 'check-release: CALLER_UMASK=%s\n' "$caller_umask"
+  [ "$caller_umask" = 0777 ] || exit 1
+  (
+    umask 022
+    extraction_umask=$(umask)
+    printf 'check-release: EXTRACTION_UMASK=%s\n' "$extraction_umask"
+    [ "$extraction_umask" = 0022 ] || exit 1
+    mkdir "$tree" && git --no-replace-objects archive "$commit" | tar -x -C "$tree"
+  )
+)
 manifest_producer="$logs/source-archive-manifest.sh"
 cp "$tree/scripts/source-archive-manifest.sh" "$manifest_producer"
 release_retain_source_identity \
