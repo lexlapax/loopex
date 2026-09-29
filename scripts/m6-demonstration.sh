@@ -80,20 +80,15 @@ embedded() {
       inspect(result, limit: :infinity, printable_limit: :infinity) <> "\n", [:exclusive])
     case result do
       {:ok, %{outcome: :completed, text: text, tools: tools}} ->
-        completed = for tool <- tools, tool.outcome == "completed", do: tool.tool_id
-        required = ~w(loopex.read loopex.write loopex.edit loopex.bash)
-        remaining = Enum.reduce(completed, required, fn id, pending ->
-          case pending do
-            [^id | rest] -> rest
-            _ -> pending
-          end
-        end)
+        observed = Enum.map(tools, &{&1.tool_id, &1.outcome})
+        required = for id <- ~w(loopex.read loopex.write loopex.edit loopex.bash),
+                       do: {id, "completed"}
         answer_ok = is_binary(text) and String.contains?(text, "M6_AFTER_EDIT")
         file_ok = File.read(Path.join(workspace, "generated.txt")) == {:ok, "M6_AFTER_EDIT"}
-        unless answer_ok and remaining == [] and file_ok,
+        unless answer_ok and observed == required and file_ok,
           do: raise("embedded demonstration coding task mismatch: " <>
-                    inspect(%{answer_ok: answer_ok, completed_tools: completed,
-                              ordered_tools_ok: remaining == [], file_ok: file_ok}))
+                    inspect(%{answer_ok: answer_ok, observed_tools: observed,
+                              exact_tools_ok: observed == required, file_ok: file_ok}))
       _ -> raise "embedded demonstration did not complete with proved cleanup"
     end
   '
@@ -121,22 +116,16 @@ assert_json() {
         unless value["cleanup"] == :null, do: raise("durable cleanup must be null")
     end
     if coding_required == "yes" do
-      completed = for tool <- value["tools"], tool["outcome"] == "completed",
-                    do: tool["tool_id"]
-      required = ~w(loopex.read loopex.write loopex.edit loopex.bash)
-      remaining = Enum.reduce(completed, required, fn id, pending ->
-        case pending do
-          [^id | rest] -> rest
-          _ -> pending
-        end
-      end)
+      observed = Enum.map(value["tools"], &{&1["tool_id"], &1["outcome"]})
+      required = for id <- ~w(loopex.read loopex.write loopex.edit loopex.bash),
+                     do: {id, "completed"}
       answer_ok = String.contains?(value["text"], "M6_AFTER_EDIT")
       file_ok = File.read(Path.join(System.fetch_env!("M6_DEMO_WORKSPACE"),
         "generated.txt")) == {:ok, "M6_AFTER_EDIT"}
-      unless answer_ok and remaining == [] and file_ok,
+      unless answer_ok and observed == required and file_ok,
         do: raise("command demonstration coding task mismatch: " <>
-                  inspect(%{answer_ok: answer_ok, completed_tools: completed,
-                            ordered_tools_ok: remaining == [], file_ok: file_ok}))
+                  inspect(%{answer_ok: answer_ok, observed_tools: observed,
+                            exact_tools_ok: observed == required, file_ok: file_ok}))
     end
   ' -- "$@"
 }

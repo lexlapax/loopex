@@ -38,12 +38,19 @@ retain a clean local run of the same fast check with its complete output.
 | Floor `--long-bound` transport drain on Darwin | Pending | Pending | Pending | Pending | Pending |
 | Floor `--long-bound` transport drain on Linux | Pending | Pending | Pending | Pending | Pending |
 
-## Current-pair release check on Linux
+## Current-pair release check on Linux and approved evidence reuse
 
-`LOOPEX_CROSS_UID_USER=<second user> bash scripts/check-release.sh` runs once
-from the clean candidate, with the provider credential, pinned Node and the
-required attended answers. A plain `PASS` is required; a closure-incomplete
-result is not a pass. Each lane's complete output is retained separately.
+`LOOPEX_CROSS_UID_USER=<second user> bash scripts/check-release.sh` ran once
+from a clean M6 integration candidate, with the provider credential, pinned
+Node and the required attended answers. Its actual result and every executed
+lane's complete output are retained separately; a failed full run is never
+relabeled `PASS`.
+For M6 only, the maintainer's
+[evidence-reuse disposition](../developer/agent-context-map.md#disposition-m6-evidence-reuse-2026-09-29)
+replaces the single exact-candidate full-run `PASS` requirement with successful
+unchanged-code evidence, a verified intervening diff, and affected or missing
+checks at their actual revisions. The rows below record both the original run
+and the disposition; they do not assert that the full runner passed.
 
 | Field | Value |
 | --- | --- |

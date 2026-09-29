@@ -6084,7 +6084,7 @@ retained two-platform runs showed completed read, write, edit and bash calls
 and the exact edited file, while local models omitted a read or skill marker
 in the final sentence. The generic prompt names only the skill. Its private
 directory is the sole source of the four-step task and expected file bytes.
-The demonstration now requires the four completed tools in order, the exact
+The demonstration now requires exactly the four completed tools in order, the exact
 edited file, an answer containing its final value, the existing run outcome,
 JSON shape, exit, cleanup and durable-resume checks. This proves the skill-
 directed coding workflow without making verbatim repetition of unrelated
@@ -6117,3 +6117,13 @@ uses the already-supported `anthropic:claude-sonnet-4-5` as its hosted test
 model, while the product's Haiku default and the demonstration's prompt,
 eight-step bound, deadline and assertions stay unchanged. The demonstration
 proves hosted durable workflow, not a particular model's instruction fidelity.
+
+The `f9f7f5afa4454d43b49c326d11588cad6ebf39d6` two-platform demonstration
+passed, but an independent audit found that the oracle admitted extra or
+intervening completed calls despite the exact-four instruction. The oracle now
+requires precisely the four named successful entries, and its focused fixture
+rejects an extra call and reordered calls. The same audit found that the
+closure evidence scaffold still required a single full release `PASS`, contrary
+to the approved evidence-reuse disposition above. The scaffold now states the
+exception and retains the earlier runner's actual failed result; no prior
+failure is relabeled a pass.

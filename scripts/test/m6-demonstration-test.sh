@@ -140,4 +140,26 @@ printf '%s\n' "${valid_json/\"loopex.write\"/\"loopex.bash\"}" >"$work/missing-w
 if assert_json "$work/missing-write.json" completed ephemeral yes 2>/dev/null; then
   fail 'workflow oracle admitted a missing write effect'
 fi
+python3 - "$work/delegated.json" "$work/extra-call.json" "$work/wrong-order.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+value = json.loads(Path(sys.argv[1]).read_text())
+extra = dict(value)
+extra["tools"] = value["tools"][:1] + [value["tools"][0]] + value["tools"][1:]
+wrong_order = dict(value)
+wrong_order["tools"] = list(value["tools"])
+wrong_order["tools"][1], wrong_order["tools"][2] = (
+    wrong_order["tools"][2], wrong_order["tools"][1]
+)
+for path, result in ((sys.argv[2], extra), (sys.argv[3], wrong_order)):
+    Path(path).write_text(json.dumps(result, separators=(",", ":")) + "\n")
+PY
+if assert_json "$work/extra-call.json" completed ephemeral yes 2>/dev/null; then
+  fail 'workflow oracle admitted an extra completed call'
+fi
+if assert_json "$work/wrong-order.json" completed ephemeral yes 2>/dev/null; then
+  fail 'workflow oracle admitted reordered tool effects'
+fi
 printf 'm6-demonstration-test: PASS\n'
