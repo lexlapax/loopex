@@ -66,10 +66,15 @@ defmodule LoopexDaemon.CrossUidTest do
     # At the verified modes the kernel itself refuses the foreign user.
     assert foreign(user, socket) =~ "connect-refused"
 
-    File.chmod!(directory, 0o711)
-    File.chmod!(socket, 0o666)
+    # Concept: only this disposable fixture becomes traversable. Its parents
+    # must not mask the daemon's peer check under the attended runner's 077 umask.
+    directories = [context.root, Path.join(context.root, "s"), directory]
+    modes = Enum.map(directories, &{&1, Bitwise.band(File.stat!(&1).mode, 0o777)})
 
     try do
+      Enum.each(directories, &File.chmod!(&1, 0o711))
+      File.chmod!(socket, 0o666)
+
       # With the modes relaxed the connection reaches accept, and the daemon's
       # peer-credential check closes it before initialize.
       output = foreign(user, socket)
@@ -77,7 +82,7 @@ defmodule LoopexDaemon.CrossUidTest do
       assert output =~ "received 0", output
     after
       File.chmod!(socket, 0o600)
-      File.chmod!(directory, 0o700)
+      Enum.each(modes, fn {path, mode} -> File.chmod!(path, mode) end)
     end
 
     stop.()
@@ -101,6 +106,9 @@ defmodule LoopexDaemon.CrossUidTest do
 
     workspace = Path.join(root, "w")
     File.mkdir_p!(workspace)
+    File.mkdir!(Path.join(root, "s"))
+    File.chmod!(root, 0o700)
+    File.chmod!(Path.join(root, "s"), 0o700)
     on_exit(fn -> File.rm_rf(root) end)
     %{root: root, workspace: workspace}
   end
