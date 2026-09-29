@@ -301,6 +301,27 @@ defmodule Loopex.ClosureConfineTest do
     assert_refused(c, renamed, "evidence")
   end
 
+  test "indexed M6 evidence reserves only fillable Pending value cells" do
+    path = Path.expand("../../../docs/evidence/M6-closure-runs.md", __DIR__)
+
+    pending_cells =
+      path
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.filter(&String.starts_with?(&1, "|"))
+      |> Enum.flat_map(fn line ->
+        line
+        |> String.split("|", trim: false)
+        |> Enum.drop(2)
+        |> Enum.drop(-1)
+        |> Enum.filter(&String.contains?(&1, "Pending"))
+        |> Enum.map(&String.trim/1)
+      end)
+
+    assert pending_cells != []
+    assert Enum.reject(pending_cells, &(&1 in ["Pending", "sha256:Pending"])) == []
+  end
+
   defp assert_refused(c, admin, check) do
     patch = Path.join(c.root, "#{check}-#{System.unique_integer([:positive])}.patch")
     assert {:error, lines} = Confine.check(c.root, c.tested, admin, @name, patch)
@@ -335,7 +356,7 @@ defmodule Loopex.ClosureConfineTest do
       "docs/plans/M6-technical.md" => "unchanged technical contract\n",
       "docs/developer/agent-context-map.md" => "unchanged earlier disposition\n",
       "docs/evidence/M6-closure-runs.md" =>
-        "# Closure runs\n| Fixed label | Value |\n| --- | --- |\n| Check | Pending |\n| Pending review | sha256:Pending |\n",
+        "# Closure runs\n| Fixed label | Value |\n| --- | --- |\n| Check | Pending |\n| Core runtime comparison against `v0.2.0` | Pending |\n| Independent `v0.2.0`–candidate `mix.lock` package-key comparison | Pending |\n| Pending review | sha256:Pending |\n",
       "README.md" =>
         "unchanged introduction\n<!-- loopex:readme-status:start -->\nM6 In review\n<!-- loopex:readme-status:end -->\n"
     }
@@ -353,7 +374,7 @@ defmodule Loopex.ClosureConfineTest do
       "docs/developer/agent-context-map.md" =>
         "unchanged earlier disposition\n\n<a id=\"disposition-m6-closure-2026-09-27\"></a>\n### M6 closure — 2026-09-27\n\nThe maintainer closed M6.\n",
       "docs/evidence/M6-closure-runs.md" =>
-        "# Closure runs\n| Fixed label | Value |\n| --- | --- |\n| Check | PASS |\n| Pending review | sha256:#{String.duplicate("a", 64)} |\n",
+        "# Closure runs\n| Fixed label | Value |\n| --- | --- |\n| Check | PASS |\n| Core runtime comparison against `v0.2.0` | PASS; retained=/tmp/core; sha256:#{String.duplicate("a", 64)} |\n| Independent `v0.2.0`–candidate `mix.lock` package-key comparison | PASS; candidate=#{tested}; keys=/tmp/keys; output=/tmp/out; sha256:#{String.duplicate("b", 64)} |\n| Pending review | sha256:#{String.duplicate("a", 64)} |\n",
       "README.md" =>
         "unchanged introduction\n<!-- loopex:readme-status:start -->\nM6 Closed\n<!-- loopex:readme-status:end -->\n"
     })
