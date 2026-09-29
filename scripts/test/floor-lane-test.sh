@@ -48,6 +48,16 @@ printf 'one selected case lives here\n' >"$repo/apps/loopex_llm_reqllm/test/in_p
 git -C "$repo" init -q
 git -C "$repo" add .
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm fixture
+base_sha=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" branch -M m6
+git -C "$repo" update-ref refs/remotes/origin/main "$base_sha"
+if git -C "$repo" show-ref --verify --quiet refs/heads/main; then
+  fail 'the source-main fixture unexpectedly has a local main branch'
+fi
+printf 'fixture candidate\n' >"$repo/apps/loopex/.fixture"
+git -C "$repo" add apps/loopex/.fixture
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  commit -qm fixture-candidate
 sha=$(git -C "$repo" rev-parse HEAD)
 runner=$repo/scripts/floor-lane.sh
 printf 'this dirty line must not run\n' >>"$repo/scripts/check.sh"
@@ -124,6 +134,12 @@ expect_preflight_failure ignored_hup "$retained/ignored-hup" \
     _ "$runner" "$sha" "$retained/ignored-hup"
 grep -q 'SIGHUP is ignored' "$work/ignored_hup.stderr" ||
   fail 'ignored SIGHUP did not receive a refusal'
+git -C "$repo" update-ref -d refs/remotes/origin/main
+expect_preflight_failure missing_source_main "$retained/missing-source-main" \
+  bash "$runner" "$sha" --output-dir "$retained/missing-source-main"
+grep -q 'fetch origin/main before running the floor lane' "$work/missing_source_main.stderr" ||
+  fail 'missing origin/main did not receive a corrective refusal'
+git -C "$repo" update-ref refs/remotes/origin/main "$base_sha"
 
 for platform in Darwin Linux; do
   case "$platform" in
@@ -150,6 +166,12 @@ for platform in Darwin Linux; do
   esac
   [[ $mode == 700 ]] || fail "$platform output directory mode is $mode, not 700"
   grep -qx "SHA=$sha" "$out/check.log" || fail "$platform SHA was not retained"
+  grep -qx "SOURCE_ORIGIN_MAIN=$base_sha" "$out/check.log" ||
+    fail "$platform source origin/main was not retained"
+  [[ $(git -C "$out-source" rev-parse refs/remotes/origin/main) == "$base_sha" ]] ||
+    fail "$platform clone lost source origin/main without a local main branch"
+  [[ $(git -C "$out-source" merge-base refs/remotes/origin/main HEAD) == "$base_sha" ]] ||
+    fail "$platform commit-message gate has the wrong review base"
   grep -qx "PLATFORM=$platform" "$out/check.log" || fail "$platform platform was not retained"
   grep -qx 'NATIVE_ENCODING=UTF-8' "$out/check.log" ||
     fail "$platform did not retain the selected native encoding"

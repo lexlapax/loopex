@@ -28,6 +28,8 @@ repo=$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null) ||
 repo=$(cd "$repo" && pwd -P)
 [[ $(git -C "$repo" cat-file -t "$sha" 2>/dev/null || true) == commit ]] ||
   refuse 'SHA is not a local commit'
+source_main=$(git -C "$repo" rev-parse --verify 'refs/remotes/origin/main^{commit}' 2>/dev/null) ||
+  refuse 'fetch origin/main before running the floor lane'
 
 parent=$(cd "$(dirname "$requested_dir")" 2>/dev/null && pwd -P) ||
   refuse 'the output parent must exist'
@@ -154,8 +156,8 @@ finish() {
   exit "$status"
 }
 trap finish EXIT
-printf 'SHA=%s\nPLATFORM=%s\nTOOLCHAIN=erlang@27.3.4 elixir@1.18.5-otp-27\nNATIVE_ENCODING=%s\nOPEN_FILES=%s\nSOURCE=%s\nBUILD_ROOT=%s\n' \
-  "$sha" "$platform" "$native_encoding" "$soft_files" "$clone_dir" "$build_root" | tee -a "$check_log"
+printf 'SHA=%s\nPLATFORM=%s\nTOOLCHAIN=erlang@27.3.4 elixir@1.18.5-otp-27\nNATIVE_ENCODING=%s\nOPEN_FILES=%s\nSOURCE=%s\nSOURCE_ORIGIN_MAIN=%s\nBUILD_ROOT=%s\n' \
+  "$sha" "$platform" "$native_encoding" "$soft_files" "$clone_dir" "$source_main" "$build_root" | tee -a "$check_log"
 
 # The first file is the required retained transcript. The optional second
 # file isolates one app's ExUnit summary without losing the combined stream.
@@ -207,6 +209,14 @@ floor_env() {
 }
 
 fetch_deps() { (cd "$clone_dir" && floor_env mix deps.get); }
+fetch_source_main() {
+  git -C "$clone_dir" fetch --quiet --no-tags "$repo" \
+    'refs/remotes/origin/main:refs/remotes/origin/main' || return 1
+  [[ $(git -C "$clone_dir" rev-parse --verify 'refs/remotes/origin/main^{commit}') == "$source_main" ]] || {
+    printf 'floor-lane: origin/main changed during clone\n' >&2
+    return 1
+  }
+}
 fast_check() {
   (cd "$clone_dir" &&
     env -u MIX_BUILD_PATH -u LOOPEX_PROVIDER_API_KEY -u OPENAI_API_KEY \
@@ -222,6 +232,7 @@ long_check() {
 
 run_logged build-root "$check_log" '' mkdir -m 700 -- "$build_root" || exit 1
 run_logged clone "$check_log" '' git clone --quiet --no-hardlinks "$repo" "$clone_dir" || exit 1
+run_logged source-main "$check_log" '' fetch_source_main || exit 1
 run_logged checkout "$check_log" '' git -C "$clone_dir" checkout --quiet --detach "$sha" || exit 1
 run_logged deps-get "$check_log" '' fetch_deps || exit 1
 run_logged fast-check "$check_log" '' fast_check || exit 1
