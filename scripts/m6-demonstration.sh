@@ -71,7 +71,12 @@ embedded() {
     options = [policy: M6Demonstration.Policy, cwd: workspace,
                model: System.fetch_env!("M6_DEMO_LOCAL_MODEL"),
                tools: :coding, skills: [skill], max_steps: 8, deadline_ms: 120_000]
-    case LoopexComposition.Ephemeral.run(System.fetch_env!("M6_DEMO_PROMPT"), options) do
+    result = LoopexComposition.Ephemeral.run(System.fetch_env!("M6_DEMO_PROMPT"), options)
+    # Retain the bounded public answer even when a marker assertion fails. This
+    # local-only fixture clears provider-key variables; its parent is private.
+    File.write!(Path.join(workspace, "embedded-result.txt"),
+      inspect(result, limit: :infinity, printable_limit: :infinity) <> "\n", [:exclusive])
+    case result do
       {:ok, %{outcome: :completed, text: text, tools: tools}} ->
         markers = for marker <- ["M6_DEMONSTRATION_READ_OK", "M6_AFTER_EDIT",
                                 "M6_SKILL_LOADED_OK"],
