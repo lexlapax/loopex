@@ -62,12 +62,16 @@ embedded() {
                tools: :coding, skills: [skill], max_steps: 8, deadline_ms: 120_000]
     case LoopexComposition.Ephemeral.run(System.fetch_env!("M6_DEMO_PROMPT"), options) do
       {:ok, %{outcome: :completed, text: text, tools: tools}} ->
-        unless Enum.all?(["M6_DEMONSTRATION_READ_OK", "M6_AFTER_EDIT", "M6_SKILL_LOADED_OK"],
-                 &String.contains?(text, &1)) and
-               Enum.all?(~w(loopex.read loopex.write loopex.edit loopex.bash), fn id ->
-                 Enum.any?(tools, &(&1.tool_id == id and &1.outcome == "completed"))
-               end) and File.read!(Path.join(workspace, "generated.txt")) == "M6_AFTER_EDIT",
-          do: raise("embedded demonstration did not execute the skill coding task")
+        markers = for marker <- ["M6_DEMONSTRATION_READ_OK", "M6_AFTER_EDIT",
+                                "M6_SKILL_LOADED_OK"],
+                      into: %{}, do: {marker, String.contains?(text, marker)}
+        completed = for tool <- tools, tool.outcome == "completed", do: tool.tool_id
+        required = ~w(loopex.read loopex.write loopex.edit loopex.bash)
+        file_ok = File.read(Path.join(workspace, "generated.txt")) == {:ok, "M6_AFTER_EDIT"}
+        unless Enum.all?(markers, fn {_marker, found} -> found end) and
+               Enum.all?(required, &(&1 in completed)) and file_ok,
+          do: raise("embedded demonstration coding task mismatch: " <>
+                    inspect(%{markers: markers, completed_tools: completed, file_ok: file_ok}))
       _ -> raise "embedded demonstration did not complete with proved cleanup"
     end
   '
