@@ -6046,3 +6046,32 @@ rejected. The maintainer accepted this fail-closed compatibility limit instead
 of requiring a broader I/O redesign. Use plain ASCII confirmations. No stored
 data changes, migrations or rollback conversions follow from this choice.
 This authorizes the scoped fix and its tests, not milestone closure or release.
+
+<a id="disposition-m6-evidence-reuse-2026-09-29"></a>
+### M6 evidence reuse and demonstration disposition, 2026-09-29
+
+The maintainer explicitly approved both proposed exceptions after candidate
+`1a78a1fc532b1b590a4d0210ac978b9523010c11`. For this M6 closure only, successful
+checks at `3ddeca3f8fb753cd7378bc92f33243fdd38acc19` may cover unchanged code,
+with the intervening diff verified and affected or missing checks executed.
+This replaces the requirement for another complete exact-SHA matrix and a
+single full-release `PASS`; it does not turn the failed full-release run into
+a pass. Evidence retains each run's actual revision, result and output digest.
+The intervening implementation changes are the cross-user fixture correction
+at `be272ea380a0b921b6570b6e0bda95f4ad5b9da4` and embedded-demonstration result
+retention at `1a78a1fc532b1b590a4d0210ac978b9523010c11`; production code is
+unchanged. Their focused checks, the selected rollback lane, documentation
+examples, and final demonstrations remain required. This disposition's own
+documentation change requires documentation validation and review.
+
+The maintainer also approved new instrumented demonstrations with every
+assertion unchanged. The earlier Darwin demonstration completed its four tools
+and produced the correct file but omitted the required answer markers. Its
+answer was not retained, and its cause remains unproved. Later successful
+diagnostics do not resolve it. The original failure remains an unresolved
+acceptance note alongside any new demonstration evidence, not a corrected or
+superseded passing run. No retry-until-pass procedure is authorized.
+
+These exceptions authorize completion of the evidence package, not M6 closure,
+merge to `main`, a tag, release or publication. The administrative direct-child
+closure and subsequent publication authorization rules remain in force.
