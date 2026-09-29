@@ -420,16 +420,27 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
       )
 
     {:loopex_ephemeral_session, owner, cell} = session
-    root = owned_root(owner)
+    startup = :sys.get_state(owner).startup
+    root = startup.owned_root.path
+    subtree = Map.keys(startup.process_monitors)
+    assert subtree != []
 
     assert {:error,
             {:cleanup_unproved,
              %{
-               pending: [:process_groups, :session_subtree],
+               pending: pending,
                root: ^root,
                root_ownership: :owned
              }}} =
              Ephemeral.stop_session(session)
+
+    # Concept: missing group proof always seals the session, even if its subtree ended.
+    # Technical depth: the worker DOWN and owner slot timer can win in either order.
+    assert pending in [[:process_groups], [:process_groups, :session_subtree]]
+
+    if pending == [:process_groups] do
+      refute Enum.any?(subtree, &Process.alive?/1)
+    end
 
     assert :atomics.get(cell, 1) == 3
     assert File.dir?(root)
