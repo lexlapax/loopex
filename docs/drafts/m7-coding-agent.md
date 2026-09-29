@@ -101,18 +101,30 @@ Technical depth: [Prerequisites and acceptance points](m7-coding-agent-technical
 - The vision keeps "a built-in sub-agent scheduler" out of Loopex. Outcome 7
   is a host tool over ordinary sessions, not a kernel feature.
 
-**Still to be decided,** each proposed as an ADR before the outcome that
-depends on it:
+**Proposed with this draft,** each accepted before the outcome that depends
+on it:
 
-| Decision | Question | Recommendation |
+| Decision | Outcome | What it decides |
 | --- | --- | --- |
-| Instruction composition | Who owns the instruction bytes, and what may a host put in them? | The host owns them; core keeps a versioned envelope, size bound and digest |
-| Compaction checkpoint | What triggers it, what does it keep, and which model writes it? | Follow the vision's compaction record; the session's own model writes the summary |
-| Lineage and budget | How does a whole-lineage projection meet ADR 0017's context budget? | Refuse admission with a named dimension until compaction makes room |
-| Run model configuration | Where do model and reasoning level live, and what happens to provider state on a change? | In committed run configuration; provider-affine state is stripped on an incompatible change |
-| Model-originated question | Does it reuse the `choice` interaction or add a free-text kind? | Add one bounded free-text kind; keep `choice` |
-| Child-session tool | Where does the tool live, and how are the two sessions linked? | In composition; the parent's tool result names the child session |
-| Default bounds | Do 16 turns and 10 minutes suit coding tasks? | Raise the host defaults; keep every bound declared |
+| [ADR 0041](../adr/0041-session-lineage-projection-and-context-budget.md#concept) | 1 | A new run projects the session's history; the host sizes the context budget to the model |
+| [ADR 0042](../adr/0042-host-composed-instructions.md#concept) | 2, 7 | The host supplies the instruction block; core stages and digests it |
+| [ADR 0043](../adr/0043-context-compaction-checkpoint.md#concept) | 3 | A `compact` command and checkpoint record; the session's own model writes the summary |
+| [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept) | 4 | Model and reasoning level are a durable session fact, changed between runs |
+| [ADR 0045](../adr/0045-model-originated-questions.md#concept) | 5, 6 | A question is a tool call the session owner handles; one new free-text kind |
+| [ADR 0046](../adr/0046-child-session-tool.md#concept) | 7 | An opt-in executor adapter in composition runs one read-only child session |
+| [ADR 0047](../adr/0047-reference-host-run-defaults.md#concept) | 6, 8 | The conversational command's bounds: 64 turns, 60 minutes, measured before closure |
+
+**Decisions inside those records that need the maintainer.**
+
+- **Vision readings.** The vision budgets seven built-in tools and no
+  built-in sub-agent. ADR 0045 and ADR 0046 read opt-in host tools as
+  outside both. Acceptance confirms that, or names a vision amendment.
+- **Accepted clauses amended.** ADR 0042 changes the source of ADR 0010's
+  system class and ADR 0017's fixed ceiling. ADR 0043 lifts ADR 0010's
+  compaction exclusion. ADR 0045 amends one clause each of ADR 0009 and
+  ADR 0024.
+- **Conflict with a proposed record.** ADR 0044 conflicts with clause 7 of
+  Proposed ADR 0037, which fixes the model at composition start.
 
 **Open reconciliations.**
 

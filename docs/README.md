@@ -92,6 +92,13 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0038 — installed distribution and release artifact | [Decision](adr/0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](adr/0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
 | 0039 — ephemeral embedded profile | [Decision](adr/0039-ephemeral-embedded-profile.md#concept) | [Technical depth](adr/0039-ephemeral-embedded-profile-technical.md#technical-depth) |
 | 0040 — ephemeral startup interrupt and unnamed root | [Decision](adr/0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept) | [Technical depth](adr/0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth) |
+| 0041 — session lineage projection and context budget | [Decision](adr/0041-session-lineage-projection-and-context-budget.md#concept) | [Technical depth](adr/0041-session-lineage-projection-and-context-budget-technical.md#technical-depth) |
+| 0042 — host-composed instructions | [Decision](adr/0042-host-composed-instructions.md#concept) | [Technical depth](adr/0042-host-composed-instructions-technical.md#technical-depth) |
+| 0043 — context compaction checkpoint | [Decision](adr/0043-context-compaction-checkpoint.md#concept) | [Technical depth](adr/0043-context-compaction-checkpoint-technical.md#technical-depth) |
+| 0044 — run model and reasoning configuration | [Decision](adr/0044-run-model-and-reasoning-configuration.md#concept) | [Technical depth](adr/0044-run-model-and-reasoning-configuration-technical.md#technical-depth) |
+| 0045 — model-originated questions | [Decision](adr/0045-model-originated-questions.md#concept) | [Technical depth](adr/0045-model-originated-questions-technical.md#technical-depth) |
+| 0046 — child-session tool | [Decision](adr/0046-child-session-tool.md#concept) | [Technical depth](adr/0046-child-session-tool-technical.md#technical-depth) |
+| 0047 — reference host run defaults | [Decision](adr/0047-reference-host-run-defaults.md#concept) | [Technical depth](adr/0047-reference-host-run-defaults-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

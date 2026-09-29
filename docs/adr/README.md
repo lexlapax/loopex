@@ -50,6 +50,13 @@ a decision adds a new record rather than rewriting the old one.
 | 0038 | Installed distribution and release artifact | Proposed | [Decision](0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
 | 0039 | Ephemeral embedded profile | Accepted (startup-handler order, named-root and unknown-ownership clauses narrowly superseded by 0040) | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
 | 0040 | Ephemeral startup interrupt and unnamed root | Accepted | [Decision](0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept) | [Technical depth](0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth) |
+| 0041 | Session lineage projection and context budget | Proposed | [Decision](0041-session-lineage-projection-and-context-budget.md#concept) | [Technical depth](0041-session-lineage-projection-and-context-budget-technical.md#technical-depth) |
+| 0042 | Host-composed instructions | Proposed | [Decision](0042-host-composed-instructions.md#concept) | [Technical depth](0042-host-composed-instructions-technical.md#technical-depth) |
+| 0043 | Context compaction checkpoint | Proposed | [Decision](0043-context-compaction-checkpoint.md#concept) | [Technical depth](0043-context-compaction-checkpoint-technical.md#technical-depth) |
+| 0044 | Run model and reasoning configuration | Proposed | [Decision](0044-run-model-and-reasoning-configuration.md#concept) | [Technical depth](0044-run-model-and-reasoning-configuration-technical.md#technical-depth) |
+| 0045 | Model-originated questions | Proposed | [Decision](0045-model-originated-questions.md#concept) | [Technical depth](0045-model-originated-questions-technical.md#technical-depth) |
+| 0046 | Child-session tool | Proposed | [Decision](0046-child-session-tool.md#concept) | [Technical depth](0046-child-session-tool-technical.md#technical-depth) |
+| 0047 | Reference host run defaults | Proposed | [Decision](0047-reference-host-run-defaults.md#concept) | [Technical depth](0047-reference-host-run-defaults-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -223,3 +230,13 @@ unproved-startup root naming and unknown-ownership cases. It also requires
 plain-English stderr recovery guidance after the fixed `ask` diagnostic. The
 [acceptance disposition](../developer/agent-context-map.md#disposition-m6-adr-0040-acceptance-2026-09-28)
 binds its exact Proposed pair and leaves 0039's other decisions unchanged.
+
+0041 to 0047 were proposed on 2026-09-29 with the draft M7 coding-agent
+proof. They are: session lineage projection, which implements 0010's
+lineage clause and sizes the context budget; host-composed instructions;
+the context compaction checkpoint; run model and reasoning configuration,
+which conflicts with clause 7 of Proposed 0037; model-originated questions,
+which narrowly amend 0009 and 0024; the child-session tool; and the
+reference host's run defaults. 0045 and 0046 each state a reading of the
+vision's minimalism budget that acceptance must confirm. They accept
+nothing, and each is accepted before the M7 outcome that depends on it.

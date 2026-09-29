@@ -10,23 +10,33 @@ Concept: [Purpose](m7-coding-agent.md#concept-plan-purpose).
 
 Concept: [Design decisions](m7-coding-agent.md#concept-plan-decisions).
 
-M6 closes first. The seven decisions the Concept plan lists are proposed as
-ADRs, numbered when proposed, and each is accepted before the implementation
-that depends on it. None exists yet, so this draft links none. Accepted
-decisions that constrain the work:
+M6 closes first. Seven decisions are proposed with this draft. Each is
+accepted before the implementation that depends on it:
+
+| Decision | Accepted before |
+| --- | --- |
+| [ADR 0041](../adr/0041-session-lineage-projection-and-context-budget.md#concept) | Outcome 1's projection change |
+| [ADR 0042](../adr/0042-host-composed-instructions.md#concept) | Outcome 2's instruction option |
+| [ADR 0043](../adr/0043-context-compaction-checkpoint.md#concept) | Outcome 3's checkpoint record |
+| [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept) | Outcome 4's configuration record |
+| [ADR 0045](../adr/0045-model-originated-questions.md#concept) | Outcome 5's tool class |
+| [ADR 0046](../adr/0046-child-session-tool.md#concept) | Outcome 7's adapter |
+| [ADR 0047](../adr/0047-reference-host-run-defaults.md#concept) | Outcome 6's defaults |
+
+Accepted decisions that constrain the work:
 
 | Decision | Constraint on M7 |
 | --- | --- |
 | [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage |
 | [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Prompt, steer and follow-up admission rules are unchanged |
 | [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Context admission is budgeted and refuses by named dimension |
-| [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Provider accounting provenance is retained |
+| [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | Tool definitions, grants and the reserved `loopex.` namespace |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Interactions are durable, bounded and grant nothing |
 | [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | The ephemeral profile's credential scope and cleanup limits are unchanged |
 
 Vision sections that bind the work: what Loopex is not (§3.2), compaction
-(§12.5), model identity and provider state (§13.4) and the context pipeline
-(§13.5).
+(§12.5), model identity and provider state (§13.4), the context pipeline
+(§13.5) and the minimalism budgets (§23.4).
 
 <a id="technical-plan-comparison"></a>
 ### Comparison Basis
