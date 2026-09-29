@@ -804,8 +804,14 @@ defmodule Loopex.LLM.ReqLLM.InProcess.CleanupOwner do
     %{state | cleanup: nil, unproved: true}
   end
 
+  # Concept: failed cleanup seals this session, but cannot revoke proved closure.
+  # Technical depth: conditional writes preserve a concurrent slot-1 value 2.
   defp seal_session(%{activation: %{cell: cell}} = state) do
-    if :atomics.get(cell, 1) != 2, do: :atomics.put(cell, 1, 3)
+    case :atomics.compare_exchange(cell, 1, 0, 3) do
+      1 -> :atomics.compare_exchange(cell, 1, 1, 3)
+      _ -> :ok
+    end
+
     state
   end
 

@@ -1417,7 +1417,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   # Technical depth: an in-flight borrower is moved into stop state before its
   # operation can produce a second public reply.
   defp begin_stop(state, waiter) do
-    :atomics.put(state.cell, 1, 1)
+    _ = :atomics.compare_exchange(state.cell, 1, 0, 1)
     now = System.monotonic_time()
     grace_deadline = now + native(state.cleanup_grace_ms)
     deadline = grace_deadline + native(5_000)
@@ -2634,7 +2634,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp fail_start(state, cause, ownership), do: fail_start(state, cause, ownership, false)
 
   defp fail_start(%{startup: startup} = state, cause, ownership, unregistered_granted_result?) do
-    :atomics.put(state.cell, 1, 1)
+    _ = :atomics.compare_exchange(state.cell, 1, 0, 1)
 
     deadline =
       if state.stop,

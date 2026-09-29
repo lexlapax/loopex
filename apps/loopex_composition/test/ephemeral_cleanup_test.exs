@@ -21,6 +21,31 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     %{tmp: tmp}
   end
 
+  test "stop preserves a prior session-local seal until cleanup is proved", %{tmp: tmp} do
+    test = self()
+
+    drain = fn executor, instance, owner, nonce, _deadline ->
+      send(test, {:sealed_drain_entered, self()})
+
+      receive do
+        :release_sealed_drain ->
+          send(owner, {executor, instance, nonce, :groups_empty})
+          {:ok, nonce}
+      end
+    end
+
+    session = start_session(tmp, drain)
+    {:loopex_ephemeral_session, _owner, cell} = session
+    :atomics.put(cell, 1, 3)
+
+    stop = Task.async(fn -> Ephemeral.stop_session(session) end)
+    assert_receive {:sealed_drain_entered, worker}, 3_000
+    assert :atomics.get(cell, 1) == 3
+    send(worker, :release_sealed_drain)
+    assert :ok = Task.await(stop, 7_000)
+    assert :atomics.get(cell, 1) == 2
+  end
+
   test "each failed drain is reaped before independent runtime and subtree teardown", %{
     tmp: tmp
   } do

@@ -578,8 +578,13 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
     end
   end
 
+  # Concept: a late callback failure cannot revoke proved session cleanup.
+  # Technical depth: compare-exchange replaces only open or stopping state.
   defp seal(cell) do
-    if :atomics.get(cell, 1) != 2, do: :atomics.put(cell, 1, 3)
+    case :atomics.compare_exchange(cell, 1, 0, 3) do
+      1 -> :atomics.compare_exchange(cell, 1, 1, 3)
+      _ -> :ok
+    end
   end
 
   defp control_deadline,

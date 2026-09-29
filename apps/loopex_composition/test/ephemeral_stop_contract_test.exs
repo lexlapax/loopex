@@ -260,6 +260,7 @@ defmodule LoopexComposition.Ephemeral.StopContractTest do
     assert :sys.get_state(owner).stop.deadline > first_deadline
     assert :atomics.get(drains, 1) == 1
     assert %{stage: :root_removal, worker: %{pid: ^worker}} = :sys.get_state(owner).abort
+    assert :atomics.get(cell, 1) == 3
     send(worker, :release_removal)
 
     assert :ok = Task.await(retry, 7_000)

@@ -855,6 +855,14 @@ defmodule LoopexComposition.Ephemeral.ModelCensus do
 
   defp cancel_timer(nil), do: :ok
   defp cancel_timer({timer, _token}), do: Process.cancel_timer(timer)
-  defp seal(cell), do: if(:atomics.get(cell, 1) != 2, do: :atomics.put(cell, 1, 3))
+  # Concept: late containment must not revoke a proved-closed session.
+  # Technical depth: each transition is conditional on the value it replaces.
+  defp seal(cell) do
+    case :atomics.compare_exchange(cell, 1, 0, 3) do
+      1 -> :atomics.compare_exchange(cell, 1, 1, 3)
+      _ -> :ok
+    end
+  end
+
   defp closed, do: {:error, :session_admission_closed}
 end
