@@ -58,7 +58,7 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
     Fixture.assert_gone(fixture)
   end
 
-  test "only the ephemeral provider edge reads a selected credential environment variable" do
+  test "only the production ephemeral edge reads a selected credential environment variable" do
     # Concept: the durable provider path still receives credentials through
     # host-owned custody; the accepted ephemeral profile resolves one selected
     # variable in the host VM immediately before its provider call.
@@ -67,6 +67,22 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
     # creation and shared guards read only named non-secret settings.
     for path <- Path.wildcard(Path.join(__DIR__, "../lib/**/*.ex")) do
       source = File.read!(path)
+      relative = Path.relative_to(Path.expand(path), Path.expand(Path.join(__DIR__, "../lib")))
+
+      # The owner-state canary witness reads its test variable inside a branch
+      # compiled only under Mix.env() == :test. Keep that exception exact: two
+      # reads in this branch, and none elsewhere in the library source.
+      source =
+        if relative == "loopex/llm/req_llm/in_process/cleanup_owner.ex" do
+          [_, test_branch] = String.split(source, "  if Mix.env() == :test do\n", parts: 2)
+          [test_branch, _production_branch] = String.split(test_branch, "\n  else\n", parts: 2)
+          allowed = "System.fetch_env!(probe.variable)"
+          assert length(String.split(source, allowed)) == 3
+          assert length(String.split(test_branch, allowed)) == 3
+          String.replace(source, allowed, "")
+        else
+          source
+        end
 
       reads =
         ~r/System\.get_env\(([^)]*)\)/
@@ -74,7 +90,7 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
         |> Enum.map(fn [_match, argument] -> String.trim(argument) end)
 
       expected =
-        case Path.relative_to(Path.expand(path), Path.expand(Path.join(__DIR__, "../lib"))) do
+        case relative do
           "loopex/llm/req_llm/provider_worker.ex" ->
             ["\"ERL_CRASH_DUMP\"", "\"ERL_CRASH_DUMP_SECONDS\""]
 
