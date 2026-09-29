@@ -83,9 +83,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
 
       in_flight_processes = process_delta(before_processes)
       in_flight_ports = port_delta(before_ports)
-      controllers = client_controllers(in_flight_processes)
       ports = client_ports(in_flight_ports, fixture.port)
       assert ports != []
+      controllers = client_controllers(transport, in_flight_processes, ports)
 
       if transport == :tls do
         assert controllers != []
@@ -319,18 +319,33 @@ defmodule Loopex.LLM.ReqLLM.InProcessTransportDrainTest do
   defp port_delta(before_ports),
     do: Enum.reject(Port.list(), &MapSet.member?(before_ports, &1))
 
-  defp client_controllers(in_flight_processes) do
-    in_flight_processes
-    |> Enum.filter(fn pid ->
-      case Process.info(pid, :dictionary) do
-        {:dictionary, dictionary} ->
-          Keyword.get(dictionary, :"$initial_call") == {:ssl_gen_statem, :init, 1} and
-            Keyword.get(dictionary, :tls_role) == :client
+  defp client_controllers(:http, in_flight_processes, _ports) do
+    Enum.filter(in_flight_processes, &ssl_controller?/1)
+  end
 
-        nil ->
-          false
-      end
+  # Concept: bind the drain proof to the observed client TLS socket.
+  # Technical depth: OTP gives that port to the TLS receiver; a private
+  # process-dictionary role marker is not available on every floor version.
+  defp client_controllers(:tls, in_flight_processes, ports) do
+    ports
+    |> Enum.map(fn port ->
+      assert {:connected, controller} = Port.info(port, :connected)
+      assert controller in in_flight_processes
+      assert Process.alive?(controller)
+      assert ssl_controller?(controller)
+      controller
     end)
+    |> Enum.uniq()
+  end
+
+  defp ssl_controller?(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dictionary} ->
+        Keyword.get(dictionary, :"$initial_call") == {:ssl_gen_statem, :init, 1}
+
+      nil ->
+        false
+    end
   end
 
   defp client_ports(in_flight_ports, server_port) do
