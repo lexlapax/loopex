@@ -129,8 +129,9 @@ Concept: [Observable consequences](0045-model-originated-questions.md#concept-ad
 
 Concept: [Compatibility and rollback](0045-model-originated-questions.md#concept-adr-0045-compatibility).
 
-An old protocol client must not silently receive a text interaction through an
-unchanged schema. Unsupported negotiation fails before attachment. Old durable
+ADR 0044's coordinated new-generation-only policy refuses old protocol clients;
+it never sends a text interaction under an unchanged schema. Unsupported
+negotiation fails before attachment. Old durable
 readers require exact fixtures, and new producer/text records follow the M7
 backup/reader matrix. Paused deadlines and general workflows remain outside
 this decision. Existing multi-prompt ephemeral sessions remain supported; the

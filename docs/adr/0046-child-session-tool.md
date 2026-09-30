@@ -27,7 +27,10 @@ Each role supplies exact instructions, provider/model and reasoning. The child
 receives the task and those instructions, with fresh context. It never inherits
 the parent's conversation or reads a changed role file during recovery.
 
-Only one child operation is active per parent run. Children cannot delegate or
+Only one child operation is active per parent conversation (session), including
+unfinished cleanup from an earlier run. Independent parent sessions may run
+helpers concurrently; there is no runtime-wide helper slot or queue.
+Children cannot delegate or
 ask questions. Their fixed tools are read, grep, find and ls. M7 admits no
 widening to write, edit or bash. Parent and child use the same underlying host policy and
 workspace. The child selects an immutable mode that preserves allow/deny and
@@ -64,7 +67,7 @@ its ordinary limits still inherit from the active run.
 
 This proposal depends on acceptance of the narrow M7 amendment to both vision
 files. It explicitly permits this opt-in host helper while retaining the bans
-on a core scheduler, parallel children within one parent run and writable helpers.
+on a core scheduler, parallel children within one parent session and writable helpers.
 
 <a id="concept-adr-0046-consequences"></a>
 ### Observable Consequences
@@ -80,6 +83,10 @@ roles, exhausted allowances and unavailable recovery evidence refuse safely.
 ### Compatibility and Rollback
 
 Technical depth: [Compatibility mechanics](0046-child-session-tool-technical.md#technical-adr-0046-compatibility).
+
+The generic deadline addition joins ADR 0044's coordinated new-generation-only
+wire contract. Updated clients retain the existing foreground and daemon
+authority rules; old negotiation refuses before session work.
 
 The ledger is new host-owned persistent state and has its own versioned reader
 and backup procedure. Core child sessions remain ordinary sessions. Removing

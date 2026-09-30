@@ -38,6 +38,7 @@ Accepted decisions that constrain the work:
 | [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain |
 | [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; ADR 0044 versions the closed reply/settlement shapes for private continuation; two attempts per logical operation and no ambiguous redispatch remain |
 | [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 introduces v3 and cannot promote an invalid continuation reply to reported usage |
+| [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) and [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) | ADR 0044 replaces the served generation set and metadata-only digest with the coordinated M7 contracts below; exact negotiation, framing, session authority and connection lifecycle remain |
 | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
 | [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | ADRs 0042–0044 use fresh receipt revision 4 for instruction/compaction provenance and continuation accounting; maintenance explicitly skips optional intake. Ordinary resource admission/costs and old v2/v3 validation remain |
@@ -53,14 +54,14 @@ Vision sections that bind the work: what Loopex is not (§3.2), compaction
 Proposed ADR 0037 governs installed discovery in M8, not this milestone.
 Public protocol and generic bounds additions in ADRs 0043–0046 share one
 coordinated M7 integration, with distinct negotiated contracts for both the
-foreground generation-1 and daemon generation-2 servers. Preserve old payloads
-under their old negotiation or explicitly refuse that negotiation; never send
+foreground and daemon servers. The selected policy refuses older negotiation;
+it adds no dual-service compatibility layer. Never send
 new payloads under an unchanged generation/digest. Inventory command inputs,
 configuration/genesis, interaction variants, events, snapshots and bounds,
 including authorization differences. The new digest includes canonical payload
 schemas, not only method/record names and limits. Independent Node vectors
 cover both servers and old/new-client combinations. Acceptance binds the
-proposal contracts; source implementation and numeric schema identifiers are
+proposal contracts; source implementation and literal schema/vector digests are
 verified at the first protocol integration before any new wire shape is exposed.
 
 The source baseline has two different contracts: `LoopexProtocol.Session`
@@ -69,8 +70,44 @@ serves `loopex.experimental/1` through the foreground app-server, while
 The latter already owns `/2`; it cannot be reused for M7 foreground semantics.
 Both current digests cover metadata inventories and limits, not the payload
 schemas. New contracts must digest the complete closed payload definitions.
-Whether M7 also serves the old generations remains a maintainer decision;
-this inventory does not silently select dual service or refusal.
+M7 serves only `loopex.experimental/3` on the foreground server and only
+`loopex.experimental/4` on the daemon. These distinct names preserve the
+different attachment/controller contracts; `/2` is never repurposed. ADR 0044
+owns this coordinated amendment to ADRs 0023/0032, with ADRs 0043/0045/0046
+joining the same payload and snapshot revisions. Historical `/1` and `/2`
+schemas, vectors and committed data keep their original meaning.
+
+| Offered generations | M7 foreground | M7 daemon |
+| --- | --- | --- |
+| Only `/1`, `/2` or the retired `loopex.session.v1-experimental` name | `unsupported_generation` | `unsupported_generation` |
+| Only `loopex.experimental/3` | Select `/3` | `unsupported_generation` |
+| Only `loopex.experimental/4` | `unsupported_generation` | Select `/4` |
+| Mixed list containing the server's new generation, with any old/wrong-server entries | Select its exact new generation regardless of the other entries' order | Select its exact new generation regardless of the other entries' order |
+
+The table uses `/N` as shorthand only; wire offers and replies use complete
+generation strings. No common generation produces the existing bounded,
+request-correlated refusal and leaves that connection uninitialized without
+a second negotiation attempt. Ordinary post-refusal frames cannot create,
+attach, resume, mutate or obtain control of a session, or start work for that
+connection. Preserve existing malformed-frame, pre-initialization and shutdown
+rules; this does not claim that unrelated daemon sessions stop running.
+After a well-formed unsupported offer, another initialize returns
+`already_initialized`; ordinary frames return `not_initialized`. A malformed
+initialize returns `invalid_request` without consuming that one valid negotiation
+attempt. There is no new immediate server close: the foreground continues its
+bounded loop until EOF/host failure; the daemon retains its original
+accept-time initialization deadline and closes with EOF on expiry. Successful
+daemon initialization still waits for registry/relay setup before replying or
+processing pipelined session frames. Unknown initialize fields are checked
+against the new closed schemas; do not claim the old foreground already did so.
+There is no fallback to an older generation, host or binary on that connection.
+Update both bundled Node clients and all reference-client protocol pins together.
+They verify the selected generation and independently pinned schema digest
+before session requests; a mismatch ends the client connection without replaying
+a mutation under another contract. Their session-request entrypoints also refuse
+locally before verified initialization or after refusal; server gating remains
+mandatory against raw or nonconforming clients. Existing foreground attachment and daemon
+writer-epoch rules still apply after successful negotiation.
 
 | Member affected | Required M7 contract and owning proposal |
 | --- | --- |
@@ -132,7 +169,18 @@ members, mixed answer branches, stale writer epochs, duplicate command IDs,
 absolute-deadline promotion, pending-text-question attachment, snapshot/replay
 agreement and absence of private continuation. Exercise old-only, new-only and
 mixed-generation offers against each server. Every outcome must follow the
-selected compatibility policy, with no new payload under an old digest.
+table above, with no new payload under an old digest. Include repeated initialize
+and post-refusal create/attach/resume/control/mutation attempts, asserting no
+session work attributable to the refused connection. Exercise malformed versus
+well-formed initialization, client digest mismatch, both mixed-offer orders,
+daemon accept-time expiry and foreground continued refusal using real transport
+paths; framing-only vectors cannot prove these behaviors. Preserve historical literal
+schema/vector validation where retained; old-only offers to an M7 live server now
+prove explicit refusal. Keep the pinned historical release/rollback lanes
+unchanged and add the new-generation consumers to the M7 lanes.
+The implementation updates the operator/developer protocol references, examples
+and migration notes to show the new client/server pair and expected upgrade
+diagnostic. Do not rewrite current-product documentation before that integration.
 
 <a id="technical-plan-configuration"></a>
 ### Explicit configuration contract
@@ -187,6 +235,15 @@ The reference prompt target remains below 1,000 estimated tokens, including
 question/helper definitions and role facts for demonstrated chat profiles.
 Measure each actual profile. An explicit larger host ceiling does not itself
 approve a reference-product target deviation.
+Before integrating each demonstrated reference profile, retain complete
+instruction/tool preimages, the exact resolved workspace, enabled-role facts
+and catalog digest, and assert a system-class estimate strictly below 1,000
+with the accepted estimator. Use useful complete schemas and new immutable
+generation bytes for changed descriptions; no field removal or implicit budget
+increase can satisfy this gate. Before each provider attempt, validate its final
+staged request, including receipt revision 4 and applicable expanded-continuation
+accounting, against all configured bounds and the 65,536-byte ceiling. The earlier
+990-token prototype is a narrow arithmetic example, not this final-profile proof.
 
 Trace flags map only to the existing runtime-scoped host API and ceilings.
 Bounded pending stderr output, separate drop/delivery-uncertainty counts,
@@ -271,7 +328,10 @@ The complete rendered prefix stays fixed; compaction waits until the exchange
 ends. Later runs start without old provider state, including on A→B→A.
 After helper-manager failure, ADR 0046 recovers completed results and stops
 unfinished helpers without replaying create/prompt or activating recovered work.
-No parallel, nested or write-capable helper is included.
+Helpers are serial per parent session across runs, including unfinished cleanup.
+Independent parent sessions may run helpers concurrently, with separate allowances
+and cancellation. ADR 0046 reconstructs occupied slots from retained operations;
+no runtime-wide slot, waiting queue, nested or write-capable helper is included.
 
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
@@ -674,6 +734,12 @@ declines. Neither path assumes the model can be forced never to ask.
    one-shot defaults and unattended behavior remain unchanged.
 
 #### V13. Upgrade and supported rollback
+
+Use the updated client/server pair for M7. Inspect the retained negotiation
+cases first: old-only offers receive `unsupported_generation`, the correct new
+offer succeeds, the wrong server's generation refuses, and a digest mismatch
+stops the client before session requests. These wire checks are separate from
+the old-root reader and frozen-tool checks below.
 
 1. Record the retained M6 artifact, source, toolchain and digest. Create settled
    and unresolved M6 roots; stop their owners and retain complete pre-upgrade

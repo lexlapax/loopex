@@ -92,6 +92,9 @@ is no promise that every conversation can fit.
 
 Technical depth: [Compatibility mechanics](0043-context-compaction-checkpoint-technical.md#technical-adr-0043-compatibility).
 
+Wire compaction joins ADR 0044's coordinated new-generation-only contract.
+Operators update clients with the server; old negotiation refuses before session work.
+
 Checkpoints, maintenance state and usage are new durable records, with a new
 public event and progress kind. An unsupported reader must refuse before
 mutation where its decoder supports that guarantee; exact old-reader fixtures

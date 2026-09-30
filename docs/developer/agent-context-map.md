@@ -6287,3 +6287,25 @@ sessions whose frozen read generation lacks artifact retrieval. Preserve their
 original tool definitions and complete saved content, apply all request bounds,
 and never recover missing bytes by implication or change earlier staged requests.
 This authorizes proposal revision, not acceptance or product implementation.
+
+<a id="disposition-m7-wire-client-upgrade-2026-09-30"></a>
+### M7 wire-client compatibility choice, 2026-09-30
+
+The maintainer selected option A, require updated clients for M7. Serve the new
+foreground and daemon protocol generations, clearly refuse old negotiation,
+and update bundled clients and examples together. Do not add dual service or
+send new payloads under an old identity. ADR 0044 owns the coordinated served-set
+and schema-digest amendment to ADRs 0023/0032. Old-session reader compatibility
+and frozen tool generations remain separate. This authorizes drafting and
+review, not plan/ADR acceptance or product implementation.
+
+<a id="disposition-m7-helper-concurrency-2026-09-30"></a>
+### M7 helper concurrency scope, 2026-09-30
+
+The maintainer selected option A: one helper at a time per conversation, with
+independent conversations permitted to run helpers concurrently. The limit
+applies to a parent session across runs, including unresolved child cleanup.
+ADR 0046 owns admission and recovery; its per-run allowances remain separate.
+Clarify the plan and already-authorized paired vision amendment accordingly.
+No runtime-wide helper slot, scheduler or waiting queue is selected. This
+authorizes proposal revision and review, not acceptance or product work.

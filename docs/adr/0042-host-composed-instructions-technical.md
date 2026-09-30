@@ -88,6 +88,9 @@ Concept: [Observable consequences](0042-host-composed-instructions.md#concept-ad
 - Revision-4 instruction source binding and record-relative receipt validation;
   mismatched version/digest, unknown variants and relabelled legacy bytes refuse.
 - Retain measurements for the default and each demonstrated opt-in tool set;
+  before profile integration, retain exact instruction/tool/environment/catalog
+  preimages and assert the reference target below 1,000. Before provider work,
+  complete revision-4 request preflight includes continuation where applicable;
   no silent ceiling increase to fit helper/question definitions.
 - Real coding task follows host instructions with separately admitted resources.
 

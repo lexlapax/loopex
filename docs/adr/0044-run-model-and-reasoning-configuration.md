@@ -9,6 +9,7 @@ Technical depth: [Run model and reasoning configuration](0044-run-model-and-reas
 - **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 adds that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also extends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement, preserving its accounting-provenance rules and the existing v2 meaning.
 - **Requires with multi-provider use:** [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Prerequisite for:** M7 outcome 4
+- **Coordinated wire amendment:** Replaces [ADR 0023](0023-experimental-public-session-protocol.md#concept)/[ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept)'s served generations and schema-digest inputs through the M7 contract below; their authority, framing and connection-lifecycle rules remain
 
 <a id="concept-adr-0044-decision"></a>
 ### Context and Decision
@@ -138,6 +139,13 @@ New configuration records/events, private continuation replies/settlements and
 snapshot fields require an M7 reader. Old requests and settlements keep their
 original meanings. Private continuation is retained in recovery state, never
 in public configuration snapshots.
+The maintainer selected updated wire clients only. M7's foreground server serves
+`loopex.experimental/3`; its daemon serves `loopex.experimental/4`. Both refuse
+older generations through the existing unsupported-generation handshake. The
+coordinated schema includes compaction, configuration, questions and the generic
+deadline additions, with complete payload definitions in each digest. Bundled
+clients and examples upgrade together. This changes no historical schema meaning,
+readable journal history or frozen tool definition, and adds no dual service.
 A shared genesis revision retains initial configuration, immutable tool
 definitions and policy-defer mode with the existing mandatory cleanup value.
 ADR 0046 uses this same revision; it does not create a competing session shape.

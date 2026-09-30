@@ -28,14 +28,17 @@ The maintainer also selected
 [option A: live streaming](../developer/agent-context-map.md#disposition-m7-thinking-streaming-2026-09-30).
 The maintainer selected
 [option A: verified public reasoning summaries](../developer/agent-context-map.md#disposition-m7-reasoning-summary-2026-09-30).
-The latest selections are
+The maintainer also selected
 [up to 4 KiB per requested artifact read](../developer/agent-context-map.md#disposition-m7-artifact-range-size-2026-09-30)
 and [legacy inline reuse when the full request fits](../developer/agent-context-map.md#disposition-m7-legacy-inline-2026-09-30).
-All seven choices are drafted, including source projection, omission provenance,
+The latest selections are [updated wire clients only](../developer/agent-context-map.md#disposition-m7-wire-client-upgrade-2026-09-30)
+and [one helper per conversation](../developer/agent-context-map.md#disposition-m7-helper-concurrency-2026-09-30),
+allowing helpers in independent conversations to overlap.
+All nine choices are drafted, including source projection, omission provenance,
 captured maintenance-model selection, expanded continuation accounting and
 bounded native stream assembly with a separate permitted summary projection.
-Further material choices will be presented one at a time, including protocol compatibility
-and the scope of the parallel-helper ban. A report's request for a decision
+Further material choices, if review exposes any, will be presented one at a time.
+A report's request for a decision
 does not by itself reopen a choice the maintainer already made.
 
 ## Technical depth
@@ -481,7 +484,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | 29 | Repaired | Reply/context/system budgets stay committed on resume. Only max turns, relative deadline and token budget are new-run overrides. |
 | 30 | Repaired | Explicit ephemeral `questions: true`, default false, preserves existing definitions. State callback termination and trusted-host non-recursion obligations. |
 | 31 | Repaired with an explicit limit | Propose owner-managed ephemeral trace startup, application selectors and separate drain/writer. Bound pending output and one write; preserve ADR 0030's best-effort sink mailbox. A hard whole-consumer claim is unsupported without changing all producer paths. |
-| 32 | Inventory repaired; compatibility decision pending | The plan inventories changed create/configure/compact/prompt/follow-up/answer methods, events, snapshots, bounds, authority joins and independent payload checks. Choose old-generation refusal or dual service. No reused generation name or unchanged schema digest may carry new shapes. |
+| 32 | Repaired; maintainer selected A | Foreground serves only generation 3 and daemon only generation 4, with payload-complete pinned digests and upgraded clients. Preserve one-attempt refusal, daemon deadline and authority; add real-transport compatibility evidence. Historical schemas are retained, not served. |
 | 33 | Clarified | Keep the pinned historical pair and add a distinct M6↔M7 matrix. Source-built exact M6 artifacts are allowed with identity evidence. Blocking old-binary access is an operator precondition, not a claimed future marker. |
 | 34 | Repaired | Required new selectors join the full closure matrix. Durable A/B are hosted credentialed routes; pin their models and reference names before runs and pass every selected name through redactor/PTY self-tests. |
 | 35 | Name-as-provider-authentication claim rejected | The host authorizes variable slots; spelling cannot establish the issuer of a value. Explicit options and redacted configured-only inspection are now stated. |
@@ -489,7 +492,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | 37 | Repaired | Name the trusted fixture-chat wrapper, normal file validation and fixed composition injection. Production policy registry remains closed. |
 | 38 | Repaired | Enumerate closure slots, run identities, manifests, measurements, operator/reviewer identities and immutable pre-attempt external task pin. |
 | 39 | Repaired | Extend both pending vision amendments to question authority/flow consequences and pending §27 dispositions. Register already named paired vision acceptance; roadmap now points to it too. |
-| 40 | Pending maintainer clarification | Earlier record says no parallel helpers; later drafts say one per parent run. Confirm scope before calling those equivalent. |
+| 40 | Repaired; maintainer selected A | One helper per parent conversation, including unfinished cleanup across runs. Independent parent sessions may run helpers concurrently; the plan, ADR 0046 and proposed vision amendment agree. Add same-parent refusal and separate-parent overlap evidence. |
 | 41 | Repaired | Complete the accepted ADR 0010/0017 amendment table and add settlement provenance/credential-source dependencies. |
 | 42 | Repaired | Name the attended ephemeral demo host and operator identity form; require every scenario step/subcase in the fixture evidence manifest. |
 | 43 | Clarified; meaningful measurements retained | Record the existing lineage conformance defect, complete profile prototypes and rationale for core's closed reasoning level. Final integrated sizes and helper-coding target margin remain unproved. Context-map decision pointers remain authority; external pin has a destination. |
@@ -801,6 +804,54 @@ paragraph called itself the sole exception. The lead accepted and repaired all
 three clauses. The reviewer's reread confirmed the finding closed. This is
 proposal consistency evidence, not an implemented retrieval or upgrade proof.
 
+### Wire upgrade and helper concurrency
+
+The maintainer selected updated clients only. ADR 0044 explicitly amends the
+served-generation promises in ADRs 0023/0032: foreground serves
+`loopex.experimental/3`, daemon serves `loopex.experimental/4`, each with its
+own complete schema digest and unchanged surface authority. M7's negotiation
+table covers old-only, correct, wrong-server and mixed offers. Bundled clients
+must verify independently pinned digests before session requests and close on
+mismatch without automatic downgrade or replay.
+
+A read-only source trace confirmed that well-formed unsupported negotiation
+spends the one attempt but does not immediately close either server. Subsequent
+initialize receives `already_initialized`; ordinary requests receive
+`not_initialized`. Malformed initialization does not spend the attempt. The
+daemon retains its accept-time initialization expiry and registry/relay barrier;
+the foreground retains its bounded input loop. The draft preserves those rules
+and distinguishes refused session operations from existing host/socket effects.
+It adds missing client digest verification and uniform closed-field validation
+as implementation obligations, without claiming they exist in M6. Historical
+schema/vector bytes remain; live M7 negotiation is tested through real transports.
+A focused advisory reread found no actionable wire-contract defect.
+
+The next selection clarifies the helper ban: one active helper per conversation,
+with concurrent helpers allowed in independent conversations. The lead found
+that the previous per-run wording could allow overlap with unresolved cleanup
+from an earlier run. ADR 0046 now checks all retained operations for that parent
+session before reservation and reconstructs occupied slots at startup. It reuses
+the existing serial ledger owner and records, without a new persistent slot or
+cross-log transaction. Evidence must show separate-parent overlap and isolation,
+same-parent refusal across runs/restart and no release on uncertainty. Existing
+incarnation-wide cancellation fences and startup recovery still apply.
+
+The focused helper review found three gaps, all acted on: the immediate fence
+for a classified cancellation must be operation-scoped, complete parent intents
+must establish the expected log/operation set before declaring a slot empty,
+and one remaining parallel-worker exclusion needed the per-session qualifier.
+The repaired contract retains the global fence for unclassified cancellation
+only and adds missing-log and independent-parent cancellation witnesses.
+
+A separate feasibility review judged that the corrected 990-token example
+establishes narrow arithmetic feasibility without requiring a new scope choice.
+The lead added a pre-integration gate for exact demonstrated reference profiles
+and mandatory final request preflight before provider work. Larger explicitly
+configured host ceilings remain allowed, but cannot waive the reference target.
+The old prototype's 1,024-byte read guidance must become 4,096 in final generation
+bytes. No universal path/catalog fit, final request proof or provider usability
+is claimed by the historical prototype.
+
 <a id="resume-checkpoint"></a>
 ### Resume checkpoint, 2026-09-30
 
@@ -810,10 +861,9 @@ The maintainer also answered A for thinking capacity. Its generic local-referenc
 and initial-reserve repair is drafted and measured above. Do not re-ask it.
 The maintainer selected A for live streaming, verified public reasoning summaries,
 4-KiB explicit reads and legacy inline compatibility; all are drafted above.
-Do not re-ask them. The current unanswered question is wire compatibility:
-A requires updated clients and clearly refuses old protocol generations;
-B serves both with additional state and payload compatibility rules. A is
-recommended, not selected. Do not infer this choice from old-tool compatibility.
+Do not re-ask them. Updated wire clients only and per-conversation helper
+serialization were subsequently selected as A and are drafted above. There is
+no outstanding maintainer question at this checkpoint.
 Resume this work on branch `m7` in
 `/Users/spuri/projects/lexlapax/loopex`; inspect Git before changing anything.
 All work remains planning/docs, with commits and pushes authorized. M7 is Open,
@@ -822,7 +872,8 @@ Do not implement product changes or present a final external-review SHA/prompt
 until the remaining decisions, repairs and whole-packet adversarial pass finish.
 
 1. Preserve the selected source-excerpt A, summarizer B, thinking-capacity A and
-   live-streaming A, verified-summary A, 4-KiB reads and legacy inline A
+   live-streaming A, verified-summary A, 4-KiB reads, legacy inline A,
+   updated wire clients A and per-conversation helper A
    repairs and their sizing/review record above.
    Preserve originals,
    whole-group checkpoint cuts, exact provenance, the protected recent tail,
@@ -833,9 +884,8 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    only executor-result text leaves the original blocker unresolved.
 2. Ask remaining material questions one at a time, with plain-English options
    and consequences. The question tool was invisible to this user; display the
-   options in the chat as well. Next resolve protocol compatibility and the
-   parallel-helper ban's scope. Do not
-   reopen recorded choices or infer approval from silence.
+   options in the chat as well. Ask only if the remaining review exposes a new
+   material decision; do not reopen recorded choices or infer approval from silence.
 3. Use the retained probes above. The earlier local-reference comparison is
    superseded for drafting by the selected generic-node contract and later
    probe/correction; it remains historical evidence. Aggregate result allocation
@@ -846,10 +896,10 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    the exact external-review candidate SHA and a review prompt. Acceptance is
    a later maintainer decision.
 
-The latest pushed checkpoint before this summary/mapping revision is
-`6b5bb40646513ab2a2f83351bb285154170061cb`. Its documentation gate passed in
-16 seconds. The complete log is `/tmp/loopex-m7-streaming-6b5bb406-docs.log`,
-SHA-256 `6f8100c78afa4fff188be57b5c76387ebb752ca43e94cdab5998cb13874ade2c`.
-That run is not evidence for the subsequent summary/mapping edits. Read Git
+The latest pushed checkpoint before this wire/helper revision is
+`54c756394000da77348538602de0b2d236383dee`. Its documentation gate passed in
+15 seconds. The complete log is `/tmp/loopex-m7-summary-ranges-54c75639-docs.log`,
+SHA-256 `7cf247f0fd629e1ceec20a858b7d3e5c191d7c60f6566681bc1cf0825e6b9466`.
+That run is not evidence for the subsequent wire/helper edits. Read Git
 and the retained verification record for the current checkpoint; no worker owns
 repository edits. Durable records govern, not worker memory or old chat summaries.

@@ -327,7 +327,8 @@ Technical depth: [Tool contract, seven-tool surface, registry, and resolution](v
 conformance-tested workspace tools. It may additionally supply a model question
 tool and an opt-in host tool for serial read-only helpers. The session owner
 retains question truth; the host owns helper roles, policy, budgets and routing.
-The bundled helper allows one active child per parent run, with no nested or
+The bundled helper allows one active child per parent session, including
+unfinished cleanup across runs, with no nested or
 writable helpers and no core helper scheduler. Independent parent sessions may
 run concurrently; this adds no global scheduler or restriction on separately
 scoped host orchestration. The active profile is selected from prompt-cost, safety and task

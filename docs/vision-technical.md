@@ -1771,7 +1771,8 @@ reference distribution may supply `loopex.ask`, a policy-admitted interaction
 tool handled by the session owner, and opt-in `loopex.task`, implemented by the
 host executor adapter over ordinary sessions. The host owns saved roles,
 provider routing, child policy and aggregate delegation allowance. Helpers are
-serial within each parent run, read-only and non-nested, with no question tool.
+serial within each parent session across runs, including unfinished cleanup,
+read-only and non-nested, with no question tool.
 Independent parent sessions remain concurrent; no global helper scheduler or
 ban on separately scoped host orchestration is implied. Core has no helper
 scheduler, role type, parent relation or delegation counter. ADRs 0045 and 0046
@@ -2903,7 +2904,7 @@ Minimalism is tested, not declared:
 - reference CLI system and active-tool prompt target under 1,000 tokens before
   project context; host budgets remain host-owned;
 - **Proposed M7 amendment:** no core sub-agent scheduler, parallel children within
-  a reference parent run, nested/writable reference helpers, plan, objective,
+  a reference parent session, nested/writable reference helpers, plan, objective,
   background job, team workflow, social channel or
   policy engine; the serial read-only host helper is the sole added exception;
 - no external runtime dependency in `loopex` core beyond the single telemetry

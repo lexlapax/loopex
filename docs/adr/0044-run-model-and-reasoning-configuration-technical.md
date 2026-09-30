@@ -555,8 +555,9 @@ is synthesized for historical replies that did not retain it.
 Protocol adds `session.configure`, `session.configured` and configuration snapshot
 fields with a new experimental schema/generation jointly with ADRs 0043/0045.
 The same coordinated change includes ADR 0046's generic absolute deadline.
-No old client receives unknown shapes under unchanged negotiation. Exact vectors
-and independent Node client update precede implementation integration.
+Only the new server-specific generations are served, under the selected policy
+below. Exact vectors and independent Node client updates precede implementation
+integration; no old client receives unknown shapes under unchanged negotiation.
 
 <a id="technical-adr-0044-evidence"></a>
 ### Evidence
@@ -655,6 +656,22 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
 ### Compatibility Mechanics and Alternatives
 
 Concept: [Compatibility and rollback](0044-run-model-and-reasoning-configuration.md#concept-adr-0044-compatibility).
+
+This ADR owns M7's coordinated wire-generation replacement in
+[the plan's protocol contract](../plans/M7-technical.md#technical-plan-prerequisites).
+Foreground `/3` and daemon `/4` use full `loopex.experimental/N` names, distinct
+payload-complete schema digests and their existing different authority rules.
+Old-only or wrong-server offers refuse before attachment or session authority;
+a mixed offer succeeds only for that server's new generation. Preserve the
+single initialization attempt and existing refusal framing/lifecycle. Updated
+clients verify the independently pinned generation/digest before session work,
+and close on mismatch without automatic downgrade or mutation replay. Required
+vectors cover refusal, mixed offers, repeated initialization, side-effect
+exclusion and both independent clients. Historical schema/vector identities
+remain evidence of their original contracts, not M7 live-service promises.
+The implementation migration note instructs operators to update wire clients
+with the M7 server. Old-session readability and full-root rollback remain
+separate decisions; protocol negotiation neither migrates nor downgrades data.
 
 A future adapter may extend capability mapping through a new explicit decision.
 No within-run switching, automatic model routing or mutable tool generation is

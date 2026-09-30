@@ -394,6 +394,11 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
 
 Concept: [Compatibility and rollback](0043-context-compaction-checkpoint.md#concept-adr-0043-compatibility).
 
+`session.compact`, its bounds and checkpoint/maintenance projections use
+ADR 0044's coordinated foreground `/3` and daemon `/4` generations. Apply the
+M7 plan's old-offer refusal and independent-client vectors; no old wire decoder
+is extended in place to accept this method or its new records.
+
 This strategy uses an explicit host-selected summarizer through the existing
 model boundary. It adds no helper role, artifact request path or abandoned-branch
 summarization. Its fixed caps are

@@ -60,8 +60,9 @@ Technical depth: [Compatibility mechanics](0045-model-originated-questions-techn
 
 The interaction class, text kind, producer/disposition fields and snapshots
 change the experimental protocol schema. Negotiate a new generation jointly
-with configuration/compaction and ADR 0046's absolute deadline; reject unsupported clients before exposing new
-shapes. Legacy effect-tool definitions keep their behavior and do not acquire
+with configuration/compaction and ADR 0046's absolute deadline. ADR 0044's
+selected new-generation-only policy requires updated clients and refuses old
+negotiation before exposing new shapes. Legacy effect-tool definitions keep their behavior and do not acquire
 a new serialized member implicitly.
 
 ## Governance Record

@@ -160,6 +160,26 @@ Refund only conclusively unused tokens; child count is never refunded after
 admission. Exhaustion denies the next child, not the parent's own remaining work.
 Independent parent runs have independent allowances; resumed runs never reset one.
 
+**Serial scope.** The one-active-helper limit applies to the parent session,
+across run boundaries. Before reservation, the same serial adapter owner checks
+all retained operations for that parent; an unresolved reservation, create,
+prompt, stop, terminal or cleanup obligation still occupies its slot. A new
+operation refuses while that slot is occupied; it is not queued. Replaying the
+same logical operation uses its retained state. Release requires conclusive
+terminal and cleanup evidence, settled accounting and persisted attempt receipts.
+Before opening admission, use complete classification of retained parent
+delegation intents across runs to establish the expected run/operation set, then
+reconcile its existing binding/run logs. Enumerating present hashed log files
+alone cannot establish completeness or an empty slot. Missing, corrupt or
+unavailable required coverage refuses. Build the live occupied-slot view from
+that validated reconciliation rather than rescanning history on each call. This
+adds no separate persistent slot record or cross-log transaction. The exclusive
+owner serializes reservation and release, including between runs.
+Independent parent sessions have separate slots and may have live children at
+the same time. The owner must not hold admission while waiting for a child's
+provider work or cleanup. The existing incarnation-wide unknown-cancel fence
+and startup recovery gate still apply; concurrency does not bypass either.
+
 **Deadline.** Persist `min(parent_job.effective_job_deadline, admission_time + child_deadline_ms)`
 as the absolute cutoff before create. Extend the generic run-bound contract
 with optional `bounds.deadline_at_ms` on prompt and follow-up commands: a
@@ -263,7 +283,9 @@ same owner, commits stop, then cleans up. If a launch call won first, account fo
 its admission and cleanup rather than claiming it never happened. An unresolved
 stop commit fences launch, refund and successful publication. Its reserved
 closing-record credit prevents a full log from blocking this fact.
-Cancellation also closes the volatile launch fence immediately. Best-effort
+Classified cancellation also closes that operation's volatile launch fence
+immediately. It does not close the incarnation-wide `helper_admission_closed`
+flag; only the unclassified-cancel path above does that. Best-effort
 abort and cleanup of already known children continue while a stop commit is
 unresolved; they do not authorize another ledger mutation or a cleaned receipt.
 
@@ -352,6 +374,14 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   preserves its exact original binding and cannot reopen the parent.
 - Budget reservation, known overshoot, unknown charge, no double settlement or
   restart reset, exhausted-child-count refusal and separate visible totals.
+- Two parent sessions have overlapping live helpers, with independent allowances
+  and cancellation. A second helper in one parent refuses until its first is
+  conclusively settled, including across run boundaries and restart with unknown
+  cleanup. Replayed operations consume no second slot; no waiting helper queue
+  or runtime-wide slot is introduced.
+- Remove an older run's log while retaining its parent intent: reconstruction
+  refuses, never invents an empty slot. Cancelling a classified helper in parent
+  A does not prevent parent B's next otherwise admissible helper.
 - Delayed admission at the absolute cutoff; parent cancellation, stuck child,
   stale receipt, cleanup uncertainty and parent owner succession.
 - Real provider parent on A and child on B; investigation and review fixtures
@@ -362,10 +392,16 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
 
 Concept: [Compatibility and rollback](0046-child-session-tool.md#concept-adr-0046-compatibility).
 
+The authored-bound command revision and public deadline fields join
+ADR 0044's foreground `/3` and daemon `/4` wire contracts. The M7 negotiation
+matrix refuses old offers before session work; it does not reinterpret
+historical normalized-command bytes or grant controller authority.
+
 Version, bound and validate every ledger record before use. Unsupported or
 malformed state opens read-only for diagnosis or refuses before mutation and
 dispatch. Back up the complete quiescent host root, including ledger and child
 sessions, before upgrade. Downgrade restores that backup; it cannot erase or
 replay unresolved operations. Implement the ledger format specified above with replay and corruption fixtures;
-record actual fixture identities before integration. A queue, parallel workers, writable children, nested delegation
+record actual fixture identities before integration. A queue, parallel children
+within one parent session, writable children, nested delegation
 and charging children to core parent counters are outside this decision.
