@@ -10,11 +10,12 @@ Status: **standalone repository seed — founding document**
 Date: **2026-08-14**
 
 **M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
-tool budget and its interaction-flow consequences in sections 6, 10, 14, 23,
-26 and 27 are proposals authorized for drafting by
-the maintainer. Review both files with M7. Until acceptance, the prior seven-tool
-and no-built-in-sub-agent clauses remain governing; dependent implementation
-must not begin. Other vision boundaries are unchanged.
+tool budget and interaction flow in sections 6, 10, 14, 23 and 26, bounded
+provider continuation in section 13.4, and linked decision-trigger dispositions
+in section 27 are authorized proposals. The maintainer extended drafting scope
+to section 13.4 on 2026-09-30. Review both files with M7. Until acceptance, the
+prior clauses retained beside each proposal remain governing; dependent
+implementation must not begin. Other vision boundaries are unchanged.
 
 Project: **Loopex — “the loop, in Elixir”**
 
@@ -1022,15 +1023,18 @@ stateDiagram-v2
     awaiting_tools --> preparing: ordered results committed
     awaiting_tools --> suspended: host interaction required
     awaiting_tools --> run_terminal: cancellation / unrecoverable failure / bound reached
-    suspended --> awaiting_tools: exact resolution / model question declined or expired
-    suspended --> run_terminal: policy denial or expiry / abort / bound reached
+    suspended --> awaiting_tools: exact interaction resolved
+    suspended --> run_terminal: denied / expired / aborted
     run_terminal --> preparing: follow-up queued
     run_terminal --> idle: no queued work
 ```
 
-The two suspended-state transitions include the **proposed M7 question flow**:
-model-question decline/expiry settles a tool result, while policy interaction
-dispositions and terminal precedence remain governed by their own contracts.
+The diagram remains governing until amendment acceptance. Under the
+**proposed M7 question flow**, the first suspended-state transition becomes
+`exact resolution / model question declined or expired`, and the second becomes
+`policy denial or expiry / abort / bound reached`. Model-question decline/expiry
+settles a tool result; policy dispositions and terminal precedence keep their
+own contracts.
 
 One active run per session is an intentional 0.x constraint. It makes context,
 tool ordering, steering, durable recovery, and interaction expectations tractable.
@@ -1634,7 +1638,8 @@ Portable canonical history is necessary but may not preserve response IDs,
 reasoning signatures, provider tool-call metadata, or other model-affine state
 required for correct continuation.
 
-The adapter may therefore maintain an opaque private continuation sidecar:
+**Governing until amendment acceptance.** The adapter may therefore maintain an
+opaque private continuation sidecar:
 
 - explicitly bound to provider, model family, exact compatibility rules, and
   source message range;
@@ -1646,6 +1651,24 @@ The adapter may therefore maintain an opaque private continuation sidecar:
 Conformance tests cover same-model continuation, compatible-model continuation,
 mid-session model switching, cross-provider conversion, and tool-call ID
 normalization.
+
+**Proposed M7 amendment to section 13.4.** ADR 0044 narrows the opaque-sidecar
+rule for its bounded continuation format. Core validates the provider-neutral
+closed envelope, identity bindings, local reference layout and its bounded
+expansion for accounting against the owning canonical reply/request. Adapters
+alone interpret provider block types, signatures and native rendering semantics.
+References never fetch history or artifacts. Exact supported mappings/renderers,
+private record revisions and old-reader/rollback evidence gate implementation.
+
+Private continuation remains plaintext inside protected private reply/request
+records for the lifetime of the raw session history; ephemeral copies end with
+the runtime. Hosts own access controls and retirement. This selects the existing
+private-store protection alternative above; it does not claim encryption or add
+a key service. Public projections exclude private blocks, apart from the verified
+transient summary text explicitly permitted by ADR 0044. Model switches end
+incompatible reuse without deleting original records. The evidence is the selected
+thinking/tool workflow and bounded generic expansion proof; this permits no
+provider semantic interpreter or helper scheduler in core.
 
 Model roles such as `fast`, `capable`, or `thinking`, along with a unified
 reasoning-control UI, belong in host or reference-client configuration. Core
@@ -1749,7 +1772,7 @@ executor, grant authority, or relax host policy.
 ### 14.2 The seven-tool coding surface
 
 A coding agent needs five verbs: read, search, navigate, mutate, and execute.
-The Loopex reference distribution supplies seven conformance-tested workspace
+The Loopex reference distribution supplies seven conformance-tested
 implementations:
 
 - `read` — bounded, chunked, text/binary-aware reads;
@@ -1779,12 +1802,17 @@ scheduler, role type, parent relation or delegation counter. ADRs 0045 and 0046
 must be accepted before those additions are implemented. Their changed
 interaction/tool/session records need versioned readers and rollback proof.
 
-The reference CLI targets a base system prompt plus every active tool
-definition, including question and helper schemas, under 1,000 tokens before
-project context. That is a measured
+**Governing until amendment acceptance.** The reference CLI targets a base system
+prompt plus active built-in tool definitions under 1,000 tokens before project
+context. That is a measured
 reference-product usability budget, not a universal kernel constraint. The core
 enforces declared per-request and per-model limits; hosts may choose different
 profiles and context budgets.
+
+**Proposed M7 clarification.** Count every active tool definition, including
+question and helper schemas, and all rendered host environment facts within that
+same measured target. The seven implementations above become the seven workspace
+tools; the target remains a reference-product budget, not a universal ceiling.
 
 The local implementations share conformance for bounded output, workspace-root
 resolution, symlink and path-scope behavior, exact edit preconditions, clear
@@ -2898,11 +2926,15 @@ the separate 5,000 ms release transport-drain witness.
 
 Minimalism is tested, not declared:
 
+- Governing until acceptance: seven conformance-tested built-in tool
+  implementations with an evidence-selected reference profile.
 - **Proposed M7 amendment:** seven conformance-tested workspace tool
   implementations, plus the question and opt-in host helper tools bounded in
   section 14.2, with an evidence-selected reference profile;
 - reference CLI system and active-tool prompt target under 1,000 tokens before
   project context; host budgets remain host-owned;
+- Governing until acceptance: no built-in sub-agent, plan, objective,
+  background job, team workflow, social channel, or policy engine.
 - **Proposed M7 amendment:** no core sub-agent scheduler, parallel children within
   a reference parent session, nested/writable reference helpers, plan, objective,
   background job, team workflow, social channel or
@@ -3071,10 +3103,12 @@ The following are project doctrine unless deliberately revised:
    directly; core has no Jido framework dependency.
 7. Loopex owns durable coding-session mechanics. Hosts own identity, policy,
    secrets, tenancy, placement, memory, objectives, channels, and product UI.
-8. Under the proposed M7 amendment, the reference distribution supplies seven
-   conformance-tested workspace tools plus the optional question and host helper
-   tools in section 14.2. Its default profile and prompt budget are evidence-driven
+8. The reference distribution supplies seven conformance-tested tool
+   implementations. Its default profile and prompt budget are evidence-driven
    reference-product choices, not kernel policy.
+   **Proposed M7 amendment:** retain that governing sentence until acceptance,
+   then qualify the seven as workspace tools and permit the question and opt-in
+   host helper tools bounded in section 14.2.
 9. Tool execution is serial by default.
 10. VM-code truth, runtime-control truth, private session journal, public
     events, snapshots, progress, and diagnostics are separate domains or

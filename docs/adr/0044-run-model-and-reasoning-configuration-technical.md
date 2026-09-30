@@ -24,7 +24,8 @@ mode from ADR 0046. The closed payload is:
  runtime_configuration: {cleanup_grace_ms: positive_uint64},
  initial_configuration: <the closed configuration above>,
  tool_selection: {definitions: [<complete normalized definitions>],
-                  names: <name-to-id/version/digest map>},
+                  names: <name-to-id/version/digest map>,
+                  artifact_read: null | <ADR 0041 exact capability binding>},
  policy_defer_mode: "admit" | "refuse"}
 ```
 
@@ -32,7 +33,9 @@ Use the existing record envelope for journal version 1, owner epoch 0 and nil
 owner incarnation; those are not extra genesis payload members. Definition
 format versions distinguish legacy effect definitions from interaction-class
 ones. Require each name mapping to match exactly one retained definition and
-reject duplicates/unused mappings. Preserve mandatory committed cleanup.
+reject duplicates/unused mappings. Validate `artifact_read` under ADR 0041
+against those exact retained definitions and its fixed table. This derived field
+is not a create/configure option or a grant. Preserve mandatory committed cleanup.
 Preflight the complete genesis against 65,536 bytes before create commits.
 The M7 decoder explicitly reads v2/v3. Preserve v2 staged requests/effects;
 resolve historical selections from retained evidence, rejecting contradictions.
@@ -45,6 +48,25 @@ behavior on disposable v3 copies; no claim that the old binary knows v3 follows.
 
 Active tools remain the immutable generation under ADR 0009; changing them is out of
 M7's configure command.
+
+**Closed ephemeral options.** This is the combined M7 amendment to ADR 0039's
+startup grammar. `start_session/1` retains `policy`, `model`, `req_llm`, `tools`,
+`skills`, `cwd`, `max_steps`, `deadline_ms`, `max_tokens`, `context_token_budget`,
+`timeout` and `base_url`. M7 adds only `instructions`, `system_class_tokens`
+(ADR 0042), `reasoning` (this ADR), `maintenance_instructions` and
+`maintenance_model` (ADR 0043), `questions` (ADR 0045), `provider_bindings`
+(ADR 0048) and `trace` (ADR 0049), with each owning ADR's grammar and defaults.
+Unknown and duplicate options keep the existing refusal semantics.
+`run/2` admits the same startup set plus one-shot-only `question_responder`,
+consumes the function locally and forwards only startup data. `start_session/1`
+rejects that responder; `ask/3` retains only its existing per-call `timeout`
+option. Neither per-call settings nor arbitrary capability/mapping inputs can
+override startup configuration. Composition resolves model metadata and mapping,
+then the ephemeral owner forwards instructions/reasoning/ceiling into the shared
+initial configuration and maintenance settings separately into runtime options.
+Omitted instructions retain the compatibility fallback, omitted reasoning is
+`default`, and the omitted system ceiling remains 1,000. Buffered transport,
+credential audience and cleanup are unchanged.
 
 `configure` is a normal idempotent session command containing any nonempty subset
 of mutable model/reasoning/instructions/max_tokens/context_token_budget/
@@ -89,10 +111,13 @@ or provider mapping. Ordinary `configure` never mutates the runtime selection.
 omits it. Existing committed request bytes and provider attempts remain immutable.
 The ReqLLM adapter maps only verified model/level combinations. Retain a closed
 `provider_mapping` with `mapping_revision` and `renderer_revision` strings of
-at most 128 bytes each, Boolean `continuation_required` and a `thinking`
-selection. The host resolves the Boolean from the verified exact mapping,
-including provider-default behavior. Core uses it without interpreting the
-provider's thinking mode; a reasoning label alone cannot establish it.
+at most 128 bytes each, Booleans `continuation_required` and
+`canonical_terminal_tool_history`, and a `thinking` selection. The host resolves
+these facts from the verified exact mapping, including provider-default behavior.
+Core uses them without interpreting the provider's thinking mode; a reasoning
+label alone cannot establish either fact. `canonical_terminal_tool_history` is
+true only when that exact mapping/renderer has verified the post-terminal
+canonical rendering below; unverified support is false.
 The closed `thinking` variants are
 `{mode: omitted}`, `{mode: disabled}`, `{mode: manual, budget_tokens: positive_integer}`
 and `{mode: adaptive, effort: low | medium | high, display: summarized}`.
@@ -125,14 +150,20 @@ below; these conformance rows use that exact identity.
 | --- | --- | --- | --- | --- | --- |
 | `claude-haiku-4-5-20251001` | `default` | Omit both | No | No | Preserve committed limit |
 | `claude-haiku-4-5-20251001` | `none` | `type: disabled`; omit effort and display | No | No | Preserve committed limit; maintenance uses 1,024 |
-| `claude-haiku-4-5-20251001` | `low`, `medium`, `high` | `type: enabled`, budget 1,024 / 2,048 / 4,096 respectively; omit effort and display | Yes | Only verified native summary text under this default display | Strictly greater than the selected budget |
+| `claude-haiku-4-5-20251001` | `low`, `medium`, `high` | `type: enabled`, budget 1,024 / 2,048 / 4,096 respectively; omit effort and display | Yes | Yes: native summarized thinking text | Strictly greater than the selected budget |
 | `claude-fable-5-1` | `default` | Omit both; provider default is adaptive with omitted summary display | Yes | No | Preserve committed limit |
-| `claude-fable-5-1` | `low`, `medium`, `high` | `type: adaptive`, `display: summarized`; `output_config.effort` equals the selected level | Yes | Verified native summary text only | Preserve committed limit |
+| `claude-fable-5-1` | `low`, `medium`, `high` | `type: adaptive`, `display: summarized`; `output_config.effort` equals the selected level | Yes | Yes: native summarized thinking text | Preserve committed limit |
 | `claude-fable-5-1` | `none` | Refuse before commitment; no request | — | — | Thinking cannot be disabled |
 
 Mapping revisions are `loopex.anthropic.haiku45.v1` and
 `loopex.anthropic.fable51.v1` respectively. These define the summary
 classification used below; there is no independently authored disclosure bit.
+Haiku manual low/medium/high classify supported native thinking text as a
+provider summary: its omitted display setting defaults to summarized under the
+[provider display contract](https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display),
+checked 2026-09-30. Default/none remain ineligible. This is the mapping's literal
+policy, still subject to exact response-identity and native-event validation;
+a converted thinking chunk does not establish eligibility.
 All rows remain subject to ordinary model output, run-spending, context,
 capsule and record bounds. A syntactically valid reply allowance promises no
 number of thinking/tool rounds. With the unchanged 4,096 ordinary reply default,
@@ -143,7 +174,11 @@ headers, `between_tools`, extra effort levels or raw provider-option bags are
 introduced. The Haiku thinking-off row supplies one maintenance conformance
 case. M7's required cross-provider compaction case separately pins a verified
 thinking-off model on provider B; it cannot use two Anthropic models to claim
-that routing proof. The always-on conversation model need not disable thinking.
+that routing proof. Different providers mean different admitted `provider:`
+route identities and their endpoint/custody routes, not different model vendors.
+An admitted OpenRouter route may therefore host an Anthropic model; this proves
+route switching without claiming cross-vendor model diversity. The always-on
+conversation model need not disable thinking.
 
 Inspect the final request after dependency normalization, not only Loopex's
 input options. In pinned ReqLLM, `reasoning_effort: none` removes the option;
@@ -184,7 +219,11 @@ sequence and reply `delta_count`; suppressed private events consume no sequence
 number. Chunking, loss detection, closure and cancellation retain their existing
 rules. Receiving a complete summary block grants no tool or settlement authority.
 The private assembler independently retains the original block unchanged, even
-if public projection is suppressed, split, dropped or terminal-sanitized.
+if public projection is ineligible, split or lost by a subscriber. An otherwise
+eligible summary fragment that fails existing terminal-control validation fails
+the attempt through the started-call failure path; do not sanitize or silently
+suppress it into a successful reply. Ineligible private text is suppressed
+before public projection, not subjected to a new disclosure rule.
 
 A visible summary is provisional progress. Reference clients distinguish it
 from answer text and may retain received progress in their operator transcript.
@@ -244,6 +283,10 @@ For this Anthropic format the adapter requires text templates exactly
 Literal nodes are only the supported exact thinking/completed-signature or
 redacted-thinking/data blocks. The adapter constructs these reference nodes;
 provider-supplied objects are never accepted as reference instructions.
+Conformance covers complete native field sets. Unknown members fail reply
+validation and are never silently discarded. Supporting an additional member
+requires a new explicit mapping/renderer revision with exact templates,
+expansion vectors and retained bounds; existing revisions keep their meaning.
 Expand against the simultaneously produced
 canonical reply and compare the complete native array with the bounded captured
 array before settlement. Preserve
@@ -307,8 +350,20 @@ process handle or arbitrary dependency metadata enters either form.
 from v3, retaining its other nine fields exactly. `model_attempt_settled_v3`
 keeps the twelve outer fields and accepts that reply variant. ADR 0021 already
 owns v2; never reinterpret v2 records as carrying v3 replies. Preserve its
-compact `accounting_evidence` member and closed relations under the new kind. Commit
-reply, continuation, usage and next disposition atomically before tool intent.
+compact `accounting_evidence` member and closed relations under the new kind.
+M7 writes `model_attempt_settled_v3` for every newly committed settlement:
+ordinary, maintenance, error-only, nil-continuation, unreadable and validated
+reply compaction. Historical v1/v2 kinds are read-only under their original
+validators, including when an older request later receives a new v3 settlement.
+An exact nine-member v2 adapter reply is still admissible when the staged
+request requires no continuation, including eligible legacy requests. Validate
+it under v2, then normalize to v3 by adding only `continuation: nil`. A request
+requiring continuation rejects a v2 reply. V3 adapter replies have exactly ten
+members and their canonical projections nine; extra keys and mixed shapes
+refuse. V3 model-call errors retain ADR 0021's two-member result; unreadable and
+compacted results retain its three-member result and closed accounting-evidence
+union. Commit reply, continuation, usage and next disposition atomically before
+tool intent.
 Measure the complete owning settlement against 65,536 bytes. Invalid or oversized continuation is prevalidation rejection: retain compact
 `unreadable_model_answer` with `accounting_evidence: {kind: none}`, no canonical
 reply/tools and terminal failure, charging the conservative remaining allowance
@@ -345,8 +400,11 @@ Apply both targets inside ADR 0041's required-context allocator and optional
 intake, measuring the complete fixed-point record with both reserved header
 variants. If the minimum required projection at `q=0`, with optional resources
 absent, misses either target, use ADR 0043's single bounded maintenance episode
-for this staging identity. Preserve the current input, protected tail and fixed
-metadata. If those alone exceed a target, refuse without a summary call.
+for this staging identity. Preserve current-run inputs and fixed metadata, applying ADR 0043's conditional
+terminal-tail release and target-aware optional tail growth first. If that
+irreducible projection still exceeds a target, refuse without a summary call.
+A fresh session with a large first prompt can therefore refuse the initial
+reserve despite fitting ordinary hard limits; no absent-history exemption exists.
 Otherwise each checkpoint must strictly reduce that same minimum projection in
 both bytes and estimated tokens, and maintenance continues until both targets
 fit. Fitting only the hard ceilings does not end this preparation.
@@ -361,7 +419,8 @@ episode. A request already staged before a crash keeps its exact bytes and
 dispatch classification; recovery does not summarize it again.
 
 If no eligible range can leave the reserve, retain `thinking_exchange_headroom`
-with dimension, observed size, target and hard ceiling before ordinary intent.
+through ADR 0043's version-2 failure union with dimension, observed size,
+target and hard ceiling before ordinary intent.
 Missing maintenance configuration, no progress, uncertain commits and exhausted
 bounds retain their more specific failure causes. Preserve committed checkpoints;
 none of these failures authorizes another automatic episode for the same staging
@@ -392,6 +451,19 @@ second HTTP client or dependency upgrade. Preserve request option validation,
 exact model/routing, native request rendering, the existing dispatch handoff
 classification and companion lifetime. Native assembly state stays private to
 that invocation; it cannot be recovered from a public progress subscriber.
+The durable bridge performs credential-free model, option and context validation
+before calling pinned `ReqLLM.Streaming.start_stream/4` with its provider wrapper.
+It explicitly preserves the required normalization otherwise performed by
+`stream_text/3`; no global provider registry is changed. Entering `start_stream/4`
+is the transport handoff: all subsequent errors, exceptions and incomplete
+responses are `dispatched_or_unknown`, regardless of dependency error tags.
+At the wrapper's request-building boundary, install and validate the exact
+native body after dependency normalization and before HTTP launch. Ordinary
+context conversion may not reorder native arrays, replace malformed arguments
+with an empty object or alter admitted controls. Preserve route/authentication
+and transport ownership. The buffered caller captures native response content
+before lossy ReqLLM response conversion and applies the same exact native request
+rendering through its existing OneShotHTTP1 path.
 Return completed capture over a bounded private path correlated to that same
 invocation. Never return native blocks or signatures through ordinary chunk
 metadata, dependency telemetry, progress or raw exception terms. The buffered
@@ -414,7 +486,10 @@ bounds. Pings do not extend the committed deadline or count as model progress.
 The bridge must make overflow, malformed framing and JSON decode errors fatal
 before dependency code can discard them or render their raw diagnostics. Retain
 a monotonic invocation-failure latch and terminate the exact owned stream;
-later input cannot clear the latch or restore success. Pinned StreamServer logs
+later input cannot clear the latch or restore success. The invocation owner
+observes private fatal failure independently of chunk enumeration, terminates
+the exact stream and wakes and joins the blocked drain through existing cleanup.
+Infinite dependency timers cannot defer this handling. Pinned StreamServer logs
 and continues on a parser error return, so that return alone cannot enforce
 this rule. Validate before lossy SSE event conversion too. Test final parser
 flush as well as ordinary input; neither may turn a previous failure or
@@ -491,6 +566,24 @@ failed or invalidated exchange. Compatible reuse in M7 means the exact admitted
 model/configuration/renderer within that exchange; no cross-model native reuse
 is promised.
 
+For post-terminal canonical rendering, emit retained assistant text/tool calls
+without old private blocks. Render each following ordered tool-result group in
+one native user content array, followed by any adjacent admitted user text in
+canonical order, including the new prompt. Do not fabricate an assistant
+completion or change that grouping to imply one. This rule applies to retained
+canonical groups; it does not rewrite the frozen prefix of an open exchange.
+Before ordinary provider intent, inspect the projected history after any admitted
+compaction. If it still contains a terminal run's tool turn with results but no
+assistant completion, require `canonical_terminal_tool_history: true` from the
+selected mapping. Otherwise refuse `canonical_history_rendering_unsupported`
+through ADR 0043's closed failure projection, without provider dispatch. Explicit
+compaction that covers the group or configuration of a verified compatible
+mapping is the remedy; neither old native-state resurrection nor an automatic
+retry is permitted. Explicit compaction may select the offending terminal group
+even when it otherwise fits byte/token targets. The exact retained rendering and
+capability value are conformance facts, not inferred from another model or an
+ordinary completed turn.
+
 **Accounting and private retention.** The complete staged-request record still
 has the 65,536-byte limit, including semantic continuation, its duplicate inside
 canonical bytes, receipt, envelope and fixed-point size. No artifact reference
@@ -565,6 +658,13 @@ integration; no old client receives unknown shapes under unchanged negotiation.
 Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md#concept-adr-0044-consequences).
 
 - Atomic creation/configure, strict validation, version capture and idempotency.
+- New v3 settlement writers cover ordinary/maintenance, successful nil/non-nil
+  continuation, model-call error, unreadable and validated-compaction results.
+  Exact legacy v2 adapter replies succeed only without required continuation;
+  mixed/extra-key shapes refuse. Historical settlement readers stay unchanged.
+- Ephemeral explicit instructions, reasoning and system ceiling reach the shared
+  initial configuration and encoded request. Unknown/duplicate options and
+  per-call overrides refuse; buffered delivery and cleanup remain unchanged.
 - Revision-4 continuation-cost null/non-null branches, exact digest/cost replay,
   descriptor totals versus complete input estimate, unchanged v2/v3 equations,
   and public exclusion of the private cost digest. A missing or fabricated
@@ -595,8 +695,11 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   tool results, followed by a new user prompt on the same thinking model.
   Verify the exact rendered message grouping and provider acceptance without
   resurrecting old native state or inventing an assistant completion. A mapping
-  that cannot render this canonical history is unsupported and refuses by name;
-  do not claim that one successful ordinary end_turn proves this path.
+  that cannot render this canonical history has the capability false and refuses
+  `canonical_history_rendering_unsupported` before provider intent. Vectors prove
+  that refusal and explicit compaction/model-change remedies even when the group
+  fits ordinary limits. Do not claim that one successful ordinary end_turn proves
+  this path.
 - Native/derived ID collision yields the named unreadable-answer or staging
   refusal before tool dispatch, with usage truth preserved.
 - Privacy witnesses name chat transcripts, one-shot JSON, independent Node
@@ -622,6 +725,12 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   with answer progress before complete reply settlement. Controlled barriers prove
   this ordering without a latency threshold or a requirement that every model
   produce text before tools. The ephemeral case remains buffered.
+- Before bridge integration, exercise its production request-building and actual
+  local HTTP transport path with the pinned dependency: exact native outgoing
+  body, parser callbacks, interior malformed event, fatal-latch wakeup under
+  infinite dependency timers, cancellation and cleanup. Direct SSE injection
+  proves parser behavior only. Buffered integration separately proves capture
+  before conversion, OneShotHTTP1 routing, selected-key screening and cleanup.
 - Native streams split across UTF-8, SSE and JSON boundaries; empty/interleaved
   blocks, cumulative usage, signature completion and exact argument assembly.
   Reject duplicate/out-of-order indices, wrong-kind deltas, unknown blocks,
@@ -643,6 +752,13 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   context charges, including combined large excerpts and duplicate request
   representations. Measure a useful multi-round fixture with the final generic
   node overhead and revision-4 receipt; earlier prototype sizes are not proof.
+  Before admitting an exact mapping, complete deterministic native request/response
+  and bound conformance. Its owning real-provider cases retain compact/expanded capsule
+  sizes, block counts and owning settlement sizes. Synthetic signatures prove
+  mechanics only; a live sample promises no future response size. A real bound
+  failure remains a failed attempt under the fixed evidence/disposition rule,
+  not authority to truncate, enlarge a cap, omit selected summaries, remove a
+  required row or replace the attempt.
 - Frozen-prefix compaction refusal, same-model restart, terminal invalidation
   and A→B→A without resurrecting old signatures.
 - Private-state canaries across both transport profiles, public/progress/trace
@@ -661,6 +777,11 @@ This ADR owns M7's coordinated wire-generation replacement in
 [the plan's protocol contract](../plans/M7-technical.md#technical-plan-prerequisites).
 Foreground `/3` and daemon `/4` use full `loopex.experimental/N` names, distinct
 payload-complete schema digests and their existing different authority rules.
+Compute each digest with `LoopexProtocol.Canonical.digest/1`, encoding revision
+`loopex.canonical.v1`, over one closed manifest containing generation, ordered
+methods/record families/error codes, limits and complete payload definitions.
+Pin every list's order, the manifest preimage and the resulting literal digest
+in vectors. JSON transport encoding is not the schema-digest recipe.
 Old-only or wrong-server offers refuse before attachment or session authority;
 a mixed offer succeeds only for that server's new generation. Preserve the
 single initialization attempt and existing refusal framing/lifecycle. Updated

@@ -25,6 +25,9 @@ creation/configure before its mutation commits. Count actual model-facing tool
 definitions in the system class. The ceiling defaults to 1,000 for legacy
 callers; an explicit positive host value cannot exceed the input context budget.
 The full model-request record still must fit ADR 0017's byte bound.
+ADR 0043's refusal revision 2 validates the captured configurable ceiling;
+historical v1 failures still require exactly 1,000. A host override is explicit
+configuration and never silently applied to meet the reference target.
 
 M7 uses fresh context-provider receipt revision 4. Revision 3 already belongs to
 ADR 0025's resource-pack receipt. Retain ADR 0017's sixteen-key outer shape when
@@ -91,7 +94,11 @@ Concept: [Observable consequences](0042-host-composed-instructions.md#concept-ad
   before profile integration, retain exact instruction/tool/environment/catalog
   preimages and assert the reference target below 1,000. Before provider work,
   complete revision-4 request preflight includes continuation where applicable;
-  no silent ceiling increase to fit helper/question definitions.
+  no silent ceiling increase to fit helper/question definitions. Pin and repeat
+  this gate at the actual demonstration root immediately before provider work.
+  Workspace paths and role catalogs count in full. Longer paths/catalogs can
+  refuse under the default; an operator may explicitly raise `system_class_tokens`
+  within the input budget. The reference target still includes those bytes.
 - Real coding task follows host instructions with separately admitted resources.
 
 <a id="technical-adr-0042-compatibility"></a>

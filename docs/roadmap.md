@@ -137,13 +137,18 @@ The next planning candidate is the Open [M7 coding-agent proof](plans/M7.md#conc
 followed by the installed durable operator, store engine and governed extension
 runtime [drafts](drafts/README.md) for M8–M10. M7 and the successors are unaccepted;
 their scope and release versions remain decisions for their own acceptance.
-M7 acceptance also reviews the labelled question/helper amendment in both
+M7 acceptance also reviews the labelled tool, interaction and bounded-continuation amendment in both
 vision files; it has no separate implied acceptance through this roadmap.
 
 Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technical-roadmap-minimal-runnable)
 
 <a id="concept-roadmap-governed-extension-runtime"></a>
-#### Governed extension runtime — v0.4 candidate
+#### Governed extension runtime — version unselected
+
+M7 coding-agent proof, M8 installed operation and M9 store migration precede
+this M10 draft. Their acceptance and eventual release versions remain separate
+decisions; the later numeric candidates are illustrative capability labels and
+do not reserve the next source version.
 
 Can reviewed and promoted trusted behavior evolve without changing session
 truth, weakening authority, or pretending executable code is runtime-local?

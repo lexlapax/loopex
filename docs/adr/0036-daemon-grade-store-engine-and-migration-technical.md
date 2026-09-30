@@ -84,8 +84,14 @@ next run in each case.
 **Reader boundary.** The installed candidate adds a container-format marker
 and refuses unknown formats before mutation. A missing marker identifies only
 a legacy container, not the durable-record capabilities it contains. Validate
-record support before serving it. M7 configuration, compaction, interactions and
-host ledger state must appear in the source fixtures and backup inventory.
+record support before serving it. The complete [M7 compatibility inventory](../plans/M7-technical.md#technical-plan-compatibility)
+must appear in source fixtures and backup inventory, including child sessions,
+receipts, continuation, command revisions and immutable selections. The host
+ledger is outside `Loopex.Store`: in-place engine migration leaves it at its
+existing host-root path byte-for-byte, and does not pass it to a Store decoder or
+retire it with the source store. Whole-root backup/restore includes that ledger,
+its role snapshots and root-relative layout; restoration to a new root preserves
+those relative paths and bytes. Interrupted migration verifies them unchanged.
 The engine candidate alone requires explicit container migration; the installed
 candidate does not require migration merely because a supported local root lacks
 a marker. Retain exact old binaries to test their real behavior. Never claim an
@@ -127,5 +133,5 @@ do not apply; no extension state exists.
 
 **Open before acceptance.** The engine cell and the retained experiment record
 it cites; the adapter application's name; the exact capacity ceiling the
-definite refusal enforces and how the operator configures it, which ADR 0037's
-schema carries once this pair names the key.
+definite refusal enforces and how the operator configures it, which ADR 0049's
+version-1 schema carries once this pair names the key.

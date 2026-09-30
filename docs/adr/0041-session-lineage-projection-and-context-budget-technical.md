@@ -67,6 +67,25 @@ irreducible oversize refuses before ordinary dispatch. Once eligible as older
 history, they may enter ADR 0043's marked maintenance-source excerpt. That
 exception changes neither the original answer nor its ordinary projection.
 
+**Artifact capability identity.** The reference host registers the exact M7
+`loopex.read` implementation-generation identity and tool-definition digest as
+artifact-capable. This closed table is part of the versioned host tool registry,
+with byte vectors for its one new generation and every supported legacy entry.
+Capture the resolution in ADR 0044's closed `tool_selection.artifact_read`
+member, not an unspecified extra genesis field. It is null, or exactly
+`{revision: "loopex.artifact_read.v1", tool_id, tool_version, definition_digest}`.
+The triple must name the one selected read definition and match the exact
+artifact-capable registered generation. The registry's fixed revision-1 table
+contains the literal supported triples pinned before implementation; no caller
+can supply or edit it through create/configure. Core validates that binding at
+admission and replay without looking up a changed host file. Legacy v2 selection
+reconstruction uses its retained exact definitions and the same literal legacy
+entries, resolving null for generations without support; it never rewrites old
+genesis or upgrades an old read generation by name. Unknown generations refuse selection. Do not infer capability from a
+version prefix, advertised name or a guessed schema field. A legacy exact table
+entry without this capability follows the inline branch below. Changing the table
+requires a new generation/admitted selection, never a replay-time reinterpretation.
+
 **Legacy inline compatibility.** For a session whose frozen read generation
 does not support `artifact_use`, preserve the existing inline result shape and
 the full committed `result.content`, with the normalized cross-run call identity
@@ -170,6 +189,18 @@ Cancellation stops preparation; exhausted count/bytes/time yields a named
 refusal, never a fresh episode for the same staging identity. No provider calls
 or artifact-content reads occur as preparation side effects. Already retained
 references are reused and do not consume another source allowance.
+
+Staging and preparation failures use ADR 0043's version-2 closed failure union.
+Use `artifact_read_unavailable` for a required retrieval capability absent from
+selection, `artifact_metadata_unrepresentable` for an individually impossible
+reference envelope, and `context_projection_invalid` for missing/conflicting
+canonical facts or normalized-ID collision. Preparation count, source-byte and
+fixed-episode-deadline exhaustion use the corresponding `artifact_preparation_*`
+cause; definite retention failure uses `artifact_preparation_failed`. Existing
+run cancellation/deadline and Store commit-unknown rules take precedence. A
+full numeric request overflow keeps its numeric dimension. A failure before
+projection exists uses `projection_state: unavailable` and no invented counts.
+This does not change executor retrieval/tool-result error schemas.
 
 **Explicit read range.** A new generation of `read` accepts either its existing
 workspace `path` inputs or `artifact_use`, nonnegative byte `offset` and positive

@@ -6,7 +6,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure to allow bounded maintenance first and its closed receipt source-reference union for maintenance and checkpoint provenance. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure and closed refusal/failure shapes to allow bounded maintenance first and versioned preparation failures and its closed receipt source-reference union for maintenance and checkpoint provenance. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) and [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Also extends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with explicit maintenance instructions and model selection; its one-shot interface, credential audience and cleanup guarantees remain unchanged
 - **Maintenance resource receipts:** Narrowly amends [ADR 0017](0017-durable-context-admission-budget.md#concept) and [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) so a successful maintenance request can explicitly record that optional resource intake was skipped; ordinary admission and older receipt validation remain unchanged
@@ -63,7 +63,13 @@ records. Their committed provenance grants no authority over future effects.
 Maintenance admits no fresh project resources; its receipt explicitly records
 that omission rather than claiming an ordinary resource-admission pass.
 
-Source and output remain bounded. Every checkpoint must strictly reduce both
+Source and output remain bounded. A completed group from a terminal run may be summarized even when it is the
+newest group, if retaining it would block the next request by size or unsupported canonical
+tool-history rendering. Explicit compact can also cover it to prepare for a
+smaller model. Current-run inputs
+and open exchanges remain protected. Failure projections are versioned and name
+either the measured bound or the precise preparation failure; old records keep
+their old validation. Every checkpoint must strictly reduce both
 projected token count and exact record size. Insufficient room for the minimum
 excerpt, invalid summary, no progress or exhausted episode produces a named
 refusal. Useful checkpoints already committed remain; failed work cannot roll

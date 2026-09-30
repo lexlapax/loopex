@@ -46,9 +46,24 @@ Each selection unit includes its preceding unconsumed user/steer elements from
 the same run in original order. Contiguous unconsumed inputs left by a terminal run with no
 pending operation or interaction form an input-only unit. Failed or cancelled
 runs without an assistant reply must not strand those inputs. No unfinished
-group is eligible. Preserve current prompt/steer and the newest complete assistant group.
-Grow this tail backward by complete groups and intervening inputs while it fits
-a 2,048-estimated-token target; the mandatory tail may exceed that target.
+group is eligible. Protect current-run prompt/steer and every unfinished group.
+Initially also keep the newest complete assistant group. Measure that minimum
+tail plus fixed instructions, metadata and prior checkpoint against the applicable
+ordinary hard limits or ADR 0044 initial targets at `q=0`, without optional
+resources. Release the newest group, with its preceding inputs, when it belongs
+to a terminal run and any of these conditions holds: that minimum cannot fit;
+retained terminal tool history fails ADR 0044 canonical rendering admission; or
+the trigger is explicit compact. Explicit compact can therefore prepare for a
+smaller model even when the current larger window fits. This is eligibility,
+not a promise that the resulting summary satisfies an arbitrary future window.
+This applies to automatic and explicit compaction, including cancelled or bound
+runs. Never release current-run inputs or an open exchange. Recompute the minimum;
+if the truly protected content still cannot fit, refuse by the relevant bound.
+Grow the retained tail backward only while each complete group plus intervening
+inputs fits both the 2,048-estimated-token preference and the applicable complete
+request limits/targets. Optional tail growth cannot prevent initial preparation.
+A group released by this rule cannot be re-added by optional tail growth in the
+same selection. Selection and this exception use strategy revision 3.
 
 From the oldest remaining range, select the largest contiguous prefix ending
 at a complete-unit boundary that fits both the 16,384-byte encoded source
@@ -68,18 +83,18 @@ Compaction fetches no artifact and creates no implicit artifact reference.
 If no complete prefix fits, select exactly the oldest eligible unit using the
 marked serialized-excerpt form below. Coverage still consumes that whole unit;
 the checkpoint cut never splits a tool/result group. Try per-end raw-byte
-quotas 8,192, 4,096, 2,048, 1,024 and 512, in that order. For each, take the
+quotas 4,096, 2,048, 1,024 and 512, in that order. For each, take the
 shortest UTF-8-safe prefix and suffix of at least that quota, at most three
 extra bytes per end. Require a nonempty omitted middle and disjoint fragments.
 Skip an invalid candidate; select the first whose exact source and complete
 maintenance request pass every limit, including the 1,024-token reply reserve.
-This is five local sizing candidates, not five provider attempts or a claim to
+This is four local sizing candidates, not four provider attempts or a claim to
 the largest possible excerpt. JSON escaping can enlarge fragments, so raw
 quotas alone never establish fit. If none fits, refuse
 `compaction_excerpt_budget_too_small` before provider intent. The prior checkpoint,
 instructions and minimum fragments can still be irreducible in a small window.
 Neither this refusal nor strict-decrease failure authorizes trimming the protected
-tail, dropping prior summary data or opening another automatic episode.
+current-run inputs, dropping prior summary data or opening another automatic episode.
 
 **Summarizer selection.** Add immutable optional `maintenance_model` at the same
 startup entrypoints as `maintenance_instructions` below. Durable and ephemeral
@@ -88,23 +103,29 @@ ADR 0044's host capability/mapping normalizer. Validate the selected route under
 ADR 0048. Direct `Loopex.start_link/1` / `Runtime.start_link/1` receive only the
 closed resolved map `{model, reasoning, model_capabilities, provider_mapping}`,
 with the same field bounds and combined 2-KiB capability/mapping ceiling as
-ADR 0044. Reasoning is verified `none`, or `default` only when its retained
-mapping proves omission disables thinking for that exact model. No credential,
-route handle, module, provider-option bag or live resolver enters this map.
-The verified maintenance mapping has `continuation_required: false`.
+ADR 0044. Maintenance requires `reasoning: none`,
+`provider_mapping.thinking: {mode: disabled}` and `continuation_required: false`.
+The exact renderer proves its outgoing request disables thinking without raising
+the committed reply ceiling; `default` and `{mode: omitted}` cannot establish
+this. Other providers may encode the normalized disabled selection differently.
+No credential, route handle, module, provider-option bag or live resolver enters
+this map.
 Core validates plain data and never consults a catalog or derives a provider
 mapping from the conversation model. Composition forwards the resolved option
 through runtime `Control`, durable assembly and ephemeral
 `SessionOwner.runtime_options/1`.
 
-Absent/nil means unconfigured: ordinary work remains valid, but new maintenance
-refuses `maintenance_model_unconfigured`. It never means inherit the parent
+Absent/nil means unconfigured: ordinary work is available only while its
+staging limits and any initial thinking reserve fit; new maintenance refuses `maintenance_model_unconfigured`. It never means inherit the parent
 model. A host may explicitly select the same model. Invalid supplied selections,
 unsupported thinking-off mappings or unavailable configured routes refuse
 composition startup before owned runtime/session effects; direct core startup
 rejects invalid resolved data. Missing instructions retain their distinct
-refusal. No public create/configure/compact or per-prompt field overrides these
-host startup settings. ADR 0049 maps the model selection to explicit file/CLI
+refusal. Startup and `/status` warn when a continuation-required conversation has no
+maintenance model. The remedy is a host restart with an explicit admitted
+summarizer; a request which needs maintenance cannot continue merely because
+ordinary calls were previously possible. No public create/configure/compact or
+per-prompt field overrides these host startup settings. ADR 0049 maps the model selection to explicit file/CLI
 configuration; it supplies no default summarizer.
 
 At episode admission, retain the parent configuration version and capture the
@@ -248,7 +269,7 @@ Use the actual
 serializer, fixed-point receipt and token/depth/cardinality checks for the entire
 65,536-byte request, including semantic fields and canonical bytes. Stream source
 counting/hashing and projection over the captured range, with bounded source
-pages/records and two end buffers of at most 8,195 bytes each. Do not collect an
+pages/records and two end buffers of at most 4,099 bytes each. Do not collect an
 unbounded projected message list or serialized unit. Complete-prefix sizing
 retains at most the 16,384-byte candidate. Check cancellation/deadline between
 bounded reads and encoding chunks; traversal spends the episode deadline.
@@ -273,7 +294,14 @@ string encoding, including quotes and escaping, and `carry_forward` containing
 arrays `files_read` and `files_changed`, together at most 2,048 encoded bytes.
 The whole encoded summary/carry-forward envelope is at most 6,144 bytes, so
 independently maximal members may need to be smaller to leave room for framing. Bound each path to 1,024 bytes and each list to 32
-entries. Unknown/invalid/oversize output fails without a hidden repair call.
+entries. Unknown/invalid/oversize output fails without a hidden repair call. The 6,144-byte
+limit is an admission ceiling, not output capacity promised by 1,024 tokens.
+The reference instruction asks for a compact envelope below 3,072 encoded bytes.
+A native `max_tokens` stop, its normalized `length` equivalent, or unknown completion stop, even with parseable JSON, fails as
+`maintenance_summary_incomplete`; malformed, extra-key or oversized output fails
+as `maintenance_summary_invalid`. Both consume the attempt and observed or
+conservative usage under the existing accounting rules; neither permits a repair
+call or a fresh automatic episode.
 
 Measure the next candidate projection before and after substitution using the
 same staging serializer and estimator. For a thinking-headroom trigger, compare
@@ -292,9 +320,82 @@ remaining capacity below those targets and exact final preflight, as ADR 0044
 requires. All maintenance requests keep their own existing hard limits;
 the ordinary pre-exchange targets do not halve the summarizer's allowance.
 
+**Refusal records and projections.** This proposal amends ADR 0017's closed
+failure and refusal unions. Old `context_admission_refused_v1` and its five-key
+failure retain their exact rules, including the 1,000 system limit. New staging
+uses `context_admission_refused_v2`; never replay old bytes as the new revision.
+Its exact members are ADR 0017's nineteen-key v1 shape with `kind` changed to
+v2, the four members `category`, `dimension`, `observed`, `limit` replaced by
+`failure`, and four added members `configuration_version`, `episode_id`, `targets` and
+`projection_state`. Configuration is the captured version; episode is null or its bounded
+owning identity. All earlier count/digest/disposition rules remain for the canonical descriptor
+sequence. The complete estimate additionally includes continuation under ADR
+0044; it is not asserted equal to descriptor subtotals alone. Use ADR 0044's
+estimator for new requests, including continuation cost. `targets` is null for
+ordinary hard-limit refusal, or exactly `{revision, record_target, input_target}`
+with ADR 0044's captured rule and recomputed values. No source text is retained. `projection_state` is `measured` or `unavailable`.
+Numeric failures require measured. With measured, compact counts/digest/estimate
+describe the last captured minimum ordinary projection, not an admitted request;
+record cost may still be null under the earlier preflight-order rules. With
+unavailable, permitted only for a nonnumeric failure before projection exists,
+the four counts, ordered descriptor digest, provider estimate and record cost
+are all null, never fabricated zero observations. Captured configuration/budgets
+and any derived targets remain required. For nonnumeric preparation failure,
+record cost is null. Standalone compact
+uses its episode record instead and emits no invented context-refusal run record.
+
+The new `failure` is one of these exact closed objects:
+
+- `{version: 2, category: "context_budget_exceeded" | "thinking_exchange_headroom",
+  retryable: false, dimension, observed, limit, hard_limit}`. The dimension is
+  one of ADR 0017's five values. Counts are unsigned 64-bit integers; limits are
+  positive. Ordinary token, byte and structural limits retain ADR 0017's
+  measurement relations, with `hard_limit == limit`; system limit instead equals
+  the captured configured `system_class_tokens` and refuses at `observed >= limit`.
+  Other dimensions refuse only above the limit. Headroom permits only
+  `context_tokens` or `context_record_bytes`: limit equals the corresponding
+  captured target, hard_limit equals the captured ordinary input ceiling or
+  65,536, and `observed > limit` even when observed does not exceed hard_limit.
+  Record cost equals observed only for the byte dimension, as before.
+- `{version: 2, category: "context_preparation_failed", retryable: false, cause}`.
+  The closed causes are `maintenance_model_unconfigured`,
+  `maintenance_instructions_unconfigured`, `maintenance_reasoning_unsupported`,
+  `compaction_excerpt_budget_too_small`, `compaction_no_progress`,
+  `maintenance_summary_incomplete`, `maintenance_summary_invalid`, and
+  `canonical_history_rendering_unsupported`, `artifact_read_unavailable`,
+  `artifact_metadata_unrepresentable`, `artifact_preparation_count_exhausted`,
+  `artifact_preparation_bytes_exhausted`, `artifact_preparation_deadline`,
+  `artifact_preparation_failed`, and `context_projection_invalid`. They report a condition, not a
+  fabricated numeric budget observation. Invalid startup configuration has no
+  run record and remains a startup validation error.
+
+For an active ordinary run, commit the v2 refusal with its failed
+`run_terminal_committed` in one transaction, substituting only the nested failure
+union in ADR 0017's exact terminal shape. Bind its configuration, staging identity,
+measurements and optional episode to the owning records. Maintain cancellation,
+deadline, provider failure and commit-unknown precedence; those existing outcomes
+keep their own schemas and do not become preparation failures. A completed
+maintenance failure records its cause in the episode terminal and ends the
+triggering run with that same projection, without a second provider settlement.
+For standalone compact, the episode terminal and idempotent command result carry
+this same closed failure union, without inventing a run. `unchanged` is successful
+only under the selection rule above. Exhausted attempts/usage/deadline retain the
+existing bound outcome and its measurements. An episode's before/after projection
+measurements prove no-progress locally; they are not new public payload fields.
+
+`run.finished`, compact completion and snapshot failure views carry this exact
+version-2 object under the new foreground/daemon generations. CLI rendering uses
+only these safe fields. Version-1 and version-2 validators, reducer transactions,
+snapshot/event projections and independent Node vectors must reject unknown
+keys/causes, wrong configured limits, fabricated targets and cross-version shapes.
+The compact private refusal itself must pass Store bounds before proposing its
+transaction; failure to retain it means Store unavailable, never a fabricated
+terminal or acknowledgement. Detailed provider blocks and descriptors remain
+absent from all failure projections.
+
 **Checkpoint.** Retain original lineage/range, newly consumed raw range, prior
 checkpoint ID if any, first-kept identity, summary/carry-forward bytes, strategy
-`loopex.compaction.reference` revision 2, exact model/reasoning/configuration
+`loopex.compaction.reference` revision 3, exact model/reasoning/configuration
 version, usage, summary-input digest and ordered covered-record integrity digest.
 Ranges extend contiguously without gaps/cycles and never split tool/result groups.
 Retain the owner-computed boolean `source_excerpted`: the prior checkpoint's
@@ -339,11 +440,20 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   fits but the byte-maximal prefix does not. Old 12 KiB prompts, 10 KiB write
   arguments, large call metadata and settled input-only runs use marked excerpts
   with maximal prior checkpoint data. No silent truncation or cut inside a group.
-- Exact fragment offsets, digests, UTF-8 boundaries, escaping expansion, the five
+- Exact fragment offsets, digests, UTF-8 boundaries, escaping expansion, the four
   candidate quotas, whole-request receipt measurement and minimum-excerpt refusal.
   Original facts remain readable, including a sentinel outside both fragments;
   no check claims the model saw that sentinel. Invalid summary, fixed/system
   context overflow and no-progress cases remain named refusals.
+- A terminal run whose newest group is a 14-KiB write or four 4-KiB range
+  results can release that group and resume after compaction; include cancelled
+  and bound outcomes, maximal prior checkpoint and both automatic/explicit paths.
+  Current-run inputs/open exchanges remain protected. Exact sizing of maximal
+  summary, largest demonstrated profile, both headers and retained tail must
+  establish the fixture's pinned input ceiling before its provider attempt.
+- Explicit compact covers a sole terminal group that fits the old window but
+  prevents a smaller-model configure; then a separately admitted configure uses
+  the new summary. No provider call occurs inside configure itself.
 - Old question answers and explicit artifact-range results remain exact in
   ordinary projection and original history; only maintenance source may excerpt
   them. No artifact fetch or implicit artifact/reference creation occurs.

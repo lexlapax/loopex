@@ -6,9 +6,9 @@ Technical depth: [Run model and reasoning configuration](0044-run-model-and-reas
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 adds that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also extends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement, preserving its accounting-provenance rules and the existing v2 meaning.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 amends [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) to add that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also extends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement, preserving its accounting-provenance rules and the existing v2 meaning. Qualifies ADR 0011's continuation-material exclusion solely for verified provider summary text in existing transient reasoning progress. Extends [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with reasoning configuration; its buffered transport and cleanup remain unchanged.
 - **Requires with multi-provider use:** [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
-- **Prerequisite for:** M7 outcome 4
+- **Prerequisite for:** M7 outcomes 4 and 7
 - **Coordinated wire amendment:** Replaces [ADR 0023](0023-experimental-public-session-protocol.md#concept)/[ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept)'s served generations and schema-digest inputs through the M7 contract below; their authority, framing and connection-lifecycle rules remain
 
 <a id="concept-adr-0044-decision"></a>
@@ -48,7 +48,10 @@ Configuration becomes a durable session fact. Creation and settled-only
 `configure` commit an exact model identity, reasoning, instruction envelope and
 context/reply limits with one version. A run captures that version at admission
 and keeps it through restart. No configuration change occurs inside a run or
-unresolved maintenance operation.
+unresolved maintenance operation. Ephemeral `start_session/1` and one-shot
+`run/2` accept explicit initial instructions, reasoning and system ceiling;
+`ask/3` cannot override those startup choices. Their existing defaults and
+buffered delivery remain.
 Maintenance retains the parent configuration identity and applicable ceilings,
 while capturing ADR 0043's separately configured summarizer and host instructions.
 Changing ordinary model or instructions does not replace those runtime settings
@@ -78,7 +81,8 @@ captured blocks. References grant no access to history, artifacts or a provider.
 
 The initial Claude verification set pairs the dated Haiku 4.5 model, with manual
 thinking and a thinking-off maintenance mode, with Fable 5.1 for always-on
-adaptive conversation. Explicit adaptive levels request verified summaries;
+adaptive conversation. Haiku manual modes return verified native summary text;
+explicit adaptive levels request verified summaries;
 `default` preserves the provider's default display. Other combinations require
 their own exact verified mapping. Manual `high` conflicts with the existing
 4,096 reply default and refuses unless the operator explicitly configures a
@@ -89,14 +93,20 @@ Before a new thinking exchange, leave half the complete request-record capacity
 and up to 8,192 estimated input tokens available for its continuation. Earlier
 eligible history may need compaction even when the first request would fit the
 hard limits. Required current content that cannot leave this reserve refuses
-before the first ordinary provider call. Existing summary attempts, spending
+before the first ordinary provider call, including a large first prompt in a
+fresh session. A terminal run's newest completed group is eligible for ADR 0043's
+bounded compaction when retaining it would prevent this preparation. Existing summary attempts, spending
 and deadlines still bound preparation. The reserve does not guarantee a number
 of tool rounds or make an oversized reply acceptable.
 Preserve the complete rendered conversation
 prefix while a thinking tool exchange is open. Compaction waits until it ends;
 if the next request cannot fit, stop with a named bound failure rather than
 dropping or changing required blocks. A new run starts from canonical history
-and never resurrects old thinking state.
+and never resurrects old thinking state. If its exact mapping cannot render a
+retained terminal tool turn without that private state, refuse before dispatch
+with `canonical_history_rendering_unsupported`. The operator may explicitly
+compact that group, even when it fits ordinary limits, or select a verified
+compatible mapping; no assistant completion is invented.
 
 Private continuation has a 16-KiB cap on both stored and expanded envelopes,
 and remains within the existing
@@ -142,8 +152,9 @@ in public configuration snapshots.
 The maintainer selected updated wire clients only. M7's foreground server serves
 `loopex.experimental/3`; its daemon serves `loopex.experimental/4`. Both refuse
 older generations through the existing unsupported-generation handshake. The
-coordinated schema includes compaction, configuration, questions and the generic
-deadline additions, with complete payload definitions in each digest. Bundled
+coordinated schema includes compaction, configuration, host instructions,
+immutable create-time tool/defer selections, questions and the generic deadline
+additions, with complete payload definitions in each digest. Bundled
 clients and examples upgrade together. This changes no historical schema meaning,
 readable journal history or frozen tool definition, and adds no dual service.
 A shared genesis revision retains initial configuration, immutable tool

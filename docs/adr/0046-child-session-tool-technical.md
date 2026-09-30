@@ -81,8 +81,16 @@ command ID. Retain an immutable resolved creation object, at most 1 MiB, before
 `prepare_parent` commits its digest, original command/input digest, catalog
 digest and exact task generation. Then call core create with that exact command
 and payload. Commit `bind_parent` with the returned session ID before publishing
-the handle or allowing prompts. Lost acknowledgements replay that same create,
-then finish binding; missing binding never proves that creation did not happen.
+the handle or allowing prompts. The object also retains the closed delegation
+declaration: `enabled`, ordered enabled `roles`, `max_children`, aggregate
+`token_budget`, `child_bounds`, `max_tokens`, and per-role resolved
+`context_token_budget`/`system_class_tokens`, with a canonical digest. It uses
+the existing 1 MiB object cap; no core record receives these host fields.
+Lost acknowledgements first use the read-only creation queries below. An exact
+historical result finishes binding without create or activation. A proven absent
+result may re-present the same retained creation only during an authorized live
+parent-create command; helper recovery never reissues child creation. Missing
+binding alone never proves that creation did not happen.
 Unresolved binding fences parent admission through the host. Delegation checks
 session → binding → catalog → role; changed files cannot repair missing state.
 The two-transition binding log has a 1 MiB cap and reserves completion space
@@ -98,13 +106,37 @@ refuses; it cannot be reclassified as an interrupted append. Payload is at
 most 65,536 bytes. Each frame is one atomic logical transaction containing
 `version`, `tx_id`, `expected_version`, `mutation_digest`, and one mutation of
 kind `prepare_parent` or `bind_parent` in binding logs, or `initialize`,
-`reserve`, `child_created`, `child_prompted`, `stop`, `settle` or `bind_receipt` in run logs. The fields below define those mutation families; unknown fields,
+`reserve`, `recover_uncreated`, `child_created`, `child_prompted`, `stop`, `settle` or `bind_receipt` in run logs. The fields below define those mutation families; unknown fields,
 versions or kinds refuse. Commit append then fsync before acknowledging.
+
+The ledger's version-1 codec makes binary representation explicit. Host text
+fields are valid UTF-8; digests/checksums are lowercase hex. Opaque core IDs,
+fences and epochs that are binaries use canonical padded RFC 4648 base64 in
+those schema-declared fields; integer epochs stay integers. Nested exact core
+payloads in retained creation objects use exactly `{encoding:
+"loopex.ledger.plain_etf.v1.base64", bytes, sha256}`: bytes is base64 of
+`:erlang.term_to_binary(plain_payload, [:deterministic])`, without compression,
+and sha256 binds those decoded ETF bytes. This private codec serializes the
+plain map directly; it is not the tagged map tree used by protocol Canonical.
+Bound decoded payloads by their owning core limit before parsing, reject compressed
+ETF and noncanonical base64, decode with safe existing-atom rules, validate the
+owning closed plain-data schema, and require exact equality after re-encoding
+with that same deterministic ETF recipe. This is a
+private representation, never arbitrary-term acceptance or an atom-creation path.
+The host invokes the shared genesis validator after decoding retained genesis.
+Measure complete JSON after encoding, including base64 expansion, for object,
+frame, registry and closing-credit limits. Test non-UTF-8 IDs/digests, malformed
+base64, wrong hash, compressed/unsafe terms, mixed field encodings and oversize
+encoded frames. Never JSON-encode raw canonical request bytes or opaque binaries.
 
 The composition application owns this ledger; core has no ledger dependency.
 Cap a parent-run log at 16 MiB and child count at 128; the byte cap can bind
-before the child-count ceiling. Neither ceiling promises that 128 maximal
-children fit. Capacity refusal is
+before the child-count ceiling. `max_children` is an upper bound, not a promise
+of that many successful reservations; validation accepts 1 through 128. Neither
+ceiling promises that 128 maximal children fit. Calculate storage credit using
+the maximum encoded payload and framing for each remaining mutation kind and
+every permitted attempt receipt; do not multiply an average frame size.
+Capacity refusal is
 definite before append, never a hidden eviction. Before reserving a child,
 reserve disk-log capacity for the maximum bounded create, prompt, stop, settlement
 and final-receipt frames. Persist this storage credit with the token reservation.
@@ -126,7 +158,11 @@ children and receipts. Parent completion or quiescence alone cannot retire
 unresolved evidence needed for recovery or idempotency. Do not write another
 session's journal. A ledger `commit_unknown` fences this
 adapter's mutation domain until resolved; it cannot authorize child creation,
-refund, publication or reissue. The ledger retains:
+refund, publication or reissue. This fence includes settlement, receipt commits
+and slot release for independent parents sharing that adapter. Best-effort child
+abort/cleanup can continue without another ledger mutation; a later successful
+cleanup does not clear the fence. Recovery must resolve the original transaction
+before those mutations resume. The ledger retains:
 
 - Catalog identity and parent-run allowance: child count, reserved tokens,
   settled reported/estimated usage and unknown charges.
@@ -137,8 +173,16 @@ refund, publication or reissue. The ledger retains:
 - The immutable resolved child-creation input, including cleanup grace, tool
   definitions, policy mode and configuration, or a digest-bound retained object
   installed before reservation under the same 1 MiB object rules as parent
-  creation. Keep the original command input and its digest as well as resolved
-  values. Current startup defaults cannot reconstruct a different create input.
+  creation. Keep original options/input and their digest, plus the exact fully
+  resolved v2/v3 genesis submitted at creation, including its normalized options
+  and runtime_configuration. The parent creation object retains the same pair.
+  Use one planned pure core helper, `Loopex.Runtime.SessionGenesis.normalize/1`,
+  shared by the M7 create writer and both retained-genesis paths. It accepts the
+  complete v2/v3 payload and returns `{:ok, normalized_genesis}` or
+  `{:error, :invalid_session_genesis | :session_configuration_too_large}`; it
+  inserts no defaults and performs no Store call. Composition must not duplicate
+  its closed decoders or normalization. Current startup defaults
+  cannot reconstruct a different create input.
 
 Use core's idempotent create command and returned session ID. Create and prompt
 command IDs derive from the logical operation, excluding executor attempt.
@@ -149,8 +193,10 @@ Different arguments under the same identity refuse. Retain each original
 attempt tuple separately; operation deduplication does not make an old receipt
 valid for a new attempt.
 
-**Allowance.** All limits come explicitly from ADR 0049. Initialize once per
-parent run. In one ledger transaction, check child count and aggregate remaining
+**Allowance.** ADR 0049 supplies the declaration retained with the parent
+binding, not fresh invocation values on resume. `initialize` binds its digest
+and effective limits once per parent run. A new run uses the same immutable
+declaration with new counters; a resumed run reuses its existing counters. In one ledger transaction, check child count and aggregate remaining
 tokens, reserve `min(child_token_budget, remaining)` and increment child count.
 Commit before creating the child. Replays of that operation reuse its reservation.
 Pass the reserved token threshold and configured turn/reply limits to the child.
@@ -172,8 +218,12 @@ terminal and cleanup evidence, settled accounting and persisted attempt receipts
 Before opening admission, use complete classification of retained parent
 delegation intents across runs to establish the expected run/operation set, then
 reconcile its existing binding/run logs. Enumerating present hashed log files
-alone cannot establish completeness or an empty slot. Missing, corrupt or
-unavailable required coverage refuses. Build the live occupied-slot view from
+alone cannot establish completeness or an empty slot. The read-only query and
+missing-log recovery rules below distinguish proven uncreated work from missing
+child evidence. Corrupt or unavailable required coverage refuses the affected
+parent's helper admission; it does not erase a known unrelated session's
+classification. A session whose own provenance cannot be established cannot be
+mutated as an ordinary session. Build the live occupied-slot view from
 that validated reconciliation rather than rescanning history on each call. This
 adds no separate persistent slot record or cross-log transaction. The exclusive
 owner serializes reservation and release, including between runs.
@@ -212,7 +262,12 @@ including omission, before defaults are resolved. Prompt overrides remain
 partial and closed to `max_turns`, `token_budget`, `deadline_ms` and
 `deadline_at_ms`. Follow-up `bounds` is closed to `deadline_at_ms` alone;
 ordinary limits inherit under ADRs 0013/0017 and do not read current defaults
-at promotion. Steer accepts no bounds. This explicitly amends ADRs 0011/0017's
+at promotion. Retain a queued follow-up's own `deadline_at_ms` separately from
+the predecessor's declared bounds. Promotion copies only inherited ordinary
+limits and applies that follow-up's captured ceiling; omission never copies the
+predecessor's absolute ceiling. This belongs to the already proposed admission
+and normalized-command revision; old records retain their old promotion rules.
+Steer accepts no bounds. This explicitly amends ADRs 0011/0017's
 old normalized identity, which omitted ordinary bound configuration. Resolve
 effective prompt defaults once at admission, retain them separately, and
 check duplicate command facts before resolving them again. Preserve old
@@ -242,17 +297,51 @@ of a terminal cannot manufacture a known failure.
 executor job may reserve/create/prompt. One host mutation producer serializes
 those calls with cancellation; no detached worker keeps a reusable launch permit.
 Stable command IDs deduplicate live calls, but do not authorize recovery to
-submit a previously unadmitted command. Serialize job registration and cancel
-at the router before handing a helper launch to its mutation producer. Register
-the job ID and validated original tuple before reserve/create/prompt. A known
-helper cancel uses its durable operation stop. An unclassified job ID has no
-bound digest and cannot create a durable stop, as ADR 0016 requires. It closes
-a single volatile `helper_admission_closed` flag for this router incarnation
-and returns unconfirmed unless the unchanged local executor establishes its
-own conclusive receipt. The closed flag prevents every later helper launch,
-including a delayed execute that had not registered when cancel arrived; it
-never reopens in this incarnation. Local-tool routing/receipt bytes remain
-unchanged. Existing known helpers can settle or be cancelled normally.
+submit a previously unadmitted command. Serialize registration and cancellation
+at the router for every forwarded job, local or helper, before forwarding or
+reserve/create/prompt. A closed registry row contains `job_id`, `route` (`local`
+or `helper`), `operation_id`, `attempt`, `session_id`, `run_id`,
+`canonical_request_digest`, `origin_session_epoch`, `origin_executor_epoch`,
+`executor_identity`, `fencing_token` and `cleanup_grace_ms`, all from the
+validated job. Use lowercase hex for the digest and canonical padded RFC 4648 base64 for
+opaque binary identity/fence fields in its JSON size projection, as in the
+ledger codec below. Decode by field schema, never by guessing a string's shape. A repeated ID with different
+binding refuses; an exact repeated job reuses the row. A row supplies routing
+and cancellation bounds, never a launch permit or a replacement grant.
+
+Retain registered rows until that exact router incarnation ends, including
+after execute returns; no timer or settlement evicts them. Cap the registry at
+4,096 rows and 8,388,608 total canonical JSON bytes, including each row's key.
+Before admitting a new distinct job, measure both limits. If either would be
+exceeded, return the existing `{:error, {:refused_before_effect,
+:router_registration_capacity}}` executor result without forwarding or ledger
+mutation. Existing rows, cancellation, receipt reads and cleanup remain usable;
+there is no automatic restart or eviction. The host diagnostic names registry
+capacity and the full-composition restart remedy. Existing private job/receipt
+contracts and public failure projection stay unchanged. Recovery may seed a
+row from validated committed intent evidence before cancelling that job; this
+does not authorize execution and obeys the same limits. If classification cannot
+be retained, refuse activation rather than attempting unclassified recovery.
+
+Known local cancellation forwards unchanged to Local and does not close helper
+admission. Known helper cancellation uses only its durable operation stop.
+Derive the cancellation callback's absolute monotonic observation deadline once
+on entry from the registered parent job's `cleanup_grace_ms` and
+`Executor.cancellation_bounds/1`; queueing and nested waits spend that deadline.
+Do not use the current runtime grace or renew the deadline between child waits.
+The child may have a longer committed grace. Its cleanup can therefore finish
+after the parent's observation window; return unconfirmed and preserve the
+parent's unknown outcome without a refund or later terminal rewrite.
+
+A cancel that arrives before registration has no bound digest and cannot create
+a durable stop, as ADR 0016 requires. It closes the volatile
+`helper_admission_closed` flag for this router incarnation and returns
+unconfirmed unless the unchanged local executor establishes a conclusive
+receipt. The flag also covers any other genuinely unclassifiable job ID; never
+claim that absence identifies its route. It prevents every later helper launch,
+including delayed execute registration, and never reopens in this incarnation.
+This may affect all parents in a daemon host. Existing classified helpers can
+settle or be cancelled normally. Local request and receipt bytes remain unchanged.
 
 The router reference names its exact PID/incarnation, never a global alias that
 silently rebinds after failure. A replacement requires normal host construction
@@ -291,6 +380,136 @@ flag; only the unclassified-cancel path above does that. Best-effort
 abort and cleanup of already known children continue while a stop commit is
 unresolved; they do not authorize another ledger mutation or a cleaned receipt.
 
+**Read-only recovery queries.** These are new M7 joins owned by core's runtime
+Control process, not existing APIs or composition reads of adapter internals.
+They require the exact `Runtime.t()` capability and validate the runtime's Store
+scope. They never start/attach a coordinator, acquire an owner, append records,
+resolve an unknown write by mutation, or dispatch provider/executor work. No
+query result grants command or effect authority. Do not expose their private
+payloads through wire schemas, progress or diagnostics. Unknown fields and
+versions refuse; callers never construct atoms from returned input. Field lists
+in braces below denote closed plain maps; tagged API results are tuples.
+
+- `Runtime.effect_intents(runtime, session_id, cursor, limit)` accepts `nil`
+  or the closed cursor `{version: 1, runtime_id, session_id, through_version,
+  after_version}` and integer `limit` from 1 to 16. The first call captures
+  `through_version` from `Store.ownership_head/3`; later calls scan that same
+  immutable prefix through `Store.load_records/4`. Each call scans at most
+  `limit` private records, advances past every scanned record, and returns
+  `{:ok, {version: 1, runtime_id, session_id, through_version, scanned_through,
+  rows, next_cursor}}`, where each row is exactly `{journal_version, job}` and
+  `job` is the validated plain JobRequest projection of an
+  `effect_intent_committed` record. Exclude grants and owner-incarnation stamps.
+  Return all executor kinds; composition selects the retained task generation.
+  Empty `rows` does not end a scan: only `next_cursor: nil` proves that the
+  captured prefix is complete. Preserve Store's 65,536-byte per-record bound;
+  at most 16 rows and 1,114,112 `Canonical.encode/1` bytes may leave one call.
+  This private API returns plain data, not the ledger JSON representation. Invalid cursor
+  scope, ordering, gaps or unsupported records refuse; an available empty
+  session differs from absent/unavailable history. The closed errors are
+  `invalid_query`, `session_absent`, `history_unavailable`, `invalid_history`
+  and `runtime_unavailable`, returned as `{:error, reason}`. Composition's
+  startup recovery deadline applies between pages; timeout never means complete.
+- `Runtime.creation_provenance(runtime, selector)` accepts exactly
+  `{kind: :command, command_id}`, `{kind: :session, session_id}`, or
+  `{kind: :runtime_page, cursor, limit}`. The first two are point queries. The new
+  read-only Store callback `creation_provenance(reference, runtime_id, selector)`
+  returns `{:historical, {version: 1, runtime_id, command_id, session_id,
+  genesis_version, canonical_create_digest}}`, `:absent`, `:conflict`, or
+  `:unavailable`. IDs retain existing Store limits, `genesis_version` is 2 or 3,
+  and the digest is 64 lowercase hexadecimal characters. The complete historical
+  projection is at most 65,536 encoded bytes. Read only an atomically committed
+  create mapping; a cross-kind command or wrong-runtime session is `:conflict`.
+  A mapping whose supported genesis/digest cannot be validated is unavailable.
+  Build any reverse index from retained create transactions during replay; do
+  not infer provenance from session-directory metadata or add a helper field.
+  Runtime returns `{:ok, {:historical, projection} | :absent | :conflict |
+  :store_unavailable | :unexpected}` and uses `{:error, :runtime_unavailable}`
+  for Control loss; malformed selectors
+  return `{:ok, :unexpected}`. Store unavailability/malformed output maps to
+  `:store_unavailable`, never absence. This read callback extends ADR 0008 and
+  the Store conformance suites without changing retained transaction bytes.
+  The runtime-page selector extends that same Store callback. Limit is 1–16;
+  cursor is nil or exactly `{version: 1, runtime_id, through_create_ordinal,
+  after_create_ordinal}`. The first call captures the committed creation high-water
+  ordinal; each page returns `{:page, {version: 1, runtime_id,
+  through_create_ordinal, rows, next_cursor}}`. Rows are the historical projection
+  above plus `create_ordinal`, ordered by that ordinal, each at most 65,536 bytes;
+  complete response is at most 1,114,112 canonical bytes. Runtime wraps a valid
+  page in `{:ok, {:page, projection}}`. Only nil next_cursor proves complete
+  coverage. Point queries never return pages. Invalid cursors return unexpected;
+  incomplete/corrupt indexes return store_unavailable, never an empty page.
+  Build ordinals from authoritative committed create transactions in replay order,
+  scoped by runtime, preserving them on reopen. They are derived read indexes,
+  not new session fields or directory-discovery authority. Both Stores must prove
+  complete enumeration, empty/populated paging and concurrent-create cut behavior.
+- `Runtime.lookup_create_result(runtime, command_id, session_options,
+  retained_genesis)` adds a four-argument exact-history variant. Normalize and
+  require `session_options` to equal the retained genesis `options`; validate
+  the complete retained payload under its exact v2 or ADR 0044 v3 decoder and
+  65,536-byte cap, then use `Store.create_session/3` only as the pure transaction
+  constructor and `Store.runtime_command/2` as the read. Never call transact or
+  insert current defaults, cleanup grace, definitions or provider mappings.
+  Keep `/3`'s existing result union: `{:ok, {:historical, session_id} | :absent |
+  :conflict | :store_unavailable | :unexpected}` or
+  `{:error, :runtime_unavailable}`. Invalid supplied genesis returns unexpected;
+  a different retained binding returns conflict. Keep `/3` and v2 history
+  unchanged; parent/child binding recovery uses `/4`. This is the narrow
+  ADR 0016 amendment for retained cleanup configuration, not permission to
+  change an existing session's grace or to replay a historical create.
+
+Before opening admission, the host completely enumerates committed creating
+mappings with the runtime-page selector, then scans each enumerated session's
+intent prefix. This yields the complete expected parent/operation set even when
+host binding/log files are missing; Control's live-session map and the daemon's
+discovery index cannot establish completeness. Account for all predecessor
+producers/in-flight creates before capturing the startup cuts. After opening,
+the serial adapter retains each newly authorized parent/helper create identity
+and joins its committed mapping before exposing session mutations. An unseen
+session triggers a complete creation-watermark delta scan and intent coverage
+before classification, or remains fenced. New commits cannot be omitted by
+reusing an old cut as current completeness proof.
+The host then joins creating-command
+provenance to deterministic child-create IDs derived from those intents, not
+only reservations whose log files happen to exist. During a still-accountable
+in-flight create, defer mutation classification until the mapping is conclusive.
+A helper's provenance remains helper-owned after settlement or log loss.
+Unresolved evidence fences the affected parent/helper; it does not downgrade
+that session to ordinary or erase a separately established unrelated identity.
+
+**Intent without retained reservation.** A missing run log, or an expected
+operation absent from a valid recovered log prefix, is not automatically proof
+of tampering or of zero prior reservations. After the predecessor producer is
+gone and all sent creates are accounted for, query creation provenance by each
+expected child-create command ID. A historical result without its required
+reservation/creation input refuses as missing evidence; conflict, unavailable
+or unexpected also refuse. Only conclusive absence permits the recovery below.
+A present reservation still uses exact `/4` lookup; never replace it by this
+weaker identity-only check. A corrupt log is not eligible for reconstruction.
+
+Create a missing `initialize` from the immutable parent declaration, then commit
+one `recover_uncreated` mutation per expected operation in journal order. Its
+closed fields are `operation_identity`, `source_intent` (exactly `session_id`, `journal_version` and
+`canonical_request_digest` as lowercase hex), derived `create_command_id` and `prompt_command_id`,
+`reservation_state: "unknown"`, `reason: "adapter_recovery"`,
+`child_session_id: null`, `child_run_id: null`, `reported_child_usage: 0`,
+`count_charge: 1`, and `closing_credit_bytes`, plus `kind: "recover_uncreated"`. It uses the normal versioned frame.
+The source reference resolves only the captured immutable intent row through the
+bounded query above, validating operation and original attempt against that job;
+never embed its binary canonical request bytes in JSON. Repeated recovery re-reads
+and validates the same row before building a receipt; missing source refuses.
+Use a transaction ID derived from that operation; replay returns the original
+mutation without another charge. Absence proves no child/provider usage, but
+cannot prove that the lost log never reserved a count slot. Therefore charge
+one conservative count slot, never reconstruct zero counts or refresh allowance.
+Reserve bounded credit for settlement and all original-attempt receipts before
+this mutation. If expected operations exceed the retained count or storage
+bounds, refuse that parent's recovery; do not clamp counts or discard intents.
+This transition is already stopped, creates no launch permit, and may only
+settle known no-child failure and bind the original-attempt receipt. It consumes
+no child tokens and cannot later transition to reserve/create/prompt. The normal
+stop-only recovery, conclusive-receipt and slot-release rules still apply.
+
 On adapter startup, before opening routing/admission, mark every unfinished
 predecessor operation stopped with reason adapter_recovery. A missing earlier
 cancel record changes nothing: loss of the manager itself selects stop-only
@@ -301,7 +520,7 @@ fence tuple; solicited receipts use the current query ID and owner epoch.
 
 | Retained gap | Stop-only recovery |
 | --- | --- |
-| Reservation; missing create result | Read `Runtime.lookup_create_result/3` with the exact retained original creation input; never replay create. Preserve cleanup grace and all resolved creation settings. Incompatible reconstruction, conflict, unexpected replies and unavailable evidence remain unknown. Account for the old producer and any in-flight create before treating absence as conclusive. |
+| Reservation; missing create result | Read `Runtime.lookup_create_result/4` with the original options and retained complete v2/v3 genesis; never replay create or rebuild with current runtime defaults. Exact history returns the original session despite changed current cleanup grace. Conflict identifies an incompatible retained binding; diagnose and preserve uncertainty, never treat it as absence. Unexpected/unavailable evidence also remains unknown. Account for the old producer and any in-flight create before treating absence as conclusive. |
 | Child known; prompt acknowledgement missing | Never replay prompt. Inspect/rebuild the child through prepared recovery and abort any admitted work. An unprompted child remains unprompted. |
 | Child unfinished | Abort through its live attachment, or use `Loopex.prepare_resume_session/3` to rebuild without scheduling, attach and admit an idempotent abort. Never call `activate_resume/1`; abort invalidates activation. Abandon an unused capability. |
 | Child terminal; receipt missing | Retain the original attempt-bound receipt only from conclusive terminal/cleanup evidence, preserving failure or uncertainty and actual usage. |
@@ -309,8 +528,9 @@ fence tuple; solicited receipts use the current query ID and owner epoch.
 
 Host startup and every host admission route, including CLI, foreground
 app-server and daemon resume and new-prompt paths, derive helper identity from validated host
-binding/operation records and read-only create-result resolution, checked
-against retained parent delegation intents. Complete classification precedes
+binding/operation records, complete `effect_intents/4` coverage and
+`creation_provenance/2`, checked against expected derived child-create command
+IDs. Exact retained creation inputs use `lookup_create_result/4`. Complete classification precedes
 activation and every session mutation admission, including commands through
 existing attachments; missing/corrupt required records refuse instead of defaulting to
 ordinary eager resume. A session-directory discovery index is not authority.
@@ -366,8 +586,23 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
 - Cancel before execute registration closes helper admission; a delayed execute
   cannot launch, stale references cannot rebind, and local-tool receipt bytes
   remain unchanged. Unknown job cancellation is never falsely cleaned.
-- Cancelling an unclassified local job can close helper admission even if the
-  local executor later proves cleanup. Record that availability consequence.
+- Registered local cancellation, including after execute returned, leaves helper
+  admission open; helper cancellation remains operation-scoped. Race a cancel
+  before registration and prove the disclosed incarnation-wide fence. Fill each
+  registry bound independently: no forwarding at exhaustion, no eviction,
+  duplicate/cancel/receipt paths remain available, and full composition restart
+  preserves recovery truth before replenishing capacity.
+- Core query conformance for both Stores: no write, owner acquisition,
+  coordinator start or dispatch; bounded empty matching pages still advance;
+  fixed high-water coverage, missing/corrupt history, wrong-runtime selectors,
+  reverse creation lookup, complete runtime enumeration with absent binding/log
+  files, changing watermarks and cross-kind conflict, plus exact Control loss.
+- Crash after core intent but before host initialize/reserve; prove absent-create
+  stop-only recovery, conservative count charge and zero provider work. Remove
+  a reserve-only log before create: absence still cannot reset the count. Remove
+  a log for a historical child: refuse. Crash after each reconstruction frame;
+  replay never repeats its count, settlement or receipt. Changed startup grace
+  does not break an exact retained-v2/v3 lookup; altered retained bytes conflict.
 - Child lookup after cleanup-grace/default changes uses the retained create
   input; conflict/unavailability remains unknown. Every host refuses independent
   client mutation/resume adoption of both active and settled helper sessions,
@@ -383,6 +618,8 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   replacement stop and preserves the original reason, settlement and receipt.
 - Parent observation can end before nested child cleanup completes. The parent
   stays unknown even if later receipt lookup finds completed child cleanup.
+  Cover both equal grace values and a child whose committed grace exceeds the
+  parent job's; the callback uses only the registered parent observation bound.
   Parent-job cancellation uses the executor receipt's causation rule; a child
   terminal before cancellation but before bind_receipt retains its proven fact.
 - Repeated receipt lookup performs no mutations or dispatch; completed receipt
@@ -394,9 +631,17 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   conclusively settled, including across run boundaries and restart with unknown
   cleanup. Replayed operations consume no second slot; no waiting helper queue
   or runtime-wide slot is introduced.
-- Remove an older run's log while retaining its parent intent: reconstruction
-  refuses, never invents an empty slot. Cancelling a classified helper in parent
-  A does not prevent parent B's next otherwise admissible helper.
+- Remove an older run's log while retaining its parent intent and historical
+  child creation: reconstruction refuses, never invents an empty slot. Cancelling
+  a classified helper in parent A does not prevent parent B's next otherwise
+  admissible helper. Separately, inject an unknown ledger commit in A and prove
+  the documented adapter-wide mutation fence also delays B's settlement.
+- Edit every delegation declaration field and use `--no-helpers` before resume:
+  retained effective limits and counters remain; conflicting explicit disable
+  refuses. A new run initializes from the parent binding, not the edited file.
+- Follow-up with no absolute ceiling after a predecessor with one does not inherit
+  it; a supplied follow-up ceiling survives promotion/restart unchanged while
+  ordinary limits retain their existing inheritance and legacy replay.
 - Delayed admission at the absolute cutoff; parent cancellation, stuck child,
   stale receipt, cleanup uncertainty and parent owner succession.
 - Real provider parent on A and child on B; investigation and review fixtures

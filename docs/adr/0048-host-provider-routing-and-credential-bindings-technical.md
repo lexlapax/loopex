@@ -74,7 +74,9 @@ refuse before any runtime or subprocess starts. Ephemeral composition stores
 only references and uses its selected caller resolution below, never this
 durable custody plane.
 Supplying both `:provider_bindings` and `:credential_plane` is conflicting
-configuration and refuses before effects. A borrowing host validates its file
+configuration and refuses before effects. Daemon startup also rejects simultaneous
+value-bearing `:credential` and `:provider_bindings` before environment reads,
+deletions or custody creation; its legacy credential branch remains separate. A borrowing host validates its file
 and bindings once when opening custody. For each temporary or main composition,
 `CredentialHost.plane/1` lends the same route tokens/registry and exclusion set
 with a fresh runtime-specific tracing capability. Never reuse a capability
@@ -82,7 +84,13 @@ already bound to another runtime. The plane supplies immutable route and
 exclusion sets. Borrowing never resolves environment variables again or adds
 default routes. Validate every supplied plane before starting owned edges.
 
-**Durable custody.** Host bootstrap resolves all configured credential references
+**Durable custody.** One private composition-owned binding resolver supplies
+complete-name validation, unique-name resolution/deletion, custody registration
+and partial-start cleanup to CredentialHost, direct composition and daemon
+bootstrap. Preserve each opener's process ownership and error boundary; validate
+the whole binding set before environment effects. Ephemeral reference resolution
+retains its separate caller-only lifetime and does not use this durable loader.
+Host bootstrap resolves all configured credential references
 into separately owned custody, creates composition-bound tokens and removes
 those named values from the Loopex-owned host environment before resource/tool
 subprocess launch, as the existing durable path does for
@@ -94,6 +102,10 @@ up every custody already created. This does not erase copies held by the
 invoking shell or other host code.
 Preserve existing exclusion behavior too: if the legacy credential name is
 not a configured route, remove it without reading or admitting its value.
+CLI chat reaches validated binding resolution before the general early legacy
+credential discard. Non-composing inspection remains free of credential reads;
+the durable resolver performs unread legacy deletion when that name is not a
+configured route.
 
 After the selected provider companion is ready, the excluded sender obtains
 only that binding's selected key from custody and transfers it on the existing
@@ -146,6 +158,10 @@ An already settled summary needs no new provider dispatch to finish its checkpoi
 
 Concept: [Observable consequences](0048-host-provider-routing-and-credential-bindings.md#concept-adr-0048-consequences).
 
+- All three durable openers share reserved-name, duplicate-name, partial-bootstrap
+  and cleanup vectors. Conflicting daemon credential sources refuse before
+  effects. A built CLI chat using the legacy name resolves it once rather than
+  deleting it before dispatch; inspection reads no selected value.
 - Two credential canaries and interleaved independent sessions prove selected
   binding isolation, no unselected custody resolution during dispatch and no key in durable/public
   planes, jobs, diagnostics or resource subprocess environments.
@@ -157,6 +173,12 @@ Concept: [Observable consequences](0048-host-provider-routing-and-credential-bin
   Bootstrap deliberately resolves all configured credentialed bindings.
 - Restart before/after configure and staged intent retains exact dispatch identity.
 - Real A→B→A with canonical tool history, and parent A/helper B, both succeed.
+  A and B have different admitted provider-route prefixes; this is not a
+  cross-model-vendor requirement. Before the first attempt, pin B's exact model,
+  mapping/renderer revisions and credential reference under the plan's immutable
+  pin rule. The phase-2 provider workstream owns B's conformance, including
+  explicit disabled thinking for its summarizer use, unchanged reply ceiling,
+  canonical history rendering and selected-route isolation.
 - Real conversation A/summarizer B uses the selected route, counts maintenance
   usage once in parent/standalone totals and exposes no credential references.
   Changed/absent startup selections, lost B custody and rebinding the same B

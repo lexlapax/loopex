@@ -18,10 +18,10 @@ implementation that depends on it:
 | Decision | Accepted before |
 | --- | --- |
 | [ADR 0041](../adr/0041-session-lineage-projection-and-context-budget.md#concept) | Outcome 1's projection change |
-| [ADR 0042](../adr/0042-host-composed-instructions.md#concept) | Outcome 2's instruction option |
+| [ADR 0042](../adr/0042-host-composed-instructions.md#concept) | Outcomes 2 and 7's instruction option |
 | [ADR 0043](../adr/0043-context-compaction-checkpoint.md#concept) | Outcome 3's checkpoint record |
 | [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept) | Outcome 4's configuration and bounded private thinking continuation, with versioned replies/settlements and charged context; outcome 7's resolved per-role model configuration |
-| [ADR 0045](../adr/0045-model-originated-questions.md#concept) | Outcome 5's tool class |
+| [ADR 0045](../adr/0045-model-originated-questions.md#concept) | Outcomes 5 and 6's tool class |
 | [ADR 0046](../adr/0046-child-session-tool.md#concept) | Outcome 7's adapter |
 | [ADR 0047](../adr/0047-reference-host-run-defaults.md#concept) | Outcome 6's mandatory configured bounds and outcome 8's measured baseline |
 | [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept) | Outcomes 3, 4 and 7 provider routing and credential bindings |
@@ -35,14 +35,15 @@ Accepted decisions that constrain the work:
 | [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure, ADR 0044 qualifies continuation exclusion only for verified summary text in existing reasoning progress, and ADR 0046 adds the explicit deadline ceiling and versions authored-bound command identity |
 | [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, receipt source provenance, session configuration placement and charged continuation; ADR 0046 extends the closed prompt/follow-up bounds |
 | [ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | Existing relative deadline remains; ADR 0046 explicitly permits an earlier committed absolute cutoff, including before first staging |
-| [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain |
+| [ADR 0008](../adr/0008-owner-succession-recovery-and-runtime-placement.md#concept) | ADR 0046 adds bounded runtime-private history/provenance reads and a read-only Store callback; no activation or mutation authority |
+| [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain; ADR 0046 adds exact retained-genesis lookup without current-default substitution |
 | [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; ADR 0044 versions the closed reply/settlement shapes for private continuation; two attempts per logical operation and no ambiguous redispatch remain |
 | [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 introduces v3 and cannot promote an invalid continuation reply to reported usage |
 | [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) and [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) | ADR 0044 replaces the served generation set and metadata-only digest with the coordinated M7 contracts below; exact negotiation, framing, session authority and connection lifecycle remain |
 | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
 | [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | ADRs 0042–0044 use fresh receipt revision 4 for instruction/compaction provenance and continuation accounting; maintenance explicitly skips optional intake. Ordinary resource admission/costs and old v2/v3 validation remain |
-| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0043 adds explicit maintenance instructions and model at startup; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
+| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADRs 0042/0044 add explicit initial instructions, system ceiling and reasoning under ADR 0044's combined closed option inventory; ADR 0043 adds explicit maintenance instructions and model at startup; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
 | [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) | ADR 0048 amends only its sole credential source; durable isolation, cleanup and trusted-launch exclusions remain |
 | [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Durable provider dispatch retains host-owned credential references and per-invocation custody; ADR 0048 narrowly amends its single-provider restriction |
 | [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) | Host-owned runtime tracing, bounded diagnostics and redaction remain unchanged when exposed through startup flags |
@@ -121,6 +122,7 @@ writer-epoch rules still apply after successful negotiation.
 | Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest, owner-computed `source_excerpted` flag, exact summarizer model/thinking-off setting, usage and owning configuration/maintenance identity. Checkpoint snapshots and rendered summary provenance retain the flag, including inherited omissions. Active-maintenance inspection/snapshots expose captured model identity and bounds, excluding provider mappings, instruction bytes, permits, routes and private recovery records. `context.compaction_progress` remains transient. |
 | Interaction records | Pending and terminal projections preserve producer, kind, stable choices, original run/turn/call identity, expiry and answer/decline/expiry disposition. Attach snapshot and replay agree at the same cursor, including a question already pending when attachment begins. |
 | Run/bound records | Preserve the effective absolute deadline and ordinary bound/terminal outcome through committed run views, while keeping relative and absolute limits distinct. Encode new ordinary bound members as canonical positive decimal strings: `max_turns`/`token_budget` retain their current positive-integer domains, `deadline_ms` its positive uint64 domain. `deadline_at_ms` uses ADR 0046's positive JSON safe-integer domain. Apply the same conversion on output; never round through JavaScript numbers or silently impose uint64 on turns/tokens. |
+| Context refusal/failure | ADR 0043 owns private refusal revision 2, its closed numeric/nonnumeric failure union and measured/unavailable projections; new wire event/snapshot/compact-result schemas include it with uint64 values as exact decimal strings. Old revision 1 retains its five-key shape and fixed system limit. |
 | Tool-definition format | Version the interaction-class addition and zero artifact-budget exception under ADR 0045. Preserve old effect-definition bytes; new artifact-capable read/search generations keep their own exact version/digest. The tool-definition version is distinct from session-protocol generation. |
 
 The integration owner updates the foreground `Mapping`, daemon `Request`,
@@ -435,6 +437,38 @@ maintainer disposition before another attempt. The administrative closure
 commit cannot introduce that change. These are specifications to implement,
 not fixtures or successful proof today.
 
+**Case verdict and prior failures.** The fixed manifest declares each case's
+required model actions and objective oracle before execution. The runner writes
+one verdict to its retained execution record:
+
+| Verdict | Rule |
+| --- | --- |
+| `pass` | Every prescribed assertion, including expected negative outcomes, passes; required attendance and complete evidence are present and fixture cleanup is confirmed |
+| `product_failure` | Retained boundary facts or pinned assertions demonstrate a product defect; record the failed assertion and causal evidence |
+| `model_nonconformance` | Valid committed input and complete boundary evidence show the model omitted a prescribed action or violated the fixed task oracle, without a demonstrated product defect |
+| `evidence_unavailable` | Missing evidence, prerequisites, attendance or unconfirmed fixture cleanup prevents a verdict about the required behavior |
+
+A named independent reviewer assesses the cause classification and whether a
+proposed product correction addresses the retained failure. The reviewer cannot
+waive an assertion, attendance or evidence requirement. Unresolved classification
+blocks the case. Every candidate scaffold predeclares a prior-attempt section
+with one row for each earlier candidate/case/attempt, its verdict, retained-output
+reference/digest, diagnosis and any disposition. A new candidate incorporates
+known rows before commitment; the closure child fills only predeclared values.
+A failed unchanged case cannot run again merely because another fix produced a
+new SHA. `product_failure` needs a substantive causal correction and review;
+`model_nonconformance` routes to the maintainer with this fixed disposition menu:
+
+1. Keep the case and stop pending a supported causal product correction.
+2. Explicitly approve a revised pinned model or witness for a new candidate,
+   retaining every required assertion, attendance obligation and prior failure.
+3. Propose a named scope or evidence-rule amendment for separate approval.
+
+Until that disposition is recorded, no replacement attempt is authorized.
+Nothing here accepts a limitation, cross-candidate evidence reuse or an attendance
+waiver. `evidence_unavailable` is not PASS; restarting a dispatched model case
+still obeys the same attempt rule.
+
 **Case ownership.** Before the first provider attempt, the fixed manifest assigns
 each prescribed real-provider case a stable case ID, one owning release lane
 and its ordered prompts, actions and checks. One case execution may contain
@@ -442,22 +476,62 @@ several runs and prescribed process restarts. The runner allocates and retains
 its attempt identity before dispatch; every session/run/child identity belongs
 to that execution record. Multiple outcome or step references reuse that
 record, not another model execution. The release selector union executes each
-owning case once per invocation, including when both coding-task and attended
-selectors need its evidence. A pre-merge selector cannot substitute unattended
-execution for required attendance. Existing release cases remain required;
-this mapping prevents duplicate dispatch of the newly shared M7 cases.
+owning case once in the full closure invocation, including when coding-task and
+operator steps share its evidence. Extend `scripts/check-release.sh` and its
+existing manifest/identity sidecars rather than adding another check command.
+The owning lane for each attended M7 case is `m7-operator`; the unattended
+real-provider lane is `m7-provider`; deterministic integration/fault cases name
+one exact fast-check or unattended release test. Both M7 provider lanes belong
+to the full matrix. The runner binds each case wrapper's execution identity and
+oracle result to its manifest case ID, even when one wrapper spans several runs.
+Existing ExUnit row identity checks and attended rows remain required.
 
-| Catalog task | Owning scenario steps; final collection is V10 |
-| --- | --- |
-| `repair` | V2.1–5, including the agent test and independent oracle rerun |
-| `feature` | V5.1–2, including the actual-ID answer and both test results |
-| `review` | V8.1–4, including investigation and the separately instructed review |
-| `long` | V6.1–4 and the settled-reopen positive path in V6.6 |
+An attended case, including a shared coding task, runs only in the full matrix
+with a named human operator. `--only` refuses attended case selectors; it may
+select unattended M7 cases as non-closure pre-merge evidence. Such evidence does
+not replace any required full-matrix execution or authorize a failed case reroll.
+The case-ID union prevents duplicate dispatch. Extend the existing attended
+wrapper/PTY capture to preserve human input and exact interaction IDs; automatic
+PTY answers never establish M7 attendance. V10 collection/external execution,
+V11 tracing, V12 configuration and V13 artifact/restore steps are actions inside
+that same full invocation, with their slots and cleanup joined before success.
 
-V5.3's question restart, V5.6's ephemeral answer, V6.5's oversized source,
-V6.6's injected faults and V6.7's separate summarizer-provider case are
-distinct predeclared cases. They never replace a failed main case. Other
-prescribed positives and negatives receive the same explicit ownership.
+| Case ID | Lane and scenario | Objective oracle |
+| --- | --- | --- |
+| `m7.repair` | `m7-operator`, V2.1–5 | Repair catalog assertions, both pinned test results, allowed diff and reopened diagnosis facts |
+| `m7.feature` | `m7-operator`, V5.1–2 | Committed ask/actual-ID answer, chosen row default and both pinned test results |
+| `m7.review` | `m7-operator`, V8.1–4 | Both committed role calls, exact known finding/call chain, unchanged child workspace and separate/combined usage |
+| `m7.long` | `m7-operator`, V6.1–4 and V6.6 settled reopen | Long catalog facts/files after automatic/explicit compaction and restart; raw/checkpoint agreement |
+| `m7.pipe-answer` | `m7-provider`, V2.6 answer and decline subcases | Actual emitted IDs match committed responses; expected answer/decline outcomes and confirmed cleanup |
+| `m7.question-restart` | `m7-operator`, V5.3 | Same pending identity after prescribed loss; actual answer and selected feature oracle |
+| `m7.ephemeral-question` | `m7-operator`, V5.6 positive | Real displayed question, human callback answer, chosen feature oracle and ephemeral cleanup |
+| `m7.oversized-source` | `m7-operator`, V6.5 positive | Progressing checkpoint, inherited omission flag and host-readable complete sentinel/original |
+| `m7.cross-provider-maintenance` | `m7-provider`, V6.7 | Captured distinct provider routes, thinking-off summary, continued facts and usage counted once |
+| `m7.provider-switch` | `m7-operator`, V7.1–2 and V7.4 | One session's A→B→A canonical facts/tool results and captured configuration identities |
+| `m7.thinking-rounds` | `m7-operator`, V7.3 | At least two continuation requests after committed tool-result rounds, expanded outgoing-block equality, final fixture facts and settled reopen |
+| `m7.thinking-bound` / `m7.thinking-cancel` | `m7-provider`, V7.7 subcases | Prescribed bound/cancel after committed tool results; later prompt on same model preserves canonical grouping/facts without old native state; provider acceptance and truthful cleanup |
+| `m7.external` | `m7-operator`, V10 external execution | Pre-dispatch pin, pinned repository acceptance commands and allowed diff |
+
+The manifest also pins provider-backed baseline cases `m7.baseline.ask` and
+`m7.baseline.durable` for V1; `m7.instructions.admitted`, `.declined` and `.changed`
+for V3 with exact receipt identities and distinctive fixture behavior;
+`m7.steer-barrier` for V4 with committed steer/follow-up order and generated facts;
+`m7.interrupt` for V9.2 with terminal cancellation and cleanup; and
+`m7.trace.flag`, `.file` and `.json` for V11 with task assertions and separated
+redacted trace output. Their lane is `m7-operator` wherever the mandatory table
+requires attendance, otherwise `m7-provider`. Each variant has its own pinned
+initial root, ordered inputs and oracle; inspection steps reference those
+executions without calling a model again. V12.1–2 reuse `m7.trace.file`'s file-only
+startup and `m7.trace.flag`'s explicit override startup, including one ordinary
+chat prompt through the built escript and committed effective-value checks.
+
+`m7.range-read` is a deterministic fast-check integration case inspected at
+V6.2, not a required model action in `m7.long`. V6.6 faults, V5.4–5, V5.6
+responder negatives, V7.5–6, V8.5–7 and other controlled negatives name exact
+suite/test IDs and expected facts in the manifest. Tests of those negatives
+cannot replace any failed positive provider case. All remaining V steps and
+subcases receive one fixed step key, exact owner/test, oracle and evidence slot;
+no unlabeled provider call may be added by the runbook.
 Each case starts from its pinned initial workspace/state or the exact retained
 state of its prescribed predecessor; the manifest declares which. It cannot
 silently reuse a workspace already repaired by another case. Independent
@@ -475,8 +549,17 @@ profile or caller-supplied policy module. The planned trusted entry point is
 policy profile first, then inject the fixed fixture policy through host
 composition and invoke the same CLI conversation driver. Only the harness owns
 this injection; neither a config field nor a model argument names a module.
-Record the effective policy/manifest
-identity; production config retains its closed profile registry. Before the attempt, pin command bytes, executable/runner
+The planned internal `LoopexCli.Chat.run/2` join accepts resolved conversation
+options and trusted host composition overrides; the ordinary `main/1` path
+supplies none. It is not a public/configurable policy-module option. Effective
+inspection and `/status` report policy origin `harness` and the pinned fixture
+policy/manifest identity when the wrapper supplies it; the production registry
+profile remains separately visible. V2.4 and V5.3 reopen through the same wrapper
+and matching retained policy identity. Exercise V12.1–2 and an ordinary chat
+prompt through the built escript too, retaining stdio/live-signal/bootstrap
+checks that embedding the driver alone cannot prove. The escript inventory
+continues to prove dependency presence, not command behavior. Before the attempt,
+pin command bytes, executable/runner
 path and digest, cwd, permitted inputs and scrubbed environment. The trusted
 runner lives outside the writable task tree and uses absolute toolchain paths
 or its own fixed PATH. Validate prerequisites under the executor's scrubbed
@@ -534,7 +617,9 @@ process loss from a daemon client's detach.
 The static-pipe variant treats an unexpected question as a recorded failed
 scenario and exits through the ordinary cleanup path. It never answers a future
 or guessed ID. A separate bidirectional-pipe case proves actual-ID answers and
-declines. Neither path assumes the model can be forced never to ask.
+declines under case `m7.pipe-answer`. Static repair prompts declare complete
+requirements and say no clarifying question is needed; this wording does not
+waive an unexpected-question failure or claim the model can be forced not to ask.
 
 1. Open the repair fixture and request a diagnosis without an edit.
 2. Ask for the fix by referring to the earlier diagnosis without repeating it.
@@ -545,6 +630,10 @@ declines. Neither path assumes the model can be forced never to ask.
 4. Close and reopen the settled session using its recorded identity.
 5. Ask about the original decision and verify continuity against retained
    history and the resulting patch.
+6. Run the separate bidirectional-pipe answer and decline subcases. Read each
+   emitted interaction ID, submit that exact ID, and inspect the committed
+   response/outcome and cleanup. This automated case is separate from the
+   attended repair and cannot replace it.
 
 #### V3. Admit instructions and specialize work
 
@@ -558,10 +647,15 @@ declines. Neither path assumes the model can be forced never to ask.
 
 #### V4. Steer and queue a follow-up
 
-1. Start the pinned task and wait for its controlled tool barrier. The trusted
-   fixture holds that tool's completion until the operator has submitted the
-   steer and follow-up. Document the barrier and its bounded failure path;
-   operator timing against a fast provider is not the acceptance oracle.
+1. Start `m7.steer-barrier` and request its exact approved `loopex.bash` argv
+   invocation of the pinned fixture runner outside the writable task tree. It
+   waits on a harness-owned FIFO. Release it only after committed steer-admitted
+   and follow-up-queued evidence for this case, never merely after terminal
+   input. Pin a hold limit below the 120,000-ms tool wall time and remaining run
+   deadline, leaving a documented cleanup margin. Timeout is a retained failed
+   assertion; a missing required call is model nonconformance. Abort removes
+   only confirmed fixture-owned processes/FIFO state. Operator timing against a
+   fast provider is not the acceptance oracle.
 2. Steer the active objective and observe its admission/disposition.
 3. Queue a follow-up while the run remains active.
 4. Observe that the follow-up becomes a separate run with prior context.
@@ -593,10 +687,11 @@ declines. Neither path assumes the model can be forced never to ask.
    explicit `maintenance.model` or `--compaction-model`. Inspect the selected
    thinking-off summarizer and its admitted provider without reading credentials.
 2. Establish an early fact, then continue until automatic compaction occurs.
-   Inspect the fixture's automated range-read evidence for a source file of at
-   least 16 KiB: full 4-KiB ranges where encoding fits, exact offsets through EOF,
-   escaped/multibyte boundary cases and complete staged-request measurements.
-   This reuses the owning fixture run; it adds no duplicate model attempt.
+   Inspect retained `m7.range-read` deterministic integration-test evidence for
+   a source file of at least 16 KiB: full 4-KiB ranges where encoding fits, exact
+   offsets through EOF, escaped/multibyte boundary cases and complete staged
+   requests. This host-driven test calls no provider; it does not add required
+   range-read actions to the `m7.long` model oracle or rerun that task.
 3. Verify the visible checkpoint and ask about the earlier work.
 4. Explicitly compact a settled session and inspect retained raw history.
 5. In the oversized-source fixture, make the documented large prompt or write
@@ -632,7 +727,10 @@ declines. Neither path assumes the model can be forced never to ask.
    fault cases cover split events, limits and interrupted signatures/messages.
    Reopen the settled session and confirm configuration and canonical history.
    The next run starts a new exchange; automated fault cuts cover open-exchange
-   restart and exact replay.
+   restart and exact replay. `m7.thinking-rounds` pins its measured input ceiling
+   and fixtures before dispatch and requires at least two actual continuation
+   requests following committed tool-result rounds; a single tool round fails
+   that oracle. Retain each request's sizes/charges and canonical identities.
 4. Switch back to provider A and verify continuity with the fixture's facts
    and earlier tool results.
 5. Request an unsupported level or an in-run change and verify refusal
@@ -647,6 +745,12 @@ declines. Neither path assumes the model can be forced never to ask.
    permitted-summary and private-data canaries across public/progress/trace/
    artifact output. Automated cases also prove suppression for an unverified or
    empty summary, unchanged private replay and the buffered ephemeral result.
+7. Inspect the separately owned `m7.thinking-bound` and `m7.thinking-cancel`
+   real-provider cases. Each performs its prescribed terminal cut after committed
+   tool results, then submits a new prompt on the same admitted thinking model.
+   Require accepted canonical message grouping, correct fixture facts and no
+   resurrected native state. Controlled cuts are actions within each fixed case,
+   not replacement attempts; missing required model actions still fail.
 
 #### V8. Delegate bounded investigation and review
 
@@ -665,17 +769,28 @@ declines. Neither path assumes the model can be forced never to ask.
    after child creation but before prompt, stop the parent while the manager
    is down, then recover: no prompt is submitted and no provider work starts.
    An already running child is aborted or reported uncertain; a completed result
-   can be recovered without reopening its parent.
+   can be recovered without reopening its parent. Inspect pre-reservation crash
+   and lost-log cases: proven absence retains a conservative count charge;
+   missing evidence for a historical child refuses. Query tests prove no session
+   activation. Changed runtime grace cannot replace retained genesis.
+   A child may finish cleanup after the parent's observation window; the parent
+   remains unknown. Stop helpers through their parent, never direct child abort;
+   if unavailable, restart the host for stop-only recovery. Inspect late local
+   cancellation, registry exhaustion/restart and cross-parent ledger-fence tests.
 6. Exhaust a small delegation allowance across serial children; verify that
    another child refuses while the parent's remaining budget stays distinct.
    Inspect parent, helper and combined usage, then restart and verify no reset.
 7. Reject an unknown/disabled role. Edit a role file, reopen the parent and
-   verify its retained catalog still governs already admitted work.
+   verify its retained catalog and every delegation declaration field still
+   govern. Edit child and aggregate limits and try conflicting `--no-helpers`;
+   confirm refusal of the explicit disable and no allowance/counter reset.
 
 #### V9. Refuse, interrupt and recover
 
 1. Trigger a policy-denied effect and verify no effect occurred.
 2. Interrupt a foreground task and inspect its cancellation/cleanup result.
+   For a helper, cancellation goes through the parent. A late confirmed child
+   stop does not rewrite the parent's expired observation as confirmed cleanup.
 3. Recover a disposable durable session after controlled process loss and
    inspect the committed outcome before submitting more work.
 4. Detach a daemon client, reattach and verify that client absence alone did
@@ -723,7 +838,10 @@ declines. Neither path assumes the model can be forced never to ask.
 3. Refuse duplicate/unknown JSON members, bad paths, malformed values and missing
    mandatory run/delegation limits before provider dispatch.
 4. Edit defaults and role files, then resume a settled session. Verify committed
-   configuration and role snapshots persist. Apply a permitted explicit
+   configuration, role snapshots and delegation declaration persist. Edit every
+   child/aggregate allowance field and try conflicting `--no-helpers`: file
+   changes do not replace retained limits, explicit disable refuses, and a new
+   run uses the same declaration with only its own fresh counters. Apply a permitted explicit
    `/configure` change and verify it affects only the next run.
    Automated prepared-recovery subcases start with unfinished work, change or
    omit the file's cleanup period, and omit, match or conflict with an explicit
@@ -741,6 +859,20 @@ offer succeeds, the wrong server's generation refuses, and a digest mismatch
 stops the client before session requests. These wire checks are separate from
 the old-root reader and frozen-tool checks below.
 
+The rollback lane stages three immutable archives/projections/source identities:
+exact v0.2.0, exact published v0.3.0 and the candidate. Build each independently
+with isolated dependency/build paths. The historical v0.2.0↔v0.3.0 pair uses its
+pinned v0.3.0 driver, worker and assertion bytes; M7 changes to shared driver
+files cannot silently alter it. The added v0.3.0↔M7 pair uses candidate drivers
+with separately pinned identities. Retain all driver/build/executable digests.
+The lane preserves every historical assertion and adds the new pair. Prevent
+old access by exact executable/build digest and launch configuration, not VERSION,
+which may be identical. `m7.rollback` owns this credential-free release lane;
+V13 inspects its retained results and performs the attended restore steps.
+Private format metadata here means versioned records, not M8's future container
+marker. Candidate-server release/Node cases migrate to the new wire clients;
+only the historical rollback pair and its assertions remain unchanged.
+
 1. Record the retained M6 artifact, source, toolchain and digest. Create settled
    and unresolved M6 roots; stop their owners and retain complete pre-upgrade
    copies with manifests outside the test roots.
@@ -754,8 +886,10 @@ the old-root reader and frozen-tool checks below.
    actual behavior. A reducer rejection does not prove refusal before root mutation.
 4. Prevent the old binary from opening the live upgraded root. Restore its
    pre-upgrade copy into a separate empty root.
-5. Verify complete manifest equality and run the pinned baseline using the
-   matching M6 artifact. Root contents and observable baseline must agree.
+5. Verify complete manifest equality and inspect the pinned credential-free
+   baseline execution produced by `m7.rollback` using the matching M6 artifact.
+   Root contents and observable baseline must agree; this step adds no provider
+   call or second execution of a real-task case.
 6. Retain upgrade, old-reader and restore outputs with identities/digests; clean
    only confirmed disposable state. Uncertain state remains available for review.
 
@@ -792,8 +926,14 @@ assertion and retained evidence. Implement `operator_step_evidence` in the
 fixed fixture manifest before demonstrations. It lists every V1–V13 step and
 subcase, its attended/automated classification, exact lane/test ID, oracle and
 evidence slot. Each provider-backed step/subcase names its owning case ID and
-retained execution record, including the actual attempt and session/run
-identities after execution. Several steps may reference one execution; each
+execution-record slot key. The committed manifest contains only fixed mapping
+and specification bytes, never actual post-run identities. The runner writes
+actual attempt/session/run/child identities, outcomes, operator identity and
+verdict to fresh retained execution records outside the repository; each record
+binds its case ID and manifest digest. The scaffold predeclares one Pending row
+per manifest step/subcase key. A candidate-time check requires those key sets
+and lane/classification mappings to agree exactly. Filling scaffold values uses
+retained records and never edits the manifest after execution. Several steps may reference one execution; each
 step/subcase still has exactly one coverage entry. Validate classifications
 against the mandatory attended table, splitting positive and automated fault
 subcases even when they share a numbered step. Missing or duplicate coverage,
@@ -815,7 +955,8 @@ allowance or a Proved label.
 Create and index `docs/evidence/M7-closure-runs.md` in the implementation
 candidate before its closure matrix. Its predeclared Pending slots cover:
 
-- candidate/source identity, tested implementation SHA and full toolchain pins;
+- candidate/source identity, tested implementation SHA, run platform/architecture
+  and full toolchain pins; a closure-incomplete platform result remains incomplete;
 - floor/current-pair run identities, outcomes, measured durations and complete
   retained-output references/digests, including reused CI evidence where allowed;
 - the tested fresh-source archive manifest's exact retained bytes/reference and
@@ -824,20 +965,33 @@ candidate before its closure matrix. Its predeclared Pending slots cover:
   authority and the manifest's exact lane/test-to-step mapping;
 - fixture manifest, prompt, runner and immutable oracle digests; every task's
   objective result and duration/turn/token/maximum-reply measurements;
-- meaningful per-profile instruction/tool/environment/role cost measurements;
-- exact provider/model/mode identities and credential-free routing metadata;
+- the complete demonstrated profile set, exact resolved roots/catalogs and
+  meaningful per-profile instruction/tool/environment/role cost measurements;
+- immutable A/B provider/model/mode pins, per-case mapping/renderer revisions,
+  selected credential-variable-name-set pin and credential-free routing metadata;
+  the selected-name redaction self-test outcome and retained-output reference/digest;
 - both protocol schema/vector manifests and independent Node consumer results;
 - upgrade/old-reader/restore lane identities, complete manifests and exact M6
   artifact identity, plus the external task's pre-attempt pin described below;
-- security, independent and documentation review identities and conclusions.
+- security, independent and documentation review identities, conclusions and
+  complete retained-report references/digests;
+- every case's verdict, failed assertion/cause classification and execution-record
+  reference/digest, plus predeclared earlier-candidate attempt/verdict/diagnosis and
+  disposition rows. Before commitment enumerate the known prior attempts; no
+  later closure child adds headings/rows outside its designated Pending slots.
 
 The external repository/task remains selected during testing. Before any
 attempt, write its complete pinned specification to an immutable retained
-record with a SHA-256 digest and UTC timestamp. The runner requires that record,
-records its digest at startup and checks its timestamp precedes the attempt.
-Reference it from the predeclared evidence slot; filling a slot afterward alone
-does not prove prior selection. Changing the pin creates a new recorded attempt
-and cannot reclassify the old result. A committed candidate fixture may instead
+record under a fresh path outside the repository and task tree, with its complete
+bytes, SHA-256 digest and UTC timestamp. The runner refuses reused execution paths
+and records the pin digest before its first dispatch in the same retained,
+digested execution log. That ordered record is the timing proof; an authored
+UTC timestamp alone is not. Recheck the pin digest before dispatch and at case
+completion. Reference the pin and log from predeclared evidence slots; filling
+slots afterward alone does not prove prior selection. No pin changes within an
+execution. Changing a used pin requires a new candidate
+under the verdict/disposition rules above; it cannot replace or reclassify the
+old result. A committed candidate fixture may instead
 supply that pin when selection occurs before candidate commitment. Extend the
 existing release runner, selectors, wrapper/redaction tests and the existing
 PTY helper for the changed chat workflow. The current runner's fixed eleven
@@ -849,13 +1003,16 @@ separate A/B references and redact all selected values; other lanes require no
 new credentials. Preserve all existing required lanes and failure honesty.
 Both A and B are admitted hosted credentialed routes for the durable examples;
 M7 adds no durable local-provider support. Pin their exact models, reasoning
-mappings and selected credential variable names before the attempt. The runner
-passes that complete selected-name set to its redactor and PTY driver and
+mappings, renderer revisions and selected credential variable names in the
+committed manifest or the same immutable pre-dispatch pin mechanism before the
+attempt. Names are host-only evidence, not public configuration or credential
+values. The runner records their digest/identity with each case and passes the
+complete selected-name set to its redactor and PTY driver and
 self-tests with every canary, including non-default names. Redaction cannot
 remain a fixed four-name list. The new selectors are required in the full
 closure release matrix; `--only` selects pre-merge evidence, not an exemption
-from closure. The compaction lane pins an always-on conversation model and an
-explicit thinking-off summarizer, including their exact mappings. A switching
+from closure. `m7.cross-provider-maintenance`, distinct from `m7.long`, pins an
+always-on conversation model and an explicit thinking-off summarizer, including their exact mappings. A switching
 model needs no thinking-off capability merely because it is provider B; the
 configured summarizer must have it. Switching alone proves no compaction capability.
 ADR 0044's initial Claude matrix pins `anthropic:claude-haiku-4-5-20251001`
@@ -884,8 +1041,11 @@ that pass.
 The [round 2 assessment](../evidence/M7-external-review-2.md)
 then rejected candidate `10749d08` for additional feasibility and closure gaps.
 Its claims have been dispositioned through source-backed checks, bounded
-prototypes and that fresh adversarial pass. The repaired packet proceeds to
-external audit after clean-candidate documentation validation. This is review of planned contracts, not product evidence or
+prototypes and that fresh adversarial pass. The subsequent [round 3 assessment](../evidence/M7-external-review-3.md) of
+`a4c9061e` supersedes that readiness conclusion. Its 52 findings and renewed
+internal review are tracked in the [round 3 disposition](../evidence/M7-round-3-disposition.md).
+The repaired packet proceeds to external audit only after that review and
+clean-candidate documentation validation. This is review of planned contracts, not product evidence or
 formal independent acceptance review.
 
 | Finding | Governing repair and implementation witness |
@@ -935,7 +1095,7 @@ Concept: [Workstreams](M7.md#concept-plan-workstreams).
 | --- | --- |
 | 0. Specify | Accept the proposed contracts; build the task fixtures and executable scenario commands from the fixed grammar. Accept prerequisite ADRs before dependent implementation |
 | 1. First complete workflow | Reproduce lost cross-run history, then implement continuity and host instructions under one owner. Integrate a minimal conversational command and prove two prompts plus restart |
-| 2. Long-lived work | Add compaction under the same projection/staging owner. Integrate model/reasoning configuration, private continuation and atomic reply settlement; prove frozen-prefix tool exchanges, maintenance thinking-off and canonical history after a change |
+| 2. Long-lived work | Add compaction under the same projection/staging owner. Integrate model/reasoning configuration, private continuation and atomic reply settlement; prove frozen-prefix tool exchanges, maintenance thinking-off and canonical history after a change; own provider-B mapping/renderer conformance before its first pinned attempt |
 | 3. Operator control | Add model questions to the existing interaction lifecycle; complete conversation steering, answers, follow-up, interrupt and noninteractive behavior |
 | 4. Bounded helper | Integrate the host adapter after outcomes 1, 2 and 4; prove identity, read-only policy, cancellation and recovery before role examples |
 | 5. Acceptance evidence | Complete the coding-task set and operator runbook, measure defaults, reconcile documentation and retain the closure matrix and attended evidence on the exact candidate |
@@ -949,7 +1109,9 @@ join; it must not acquire a second loop or durable state owner.
 The integration owner also owns the source joins hidden by the earlier packet:
 configuration normalization and session genesis/migration; runtime-to-session
 tool selection; executor router binding before recovery dispatch; parent-binding
-and catalog recovery; both protocol servers and payload-schema digests; the
+and catalog recovery, `Runtime.effect_intents/4`, `Runtime.creation_provenance/2`,
+`Runtime.lookup_create_result/4`, the read-only Store provenance callback with complete runtime paging and
+shared pure `SessionGenesis.normalize/1`, with their conformance; both protocol servers and payload-schema digests; the
 trusted fixture-chat wrapper and composition policy injection, preserving the
 CLI's closed production policy registry; release selectors/credential redaction;
 and the existing attended PTY driver. Each rejoins with conformance or negative
@@ -975,12 +1137,14 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   model_request.v2 local-reference continuation and its generic expansion rule,
   captured thinking-headroom trigger/targets, bounded adapter/canonical reply v3 and
   model_attempt_settled_v3 preserving ADR 0021's v2/accounting provenance,
-  estimator revision and private/public projection,
+  estimator revision, context-provider receipt revision 4, versioned refusal/failure
+  projections and private/public projection,
   question producer/text/decline records,
   host role/allowance ledger including monotonic stop records, generic absolute deadline ceiling on prompt/follow-up,
   request and normalized-command revisions, events, snapshots and negotiated
   protocol generation. Each has versioned vectors and an explicit unsupported-reader
-  behavior; bump private format metadata where needed before emitting new records.
+  behavior; version each changed record before emitting it. This does not introduce
+  M8's future container-format marker. Include child sessions in the inventory.
 - Upgrade fixtures include actual M6 roots with settled and unresolved model/tool
   operations. Preserve staged requests and resolve uncertainty without redispatch.
 - Downgrade tests use the exact retained M6 binary on disposable copies. Do not

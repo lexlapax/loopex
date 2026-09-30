@@ -90,7 +90,15 @@ change an existing session's committed tool generation on resume.
 
 On resume, file defaults do not reconfigure. Use committed model, reasoning,
 instructions, max_tokens, context_token_budget, system_class_tokens, tools,
-resources and role catalog. Explicit conflicting flags
+resources, role catalog and the complete delegation declaration retained in the
+ADR 0046 parent binding. The declaration includes enabled roles, max_children,
+aggregate delegation token_budget, child_bounds and child reply/context/system
+limits. New parent runs initialize their separate allowances from this immutable
+declaration; resumed runs reuse their counters. File edits never substitute
+these values, and changing the declaration requires a new parent session. A
+conflicting `--no-helpers` on a helper-enabled resumed session refuses before
+activation; a matching disable on an already helper-disabled session is harmless.
+Effective inspection reports these values with committed origin. Explicit conflicting flags
 for those fields refuse and direct the operator to `/configure` for mutable
 settings; immutable tool/catalog changes require a new session. Only
 max_turns, deadline_ms and token_budget for a new run come from validated
@@ -169,10 +177,10 @@ encodings for IDs. Each object has `v:1`, an `event` and exactly its branch:
 
 | Event | Required fields; other members refuse |
 | --- | --- |
-| `input` | `input_sequence`, `command_id`, `disposition` from admitted/refused, `code` as the stable command disposition/error code |
+| `input` | `input_sequence`, `command_id`, `disposition` from admitted/refused/unknown, `code` as the stable command disposition/error code |
 | `question` | `session_id`, `run_id`, `interaction_id`, `producer`, `kind`, `question`, `choices` array, `expires_at_ms`; choices empty for text |
-| `wait` | `input_sequence`, `state` from settled/question/uncertain, `session_id`, `run_id` or null, `interaction_id` or null, `outcome` or null; question requires interaction ID, uncertain requires its public uncertainty outcome |
-| `status` | `input_sequence`, `session_id`, `run_id` or null, `state`, `configuration_version`, `model`, `reasoning`, `bounds`, `interaction_id` or null, `trace`, `maintenance`; no credential reference, role prompt or private continuation |
+| `wait` | `input_sequence`, `state` from settled/question/uncertain, `session_id`, `run_id` or null, `interaction_id` or null, `command_id` or null, `outcome` or null; question requires interaction ID; uncertain uses the public uncertainty outcome, or `commit_unknown` with its unresolved command ID |
+| `status` | `input_sequence`, `session_id`, `run_id` or null, `state`, `configuration_version`, `model`, `reasoning`, `bounds`, `interaction_id` or null, `trace`, `maintenance`, `policy`; no credential reference, role prompt or private continuation |
 | `closing` | `exit_code`, `cleanup` from confirmed/unknown, `last_outcome` or null |
 | `error` | `input_sequence` or null, `code` as a stable host error code |
 
@@ -190,7 +198,14 @@ model means there is no admitted episode. A resumed episode may show a different
 active model from the current configured selection. This host status view grants
 no session mutation or provider authority. TTY rendering
 shows the same identities, labeled choices, expiry and command syntax in human
-readable form, without suggesting a default answer.
+readable form, without suggesting a default answer. Host status `policy` is exactly
+`{origin, id, revision, fixture_manifest_digest}`. Origin is `registry` for ordinary
+chat and `harness` for the trusted fixture wrapper; id/revision name the effective
+policy identity, not a caller-supplied module. `fixture_manifest_digest` is null
+for registry origin and the pinned SHA-256 digest for harness origin. Effective
+inspection reports the same host origin/identity alongside the validated file
+profile. This is inspection only and adds no policy-selection config or remote
+mutation authority.
 Publish an input admission record before question/wait output caused by that
 input. Barriers report all earlier admitted work settled, the current question,
 or uncertainty; a transient idle boundary before queued follow-up promotion
@@ -219,7 +234,15 @@ claim cleanup from a broken output channel. A second interrupt reports cleanup
 unknown where possible and exits nonzero. EOF and `/quit` abort active work,
 including pending questions; scripts must `/wait` before EOF for normal success.
 Pipe syntax/state refusal stops further input and exits nonzero after cleanup.
-Interactive local refusal leaves the conversation usable.
+Interactive local refusal leaves the conversation usable. Admission
+`commit_unknown` emits `input` disposition `unknown` with the original command ID;
+it never claims refusal or absence of a committed run. Stop further pipe input,
+report an uncertain barrier for the preceding command through its ordinary
+resolution path, with `outcome: commit_unknown` and that command ID if admission
+remains unresolved, and perform bounded cleanup. Other barriers set command ID
+to null. This host command status does not invent a public run outcome. An interactive
+host also fences further mutations until ordinary resolution. No blind command
+retry, synthetic settled barrier or success exit follows unknown admission.
 
 All model-facing input obeys existing prompt/steer/follow-up limits. Chat exit is zero only when every admitted run/maintenance operation in that
 invocation completed successfully and cleanup is conclusive. Any failed,
@@ -233,7 +256,8 @@ repeatable `--trace-module`, `--trace-max-entry-bytes`,
 `--trace-max-entries-per-second`, `--trace-max-queue-entries` map to ADR 0030.
 Expose them on chat, ask and daemon startup only when that command owns the
 runtime. Existing non-owning commands reject them. Absent modules use ADR 0030's
-existing Loopex-only default. No arbitrary module atoms; reject unsupported
+existing `:loopex` and `:loopex_protocol` application-selector defaults. No
+arbitrary module atoms; reject unsupported
 selectors. File/CLI modules contain at most 64 strings of at most 128 bytes,
 resolved through the host's compiled trusted-module inventory. Accept exact
 admitted module names and only the `Loopex.*` and `LoopexProtocol.*` wildcard

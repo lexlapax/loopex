@@ -10,7 +10,8 @@ Technical depth: [Artifact contents, companion placement and smoke proofs](0038-
   rule that a minimal runtime distribution carries no compiler, and
   [ADR 0019](0019-host-owned-provider-protection.md#concept)'s separate
   protected provider companion, to an installed artifact
-- **Prerequisite for:** M8 outcomes 1 and 5 (draft; this was M6 before the maintainer's reframing of 2026-09-26), accepted before any release
+- **Depends on:** [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for installed initialization and configuration discovery
+- **Prerequisite for:** M8 outcomes 1, 5 and 6 (draft; this was M6 before the maintainer's reframing of 2026-09-26), accepted before any release
   build, manifest or install script is written
 
 <a id="concept-adr-0038-decision"></a>

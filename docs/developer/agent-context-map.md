@@ -6309,3 +6309,28 @@ ADR 0046 owns admission and recovery; its per-run allowances remain separate.
 Clarify the plan and already-authorized paired vision amendment accordingly.
 No runtime-wide helper slot, scheduler or waiting queue is selected. This
 authorizes proposal revision and review, not acceptance or product work.
+
+<a id="disposition-m7-strict-demonstrations-2026-09-30"></a>
+### M7 strict demonstration disposition, 2026-09-30
+
+The maintainer's selected required-action demonstrations remain strict. A model
+which omits a required tool action fails that case; an unchanged attempt cannot
+be rerolled to obtain a pass. The round 3 repair makes the verdict, retained
+prior failure and maintainer disposition explicit without changing this rule.
+A new SHA alone is not permission to retry an unchanged failed case. The plan's
+case-verdict contract governs causal product fixes and any separately authorized
+model/witness or scope change. No acceptance limitation, attendance waiver or
+cross-candidate evidence reuse is authorized by this clarification.
+
+<a id="disposition-m7-continuation-vision-amendment-2026-09-30"></a>
+### M7 continuation vision amendment scope, 2026-09-30
+
+The maintainer answered "Agent vision. Yes approved - A" to the round 3
+scope question. Extend the proposed vision pair to section 13.4 and its section
+27 disposition: core validates bounded envelopes/local references and adapters
+interpret provider blocks; private plaintext continuation stays with raw history.
+This authorizes drafting the labelled amendment, not acceptance of its bytes.
+The previous governing clauses remain visible beside the proposals. M7 and its
+nine prerequisite ADR pairs still require exact-byte acceptance before dependent
+implementation. The selected scope does not add encryption, a key service or
+selective private-record deletion.

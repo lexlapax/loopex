@@ -10,11 +10,12 @@ Status: **standalone repository seed — founding document**
 Date: **2026-08-14**
 
 **M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
-tool budget and its interaction-flow consequences in sections 6, 10, 14, 23,
-26 and 27 are proposals authorized for drafting by
-the maintainer. Review both files with M7. Until acceptance, the prior seven-tool
-and no-built-in-sub-agent clauses remain governing; dependent implementation
-must not begin. Other vision boundaries are unchanged.
+tool budget and interaction flow in sections 6, 10, 14, 23 and 26, bounded
+provider continuation in section 13.4, and linked decision-trigger dispositions
+in section 27 are authorized proposals. The maintainer extended drafting scope
+to section 13.4 on 2026-09-30. Review both files with M7. Until acceptance, the
+prior clauses retained beside each proposal remain governing; dependent
+implementation must not begin. Other vision boundaries are unchanged.
 
 Project: **Loopex — “the loop, in Elixir”**
 
@@ -313,6 +314,14 @@ Those bytes are recovery identity, not redispatch authority: an ambiguous
 provider handoff is never made safe merely by having the same payload
 available.
 
+**Proposed M7 continuation amendment, section 13.4.** Core may validate and
+account for a bounded provider-neutral envelope and local references into its
+own reply/request. Adapters still interpret the provider data. Private plaintext
+continuation stays under the private store's protections with raw history; it is
+not public history or authority. This narrows opaque ownership only as specified
+in ADR 0044, with versioned readers, exact rendering and rollback evidence before
+implementation. The technical section retains the governing clause until acceptance.
+
 <a id="concept-vision-tools"></a>
 ### 14. Tools and the coding surface
 
@@ -322,6 +331,11 @@ product proves a deliberately small coding surface rather than placing every
 possible action in the kernel.
 
 Technical depth: [Tool contract, seven-tool surface, registry, and resolution](vision-technical.md#technical-vision-tools)
+
+**Governing until amendment acceptance.** The reference distribution supplies
+seven conformance-tested implementations; the active default profile is selected
+from prompt-cost, safety, and task evidence. Tools remain ordinary behaviours
+resolved through explicit registries.
 
 **Proposed M7 amendment.** The reference distribution supplies seven
 conformance-tested workspace tools. It may additionally supply a model question
@@ -580,9 +594,12 @@ The project is an independent greenfield implementation of a multi-instance,
 host-neutral OTP coding-session and effects runtime. It uses direct OTP, small
 edge behaviours, a core whose only external dependency is the standard
 telemetry event dispatcher, a provider-neutral model port,
-seven reference workspace tool implementations, with the proposed optional
-question and host helper tools from section 14, serial tool execution by default, and
+seven reference tool implementations, serial tool execution by default, and
 separate durable truth planes.
+
+**Proposed M7 amendment.** Section 14 would qualify the seven tools as workspace
+tools and permit the bounded question and opt-in host helper additions. The
+founding-decision summary above remains governing until acceptance.
 
 Technical depth: [Complete numbered founding-decision record](vision-technical.md#technical-vision-founding-decisions)
 

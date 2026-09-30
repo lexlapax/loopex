@@ -40,6 +40,8 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M7 continuation review](M7-continuation-review.md) | Historical 10749d08 thinking continuation/helper recovery proposal, prompt-cost probe and internal review. Round 2 reopens its readiness assessment. |
 | [M7 external review, round 2](M7-external-review-2.md) | Received assessment of candidate 10749d08; source SHA-256 7f445b3638917d7e1c782218b13cf4e4c6efeefc6b879cac5e8e7731da6a5483. |
 | [M7 round 2 disposition](M7-round-2-disposition.md) | All 44 findings dispositioned, bounded feasibility probes, selected scope repairs and completed whole-packet internal review for external planning audit. No implementation or acceptance claim. |
+| [M7 external review, round 3](M7-external-review-3.md) | Received assessment of a4c9061e; SHA-256 cbb9cd861bad099d215d0c5a2299e3d84840e8501a513435153a9afa9824b055. |
+| [M7 round 3 disposition](M7-round-3-disposition.md) | Findings, repair limits and the renewed internal adversarial review before the next external audit. |
 
 ## Related
 

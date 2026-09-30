@@ -8,6 +8,10 @@ Concept: [Model-originated questions](0045-model-originated-questions.md#concept
 
 Concept: [Context and decision](0045-model-originated-questions.md#concept-adr-0045-decision).
 
+The final M7 ephemeral option union is owned by [ADR 0044](0044-run-model-and-reasoning-configuration-technical.md#technical-adr-0044-decision).
+The question-specific additions below extend that union; they are not a second
+complete startup inventory.
+
 A tool definition may specify `class: interaction`; absent class remains
 `effect` semantically and keeps its original definition bytes. M7 admits class `interaction` only for the reviewed `loopex.ask` definition
 and exact argument schema. Its new definition-format generation retains the

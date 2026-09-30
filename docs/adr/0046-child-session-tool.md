@@ -6,7 +6,7 @@ Technical depth: [Serial read-only child sessions](0046-child-session-tool-techn
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field and their normalized command identity for newly authored bounds, preserving historical digests and ordinary follow-up inheritance; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment.
+- **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field and their normalized command identity for newly authored bounds, preserving historical digests and ordinary follow-up inheritance; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment. Extends [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) with runtime-private read-only effect-intent and creation-provenance queries, including a Store read callback, without granting activation or mutation authority. Amends [ADR 0016](0016-configured-cancellation-observation.md#concept) only to permit exact retained v2/v3 genesis in historical create lookup; committed cleanup values and observation bounds remain unchanged.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept) and [ADR 0049](0049-explicit-host-configuration.md#concept)
 - **Prerequisite for:** M7 outcome 7
 
@@ -22,7 +22,9 @@ explicit immutable per-session tool selection and policy-defer handling at
 creation, shared session mechanics that ordinary embedded hosts can also use.
 
 The parent may automatically choose a host-enabled role within policy and
-explicit limits. The host freezes the role catalog at parent-session creation.
+explicit limits. The host freezes the role catalog and complete delegation declaration
+at parent-session creation. Each new parent run starts a separate allowance from
+that declaration; resume never substitutes edited file limits or resets a run.
 Each role supplies exact instructions, provider/model and reasoning. The child
 receives the task and those instructions, with fresh context. It never inherits
 the parent's conversation or reads a changed role file during recovery.
@@ -55,12 +57,29 @@ activating recovered work. Some interrupted tasks therefore need a new request.
 This is the maintainer's selected recovery boundary. A still-live child may
 continue until abort is admitted; no instantaneous stop is promised at the
 parent's earlier abort commit. Only confirmed cleanup permits a cleaned result.
-Clients may inspect child evidence but cannot independently reconfigure, compact
-or start further work in a helper session. Its owning operation controls mutation
-and cleanup, including after settlement.
-Cancellation before a job can be identified closes new helper admission for
-that host instance and reports uncertainty. A host restart restores admission
-through normal fencing and recovery; ordinary local-tool behavior stays intact.
+Clients may inspect child evidence but cannot independently mutate a helper,
+including abort, reconfiguration, compaction or further work. Cancel its owning
+parent operation to stop it; when that owner is unavailable, use host restart
+and stop-only recovery. Its owning operation controls mutation and cleanup,
+including after settlement. Child cleanup can finish after the parent's
+observation window; the parent then remains unknown even after a clean child stop.
+
+The router classifies every forwarded local or helper job. Cancelling a known
+local job leaves helper admission open. An unclassified cancellation closes new
+helper admission for that host instance, including other daemon sessions, and
+reports uncertainty. Classification is retained for the router's lifetime so
+late cancellation cannot turn a completed known job into an unknown one. Its
+bounded registry refuses new distinct jobs when full; existing jobs and cleanup
+remain available. Restart the full composition to replenish that registry.
+An unresolved host-ledger commit separately fences that adapter's mutations,
+including settlement for other parent sessions, until recovery resolves it.
+These limits do not change local request or receipt bytes.
+
+Read-only core queries supply committed effect intents and creation provenance
+without starting a session. The host uses them to distinguish a crash before
+child creation from missing evidence for an existing child. Proven absence may
+close an interrupted operation without dispatch; it never resets an uncertain
+reservation's count or authorizes a replacement child.
 
 New command identities bind the caller's explicit limits, so reusing an ID
 with different limits refuses. Repeating the original command keeps its first
