@@ -32,7 +32,7 @@ Accepted decisions that constrain the work:
 | Decision | Constraint on M7 |
 | --- | --- |
 | [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage; ADR 0041 amends tool-result projection, ADR 0042 system-text ownership, ADR 0043 raw-only projection/compaction deferral, and ADR 0044 session-fixed model/empty continuation |
-| [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure and ADR 0046 adds the explicit deadline ceiling and versions authored-bound command identity |
+| [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure, ADR 0044 qualifies continuation exclusion only for verified summary text in existing reasoning progress, and ADR 0046 adds the explicit deadline ceiling and versions authored-bound command identity |
 | [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, receipt source provenance, session configuration placement and charged continuation; ADR 0046 extends the closed prompt/follow-up bounds |
 | [ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | Existing relative deadline remains; ADR 0046 explicitly permits an earlier committed absolute cutoff, including before first staging |
 | [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain |
@@ -164,9 +164,12 @@ subsequent work and do not promise exact provider invoice caps.
 Model requests, including the normalized record envelope and receipt, remain
 at most 65,536 bytes. ADR 0043 fixes summary input/output limits and a four-attempt
 maintenance ceiling. ADR 0041 projects bulky tool output as retained artifacts
-with at most 2,048 encoded bytes per executor-backed model-facing result, and adds bounded read
-ranges. Compaction uses those projections without automatically fetching full
-objects. Model-question results preserve exact bounded answers in ordinary
+with at most 2,048 encoded bytes per unsolicited executor-backed model-facing
+result, except exact legacy inline content under ADR 0041's old-tool rule.
+Explicit artifact reads request up to 4,096 raw bytes within an
+8,192-byte complete encoded result, preserving exact next offsets and the
+65,536-byte whole-request bound. Compaction uses those projections without
+automatically fetching full objects. Model-question results preserve exact bounded answers in ordinary
 projection and use its final preflight, including explicit irreducible refusal.
 For maintenance source alone, ADR 0043 first seeks a complete prefix, then uses
 marked serialized excerpts of the oldest eligible whole unit when necessary.
@@ -308,6 +311,10 @@ The selected durable live-streaming path also proves provisional answer delivery
 bounded native assembly and exact final block reconstruction. Interruption and
 owner loss cannot commit a partial answer, dispatch tools from deltas or retry
 an ambiguous call. Buffered ephemeral delivery retains ADR 0039's transport.
+Verified provider summaries use existing reasoning progress after native-event
+classification. Positive display and separate private-data canaries prove that
+permitted text can appear while signatures, redacted data and unverified thinking
+cannot. The public schema stays unchanged; canonical history omits that progress.
 
 Use the existing CLI coding-task fixture and release lane as the starting
 point: `apps/loopex_cli/test/coding_task_test.exs` and
@@ -526,6 +533,10 @@ declines. Neither path assumes the model can be forced never to ask.
    explicit `maintenance.model` or `--compaction-model`. Inspect the selected
    thinking-off summarizer and its admitted provider without reading credentials.
 2. Establish an early fact, then continue until automatic compaction occurs.
+   Inspect the fixture's automated range-read evidence for a source file of at
+   least 16 KiB: full 4-KiB ranges where encoding fits, exact offsets through EOF,
+   escaped/multibyte boundary cases and complete staged-request measurements.
+   This reuses the owning fixture run; it adds no duplicate model attempt.
 3. Verify the visible checkpoint and ask about the earlier work.
 4. Explicitly compact a settled session and inspect retained raw history.
 5. In the oversized-source fixture, make the documented large prompt or write
@@ -571,7 +582,11 @@ declines. Neither path assumes the model can be forced never to ask.
    state, conflicting reply/thinking limits and compaction during an open
    exchange. Verify named refusal without dropped blocks, enlarged limits or
    extra provider calls. After settlement, a new prompt can compact canonical
-   history. Inspect canary results for public/progress/trace/artifact exclusion.
+   history. In a verified summary mode, distinguish reasoning progress from answer
+   text and confirm it is absent from reopened canonical history. Inspect separate
+   permitted-summary and private-data canaries across public/progress/trace/
+   artifact output. Automated cases also prove suppression for an unverified or
+   empty summary, unchanged private replay and the buffered ephemeral result.
 
 #### V8. Delegate bounded investigation and review
 
@@ -664,7 +679,11 @@ declines. Neither path assumes the model can be forced never to ask.
    and unresolved M6 roots; stop their owners and retain complete pre-upgrade
    copies with manifests outside the test roots.
 2. Open copies with M7; verify unchanged staged bytes and truthful settled/unknown
-   recovery. No missing result authorizes blind provider/effect redispatch.
+   recovery. Inspect the old-tool compatibility cases: a saved inline result above
+   2 KiB remains exact when the full request fits, without new artifact preparation
+   or tool capabilities; an irreducible overflow refuses. Include a later receipt
+   from the same old generation and preserved truncation/spill notices. No missing
+   result authorizes blind provider/effect redispatch.
 3. Run the exact M6 reader only on disposable copies of new roots and record its
    actual behavior. A reducer rejection does not prove refusal before root mutation.
 4. Prevent the old binary from opening the live upgraded root. Restore its
@@ -773,6 +792,13 @@ from closure. The compaction lane pins an always-on conversation model and an
 explicit thinking-off summarizer, including their exact mappings. A switching
 model needs no thinking-off capability merely because it is provider B; the
 configured summarizer must have it. Switching alone proves no compaction capability.
+ADR 0044's initial Claude matrix pins `anthropic:claude-haiku-4-5-20251001`
+for manual/default and thinking-off maintenance cases, and
+`anthropic:claude-fable-5-1` for the always-on adaptive conversation case.
+Their exact outgoing mode, display and reply-limit vectors precede integration;
+catalog presence alone proves no support. The release manifest retains these
+mapping/renderer revisions with each selected case. This does not choose the
+separate hosted provider B or replace its required pre-attempt identity pin.
 
 <a id="technical-plan-acceptance-issues"></a>
 ### Internal review disposition and audit targets

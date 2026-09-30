@@ -95,9 +95,11 @@ including provider-default behavior. Core uses it without interpreting the
 provider's thinking mode; a reasoning label alone cannot establish it.
 The closed `thinking` variants are
 `{mode: omitted}`, `{mode: disabled}`, `{mode: manual, budget_tokens: positive_integer}`
-and `{mode: adaptive, effort: low | medium | high, display: provider_default}`.
-The adaptive display value omits a display override; the pinned mapping must
-prove this exact choice supports the retained content format.
+and `{mode: adaptive, effort: low | medium | high, display: summarized}`.
+Explicit adaptive levels request the verified summary display selected below.
+`{mode: omitted}` sends no thinking, display or effort override; it retains the
+verified exact model's default behavior, including whether continuation is
+required and any public summary is returned. Omission is not disabled thinking.
 No arbitrary provider-option bag is admitted. Include this mapping in the
 2-KiB configuration capability budget, and its resolved values in canonical
 sampling. Unknown capability permits `default` only and cannot enable a
@@ -108,6 +110,90 @@ and reject a conflicting configuration before commitment. Do not enlarge the
 reply limit. Verify the actual outgoing request: dependency translation may
 neither raise committed `max_tokens` nor enable an unadmitted mode. Pin the
 supported exact model, mapping and renderer in vectors before integration.
+
+M7's initial Claude conformance rows are below. These are proposed mappings,
+not claims that the current product implements or has verified them. Both use
+renderer revision `loopex.anthropic.native.v1`. Source metadata is the pinned
+LLMDB snapshot `b78cd916413017210f042b413c715d73180999b194545d1aa7e95a293e837c53`,
+generated 2026-09-18, plus the provider references below and the completed
+adapter conformance record. Keep those identities/digests in the bounded source
+metadata; a catalog label cannot override a verified request/response contract.
+The Haiku alias in the current reference default resolves to the dated identity
+below; these conformance rows use that exact identity.
+
+| Exact model after `anthropic:` | Reasoning | Outgoing thinking and effort | Continuation | Public summary | Reply condition |
+| --- | --- | --- | --- | --- | --- |
+| `claude-haiku-4-5-20251001` | `default` | Omit both | No | No | Preserve committed limit |
+| `claude-haiku-4-5-20251001` | `none` | `type: disabled`; omit effort and display | No | No | Preserve committed limit; maintenance uses 1,024 |
+| `claude-haiku-4-5-20251001` | `low`, `medium`, `high` | `type: enabled`, budget 1,024 / 2,048 / 4,096 respectively; omit effort and display | Yes | Only verified native summary text under this default display | Strictly greater than the selected budget |
+| `claude-fable-5-1` | `default` | Omit both; provider default is adaptive with omitted summary display | Yes | No | Preserve committed limit |
+| `claude-fable-5-1` | `low`, `medium`, `high` | `type: adaptive`, `display: summarized`; `output_config.effort` equals the selected level | Yes | Verified native summary text only | Preserve committed limit |
+| `claude-fable-5-1` | `none` | Refuse before commitment; no request | — | — | Thinking cannot be disabled |
+
+Mapping revisions are `loopex.anthropic.haiku45.v1` and
+`loopex.anthropic.fable51.v1` respectively. These define the summary
+classification used below; there is no independently authored disclosure bit.
+All rows remain subject to ordinary model output, run-spending, context,
+capsule and record bounds. A syntactically valid reply allowance promises no
+number of thinking/tool rounds. With the unchanged 4,096 ordinary reply default,
+manual `high` refuses. An explicit larger allowance, such as 8,192, uses existing
+configuration and must pass all bounds; dependency code cannot grant the increase.
+Haiku's manual mode does not claim interleaved thinking support. No new beta
+headers, `between_tools`, extra effort levels or raw provider-option bags are
+introduced. The Haiku thinking-off row supplies one maintenance conformance
+case. M7's required cross-provider compaction case separately pins a verified
+thinking-off model on provider B; it cannot use two Anthropic models to claim
+that routing proof. The always-on conversation model need not disable thinking.
+
+Inspect the final request after dependency normalization, not only Loopex's
+input options. In pinned ReqLLM, `reasoning_effort: none` removes the option;
+it does not send `thinking.type: disabled`. Default omission likewise must not
+use ReqLLM's `reasoning_effort: default`, which can enable thinking. Set the
+verified native disabled/manual/adaptive values explicitly where selected.
+Reject unadmitted manual-to-adaptive conversion, reply-limit increases or
+display injection before dispatch. Only conformance-complete exact rows may
+be admitted; an unknown default that may need private continuation cannot
+bypass that rule. Additional exact model mappings need the same bounded
+contract and evidence, not a family-name inference or automatic catalog update.
+
+**Public reasoning projection.** The retained exact model/mapping revision and
+actual outgoing mode/display settings determine whether native text is a
+verified provider summary. Keep that classification in the versioned adapter
+mapping, not a caller-authored permission flag or a new core provider taxonomy.
+Apply it before converting native events, emitting progress or incrementing
+the public delta counter. For streaming, verify the response identity and
+supported event kind before its first eligible fragment. An unverified mode,
+changed response identity or unexpected event cannot inherit another mapping's
+summary classification. Malformed native streams retain the failure rules below.
+
+Only provider-declared summary text is eligible for `reasoning_delta`. A field
+named `thinking`, a converted `:thinking` chunk, a missing signature or an
+`encrypted?: false` marker cannot establish eligibility. Pinned dependency
+conversion may erase the distinction between summary and other reasoning
+events. Classify at the native boundary and suppress unverified reasoning text;
+do not decode signatures, copy redacted data or generate a local summary from
+private continuation. This rule also applies to other provider routes. It does
+not require enabling thinking or requesting a summary when the admitted mode
+does not return one. No new user option or provider mode follows from this rule.
+
+Project only bounded UTF-8 summary text through ADR 0011's existing
+`reasoning_delta` schema, with its terminal-control, credential and binding
+checks. Exclude native block wrappers, signatures, redacted data and private
+continuation metadata. Count only emitted public deltas in the shared model
+sequence and reply `delta_count`; suppressed private events consume no sequence
+number. Chunking, loss detection, closure and cancellation retain their existing
+rules. Receiving a complete summary block grants no tool or settlement authority.
+The private assembler independently retains the original block unchanged, even
+if public projection is suppressed, split, dropped or terminal-sanitized.
+
+A visible summary is provisional progress. Reference clients distinguish it
+from answer text and may retain received progress in their operator transcript.
+It is absent from canonical answer/history, snapshots, compaction input, helper
+results and diagnostics. Reopen/replay does not regenerate it from the capsule.
+ADR 0011's summary-only rule remains; this proposal qualifies its blanket
+continuation-material exclusion only for the verified text projection. ADR 0023's
+public progress kinds and field names are unchanged. Ephemeral calls remain
+buffered without a new progress callback or post-hoc summary disclosure.
 
 **Private reply and request forms.** Revision `loopex.model_request.v2` retains
 the same top-level semantic members and digest coverage, admitting `continuation`
@@ -450,8 +536,11 @@ retires the complete history under existing retention policy; M7 introduces no
 selective continuation collection. Ephemeral runtime teardown removes its owned
 state under the existing cleanup contract. Public events, snapshots, history
 views, transcripts, helper results, summary input, progress and diagnostics omit
-the capsules and native thinking/signature deltas. Expose only bounded format,
-size and availability metadata. The raw capture path preserves selected-key
+the capsules, native block objects, signatures, redacted data and unverified
+thinking text. The public reasoning projection above is the sole exception for
+verified summary text; its identical occurrence inside a capsule is permitted.
+Other capsule exposure is limited to bounded format, size and availability
+metadata. The raw capture path preserves selected-key
 screening and credential isolation. Backup/restore includes private state;
 ordinary artifact retrieval never exposes it. Host-authorized raw store access
 retains the existing private-store audience, not an encryption guarantee.
@@ -496,6 +585,11 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
 - Restart at configure and staging boundaries preserves configuration/digest.
 - Reasoning capability negatives, default omission versus verified disabled mode,
   and unchanged outgoing reply limits for manual and admitted adaptive modes.
+  Cover every literal matrix row after actual pinned request encoding, including
+  Haiku manual-high rejection at 4,096 and explicit 8,192, Fable default omission
+  versus explicit summarized adaptive display, and Fable `none` refusal. Check
+  retained source/mapping/renderer identity, continuation requirement and summary
+  eligibility. A newer catalog or resumed run cannot reinterpret old rows.
 - Real-provider continuation after a bound or cancellation immediately after
   tool results, followed by a new user prompt on the same thinking model.
   Verify the exact rendered message grouping and provider acceptance without
@@ -508,6 +602,19 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   history/snapshots, diagnostics and ReqLLM telemetry. Host crash dumps and
   trusted host-installed handlers retain ADR 0039's stated host-VM audience;
   the private-store and credential guarantees must not imply secrecy from it.
+- Use distinct canaries for permitted summary text, unverified thinking text,
+  signatures and redacted data. A verified summary appears only in received
+  reasoning progress and any recording of that progress; private canaries never
+  appear in public planes. Assert both positive display and negative exclusion,
+  rather than requiring every byte in the private capsule to remain undisclosed.
+  Ordinary answer-text overlap is likewise not a private-state disclosure.
+- Mapping/native-event vectors distinguish summary and other thinking events
+  even when dependency conversion produces the same `:thinking` chunk. Cover
+  absent/unverified classification, omitted/empty display, changed identity,
+  split UTF-8 and terminal-control rejection, mixed hidden/public events with
+  gapless counts, slow subscribers and cancellation. The capsule stays exact
+  and reopening never republishes its summary as canonical history. Buffered
+  ephemeral output remains free of reasoning progress.
 - A real selected Claude thinking/tool loop, including multiple tools/rounds;
   raw block fidelity, redacted/interleaved blocks, signatures and native ID mapping.
 - Streamed/buffered native-equivalence vectors and one live durable thinking case
@@ -538,7 +645,8 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
 - Frozen-prefix compaction refusal, same-model restart, terminal invalidation
   and A→B→A without resurrecting old signatures.
 - Private-state canaries across both transport profiles, public/progress/trace
-  planes, helpers, summaries, artifacts, backup/restore and ephemeral teardown.
+  planes, helpers, compaction input, artifacts, backup/restore and ephemeral
+  teardown, with the verified-summary projection classified separately above.
 - Deterministic same-model/cross-provider history, repeated tool IDs and raw-history
   preservation; real A→B→A with restart and tool results.
 - Schema negotiation, events/snapshots and independent client vectors.
@@ -578,3 +686,14 @@ do not supply Loopex dispatch, recovery or publication authority. Pinned local
 ReqLLM exposes provider decoding callbacks before ordinary stream chunks, but
 its chunk queue does not bound the accumulated response. The implementation
 must prove the per-invocation bridge and bounds above with the retained version.
+
+The provider's [thinking display contract](https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display),
+checked 2026-09-30, distinguishes readable summaries from signatures and omitted
+text. Display defaults vary by model. That supports a mapping-specific projection,
+not treating all returned thinking text as public or inferring output cost from
+visible summary length.
+The [mode matrix](https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#thinking-support-defaults-and-rejected-configurations-by-model)
+and [manual-mode rules](https://platform.claude.com/docs/en/build-with-claude/extended-thinking#budget-rules-and-tuning)
+checked the same day support the candidate rows above. These references establish
+API intent; pinned request encoding, complete native replay and real-provider
+acceptance remain separate required evidence.

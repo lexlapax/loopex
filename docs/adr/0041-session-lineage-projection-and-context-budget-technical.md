@@ -45,7 +45,8 @@ freeze earlier result projections and context receipts; prepare new result
 references only for newly appended results, without revising the frozen prefix.
 
 **Retained output and model excerpts.** Cap each complete model-facing result
-from an executor-backed tool at 2,048 encoded JSON bytes, using ADR 0042's
+from an executor-backed tool at 2,048 encoded JSON bytes, except legacy inline
+compatibility and explicitly requested artifact ranges below, using ADR 0042's
 compact UTF-8 encoding recipe. Include normalized call ID, outcome,
 excerpt and reference notice. Revision 1 projects `use_locator`, object digest,
 object size, `excerpt_source: receipt_content`, excerpt byte range and explicit
@@ -66,14 +67,29 @@ irreducible oversize refuses before ordinary dispatch. Once eligible as older
 history, they may enter ADR 0043's marked maintenance-source excerpt. That
 exception changes neither the original answer nor its ordinary projection.
 
-Before producing a model-retrievable projection, require the session's frozen
-read generation to support `artifact_use`. Otherwise return
-`artifact_read_unavailable` before preparation writes; preserve the old tool
-definitions and inline facts, with host inspection still available. No implicit
-tool-set migration is permitted. Small inline results remain usable.
+**Legacy inline compatibility.** For a session whose frozen read generation
+does not support `artifact_use`, preserve the existing inline result shape and
+the full committed `result.content`, with the normalized cross-run call identity
+and original outcome. This is a compatibility exception to the 2,048-byte
+excerpt cap, not permission to fetch or expand a retained artifact. It applies
+to receipts produced under those frozen old definitions, including later runs
+after upgrade; no timestamp or new tool-set migration determines eligibility.
+Only bytes already in the receipt are available. Existing truncation or spill
+notices remain explicit; this rule does not recover their omitted output or
+claim that an old tool gained artifact retrieval.
 
-For new output too large for the projection, use the existing verified artifact
-spill path before receipt commitment. Measure the complete encoded projection
+Treat this inline content as fixed during ordinary aggregate allocation. Apply
+all full-record, token, depth and cardinality checks, including both retained
+representations. Eligible older history may compact under ADR 0043; if required
+content still does not fit, refuse by the existing bound without truncating it.
+Do not require a usable artifact reference merely to reuse these saved bytes,
+or perform preparation writes for this compatibility projection. Producing an
+artifact-retrievable excerpt still requires a supporting frozen read generation;
+otherwise `artifact_read_unavailable` precedes preparation writes. Host inspection
+remains available. Original receipts and previously staged requests never change.
+
+For output from new M7 generations too large for the projection, use the existing
+verified artifact spill path before receipt commitment. Measure the complete encoded projection
 including its reference notice; crossing that bound triggers retention even
 when output remains below the tool's capture/output ceiling. New M7
 grep/find/ls generations need artifact allowances sufficient for their retained
@@ -85,7 +101,8 @@ receipt and diagnostics. Retention failure cannot claim a retrievable reference;
 existing size/cleanup limits still apply. Full output means all bytes actually
 retained by that tool under its existing limit, not unbounded process output.
 
-For a legacy inline result without a usable reference, bounded preparation may
+Where the frozen read generation supports artifact retrieval, bounded
+preparation for a legacy inline result without a usable reference may
 retain the exact UTF-8 bytes of committed `result.content`, with no added
 wrapper or newline, and append `tool_result_reference_prepared`,
 keyed by original receipt identity/digest and projection revision. Retain source
@@ -102,7 +119,8 @@ encoded result remains at most 2,048 bytes. A shorter source saturates at its
 full length. Zero emits an empty excerpt with explicit omission when source
 content exists; it never omits the result or its required metadata. Binary
 descriptions, user/assistant/question content, call identities/generations,
-outcomes, explicit artifact-range results and frozen native prefixes are fixed.
+outcomes, legacy compatibility inline content, explicit artifact-range results
+and frozen native prefixes are fixed.
 An excerpt is eligible only with an already usable committed artifact reference.
 Allocation grants no extra retention/preparation work: inline sources use the
 bounded preparation episode below before they can become eligible.
@@ -155,7 +173,7 @@ references are reused and do not consume another source allowance.
 
 **Explicit read range.** A new generation of `read` accepts either its existing
 workspace `path` inputs or `artifact_use`, nonnegative byte `offset` and positive
-`length <= 1,024`; the alternatives are exclusive. `artifact_use` is the existing
+`length <= 4,096`; the alternatives are exclusive. `artifact_use` is the existing
 `use:<sha256>` identity. The owner resolves it only from committed receipt or
 prepared-reference facts of this session in the same artifact-store namespace.
 Unknown, orphan, other-session and forged uses refuse. Possession is no grant;
@@ -175,8 +193,12 @@ not prove journal inclusion. Recovery reuses the journaled resolution.
 
 Use one job-owned verified transfer window per read and close it on every path.
 Return actual offset, byte count, next offset and EOF, without exposing transfer
-handles. Length is an upper bound: choose the largest UTF-8-safe returned range
-that fits the same 2,048-byte encoded result cap after metadata. A requested
+handles. This explicit retrieval has an 8,192-byte complete encoded JSON result
+cap, including the normalized call identity, outcome and object/range metadata.
+This is the larger artifact-read result cap, separate from the legacy inline
+compatibility exception. Length is
+an upper bound: choose the largest UTF-8-safe returned range no longer than the
+requested length that fits this larger encoded cap after metadata. A requested
 start inside a codepoint refuses; the end may shorten with explicit next offset.
 Offset equal to object size returns empty EOF; offset beyond size refuses. A
 binary/non-UTF-8 range gives a bounded unsupported-content result. Retrieval
@@ -185,6 +207,14 @@ excerpts or report the source as a newly retained receipt artifact. Require
 positive returned bytes unless EOF; if metadata plus one character cannot fit,
 return `artifact_range_unrepresentable`. This prevents recursion and zero-progress
 retrieval loops. No automatic reinjection occurs.
+The returned range remains exact during later ordinary projection and aggregate
+allocation; never shorten it a second time to satisfy the unsolicited-excerpt
+cap. Its original object reference requires no new artifact or preparation
+episode. Eligible old complete groups may later compact under ADR 0043's
+separate source rules. The larger result still counts in full in both retained
+request representations and the input estimator. Combined reads, metadata or a
+frozen thinking prefix can still exceed the complete-request ceiling; ordinary
+compaction or named refusal applies, never a larger request limit.
 
 The M7 local profile retains referenced objects/uses with raw session history,
 including after compaction and restart. It adds no automatic collection. Missing
@@ -194,7 +224,8 @@ workspace path as a replacement. Whole-root backup includes these artifacts.
 The final request measurement is independent: semantic messages and
 `canonical_request_bytes` both retain the projection, plus receipt/envelope.
 Two 16-KiB raw outputs already consume 65,536 bytes in those two representations
-before framing. Neither the 2-KiB excerpt limit nor the summary-source bound
+before framing. Neither the 2-KiB excerpt limit, the 8-KiB explicit-range result
+limit nor the summary-source bound
 replaces full exact-record preflight.
 
 For a known model window `W` and reply reserve `R`, the host default is `W-R`.
@@ -221,6 +252,14 @@ Concept: [Observable consequences](0041-session-lineage-projection-and-context-b
   original bytes/outcomes remain inspectable; measure actual task fixtures too.
 - Encoded excerpts with quotes/control characters/multibyte text and long valid
   references; first/middle/final/empty ranges, exact next offsets, no recursion.
+- Explicit lengths 4,095/4,096/4,097, encoded-result edges 8,191/8,192/8,193,
+  and escaped content that must return less than the requested range. Prove
+  positive progress or named refusal and unchanged requested/job/grant bounds.
+  A fixture source file of at least 16 KiB requires full 4-KiB returns where
+  its encoded content and metadata fit. Retain call counts, actual range sizes,
+  complete staged-record/input measurements and exact next offsets through
+  compaction/restart. Test combined reads and continuation prefixes separately;
+  no claim that every batch or raw 4-KiB string fits follows.
 - Multi-call aggregate allocation, monotone candidate sizes, optional-resource
   withholding including reserved empty-header growth, zero-prefix metadata
   overflow and unchanged frozen prefixes;
@@ -229,8 +268,13 @@ Concept: [Observable consequences](0041-session-lineage-projection-and-context-b
   artifacts and digest/range corruption refuse without widening authority.
 - Retention/preparation/staging fault cuts and commit_unknown fencing; cancelled
   or failed range retrieval closes its transfer and preserves receipt truth.
-- Legacy inline/spilled results preserve original receipts and staged bytes;
-  an old read generation refuses required retrieval without widening tools.
+- Legacy inline/spilled results preserve original receipts and staged bytes.
+  An old read generation reuses exact inline content above 2 KiB when the full
+  request fits; test fit/overflow edges, later old-generation receipts, restart
+  and frozen thinking prefixes. Assert no preparation write, implicit read
+  capability or invented recovery of truncated/spilled bytes. Eligible compaction
+  may make room; otherwise named refusal preserves the complete inline fact.
+  An attempted artifact-retrievable projection still refuses without widening tools.
   Preparation count/byte/time boundaries and restart never reset allowances.
 - Real multi-prompt task refers correctly to earlier diagnosis and tool evidence.
 

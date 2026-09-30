@@ -24,13 +24,17 @@ for oversized older content, retaining complete originals, and
 [option B: a separately configured summarizer](../developer/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30).
 The maintainer subsequently selected
 [option A: local references and initial thinking reserve](../developer/agent-context-map.md#disposition-m7-thinking-capacity-2026-09-30).
-The latest selection is
+The maintainer also selected
 [option A: live streaming](../developer/agent-context-map.md#disposition-m7-thinking-streaming-2026-09-30).
-All four choices are drafted, including source projection, omission provenance,
+The maintainer selected
+[option A: verified public reasoning summaries](../developer/agent-context-map.md#disposition-m7-reasoning-summary-2026-09-30).
+The latest selections are
+[up to 4 KiB per requested artifact read](../developer/agent-context-map.md#disposition-m7-artifact-range-size-2026-09-30)
+and [legacy inline reuse when the full request fits](../developer/agent-context-map.md#disposition-m7-legacy-inline-2026-09-30).
+All seven choices are drafted, including source projection, omission provenance,
 captured maintenance-model selection, expanded continuation accounting and
-bounded native stream assembly.
-Further material choices will be presented one at a time, including supported
-modes, public reasoning-summary policy, protocol compatibility
+bounded native stream assembly with a separate permitted summary projection.
+Further material choices will be presented one at a time, including protocol compatibility
 and the scope of the parallel-helper ban. A report's request for a decision
 does not by itself reopen a choice the maintainer already made.
 
@@ -436,8 +440,8 @@ budget. Restricting long-session support to thinking-off-capable conversation
 models and increasing the maintenance reasoning allowance were not selected.
 The proposal repair adds explicit model configuration, routing and recovery
 bindings. Ordinary bounded thinking in M7 remains selected. The subsequent
-capacity and live-delivery selections are drafted; their integrated proof and
-the public reasoning-summary choice remain outstanding.
+capacity, live-delivery and public-summary selections are drafted. The literal
+initial mode matrix below defines the remaining implementation and provider proof.
 
 ### Finding dispositions
 
@@ -448,17 +452,17 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | --- | --- | --- |
 | 1 | A incorporated in proposed contract | ADR 0043 now defines complete-prefix selection followed by marked serialized excerpts of the oldest eligible whole unit, including terminal input-only runs. Fixed head/tail allocation covers large prompts, arguments and group metadata; inherited omission provenance distinguishes raw coverage from bytes the summarizer saw. Originals remain readable. No new admission restriction or chunked model workflow was selected; integrated implementation evidence remains required. |
 | 2 | A selected and drafted; bounded sizing retained | Generic local references preserve native expansion and full input charge. A revised three-round candidate is 58,394 record bytes; five/eight still fail. Both compact/expanded caps remain. Initial reserve targets join allocation, maintenance and recovery. Final integrated metadata/provider proof remains required; no round-count guarantee follows. |
-| 3 | Separate summarizer selected and drafted; ordinary matrix pending | Manual thinking is not Haiku-only. The selected explicit thinking-off summarizer lets an always-on conversation model compact without changing its ordinary mode. The ordinary supported-mode matrix and ReqLLM's adaptive display injection versus `provider_default` still need resolution. |
+| 3 | Separate summarizer and literal candidate matrix drafted | Manual thinking is not Haiku-only. ADR 0044 pins exact Haiku 4.5 and Fable 5.1 rows, default omission, actual disabled thinking, manual reply-limit conditions and explicit summarized adaptive display. Conformance must inspect final encoded requests and unchanged bounds before admitting a row; no catalog-wide support or implementation proof is claimed. |
 | 4 | Small complete example measured; quality proof remains | A useful authored fixture fits the declared input/output caps and current-shaped record with receipt. This does not prove provider output tokens or quality. Retain the reserve pending actual implemented witnesses; do not infer that every maximal member must fit simultaneously. |
 | 5 | Existing rule overlooked; concrete join repaired | ADR 0041 already required new output to spill before receipt. Clarify the encoded projection trigger and require new search-tool artifact allowances; old one-byte allowances cannot retain their output. |
 | 6 | Aggregate proposal repaired; finite capacity retained | The complete baseline probe fits eight maximal outputs, repairs twelve with a shared allowance, and demonstrates irreducible metadata overflow at 64. ADR 0041 now allocates eligible excerpts together with exact preflight, unchanged preparation limits and frozen-prefix/range-read protection. Final M7 records still require measurement. |
-| 7 | Usability choice pending | Batched calls mean 1 KiB reads need not consume fifteen turns, but explicit retrieval is still costly. Decide its usable bound separately from unsolicited excerpts. |
-| 8 | Deliberate compatibility restriction; pending disposition | Old generations lack artifact retrieval. Choose a bounded inline compatibility exception or name this refusal explicitly in upgrade expectations; never migrate tool definitions implicitly. |
+| 7 | 4-KiB range A selected and drafted | ADR 0041 admits requested lengths up to 4,096 bytes within a separate 8,192-byte encoded result cap. Ordinary unsolicited excerpts stay at 2,048 encoded bytes. Exact next offsets, positive progress, no second shortening and complete-request limits remain; 16-KiB-file and escaped/boundary witnesses are explicit. |
+| 8 | Legacy-inline A selected and drafted | Sessions with old frozen read definitions may project exact committed inline bytes when the full request fits, without preparation writes or new artifact capabilities. The exception includes later receipts under those definitions and preserves prior truncation/spill notices. Eligible compaction or named overflow refusal remains. |
 | 9 | Corrected complete example measured; margin remains narrow | Earlier helper numbers omitted a required property. Restored schemas and two wording repairs produce a 990-token example for this checkout, but a 96-byte path already reaches 1,010. No schema/cap relaxation or provider-quality claim follows; actual demonstrated profiles and margins remain required. |
 | 10 | Claimed subtraction rejected; wording repaired | 8,192 is the fallback input budget. ADR 0041 now says so explicitly. Actual mandatory-content preflight still applies. |
 | 11 | Repaired | ADR 0044 uses settlement v3, preserves ADR 0021 v2 and its accounting evidence, and charges invalid continuation conservatively. |
 | 12 | Live streaming A selected and drafted; focused bridge probe passed | Preserve durable live answer progress and buffered ephemeral delivery. The pinned parser/provider bridge probe demonstrates early text, private complete capture, signature joining and failure latching. ADR 0044 requires complete grammar, bounded accumulation, atomic settlement, interruption/recovery and transport proof; the scratch probe does not implement or prove those full obligations. |
-| 13 | Pending maintainer choice | Existing public reasoning summaries conflict with blanket suppression. Decide permitted public summary versus private native data and name any accepted-contract amendment. |
+| 13 | Verified-summary A selected and drafted | Gate public summary text at the native event and exact retained mapping before emission/counting. Qualify ADR 0011's continuation exclusion narrowly, preserve ADR 0023's wire shape, distinguish positive summary canaries from private-state canaries, and keep buffered ephemeral delivery. |
 | 14 | Evidence gap repaired | Add real continuation after bound/cancel with a new prompt and exact rendered grouping. Unsupported rendering refuses; no invented assistant completion. |
 | 15 | Clarified | Define deterministic derived IDs and collision refusal. A chosen prefix cannot prove disjointness from native IDs. |
 | 16 | Coverage clarified; selected reserve drafted | Enumerate CLI JSON/transcript, Node, diagnostics and dependency telemetry witnesses. Preserve the existing private-store and host-VM audience limits; the new reserve changes no public/private audience. |
@@ -633,8 +637,8 @@ blocker. This bounded pass does not replace the complete-packet review.
 The maintainer selected A, live streaming. The draft keeps live answer text on
 the existing durable path and adds bounded native assembly before tool admission.
 ADR 0039's ephemeral one-shot path remains buffered. The separate question about
-publishing verified provider reasoning summaries is unanswered; this selection
-does not authorize disclosure of private native thinking or signatures.
+publishing verified provider reasoning summaries was unanswered at that checkpoint;
+the subsequent selection and its distinct boundary are recorded below.
 
 A read-only source trace at `d6e5bacfc64a60d4c92f36a5e5b68ed5124c8cff`
 identified a per-invocation parser/provider callback route in pinned ReqLLM
@@ -690,6 +694,113 @@ telemetry audiences, core validation/accounting/settlement, cancellation races
 or restart. Those remain implementation obligations, as does the final
 whole-packet planning review.
 
+### Public-summary selection and model mapping
+
+The maintainer selected A, show verified provider summaries. A focused source
+trace found that `req_llm.ex` currently publishes every converted `:thinking`
+chunk as `reasoning_delta`. The dependency converts Anthropic thinking events
+without a public-summary designation; its OpenAI Responses decoder also maps
+both ordinary reasoning and summary events to the same chunk shape. Core's
+delta validation proves shape, size and terminal safety, not provider semantics.
+Existing fixtures test those shapes and presentation, not summary eligibility.
+
+ADR 0044 now requires native-event classification under the retained exact
+provider/model mapping before public emission and counting. It qualifies the
+accepted ADR 0011 continuation exclusion only for that bounded summary text;
+ADR 0023's public schema remains. Hidden events consume no public sequence
+number. Client stderr summaries remain separate from answer reconstruction and
+durable replay; a captured operator transcript can retain permitted progress.
+The capsule stays exact even when public text is split, rejected or dropped.
+The evidence distinguishes permitted summary text from private thinking,
+signatures and redacted data. A read-only advisory review found no actionable
+issue in this focused privacy repair. No product implementation or provider
+call was made.
+
+A second advisory analysis concluded that the ordinary model matrix needs no
+new scope choice. The selected continuation, public-summary and separately
+configured maintenance contracts already permit a small exact verification
+set. The draft pins Haiku 4.5's dated model for manual thinking and thinking-off
+maintenance, and Fable 5.1 for the required always-on conversation case. Both
+exist in the pinned snapshot; Opus 5.5 is absent there. The table names mapping
+and renderer revisions, actual outgoing mode/display settings, continuation
+requirements, summary eligibility and reply-limit conditions. It makes no
+catalog-wide claim. Official current [mode support](https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#thinking-support-defaults-and-rejected-configurations-by-model)
+and [display documentation](https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display)
+were checked through Context7 and the provider site on 2026-09-30.
+
+The exact mappings preserve `default` omission and make `none` send actual
+disabled thinking only where verified. Explicit adaptive levels retain
+`display: summarized`, resolving the earlier `provider_default` contradiction.
+Manual `high` still refuses at the unchanged 4,096 reply default; explicit larger
+reply limits already exist. These are proposed rows requiring final wire,
+native replay, privacy and real-provider proof, not evidence of implemented
+support or permission to add every current model.
+A focused advisory reread found no new contradiction in those matrix rows.
+The lead then clarified that Haiku's maintenance conformance row cannot stand
+in for V6.7's separately required cross-provider summarizer proof.
+
+The dependency-only encoding probe at `/tmp/loopex-m7-mapping-6b5bb406/`
+retains 23 rows using ReqLLM 1.24.0 and the compiled packaged catalog under
+Elixir 1.20.3/OTP 29. All rows construct buffered and streaming request values
+with matching selected body controls. Sixteen match the intended literal
+controls; seven expose mismatches rather than successful mappings. Two rows
+also violate the proposed manual-budget relation, including one whose literal
+fields match. In particular, library `none` omits thinking instead of disabling
+it, library `default` enables it, canonical manual-high can raise 4,096 to 4,297,
+and Fable manual requests become adaptive. Explicit Haiku disabled and Fable
+summarized adaptive settings encode as drafted. This confirms why final encoded
+request checks and preflight refusal are both required.
+
+The successful construction run took 16,943 ms. The first setup attempt omitted
+built-in provider registration and produced setup refusals, retained separately.
+A supplemental catalog-only read corrected the initial metadata lookup and
+confirmed the same packaged BEAM/source snapshot without repeating request rows.
+The lead read the report and structured checks and verified the artifact hashes.
+No constructed request ran; no provider, real credential, application startup,
+product test or repository implementation was used. Source/loaded-BEAM hashes
+identify the executed dependency bytes without claiming a rebuild. The probe
+does not prove provider acceptance, native replay, response summary classification,
+transport, custody, accounting or recovery.
+
+| Retained mapping-probe file | SHA-256 |
+| --- | --- |
+| `README.md` | `504eaaaf05ce5fc8cad19cb77ba73fb3d3969315667dda5b5348e46347c5e7a7` |
+| `probe.exs` | `dc8280670ec1bba155594937ae8da854bf8d43216a8f73f2268f33393225fff3` |
+| `results.json` | `122af67aa8c29367bda96b7eadb053c3df85c9cc3d48192ca104f2523f963033` |
+| `identity.json` | `cfc8fac626cd8dcd0ec59be1f63af57081f203ef823bc1bd9202882d692ef2f5` |
+| `catalog-identity.json` | `574692694074934b78faf5282f1105b8c39ea7e86d3484a7bde76b8e36beea9e` |
+| `artifact-check.json` | `0d124c4006315be4a7b181e1f24228e8e2e2fcb3a33ce651d5eba706006fe6b1` |
+| `SHA256SUMS` | `15c7359c6bae0b75c1f965ac271a5bbd6eb9759f06197d949d116e45d68f2453` |
+
+### Requested ranges and older inline results
+
+The maintainer selected up to 4 KiB per explicit artifact read. ADR 0041 uses an
+8-KiB complete encoded result cap for this branch while keeping the 2-KiB
+unsolicited-excerpt cap. The request remains an upper bound, since escaping,
+metadata and UTF-8 boundaries may shorten the actual range. Exact next offsets
+and positive progress or named refusal prevent silent gaps and empty loops.
+Ordinary projection and aggregate allocation cannot shorten the returned range
+again. Complete request/input bounds still apply to both stored representations,
+including combined reads and frozen thinking prefixes. M7's operator case
+inspects retained automated evidence for a source file of at least 16 KiB,
+without requiring a duplicate model attempt.
+
+The subsequent A selection preserves usable older sessions. A frozen read
+generation without artifact retrieval may reuse exact committed inline content
+above the new excerpt ceiling when the complete request fits. Its tool identity
+determines compatibility, including later receipts under the old definition;
+no timestamp exception or implicit tool upgrade is introduced. Saved truncation
+and spill notices remain, without claiming lost bytes can be recovered. The
+branch performs no artifact preparation, treats inline content as fixed during
+ordinary allocation, and retains eligible compaction or named overflow refusal.
+The upgrade operator case and conformance list now distinguish this fit path
+from irreducible overflow and unauthorized retrieval.
+A focused advisory reviewer found one contradiction: the general result-cap
+paragraph and M7 summary still omitted the legacy exception, and the range
+paragraph called itself the sole exception. The lead accepted and repaired all
+three clauses. The reviewer's reread confirmed the finding closed. This is
+proposal consistency evidence, not an implemented retrieval or upgrade proof.
+
 <a id="resume-checkpoint"></a>
 ### Resume checkpoint, 2026-09-30
 
@@ -697,12 +808,12 @@ The maintainer's restart request selected A for oversized-source excerpts.
 That repair and the later B selection for a separate summarizer are drafted.
 The maintainer also answered A for thinking capacity. Its generic local-reference
 and initial-reserve repair is drafted and measured above. Do not re-ask it.
-The maintainer selected A for live streaming; its repair and limited feasibility
-probe are recorded above. Do not re-ask it. The current unanswered question is
-public reasoning summaries: A permits verified provider summaries through the
-existing reasoning-progress path, with private continuation/signatures excluded;
-B hides reasoning content in thinking modes. A is recommended, not selected.
-Do not infer this privacy decision from the live-delivery choice.
+The maintainer selected A for live streaming, verified public reasoning summaries,
+4-KiB explicit reads and legacy inline compatibility; all are drafted above.
+Do not re-ask them. The current unanswered question is wire compatibility:
+A requires updated clients and clearly refuses old protocol generations;
+B serves both with additional state and payload compatibility rules. A is
+recommended, not selected. Do not infer this choice from old-tool compatibility.
 Resume this work on branch `m7` in
 `/Users/spuri/projects/lexlapax/loopex`; inspect Git before changing anything.
 All work remains planning/docs, with commits and pushes authorized. M7 is Open,
@@ -711,7 +822,7 @@ Do not implement product changes or present a final external-review SHA/prompt
 until the remaining decisions, repairs and whole-packet adversarial pass finish.
 
 1. Preserve the selected source-excerpt A, summarizer B, thinking-capacity A and
-   live-streaming A
+   live-streaming A, verified-summary A, 4-KiB reads and legacy inline A
    repairs and their sizing/review record above.
    Preserve originals,
    whole-group checkpoint cuts, exact provenance, the protected recent tail,
@@ -722,9 +833,8 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    only executor-result text leaves the original blocker unresolved.
 2. Ask remaining material questions one at a time, with plain-English options
    and consequences. The question tool was invisible to this user; display the
-   options in the chat as well. Next resolve public reasoning summaries, then
-   supported modes, explicit range-read usability, old
-   tool/protocol compatibility and the parallel-helper ban's scope. Do not
+   options in the chat as well. Next resolve protocol compatibility and the
+   parallel-helper ban's scope. Do not
    reopen recorded choices or infer approval from silence.
 3. Use the retained probes above. The earlier local-reference comparison is
    superseded for drafting by the selected generic-node contract and later
@@ -736,10 +846,10 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    the exact external-review candidate SHA and a review prompt. Acceptance is
    a later maintainer decision.
 
-The latest pushed checkpoint before this live-streaming revision is
-`d6e5bacfc64a60d4c92f36a5e5b68ed5124c8cff`. Its documentation gate passed in
-17 seconds. The complete log is `/tmp/loopex-m7-cleanup-d6e5bacf-docs.log`,
-SHA-256 `fc6b66c459cc602be769c449a1c5398939dd23edc0655fc29b3be231dff02b1c`.
-That run is not evidence for the subsequent live-streaming edits. Read Git
+The latest pushed checkpoint before this summary/mapping revision is
+`6b5bb40646513ab2a2f83351bb285154170061cb`. Its documentation gate passed in
+16 seconds. The complete log is `/tmp/loopex-m7-streaming-6b5bb406-docs.log`,
+SHA-256 `6f8100c78afa4fff188be57b5c76387ebb752ca43e94cdab5998cb13874ade2c`.
+That run is not evidence for the subsequent summary/mapping edits. Read Git
 and the retained verification record for the current checkpoint; no worker owns
 repository edits. Durable records govern, not worker memory or old chat summaries.

@@ -6254,3 +6254,36 @@ streaming and buffered capture; ADR 0039's explicitly non-streaming ephemeral
 profile keeps its existing transport and delivery contract. Whether verified
 provider reasoning summaries may be public remains a separate question. This
 authorizes proposal revision, not acceptance or product implementation.
+
+<a id="disposition-m7-reasoning-summary-2026-09-30"></a>
+### M7 public reasoning-summary choice, 2026-09-30
+
+The maintainer selected option A, show verified provider summaries. Publish only
+text whose exact provider/model mode and native event establish a user-facing
+summary, through existing transient reasoning progress. Otherwise hide reasoning
+text. Native continuation blocks, signatures and redacted data stay private;
+permitted summary text may occur in both a private block and public progress.
+ADR 0044 records this narrow qualification of ADR 0011's continuation exclusion
+while retaining its summary-only payload and ADR 0023's wire shape. Preserve
+buffered ephemeral delivery. This authorizes proposal revision, not acceptance
+or product implementation.
+
+<a id="disposition-m7-artifact-range-size-2026-09-30"></a>
+### M7 explicit artifact-read size choice, 2026-09-30
+
+The maintainer selected option A, up to 4 KiB for each explicitly requested
+artifact range. Use a larger bounded result while retaining the 64 KiB complete
+model-request ceiling and the smaller unsolicited-excerpt limit. ADR 0041
+sets the encoded result ceiling and exact range/next-offset behavior; encoded
+size or UTF-8 boundaries may shorten a returned range. This authorizes proposal
+revision, not acceptance or product implementation.
+
+<a id="disposition-m7-legacy-inline-2026-09-30"></a>
+### M7 older-session inline compatibility choice, 2026-09-30
+
+The maintainer selected option A, reuse saved inline results when the complete
+request still fits. ADR 0041 records an exception to the new excerpt limit for
+sessions whose frozen read generation lacks artifact retrieval. Preserve their
+original tool definitions and complete saved content, apply all request bounds,
+and never recover missing bytes by implication or change earlier staged requests.
+This authorizes proposal revision, not acceptance or product implementation.

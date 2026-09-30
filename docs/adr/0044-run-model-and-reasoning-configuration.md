@@ -33,6 +33,16 @@ attempt rules and cannot restart an ambiguous provider call. The buffered
 ephemeral path keeps ADR 0039's non-streaming contract and must preserve the
 same complete native data before returning a reply.
 
+The maintainer selected verified public reasoning summaries. When the exact
+provider/model mode establishes that returned text is a user-facing summary,
+the adapter may project that text through existing transient reasoning progress.
+Otherwise it hides the reasoning text. Native blocks, signatures and redacted
+data remain private. Summary text can occur in both the private continuation
+and the public projection; that overlap does not make the whole block public.
+This narrowly qualifies ADR 0011's exclusion of continuation material while
+preserving its summary-only payload and ADR 0023's existing wire shape. No
+private block is summarized locally to create public output.
+
 Configuration becomes a durable session fact. Creation and settled-only
 `configure` commit an exact model identity, reasoning, instruction envelope and
 context/reply limits with one version. A run captures that version at admission
@@ -65,6 +75,15 @@ expansion rule supports core accounting and adapter rendering; it reads only
 that reply/request. The adapter proves the restored native blocks equal the
 captured blocks. References grant no access to history, artifacts or a provider.
 
+The initial Claude verification set pairs the dated Haiku 4.5 model, with manual
+thinking and a thinking-off maintenance mode, with Fable 5.1 for always-on
+adaptive conversation. Explicit adaptive levels request verified summaries;
+`default` preserves the provider's default display. Other combinations require
+their own exact verified mapping. Manual `high` conflicts with the existing
+4,096 reply default and refuses unless the operator explicitly configures a
+larger permitted reply limit. M7 does not raise that default or promise every
+current Claude model.
+
 Before a new thinking exchange, leave half the complete request-record capacity
 and up to 8,192 estimated input tokens available for its continuation. Earlier
 eligible history may need compaction even when the first request would fit the
@@ -84,8 +103,10 @@ and remains within the existing
 store's access controls and remain with raw session history until the host
 retires that history; ephemeral copies end with their runtime. Local storage
 remains plaintext under the existing host protection model. M7 adds no key
-service or selective deletion. Public transcripts, events, snapshots, tool
-results, summaries and diagnostics exclude the private blocks.
+service or selective deletion. Public events, snapshots, tool results,
+compaction input and diagnostics exclude the private blocks. A client may
+display or record the permitted summary projection as transient progress;
+reopening history does not replay it as a durable answer.
 
 <a id="concept-adr-0044-consequences"></a>
 ### Observable Consequences
@@ -104,8 +125,9 @@ Operators can observe earlier compaction and a named reserve refusal while the
 ordinary hard limits remain unchanged.
 Streaming clients distinguish provisional text and a closed or abandoned
 stream from the committed final answer. A silent interval while the provider
-thinks is possible; Loopex does not invent progress text or expose private
-blocks to fill it.
+thinks is possible, including when a mode emits no verified summary. Clients
+label any permitted reasoning summary separately from answer text. Loopex does
+not invent progress text or expose private blocks to fill a silent interval.
 
 <a id="concept-adr-0044-compatibility"></a>
 ### Compatibility and Rollback

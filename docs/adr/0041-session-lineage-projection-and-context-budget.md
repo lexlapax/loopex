@@ -36,16 +36,26 @@ still cannot exceed 65,536 bytes, regardless of the model's advertised window.
 Bulky tool output is retained as an artifact before the model receives an
 explicit bounded excerpt/reference. The existing read tool gains an authorized
 range-retrieval branch, so the model can request more without expanding the
-whole object into context. When several results share a request, their excerpts
-may be shorter so the complete request fits; every result identity, outcome and
+whole object into context. The maintainer selected up to 4 KiB per explicit
+range read. Its larger bounded result includes metadata and encoded content;
+escaping or a codepoint boundary can make the returned range shorter, with an
+exact next offset. Unsolicited excerpts keep their smaller limit. Explicitly
+retrieved bytes remain exact until eligible history is compacted; several reads
+still share the same complete-request ceiling. When several results share a
+request, eligible excerpts may be shorter so the complete request fits; every result identity, outcome and
 reference remains present. Required metadata alone can still exceed the bound.
 When an eligible older group cannot fit as complete summary source, ADR 0043
 permits marked excerpts with readable originals and retained omission provenance.
 This maintenance-only rule does not shorten ordinary question answers or grant
 artifact access. Compaction keeps those references retrievable; it
-does not fetch them implicitly. An old frozen read generation is not silently
-upgraded; if it lacks artifact reads, a projection needing that capability
-refuses explicitly while host inspection remains available. Reference preparation
+does not fetch them implicitly. The maintainer selected an inline compatibility
+exception for old frozen read generations. Keep their full saved result content
+when the complete request fits, including later receipts under those same old
+definitions. Eligible older history may compact; required content that still
+cannot fit refuses without truncation. This exception creates no preparation
+writes and cannot recover previously omitted or spilled bytes. Artifact retrieval
+still requires the matching frozen capability; host inspection remains available.
+No tool generation changes implicitly. Reference preparation
 is a bounded, restart-stable episode. No artifact-backed request storage enters M7. ADR 0044's private thinking
 continuation counts within the same limits and stays exact; it cannot use the
 executor excerpt rule. An open thinking exchange freezes its earlier projection
@@ -70,11 +80,13 @@ an oversized indivisible turn.
 
 Technical depth: [Compatibility mechanics](0041-session-lineage-projection-and-context-budget-technical.md#technical-adr-0041-compatibility).
 
-Projection reads committed facts only. A new prepared-reference record may
+Projection reads committed facts only. With artifact-capable frozen tools,
+a new prepared-reference record may
 retain exact legacy inline result bytes before projection, without rewriting
 receipts. New read-tool and projection generations preserve old dispatch
 definitions. Already staged requests retain exact bytes; newly staged requests
-may use the new excerpt/reference representation.
+may use the new excerpt/reference representation when their frozen tools can
+retrieve it. Older tools retain the bounded inline compatibility path above.
 Rollback may change later projection behavior; it cannot undo additional M7
 records created by other decisions. Those records need the M7 reader contract.
 
