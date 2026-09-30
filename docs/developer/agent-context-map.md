@@ -6127,3 +6127,25 @@ closure evidence scaffold still required a single full release `PASS`, contrary
 to the approved evidence-reuse disposition above. The scaffold now states the
 exception and retains the earlier runner's actual failed result; no prior
 failure is relabeled a pass.
+
+<a id="disposition-m6-closure-2026-09-29"></a>
+### M6 closure disposition, 2026-09-29
+
+The maintainer said, “go ahead close.” This closes M6 against the tested
+implementation candidate `4088759467ce8a3b2e7ad14b1166ae3ee923b7f3` and
+the indexed evidence scaffold filled by its administrative direct child. The
+independent external post-implementation review gave ACCEPT WITH NOTES to the
+implementation and closure evidence, with no blocker. The maintainer's earlier
+M6-specific evidence-reuse and demonstration-oracle decisions above remain the
+authority for interpreting the matrix: the full Linux release command at
+`3ddeca3f8fb753cd7378bc92f33243fdd38acc19` failed at cross-UID and is not
+recorded as a passing full run. Successful unchanged-code lanes, separately
+passed affected lanes, the two exact-candidate demonstrations, source identity,
+security review and documentation review are bound by their actual revisions,
+references and SHA-256 digests in the closure evidence page. Earlier failed
+demonstrations remain failed; the final hosted demonstration used supported
+Sonnet 4.5 rather than the default Haiku model. The external review's notes on
+proof strength and search-tool behavior remain non-blocking observations, not
+upgraded guarantees. This closure does not authorize a merge to `main`, tag,
+release, binary publication or claim that administrative-SHA archive comparison
+has run.
