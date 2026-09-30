@@ -34,6 +34,9 @@ read once as exact bounded host bytes. Project resources still require their
 separate admission. Existing sessions retain committed ordinary settings and
 their frozen role catalog; file edits to those values affect new sessions. Explicit between-run
 configuration is the only way to change admitted model or instruction settings.
+Resume also keeps the session's committed cleanup period. A changed file value
+is a default for new sessions; a conflicting explicit cleanup flag refuses
+through ADR 0016's prepared-recovery path before work can start.
 The reference host also supplies ADR 0043's shared versioned compaction
 instructions at runtime startup. They have no new file field or CLI flag;
 an admitted episode retains its block across restart, while future episodes

@@ -99,6 +99,16 @@ invocation configuration; in-flight bounds stay committed. A conflicting
 directs the operator to settled `/configure`; it is not a run-bound override.
 Require matching workspace/policy identity and available routes for admitted
 work. Trace/output are host-local options, not durable session configuration.
+
+Cleanup grace retains ADR 0016's separate immutable contract. File/default
+`session.cleanup_grace_ms` applies only to new sessions. Resume recovers the
+committed value before scheduling and uses it for the owner, configured
+interrupt/cancellation bounds and effective inspection with `committed` origin.
+An omitted or matching `--cleanup-grace-ms` preserves it. A conflicting explicit
+flag follows the existing prepared-owner abandonment and refusal path without
+activating recovered work; failed abandonment retains the existing unconfirmed
+conflict result. Neither `/configure` nor a new run changes this value.
+
 `--compaction-model` overrides the file's `maintenance.model` for new episodes,
 including on resume; it cannot redirect an admitted episode. Show configured
 selection or `unconfigured`, its origin and any distinct active episode model
@@ -288,6 +298,10 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
   interrupts, idempotent resubmission and old-command compatibility.
 - Resume after file edits preserves committed configuration/catalog; explicit
   settled changes commit atomically; in-flight changes refuse.
+- Resume with changed/omitted file cleanup grace and omitted/matching/conflicting
+  flags preserves the committed value and observation bounds. A conflict safely
+  abandons prepared recovery before refusal; failed abandonment stays unconfirmed
+  and neither path dispatches recovered work.
 - Separate summarizer file/flag precedence, unconfigured display/refusal and
   invalid supplied model/route/mapping refusal. Resume may select a new model
   for later episodes without redirecting an admitted one; status distinguishes

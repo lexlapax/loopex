@@ -600,6 +600,30 @@ pairs, then run a fresh adversarial pass over the complete packet and repair
 its findings before preparing another external SHA/prompt. A documentation
 check alone cannot establish implementation readiness.
 
+### Configuration and recovery follow-up
+
+While the streaming choice remained unanswered, the lead checked the selected
+configuration/helper/recovery joins at `355ade1f34db15340be6ea18fcb06a83cd44f85a`.
+Two advisory readers examined ADR 0049 and its instruction, summarizer,
+credential, pipe and trace contracts. Their task instructions were read-only
+within the workspace-write environment, not an enforced read-only acceptance
+profile. No product test or provider call ran.
+
+The lead found that ADR 0049's enumerated resume settings omitted cleanup
+grace. Its statement that the existing bound/default is unchanged already
+imports ADR 0016, whose recovery rule preserves the committed value and requires
+safe prepared-owner abandonment on an explicit conflict. The new file/flag
+precedence must not replace that value or the host's cancellation observation
+bounds. The repair makes this join explicit in both ADR 0049 files and adds
+V12 automated subcases for changed/omitted file settings, omitted/matching/
+conflicting flags, and uncertain abandonment. It changes no accepted cleanup
+rule or maintainer scope choice.
+Both readers reported no independent actionable contradiction in their assigned
+scope and corroborated this clarification. One rated the omission P2; the other
+treated the inherited contract as sufficient authority. The lead accepted the
+clarification and coverage addition, without treating it as a new acceptance
+blocker. This bounded pass does not replace the complete-packet review.
+
 <a id="resume-checkpoint"></a>
 ### Resume checkpoint, 2026-09-30
 
@@ -644,10 +668,10 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    the exact external-review candidate SHA and a review prompt. Acceptance is
    a later maintainer decision.
 
-The latest pushed checkpoint before this thinking-capacity repair is
-`ff08713c10ce43fe2e5cd56d8ccd2dc80fa99eb1`. Its documentation gate passed in
-15 seconds. The complete log is `/tmp/loopex-m7-operator-ff08713c-docs.log`,
-SHA-256 `fa6635297e59951c1631b387a36c052d919094ad0602a01b9a120b06c36ae2ae`.
-That run is not evidence for the subsequent thinking-capacity edits. Read Git
+The latest pushed checkpoint before this cleanup-grace clarification is
+`355ade1f34db15340be6ea18fcb06a83cd44f85a`. Its documentation gate passed in
+17 seconds. The complete log is `/tmp/loopex-m7-thinking-355ade1f-docs.log`,
+SHA-256 `fc6b66c459cc602be769c449a1c5398939dd23edc0655fc29b3be231dff02b1c`.
+That run is not evidence for the subsequent cleanup-grace edits. Read Git
 and the retained verification record for the current checkpoint; no worker owns
 repository edits. Durable records govern, not worker memory or old chat summaries.

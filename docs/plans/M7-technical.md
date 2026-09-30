@@ -643,6 +643,11 @@ declines. Neither path assumes the model can be forced never to ask.
 4. Edit defaults and role files, then resume a settled session. Verify committed
    configuration and role snapshots persist. Apply a permitted explicit
    `/configure` change and verify it affects only the next run.
+   Automated prepared-recovery subcases start with unfinished work, change or
+   omit the file's cleanup period, and omit, match or conflict with an explicit
+   cleanup flag. Assert the retained value and observation bounds. A conflict
+   safely abandons the prepared owner before refusal; failed abandonment stays
+   unconfirmed. Both conflict paths dispatch no recovered work.
 5. Refuse in-flight changes and immutable tool/catalog changes. Confirm legacy
    one-shot defaults and unattended behavior remain unchanged.
 
