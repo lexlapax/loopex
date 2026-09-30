@@ -37,7 +37,10 @@ whole object into context. Compaction keeps those references retrievable; it
 does not fetch them implicitly. An old frozen read generation is not silently
 upgraded; if it lacks artifact reads, a projection needing that capability
 refuses explicitly while host inspection remains available. Reference preparation
-is a bounded, restart-stable episode. No artifact-backed request storage enters M7.
+is a bounded, restart-stable episode. No artifact-backed request storage enters M7. ADR 0044's private thinking
+continuation counts within the same limits and stays exact; it cannot use the
+executor excerpt rule. An open thinking exchange freezes its earlier projection
+until completion or a truthful bound failure.
 
 <a id="concept-adr-0041-consequences"></a>
 ### Observable Consequences

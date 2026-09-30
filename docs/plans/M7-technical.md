@@ -20,7 +20,7 @@ implementation that depends on it:
 | [ADR 0041](../adr/0041-session-lineage-projection-and-context-budget.md#concept) | Outcome 1's projection change |
 | [ADR 0042](../adr/0042-host-composed-instructions.md#concept) | Outcome 2's instruction option |
 | [ADR 0043](../adr/0043-context-compaction-checkpoint.md#concept) | Outcome 3's checkpoint record |
-| [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept) | Outcome 4's configuration record and outcome 7's resolved per-role model configuration |
+| [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept) | Outcome 4's configuration and bounded private thinking continuation, with versioned replies/settlements and charged context; outcome 7's resolved per-role model configuration |
 | [ADR 0045](../adr/0045-model-originated-questions.md#concept) | Outcome 5's tool class |
 | [ADR 0046](../adr/0046-child-session-tool.md#concept) | Outcome 7's adapter |
 | [ADR 0047](../adr/0047-reference-host-run-defaults.md#concept) | Outcome 6's mandatory configured bounds and outcome 8's measured baseline |
@@ -31,12 +31,12 @@ Accepted decisions that constrain the work:
 
 | Decision | Constraint on M7 |
 | --- | --- |
-| [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage |
+| [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage; ADR 0044 amends session-fixed model and empty continuation |
 | [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure and ADR 0046 adds the explicit deadline ceiling |
-| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure and session configuration placement |
+| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, session configuration placement and charged continuation |
 | [ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | Existing relative deadline remains; ADR 0046 explicitly permits an earlier committed absolute cutoff, including before first staging |
 | [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain |
-| [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; two attempts per logical operation and no ambiguous redispatch remain |
+| [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; ADR 0044 versions the closed reply/settlement shapes for private continuation; two attempts per logical operation and no ambiguous redispatch remain |
 | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
 | [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0045 adds bounded one-call answers and ADR 0048 permits explicit env names |
@@ -176,8 +176,13 @@ caller resolution stay distinct. Host restart may explicitly rebind the same
 provider to a replacement key without redirecting a committed model request.
 
 ADR 0044 specifies pure cross-provider history conversion and A→B→A proof.
-Canonical text and tool facts survive; incompatible opaque continuation and
-reasoning state does not. No parallel, nested or write-capable helper is included.
+Canonical text and tool facts survive. Selected Claude thinking modes preserve
+exact private continuation within an open exchange, including across restart.
+The complete rendered prefix stays fixed; compaction waits until the exchange
+ends. Later runs start without old provider state, including on A→B→A.
+After helper-manager failure, ADR 0046 recovers completed results and stops
+unfinished helpers without replaying create/prompt or activating recovered work.
+No parallel, nested or write-capable helper is included.
 
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
@@ -193,10 +198,10 @@ Concept: [How each outcome is verified](M7.md#concept-plan-verification).
 | 1 | The second run's staged request contains the first run's prompt, assistant messages and tool results in committed order. The projection is rebuilt identically after owner succession and restart. Accounting for the new run starts at zero | The second prompt of a real session refers to the first |
 | 2 | Staged bytes equal the host's composed block. The digest changes when the block changes. An oversize or malformed block is refused before dispatch. Project files stay in separate provenance classes. Core retains only ADR 0042's compatibility fallback | The default block drives a real task; record its cost with the active tools |
 | 3 | The checkpoint records input range, summary, model identity, usage and integrity digest. Projection substitutes it and keeps the first later raw record verbatim. Raw records remain readable. Recovery selects the last committed checkpoint, fences uncertain commits and never repeats an ambiguous summary attempt. Tool receipts and effect outcomes are unchanged by a summary | A real session passes its context limit and continues |
-| 4 | Run configuration commits provider/model and reasoning. Adapter conformance proves cross-provider history conversion, tool-call identity normalization and incompatible-state removal. Restart uses the admitted configuration; missing routes and in-run changes refuse | One session continues A→B→A across providers, retaining earlier facts and tool results, including restart |
+| 4 | Run configuration commits provider/model and reasoning. Adapter conformance proves native thinking/block fidelity, frozen-prefix replay, original IDs inside the exchange, canonical conversion afterward, private-state exclusion and all size limits. Crash/commit_unknown cuts preserve atomic reply/continuation; missing routes/state and in-run changes refuse | A selected Claude thinking mode completes multiple tool rounds; one session continues A→B→A with restart, retaining canonical facts without resurrecting old thinking state |
 | 5 | Policy permits the question before interaction admission. Durable replay re-presents the same question; ephemeral interaction state ends with its runtime. Both hold no provider call while waiting. Answer/expiry differ; cancellation stays terminal. Test the explicit ephemeral answer path, absent/failed responder, deadlines, duplicate/late answers and cleanup. Answers grant nothing | A real model asks and uses an answer through the durable command and the ephemeral host-answer interface |
 | 6 | The command drives the public session contract only. Steer, follow-up, question and interrupt paths each have a test over a pseudo-terminal and piped input, including state/ordering differences. Configuration tests cover explicit file selection, flag precedence, prompt files, invalid values and resume semantics | Attended conversation of at least three prompts using the documented flags and config file |
-| 7 | Saved roles resolve to exact provider/model/instruction settings and separate credential references without widening policy. Routing and custody have conformance/canary coverage. The child has its own identity, bounds and read-only tools. Recovery uses recorded settings; parent cancel propagates; nesting refuses; failures preserve uncertainty | A real parent delegates investigation and review sequentially using saved roles, including a helper on a different provider |
+| 7 | Saved roles resolve to exact provider/model/instruction settings and separate credential references without widening policy. Routing and custody have conformance/canary coverage. The child has its own identity, bounds and read-only tools. Recovery uses recorded settings; manager loss stops unfinished helpers, preserving completed results; cancel/launch races and observational receipt lookup have fault tests; nesting refuses; failures preserve uncertainty | A real parent delegates investigation and review sequentially using saved roles, including a helper on a different provider |
 | 8 | The task set and its acceptance checks are fixtures in the repository | Every task completes against the real provider. Transcripts and workspace diffs are retained outside the repository with digests |
 | 9 | Runbook commands use the same fixture setup and objective checks as outcome 8. Tests cover failure cases that require controlled injection | A named operator follows the documented workflow on the tested SHA; record steps, observations, failures and evidence references |
 
@@ -376,13 +381,22 @@ process loss from a daemon client's detach.
 1. Complete a run and record its model and reasoning configuration.
 2. Select a supported model on provider B through its separate credential
    reference and submit a follow-up referring to work from provider A.
-3. Select a supported non-default reasoning level, then reopen the settled
-   session and confirm the committed configuration and retained history.
+3. Select a pinned supported Claude thinking mode and run the fixed multi-round
+   tool fixture. Record its admitted reply/thinking limits, private-state sizes
+   and objective outgoing-block equality result without printing private blocks.
+   Reopen the settled session and confirm configuration and canonical history.
+   The next run starts a new exchange; automated fault cuts cover open-exchange
+   restart and exact replay.
 4. Switch back to provider A and verify continuity with the fixture's facts
    and earlier tool results.
 5. Request an unsupported level or an in-run change and verify refusal
    before a new provider dispatch. Exercise a missing provider binding and
    verify refusal without fallback. V8 proves the separate parent/child workflow.
+6. Automated cases force capsule and complete-record limits, missing/corrupt
+   state, conflicting reply/thinking limits and compaction during an open
+   exchange. Verify named refusal without dropped blocks, enlarged limits or
+   extra provider calls. After settlement, a new prompt can compact canonical
+   history. Inspect canary results for public/progress/trace/artifact exclusion.
 
 #### V8. Delegate bounded investigation and review
 
@@ -397,7 +411,11 @@ process loss from a daemon client's detach.
    selected provider/model, the known finding and unchanged workspace.
 5. Exercise child failure, bound exhaustion and parent cancellation. Observe
    truthful parent settlement; nested delegation and question tools refuse.
-   Deduplication and reconciliation after crashes are automated proof.
+   Deduplication and reconciliation after crashes are automated proof. Crash
+   after child creation but before prompt, stop the parent while the manager
+   is down, then recover: no prompt is submitted and no provider work starts.
+   An already running child is aborted or reported uncertain; a completed result
+   can be recovered without reopening its parent.
 6. Exhaust a small delegation allowance across serial children; verify that
    another child refuses while the parent's remaining budget stays distinct.
    Inspect parent, helper and combined usage, then restart and verify no reset.
@@ -519,7 +537,7 @@ existing release runner, selectors, wrapper/redaction tests and the existing
 PTY helper for the changed chat workflow. The current runner's fixed eleven
 cases and one credential are implementation work, not evidence that new lanes
 already run. Required new selectors cover coding tasks, piped/attended chat,
-A→B→A, parent A/helper B and M7 upgrade/rollback. Credentialed lanes declare
+thinking/tool continuation, A→B→A, parent A/helper B and M7 upgrade/rollback. Credentialed lanes declare
 separate A/B references and redact all selected values; other lanes require no
 new credentials. Preserve all existing required lanes and failure honesty.
 
@@ -531,7 +549,9 @@ Concept: [Design decisions](M7.md#concept-plan-decisions).
 The first internal implementation-readiness review corrected the following
 proposal contradictions. The [external round 1 assessment](../evidence/M7-external-review-1.md)
 then identified additional gaps. This revision records their repairs, with the
-reasoning-compatibility choice and a fresh review still outstanding. This is review of planned contracts, not product evidence or
+selected bounded thinking continuation and stop-only helper recovery included.
+The [follow-up record](../evidence/M7-continuation-review.md) binds their review.
+Fresh external audit remains outstanding. This is review of planned contracts, not product evidence or
 formal independent acceptance review.
 
 | Finding | Governing repair and implementation witness |
@@ -559,6 +579,7 @@ to mechanisms that must be owned by the serial session writer:
 | --- | --- |
 | Retained lineage/excerpts and preparation facts | Staging/recovery must agree on committed context and its exact digest |
 | Configuration/genesis and immutable tools/defer mode | Admission, recovery and dispatch must use the same durable selection |
+| Private continuation envelope and settlement | Exact request replay and atomic reply/tool admission must agree on retained provider data; adapters interpret its content |
 | Compaction state/checkpoints | Maintenance accounting, checkpoint transactions and staging are serial session truth |
 | Model-question transitions | Answer/expiry/cancel must atomically settle the original call and release the durable interaction slot |
 | Optional absolute deadline | A child owner must stop even while its host adapter is unavailable |
@@ -579,7 +600,7 @@ Concept: [Workstreams](M7.md#concept-plan-workstreams).
 | --- | --- |
 | 0. Specify | Accept the proposed contracts; build the task fixtures and executable scenario commands from the fixed grammar. Accept prerequisite ADRs before dependent implementation |
 | 1. First complete workflow | Reproduce lost cross-run history, then implement continuity and host instructions under one owner. Integrate a minimal conversational command and prove two prompts plus restart |
-| 2. Long-lived work | Add compaction under the same projection/staging owner. Integrate model/reasoning configuration and verify compatible history after a change |
+| 2. Long-lived work | Add compaction under the same projection/staging owner. Integrate model/reasoning configuration, private continuation and atomic reply settlement; prove frozen-prefix tool exchanges, maintenance thinking-off and canonical history after a change |
 | 3. Operator control | Add model questions to the existing interaction lifecycle; complete conversation steering, answers, follow-up, interrupt and noninteractive behavior |
 | 4. Bounded helper | Integrate the host adapter after outcomes 1, 2 and 4; prove identity, read-only policy, cancellation and recovery before role examples |
 | 5. Acceptance evidence | Complete the coding-task set and operator runbook, measure defaults, reconcile documentation and retain the closure matrix and attended evidence on the exact candidate |
@@ -614,8 +635,10 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
 - Compatibility inventory before the first decoder change: configuration/instruction
   records and v3 genesis, prepared tool-result references and artifact-read resolved
   arguments, immutable tool/policy selections, maintenance/compaction records,
+  model_request.v2 continuation, bounded adapter/canonical reply v3 and
+  model_attempt_settled_v2, estimator revision and private/public projection,
   question producer/text/decline records,
-  host role/allowance ledger, generic absolute deadline ceiling on prompt/follow-up,
+  host role/allowance ledger including monotonic stop records, generic absolute deadline ceiling on prompt/follow-up,
   request revision, events, snapshots and negotiated
   protocol generation. Each has versioned vectors and an explicit unsupported-reader
   behavior; bump private format metadata where needed before emitting new records.
@@ -635,7 +658,7 @@ with source/toolchain/digest evidence before the fixture run. A later source-doc
 commit is not a substitute for that artifact. Extend `scripts/rollback-lane.sh`
 and its selectors to cover the M7 matrix without dropping its earlier proofs.
 Quiescent backups include sessions, runtime control, artifacts, executor
-receipts, catalogs and host ledgers; compare complete manifests after restoring
+receipts, private continuation/recovery state, catalogs and host ledgers; compare complete manifests after restoring
 into an empty root. Old staged v1 requests and old tool-definition bytes remain
 unchanged; new semantics have explicit versions. Pre-v2 genesis remains refused.
 

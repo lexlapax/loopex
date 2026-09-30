@@ -24,7 +24,12 @@ Automatic compaction runs at initial or later model staging when eligible
 history would exceed a token or record-byte limit. It does not change prompt
 admission or require a host to resubmit a command. Explicit `compact` is admitted
 only while settled. Both use a bounded maintenance episode with the session's
-frozen model and no tools. No executor work or pending interaction overlaps it.
+frozen model and no tools. Maintenance uses an explicitly recorded, verified
+thinking-off setting so its fixed reply reserve remains valid. Unsupported
+maintenance settings refuse before dispatch. No executor work or pending
+interaction overlaps it. ADR 0044's open thinking exchange also blocks
+compaction: its complete earlier prefix must remain unchanged. If that exchange
+cannot fit, stop truthfully; a later run can compact canonical history.
 
 Keep the current input and a recent complete tail verbatim. Summarize only whole
 eligible turns, with bounded source and output. Every checkpoint must strictly

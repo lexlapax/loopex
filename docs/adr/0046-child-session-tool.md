@@ -45,7 +45,16 @@ A generic committed absolute-deadline ceiling, available to any bounded run,
 enforces the child cutoff no later than its parent job's cutoff. Core gains
 this bound but no child-specific mechanism. Parent cancellation aborts the child and waits for truthful cleanup
 within the existing grace; uncertainty remains unknown. Stable logical identities
-prevent a recovered delegation from creating or prompting a second child.
+prevent duplicate live create/prompt admission. After the helper manager
+crashes, recovery is stop-only for unfinished operations. Recover completed
+results; abort unfinished children without replaying their create/prompt or
+activating recovered work. Some interrupted tasks therefore need a new request.
+This is the maintainer's selected recovery boundary. A still-live child may
+continue until abort is admitted; no instantaneous stop is promised at the
+parent's earlier abort commit. Only confirmed cleanup permits a cleaned result.
+Cancellation before a job can be identified closes new helper admission for
+that host instance and reports uncertainty. A host restart restores admission
+through normal fencing and recovery; ordinary local-tool behavior stays intact.
 
 This proposal depends on acceptance of the narrow M7 amendment to both vision
 files. It explicitly permits this opt-in host helper while retaining the bans

@@ -98,12 +98,12 @@ refuses; it cannot be reclassified as an interrupted append. Payload is at
 most 65,536 bytes. Each frame is one atomic logical transaction containing
 `version`, `tx_id`, `expected_version`, `mutation_digest`, and one mutation of
 kind `prepare_parent` or `bind_parent` in binding logs, or `initialize`,
-`reserve`, `child_created`, `child_prompted`, `settle` or `bind_receipt` in run logs. The fields below define those mutation families; unknown fields,
+`reserve`, `child_created`, `child_prompted`, `stop`, `settle` or `bind_receipt` in run logs. The fields below define those mutation families; unknown fields,
 versions or kinds refuse. Commit append then fsync before acknowledging.
 
 Cap a parent-run log at 16 MiB and child count at 128; capacity refusal is
 definite before append, never a hidden eviction. Before reserving a child,
-reserve disk-log capacity for the maximum bounded create, prompt, settlement
+reserve disk-log capacity for the maximum bounded create, prompt, stop, settlement
 and final-receipt frames. Persist this storage credit with the token reservation.
 Other appends cannot consume its closing-record credit. Release it only after
 conclusive terminal settlement and receipt persistence. Insufficient capacity
@@ -186,16 +186,79 @@ tool result, including ADR 0018's settled provider-ambiguity failure. Unknown
 child lifecycle, unresolved effect or cleanup evidence remains unknown; absence
 of a terminal cannot manufacture a known failure.
 
-**Recovery.** Cover reservation→create→prompt→terminal→receipt as separate gaps.
-Re-present identical public command IDs after missing acknowledgements. Reconcile
-from retained child evidence and the full original operation/attempt/request
-digest/session epoch/executor epoch/identity/fence tuple. Solicit receipts with
-the current reconciliation query ID and current owner epoch. Resume the existing
-child only under ordinary model/effect ambiguity rules. Absence of a receipt,
-missing ledger state or an unfinished child never proves that dispatch did not
-happen. Stale unsolicited results are rejected. A currently solicited, fully validated
-receipt may preserve a terminal fact after cancellation without reopening the
-cancelled parent run or granting new authority.
+**Stop fence and recovery.** Only live `execute/5` handling a validated current
+executor job may reserve/create/prompt. One host mutation producer serializes
+those calls with cancellation; no detached worker keeps a reusable launch permit.
+Stable command IDs deduplicate live calls, but do not authorize recovery to
+submit a previously unadmitted command. Serialize job registration and cancel
+at the router before handing a helper launch to its mutation producer. Register
+the job ID and validated original tuple before reserve/create/prompt. A known
+helper cancel uses its durable operation stop. An unclassified job ID has no
+bound digest and cannot create a durable stop, as ADR 0016 requires. It closes
+a single volatile `helper_admission_closed` flag for this router incarnation
+and returns unconfirmed unless the unchanged local executor establishes its
+own conclusive receipt. The closed flag prevents every later helper launch,
+including a delayed execute that had not registered when cancel arrived; it
+never reopens in this incarnation. Local-tool routing/receipt bytes remain
+unchanged. Existing known helpers can settle or be cancelled normally.
+
+The router reference names its exact PID/incarnation, never a global alias that
+silently rebinds after failure. A replacement requires normal host construction
+and fresh runtime/executor fencing: restart the full composition and reopen
+the local executor before constructing the replacement runtime/router. Reuse
+that executor's identity/epoch; do not invent a router-only job epoch or
+translate local jobs/receipts. No manager-only transparent rebind is allowed.
+Stale references/jobs cannot reach it as fresh execution. Startup reconciles predecessor ledgers before admission as
+specified below. This conservative unknown-cancel case may require host restart
+to admit new helpers; it does not add an unbound durable tombstone or return a
+false cleaned result. Establish that a predecessor producer
+is gone and account for calls it already sent before taking over its operation.
+
+The monotonic `stop` mutation carries the logical operation identity, original
+attempt binding, stop transaction ID and a closed reason: `cancel`, `cutoff` or
+`adapter_recovery`. After it commits, no create/prompt/activation transition is
+allowed for that operation, including under a later execute attempt. Cleanup,
+terminal evidence and receipt commitment remain allowed. `cancel/2` enters the
+same owner, commits stop, then cleans up. If a launch call won first, account for
+its admission and cleanup rather than claiming it never happened. An unresolved
+stop commit fences launch, refund and successful publication. Its reserved
+closing-record credit prevents a full log from blocking this fact.
+
+On adapter startup, before opening routing/admission, mark every unfinished
+predecessor operation stopped with reason adapter_recovery. A missing earlier
+cancel record changes nothing: loss of the manager itself selects stop-only
+recovery. Never infer permission from a snapshot saying the parent is active.
+Conclusive completed evidence remains recoverable. Reconciliation uses the full
+original operation/attempt/request digest/session epoch/executor epoch/identity/
+fence tuple; solicited receipts use the current query ID and owner epoch.
+
+| Retained gap | Stop-only recovery |
+| --- | --- |
+| Reservation; missing create result | Read `Runtime.lookup_create_result/3`; never replay create. Account for the old producer and any in-flight create before treating absence as conclusive. Missing/unavailable evidence remains unknown. |
+| Child known; prompt acknowledgement missing | Never replay prompt. Inspect/rebuild the child through prepared recovery and abort any admitted work. An unprompted child remains unprompted. |
+| Child unfinished | Abort through its live attachment, or use `Loopex.prepare_resume_session/3` to rebuild without scheduling, attach and admit an idempotent abort. Never call `activate_resume/1`; abort invalidates activation. Abandon an unused capability. |
+| Child terminal; receipt missing | Retain the original attempt-bound receipt only from conclusive terminal/cleanup evidence, preserving failure or uncertainty and actual usage. |
+| Receipt retained | Return its exact bytes through solicited reconciliation. Parent cancellation stays terminal. |
+
+Host startup and CLI resume routing derive helper identity from validated host
+binding/operation records and read-only create-result resolution, checked
+against retained parent delegation intents. Complete classification precedes
+activation; missing/corrupt required records refuse instead of defaulting to
+ordinary eager resume. A session-directory discovery index is not authority.
+Recognized helpers use this path; eager resume cannot activate a stopped helper. A
+live child can continue until its abort is admitted. The existing absolute
+cutoff bounds it while the adapter is unavailable. Confirm every launch call,
+child admission and provider/tool cleanup before answering cleaned. An
+unaccounted call, live child, callback failure or uncertain cleanup answers
+unconfirmed/unknown; no success or speculative usage refund conceals that gap.
+
+`retained_receipt/2` is observational, as the executor contract requires. It
+reads a retained receipt or returns the existing unresolved/in-flight error;
+it starts no worker and commits no stop, create, prompt or recovery mutation.
+Startup recovery and cancel perform those actions separately. Missing receipt
+is not proof of no dispatch and cannot become `absent` for an unresolved
+operation. Stale unsolicited results are rejected. A solicited valid terminal
+receipt may preserve an earlier fact without reopening the parent run.
 
 <a id="technical-adr-0046-evidence"></a>
 ### Evidence
@@ -210,7 +273,16 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
 - Router binding/startup failure, retained parent creation across both stores,
   missing catalogs and reserved-generation reconstruction before recovery.
 - Store/process failure before and after every ledger and child-command boundary;
-  unresolved ledger commit fences dispatch, exactly one child and one prompt.
+  unresolved ledger commit fences dispatch, at most one child and one prompt.
+- Crash after child_created but before prompt, parent cancellation while the
+  manager is down, then recovery: zero prompt submissions/provider dispatches.
+- Both sides of create/prompt acknowledgement, live versus dormant child,
+  stop fsync uncertainty, cancel/launch ordering and blocked eager activation.
+- Cancel before execute registration closes helper admission; a delayed execute
+  cannot launch, stale references cannot rebind, and local-tool receipt bytes
+  remain unchanged. Unknown job cancellation is never falsely cleaned.
+- Repeated receipt lookup performs no mutations or dispatch; completed receipt
+  preserves its exact original binding and cannot reopen the parent.
 - Budget reservation, known overshoot, unknown charge, no double settlement or
   restart reset, exhausted-child-count refusal and separate visible totals.
 - Delayed admission at the absolute cutoff; parent cancellation, stuck child,

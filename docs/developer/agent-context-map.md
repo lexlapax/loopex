@@ -56,7 +56,7 @@ starting from the founding vision and moving to the implemented subsystems.
 | Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 | Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
 | Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
-| M7 coding-agent planning | [Open M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | ADRs 0041–0049 and the narrow vision amendment remain proposed. Read the [external review](../evidence/M7-external-review-1.md) and [scope decisions](#disposition-m7-audit-scope-2026-09-30) before dependent work. |
+| M7 coding-agent planning | [Open M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | ADRs 0041–0049 and the narrow vision amendment remain proposed. Read the [external review](../evidence/M7-external-review-1.md), [scope decisions](#disposition-m7-audit-scope-2026-09-30) and [thinking-continuation choice](#disposition-m7-thinking-continuation-2026-09-30) before dependent work. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Architecture as implemented | [Architecture](architecture.md#concept) | [Architecture invariants and mechanics](architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
@@ -6176,3 +6176,27 @@ These are scope choices for proposal revision, not acceptance of the plan,
 ADRs or vision amendment and not authorization for product implementation.
 Earlier scope choices remain in the plan; the external repository and task
 remain deferred until testing, then pinned before their demonstration attempt.
+
+<a id="disposition-m7-thinking-continuation-2026-09-30"></a>
+### M7 thinking continuation scope, 2026-09-30
+
+After an explanation that some Claude thinking modes require unchanged provider
+blocks across tool calls, the maintainer selected option B: include bounded
+provider continuation in M7, with strict limits and recovery rules and tests for
+crashes, model switching and size limits. This replaces the pending
+canonical-history-only scope choice in the earlier audit repair. ADR 0044 owns
+the proposed retention, privacy, staging and compatibility contract; ADRs 0041
+and 0043 must account for it in projection and compaction. The existing
+65,536-byte complete request-record ceiling remains. This authorizes proposal
+revision, not acceptance of its exact bytes or product implementation.
+
+<a id="disposition-m7-helper-recovery-2026-09-30"></a>
+### M7 helper manager recovery, 2026-09-30
+
+The maintainer selected option A after review showed that replaying a child
+prompt after its manager crashed could launch work after the parent stopped.
+After that crash, recover completed helper results but stop unfinished helpers;
+report failure or cleanup uncertainty truthfully. An interrupted task may need
+a new request. ADR 0046 therefore replaces automatic unfinished-child resumption
+with stop-only recovery. This scopes the proposal; exact-byte acceptance and
+product implementation remain separate.

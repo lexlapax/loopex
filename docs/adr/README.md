@@ -231,7 +231,8 @@ binds its exact Proposed pair and leaves 0039's other decisions unchanged.
 0041 to 0047 were first proposed on 2026-09-29 and revised during the
 2026-09-30 internal readiness review. ADRs 0048 and 0049 add narrow provider
 binding amendments and explicit configuration. Together, 0041–0049 are M7's
-proposed prerequisites: lineage, instructions, compaction, model configuration,
+proposed prerequisites: lineage, instructions, compaction, model configuration
+and bounded private thinking continuation,
 questions, serial read-only helpers, explicit limits, provider custody and host
 configuration. ADRs 0045/0046 now require the explicit narrow amendment to both
 vision files, authorized for drafting after external review and still pending

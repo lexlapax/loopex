@@ -17,7 +17,10 @@ current run elements and any admitted steer at its defined boundary.
 Join tool calls/results by `(run_id, turn_number, tool_call_id)`, never by
 turn number or provider call ID alone. Derive deterministic provider-facing
 call IDs across the entire projection; retain the mapping back to canonical
-identities. Reused provider IDs in later runs must not select an earlier
+identities. ADR 0044's open native thinking exchange is the explicit exception:
+freeze its prefix mapping and preserve its original native tool IDs, rejecting
+collisions before tool dispatch. After the exchange, normalize canonical history
+again. Reused provider IDs in later runs must not select an earlier
 result. A terminal fact may supply its committed denied/cancelled/failed/unknown
 result; missing facts refuse staging rather than synthesizing success or
 raising an uncontrolled owner crash.
@@ -27,6 +30,11 @@ record measurement, including context receipt, envelope and fixed-point
 self-size. Preserve its depth/cardinality limits and strict system ceiling.
 The 65,536-byte bound is not merely a message or canonical-request bound.
 Check before provider intent/dispatch as the accepted staging rules require.
+ADR 0044 adds a charged private-continuation envelope to the estimator and to
+both retained request representations. Preserve its exact values; no excerpt,
+artifact substitution or summary can stand in for it. Once that exchange opens,
+freeze earlier result projections and context receipts; prepare new result
+references only for newly appended results, without revising the frozen prefix.
 
 **Retained output and model excerpts.** Cap each complete model-facing result
 from an executor-backed tool at 2,048 encoded JSON bytes, using ADR 0042's

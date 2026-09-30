@@ -13,7 +13,11 @@ compact command ID. Persist frozen configuration, captured session version,
 attempt count, bounds, usage and checkpoint progress. Block conflicting mutation
 until settled. Steer/follow-up admission keeps its existing ordering and cannot
 change the captured summary range. No live provider/executor or interaction
-may overlap summary dispatch.
+may overlap summary dispatch. An open ADR 0044 thinking exchange is also
+ineligible: neither its current group nor any earlier rendered prefix may be
+compacted or re-rendered. A staging overflow during it is the named bound
+failure, not a maintenance trigger. After terminal settlement, later work can
+compact canonical history without reusing the ended exchange's private data.
 
 At most four provider attempts total per episode, including retries allowed
 only after proven `not_dispatched`. ADR 0018's two-attempt limit per logical
@@ -56,8 +60,18 @@ those combined constraints, stop with
 The reference host owns a versioned compaction instruction block with fixed
 sections: goal, constraints, progress, decisions, next steps and critical
 context. It passes exact bytes/digest to the maintenance configuration; core
-does not author the summary prompt or copy project instructions into host trust. It has no tools and reserves
-1,024 reply tokens. Full token/record/depth/cardinality preflight still applies.
+does not author the summary prompt or copy project instructions into host trust.
+It has no tools and reserves 1,024 reply tokens. Retain the parent configuration
+version and a separate maintenance configuration/digest with the same exact
+model and a verified thinking-off setting: `none`, or `default` only when the
+adapter proves omission disables thinking for that exact model. Display this
+purpose-specific override; it does not change ordinary run configuration.
+Require capability evidence for that setting before dispatch, otherwise refuse
+`maintenance_reasoning_unsupported`. Do not let a manual thinking budget or
+dependency translation enlarge the 1,024-token reply reserve. Maintenance
+starts with nil continuation and never consumes or creates a reusable ordinary
+exchange. Private thinking is excluded from summary input and checkpoint data.
+Full token/record/depth/cardinality preflight still applies.
 Reject a model incapable of that reserve or insufficient remaining budget before
 dispatch. Output is closed JSON with `summary` at most 4,096 bytes after canonical JSON
 string encoding, including quotes and escaping, and `carry_forward` containing
@@ -112,6 +126,10 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   but the byte-maximal prefix does not, oversized single turn, fixed/system context that cannot fit,
   invalid summary and no-progress refusal; no silent tool truncation.
 - Attempt/turn/token/deadline accounting, four-attempt ceiling and no restart reset.
+- Open-thinking-exchange refusal preserves its full prefix; after settlement,
+  canonical compaction succeeds without private blocks or signature reuse.
+- Recorded maintenance thinking-off override and unsupported-mode refusal;
+  actual provider reply limit remains 1,024 and ordinary run settings stay intact.
 - Fault cuts at summary settlement/checkpoint commit/publication, including
   commit_unknown and ambiguous provider attempt; no duplicate dispatch.
 - Real long conversation passes the limit and correctly refers to summarized work;
