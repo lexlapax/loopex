@@ -70,6 +70,9 @@ refusal. Useful checkpoints already committed remain; failed work cannot roll
 them back.
 
 Active maintenance consumes the run's call/turn, token and deadline budgets.
+In a helper session, that usage is part of the child's total and therefore its
+delegation charge. Maintenance in the delegating parent spends only that parent's
+run budget, not the separate helper allowance.
 Standalone maintenance requires explicit limits and cannot exceed four attempts,
 60,000 ms or 32,768 tokens. Recovery retains attempts and usage; an uncertain
 provider result or checkpoint commit never authorizes another summarization.

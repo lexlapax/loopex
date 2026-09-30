@@ -36,6 +36,9 @@ Configuration/discovery and launch have one integration owner. Store readiness
 and packaging use non-overlapping ownership and separate worktrees. Rejoin at
 one installed workflow before adding failure matrices; documentation follows the
 same accepted grammar. No second configuration resolver or durable session owner.
+Helper concurrency inherits the delivered M7 boundary: one active helper per
+parent conversation, with independent parents permitted to overlap. Installation
+adds no runtime-wide slot, parallel children within a parent or writable helper.
 
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping

@@ -55,6 +55,9 @@ activating recovered work. Some interrupted tasks therefore need a new request.
 This is the maintainer's selected recovery boundary. A still-live child may
 continue until abort is admitted; no instantaneous stop is promised at the
 parent's earlier abort commit. Only confirmed cleanup permits a cleaned result.
+Clients may inspect child evidence but cannot independently reconfigure, compact
+or start further work in a helper session. Its owning operation controls mutation
+and cleanup, including after settlement.
 Cancellation before a job can be identified closes new helper admission for
 that host instance and reports uncertainty. A host restart restores admission
 through normal fencing and recovery; ordinary local-tool behavior stays intact.

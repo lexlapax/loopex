@@ -130,7 +130,10 @@ New episodes use the current runtime selection. `session.configure` changes
 ordinary configuration only. Active maintenance charges the parent run's existing
 calls/turns, token and deadline budgets; standalone bounds remain 4/60,000/32,768.
 Report maintenance model/usage separately while counting it once in overall
-usage. Neither call nor tokens spend the helper allowance.
+usage. Maintenance in the delegating parent session spends no helper allowance.
+In a child session, automatic maintenance spends that child's run bounds and is
+included in its terminal usage for ADR 0046's delegation settlement exactly once;
+it is not a second child admission or a separately refunded charge.
 
 **Instructions and source encoding.** Add the optional runtime/composition
 startup option `maintenance_instructions`, immutable for that runtime instance,
@@ -367,7 +370,10 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   choice cannot change another's. Public/per-prompt inputs cannot override it.
 - Derive the input ceiling from the summarizer window and captured parent cap,
   test unknown-window fallback and output/system limits, and retain exact origins.
-  Active maintenance spends parent allowances once, never helper allowances.
+  Active maintenance spends its owning run allowances once. Parent-session
+  maintenance leaves delegation counters unchanged; child maintenance appears
+  once in child terminal usage and delegation settlement, including overshoot,
+  unknown accounting and restart. It consumes no extra child count.
 - Restart with changed/absent model selection or changed host catalog retains
   admitted configuration and staged bytes. Missing route/renderer refuses a
   required dispatch without substitution; an already settled summary still

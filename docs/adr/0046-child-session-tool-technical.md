@@ -155,7 +155,9 @@ tokens, reserve `min(child_token_budget, remaining)` and increment child count.
 Commit before creating the child. Replays of that operation reuse its reservation.
 Pass the reserved token threshold and configured turn/reply limits to the child.
 Settle exactly once using retained terminal usage. Reported overshoot charges in
-full; unknown usage consumes the reservation and prevents a speculative refund.
+full, including automatic maintenance performed inside that child session;
+separate maintenance reporting must not omit or double-charge it. Unknown usage
+consumes the reservation and prevents a speculative refund.
 Refund only conclusively unused tokens; child count is never refunded after
 admission. Exhaustion denies the next child, not the parent's own remaining work.
 Independent parent runs have independent allowances; resumed runs never reset one.
@@ -309,10 +311,18 @@ Host startup and every host admission route, including CLI, foreground
 app-server and daemon resume and new-prompt paths, derive helper identity from validated host
 binding/operation records and read-only create-result resolution, checked
 against retained parent delegation intents. Complete classification precedes
-activation; missing/corrupt required records refuse instead of defaulting to
+activation and every session mutation admission, including commands through
+existing attachments; missing/corrupt required records refuse instead of defaulting to
 ordinary eager resume. A session-directory discovery index is not authority.
 Recognized helpers use only their retained operation path. Ordinary client
-prompt admission or eager resume cannot independently adopt or activate one.
+mutations, including prompt, steer, follow-up, configure, standalone compact,
+interaction response and abort, cannot independently adopt or control one;
+eager resume also refuses. The owning adapter may submit its retained prompt
+or abort/recovery commands under the existing operation contract. Read-only
+attachment, inspection, history and artifact retrieval remain subject to ordinary
+authority and grant no mutation route or provider authority. In particular,
+standalone compaction of a settled child cannot spend provider work outside
+its original operation and delegation allowance.
 Classification is complete before exposing those operations, even after a child
 has settled. Missing required classification refuses. This is host enforcement;
 core still has no parent or helper field.
@@ -360,7 +370,12 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   local executor later proves cleanup. Record that availability consequence.
 - Child lookup after cleanup-grace/default changes uses the retained create
   input; conflict/unavailability remains unknown. Every host refuses independent
-  prompt/resume adoption of both active and settled helper sessions.
+  client mutation/resume adoption of both active and settled helper sessions,
+  including each mutation through an existing attachment and standalone compact
+  and configure after child settlement, before and after restart. Assert no
+  provider call, configuration/checkpoint commit or ledger/accounting mutation;
+  owner abort/recovery
+  and read-only inspection still work through their respective paths.
 - Maximum-frame capacity reserves completion credit and refuses further children
   before 128 when necessary. Unknown stop commits still permit bounded abort
   attempts without admitting new ledger mutations or launches.

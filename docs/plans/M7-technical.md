@@ -877,13 +877,15 @@ then identified additional gaps. This revision records their repairs, with the
 selected bounded thinking continuation and stop-only helper recovery included.
 The [follow-up record](../evidence/M7-continuation-review.md) binds their review.
 The [round 2 disposition](../evidence/M7-round-2-disposition.md) tracks each
-subsequent finding, measured limits, repairs and pending choices. It explicitly
-withholds a new readiness/handoff claim until those choices and our own complete
-adversarial review are resolved.
+subsequent finding, measured limits, selected choices and repairs. Its
+[whole-packet internal review](../evidence/M7-round-2-disposition.md#whole-packet-review)
+is complete, including repair rereads with no remaining planning blocker from
+that pass.
 The [round 2 assessment](../evidence/M7-external-review-2.md)
 then rejected candidate `10749d08` for additional feasibility and closure gaps.
-Its claims are under source-backed review; repairs and a fresh internal
-adversarial pass precede the next external handoff. This is review of planned contracts, not product evidence or
+Its claims have been dispositioned through source-backed checks, bounded
+prototypes and that fresh adversarial pass. The repaired packet proceeds to
+external audit after clean-candidate documentation validation. This is review of planned contracts, not product evidence or
 formal independent acceptance review.
 
 | Finding | Governing repair and implementation witness |

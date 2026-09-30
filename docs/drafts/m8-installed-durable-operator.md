@@ -59,7 +59,8 @@ the public session/controller contract; its exact scope is settled before M8 ope
 Technical depth: [Compatibility](m8-installed-durable-operator-technical.md#technical-plan-compatibility).
 
 No store engine implementation, extension activation, protocol/API freeze,
-parallel/writable helpers, file/keychain/command credentials or live configuration
+parallel helpers within one parent conversation, writable helpers,
+file/keychain/command credentials or live configuration
 reload is implied. No package publication, name clearance or release version is
 authorized. Any added capability needs a scoped acceptance decision.
 

@@ -5,18 +5,20 @@ Date: 2026-09-30. Reviewed base:
 
 ## Concept
 
-M7 is not ready for acceptance or another external handoff. The external report
+The internal adversarial review is complete, with no unresolved planning blocker
+from that pass. This packet is prepared for another external planning audit;
+M7 and its prerequisite proposals remain unaccepted. The external report
 identified real feasibility gaps, especially summary processing and thinking
-continuation capacity. Several numerical claims overstate what their examples
-prove. The repairs below preserve the maintainer's selected 64 KiB request
+continuation capacity. Several numerical claims overstated what their examples
+proved. The repairs below preserve the maintainer's selected 64 KiB request
 ceiling, bounded thinking support, stop-only helper recovery, approved agent-run
 tests, strict demonstrations and interactive/piped chat.
 
 The maintainer asked for our own adversarial review and fixes after the external
-report, before receiving another candidate SHA and review prompt. That final
-packet review remains outstanding. Three internal read-only advisory workstreams
-checked the report against source, followed by fresh checks of repaired helper,
-configuration and credential contracts. They are not formal acceptance reviews.
+report, before receiving another candidate SHA and review prompt. The lead's
+read-through and three advisory whole-packet reviews followed the focused source,
+helper, configuration and credential checks. Findings and reread conclusions
+are recorded [below](#whole-packet-review). They are not formal acceptance reviews.
 No product implementation, provider call or milestone acceptance is claimed.
 
 The maintainer selected [option A: marked bounded excerpts](../developer/agent-context-map.md#disposition-m7-compaction-excerpts-2026-09-30)
@@ -472,14 +474,14 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | 17 | Intentional availability limit retained | Unclassified cancellation closes helpers for that router incarnation, including a local-job race. Add that explicit witness; a bounded per-job registry is optional complexity. |
 | 18 | Truthful uncertainty retained | Nested cleanup may outlast the parent's observation window. Add this case and preserve unknown even after later child cleanup; no unapproved extra spending/deadline margin. |
 | 19 | Repaired for safety | Retain original child creation inputs and resolved cleanup grace. Changed-runtime reconstruction conflicts, unavailable or unexpected lookup remain unknown, never false absence. This does not promise successful recovery under changed grace. |
-| 20 | Repaired | Every reference-host resume/prompt route classifies helpers before activation. Independent adoption, including a new prompt to a settled helper, refuses. |
+| 20 | Repaired | Every reference-host activation and mutation route classifies helpers, including existing attachments. Independent prompt, configure, compact and other mutations refuse even after child settlement; inspection and adapter-owned cleanup retain their ordinary paths. |
 | 21 | Repaired with internal correction | Executor cancellation depends on causation and confirmed cleanup. Preserve a completed/failed child fact that won first; distinguish model-facing failure from receipt outcome. |
 | 22 | Cardinality claim rejected; ownership clarified | 128 is a ceiling, not guaranteed capacity. The 16 MiB log may refuse earlier and must reserve closing credit. Composition owns the ledger. |
 | 23 | Repaired | Volatile stop fences launches immediately. Bounded best-effort abort may proceed during unknown stop commit without authorizing new ledger mutations, refunds or success. Conservative adapter-wide uncertainty remains explicit. |
 | 24 | Repaired | State exact process/runtime-incarnation fencing. Do not claim Local's constant numeric epoch increments after restart. |
 | 25 | Repaired | Persist expiry refusal idempotently; resolve unknown admission/refusal by its original transaction, not a new clock check. |
 | 26 | Repaired | Complete bounded per-operation stop/reconciliation before affected parent activation. Expired recovery remains unknown. |
-| 27 | Partly repaired; chosen pipe behavior retained | Stdin TTY selects mode. Specify status/acknowledgement, choices and outcome framing. Static unexpected questions fail honestly; bidirectional producers answer actual IDs. No new no-question flag is implied. |
+| 27 | Repaired; strict pipe behavior retained | Stdin TTY selects mode. Specify status/acknowledgement, choices and outcome framing. Static unexpected questions fail honestly; bidirectional producers answer actual IDs. The suggested no-question flag is outside the selected scope; an unexpected question remains a failed attempt under the strict oracle. |
 | 28 | Repaired; fresh review applied | Name ADR 0019/0039 amendments, closed multi-binding plane, exclusive supplied-plane/reference options, all custody/launch joins and preserved legacy receipt meaning. New all-binding exclusion needs launch canaries, not reinterpretation of old false bits. |
 | 29 | Repaired | Reply/context/system budgets stay committed on resume. Only max turns, relative deadline and token budget are new-run overrides. |
 | 30 | Repaired | Explicit ephemeral `questions: true`, default false, preserves existing definitions. State callback termination and trusted-host non-recursion obligations. |
@@ -602,10 +604,10 @@ their classifications against the attended table. This restores the previously
 required proof rather than adding a new maintainer choice.
 The focused follow-up read found no remaining actionable defect in these
 repairs. It confirmed that all prescribed cases, oracle checks, attendance
-and failure retention remain required. The complete-packet review is still
-outstanding.
+and failure retention remain required. The complete-packet review was still
+outstanding at that checkpoint.
 
-Outstanding work: resolve the pending choices,
+Outstanding work at that checkpoint: resolve the pending choices,
 complete the final profile/request capacity design, update all affected
 pairs, then run a fresh adversarial pass over the complete packet and repair
 its findings before preparing another external SHA/prompt. A documentation
@@ -852,6 +854,45 @@ The old prototype's 1,024-byte read guidance must become 4,096 in final generati
 bytes. No universal path/catalog fit, final request proof or provider usability
 is claimed by the historical prototype.
 
+<a id="whole-packet-review"></a>
+### Whole-packet internal adversarial review
+
+The lead reviewed the complete M7 pair, ADRs 0041–0049, the proposed paired
+vision amendment, roadmap and M8–M10/ADRs 0036–0038 joins, with the round 2
+report and retained sizing limits. The review base is
+`f78a73ab3e8b0abb3e61bb041e4f7f8d866eb51e`; the repairs below are its follow-up.
+Three advisory readers independently reread the same packet and received the
+deltas for review. They used read-only task instructions in the workspace-write
+environment, not the unavailable enforced read-only acceptance profiles. This
+is not a model-diverse panel or formal acceptance review. None ran a provider,
+product test or experiment, or made repository edits during this pass.
+
+| Finding | Lead disposition and repair |
+| --- | --- |
+| A helper's automatic compaction was excluded from its delegation charge by ADR 0043's blanket wording | Act on. Parent-session maintenance remains outside the helper allowance; child maintenance is part of child terminal usage and delegation settlement exactly once. ADRs 0043/0046 and the accounting vectors now agree. The raising reader reread the repair and confirmed closure. |
+| M8 still excluded parallel helpers without the selected per-conversation qualifier | Act on. The lead narrowed the Concept exclusion and made the technical companion explicitly inherit M7's independent-parent concurrency. A delta reread confirmed both joins. |
+| Helper ownership checks named prompt/resume but left new mutation paths implicit | Act on. The lead traced standalone compact on a settled helper: it could start work after delegation settlement if an implementation checked only activation. ADR 0046 now explicitly classifies every mutation through existing attachments, preserves inspection and adapter-owned recovery, and adds an active/settled/restarted negative matrix. This makes the existing retained-operation-only rule explicit without a new scope choice. |
+
+The earlier focused reviews in this checkpoint also closed classified-cancel
+scope, complete helper-log coverage, the remaining ADR 0046 parallel exclusion,
+and the timing of the reference-profile size gate. All three final readers
+reported no additional actionable finding or new maintainer decision. They
+agreed that the repaired packet is coherent for external planning audit; the
+lead concurs. There was no unresolved disagreement or dismissed blocker in
+this final pass.
+The final helper-mutation clarification received a separate read-only delta
+review. It confirmed the warning closed, with no residual finding or new
+maintainer decision; the negative matrix and permitted owner/inspection paths
+match the existing ownership rule.
+
+Historical scratch results remain bounded feasibility evidence. Final profile
+and request sizes, model-mode/native streaming conformance, recovery fault cuts,
+independent protocol consumers, security, operator and rollback proofs belong
+to implementation and closure. Those explicit obligations are not asserted as
+completed by this review. The final committed audit candidate must pass the
+normal documentation gate before handoff; its exact SHA, retained output digest
+and remote verification belong to the external verification receipt below.
+
 <a id="resume-checkpoint"></a>
 ### Resume checkpoint, 2026-09-30
 
@@ -868,35 +909,21 @@ Resume this work on branch `m7` in
 `/Users/spuri/projects/lexlapax/loopex`; inspect Git before changing anything.
 All work remains planning/docs, with commits and pushes authorized. M7 is Open,
 ADRs 0041–0049 are Proposed, and the paired vision amendment is unaccepted.
-Do not implement product changes or present a final external-review SHA/prompt
-until the remaining decisions, repairs and whole-packet adversarial pass finish.
+The requested whole-packet review and repairs are complete. No product change,
+plan/ADR acceptance, milestone closure, merge or publication is authorized.
 
-1. Preserve the selected source-excerpt A, summarizer B, thinking-capacity A and
-   live-streaming A, verified-summary A, 4-KiB reads, legacy inline A,
-   updated wire clients A and per-conversation helper A
-   repairs and their sizing/review record above.
-   Preserve originals,
-   whole-group checkpoint cuts, exact provenance, the protected recent tail,
-   the open-thinking exclusion, 16 KiB source and 64 KiB request limits, and
-   bounded maintenance attempts. Define marked omissions, deterministic source
-   allocation, UTF-8/JSON handling, prior-summary handling and restart identity.
-   Cover large user text, generated arguments and large group metadata; reducing
-   only executor-result text leaves the original blocker unresolved.
-2. Ask remaining material questions one at a time, with plain-English options
-   and consequences. The question tool was invisible to this user; display the
-   options in the chat as well. Ask only if the remaining review exposes a new
-   material decision; do not reopen recorded choices or infer approval from silence.
-3. Use the retained probes above. The earlier local-reference comparison is
-   superseded for drafting by the selected generic-node contract and later
-   probe/correction; it remains historical evidence. Aggregate result allocation
-   is already drafted in ADR 0041. Final integrated sizes and helper-coding prompt
-   margin remain unproved. No provider or product-test evidence exists for M7.
-4. Update all affected pairs, perform the requested fresh whole-packet internal
-   adversarial review, repair its findings, verify and push. Only then provide
-   the exact external-review candidate SHA and a review prompt. Acceptance is
-   a later maintainer decision.
+1. Preserve all nine selected repairs and their retained sizing/review limits.
+   No maintainer question remains open; do not re-ask settled choices.
+2. Commit the final repair/review record, run the documentation gate once on
+   that clean candidate, push branch `m7`, and verify the remote identity.
+   Retain exact results in `/tmp/loopex-m7-readiness-verification.json`, with the
+   complete log and SHA-256 outside the repository. A missing or failed receipt
+   does not establish a passed check.
+3. Provide that exact candidate SHA and the external-review prompt after the
+   gate and push succeed. The next step is external audit, followed by explicit
+   maintainer disposition of exact plan/ADR/vision bytes before implementation.
 
-The latest pushed checkpoint before this wire/helper revision is
+The earlier pushed checkpoint before the wire/helper revision was
 `54c756394000da77348538602de0b2d236383dee`. Its documentation gate passed in
 15 seconds. The complete log is `/tmp/loopex-m7-summary-ranges-54c75639-docs.log`,
 SHA-256 `7cf247f0fd629e1ceec20a858b7d3e5c191d7c60f6566681bc1cf0825e6b9466`.
