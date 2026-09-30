@@ -19,9 +19,9 @@ checked the report against source, followed by fresh checks of repaired helper,
 configuration and credential contracts. They are not formal acceptance reviews.
 No product implementation, provider call or milestone acceptance is claimed.
 
-One maintainer question is pending: whether oversized old content may use
-marked excerpts, must be summarized in bounded chunks, or must be restricted
-before admission. No dependent summary mechanism has been selected. Further
+The maintainer selected [option A: marked bounded excerpts](../developer/agent-context-map.md#disposition-m7-compaction-excerpts-2026-09-30)
+for oversized older content, retaining complete originals. The detailed source
+projection remains to be repaired after the requested restart checkpoint. Further
 material choices will be presented one at a time, including thinking headroom
 and supported modes, native-response delivery/privacy, protocol compatibility
 and the scope of the parallel-helper ban. A report's request for a decision
@@ -244,7 +244,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 
 | # | Disposition | Reason, repair or remaining work |
 | --- | --- | --- |
-| 1 | Valid; pending maintainer choice | The oldest eligible group can exceed the summary source bound permanently. The excerpt/chunk/admission question is pending. |
+| 1 | Valid; A selected, contract repair next | Use marked bounded excerpts of oversized eligible older content and retain complete originals. Repair the source grammar/allocation so a large old prompt, model write or group metadata does not permanently block selection; no new admission restriction or chunked model workflow was selected. |
 | 2 | Partly valid; bounded comparison retained, design pending | Local-reference prototypes reduce one three-round record from 68,473 to 55,841 bytes but five/eight-round examples still fail. Counts remain fixture-dependent. Representation, expanded-cap semantics and a useful pre-exchange reserve remain unselected; required data cannot leave request digest coverage. |
 | 3 | Partly valid; pending matrix | Manual thinking is not Haiku-only: the current official matrix also permits older Opus/Sonnet families. Always-on models cannot satisfy the draft's universal thinking-off maintenance rule. ReqLLM's adaptive display injection conflicts with `provider_default`. Resolve the supported matrix and maintenance policy explicitly. |
 | 4 | Small complete example measured; quality proof remains | A useful authored fixture fits the declared input/output caps and current-shaped record with receipt. This does not prove provider output tokens or quality. Retain the reserve pending actual implemented witnesses; do not infer that every maximal member must fit simultaneously. |
@@ -332,11 +332,54 @@ The maintenance pass exposed an unnamed instruction injection/lifetime contract.
 ADR 0043 now proposes an explicit immutable runtime option, exact bounded
 rendering and capture in each episode. Missing configuration refuses new
 maintenance; recovery uses an admitted episode's retained bytes. The source
-envelope and single-string summary shape are explicit. These repairs do not
-select oversized-source handling or resolve always-on thinking support.
+envelope and single-string summary shape are explicit. These repairs preceded
+the maintainer's excerpt selection; its detailed source projection and the
+always-on thinking policy remain unfinished.
 
 Outstanding work: resolve the pending choices,
 complete the final profile/request capacity design, update all affected
 pairs, then run a fresh adversarial pass over the complete packet and repair
 its findings before preparing another external SHA/prompt. A documentation
 check alone cannot establish implementation readiness.
+
+<a id="resume-checkpoint"></a>
+### Resume checkpoint, 2026-09-30
+
+The maintainer requested commit/push and a restart checkpoint immediately after
+selecting A. No new question is pending. Resume this work on branch `m7` in
+`/Users/spuri/projects/lexlapax/loopex`; inspect Git before changing anything.
+All work remains planning/docs, with commits and pushes authorized. M7 is Open,
+ADRs 0041–0049 are Proposed, and the paired vision amendment is unaccepted.
+Do not implement product changes or present a final external-review SHA/prompt
+until the remaining decisions, repairs and whole-packet adversarial pass finish.
+
+1. Apply selected A to ADR 0043 and affected plan/ADR pairs. Preserve originals,
+   whole-group checkpoint cuts, exact provenance, the protected recent tail,
+   the open-thinking exclusion, 16 KiB source and 64 KiB request limits, and
+   bounded maintenance attempts. Define marked omissions, deterministic source
+   allocation, UTF-8/JSON handling, prior-summary handling and restart identity.
+   Cover large user text, generated arguments and large group metadata; reducing
+   only executor-result text leaves the original blocker unresolved.
+2. Ask remaining material questions one at a time, with plain-English options
+   and consequences. The question tool was invisible to this user; display the
+   options in the chat as well. Next resolve useful thinking capacity/modes;
+   then native-response delivery/privacy, explicit range-read usability, old
+   tool/protocol compatibility and the parallel-helper ban's scope. Do not
+   reopen recorded choices or infer approval from silence.
+3. Use the retained probes above. Local native references are an unselected
+   design comparison, not an adopted ADR 0044 format. Aggregate result allocation
+   is already drafted in ADR 0041. Final integrated sizes and helper-coding prompt
+   margin remain unproved. No provider or product-test evidence exists for M7.
+4. Update all affected pairs, perform the requested fresh whole-packet internal
+   adversarial review, repair its findings, verify and push. Only then provide
+   the exact external-review candidate SHA and a review prompt. Acceptance is
+   a later maintainer decision.
+
+Before this restart note, `e6e083fec34585059fd18534ac2edea3e54f9226` was pushed
+and its documentation gate passed in 15 seconds. Its complete log is
+`/tmp/loopex-m7-e6e083fe-docs.log`, SHA-256
+`dd180695d9a584e6c942e215bee9de733e61c974d0c2d1b2a9ecd0a2c0dfcc95`.
+This note adds a new checkpoint; that prior run is not evidence for these new
+bytes. Background design work was interrupted for the restart; no worker owns
+uncommitted repository changes. Read durable records rather than relying on
+worker memory or an old chat summary.

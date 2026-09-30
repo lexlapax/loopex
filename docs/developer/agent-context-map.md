@@ -6200,3 +6200,21 @@ report failure or cleanup uncertainty truthfully. An interrupted task may need
 a new request. ADR 0046 therefore replaces automatic unfinished-child resumption
 with stop-only recovery. This scopes the proposal; exact-byte acceptance and
 product implementation remain separate.
+
+<a id="disposition-m7-compaction-excerpts-2026-09-30"></a>
+### M7 oversized summary-source choice, 2026-09-30
+
+The maintainer selected option A: use clearly marked, bounded excerpts when
+older content is too large to summarize in one call, retaining the complete
+originals. Omitted details may not reach the summary. This applies to eligible
+older prompts and model-authored content as well as bulky result content; it
+does not authorize truncating live provider continuation or protected current
+input. Chunk-by-chunk summarization and new input-size restrictions were not
+selected. Revise ADR 0043's source projection and related plan/evidence rules
+to implement this choice in the proposal while retaining whole-group checkpoint
+cuts and the existing request ceiling. This is a scope disposition, not
+acceptance of the ADR/plan or authorization for product implementation.
+
+The maintainer then requested a committed and pushed checkpoint before
+restarting the agent. The remaining work is recorded in the
+[round 2 resume checkpoint](../evidence/M7-round-2-disposition.md#resume-checkpoint).
