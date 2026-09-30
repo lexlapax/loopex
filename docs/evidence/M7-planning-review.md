@@ -14,9 +14,12 @@ The integrator made all edits. Reviewers revisited the repairs; final bounded
 wording corrections were checked against their exact requested changes.
 This is internal readiness review, not formal independent acceptance review.
 
-## Disposition
+## Internal checkpoint disposition
 
-The packet is ready for external audit. M7 remains Open, all nine outcome rows
+At `20ff082a`, the packet was offered for external audit.
+The [first external review](M7-external-review-1.md) subsequently identified
+implementation and vision gaps. The packet is not ready for acceptance while
+those findings and the resulting maintainer decisions remain unresolved. M7 remains Open, all nine outcome rows
 remain Open, and ADRs 0041–0049 remain Proposed with empty Acceptance rows.
 External audit and explicit maintainer acceptance of exact committed pairs are
 still required before dependent product implementation.
@@ -58,8 +61,8 @@ scenario specification define implementation obligations, not passing results.
 ## Reviewed contract bytes
 
 SHA-256 values identify the final plan/ADR contract bytes after the bounded
-wording repairs. The commit containing this record is the audit handoff; these
-hashes do not constitute maintainer acceptance.
+wording repairs. Commit `20ff082a` was the first audit handoff; these historical candidate
+hashes do not constitute maintainer acceptance or bind subsequent repairs.
 
 | File | SHA-256 |
 | --- | --- |

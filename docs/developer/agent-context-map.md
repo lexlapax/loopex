@@ -56,6 +56,7 @@ starting from the founding vision and moving to the implemented subsystems.
 | Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 | Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
 | Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
+| M7 coding-agent planning | [Open M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | ADRs 0041–0049 and the narrow vision amendment remain proposed. Read the [external review](../evidence/M7-external-review-1.md) and [scope decisions](#disposition-m7-audit-scope-2026-09-30) before dependent work. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Architecture as implemented | [Architecture](architecture.md#concept) | [Architecture invariants and mechanics](architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
@@ -364,6 +365,8 @@ end of the file.
 | Post-M4 closure procedure, 2026-09-20 and 2026-09-21 | Six unanchored entries after the M4 closure: "Closure names two commits", "Closure and release evidence sequencing", "Administrative confinement is content confinement", "Closure candidate ownership and archive producer", "Administrative reconstruction and four release proofs" and "Archive extraction ignores the caller umask". The [milestone guide](milestones.md#concept) states the resulting procedure |
 | M5, from 2026-09-21 | [Plan pair and ADR 0031–0034 acceptance](#disposition-m5-acceptance-2026-09-21); [host application role](#disposition-m5-host-role-2026-09-22); [per-session progress routing](#disposition-m5-progress-routing-2026-09-22); [escript archive exclusion](#disposition-m5-escript-exclusion-2026-09-22); [no resident window](#disposition-m5-no-resident-window-2026-09-22); [residual proofs](#disposition-m5-residual-proofs-2026-09-22); [trace sessions load named modules](#disposition-m5-trace-loads-named-modules-2026-09-23); [closure-review decisions](#disposition-m5-closure-review-2026-09-23); [release-check attendance](#disposition-m5-driver-attendance-2026-09-23); [session-index loss](#disposition-m5-session-index-lost-2026-09-23); [non-blocking daemon components](#disposition-m5-nonblocking-components-2026-09-24); [executor cancellation and the risk packet](#disposition-m5-cleaned-implies-durable-2026-09-24) |
 | M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27); [implementation start](#disposition-m6-implementation-start-2026-09-27) |
+
+| M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); earlier choices remain recorded in the [Open plan](../plans/M7.md#concept) |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -6149,3 +6152,27 @@ proof strength and search-tool behavior remain non-blocking observations, not
 upgraded guarantees. This closure does not authorize a merge to `main`, tag,
 release, binary publication or claim that administrative-SHA archive comparison
 has run.
+
+<a id="disposition-m7-audit-scope-2026-09-30"></a>
+### M7 external-audit scope decisions, 2026-09-30
+
+The maintainer requested internal adversarial review and repairs of the M7
+planning packet, then external-review cycles, with commits and pushes during
+that work. The first external assessment reviewed `20ff082a23b7f0bbba09f123a3db0dc262a866bc`
+and is retained in the evidence index. In response, the maintainer selected:
+
+- Keep the 65,536-byte request-record ceiling and add artifact references with
+  bounded excerpts for bulky tool output. Full request records remain inline.
+- Draft a narrow amendment to both vision files: retain seven workspace tools,
+  permit a question tool and an opt-in host helper tool, and retain bans on a
+  core scheduler, parallel helpers and writable helpers. Review the amended
+  vision pair with M7 before adoption.
+- Support interactive and piped chat, including explicit input ordering,
+  question answers, EOF and failure handling.
+- Let the agent run explicitly approved fixture tests; the harness independently
+  reruns the acceptance checks. Pin allowed commands and the executable path.
+
+These are scope choices for proposal revision, not acceptance of the plan,
+ADRs or vision amendment and not authorization for product implementation.
+Earlier scope choices remain in the plan; the external repository and task
+remain deferred until testing, then pinned before their demonstration attempt.
