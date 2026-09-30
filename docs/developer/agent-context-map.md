@@ -6230,3 +6230,15 @@ ordinary bounded thinking remains in M7. Revise ADR 0043 and its configuration,
 routing and plan joins. This permits a purpose-specific model call, not a helper
 agent or scheduler. It is a proposal scope decision, not exact-byte acceptance
 or authorization for product implementation.
+
+<a id="disposition-m7-thinking-capacity-2026-09-30"></a>
+### M7 thinking capacity choice, 2026-09-30
+
+The maintainer selected option A: store repeated text/tool arguments once and
+reserve room before a thinking exchange. The provider still receives complete,
+unchanged data, and the 65,536-byte request limit remains. Earlier history may
+be summarized sooner, spending bounded maintenance calls and losing some old
+detail. Retaining duplicate copies and stopping after short exchanges was not
+selected. ADR 0044 owns the reference representation, full-input accounting and
+initial reserve; ADRs 0041/0043 own their allocation and compaction joins. This
+authorizes drafting those contracts, not plan/ADR acceptance or product work.

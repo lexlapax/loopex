@@ -295,6 +295,16 @@ Each coding task states its starting workspace, its prompt and a check that
 decides pass or fail without reading the model's prose, such as a test suite
 that must pass. A task that passes only on retry is a failure to explain.
 
+Outcome 4 includes ADR 0044's selected local-reference and initial-reserve
+contract. Prove exact expansion against canonical reply/request values, full
+expanded continuation accounting and both stored/expanded private-data caps.
+Test initially fitting requests that require earlier compaction, target-aware
+excerpt/optional admission, no-progress/exhaustion refusals and recovery of the
+same preparation targets. The real multi-round case records its first request,
+subsequent complete records and input estimates; a small initial request alone
+does not prove useful continuation capacity. No fixed round count is guaranteed
+for every admitted prefix.
+
 Use the existing CLI coding-task fixture and release lane as the starting
 point: `apps/loopex_cli/test/coding_task_test.exs` and
 `scripts/check-release.sh`. Extend the existing interaction, context,
@@ -539,6 +549,9 @@ declines. Neither path assumes the model can be forced never to ask.
 3. Select a pinned supported Claude thinking mode and run the fixed multi-round
    tool fixture. Record its admitted reply/thinking limits, private-state sizes
    and objective outgoing-block equality result without printing private blocks.
+   Record the initial reserve, complete request sizes and expanded input charges;
+   storage savings do not count as lower provider input. An automated near-limit
+   initial-history variant proves compaction leaves the reserve before dispatch.
    Reopen the settled session and confirm configuration and canonical history.
    The next run starts a new exchange; automated fault cuts cover open-exchange
    restart and exact replay.
@@ -853,7 +866,8 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   records and v3 genesis, prepared tool-result references and artifact-read resolved
   arguments, immutable tool/policy selections, maintenance/compaction records,
   runtime/composition maintenance-instruction/model options and per-episode capture,
-  model_request.v2 continuation, bounded adapter/canonical reply v3 and
+  model_request.v2 local-reference continuation and its generic expansion rule,
+  captured thinking-headroom trigger/targets, bounded adapter/canonical reply v3 and
   model_attempt_settled_v3 preserving ADR 0021's v2/accounting provenance,
   estimator revision and private/public projection,
   question producer/text/decline records,

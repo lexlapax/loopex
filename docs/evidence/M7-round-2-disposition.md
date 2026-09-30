@@ -22,10 +22,12 @@ No product implementation, provider call or milestone acceptance is claimed.
 The maintainer selected [option A: marked bounded excerpts](../developer/agent-context-map.md#disposition-m7-compaction-excerpts-2026-09-30)
 for oversized older content, retaining complete originals, and
 [option B: a separately configured summarizer](../developer/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30).
-Both choices are drafted, including source projection, omission provenance and
-captured maintenance-model selection. Further
-material choices will be presented one at a time, including thinking headroom
-and supported modes, native-response delivery/privacy, protocol compatibility
+The maintainer subsequently selected
+[option A: local references and initial thinking reserve](../developer/agent-context-map.md#disposition-m7-thinking-capacity-2026-09-30).
+All three choices are drafted, including source projection, omission provenance,
+captured maintenance-model selection and expanded continuation accounting.
+Further material choices will be presented one at a time, including supported
+modes, native-response delivery/privacy, protocol compatibility
 and the scope of the parallel-helper ban. A report's request for a decision
 does not by itself reopen a choice the maintainer already made.
 
@@ -245,7 +247,7 @@ Artifacts are retained in `/tmp/loopex-m7-aggregate-results-bdb48d73/`:
 
 ### Native-reference capacity comparison
 
-A separate probe at `bdb48d73` compares full native capsules with an unselected
+A separate probe at `bdb48d73` compares full native capsules with a then-unselected
 adapter-created local-reference layout. The authored three-round cache-repair
 example has two calls and two distinct text blocks per round, literal thinking
 and redacted-thinking blocks, and six 1,313-byte result strings. Five/eight
@@ -277,7 +279,8 @@ The probe measures supplied proposed-v2 records with the current serializer,
 Store and context admission plus a current-style receipt/continuation descriptor.
 Final M7 schemas and some binding metadata are absent. It is not a decoder,
 replay, fault, provider-token or quality proof. It demonstrates storage savings
-and their limits; the continuation/headroom decision remains open.
+and their limits; the continuation/headroom decision was still open at that
+probe. The subsequent selected-A draft and corrected probe follow.
 
 Exact sources, inputs, candidate records and report are retained under
 `/tmp/loopex-m7-native-references-bdb48d73/`. `SHA256SUMS` binds all artifacts
@@ -285,6 +288,79 @@ except itself, with SHA-256
 `46589a0d02632a37090fcb68df91d1ff19fd843f6e10b0c44a4c18427b0da2b9`.
 The `measurements.json` SHA-256 is
 `6410d09b9c914a8484b2c155c691cc894534488c57dcfccd2606c40c4492ad3c`.
+
+### Selected thinking-capacity repair and sizing
+
+The maintainer selected A: remove repeated text/tool arguments and leave room
+before a thinking exchange. ADR 0044 now uses generic literal or top-level
+reference nodes. Core expands against the owning reply/request for validation
+and cost; the adapter alone checks native schemas and exact captured blocks.
+The compact data and canonical targets stay in the staged digest. There is no
+journal/artifact lookup or adapter-reported cost. Both stored and expanded
+capsules/envelopes keep their 16,384-byte caps; complete records keep 65,536.
+
+Before a new exchange, the proposed targets are 32,768 complete record bytes and
+`C - min(8,192, floor(C/2))` estimated input tokens for captured ceiling `C`.
+Required allocation and optional intake share those targets. Maintenance
+compares the same minimum required projection before/after each checkpoint,
+continues until the reserve fits, and retains its original attempts, spending,
+deadline and restart identity. The resolved mapping declares whether continuation
+is required. An open exchange still freezes its prefix; the reserve promises
+no number of rounds and cannot make a single oversized response admissible.
+
+The new probe pins source `ff08713c10ce43fe2e5cd56d8ccd2dc80fa99eb1` and keeps
+the earlier authored input unchanged. It includes generic-node overhead,
+explicit unequal native/canonical IDs and a revision-4-shaped receipt with a
+separate continuation cost rather than an extra descriptor. `E` replaces only
+the content nodes; cost uses its complete canonical encoding, while staged
+bytes contain the compact form. Messages and tools retain their full charge.
+
+| Candidate | Compact / expanded envelope JSON bytes | Complete record bytes | Estimated input tokens |
+| --- | ---: | ---: | ---: |
+| First request | nil / nil | 9,081 | 605 |
+| Three rounds | 5,455 / 10,959 | 58,394 | 10,290 |
+| Five rounds | 8,923 / 19,160 | 92,806 | 17,350 |
+| Eight rounds | 14,123 / 29,864 | 141,380 | 26,926 |
+
+The initial request fits both targets for `C` 8,192/16,384/32,768. Three rounds
+fit the measured record/private-data caps but need an input allowance of at
+least 10,290. Five/eight rounds exceed the expanded-envelope and record limits.
+Later requests use hard ceilings, not initial targets. The probe's misleadingly
+named `output_reserve` field means input headroom, not extra output allowance.
+Its current Store/ContextAdmission call sets `C` to the observed estimate to
+isolate record admission; it does not prove every model budget admits the case.
+
+The probe retains lossless UTF-8/empty/interleaved content, fourteen malformed
+vectors, eight additional assertions and odd-budget arithmetic. A root audit
+found the scratch generic expander checked unique/total indices but not their
+order, and accepted only the two native field names. A separate correction
+reproduces the missing order check, applies the draft's ordered-index and
+generic-field rules, and proves the positive native array and measured
+three-round `E`/cost unchanged. This corrects the proof harness, not product
+code or the already explicit draft. Original artifacts remain unchanged.
+
+The records are supplied candidate shapes, with fixture source descriptors.
+Final purpose/configuration/frozen-prefix metadata may increase sizes; existing
+M7 decoders do not yet accept these forms. No provider call, native capture,
+billing-token, streaming, recovery or quality claim follows. This is narrower
+than final implementation capacity proof. A focused advisory diff review found
+no new contract contradiction; it is not the complete-packet or formal
+independent acceptance review.
+
+Retained directory `/tmp/loopex-m7-thinking-refs-ff08713c/`:
+
+| File | SHA-256 |
+| --- | --- |
+| `README.md` | `668b582e69a726a61837bbfd5e32e8408f49e18014c0ee38a5c2223e8ddd4be4` |
+| `measurements.json` | `0828b2d4cd6e8b3f1b04a841a5c688de8f0288bad33052bd42141d9193463e0b` |
+| `probe.exs` | `992aefcd12dd80cca492b1a6af3b0b7f956c4e0329fdf9c9efcee7de9a69dad9` |
+| `SHA256SUMS` | `90389b507d0a10c41f15260e7713ad11f47f748d242ece9c4597079ece23ee33` |
+
+Correction directory `/tmp/loopex-m7-thinking-refs-audit-ff08713c/`:
+`README.md` SHA-256
+`2b0d323e4ecb84f7df0468d4492ba176dd358a9ef1ea1d3532033663064393ef`;
+`SHA256SUMS` SHA-256
+`a9879abe5e0b36877b42994a3b753fae5d7727c7d6e9546aa1c3fe4b80776b05`.
 
 ### Selected-A source sizing and focused review
 
@@ -367,7 +443,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | # | Disposition | Reason, repair or remaining work |
 | --- | --- | --- |
 | 1 | A incorporated in proposed contract | ADR 0043 now defines complete-prefix selection followed by marked serialized excerpts of the oldest eligible whole unit, including terminal input-only runs. Fixed head/tail allocation covers large prompts, arguments and group metadata; inherited omission provenance distinguishes raw coverage from bytes the summarizer saw. Originals remain readable. No new admission restriction or chunked model workflow was selected; integrated implementation evidence remains required. |
-| 2 | Partly valid; bounded comparison retained, design pending | Local-reference prototypes reduce one three-round record from 68,473 to 55,841 bytes but five/eight-round examples still fail. Counts remain fixture-dependent. Representation, expanded-cap semantics and a useful pre-exchange reserve remain unselected; required data cannot leave request digest coverage. |
+| 2 | A selected and drafted; bounded sizing retained | Generic local references preserve native expansion and full input charge. A revised three-round candidate is 58,394 record bytes; five/eight still fail. Both compact/expanded caps remain. Initial reserve targets join allocation, maintenance and recovery. Final integrated metadata/provider proof remains required; no round-count guarantee follows. |
 | 3 | Separate summarizer selected and drafted; ordinary matrix pending | Manual thinking is not Haiku-only. The selected explicit thinking-off summarizer lets an always-on conversation model compact without changing its ordinary mode. The ordinary supported-mode matrix and ReqLLM's adaptive display injection versus `provider_default` still need resolution. |
 | 4 | Small complete example measured; quality proof remains | A useful authored fixture fits the declared input/output caps and current-shaped record with receipt. This does not prove provider output tokens or quality. Retain the reserve pending actual implemented witnesses; do not infer that every maximal member must fit simultaneously. |
 | 5 | Existing rule overlooked; concrete join repaired | ADR 0041 already required new output to spill before receipt. Clarify the encoded projection trigger and require new search-tool artifact allowances; old one-byte allowances cannot retain their output. |
@@ -381,7 +457,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | 13 | Pending maintainer choice | Existing public reasoning summaries conflict with blanket suppression. Decide permitted public summary versus private native data and name any accepted-contract amendment. |
 | 14 | Evidence gap repaired | Add real continuation after bound/cancel with a new prompt and exact rendered grouping. Unsupported rendering refuses; no invented assistant completion. |
 | 15 | Clarified | Define deterministic derived IDs and collision refusal. A chosen prefix cannot prove disjointness from native IDs. |
-| 16 | Coverage clarified; headroom remains pending | Enumerate CLI JSON/transcript, Node, diagnostics and dependency telemetry witnesses. Preserve the existing private-store and host-VM audience limits. |
+| 16 | Coverage clarified; selected reserve drafted | Enumerate CLI JSON/transcript, Node, diagnostics and dependency telemetry witnesses. Preserve the existing private-store and host-VM audience limits; the new reserve changes no public/private audience. |
 | 17 | Intentional availability limit retained | Unclassified cancellation closes helpers for that router incarnation, including a local-job race. Add that explicit witness; a bounded per-job registry is optional complexity. |
 | 18 | Truthful uncertainty retained | Nested cleanup may outlast the parent's observation window. Add this case and preserve unknown even after later child cleanup; no unapproved extra spending/deadline margin. |
 | 19 | Repaired for safety | Retain original child creation inputs and resolved cleanup grace. Changed-runtime reconstruction conflicts, unavailable or unexpected lookup remain unknown, never false absence. This does not promise successful recovery under changed grace. |
@@ -479,7 +555,8 @@ skipped project/resource-pack intake, with captured identities and zero optional
 contributions; old and ordinary receipt rules remain. `continuation_cost` now
 has an exact null/closed-map shape and separate estimator equation, without
 altering descriptor totals or exposing private data. Final representation and
-headroom choices still need their own capacity proof. This is a focused proposal
+headroom contracts now have the separate selected-A draft and sizing above.
+Final integrated capacity still needs proof. This is a focused proposal
 review, not a whole-packet readiness verdict or implementation evidence.
 
 ### Operator validation review
@@ -528,10 +605,13 @@ check alone cannot establish implementation readiness.
 
 The maintainer's restart request selected A for oversized-source excerpts.
 That repair and the later B selection for a separate summarizer are drafted.
-The current unanswered question is thinking capacity: A removes duplicated
-text/tool arguments and reserves room before an exchange; B retains duplicate
-copies and stops at the existing limits. A is recommended, not selected.
-Do not confuse the summarizer's answered B with this new question.
+The maintainer also answered A for thinking capacity. Its generic local-reference
+and initial-reserve repair is drafted and measured above. Do not re-ask it.
+The current unanswered question is delivery for Claude thinking modes: A keeps
+live streaming with complete-block assembly/interruption/recovery tests; B waits
+for the completed reply in those modes while ordinary non-thinking replies can
+still stream. A is recommended, not selected. Keep the existing draft promise
+until that scope choice is resolved.
 Resume this work on branch `m7` in
 `/Users/spuri/projects/lexlapax/loopex`; inspect Git before changing anything.
 All work remains planning/docs, with commits and pushes authorized. M7 is Open,
@@ -539,7 +619,8 @@ ADRs 0041–0049 are Proposed, and the paired vision amendment is unaccepted.
 Do not implement product changes or present a final external-review SHA/prompt
 until the remaining decisions, repairs and whole-packet adversarial pass finish.
 
-1. Preserve the selected A and B repairs and their sizing/review record above.
+1. Preserve the selected source-excerpt A, summarizer B and thinking-capacity A
+   repairs and their sizing/review record above.
    Preserve originals,
    whole-group checkpoint cuts, exact provenance, the protected recent tail,
    the open-thinking exclusion, 16 KiB source and 64 KiB request limits, and
@@ -549,12 +630,13 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    only executor-result text leaves the original blocker unresolved.
 2. Ask remaining material questions one at a time, with plain-English options
    and consequences. The question tool was invisible to this user; display the
-   options in the chat as well. Next resolve useful thinking capacity/modes;
-   then native-response delivery/privacy, explicit range-read usability, old
+   options in the chat as well. Next resolve native-response delivery, then
+   supported modes/privacy, explicit range-read usability, old
    tool/protocol compatibility and the parallel-helper ban's scope. Do not
    reopen recorded choices or infer approval from silence.
-3. Use the retained probes above. Local native references are an unselected
-   design comparison, not an adopted ADR 0044 format. Aggregate result allocation
+3. Use the retained probes above. The earlier local-reference comparison is
+   superseded for drafting by the selected generic-node contract and later
+   probe/correction; it remains historical evidence. Aggregate result allocation
    is already drafted in ADR 0041. Final integrated sizes and helper-coding prompt
    margin remain unproved. No provider or product-test evidence exists for M7.
 4. Update all affected pairs, perform the requested fresh whole-packet internal
@@ -562,10 +644,10 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    the exact external-review candidate SHA and a review prompt. Acceptance is
    a later maintainer decision.
 
-The latest pushed configuration checkpoint before this operator repair is
-`d12e06204bdce4613d9cb9cc65cd241a4c3fcd5c`. Its documentation gate passed in
-16 seconds. The complete log is `/tmp/loopex-m7-summarizer-d12e0620-docs.log`,
-SHA-256 `6f8100c78afa4fff188be57b5c76387ebb752ca43e94cdab5998cb13874ade2c`.
-That run is not evidence for the subsequent operator edits. Read Git and the
-retained verification record for the current checkpoint; no worker owns
+The latest pushed checkpoint before this thinking-capacity repair is
+`ff08713c10ce43fe2e5cd56d8ccd2dc80fa99eb1`. Its documentation gate passed in
+15 seconds. The complete log is `/tmp/loopex-m7-operator-ff08713c-docs.log`,
+SHA-256 `fa6635297e59951c1631b387a36c052d919094ad0602a01b9a120b06c36ae2ae`.
+That run is not evidence for the subsequent thinking-capacity edits. Read Git
+and the retained verification record for the current checkpoint; no worker owns
 repository edits. Durable records govern, not worker memory or old chat summaries.

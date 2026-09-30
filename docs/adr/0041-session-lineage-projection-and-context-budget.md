@@ -50,6 +50,10 @@ is a bounded, restart-stable episode. No artifact-backed request storage enters 
 continuation counts within the same limits and stays exact; it cannot use the
 executor excerpt rule. An open thinking exchange freezes its earlier projection
 until completion or a truthful bound failure.
+Before a new thinking exchange, allocation and optional intake stay within
+ADR 0044's lower initial targets to leave room for continuation. This can shorten
+eligible result excerpts or trigger earlier compaction without raising any
+hard limit or changing an already staged prefix.
 
 <a id="concept-adr-0041-consequences"></a>
 ### Observable Consequences

@@ -111,6 +111,13 @@ permits marked excerpts of an eligible old unit for maintenance input, including
 user/assistant/question content and metadata. It preserves original facts and
 never applies to an open native exchange or its protected prefix.
 
+Before a new continuation-required exchange, ADR 0044 supplies lower byte/input
+admission targets. Use them for required allocation and optional intake below,
+while retaining the original hard ceilings in configuration and accounting.
+Other staging uses the ordinary hard ceilings. A request within hard limits can
+therefore require bounded maintenance to leave the initial thinking reserve.
+The selected target never permits changing an already frozen native prefix.
+
 Measure the required-context candidate at zero with both existing header
 variants: the initial resource receipt header and the reserved longest empty
 header (`retained_content_missing`). If that minimum fails, use existing eligible compaction or

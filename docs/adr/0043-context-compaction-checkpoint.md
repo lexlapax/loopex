@@ -23,7 +23,10 @@ outcomes or tool evidence. The session owner commits each checkpoint before it
 publishes or stages against it.
 
 Automatic compaction runs at initial or later model staging when eligible
-history would exceed a token or record-byte limit. It does not change prompt
+history would exceed a token or record-byte limit, or would leave insufficient
+space for a new thinking exchange under ADR 0044. That preparation continues
+until the initial reserve fits, even if a smaller reduction already fits the
+hard limits. It does not change prompt
 admission or require a host to resubmit a command. Explicit `compact` is admitted
 only while settled. Both use a bounded maintenance episode with an explicitly
 configured summarizer and no tools. Its model may equal the conversation model

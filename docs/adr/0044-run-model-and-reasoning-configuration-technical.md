@@ -89,7 +89,11 @@ or provider mapping. Ordinary `configure` never mutates the runtime selection.
 omits it. Existing committed request bytes and provider attempts remain immutable.
 The ReqLLM adapter maps only verified model/level combinations. Retain a closed
 `provider_mapping` with `mapping_revision` and `renderer_revision` strings of
-at most 128 bytes each and a `thinking` selection. Its closed variants are
+at most 128 bytes each, Boolean `continuation_required` and a `thinking`
+selection. The host resolves the Boolean from the verified exact mapping,
+including provider-default behavior. Core uses it without interpreting the
+provider's thinking mode; a reasoning label alone cannot establish it.
+The closed `thinking` variants are
 `{mode: omitted}`, `{mode: disabled}`, `{mode: manual, budget_tokens: positive_integer}`
 and `{mode: adaptive, effort: low | medium | high, display: provider_default}`.
 The adaptive display value omits a display override; the pinned mapping must
@@ -112,20 +116,60 @@ uses `bounded_adapter_reply_v3`, the exact nine fields of ADR 0018's v2 plus
 `continuation`, either nil or this closed capsule:
 
 ```text
-{format: "loopex.anthropic.content.v1", provider: "anthropic", model: exact_model,
- status: "open" | "closed", content: [ordered native content blocks]}
+{format: "loopex.anthropic.content_refs.v1", provider: "anthropic", model: exact_model,
+ status: "open" | "closed", content: [ordered content nodes]}
 ```
 
-The adapter validates closed supported blocks: text, thinking plus completed
-signature, redacted thinking plus data, and application tool use. Preserve
+Each content node is exactly one of these model-port forms:
+
+```text
+{kind: "literal", value: bounded_object}
+{kind: "text_ref", byte_length: nonnegative_integer,
+ template: bounded_object, field: bounded_field_name}
+{kind: "tool_use_ref", call_index: nonnegative_integer, native_id: bounded_identity,
+ template: bounded_object, field: bounded_field_name}
+```
+
+One pure bounded expansion rule serves core validation/accounting and adapter
+rendering. A literal returns its value unchanged. A reference inserts one value
+into one absent top-level template member. A field name is nonempty ASCII of
+at most 128 bytes and names one key, never a path. Reject unknown node members,
+overwrites, out-of-range indices and cross-entry or recursive substitution.
+Opaque literal/template/argument data is never scanned for nested references.
+No callback, provider dependency, store handle or external lookup enters this
+rule. The shared rule unifies these two required consumers; core does not
+interpret native block types, names or signatures.
+
+Text nodes consume successive UTF-8 byte slices of the owning canonical text,
+starting at zero, with valid slice boundaries and complete final consumption.
+Zero-length nodes preserve empty native text blocks. Tool nodes consume indices
+exactly `0..call_count-1` in native tool-call order, each once, inserting the
+selected canonical arguments. Empty calls require no tool nodes. Native
+identities use the existing nonempty UTF-8 reply-call identity contract and
+the enclosing size limits. Retain each node's `native_id` as generic mapping
+data; the adapter proves it equals the
+native identity inside the opaque template. This small identity duplication
+avoids provider-field interpretation by core. Text and tool arguments are not
+repeated in the private layout.
+
+For this Anthropic format the adapter requires text templates exactly
+`{type: "text"}` with field `text`, and tool templates exactly
+`{type: "tool_use", id: original_id, name: original_name}` with field `input`.
+Literal nodes are only the supported exact thinking/completed-signature or
+redacted-thinking/data blocks. The adapter constructs these reference nodes;
+provider-supplied objects are never accepted as reference instructions.
+Expand against the simultaneously produced
+canonical reply and compare the complete native array with the bounded captured
+array before settlement. Preserve
 all decoded string values and array order exactly. JSON whitespace and map-key
 order are not preserved wire bytes. Reject unknown blocks, incomplete streaming
 signatures or a mismatch with the canonical reply's text/calls/arguments before
 any tool intent or policy evaluation. `tool_use` stop with complete matching
 calls means open; genuine `end_turn` with no unresolved calls means closed.
 `max_tokens`, unfamiliar stop reasons and incomplete responses fail rather than
-masquerading as a completed exchange. Nil is allowed only when the admitted
-mapping does not require continuation for that reply. An omitted required
+masquerading as a completed exchange. An admitted mapping with
+`continuation_required: true` requires a capsule for each successfully decoded
+reply; false requires nil. An omitted required
 capsule is an unreadable answer, not permission to continue without thinking.
 
 The capsule is private data in its source settlement, whose existing operation,
@@ -134,7 +178,7 @@ closed envelope from committed source settlements, not adapter-supplied journal
 identities:
 
 ```text
-{format: "loopex.anthropic.content.v1", provider: "anthropic", model: exact_model,
+{format: "loopex.anthropic.content_refs.v1", provider: "anthropic", model: exact_model,
  configuration_version, exchange_id: first_model_operation_id,
  base_request_digest,
  entries: [{source: {run_id, turn_id, operation_id, attempt, settlement_digest},
@@ -147,12 +191,25 @@ The first request of an exchange has nil continuation. Its staged digest is the
 base identity; it never contains a digest of itself. Source digests bind prior
 complete settlement records, so there is no circular digest. Each entry names
 the exact assistant message position and its ordered call/result mapping in the
-current request. The owner validates these against source settlements and the
-exact projected messages before staging; content matching is never identity.
-The adapter validates index, role, call arguments and ID correspondence before
-rendering, rejecting missing, duplicate or ambiguous mappings. Each capsule and
-the aggregate request envelope are at most 16,384 bytes under ADR 0042's compact
-UTF-8 JSON recipe. At most 32 assistant entries and 128 native content blocks
+current request. Copy the source compact capsule unchanged, and require staged
+assistant text and ordered arguments to equal its source canonical reply.
+`calls[n].canonical_call_id` names that staged assistant's nth call, whose
+relationship to the source nth call follows the retained projection rule.
+`calls[n].native_id` comes from its tool node; it need not equal the canonical
+ID. The owner validates identities and result positions against source facts
+and exact projected messages; content matching is never identity.
+The adapter validates index, role, arguments and native/canonical correspondence
+before rendering. Native names match the original reply. For known tools they
+also match the frozen model-visible name/generation mapping, not a guessed
+`tool_id` spelling or interchangeable alias. Unknown names retain their exact
+source bytes and existing failed-call behavior, not a new grant or a fabricated
+generation.
+Missing, duplicate or ambiguous mappings refuse.
+
+Each capsule and the aggregate request envelope, both compact and expanded as
+defined below, are at most 16,384 bytes under ADR 0042's compact UTF-8 JSON
+recipe. Bound counting/expansion before allocating an oversized value. At most
+32 assistant entries and 128 native content blocks, including empty text blocks,
 are admitted in one exchange; existing depth/cardinality limits also apply.
 Every source must be a canonical, successful reply of this exchange, in order,
 under the exact model/configuration/renderer. Late evidence-only replies cannot
@@ -180,6 +237,53 @@ refuse; do not invent a capsule-limit compaction dimension. Late replies remain 
 retry authority, second reply transaction or separate provider-state writer
 is introduced.
 
+**Space before an exchange.** When the retained mapping has
+`continuation_required: true` and staging would begin a new ordinary exchange,
+apply revision `loopex.thinking_headroom.v1` before its first provider intent.
+This includes a first candidate that already fits the hard limits. With captured
+input ceiling `C`, the inclusive admission targets are:
+
+```text
+record_target = 32,768
+token_reserve = min(8,192, floor(C / 2))
+input_target = C - token_reserve
+```
+
+This leaves half the 65,536-byte record and up to 8,192 estimated input tokens
+available. An unknown-window `C = 8,192` gives `input_target = 4,096`; odd/small
+positive budgets use the equation without rounding through floating point.
+These are fixed preparation targets, not configuration flags, a changed `C`,
+additional spending allowance or a deduction from `max_tokens`.
+
+Apply both targets inside ADR 0041's required-context allocator and optional
+intake, measuring the complete fixed-point record with both reserved header
+variants. If the minimum required projection at `q=0`, with optional resources
+absent, misses either target, use ADR 0043's single bounded maintenance episode
+for this staging identity. Preserve the current input, protected tail and fixed
+metadata. If those alone exceed a target, refuse without a summary call.
+Otherwise each checkpoint must strictly reduce that same minimum projection in
+both bytes and estimated tokens, and maintenance continues until both targets
+fit. Fitting only the hard ceilings does not end this preparation.
+
+Once the minimum fits, maximize eligible excerpts and admit optional resources
+within these same targets, then preflight the complete actual candidate. Optional
+content cannot spend the reserve. Capture the trigger kind, rule revision and
+derived targets in the maintenance episode alongside its existing configuration,
+staging identity and bounds. Recovery validates the captured derivation and
+continues with the same counters/targets, never current defaults or a new
+episode. A request already staged before a crash keeps its exact bytes and
+dispatch classification; recovery does not summarize it again.
+
+If no eligible range can leave the reserve, retain `thinking_exchange_headroom`
+with dimension, observed size, target and hard ceiling before ordinary intent.
+Missing maintenance configuration, no progress, uncertain commits and exhausted
+bounds retain their more specific failure causes. Preserve committed checkpoints;
+none of these failures authorizes another automatic episode for the same staging
+identity. The rule reserves capacity but guarantees no number of rounds: a
+single large reply, fixed metadata, later steer or accumulated results can still
+exhaust a hard limit. After first staging, continuation requests use the hard
+ceilings and never replenish the reserve by changing their frozen prefix.
+
 **Lossless rendering and exchange lifetime.** Pinned ReqLLM 1.24.0's ordinary
 message conversion drops redacted thinking and groups thinking/text/tools.
 Implement bounded capture before that conversion and exact native-array
@@ -191,7 +295,8 @@ be captured and rendered losslessly is unsupported before dispatch.
 
 Freeze the first request's complete rendered system, tools, messages, artifact
 excerpts and canonical-ID mapping. Every next request extends that same prefix
-with exact retained assistant arrays and their committed tool results in order.
+with assistant arrays expanded from the exact retained layouts and their
+canonical targets, followed by committed tool results in order.
 The adapter replaces the corresponding canonical assistant view, rather than
 sending both views. Every staged request includes the complete frozen prefix
 and all replacement content and mappings needed to render it. The base digest
@@ -221,18 +326,27 @@ is promised.
 **Accounting and private retention.** The complete staged-request record still
 has the 65,536-byte limit, including semantic continuation, its duplicate inside
 canonical bytes, receipt, envelope and fixed-point size. No artifact reference
-stands in for required native data. Extend ADR 0017's estimator revision to
-charge the entire canonical continuation envelope in addition to existing
+stands in for required native data. Define `E(request)` as its continuation
+envelope with each capsule's content nodes expanded against the indicated staged
+assistant text/calls. Preserve all other members, including format strings.
+`E` is an accounting preimage, not another admitted dispatch format or retained
+payload. The same generic expansion validates a reply capsule against its owning
+canonical reply. Both compact and expanded JSON caps apply before admission;
+JSON size is distinct from `Canonical.encode`'s deterministic ETF size.
+Extend ADR 0017's estimator revision to
+charge the entire expanded canonical continuation envelope in addition to existing
 message/tool/system charges, using the existing ceil(bytes/3) rule. This
-conservatively counts duplicated canonical text/tool arguments; it never treats
-private state as free or subtracts an unproved provider discount.
+conservatively counts canonical text/tool arguments again; smaller storage never
+treats private state as free or subtracts an unproved provider discount.
 
 Context-provider receipt revision 4, shared with ADRs 0042/0043, adds exactly one
 mandatory outer member `continuation_cost`: null for nil continuation, otherwise
 `{content_digest, byte_cost, token_cost}`. Compute the digest and byte count over
-`Canonical.encode(staged_continuation)` and `token_cost = ceil(byte_cost / 3)`.
+`Canonical.encode(E(request))` and `token_cost = ceil(byte_cost / 3)`.
 The digest is lowercase SHA-256 hex. Recompute all three against the actual
-staged request at construction and replay; no caller-supplied cost is trusted.
+staged request at construction and replay using generic expansion; no
+caller-supplied cost or provider-specific expansion callback is trusted. The
+actual request digest still binds the compact envelope and canonical targets.
 This is private receipt metadata, not an extra provider message or descriptor.
 Keep `totals` and every `by_provenance` bucket equal to their message/tool
 descriptor sums. Under estimator `loopex.context_bytes.v2`,
@@ -241,12 +355,11 @@ treating null as zero. Input admission uses that complete sum. Maintenance has
 nil continuation and a null cost. Existing receipt revisions 2/3 retain their
 original estimator, closed keys and block-only equations. Public projection
 retains its existing metadata allowlist; this does not expose the private
-continuation or its digest. This accounting recipe describes the currently
-proposed continuation representation; a later selected representation must
-explicitly re-prove its estimator preimage and rendered-input coverage.
-System-class limits stay
-separate. Test the final rendered provider input against the declared estimator
-preimage; provider tokenization remains an estimate, not a billing guarantee.
+continuation or its digest. Charging only the smaller stored layout is invalid;
+mutating a target, index or slice must change the staged digest or refuse.
+System-class limits stay separate. Test the final rendered provider input
+against the declared estimator preimage; provider tokenization remains an
+estimate, not a billing guarantee.
 
 Retain private capsules, staged requests and their bindings with raw session
 recovery history. Existing private-root ownership/access controls protect durable
@@ -284,6 +397,19 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   descriptor totals versus complete input estimate, unchanged v2/v3 equations,
   and public exclusion of the private cost digest. A missing or fabricated
   continuation charge cannot pass input admission.
+- Generic expansion vectors cover zero-length/interleaved text, UTF-8 splits,
+  quotes/control characters, overwritten fields, missing/duplicate/reordered call
+  indices, literal data resembling references, unequal native/canonical IDs and
+  aliases distinct from tool IDs. Compare complete expanded arrays with capture;
+  verify multiple results grouped into one native user message and later steer.
+- Exact pre-exchange target edges, including odd input budgets, and initial
+  candidates that fit hard limits but require compaction for the reserve.
+  A checkpoint that fits hard limits but misses a target continues within the
+  original episode. Compare required `q=0` projections before/after; optional
+  intake cannot consume reserved space. Mandatory-only, no-progress and exhausted
+  episodes refuse before ordinary intent without repeated automatic episodes.
+  Recovery on both sides of checkpoint and first staging retains the rule,
+  targets, request bytes and existing spending/attempt bounds.
 - Active/unresolved change refusal; legacy model derivation versus conflict.
 - Restart at configure and staging boundaries preserves configuration/digest.
 - Reasoning capability negatives, default omission versus verified disabled mode,
@@ -304,8 +430,10 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   raw block fidelity, redacted/interleaved blocks, signatures and native ID mapping.
 - Crash/commit_unknown cuts at reply settlement, tool intent and next staging;
   no lost capsule, stale source, late-reply activation or duplicate provider call.
-- Capsule/aggregate/complete-record boundaries and context charges, including
-  combined large tool excerpts and duplicate request representations.
+- Compact and expanded capsule/aggregate limits, complete-record boundaries and
+  context charges, including combined large excerpts and duplicate request
+  representations. Measure a useful multi-round fixture with the final generic
+  node overhead and revision-4 receipt; earlier prototype sizes are not proof.
 - Frozen-prefix compaction refusal, same-model restart, terminal invalidation
   and A→B→A without resurrecting old signatures.
 - Private-state canaries across both transport profiles, public/progress/trace

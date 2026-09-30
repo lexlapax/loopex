@@ -48,13 +48,29 @@ Reasoning is `default`, `none`, `low`, `medium` or `high`. The adapter declares
 its supported subset; unsupported values refuse. `default` omits the provider
 option. An incompatible model/provider change removes provider-affine continuation
 material from projection, while preserving canonical text, calls and results.
-Raw history remains unchanged. Preserve the complete rendered conversation
+Raw history remains unchanged. The maintainer selected removal of duplicate
+text/tool arguments and a reserve before thinking exchanges on 2026-09-30.
+Store those values once in the canonical reply or request and retain bounded
+local references in its private provider layout. A small provider-neutral
+expansion rule supports core accounting and adapter rendering; it reads only
+that reply/request. The adapter proves the restored native blocks equal the
+captured blocks. References grant no access to history, artifacts or a provider.
+
+Before a new thinking exchange, leave half the complete request-record capacity
+and up to 8,192 estimated input tokens available for its continuation. Earlier
+eligible history may need compaction even when the first request would fit the
+hard limits. Required current content that cannot leave this reserve refuses
+before the first ordinary provider call. Existing summary attempts, spending
+and deadlines still bound preparation. The reserve does not guarantee a number
+of tool rounds or make an oversized reply acceptable.
+Preserve the complete rendered conversation
 prefix while a thinking tool exchange is open. Compaction waits until it ends;
 if the next request cannot fit, stop with a named bound failure rather than
 dropping or changing required blocks. A new run starts from canonical history
 and never resurrects old thinking state.
 
-Private continuation has a 16-KiB envelope cap and remains within the existing
+Private continuation has a 16-KiB cap on both stored and expanded envelopes,
+and remains within the existing
 64-KiB request and settlement record limits. Durable copies use the private
 store's access controls and remain with raw session history until the host
 retires that history; ephemeral copies end with their runtime. Local storage
@@ -73,6 +89,10 @@ the same declared stopping rules. Saved file changes alone do not alter history
 or pending work. Unsupported models or thinking formats refuse explicitly; a
 provider catalog entry alone is not a support promise. Crash recovery must
 preserve the exact required blocks or fail without another provider call.
+The smaller stored form provides no token discount: admission still charges
+the complete expanded continuation in addition to canonical conversation data.
+Operators can observe earlier compaction and a named reserve refusal while the
+ordinary hard limits remain unchanged.
 
 <a id="concept-adr-0044-compatibility"></a>
 ### Compatibility and Rollback

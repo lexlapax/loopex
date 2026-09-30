@@ -10,7 +10,12 @@ Concept: [Context and decision](0043-context-compaction-checkpoint.md#concept-ad
 
 **Episode.** Derive identity from the triggering run/staging identity or explicit
 compact command ID. Persist frozen configuration, captured session version,
-attempt count, bounds, usage and checkpoint progress. Block conflicting mutation
+attempt count, bounds, usage and checkpoint progress. Capture its trigger as
+`ordinary_limit`, `thinking_headroom` or `explicit`; the thinking trigger also
+retains ADR 0044's rule revision and derived byte/input targets. Derive them from
+the captured ordinary configuration, never the summarizer's input allowance.
+Recovery validates and reuses that capture; it cannot reset the trigger or
+targets. Block conflicting mutation
 until settled. Steer/follow-up admission keeps its existing ordering and cannot
 change the captured summary range. No live provider/executor or interaction
 may overlap summary dispatch. An open ADR 0044 thinking exchange is also
@@ -86,6 +91,7 @@ with the same field bounds and combined 2-KiB capability/mapping ceiling as
 ADR 0044. Reasoning is verified `none`, or `default` only when its retained
 mapping proves omission disables thinking for that exact model. No credential,
 route handle, module, provider-option bag or live resolver enters this map.
+The verified maintenance mapping has `continuation_required: false`.
 Core validates plain data and never consults a catalog or derives a provider
 mapping from the conversation model. Composition forwards the resolved option
 through runtime `Control`, durable assembly and ephemeral
@@ -267,11 +273,21 @@ independently maximal members may need to be smaller to leave room for framing. 
 entries. Unknown/invalid/oversize output fails without a hidden repair call.
 
 Measure the next candidate projection before and after substitution using the
-same staging serializer and estimator. Require strict decrease in both exact
+same staging serializer and estimator. For a thinking-headroom trigger, compare
+the same minimum required projection at `q=0`, with optional resources absent,
+so enlarging excerpts after compaction cannot hide the reduction. Its inclusive
+byte/input targets govern stopping; other triggers use the ordinary hard limits.
+Require strict decrease in both exact
 record bytes and estimated tokens. Stop with `compaction_no_progress` otherwise.
-If still oversized, another bounded prefix may be summarized within the episode's
-remaining attempts. After exhaustion retain checkpoints and the existing named
-staging failure; do not restart an automatic episode for the same staging identity.
+If still above the applicable limits or targets, another bounded prefix may be
+summarized within the episode's remaining attempts. After exhaustion retain
+checkpoints and the existing named
+staging or thinking-headroom failure; do not restart an automatic episode for
+the same staging identity. A maintenance failure retains its more specific
+cause. Once the targets fit, ordinary excerpt/optional admission uses the
+remaining capacity below those targets and exact final preflight, as ADR 0044
+requires. All maintenance requests keep their own existing hard limits;
+the ordinary pre-exchange targets do not halve the summarizer's allowance.
 
 **Checkpoint.** Retain original lineage/range, newly consumed raw range, prior
 checkpoint ID if any, first-kept identity, summary/carry-forward bytes, strategy
