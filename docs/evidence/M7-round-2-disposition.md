@@ -20,8 +20,10 @@ configuration and credential contracts. They are not formal acceptance reviews.
 No product implementation, provider call or milestone acceptance is claimed.
 
 The maintainer selected [option A: marked bounded excerpts](../developer/agent-context-map.md#disposition-m7-compaction-excerpts-2026-09-30)
-for oversized older content, retaining complete originals. The resumed draft
-now defines the source projection and omission provenance. Further
+for oversized older content, retaining complete originals, and
+[option B: a separately configured summarizer](../developer/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30).
+Both choices are drafted, including source projection, omission provenance and
+captured maintenance-model selection. Further
 material choices will be presented one at a time, including thinking headroom
 and supported modes, native-response delivery/privacy, protocol compatibility
 and the scope of the parallel-helper ban. A report's request for a decision
@@ -480,6 +482,41 @@ altering descriptor totals or exposing private data. Final representation and
 headroom choices still need their own capacity proof. This is a focused proposal
 review, not a whole-packet readiness verdict or implementation evidence.
 
+### Operator validation review
+
+A focused internal pass read the operator and task requirements at
+`d12e06204bdce4613d9cb9cc65cd241a4c3fcd5c`. Two advisory readers examined the
+same scope. The specialized reviewer profiles could not run because the host
+exposed workspace-write permissions; the advisory reads followed read-only
+task instructions without an enforced read-only sandbox. They supply analysis
+to the internal review, not formal independent-review evidence. No provider
+call, product test or operator demonstration ran.
+
+One reader found V10's instruction to run the catalog again inconsistent with
+V2/V5/V6/V8 already executing those tasks. The other considered shared-attempt
+mapping an implementation obligation rather than a blocker because strict
+failure retention already prevents hiding a failed attempt. The lead accepted
+the concrete ambiguity: literal compliance added another model-dependent gate,
+while evidence reuse required disregarding "Run". The repaired pair names one
+owning case execution, retained attempt/session identities and evidence reuse
+across outcomes and steps. V10 collects those records and executes the external
+task. Prescribed restart, ephemeral and fault cases remain distinct; independent
+oracle reruns still check the existing workspace. No required case is dropped,
+and a missing result cannot trigger an unplanned replacement attempt.
+
+The lead also verified an attended-step regression against `10749d08`.
+That revision's V6.5 reopened the compacted session, and the mandatory V6.1–5
+range included it. Adding oversized-source validation moved reopening to V6.6
+but left the attended range unchanged. The table now explicitly includes
+V6.6's settled-reopen positive path; injected option changes and other fault
+cuts remain automated. The manifest must distinguish these subcases and check
+their classifications against the attended table. This restores the previously
+required proof rather than adding a new maintainer choice.
+The focused follow-up read found no remaining actionable defect in these
+repairs. It confirmed that all prescribed cases, oracle checks, attendance
+and failure retention remain required. The complete-packet review is still
+outstanding.
+
 Outstanding work: resolve the pending choices,
 complete the final profile/request capacity design, update all affected
 pairs, then run a fresh adversarial pass over the complete packet and repair
@@ -489,16 +526,21 @@ check alone cannot establish implementation readiness.
 <a id="resume-checkpoint"></a>
 ### Resume checkpoint, 2026-09-30
 
-The maintainer requested commit/push and a restart checkpoint immediately after
-selecting A. No new question is pending. Resume this work on branch `m7` in
+The maintainer's restart request selected A for oversized-source excerpts.
+That repair and the later B selection for a separate summarizer are drafted.
+The current unanswered question is thinking capacity: A removes duplicated
+text/tool arguments and reserves room before an exchange; B retains duplicate
+copies and stops at the existing limits. A is recommended, not selected.
+Do not confuse the summarizer's answered B with this new question.
+Resume this work on branch `m7` in
 `/Users/spuri/projects/lexlapax/loopex`; inspect Git before changing anything.
 All work remains planning/docs, with commits and pushes authorized. M7 is Open,
 ADRs 0041–0049 are Proposed, and the paired vision amendment is unaccepted.
 Do not implement product changes or present a final external-review SHA/prompt
 until the remaining decisions, repairs and whole-packet adversarial pass finish.
 
-1. Apply selected A to ADR 0043 and affected plan/ADR pairs. This draft repair
-   was completed after restart; its sizing/review record is above. Preserve originals,
+1. Preserve the selected A and B repairs and their sizing/review record above.
+   Preserve originals,
    whole-group checkpoint cuts, exact provenance, the protected recent tail,
    the open-thinking exclusion, 16 KiB source and 64 KiB request limits, and
    bounded maintenance attempts. Define marked omissions, deterministic source
@@ -520,11 +562,10 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    the exact external-review candidate SHA and a review prompt. Acceptance is
    a later maintainer decision.
 
-Before this restart note, `e6e083fec34585059fd18534ac2edea3e54f9226` was pushed
-and its documentation gate passed in 15 seconds. Its complete log is
-`/tmp/loopex-m7-e6e083fe-docs.log`, SHA-256
-`dd180695d9a584e6c942e215bee9de733e61c974d0c2d1b2a9ecd0a2c0dfcc95`.
-This note adds a new checkpoint; that prior run is not evidence for these new
-bytes. Background design work was interrupted for the restart; no worker owns
-uncommitted repository changes. Read durable records rather than relying on
-worker memory or an old chat summary.
+The latest pushed configuration checkpoint before this operator repair is
+`d12e06204bdce4613d9cb9cc65cd241a4c3fcd5c`. Its documentation gate passed in
+16 seconds. The complete log is `/tmp/loopex-m7-summarizer-d12e0620-docs.log`,
+SHA-256 `6f8100c78afa4fff188be57b5c76387ebb752ca43e94cdab5998cb13874ade2c`.
+That run is not evidence for the subsequent operator edits. Read Git and the
+retained verification record for the current checkpoint; no worker owns
+repository edits. Durable records govern, not worker memory or old chat summaries.

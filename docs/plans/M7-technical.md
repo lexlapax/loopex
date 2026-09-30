@@ -354,6 +354,37 @@ maintainer disposition before another attempt. The administrative closure
 commit cannot introduce that change. These are specifications to implement,
 not fixtures or successful proof today.
 
+**Case ownership.** Before the first provider attempt, the fixed manifest assigns
+each prescribed real-provider case a stable case ID, one owning release lane
+and its ordered prompts, actions and checks. One case execution may contain
+several runs and prescribed process restarts. The runner allocates and retains
+its attempt identity before dispatch; every session/run/child identity belongs
+to that execution record. Multiple outcome or step references reuse that
+record, not another model execution. The release selector union executes each
+owning case once per invocation, including when both coding-task and attended
+selectors need its evidence. A pre-merge selector cannot substitute unattended
+execution for required attendance. Existing release cases remain required;
+this mapping prevents duplicate dispatch of the newly shared M7 cases.
+
+| Catalog task | Owning scenario steps; final collection is V10 |
+| --- | --- |
+| `repair` | V2.1–5, including the agent test and independent oracle rerun |
+| `feature` | V5.1–2, including the actual-ID answer and both test results |
+| `review` | V8.1–4, including investigation and the separately instructed review |
+| `long` | V6.1–4 and the settled-reopen positive path in V6.6 |
+
+V5.3's question restart, V5.6's ephemeral answer, V6.5's oversized source,
+V6.6's injected faults and V6.7's separate summarizer-provider case are
+distinct predeclared cases. They never replace a failed main case. Other
+prescribed positives and negatives receive the same explicit ownership.
+Each case starts from its pinned initial workspace/state or the exact retained
+state of its prescribed predecessor; the manifest declares which. It cannot
+silently reuse a workspace already repaired by another case. Independent
+oracle reruns verify the existing task workspace without calling the model or
+starting another task attempt. Repeated selection, missing evidence or failure
+cannot allocate a replacement attempt to manufacture a pass; the failure and
+candidate rules above still govern.
+
 The maintainer selected agent-run fixture tests and independent harness reruns.
 Add a fixture-host policy adapter supplied by trusted validation-harness
 composition to the real CLI path, with exact approved invocations and a pinned
@@ -489,7 +520,8 @@ declines. Neither path assumes the model can be forced never to ask.
    outside both excerpts through host history; do not ask the model to prove
    knowledge of bytes it was never shown. A later checkpoint retains the omission
    flag. Automated cases cover large metadata, input-only runs and size failures.
-6. Reopen the session and verify the same continuation. A prescribed fault case
+6. Reopen the settled long-conversation session and verify the same continuation
+   as an attended positive path. A separate automated fault case
    changes/removes the startup summarizer option while an episode is admitted;
    verify that episode keeps its recorded model and later episodes use the new
    setting or refuse unconfigured. Atomic checkpoint commits, missing routes and
@@ -558,11 +590,14 @@ declines. Neither path assumes the model can be forced never to ask.
 
 #### V10. Record the coding-task result and clean up
 
-1. Run the repeatable fixtures from their pinned initial content and prompts.
+1. Collect the authoritative fixture attempts from their owning scenarios;
+   do not execute them again for this step or to fill a missing evidence slot.
    Choose the external repository/task during testing; record base SHA, allowed
    paths and objective checks before the attempt. Create its disposable checkout,
    execute the task and retain the original results and diff.
-2. Run every objective acceptance command and inspect the allowed diff.
+2. Verify the collected objective check results and allowed diffs against the
+   fixed manifest. Run the external task's pinned acceptance commands and
+   inspect its allowed diff as part of that task's execution.
 3. Record elapsed duration, usage, largest reply and terminal outcome for
    each task; retain failed attempts as well as successful ones.
 4. Stop the fixture-owned processes and retain redacted logs, workspace diffs
@@ -635,7 +670,7 @@ but cannot reduce it without maintainer disposition:
 | Piped repair, tests and restart | V2.1–5 |
 | Interactive instructions, steer and follow-up | V3.1–2, V4.1–4 |
 | Human answer, question restart and ephemeral answer | V5.1–3, V5.6 positive path |
-| Compaction and model changes | V6.1–5, V7.1–4 |
+| Compaction and model changes | V6.1–5, V6.6 settled-reopen positive path, V7.1–4 |
 | Two saved read-only roles on distinct providers | V8.1–4, including separate/combined usage |
 | Denial, interrupt and trace cleanup | V9.1–2, V11.5 |
 | External task and retained results | V10.1–5 |
@@ -646,8 +681,15 @@ Every required step names the operator as `Maintainer` or
 assertion and retained evidence. Implement `operator_step_evidence` in the
 fixed fixture manifest before demonstrations. It lists every V1–V13 step and
 subcase, its attended/automated classification, exact lane/test ID, oracle and
-evidence slot. Missing or duplicate coverage fails validation; a prose promise
-that all other steps are automated is insufficient. This includes V8.5–7 and
+evidence slot. Each provider-backed step/subcase names its owning case ID and
+retained execution record, including the actual attempt and session/run
+identities after execution. Several steps may reference one execution; each
+step/subcase still has exactly one coverage entry. Validate classifications
+against the mandatory attended table, splitting positive and automated fault
+subcases even when they share a numbered step. Missing or duplicate coverage,
+conflicting attempt references or a reduced attended classification fails
+validation; a prose promise that all other steps are automated is insufficient.
+This includes V8.5–7 and
 V5.4–5 fault cuts and V5.6 responder negatives. V5.6's attended positive path
 uses the checked-in `scripts/m7-ephemeral-question-demo.exs` host, which invokes
 the public ephemeral API and displays the real question for the operator to
