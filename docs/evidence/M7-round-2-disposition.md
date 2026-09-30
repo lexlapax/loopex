@@ -64,8 +64,95 @@ machine. Complete files and SHA-256 digests:
 | `results.exs` | `1d72a3fc381c81720666037f4bb70da66c4fe13aa50756c3e6546d13e35b03fa` |
 
 These establish counterexamples and disprove universal round-count assertions.
-They do not prove useful model behavior, complete new tool-profile cost or
-acceptance of an actual rendered request.
+They do not prove useful model behavior or acceptance of an actual rendered
+M7 request. Subsequent complete-profile and maintenance examples follow.
+
+### Complete profile sizing
+
+A second probe used source checkpoint
+`9431b1c95c38d4c4261309e59c7a9526c3aa85c9`, with actual base definitions,
+complete proposed read/question/helper parameter shapes, useful instructions,
+the exact workspace/platform, two concrete roles and their full catalog digest.
+Two bounded wording passes shortened new-generation descriptions without
+changing the estimator or removing fields and validation refinements.
+
+| Complete profile | Current base descriptions plus proposed tools, estimated tokens | Second concise candidate, canonical bytes / estimated tokens |
+| --- | ---: | ---: |
+| Coding chat | 1,061 | 2,420 / 809 |
+| Read-only chat | 865 | 2,360 / 789 |
+| Helper-enabled coding chat | 1,282 | 2,990 / 1,000 |
+| Helper-enabled read-only chat | 1,086 | 2,930 / 980 |
+| Reviewer child | 688 | 1,969 / 659 |
+
+The system class sums `ceil(bytes/3)` separately for the canonical system
+message and each `ToolDefinition.model_facing/1` encoding. It is not a provider
+token count or a whole request-record size. The coding/helper candidate fails
+the strict `< 1000` rule at exactly 1,000. This near miss does not establish
+impossibility; it also gives no useful margin for longer workspace paths or
+larger role catalogs. Other profiles demonstrate arithmetic feasibility for
+these supplied inputs, not instruction effectiveness.
+
+Current tool schemas support primitive fields, required members, enums, items
+and descriptions. Bounds, exclusive branches and role membership remain
+explicit owner/executor refinements, not unsupported JSON-schema keywords.
+The proposed interaction class/zero artifact budget is not yet accepted by
+current definition validation. No production definition was changed.
+
+Complete sources, candidate text, refinements and estimator preimages are
+retained in `/tmp/loopex-m7-profile-9431b1c9/`:
+
+| File | SHA-256 |
+| --- | --- |
+| `probe.exs` | `72326fef7783108b8cf989128b3bcad2cba18ceb526c99f68dc8bb4b442a4e6d` |
+| `inputs.exs` | `9892dc90f507ffe14b46ce78ebba4da24c59ea44e24a62c1d0d2652be6d05eb1` |
+| `results.exs` | `c9e163df21610d428697b2b3c561ef223f33d1c5b4ab556b7596fe9497ea9b9a` |
+
+### Maintenance sizing example
+
+At the same `9431b1c9` checkpoint, `C43-small-cache-inspection` retains exact
+host instructions, canonical source and an authored six-section summary of a
+cache defect. The summary preserves constraints, proposed work, unrun checks
+and an unresolved old-key question. It is not a provider response or a quality
+verdict. Its instruction uses the proposed `version + ": " + body` rendering.
+
+| Measurement | Result |
+| --- | ---: |
+| Rendered instruction | 1,393 bytes |
+| Complete source JSON | 9,066 / 16,384 bytes |
+| Complete output JSON | 1,258 / 6,144 bytes |
+| Encoded summary string / carry-forward object | 1,080 / 149 bytes |
+| Maintenance input estimate + reply reserve | 3,527 + 1,024 = 4,551 |
+| Current-shaped maintenance owning record | 23,538 / 65,536 bytes |
+| Ordinary record before → after substitution | 24,510 → 7,103 bytes |
+| Ordinary input estimate before → after | 3,369 → 690 tokens |
+
+Seven source modules were extracted from that checkpoint. The probe uses the
+actual request constructor/validator, canonical serializer, per-message
+estimator, required-context admission and record normalization with the
+receipt's fixed-point self-size. Setting either measured byte or input limit
+one below the observed value produces its named refusal. Four identical
+input-plus-reserve calculations total 18,204; the current no-reply accounting
+fallback totals 18,504. Both are below 32,768 for this fixture. Neither promises
+four successes or completion within 60 seconds; four is the total attempt
+ceiling, including allowed retries.
+
+New M7 maintenance/configuration/checkpoint constructors do not yet exist.
+These supplied current-shaped records include current duplication and receipt
+cost, but do not prove future record sizes, real provider output tokens,
+committed-history replay or the final artifact projection. Receipt provenance
+and tool results are synthetic. Exact final serialization and real summary
+quality remain implementation/acceptance obligations. The example gives no
+reason by itself to increase the 1,024-token reply reserve.
+
+Complete artifacts are retained in `/tmp/loopex-m7-maintenance-9431b1c9/`:
+
+| File | SHA-256 |
+| --- | --- |
+| `hashes.json` (all inputs, probe, source manifest and preimages) | `9d78659db27feec885b0796eeca20f235759e8dda8d27b523ccef968ebef9301` |
+| `maintenance-instructions.txt` | `25e7e4e99e645f7e567fd5985ba6493a7d7d121a112c084150497dcafd7b2f4a` |
+| `source.json` | `3ccca7c0ac8882a52d71bdbdcc2e440f502cb8b63ddad6776c1396951f9f4c9a` |
+| `output.json` | `a4c4fb2d6d02619de0a75e27e86b7bdb3029250ef9fa14daead18c5cd80e3f88` |
+| `measurements.json` | `dd4e5f92b5234c0ff3559d18684166280e7506e8e00c9a4ece5ac9d7f3f2b899` |
 
 ### Finding dispositions
 
@@ -77,12 +164,12 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | 1 | Valid; pending maintainer choice | The oldest eligible group can exceed the summary source bound permanently. The excerpt/chunk/admission question is pending. |
 | 2 | Partly valid; pending design | Finite headroom and avoidable native/canonical duplication are real. Three-to-five rounds is not a universal limit. Specify lossless local references and a measured pre-exchange reserve without moving required request data outside its digest. |
 | 3 | Partly valid; pending matrix | Manual thinking is not Haiku-only: the current official matrix also permits older Opus/Sonnet families. Always-on models cannot satisfy the draft's universal thinking-off maintenance rule. ReqLLM's adaptive display injection conflicts with `provider_default`. Resolve the supported matrix and maintenance policy explicitly. |
-| 4 | Numerical necessity not established; evidence work remains | Byte maxima and the admission estimator are not a provider tokenizer or a minimum output size. Measure the actual maintenance instructions and complete valid output before changing the reserve. |
+| 4 | Small complete example measured; quality proof remains | A useful authored fixture fits the declared input/output caps and current-shaped record with receipt. This does not prove provider output tokens or quality. Retain the reserve pending actual implemented witnesses; do not infer that every maximal member must fit simultaneously. |
 | 5 | Existing rule overlooked; concrete join repaired | ADR 0041 already required new output to spill before receipt. Clarify the encoded projection trigger and require new search-tool artifact allowances; old one-byte allowances cannot retain their output. |
 | 6 | Partly valid; pending aggregate projection | Eight results alone is not a demonstrated overflow; twelve synthetic results are. Define an aggregate projection policy and multi-call vectors while keeping frozen native prefixes unchanged. |
 | 7 | Usability choice pending | Batched calls mean 1 KiB reads need not consume fifteen turns, but explicit retrieval is still costly. Decide its usable bound separately from unsolicited excerpts. |
 | 8 | Deliberate compatibility restriction; pending disposition | Old generations lack artifact retrieval. Choose a bounded inline compatibility exception or name this refusal explicitly in upgrade expectations; never migrate tool definitions implicitly. |
-| 9 | Estimate unproved; measurement pending | Neither a one-character-description probe nor an asserted 1,450-token profile establishes useful profile cost. Measure complete schemas and instructions before changing the target. |
+| 9 | Meaningful prototypes measured; target risk remains | Complete ordinary profiles fit after bounded wording work. Helper-enabled coding reaches exactly 1,000 and therefore refuses. No impossible-target claim or ceiling increase follows; actual final profiles and path/catalog margins still need proof. |
 | 10 | Claimed subtraction rejected; wording repaired | 8,192 is the fallback input budget. ADR 0041 now says so explicitly. Actual mandatory-content preflight still applies. |
 | 11 | Repaired | ADR 0044 uses settlement v3, preserves ADR 0021 v2 and its accounting evidence, and charges invalid continuation conservatively. |
 | 12 | Feasible route found; delivery choice pending | Built-in Anthropic preparation plus per-request Req steps can capture buffered native replies without global provider registration. Native streaming needs additional lifecycle work; do not silently narrow its promise. |
@@ -105,7 +192,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | 29 | Repaired | Reply/context/system budgets stay committed on resume. Only max turns, relative deadline and token budget are new-run overrides. |
 | 30 | Repaired | Explicit ephemeral `questions: true`, default false, preserves existing definitions. State callback termination and trusted-host non-recursion obligations. |
 | 31 | Repaired with an explicit limit | Propose owner-managed ephemeral trace startup, application selectors and separate drain/writer. Bound pending output and one write; preserve ADR 0030's best-effort sink mailbox. A hard whole-consumer claim is unsupported without changing all producer paths. |
-| 32 | Pending compatibility decision | Choose old-generation refusal or dual service, then close the common command/event/snapshot/bounds inventory. No reused generation name or unchanged schema digest may carry new shapes. |
+| 32 | Inventory repaired; compatibility decision pending | The plan inventories changed create/configure/compact/prompt/follow-up/answer methods, events, snapshots, bounds, authority joins and independent payload checks. Choose old-generation refusal or dual service. No reused generation name or unchanged schema digest may carry new shapes. |
 | 33 | Clarified | Keep the pinned historical pair and add a distinct M6↔M7 matrix. Source-built exact M6 artifacts are allowed with identity evidence. Blocking old-binary access is an operator precondition, not a claimed future marker. |
 | 34 | Repaired | Required new selectors join the full closure matrix. Durable A/B are hosted credentialed routes; pin their models and reference names before runs and pass every selected name through redactor/PTY self-tests. |
 | 35 | Name-as-provider-authentication claim rejected | The host authorizes variable slots; spelling cannot establish the issuer of a value. Explicit options and redacted configured-only inspection are now stated. |
@@ -116,7 +203,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | 40 | Pending maintainer clarification | Earlier record says no parallel helpers; later drafts say one per parent run. Confirm scope before calling those equivalent. |
 | 41 | Repaired | Complete the accepted ADR 0010/0017 amendment table and add settlement provenance/credential-source dependencies. |
 | 42 | Repaired | Name the attended ephemeral demo host and operator identity form; require every scenario step/subcase in the fixture evidence manifest. |
-| 43 | Clarified; measurements still pending | Record the existing lineage conformance defect, explicit profile proposal and rationale for core's closed reasoning level. Context-map decision pointers remain authority; external pin has a destination. |
+| 43 | Clarified; meaningful measurements retained | Record the existing lineage conformance defect, complete profile prototypes and rationale for core's closed reasoning level. Final integrated sizes and helper-coding target margin remain unproved. Context-map decision pointers remain authority; external pin has a destination. |
 | 44 | Repaired | Concept explains host compaction instructions, native capture/render boundary and config/rollback operator coverage. |
 
 ### Fresh internal findings
@@ -142,8 +229,28 @@ therefore bounds pending output but cannot alone bound the drain mailbox. The
 proposal now names ADR 0030's existing best-effort limit instead of inventing a
 subscription guarantee; no required existing diagnostic check is removed.
 
+The protocol pass found that both existing generation digests cover metadata,
+while the Node vector runner proves framing rather than method payloads. The
+new inventory requires complete payload identity and independent semantic
+witnesses. A further source check found prompt/follow-up normalization drops
+authored bounds. New command versions must bind those inputs, while replay of
+an existing command returns its captured defaults and historical digest.
+Partial bound overrides remain supported; no unrelated all-fields requirement
+was introduced.
+The same pass adds exact new bound encodings without narrowing core integer
+domains, a new bounded snapshot revision, allowlisted public projections and
+independent Node digest assertions before mutation. Literal payload vectors
+and live authority/replay witnesses remain separate obligations.
+
+The maintenance pass exposed an unnamed instruction injection/lifetime contract.
+ADR 0043 now proposes an explicit immutable runtime option, exact bounded
+rendering and capture in each episode. Missing configuration refuses new
+maintenance; recovery uses an admitted episode's retained bytes. The source
+envelope and single-string summary shape are explicit. These repairs do not
+select oversized-source handling or resolve always-on thinking support.
+
 Outstanding work: resolve the pending choices,
-measure complete profile/maintenance/request examples, update all affected
+complete the final profile/request capacity design, update all affected
 pairs, then run a fresh adversarial pass over the complete packet and repair
 its findings before preparing another external SHA/prompt. A documentation
 check alone cannot establish implementation readiness.

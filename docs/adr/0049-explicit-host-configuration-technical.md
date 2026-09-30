@@ -99,6 +99,13 @@ directs the operator to settled `/configure`; it is not a run-bound override.
 Require matching workspace/policy identity and available routes for admitted
 work. Trace/output are host-local options, not durable session configuration.
 
+Runtime-owning reference hosts inject the shared versioned maintenance block
+through ADR 0043's `maintenance_instructions` composition option. Keep that
+host code path common to chat and the existing reference entrypoints; add no
+config-file member, prompt-file override or trace-related fallback. Embedded
+callers supply their own explicit block. Resume keeps an admitted episode's
+captured block even if the host has changed; new episodes use the current block.
+
 | Input | Behaviour |
 | --- | --- |
 | Plain nonempty line while settled | Submit prompt with a fresh idempotency identity |

@@ -29,6 +29,9 @@ Configuration becomes a durable session fact. Creation and settled-only
 context/reply limits with one version. A run captures that version at admission
 and keeps it through restart. No configuration change occurs inside a run or
 unresolved maintenance operation.
+Maintenance inherits the committed model/configuration while using ADR 0043's
+separately supplied host instructions, captured for that episode. Changing
+ordinary instructions does not replace the maintenance block.
 
 A host-authorized controller may switch model or provider between runs while
 preserving canonical history. Reference CLI ownership and the daemon controller

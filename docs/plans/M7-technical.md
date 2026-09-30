@@ -40,7 +40,7 @@ Accepted decisions that constrain the work:
 | [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 introduces v3 and cannot promote an invalid continuation reply to reported usage |
 | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
-| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
+| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0043 adds explicit maintenance instructions at startup; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
 | [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) | ADR 0048 amends only its sole credential source; durable isolation, cleanup and trusted-launch exclusions remain |
 | [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Durable provider dispatch retains host-owned credential references and per-invocation custody; ADR 0048 narrowly amends its single-provider restriction |
 | [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) | Host-owned runtime tracing, bounded diagnostics and redaction remain unchanged when exposed through startup flags |
@@ -61,6 +61,74 @@ schemas, not only method/record names and limits. Independent Node vectors
 cover both servers and old/new-client combinations. Acceptance binds the
 proposal contracts; source implementation and numeric schema identifiers are
 verified at the first protocol integration before any new wire shape is exposed.
+
+The source baseline has two different contracts: `LoopexProtocol.Session`
+serves `loopex.experimental/1` through the foreground app-server, while
+`LoopexProtocol.Session.V2` serves `loopex.experimental/2` through the daemon.
+The latter already owns `/2`; it cannot be reused for M7 foreground semantics.
+Both current digests cover metadata inventories and limits, not the payload
+schemas. New contracts must digest the complete closed payload definitions.
+Whether M7 also serves the old generations remains a maintainer decision;
+this inventory does not silently select dual service or refusal.
+
+| Member affected | Required M7 contract and owning proposal |
+| --- | --- |
+| `session.create` | Versioned session-option validation for resolved configuration, instructions and immutable selections under ADRs 0042/0044/0046. Remote input cannot supply provider capabilities, credential routes, host catalogs or registry modules. |
+| New `session.configure` | Existing request/command correlation plus a nonempty closed configuration update containing only ADR 0044's mutable fields. Foreground attachment authority and daemon writer-epoch/controller authority apply before mutation. |
+| New `session.compact` | Existing request/command correlation plus explicit maintenance `bounds` containing `max_attempts`, `deadline_ms`, `token_budget` under ADR 0043. Same authority as other mutations; admission/unknown/refusal are distinct from completion. |
+| `session.prompt`, `session.follow_up` | A closed optional `bounds` object accepts the existing limit overrides (`max_turns`, `token_budget`, `deadline_ms`) and ADR 0046's optional `deadline_at_ms`. Preserve current partial-override behavior: capture host defaults for omitted ordinary limits once at admission. Bind authored bounds in the new command identity and retain effective bounds across queue promotion/replay. Steer cannot smuggle a new deadline. |
+| `session.respond_interaction` | Keep the correlated `interaction_id` and command identity. `answer` has exactly one branch: `{choice_id}`, `{text}` or `{disposition: declined}`. Text/decline are model-question-only under ADR 0045; policy-defer retains its choice branch. |
+| Configuration records | `session.configured`, inspection and attachment snapshots use an explicit allowlist: committed configuration version, exact model/reasoning, effective reply/context/system limits and instruction version/digest. Exclude raw instruction bytes, model capability/provider mapping envelopes, host binding maps, credential references, capability handles and private native continuation. An unresolved legacy configuration is explicit, never a fabricated default. |
+| Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest and owning configuration/maintenance identity. `context.compaction_progress` remains transient. Snapshots distinguish active maintenance from a settled session without exposing provider permits or private recovery records. |
+| Interaction records | Pending and terminal projections preserve producer, kind, stable choices, original run/turn/call identity, expiry and answer/decline/expiry disposition. Attach snapshot and replay agree at the same cursor, including a question already pending when attachment begins. |
+| Run/bound records | Preserve the effective absolute deadline and ordinary bound/terminal outcome through committed run views, while keeping relative and absolute limits distinct. Encode new ordinary bound members as canonical positive decimal strings: `max_turns`/`token_budget` retain their current positive-integer domains, `deadline_ms` its positive uint64 domain. `deadline_at_ms` uses ADR 0046's positive JSON safe-integer domain. Apply the same conversion on output; never round through JavaScript numbers or silently impose uint64 on turns/tokens. |
+| Tool-definition format | Version the interaction-class addition and zero artifact-budget exception under ADR 0045. Preserve old effect-definition bytes; new artifact-capable read/search generations keep their own exact version/digest. The tool-definition version is distinct from session-protocol generation. |
+
+The integration owner updates the foreground `Mapping`, daemon `Request`,
+`SocketConnection`, `LeaseOwner`, `AdmissionRelay` and `WireRecords` together.
+All new daemon mutations join the controller checks and succession/capacity
+inventory; merely adding a parser branch cannot bypass or omit lease fencing.
+Retained command IDs and prior refusal/unknown facts keep their original meaning.
+Version the attachment snapshot beyond current revision 2. It contains the
+latest configuration, zero or one active maintenance view and zero or one open
+interaction, within the existing bounded frame/record envelope. Terminal
+question facts remain in events/replay; snapshots do not accumulate all prior
+questions or configurations. Snapshot projection and transient progress must
+not expose the private fields added for recovery. Existing `WireRecords`
+payload pass-through is not a privacy filter: use explicit kind-specific public
+projections at core or wire mapping, never serialize a retained configuration
+or maintenance map wholesale. Bound their version/digest/identity fields and
+text members in the literal schemas before implementation exposes them.
+Observed turn/token terminal counters use canonical nonnegative decimal
+strings, including exactly `0` for zero, without narrowing the core domain.
+Canaries prove absence of private fields in both servers' events, inspection,
+snapshots and progress, not merely the successful configured response.
+
+Current `SessionState.normalize_command/1` omits prompt/follow-up bounds from
+the normalized command identity. Parser plumbing alone therefore cannot prove
+that replaying an ID with different limits conflicts. Version new normalized
+commands/digests to bind the exact authored bounds, including omission. Look up
+a duplicate's retained fact before resolving defaults or the clock again;
+effective bounds are captured once in its admission record. Preserve historical
+normalized bytes, digests and duplicate behavior under their original version.
+Vectors cover a changed bound under the same new command ID, an unchanged
+authored retry after host defaults change, and old-command replay.
+
+Extend `apps/loopex_protocol/priv/schema/` and `priv/vectors/`, their literal
+schema/conformance tests, and both `clients/node/loopex-client.mjs` and
+`clients/node/daemon-client.mjs`. The existing Node `vectors.mjs` checks frame
+syntax; it does not prove method payloads, authority or live workflow semantics.
+Keep that framing proof and add independent literal payload validation plus
+facade-backed round trips for the new methods and records. Both independent
+Node clients must assert independently retained expected generation/digest
+pairs before any mutation;
+the current foreground client merely stores the digest and the daemon client
+does not validate it. Add mismatched-digest refusal vectors. Vectors cover unknown
+members, mixed answer branches, stale writer epochs, duplicate command IDs,
+absolute-deadline promotion, pending-text-question attachment, snapshot/replay
+agreement and absence of private continuation. Exercise old-only, new-only and
+mixed-generation offers against each server. Every outcome must follow the
+selected compatibility policy, with no new payload under an old digest.
 
 <a id="technical-plan-configuration"></a>
 ### Explicit configuration contract
@@ -709,12 +777,13 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
 - Compatibility inventory before the first decoder change: configuration/instruction
   records and v3 genesis, prepared tool-result references and artifact-read resolved
   arguments, immutable tool/policy selections, maintenance/compaction records,
+  runtime/composition maintenance-instruction option and per-episode capture,
   model_request.v2 continuation, bounded adapter/canonical reply v3 and
   model_attempt_settled_v3 preserving ADR 0021's v2/accounting provenance,
   estimator revision and private/public projection,
   question producer/text/decline records,
   host role/allowance ledger including monotonic stop records, generic absolute deadline ceiling on prompt/follow-up,
-  request revision, events, snapshots and negotiated
+  request and normalized-command revisions, events, snapshots and negotiated
   protocol generation. Each has versioned vectors and an explicit unsupported-reader
   behavior; bump private format metadata where needed before emitting new records.
 - Upgrade fixtures include actual M6 roots with settled and unresolved model/tool

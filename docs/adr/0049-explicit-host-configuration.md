@@ -34,6 +34,10 @@ read once as exact bounded host bytes. Project resources still require their
 separate admission. Existing sessions retain committed settings and their
 frozen role catalog; file edits affect new sessions. Explicit between-run
 configuration is the only way to change admitted model or instruction settings.
+The reference host also supplies ADR 0043's shared versioned compaction
+instructions at runtime startup. They have no new file field or CLI flag;
+an admitted episode retains its block across restart, while future episodes
+use the block supplied by the current host.
 
 Tracing uses ADR 0030's runtime-scoped API, existing redaction and ceilings.
 The host reports effective scope/limits and emitted/dropped counts through a

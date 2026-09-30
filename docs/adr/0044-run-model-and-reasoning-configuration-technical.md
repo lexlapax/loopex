@@ -77,6 +77,10 @@ output capacity has no invented catalog guarantee. Existing explicit reply
 limits remain enforced and visible.
 
 Each new run and maintenance episode binds its configuration version at admission.
+ADR 0043's runtime `maintenance_instructions` is captured separately in the
+episode's maintenance configuration. It is absent from session genesis,
+ordinary configuration and public `configure`; recovery never substitutes a
+new runtime block into an admitted episode.
 `reasoning` enters canonical sampling and digest when non-default; `default`
 omits it. Existing committed request bytes and provider attempts remain immutable.
 The ReqLLM adapter maps only verified model/level combinations. Retain a closed

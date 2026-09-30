@@ -28,6 +28,11 @@ within ceilings 4, 60,000 and 32,768 respectively. The reference `/compact` uses
 4/60,000/32,768, displayed before submission; programmatic callers declare them.
 All counters and the absolute deadline survive restart. Limit exhaustion prevents
 another attempt; final-call token overshoot is reported, not discarded.
+The public protocol exposes this as `session.compact` with an explicit closed
+`bounds` object and normal command identity. It shares the M7 negotiated
+contract and mutation authority with `session.configure`; a command admission
+is not a completed checkpoint. Existing foreground attachment authority and
+daemon controller/writer-epoch checks apply before admission.
 
 **Selection and size.** Select ordered canonical conversation elements, excluding
 maintenance records. An assistant reply plus every terminal result of its tool
@@ -57,12 +62,60 @@ If the first complete group, preceding inputs and prior checkpoint cannot fit
 those combined constraints, stop with
 `compaction_input_too_large`.
 
-The reference host owns a versioned compaction instruction block with fixed
-sections: goal, constraints, progress, decisions, next steps and critical
-context. It passes exact bytes/digest to the maintenance configuration; core
-does not author the summary prompt or copy project instructions into host trust.
-It has no tools and reserves 1,024 reply tokens. Retain the parent configuration
-version and a separate maintenance configuration/digest with the same exact
+**Instructions and source encoding.** Add the optional runtime/composition
+startup option `maintenance_instructions`, immutable for that runtime instance,
+containing the closed `{version, body}` map below. It is host configuration,
+not a new genesis member, session-create option, public `configure` field or
+per-prompt override. The episode admission captures its normalized version,
+rendered bytes and digest in the already-required maintenance configuration
+before summary staging. Recovery uses those captured bytes even if the new
+host option changed or is absent; a new episode uses the current host option.
+Absence permits ordinary work and refuses new maintenance. Reference hosts
+supply their shared versioned block explicitly through composition; reusable
+composition and core invent none.
+
+The entrypoints are `Loopex.start_link/1` through `Runtime.start_link/1`,
+durable `LoopexComposition.start/1` and ephemeral
+`LoopexComposition.Ephemeral.start_session/1`. Missing or nil is unconfigured;
+per-call overrides refuse. Extend their closed validators and forward through
+runtime `Control` into each coordinator, plus durable runtime assembly and
+ephemeral `SessionOwner.runtime_options/1`. Two runtimes may carry different
+blocks without shared state. Commit episode identity and the closed capture
+`{version, rendered_bytes, digest}` before summary staging. Missing or corrupt
+captured recovery data refuses; a current host value cannot repair it silently.
+
+`version` is nonempty ASCII, at most 64 bytes; `body` is nonempty valid UTF-8,
+at most 2,048 bytes. Render
+exactly `version + ": " + body`; retain those bytes and their computed SHA-256
+digest in maintenance configuration. Apply the session's selected strict
+system-class ceiling and complete request preflight; the body cap does not
+waive either. Missing instructions refuse `maintenance_instructions_unconfigured`;
+unknown fields, invalid text or section bounds refuse
+`maintenance_instructions_invalid` at startup validation, before provider intent.
+A maintenance refusal preserves the triggering staging identity and its named
+failure. Core supplies no fallback, ordinary-session substitution, template
+expansion or promotion of project instructions into host trust.
+
+The reference block requests goal, constraints, progress, decisions, next steps
+and critical context as sections inside the single output `summary` string.
+These are prose conventions, not six machine fields or a new output union.
+Its bounded source envelope is exactly `{version, prior_checkpoint, messages}`,
+with version `loopex.compaction.source.v1`. `prior_checkpoint` is null or exactly
+`{checkpoint_id, summary, carry_forward}`, reusing the validated checkpoint's
+output shapes. `messages` is a nonempty ordered list of canonical user,
+assistant and tool messages from the newly consumed contiguous complete range;
+reuse their tool-call generation and terminal-outcome forms. Steer keeps its
+existing projected user form. No system instruction, maintenance record or
+private thinking is included. Range identities, integrity digest and first-kept
+identity remain in the owning records, not duplicated in the source message.
+Encode the whole envelope using ADR 0042's compact sorted-key UTF-8 JSON
+recipe. Prior checkpoint data and all framing spend the same 16,384-byte cap;
+depth/cardinality and whole-request checks still apply. This closes the common
+source framing; the pending oversized-content decision must amend the message
+projection explicitly before any excerpt or chunk mechanism is implemented.
+
+Maintenance has no tools and reserves 1,024 reply tokens. Retain the parent
+configuration version and a separate maintenance configuration/digest with the same exact
 model and a verified thinking-off setting: `none`, or `default` only when the
 adapter proves omission disables thinking for that exact model. Display this
 purpose-specific override; it does not change ordinary run configuration.
@@ -130,6 +183,13 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   canonical compaction succeeds without private blocks or signature reuse.
 - Recorded maintenance thinking-off override and unsupported-mode refusal;
   actual provider reply limit remains 1,024 and ordinary run settings stay intact.
+- Exact host instruction rendering/digest, missing/invalid instruction refusal,
+  strict system ceiling, closed source/output shapes and UTF-8/escaping byte
+  boundaries; six prose headings do not authorize additional output fields.
+- Restart with changed/absent host instructions resumes an admitted episode
+  from its retained block; a subsequent episode uses the new option or refuses
+  if it is absent. Two runtimes retain distinct blocks. Public create/configure
+  cannot replace that host option.
 - Fault cuts at summary settlement/checkpoint commit/publication, including
   commit_unknown and ambiguous provider attempt; no duplicate dispatch.
 - Real long conversation passes the limit and correctly refers to summarized work;

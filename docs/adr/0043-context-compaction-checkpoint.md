@@ -8,6 +8,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure to allow bounded maintenance first. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept) and [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)
+- **Also extends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with explicit maintenance instructions; its one-shot interface, credential audience and cleanup guarantees remain unchanged
 - **Prerequisite for:** M7 outcome 3
 
 <a id="concept-adr-0043-decision"></a>
@@ -26,7 +27,13 @@ admission or require a host to resubmit a command. Explicit `compact` is admitte
 only while settled. Both use a bounded maintenance episode with the session's
 frozen model and no tools. The host supplies a versioned compaction instruction
 block describing the summary's goal, constraints, progress, decisions, next
-steps and critical context; core stages and records its exact bytes.
+steps and critical context as an explicit runtime option. Each episode captures
+that block before work begins; recovery uses the captured version even if the
+host's new startup configuration differs. Missing instructions permit ordinary
+work but refuse new maintenance before any provider call; invalid supplied
+instructions refuse host startup. Core
+does not substitute the ordinary session instructions. The six sections guide
+the summary text; they are not six separate output fields.
 Maintenance uses an explicitly recorded, verified
 thinking-off setting so its fixed reply reserve remains valid. Unsupported
 maintenance settings refuse before dispatch. No executor work or pending
