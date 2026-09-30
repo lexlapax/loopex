@@ -9,8 +9,8 @@ wire protocol and M6's new surfaces are experimental; none is labelled
 release-candidate or stable — see
 [compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
-No installable package is published yet. The `0.1.0` entry records the
-source release tagged `v0.1.0`, and the annotated tag `v0.0.0-m2` is defined as
+No installable package is published yet. The `0.3.0` and `0.1.0` entries record
+source releases tagged `v0.3.0` and `v0.1.0`; the annotated tag `v0.0.0-m2` is defined as
 the exact integrated M2 source snapshot; neither is a package version, public
 API freeze, or compatibility label. Entries below the first package release record
 repository, planning, and milestone implementation work, and carry no consumer
@@ -21,6 +21,10 @@ courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
 [milestone guide](docs/developer/milestones.md#concept-milestones-close).
 
 ## [Unreleased]
+
+No changes since 0.3.0.
+
+## [0.3.0] — 2026-09-29
 
 Add the experimental `0.3.0` minimal runnable profile: an in-VM ephemeral
 session with an in-memory store and in-process ReqLLM provider calls, a

@@ -33,10 +33,14 @@ while the session lives; a session "brain" can coordinate local or remote
 
 ## What Loopex Provides
 
-At source version `0.3.0`, Loopex is a working single-machine coding harness
-and the runtime underneath it. It runs from a source checkout on macOS and
-Linux. It is not yet a published package, and its client protocol is
-experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability arrived.
+The latest source release is
+[v0.3.0](https://github.com/lexlapax/loopex/releases/tag/v0.3.0). Loopex is a
+working single-machine coding harness and the runtime underneath it. Build it
+from the tagged source on macOS or Linux using the
+[operator getting-started guide](docs/operator/getting-started.md#operator-start-build).
+There is no published binary, package or installer yet; the client protocol
+remains experimental. [CHANGELOG.md](CHANGELOG.md) records how each capability
+arrived.
 
 - **A durable session runtime you can embed.** An Elixir host starts an
   explicit runtime and owns its sessions. Each session has one serial owner and
