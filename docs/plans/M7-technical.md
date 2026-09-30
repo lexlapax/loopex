@@ -43,7 +43,7 @@ Vision sections that bind the work: what Loopex is not (§3.2), compaction
 (§13.5) and the minimalism budgets (§23.4).
 
 Proposed ADR 0037 governs installed discovery in M8, not this milestone.
-Public protocol additions in ADRs 0043–0045 must share one experimental
+Public protocol and generic bounds additions in ADRs 0043–0046 must share one experimental
 negotiation revision, vectors and independent-client proof. Acceptance binds the
 proposal contracts; source implementation and numeric schema identifiers are
 verified at the first protocol integration before any new wire shape is exposed.
@@ -463,7 +463,8 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   configuration; upgrade does not promise that an interrupted run completes.
 - Compatibility inventory before the first decoder change: configuration/instruction
   records, maintenance/compaction records, question producer/text/decline records,
-  host role/allowance ledger, request revision, events, snapshots and negotiated
+  host role/allowance ledger, generic absolute deadline ceiling on prompt/follow-up,
+  request revision, events, snapshots and negotiated
   protocol generation. Each has versioned vectors and an explicit unsupported-reader
   behavior; bump private format metadata where needed before emitting new records.
 - Upgrade fixtures include actual M6 roots with settled and unresolved model/tool

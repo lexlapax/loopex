@@ -75,8 +75,8 @@ minimal runtime distribution carries no compiler.
    private-channel topology is unchanged.
 5. **Every archive ships with a manifest** naming the source commit, the
    toolchain pair, the platform and its minimum base system, every file with
-   its size and SHA-256, the archive digest and the `SOURCE_IDENTITY` M5
-   defines, plus a checksum file for the archive. An installation can be
+   its size and SHA-256 and the `SOURCE_IDENTITY` M5 defines. The archive
+   digest belongs only in its external checksum or attestation. An installation can be
    verified against the manifest without the source tree.
 6. **Supported platforms for `<installed-version>` are the two the project can prove:**
    macOS on Apple silicon and Linux on x86-64, each with a minimum base

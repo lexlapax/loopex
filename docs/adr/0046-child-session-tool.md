@@ -6,7 +6,7 @@ Technical depth: [Serial read-only child sessions](0046-child-session-tool-techn
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing
+- **Supersedes:** no existing guarantee; adds an optional generic absolute-deadline ceiling to the bounded input contract, with existing deadline/idempotency semantics
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept) and [ADR 0049](0049-explicit-host-configuration.md#concept)
 - **Prerequisite for:** M7 outcome 7
 

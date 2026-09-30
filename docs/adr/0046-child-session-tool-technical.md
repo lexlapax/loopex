@@ -101,10 +101,19 @@ Independent parent runs have independent allowances; resumed runs never reset on
 
 **Deadline.** Persist `min(parent_job_deadline, admission_time + child_deadline_ms)`
 as the absolute cutoff before create. Extend the generic run-bound contract
-with optional `deadline_at_ms`, an absolute UTC millisecond ceiling committed
-at prompt admission. Effective deadline is the earlier of that ceiling and the
+with optional `bounds.deadline_at_ms` on prompt and follow-up commands: a
+positive integer absolute UTC millisecond timestamp no greater than 2^53−1,
+covered by canonical command identity and committed at admission. Check command
+identity/replay before clock validation, so a duplicate admitted command keeps
+its original result after the timestamp passes. A fresh expired command refuses
+before admission. A queued follow-up retains its explicitly supplied ceiling
+unchanged through promotion; absent means no inherited ceiling from its parent
+run. If an admitted run or follow-up expires before first staging, settle the
+ordinary deadline terminal without provider dispatch, rather than changing its
+already committed admission disposition. Effective deadline is the earlier of that ceiling and the
 existing relative deadline; all staging, dispatch, timers and recovery obey it.
-A past ceiling refuses before dispatch. The coordinator uses a monotonic timer
+The ceiling is part of the generic bounds/schema revision and exact request
+staging deadline; it never authorizes work past another tighter bound. The coordinator uses a monotonic timer
 for a live owner and recomputes remaining time from the persisted absolute
 ceiling after recovery, like existing durable deadlines. Owner loss cannot
 extend it. The adapter passes that exact ceiling in its idempotent prompt and

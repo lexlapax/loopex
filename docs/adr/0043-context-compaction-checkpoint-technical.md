@@ -35,8 +35,13 @@ a 2,048-estimated-token target; the mandatory tail may exceed that target.
 
 From the oldest remaining range, select the largest contiguous prefix ending
 at a complete-group boundary that fits a 16,384-byte canonical JSON source
-envelope, including the prior checkpoint summary and carry-forward. No eligible
-raw range means no provider call. Never truncate tool results or omit user facts.
+envelope, including the prior checkpoint summary and carry-forward. If no eligible
+raw range exists, make no provider call: explicit compact records idempotent
+`unchanged` only if the current request also fits; otherwise preserve the named
+staging refusal. When an eligible range exists, explicit compact may produce
+a useful bounded checkpoint even if the current model window already fits.
+This permits preparation for a smaller model window. Never truncate tool results
+or omit user facts.
 If the first group and preceding inputs cannot fit, stop with
 `compaction_input_too_large`.
 
