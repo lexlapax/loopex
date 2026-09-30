@@ -39,7 +39,10 @@ range-retrieval branch, so the model can request more without expanding the
 whole object into context. When several results share a request, their excerpts
 may be shorter so the complete request fits; every result identity, outcome and
 reference remains present. Required metadata alone can still exceed the bound.
-Compaction keeps those references retrievable; it
+When an eligible older group cannot fit as complete summary source, ADR 0043
+permits marked excerpts with readable originals and retained omission provenance.
+This maintenance-only rule does not shorten ordinary question answers or grant
+artifact access. Compaction keeps those references retrievable; it
 does not fetch them implicitly. An old frozen read generation is not silently
 upgraded; if it lacks artifact reads, a projection needing that capability
 refuses explicitly while host inspection remains available. Reference preparation

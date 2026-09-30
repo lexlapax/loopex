@@ -61,8 +61,10 @@ gets a bounded description and reference, not implicit text decoding. An
 unrepresentable metadata envelope produces a named staging refusal, never a
 silently absent result. Model-question results preserve the exact bounded
 answer/disposition from committed interaction facts. They create no executor
-receipt or implicit artifact reference. They use ordinary compaction grouping
-and complete request preflight; irreducible oversize refuses before dispatch.
+receipt or implicit artifact reference. They use complete request preflight;
+irreducible oversize refuses before ordinary dispatch. Once eligible as older
+history, they may enter ADR 0043's marked maintenance-source excerpt. That
+exception changes neither the original answer nor its ordinary projection.
 
 Before producing a model-retrievable projection, require the session's frozen
 read generation to support `artifact_use`. Otherwise return
@@ -104,6 +106,10 @@ outcomes, explicit artifact-range results and frozen native prefixes are fixed.
 An excerpt is eligible only with an already usable committed artifact reference.
 Allocation grants no extra retention/preparation work: inline sources use the
 bounded preparation episode below before they can become eligible.
+These fixed-field rules govern ordinary request allocation. ADR 0043 separately
+permits marked excerpts of an eligible old unit for maintenance input, including
+user/assistant/question content and metadata. It preserves original facts and
+never applies to an open native exchange or its protected prefix.
 
 Measure the required-context candidate at zero with both existing header
 variants: the initial resource receipt header and the reserved longest empty

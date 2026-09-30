@@ -20,8 +20,8 @@ configuration and credential contracts. They are not formal acceptance reviews.
 No product implementation, provider call or milestone acceptance is claimed.
 
 The maintainer selected [option A: marked bounded excerpts](../developer/agent-context-map.md#disposition-m7-compaction-excerpts-2026-09-30)
-for oversized older content, retaining complete originals. The detailed source
-projection remains to be repaired after the requested restart checkpoint. Further
+for oversized older content, retaining complete originals. The resumed draft
+now defines the source projection and omission provenance. Further
 material choices will be presented one at a time, including thinking headroom
 and supported modes, native-response delivery/privacy, protocol compatibility
 and the scope of the parallel-helper ban. A report's request for a decision
@@ -237,6 +237,77 @@ except itself, with SHA-256
 The `measurements.json` SHA-256 is
 `6410d09b9c914a8484b2c155c691cc894534488c57dcfccd2606c40c4492ad3c`.
 
+### Selected-A source sizing and focused review
+
+The resumed probe uses base `e487b601cfa7b893889ae7c7d0a40907f2d30f02`
+and retained snapshots of the working ADR 0043 pair. Every case includes a
+maximal 6,144-byte prior output. Four oversized cases select the 4,096-byte
+per-end quota; the existing small control selects complete source first.
+
+| Case | Complete source bytes | Selected source bytes | Current-shaped request-record bytes |
+| --- | ---: | ---: | ---: |
+| Old 12 KiB input-only prompt | 18,827 | 14,866 | 35,728 |
+| 10 KiB write group | 17,363 | 14,947 | 35,890 |
+| 32-call metadata group | 27,094 | 15,258 | 36,512 |
+| UTF-8 and escaping | 49,350 | 15,540 | 37,076 |
+| Complete-source control | 15,348 | 15,348 | 36,692 |
+
+The probe verifies exact fragment offsets/digests, outer JSON roundtrips and
+retained originals containing sentinels absent from the fragments. The selected
+UTF-8 suffix is 4,098 bytes after outward rounding. Input estimates plus the
+1,024 reply reserve range from 6,584 to 6,808 for these examples, below the
+probe's hypothetical 8,192-token total window. These are estimator results,
+not provider tokens or model capability evidence.
+
+The current Model/Store/ContextAdmission calls measure semantic request data,
+duplicate canonical bytes, a fixture receipt and fixed-point record size.
+Admitted records exactly match current SessionState construction. Receipt
+references are synthetic, not replay-proven source bindings. Final M7 purpose,
+configuration and provenance fields are absent, including the subsequently
+specified receipt revision 4. The probe report names the intermediate proposed
+revision 3, corrected after review exposed its collision with ADR 0025's already
+accepted resource-pack receipt. These remain baseline measurements, not final
+M7 admission, provider, traversal-memory, restart or summary-quality proof.
+Prototype tooling failures and corrections are retained separately; no product
+test result was retried or reclassified.
+
+Retained directory: `/tmp/loopex-m7-source-v2-e487b601/`.
+
+| File | SHA-256 |
+| --- | --- |
+| `README.md` | `e6aa468826eac29c480c439f7b4d6538cbc23e9edd9d402d0f7a2305223e09ec` |
+| `measurements.json` | `71e6e5dab57ff651c794e6931adacd9f1ddb959e46aa640179e63dbae4cc9232` |
+| `SHA256SUMS`, binding complete retained artifacts | `f16beaad16842f07af25ab4504a25b2069af68e501967bdcefbfce8ba9f76257` |
+
+An independent focused review found two remaining contract gaps. ADR 0043 now
+fixes source and summary message rendering and the corresponding revision-4
+receipt references, with ADR 0042 owning the shared receipt revision and host
+instruction reference. Follow-up review caught the revision-3 collision; the
+repair preserves both old v2/v3 decoding and ADR 0025's resource metadata/costs.
+The
+review also caught unbounded projected-list construction before encoding; the
+draft now requires incremental projection, bounded pages/end buffers and
+deadline/cancellation checks. This focused pass does not replace the outstanding
+whole-packet adversarial review.
+
+### Maintenance model compatibility, 2026-09-30
+
+A fresh Context7 lookup followed by the official Anthropic documentation confirms
+that thinking-off support is model-specific. The [current matrix](https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#thinking-support-defaults-and-rejected-configurations-by-model)
+permits disabled thinking on older Opus/Sonnet families as well as Haiku 4.5.
+Some newer models are always-on. Opus 5 additionally constrains disabled thinking
+to effort high or below. The [thinking controls](https://platform.claude.com/docs/en/build-with-claude/thinking#turning-thinking-off)
+describe Sonnet 5.5's separate `between_tools` mode: at supported effort, a
+request with no tools produces text only. That needs its own verified adapter
+mapping; it is not generic support for `disabled`.
+
+These API facts do not establish support in pinned ReqLLM. A pending maintainer
+question offers three policies: restrict long-session support to verified
+thinking-off maintenance; configure a separate summarizer for always-on parents;
+or enlarge the same model's maintenance reasoning/reply allowance and prove its
+capacity. No choice has been recorded for this question. The selected inclusion
+of bounded ordinary thinking in M7 remains in force under every option.
+
 ### Finding dispositions
 
 “Repaired” means the proposal now states the requirement and planned witness.
@@ -244,7 +315,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 
 | # | Disposition | Reason, repair or remaining work |
 | --- | --- | --- |
-| 1 | Valid; A selected, contract repair next | Use marked bounded excerpts of oversized eligible older content and retain complete originals. Repair the source grammar/allocation so a large old prompt, model write or group metadata does not permanently block selection; no new admission restriction or chunked model workflow was selected. |
+| 1 | A incorporated in proposed contract | ADR 0043 now defines complete-prefix selection followed by marked serialized excerpts of the oldest eligible whole unit, including terminal input-only runs. Fixed head/tail allocation covers large prompts, arguments and group metadata; inherited omission provenance distinguishes raw coverage from bytes the summarizer saw. Originals remain readable. No new admission restriction or chunked model workflow was selected; integrated implementation evidence remains required. |
 | 2 | Partly valid; bounded comparison retained, design pending | Local-reference prototypes reduce one three-round record from 68,473 to 55,841 bytes but five/eight-round examples still fail. Counts remain fixture-dependent. Representation, expanded-cap semantics and a useful pre-exchange reserve remain unselected; required data cannot leave request digest coverage. |
 | 3 | Partly valid; pending matrix | Manual thinking is not Haiku-only: the current official matrix also permits older Opus/Sonnet families. Always-on models cannot satisfy the draft's universal thinking-off maintenance rule. ReqLLM's adaptive display injection conflicts with `provider_default`. Resolve the supported matrix and maintenance policy explicitly. |
 | 4 | Small complete example measured; quality proof remains | A useful authored fixture fits the declared input/output caps and current-shaped record with receipt. This does not prove provider output tokens or quality. Retain the reserve pending actual implemented witnesses; do not infer that every maximal member must fit simultaneously. |
@@ -333,8 +404,13 @@ ADR 0043 now proposes an explicit immutable runtime option, exact bounded
 rendering and capture in each episode. Missing configuration refuses new
 maintenance; recovery uses an admitted episode's retained bytes. The source
 envelope and single-string summary shape are explicit. These repairs preceded
-the maintainer's excerpt selection; its detailed source projection and the
-always-on thinking policy remain unfinished.
+the maintainer's excerpt selection. The resumed draft now adds source version 2,
+complete-prefix preference and a bounded whole-unit excerpt fallback. It keeps
+the latest prior summary/carry-forward once and inherits an owner-computed
+omission flag. Full covered-record integrity remains distinct from excerpt
+source integrity. Ordinary question answers and artifact-range results remain
+exact; only eligible old maintenance input gets this exception. The always-on
+thinking policy remains unfinished.
 
 Outstanding work: resolve the pending choices,
 complete the final profile/request capacity design, update all affected
@@ -353,7 +429,8 @@ ADRs 0041–0049 are Proposed, and the paired vision amendment is unaccepted.
 Do not implement product changes or present a final external-review SHA/prompt
 until the remaining decisions, repairs and whole-packet adversarial pass finish.
 
-1. Apply selected A to ADR 0043 and affected plan/ADR pairs. Preserve originals,
+1. Apply selected A to ADR 0043 and affected plan/ADR pairs. This draft repair
+   was completed after restart; its sizing/review record is above. Preserve originals,
    whole-group checkpoint cuts, exact provenance, the protected recent tail,
    the open-thinking exclusion, 16 KiB source and 64 KiB request limits, and
    bounded maintenance attempts. Define marked omissions, deterministic source

@@ -6,7 +6,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure to allow bounded maintenance first. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure to allow bounded maintenance first and its closed receipt source-reference union for maintenance and checkpoint provenance. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept) and [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)
 - **Also extends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with explicit maintenance instructions; its one-shot interface, credential audience and cleanup guarantees remain unchanged
 - **Prerequisite for:** M7 outcome 3
@@ -41,11 +41,22 @@ interaction overlaps it. ADR 0044's open thinking exchange also blocks
 compaction: its complete earlier prefix must remain unchanged. If that exchange
 cannot fit, stop truthfully; a later run can compact canonical history.
 
-Keep the current input and a recent complete tail verbatim. Summarize only whole
-eligible turns, with bounded source and output. Every checkpoint must strictly
-reduce both projected token count and exact record size. An oversized indivisible
-turn, invalid summary, no progress or exhausted episode produces a named refusal.
-Useful checkpoints already committed remain; failed work cannot roll them back.
+Keep the current input and a recent complete tail verbatim. Each checkpoint
+covers whole eligible groups, including settled input-only runs. Prefer complete
+source. When the oldest eligible group is too large, give the summarizer marked
+excerpts from its beginning and end, retaining the complete original. This also
+covers large user prompts, generated tool arguments and group metadata. The
+checkpoint and subsequent summaries disclose that source was omitted; coverage
+of a raw range does not mean the summarizer saw every byte. This exception applies
+only to maintenance input, not ordinary tool results or private thinking data.
+Versioned receipts bind the maintenance source and later summary to their owning
+records. Their committed provenance grants no authority over future effects.
+
+Source and output remain bounded. Every checkpoint must strictly reduce both
+projected token count and exact record size. Insufficient room for the minimum
+excerpt, invalid summary, no progress or exhausted episode produces a named
+refusal. Useful checkpoints already committed remain; failed work cannot roll
+them back.
 
 Active maintenance consumes the run's call/turn, token and deadline budgets.
 Standalone maintenance requires explicit limits and cannot exceed four attempts,
@@ -57,10 +68,12 @@ provider result or checkpoint commit never authorizes another summarization.
 
 Technical depth: [Evidence](0043-context-compaction-checkpoint-technical.md#technical-adr-0043-evidence).
 
-The operator sees when compaction occurs and can inspect the summary and its
-covered raw records. Long conversations can continue when bounded summaries
-make room. Some detail may be omitted; raw records remain readable. There is
-no promise that every conversation can fit.
+The operator sees when compaction occurs, whether maintenance used excerpts,
+and can inspect the summary and its covered raw records. Long conversations
+can continue when bounded summaries make room. Details outside the excerpts
+are unavailable to the summarizer; even complete source can lose detail in a
+summary. Raw records remain readable through existing host inspection. There
+is no promise that every conversation can fit.
 
 <a id="concept-adr-0043-compatibility"></a>
 ### Compatibility and Rollback

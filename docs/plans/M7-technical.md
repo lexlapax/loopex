@@ -33,13 +33,14 @@ Accepted decisions that constrain the work:
 | --- | --- |
 | [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage; ADR 0041 amends tool-result projection, ADR 0042 system-text ownership, ADR 0043 raw-only projection/compaction deferral, and ADR 0044 session-fixed model/empty continuation |
 | [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure and ADR 0046 adds the explicit deadline ceiling and versions authored-bound command identity |
-| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, session configuration placement and charged continuation; ADR 0046 extends the closed prompt/follow-up bounds |
+| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, receipt source provenance, session configuration placement and charged continuation; ADR 0046 extends the closed prompt/follow-up bounds |
 | [ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | Existing relative deadline remains; ADR 0046 explicitly permits an earlier committed absolute cutoff, including before first staging |
 | [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain |
 | [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; ADR 0044 versions the closed reply/settlement shapes for private continuation; two attempts per logical operation and no ambiguous redispatch remain |
 | [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 introduces v3 and cannot promote an invalid continuation reply to reported usage |
 | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
+| [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | Resource admission, headers and costs remain; ADRs 0042/0043 use fresh receipt revision 4 for instruction/compaction provenance and retain old v2/v3 validation |
 | [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0043 adds explicit maintenance instructions at startup; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
 | [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) | ADR 0048 amends only its sole credential source; durable isolation, cleanup and trusted-launch exclusions remain |
 | [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Durable provider dispatch retains host-owned credential references and per-invocation custody; ADR 0048 narrowly amends its single-provider restriction |
@@ -80,7 +81,7 @@ this inventory does not silently select dual service or refusal.
 | `session.follow_up` | Optional closed `bounds` accepts only `deadline_at_ms`. Retain that authored ceiling through queue promotion; omission supplies no inherited absolute ceiling. Ordinary turn/token/relative limits retain ADRs 0013/0017's inheritance from the active run. Reject attempts to override them; steer cannot supply bounds. |
 | `session.respond_interaction` | Keep the correlated `interaction_id` and command identity. `answer` has exactly one branch: `{choice_id}`, `{text}` or `{disposition: declined}`. Text/decline are model-question-only under ADR 0045; policy-defer retains its choice branch. |
 | Configuration records | `session.configured`, inspection and attachment snapshots use an explicit allowlist: committed configuration version, exact model/reasoning, effective reply/context/system limits and instruction version/digest. Exclude raw instruction bytes, model capability/provider mapping envelopes, host binding maps, credential references, capability handles and private native continuation. An unresolved legacy configuration is explicit, never a fabricated default. |
-| Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest and owning configuration/maintenance identity. `context.compaction_progress` remains transient. Snapshots distinguish active maintenance from a settled session without exposing provider permits or private recovery records. |
+| Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest, owner-computed `source_excerpted` flag and owning configuration/maintenance identity. Checkpoint snapshots and rendered summary provenance retain that flag, including inherited omissions. `context.compaction_progress` remains transient. Snapshots distinguish active maintenance from a settled session without exposing provider permits or private recovery records. |
 | Interaction records | Pending and terminal projections preserve producer, kind, stable choices, original run/turn/call identity, expiry and answer/decline/expiry disposition. Attach snapshot and replay agree at the same cursor, including a question already pending when attachment begins. |
 | Run/bound records | Preserve the effective absolute deadline and ordinary bound/terminal outcome through committed run views, while keeping relative and absolute limits distinct. Encode new ordinary bound members as canonical positive decimal strings: `max_turns`/`token_budget` retain their current positive-integer domains, `deadline_ms` its positive uint64 domain. `deadline_at_ms` uses ADR 0046's positive JSON safe-integer domain. Apply the same conversion on output; never round through JavaScript numbers or silently impose uint64 on turns/tokens. |
 | Tool-definition format | Version the interaction-class addition and zero artifact-budget exception under ADR 0045. Preserve old effect-definition bytes; new artifact-capable read/search generations keep their own exact version/digest. The tool-definition version is distinct from session-protocol generation. |
@@ -164,8 +165,13 @@ at most 65,536 bytes. ADR 0043 fixes summary input/output limits and a four-atte
 maintenance ceiling. ADR 0041 projects bulky tool output as retained artifacts
 with at most 2,048 encoded bytes per executor-backed model-facing result, and adds bounded read
 ranges. Compaction uses those projections without automatically fetching full
-objects. Model-question results preserve exact bounded answers and use the
-ordinary final preflight, including explicit irreducible refusal. Measure the
+objects. Model-question results preserve exact bounded answers in ordinary
+projection and use its final preflight, including explicit irreducible refusal.
+For maintenance source alone, ADR 0043 first seeks a complete prefix, then uses
+marked serialized excerpts of the oldest eligible whole unit when necessary.
+Original facts remain readable; a checkpoint's omission flag survives later
+summaries. The protected tail and open thinking exchange cannot be excerpted.
+Measure the
 complete final record, including both semantic messages
 and canonical bytes. Irreducible content refuses explicitly.
 The reference prompt target remains below 1,000 estimated tokens, including
@@ -271,7 +277,7 @@ Concept: [How each outcome is verified](M7.md#concept-plan-verification).
 | --- | --- | --- |
 | 1 | The second run's staged request contains the first run's prompt, assistant messages and tool results in committed order. The projection is rebuilt identically after owner succession and restart. Accounting for the new run starts at zero | The second prompt of a real session refers to the first |
 | 2 | Staged bytes equal the host's composed block. The digest changes when the block changes. An oversize or malformed block is refused before dispatch. Project files stay in separate provenance classes. Core retains only ADR 0042's compatibility fallback | The default block drives a real task; record its cost with the active tools |
-| 3 | The checkpoint records input range, summary, model identity, usage and integrity digest. Projection substitutes it and keeps the first later raw record verbatim. Raw records remain readable. Recovery selects the last committed checkpoint, fences uncertain commits and never repeats an ambiguous summary attempt. Tool receipts and effect outcomes are unchanged by a summary | A real session passes its context limit and continues |
+| 3 | The checkpoint records input range, summary, model identity, usage, integrity digest and inherited source-omission flag. Projection substitutes it and keeps the first later raw record verbatim. Raw records remain readable. Large prompts, arguments, group metadata and terminal input-only runs use deterministic marked source excerpts within exact source/request limits. Recovery reuses staged source, selects the last committed checkpoint, fences uncertain commits and never repeats an ambiguous summary attempt. Tool receipts and effect outcomes are unchanged by a summary | A real session passes its context limit and continues; the oversized-source case shows marked omissions and readable originals without claiming the model saw omitted detail |
 | 4 | Run configuration commits provider/model and reasoning. Adapter conformance proves native thinking/block fidelity, frozen-prefix replay, original IDs inside the exchange, canonical conversion afterward, private-state exclusion and all size limits. Crash/commit_unknown cuts preserve atomic reply/continuation; missing routes/state and in-run changes refuse | A selected Claude thinking mode completes multiple tool rounds; one session continues A→B→A with restart, retaining canonical facts without resurrecting old thinking state |
 | 5 | Policy permits the question before interaction admission. Durable replay re-presents the same question; ephemeral interaction state ends with its runtime. Both hold no provider call while waiting. Answer/expiry differ; cancellation stays terminal. Test the explicit ephemeral answer path, absent/failed responder, deadlines, duplicate/late answers and cleanup. Answers grant nothing | A real model asks and uses an answer through the durable command and the ephemeral host-answer interface |
 | 6 | The command drives the public session contract only. Steer, follow-up, question and interrupt paths each have a test over a pseudo-terminal and piped input, including state/ordering differences. Configuration tests cover explicit file selection, flag precedence, prompt files, invalid values and resume semantics | Attended conversation of at least three prompts using the documented flags and config file |
@@ -469,7 +475,13 @@ declines. Neither path assumes the model can be forced never to ask.
 2. Establish an early fact, then continue until automatic compaction occurs.
 3. Verify the visible checkpoint and ask about the earlier work.
 4. Explicitly compact a settled session and inspect retained raw history.
-5. Reopen the session and verify the same continuation. Atomic checkpoint
+5. In the oversized-source fixture, make the documented large prompt or write
+   group eligible as old history. Verify compaction progresses, displays source
+   omissions and retains the complete original. Inspect the fixture's sentinel
+   outside both excerpts through host history; do not ask the model to prove
+   knowledge of bytes it was never shown. A later checkpoint retains the omission
+   flag. Automated cases cover large metadata, input-only runs and size failures.
+6. Reopen the session and verify the same continuation. Atomic checkpoint
    commits and ambiguous provider attempts use controlled fault tests.
 
 #### V7. Change provider, model and reasoning

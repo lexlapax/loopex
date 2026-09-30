@@ -37,13 +37,16 @@ daemon controller/writer-epoch checks apply before admission.
 **Selection and size.** Select ordered canonical conversation elements, excluding
 maintenance records. An assistant reply plus every terminal result of its tool
 calls is one indivisible group; an assistant reply with no calls is a group alone.
-Keep user/steer elements in their original order, including those preceding each
-group. Preserve current prompt/steer and the newest complete assistant group.
+Each selection unit includes its preceding unconsumed user/steer elements from
+the same run in original order. Contiguous unconsumed inputs left by a terminal run with no
+pending operation or interaction form an input-only unit. Failed or cancelled
+runs without an assistant reply must not strand those inputs. No unfinished
+group is eligible. Preserve current prompt/steer and the newest complete assistant group.
 Grow this tail backward by complete groups and intervening inputs while it fits
 a 2,048-estimated-token target; the mandatory tail may exceed that target.
 
 From the oldest remaining range, select the largest contiguous prefix ending
-at a complete-group boundary that fits both the 16,384-byte encoded source
+at a complete-unit boundary that fits both the 16,384-byte encoded source
 envelope, including prior summary/carry-forward, and the fully rendered
 maintenance request's token/record/depth/cardinality limits with its reply
 reserve. Search smaller complete prefixes before refusing; the source cap alone
@@ -52,15 +55,26 @@ raw range exists, make no provider call: explicit compact records idempotent
 `unchanged` only if the current request also fits; otherwise preserve the named
 staging refusal. When an eligible range exists, explicit compact may produce
 a useful bounded checkpoint even if the current model window already fits.
-This permits preparation for a smaller model window. Executor-backed tool results use ADR 0041
-artifact projections; model-question results retain their exact bounded answer
-or disposition without an executor receipt or implicit artifact reference; selection never silently truncates those projections or
-omits raw user inputs from the range being summarized. Compaction does not fetch
-full artifacts. Prior summary/carry-forward, projected groups and JSON framing
-all spend the same 16,384-byte source envelope.
-If the first complete group, preceding inputs and prior checkpoint cannot fit
-those combined constraints, stop with
-`compaction_input_too_large`.
+This permits preparation for a smaller model window. Begin with ADR 0041's
+canonical projections: executor-backed results use artifact projections and
+model-question results retain their exact bounded answer or disposition.
+Compaction fetches no artifact and creates no implicit artifact reference.
+
+If no complete prefix fits, select exactly the oldest eligible unit using the
+marked serialized-excerpt form below. Coverage still consumes that whole unit;
+the checkpoint cut never splits a tool/result group. Try per-end raw-byte
+quotas 8,192, 4,096, 2,048, 1,024 and 512, in that order. For each, take the
+shortest UTF-8-safe prefix and suffix of at least that quota, at most three
+extra bytes per end. Require a nonempty omitted middle and disjoint fragments.
+Skip an invalid candidate; select the first whose exact source and complete
+maintenance request pass every limit, including the 1,024-token reply reserve.
+This is five local sizing candidates, not five provider attempts or a claim to
+the largest possible excerpt. JSON escaping can enlarge fragments, so raw
+quotas alone never establish fit. If none fits, refuse
+`compaction_excerpt_budget_too_small` before provider intent. The prior checkpoint,
+instructions and minimum fragments can still be irreducible in a small window.
+Neither this refusal nor strict-decrease failure authorizes trimming the protected
+tail, dropping prior summary data or opening another automatic episode.
 
 **Instructions and source encoding.** Add the optional runtime/composition
 startup option `maintenance_instructions`, immutable for that runtime instance,
@@ -100,20 +114,82 @@ expansion or promotion of project instructions into host trust.
 The reference block requests goal, constraints, progress, decisions, next steps
 and critical context as sections inside the single output `summary` string.
 These are prose conventions, not six machine fields or a new output union.
-Its bounded source envelope is exactly `{version, prior_checkpoint, messages}`,
-with version `loopex.compaction.source.v1`. `prior_checkpoint` is null or exactly
-`{checkpoint_id, summary, carry_forward}`, reusing the validated checkpoint's
-output shapes. `messages` is a nonempty ordered list of canonical user,
-assistant and tool messages from the newly consumed contiguous complete range;
-reuse their tool-call generation and terminal-outcome forms. Steer keeps its
-existing projected user form. No system instruction, maintenance record or
-private thinking is included. Range identities, integrity digest and first-kept
-identity remain in the owning records, not duplicated in the source message.
-Encode the whole envelope using ADR 0042's compact sorted-key UTF-8 JSON
-recipe. Prior checkpoint data and all framing spend the same 16,384-byte cap;
-depth/cardinality and whole-request checks still apply. This closes the common
-source framing; the pending oversized-content decision must amend the message
-projection explicitly before any excerpt or chunk mechanism is implemented.
+It also explains that serialized excerpts are incomplete data, identifies the
+omitted middle, and forbids claiming unseen details, inferred file changes or
+unproved outcomes. Its bounded source envelope is exactly
+`{version, prior_checkpoint, messages}`, version `loopex.compaction.source.v2`.
+`prior_checkpoint` is null or exactly
+`{covered_range_digest, summary, carry_forward, source_excerpted}`. The digest
+is the prior checkpoint's ordered covered-record integrity digest in lowercase
+SHA-256 hex. The owning record retains the exact prior checkpoint identity.
+Reuse its validated summary and carry-forward exactly once, without recursive
+source envelopes or accumulated lists. The owner supplies the boolean
+`source_excerpted`, described below. Variable-length range/checkpoint identities
+remain in the owning records, not the source envelope.
+
+The closed `messages` union has two forms:
+
+- `{kind: "complete", value: [...]}`. The value is the nonempty ordered list of
+  canonical user, assistant and tool messages in the newly consumed range,
+  including tool-call generations and terminal outcomes. Steer retains its
+  projected user form.
+- `{kind: "serialized_excerpt", encoding: "loopex.compaction.messages_json.v1",
+  sha256, byte_length, fragments: [{offset: 0, text}, {offset, text}]}`.
+  Serialize that same whole message list with ADR 0042's compact sorted-key
+  UTF-8 JSON recipe before excerpting it. `sha256` is its lowercase hex digest;
+  `byte_length` is its byte count. Counts and offsets are unsigned 64-bit
+  integers. Fragments are exact nonempty UTF-8 slices of those bytes. The second
+  ends at `byte_length`; its offset exceeds the first fragment's byte length.
+  The two offsets and lengths identify the omitted middle. No per-message or
+  per-call headers accompany the fragments, so large group metadata is also
+  excerptable. The fragments may cut JSON tokens or escapes. They are outer
+  JSON strings, never parsed or repaired into native messages, calls or results.
+
+Exclude system instructions, maintenance records and private provider data
+before either encoding. The excerpt digest binds canonical projected messages;
+the separate covered-record integrity digest binds complete originals. A hash
+does not make an omitted detail available to the model. This grants no journal
+reader or artifact capability to the summarizer.
+
+Encode the whole envelope with the same compact recipe. Prior checkpoint data,
+fragment escaping and all framing spend the 16,384-byte source cap. Stage exactly
+one canonical user message whose `content` is the exact envelope JSON string.
+The maintenance request contains its captured system instruction message followed
+by this user message, with no tools or optional resource messages.
+
+Extend ADR 0042's context-provider receipt revision 4 with exactly
+`{kind: "compaction_source", source_digest}` and
+`{kind: "compaction_summary", checkpoint_id}` source references. `source_digest`
+is SHA-256 of the exact envelope JSON bytes, lowercase hex; checkpoint identity
+reuses its owning record's identifier bound. The source variant is valid only for
+a maintenance request whose existing episode/summary ordinal and captured range
+bind that digest. The summary variant resolves the exact committed checkpoint
+used by ordinary projection. At construction and replay, validate those owning
+records and recompute the descriptor from the actual final message. Unknown,
+missing, substituted or cross-episode references refuse. Both descriptors use
+`session` / `session_owned_durable_truth`: this authenticates the committed
+source, not the truth of its claims or authority of its instructions.
+Their six members and canonical message cost/digest recipe remain unchanged.
+Retain exactly one descriptor per final message, with none for the underlying
+excerpted messages. Maintenance instructions use ADR 0042's `host_instructions`
+variant bound to the captured maintenance configuration. Preserve v2 replay;
+preserve ADR 0025's v3 resource receipts too. These new variants require v4
+validation and are not accepted under either old revision. Maintenance performs
+no optional resource intake. If an admitted manifest requires ADR 0025's fixed
+resource header, retain it with `not_evaluated` and empty block rows, and charge
+that metadata in the request preflight.
+Use the actual
+serializer, fixed-point receipt and token/depth/cardinality checks for the entire
+65,536-byte request, including semantic fields and canonical bytes. Stream source
+counting/hashing and projection over the captured range, with bounded source
+pages/records and two end buffers of at most 8,195 bytes each. Do not collect an
+unbounded projected message list or serialized unit. Complete-prefix sizing
+retains at most the 16,384-byte candidate. Check cancellation/deadline between
+bounded reads and encoding chunks; traversal spends the episode deadline.
+Staging retains the exact selected source in the existing request;
+episode/checkpoint metadata bind its digest and strategy revision without a new
+duplicate source payload. Recovery reuses those staged bytes, never reselects
+against current host settings or a different projection.
 
 Maintenance has no tools and reserves 1,024 reply tokens. Retain the parent
 configuration version and a separate maintenance configuration/digest with the same exact
@@ -143,13 +219,21 @@ staging failure; do not restart an automatic episode for the same staging identi
 
 **Checkpoint.** Retain original lineage/range, newly consumed raw range, prior
 checkpoint ID if any, first-kept identity, summary/carry-forward bytes, strategy
-`loopex.compaction.reference` revision 1, exact model/reasoning/configuration
+`loopex.compaction.reference` revision 2, exact model/reasoning/configuration
 version, usage, summary-input digest and ordered covered-record integrity digest.
 Ranges extend contiguously without gaps/cycles and never split tool/result groups.
-Projection renders a canonical user-context element labelled `compaction_summary`,
-with checkpoint identity, covered-range digest and summary provenance; it is
+Retain the owner-computed boolean `source_excerpted`: the prior checkpoint's
+value, or false when absent, OR this source's `serialized_excerpt` kind. It is
+not a model-output field. Later complete-source summaries cannot erase an earlier
+omission. Include it in checkpoint inspection, `context.compacted`, the public
+checkpoint snapshot and the rendered summary provenance.
+This flag tracks additional maintenance excerpting. A false value promises
+neither full artifact contents in ordinary projections nor a lossless summary.
+Projection renders one canonical user message containing compact JSON with
+exactly `{kind: "compaction_summary", checkpoint_id, covered_range_digest,
+summary, carry_forward, source_excerpted}`, using the same JSON recipe. It is
 untrusted conversation data and never a system instruction or synthetic tool
-result. Adapter vectors fix this rendering. It is followed by
+result. Adapter vectors fix this rendering and its revision-4 descriptor. It is followed by
 every later canonical element from the first-kept identity in original order,
 including any unsummarized middle and the protected tail. No summary text becomes authority or a fabricated raw fact.
 
@@ -176,9 +260,26 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
 
 - Property histories cover complete cut boundaries, contiguous ranges, deterministic
   replay, no cycles and preservation of raw receipts/outcomes.
-- Byte/token edges, a small model window where a smaller complete prefix fits
-  but the byte-maximal prefix does not, oversized single turn, fixed/system context that cannot fit,
-  invalid summary and no-progress refusal; no silent tool truncation.
+- Byte/token edges and a small model window where a smaller complete prefix
+  fits but the byte-maximal prefix does not. Old 12 KiB prompts, 10 KiB write
+  arguments, large call metadata and settled input-only runs use marked excerpts
+  with maximal prior checkpoint data. No silent truncation or cut inside a group.
+- Exact fragment offsets, digests, UTF-8 boundaries, escaping expansion, the five
+  candidate quotas, whole-request receipt measurement and minimum-excerpt refusal.
+  Original facts remain readable, including a sentinel outside both fragments;
+  no check claims the model saw that sentinel. Invalid summary, fixed/system
+  context overflow and no-progress cases remain named refusals.
+- Old question answers and explicit artifact-range results remain exact in
+  ordinary projection and original history; only maintenance source may excerpt
+  them. No artifact fetch or implicit artifact/reference creation occurs.
+- Repeated checkpoints retain only the latest prior summary/carry-forward and
+  inherit `source_excerpted`. Inspection, events, snapshots and model rendering
+  agree. A model cannot clear the flag by returning a complete-looking summary.
+- Exact source/summary message rendering, one descriptor per final message,
+  revision-4 source-reference bindings and legacy v2/v3 receipt replay. Substituted
+  episode/range/digest, missing checkpoint and unknown variant refuse; no source
+  descriptor promotes conversation data into system trust. Large-range traversal
+  retains bounded pages/buffers and observes cancellation/deadline before dispatch.
 - Attempt/turn/token/deadline accounting, four-attempt ceiling and no restart reset.
 - Open-thinking-exchange refusal preserves its full prefix; after settlement,
   canonical compaction succeeds without private blocks or signature reuse.
@@ -194,7 +295,7 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
 - Direct Runtime, durable and ephemeral composition forward the same exact
   block. Missing/corrupt captured episode data refuses even when the current
   runtime has a valid block; it is not repair authority.
-- Fault cuts at summary settlement/checkpoint commit/publication, including
+- Fault cuts after source staging, then summary settlement/checkpoint commit/publication, including
   commit_unknown and ambiguous provider attempt; no duplicate dispatch.
 - Real long conversation passes the limit and correctly refers to summarized work;
   checkpoint/raw records and restart agree.

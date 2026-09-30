@@ -6,7 +6,8 @@ Technical depth: [Host-composed instructions](0042-host-composed-instructions-te
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) only the fixed source of system text; [ADR 0017](0017-durable-context-admission-budget.md#concept) only the fixed system-class token ceiling, now a host value with the existing 1,000 default
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) only the fixed source of system text; [ADR 0017](0017-durable-context-admission-budget.md#concept)'s fixed system-class token ceiling, now a host value with the existing 1,000 default, and its closed receipt revision for explicit instruction provenance
+- **Extends:** [ADR 0025](0025-resource-packs-and-skill-admission.md#concept)'s receipt revision with the same instruction provenance; preserves its resource admission, header, source-reference and budget contracts
 - **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for settled updates
 - **Prerequisite for:** M7 outcomes 2 and 7
 
@@ -33,6 +34,8 @@ its declared ceiling accommodates the measured system class.
 Commit exact bytes, version and digest with session configuration. Replace
 them only through ADR 0044's atomic settled `configure` command. An active run
 retains its configuration; restart never rereads a file to reconstruct it.
+Version the receipt so each instruction block is bound to that captured source;
+old receipt bytes retain their original validation contract.
 A host may explicitly raise the system-class ceiling within the context budget.
 The strict admission rule remains observed tokens less than the ceiling.
 

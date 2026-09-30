@@ -53,9 +53,12 @@ conflicting ID reuse, independent second answer and late answer refuse without
 mutation. Snapshots and replay preserve pending producer/kind/choices and terminal
 answer disposition; model-facing result includes the chosen label or text and
 a distinct decline/expiry category. Preserve the exact bounded answer in
-projection; ADR 0041's 2,048-byte executor-result excerpt rule does not apply.
-Ordinary complete-group compaction and final request byte/token preflight still
-apply; irreducible oversized content refuses before provider dispatch.
+ordinary projection; ADR 0041's 2,048-byte executor-result excerpt rule does not
+apply. Final request byte/token preflight still applies; irreducible oversized
+content refuses before ordinary provider dispatch. Once the complete group is
+eligible old history, ADR 0043 may use a marked excerpt for maintenance source.
+The complete original answer remains readable, without an executor receipt or
+implicit artifact reference.
 
 **Ephemeral host interface.** Preserve released `start_session/1`, `ask/3`,
 `answer/3`, history and stop semantics. Extend `answer/3` with tagged text, choice

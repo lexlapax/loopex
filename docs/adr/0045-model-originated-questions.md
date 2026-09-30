@@ -35,6 +35,9 @@ Answered, declined or expired questions can produce distinct tool results while
 remaining run bounds allow continuation. Run abort or deadline remains terminal.
 Waiting never pauses a deadline. A failed or late responder cannot grant authority
 or keep the runtime alive after cleanup.
+Ordinary model continuation receives the exact bounded answer or disposition.
+Later compaction may include it in marked source excerpts under ADR 0043;
+the original answer remains readable and never becomes an authority grant.
 
 This proposal depends on acceptance of the narrow M7 amendment to both vision
 files. The question tool is an explicit addition to the seven workspace tools,

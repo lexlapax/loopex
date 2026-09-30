@@ -26,6 +26,25 @@ definitions in the system class. The ceiling defaults to 1,000 for legacy
 callers; an explicit positive host value cannot exceed the input context budget.
 The full model-request record still must fit ADR 0017's byte bound.
 
+M7 uses fresh context-provider receipt revision 4. Revision 3 already belongs to
+ADR 0025's resource-pack receipt. Retain ADR 0017's sixteen-key outer shape when
+no resource header applies, and ADR 0025's seventeen-key shape, resource header,
+`resource_pack` provenance bucket/source reference and validation when it does.
+The existing applicability rule determines the shape; callers cannot select one
+to avoid metadata costs. Retain six descriptor members, cost/digest recipes and
+record-relative validation. Change `provider_revision` to 4 and extend the
+closed source-reference union without removing either earlier union's variants.
+Host instructions use exactly `{kind: "host_instructions", version, digest}`,
+where version is the captured instruction identifier and digest is SHA-256 of
+the exact rendered instruction bytes. Bind both to the owning request's frozen
+configuration. The descriptor remains `system` /
+`host_owned_trusted_brain_content`; its content digest/cost measures the full
+canonical system message, not just its text. ADR 0043 uses the same variant for
+captured maintenance instructions and adds its two conversation-source variants.
+This changes no trust class or grant. Preserve old receipt revisions 2 and 3 and
+their staged request validation; never relabel a legacy receipt as revision 4
+on replay. New variants are not valid under either old revision.
+
 The reference default lives in the CLI host; reusable composition accepts
 explicit bytes or the fallback. Environment facts are captured at creation or
 explicit configuration, not regenerated on replay. The configuration transaction
@@ -63,6 +82,8 @@ Concept: [Observable consequences](0042-host-composed-instructions.md#concept-ad
 - Unknown field, UTF-8, section and strict system-ceiling boundary negatives.
 - One atomic model/instruction update; active-run refusal and restart retention.
 - Legacy fallback test and immutable previously staged request vectors.
+- Revision-4 instruction source binding and record-relative receipt validation;
+  mismatched version/digest, unknown variants and relabelled legacy bytes refuse.
 - Retain measurements for the default and each demonstrated opt-in tool set;
   no silent ceiling increase to fit helper/question definitions.
 - Real coding task follows host instructions with separately admitted resources.
