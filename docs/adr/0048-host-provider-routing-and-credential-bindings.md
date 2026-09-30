@@ -21,7 +21,10 @@ bounded immutable collection of provider bindings at runtime startup, one per
 provider. The committed exact `provider:model` selects one binding. Model output,
 role text and saved defaults cannot select an unadmitted credential.
 
-Configuration stores only named environment references. No raw keys, files,
+Credentialed routes store only named environment references. Existing ephemeral
+credential-free local-provider use remains supported without an invented key.
+Durable local-provider support is not added by this proposal. Configuration for
+credentialed routes stores only those references. No raw keys, files,
 keychain lookups, commands, custom endpoints or multiple accounts for one
 provider enter M7. Missing or mismatched binding refuses before dispatch; no
 provider fallback is allowed.

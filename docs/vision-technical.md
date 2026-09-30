@@ -9,6 +9,12 @@ Status: **standalone repository seed — founding document**
 
 Date: **2026-08-14**
 
+**M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
+tool budget in sections 14, 23 and 26 are proposals authorized for drafting by
+the maintainer. Review both files with M7. Until acceptance, the prior seven-tool
+and no-built-in-sub-agent clauses remain governing; dependent implementation
+must not begin. Other vision boundaries are unchanged.
+
 Project: **Loopex — “the loop, in Elixir”**
 
 Repository: **[github.com/lexlapax/loopex](https://github.com/lexlapax/loopex)**
@@ -1728,7 +1734,7 @@ executor, grant authority, or relax host policy.
 ### 14.2 The seven-tool coding surface
 
 A coding agent needs five verbs: read, search, navigate, mutate, and execute.
-The Loopex reference distribution supplies seven conformance-tested
+The Loopex reference distribution supplies seven conformance-tested workspace
 implementations:
 
 - `read` — bounded, chunked, text/binary-aware reads;
@@ -1745,8 +1751,21 @@ measures prompt/schema cost, shell avoidance, safety, and task utility before an
 ADR fixes the reference default. Hosts always choose their own active set
 through policy and extensions.
 
-The reference CLI targets a base system prompt plus active built-in tool
-definitions under 1,000 tokens before project context. That is a measured
+**Proposed M7 amendment.** In addition to the seven workspace tools, the
+reference distribution may supply `loopex.ask`, a policy-admitted interaction
+tool handled by the session owner, and opt-in `loopex.task`, implemented by the
+host executor adapter over ordinary sessions. The host owns saved roles,
+provider routing, child policy and aggregate delegation allowance. Helpers are
+serial within each parent run, read-only and non-nested, with no question tool.
+Independent parent sessions remain concurrent; no global helper scheduler or
+ban on separately scoped host orchestration is implied. Core has no helper
+scheduler, role type, parent relation or delegation counter. ADRs 0045 and 0046
+must be accepted before those additions are implemented. Their changed
+interaction/tool/session records need versioned readers and rollback proof.
+
+The reference CLI targets a base system prompt plus every active tool
+definition, including question and helper schemas, under 1,000 tokens before
+project context. That is a measured
 reference-product usability budget, not a universal kernel constraint. The core
 enforces declared per-request and per-model limits; hosts may choose different
 profiles and context budgets.
@@ -2863,12 +2882,15 @@ the separate 5,000 ms release transport-drain witness.
 
 Minimalism is tested, not declared:
 
-- seven conformance-tested built-in tool implementations with an
-  evidence-selected reference profile;
+- **Proposed M7 amendment:** seven conformance-tested workspace tool
+  implementations, plus the question and opt-in host helper tools bounded in
+  section 14.2, with an evidence-selected reference profile;
 - reference CLI system and active-tool prompt target under 1,000 tokens before
   project context; host budgets remain host-owned;
-- no built-in sub-agent, plan, objective, background job, team workflow,
-  social channel, or policy engine;
+- **Proposed M7 amendment:** no core sub-agent scheduler, parallel children within
+  a reference parent run, nested/writable reference helpers, plan, objective,
+  background job, team workflow, social channel or
+  policy engine; the serial read-only host helper is the sole added exception;
 - no external runtime dependency in `loopex` core beyond the single telemetry
   event dispatcher §7.2 admits;
 - one canonical semantic contract across transports;
@@ -3033,8 +3055,9 @@ The following are project doctrine unless deliberately revised:
    directly; core has no Jido framework dependency.
 7. Loopex owns durable coding-session mechanics. Hosts own identity, policy,
    secrets, tenancy, placement, memory, objectives, channels, and product UI.
-8. The reference distribution supplies seven conformance-tested tool
-   implementations. Its default profile and prompt budget are evidence-driven
+8. Under the proposed M7 amendment, the reference distribution supplies seven
+   conformance-tested workspace tools plus the optional question and host helper
+   tools in section 14.2. Its default profile and prompt budget are evidence-driven
    reference-product choices, not kernel policy.
 9. Tool execution is serial by default.
 10. VM-code truth, runtime-control truth, private session journal, public

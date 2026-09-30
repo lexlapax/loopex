@@ -29,6 +29,10 @@ its last `Closed` row identifies the last closed product baseline.
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
+M7 also requires review and acceptance of the labelled narrow amendment to the
+[vision pair](../vision.md#concept-vision-tools). The [scope record](../developer/agent-context-map.md#disposition-m7-audit-scope-2026-09-30)
+authorizes drafting; it does not accept those bytes or dependent implementation.
+
 Until the first planned milestone closes, `Last closed product checkpoint` is the
 exact seed-bootstrap sentinel shown above. After that, its milestone name is
 derived from the register's final `Closed` row and its date is supplied from

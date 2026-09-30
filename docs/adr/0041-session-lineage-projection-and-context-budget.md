@@ -6,7 +6,7 @@ Technical depth: [Session lineage projection and context budget](0041-session-li
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing; implements [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)'s retained-lineage clause and preserves [ADR 0017](0017-durable-context-admission-budget.md#concept)'s admission semantics
+- **Supersedes:** [ADR 0017](0017-durable-context-admission-budget.md#concept) only its fixed 8,192-token reference-host default; implements [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)'s retained-lineage clause. ADR 0043 separately amends required-context failure timing. Also amends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept)'s deferral of model-facing artifact retrieval and its validated-argument construction for a tool-specific resolved executor form and ADR 0010's tool-result projection to permit recorded excerpts/references. Preserves [ADR 0015](0015-artifact-object-and-use-identity.md#concept) and [ADR 0028](0028-bounded-artifact-retrieval.md#concept) object/use, retention and transfer guarantees.
 - **Prerequisite for:** M7 outcome 1
 
 <a id="concept-adr-0041-decision"></a>
@@ -30,7 +30,14 @@ The host derives the input token budget from the selected model window less
 the reply reserve, or uses an explicit bounded override. An unknown window uses
 the documented 8,192-token fallback. The exact normalized model-request record
 still cannot exceed 65,536 bytes, regardless of the model's advertised window.
-No artifact-backed request storage enters M7.
+Bulky tool output is retained as an artifact before the model receives an
+explicit bounded excerpt/reference. The existing read tool gains an authorized
+range-retrieval branch, so the model can request more without expanding the
+whole object into context. Compaction keeps those references retrievable; it
+does not fetch them implicitly. An old frozen read generation is not silently
+upgraded; if it lacks artifact reads, a projection needing that capability
+refuses explicitly while host inspection remains available. Reference preparation
+is a bounded, restart-stable episode. No artifact-backed request storage enters M7.
 
 <a id="concept-adr-0041-consequences"></a>
 ### Observable Consequences
@@ -47,8 +54,11 @@ an oversized indivisible turn.
 
 Technical depth: [Compatibility mechanics](0041-session-lineage-projection-and-context-budget-technical.md#technical-adr-0041-compatibility).
 
-Projection uses existing facts and adds no record kind by itself. Already
-staged requests retain exact bytes. New projections after upgrade can differ.
+Projection reads committed facts only. A new prepared-reference record may
+retain exact legacy inline result bytes before projection, without rewriting
+receipts. New read-tool and projection generations preserve old dispatch
+definitions. Already staged requests retain exact bytes; newly staged requests
+may use the new excerpt/reference representation.
 Rollback may change later projection behavior; it cannot undo additional M7
 records created by other decisions. Those records need the M7 reader contract.
 

@@ -21,11 +21,14 @@ only the immutable legacy fallback for callers that supply no instructions.
 
 The block has base instructions, environment facts and an optional trusted
 appendix, in that order. Project files and skills keep their separate provenance
-and admission. Environment facts such as workspace, platform and date grant
-nothing. The reference host uses one default across models and tasks; its
-default block plus default active tool definitions measures below 1,000 estimated
-tokens. Opt-in tool configurations are measured separately and refuse unless
-the explicitly selected ceiling accommodates them.
+and admission. Environment facts such as workspace, platform and enabled role names grant
+nothing. The reference renderer is deterministic and captures no ambient secrets. The reference host uses one default across models and tasks; its
+default block plus every active tool definition targets fewer than 1,000
+estimated tokens. Measure both ordinary and helper-enabled chat profiles,
+including question/helper schemas and enabled-role facts. An explicit host
+ceiling does not waive that reference-product target; a measured deviation
+requires maintainer disposition before closure. Every profile refuses unless
+its declared ceiling accommodates the measured system class.
 
 Commit exact bytes, version and digest with session configuration. Replace
 them only through ADR 0044's atomic settled `configure` command. An active run

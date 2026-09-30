@@ -233,5 +233,7 @@ binds its exact Proposed pair and leaves 0039's other decisions unchanged.
 binding amendments and explicit configuration. Together, 0041–0049 are M7's
 proposed prerequisites: lineage, instructions, compaction, model configuration,
 questions, serial read-only helpers, explicit limits, provider custody and host
-configuration. ADRs 0045/0046 state vision readings acceptance must confirm.
+configuration. ADRs 0045/0046 now require the explicit narrow amendment to both
+vision files, authorized for drafting after external review and still pending
+acceptance. The revised pairs name their exact accepted-clause amendments.
 No proposal is accepted by this preparation; each blocks its dependent outcome.

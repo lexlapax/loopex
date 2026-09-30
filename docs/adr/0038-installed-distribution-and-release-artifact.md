@@ -84,9 +84,10 @@ minimal runtime distribution carries no compiler.
    toolchain pair. A platform without a retained install smoke is not
    supported, whatever the archive builds on.
 7. **The install and rollback contract is explicit.** Install is extract and
-   run; upgrade is extract beside and switch; rollback of the binary is switch
-   back, and rollback of a damaged or, in a later release, migrated root is
-   ADR 0036's restore, which the plan proves together. Uninstall is delete
+   run; upgrade is extract beside and switch. Switching back is supported only
+   when the exact prior reader is proved compatible with the root. Otherwise
+   restore a quiescent pre-upgrade backup using ADR 0036 and its matching binary.
+   The plan proves the binary and root procedure together. Uninstall is delete
    the directory; the home is the operator's and is never deleted.
 8. **Publication is a separate maintainer decision** after closure, gated on
    the public-name clearance the vision's name section already requires and
@@ -116,8 +117,9 @@ This creates the vision's surface 7, released package contents, which is inert
 until publication and permanent afterward. The archive's contents are
 therefore fixed by this decision, not by convenience: one archive contains the
 whole reference host and nothing that is a separately versioned library. Hex
-packages are not published by M8. Rollback of the binary is switching
-directories; rollback of storage is ADR 0036's; the two are proved together in
+packages are not published by M8. Binary rollback by switching directories
+requires proved reader compatibility; otherwise use ADR 0036's backup restore
+with its matching binary. The two are proved together in
 one demonstration so that "restart the old binary" is never mistaken for a
 plan.
 

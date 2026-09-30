@@ -4,8 +4,9 @@ Date: 2026-09-30. Scope: implementation readiness of the M7 plan, Proposed
 ADRs 0041–0049, affected Proposed ADRs 0036–0038, roadmap and successor drafts.
 The starting branch commit was `3e108749`; the first integrated checkpoint was
 `077c3637`, pushed to `origin/m7`. This record accompanies the final repair
-checkpoint. Accepted ADRs, vision and historical milestone evidence were not
-amended. No product code or implementation proof is part of this review.
+checkpoint at `20ff082a`. In that historical review, accepted ADRs, vision and
+historical milestone evidence were not amended. Later repair records describe
+the separately authorized proposed vision amendment and expanded scenarios. No product code or implementation proof is part of this review.
 
 The maintainer requested an internal adversarial review with repair loops and
 commits/pushes. Three read-only advisory workstreams reviewed core context and

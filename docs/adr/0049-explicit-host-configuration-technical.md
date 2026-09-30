@@ -22,7 +22,7 @@ host trust decision and is never inferred from a project file's name.
 | --- | --- |
 | `schema_version` | Required integer `1` |
 | `paths` | Optional `workspace`, `state_root`; absolute after resolution |
-| `providers` | Required map of 1–16 supported provider names to exactly `{"credential":{"env":"NAME"}}`; ADR 0048 owns reference syntax and custody |
+| `providers` | Required map of 1–16 supported provider names to a credential binding under ADR 0048; durable chat requires `{"credential":{"env":"NAME"}}`, while existing credential-free ephemeral composition remains valid |
 | `policy` | Required existing reference-host policy profile name, validated against its closed registry; no permissive default |
 | `session` | Required `model` as exact `provider:model`, required `bounds`; optional `reasoning`, `max_tokens`, `context_token_budget`, `system_class_tokens`, `instructions`, `tools`, `skill_dirs`, `cleanup_grace_ms` |
 | `session.bounds` | Required positive integers `max_turns`, `deadline_ms`, `token_budget`, even when flags override |
@@ -35,8 +35,8 @@ host trust decision and is never inferred from a project file's name.
 | `session.skill_dirs` | Optional array, at most 16 bounded directory paths; default empty; admission unchanged |
 | `session.cleanup_grace_ms` | Existing runtime bound/default, unchanged |
 | `roles` | Optional map of at most 16 bounded role names to required `model`, `instructions_file` and optional `reasoning` defaulting to `default` |
-| `delegation` | Optional `enabled` default false, `roles` list default empty; when enabled require nonempty enabled-role list, `max_children` from 1 to 128, positive `token_budget`, `child_bounds`; optional `max_tokens` default 4,096 |
-| `delegation.child_bounds` | Required positive `max_turns`, `deadline_ms`, `token_budget`; no implicit spending defaults |
+| `delegation` | Optional `enabled` default false, `roles` list default empty; when enabled require nonempty enabled-role list, `max_children` from 1 to 128, positive `token_budget`, `child_bounds`; optional `max_tokens` default 4,096, `context_token_budget` derived from each child model under ADR 0041, `system_class_tokens` default 1,000 |
+| `delegation.child_bounds` | Required positive `max_turns`, `deadline_ms` at most 600,000 under the fixed task generation, and `token_budget`; no implicit spending defaults |
 | `trace` | Optional `enabled` default false, `level` default `calls`, `modules`, `max_entry_bytes`, `max_entries_per_second`, `max_queue_entries` |
 | `output` | `text` only for chat; no new JSON conversation format in M7 |
 
@@ -51,8 +51,10 @@ Role names match `[a-z][a-z0-9_-]{0,63}`. Each enabled role requires an exact
 model and an admitted provider. There is no model inheritance or automatic
 routing. Role instructions become the child's base, with host environment
 facts and empty appendix; ADR 0042 bounds apply. Roles expose no credentials,
-policy, tools, paths or limit overrides. The parent task definition's enum
-contains only the explicitly enabled names. ADR 0046 freezes the catalog.
+policy, tools, paths or limit overrides. One fixed task definition accepts a bounded role string. Frozen host instruction
+facts name enabled roles and the catalog digest; dispatch checks membership
+against ADR 0046's retained parent binding. Child budgets are validated
+independently against each selected model; no parent-model inheritance is implied.
 
 **Precedence.** Validate authored file values first. Then apply explicit CLI
 value > `LOOPEX_HOME` for state root only > selected file > documented harmless
@@ -95,20 +97,79 @@ work. Trace/output are host-local options, not durable session configuration.
 | Plain nonempty line while settled | Submit prompt with a fresh idempotency identity |
 | Plain line during active work | Refuse locally with instructions to use an explicit action |
 | `/steer TEXT`, `/follow-up TEXT` | Existing admission and disposition rules |
-| `/answer ID TEXT`, `/answer ID --choice CHOICE_ID` | Bound response to the pending interaction identity; duplicate/late replies follow ADR 0045 |
+| `/answer ID --text JSON_STRING`, `/answer ID --choice CHOICE_ID`, `/decline ID` | Bound response to the pending interaction identity; duplicate/late replies follow ADR 0045 |
 | `/compact` | Bounded settled compaction under ADR 0043; active use refuses |
 | `/configure JSON` | Closed mutable fields from ADR 0044, with optional ADR 0042 instruction envelope; atomic settled update; raw credential/file/role fields refuse |
 | `/abort` | Existing run abort and bounded cleanup |
 | `/status` | Committed model/bounds, pending interaction and host trace/usage status |
+| `/wait` | Pause input until prior admitted work settles, needs an answer or reports recovery/cleanup uncertainty; report exact identities before reading the next line |
 | `/quit`, EOF | Abort foreground active work, wait bounded cleanup, stop trace/runtime, print truthful outcome and exit |
 | Ctrl-C | Same cancellation path; second interrupt ends waiting with cleanup explicitly unknown |
 | `//TEXT` | Literal prompt beginning `/TEXT` while settled |
 
+**Interactive and pipe framing.** Both consume UTF-8 newline-delimited input,
+ignore empty lines and execute no input as shell syntax. Accept LF or CRLF;
+strip only that terminator, and count the line cap before it. A bare CR is
+invalid. Text answers require a JSON string after `--text`; decode once and
+preserve its whitespace exactly, including literal `--choice` text. Reject NUL, invalid
+UTF-8 and lines over 65,536 bytes before admission. An unterminated final pipe
+fragment is malformed, never an implicit prompt. Existing prompt/steer/follow-up
+limits still apply after framing. Process lines in order with an invocation-local
+input sequence and fresh command ID. `/wait` stops reading input until all prior
+admitted work settles, needs an answer or becomes uncertain. It does not extend
+a deadline, answer a question or retry a command. A static sequence uses prompt,
+`/wait`, prompt, `/wait`, then `/quit`. Question-capable producers read the actual
+question ID through bidirectional pipes, answer that ID, then `/wait`; there is
+no positional or future-question answer alias.
+
+Pipe stdout carries transient host control lines prefixed `@loopex ` with
+compact UTF-8 JSON, using ADR 0042's JSON encoding and existing protocol string
+encodings for IDs. Each object has `v:1`, an `event` and exactly its branch:
+
+| Event | Required fields; other members refuse |
+| --- | --- |
+| `input` | `input_sequence`, `command_id`, `disposition` from admitted/refused, `code` as the stable command disposition/error code |
+| `question` | `session_id`, `run_id`, `interaction_id`, `producer`, `kind`, `question`, `choices` array, `expires_at_ms`; choices empty for text |
+| `wait` | `input_sequence`, `state` from settled/question/uncertain, `session_id`, `run_id` or null, `interaction_id` or null, `outcome` or null; question requires interaction ID, uncertain requires its public uncertainty outcome |
+| `closing` | `exit_code`, `cleanup` from confirmed/unknown, `last_outcome` or null |
+| `error` | `input_sequence` or null, `code` as a stable host error code |
+
+Question content uses ADR 0045; policy-defer questions retain ADR 0024's bounds.
+Publish an input admission record before question/wait output caused by that
+input. Barriers report all earlier admitted work settled, the current question,
+or uncertainty; a transient idle boundary before queued follow-up promotion
+is not settled. Hosts use bounded generated identities for new work; maximum
+encoded records, including legacy-resumed questions and choices, must be proved
+by vectors before integration. The cap is 65,536 bytes. If an existing public
+record cannot be represented, report `control_record_too_large` and perform
+transport-failure cleanup, never truncate an ID or question. This is an explicit
+presentation limit, not a new public identifier limit.
+
+Frame content at LF boundaries and prefix every model/tool line with `> `.
+Escape CR, ANSI and other nonprinting controls visibly before writing so they
+cannot erase that prefix or spoof host records. Test forged markers and split
+multibyte input. These control lines are bounded presentation from the facade;
+they own no durable truth, reconnection protocol or remote authority. Chat stays
+a text transcript, not `ask`'s JSON result format. Tracing stays on stderr.
+
+Keep at most one line under construction and one command awaiting admission;
+`/wait` relies on pipe backpressure. Output queues total at most 256 KiB, with
+provider progress dropped first and drop counts reported. Never drop control
+records or silently truncate non-progress output. Non-progress overflow triggers
+transport-failure cleanup before accepting further input. A control record that
+cannot drain within 5,000 ms, broken output, input failure or first SIGINT/SIGTERM
+stops input and follows bounded abort/cleanup independently of the writer. Never
+claim cleanup from a broken output channel. A second interrupt reports cleanup
+unknown where possible and exits nonzero. EOF and `/quit` abort active work,
+including pending questions; scripts must `/wait` before EOF for normal success.
+Pipe syntax/state refusal stops further input and exits nonzero after cleanup.
+Interactive local refusal leaves the conversation usable.
+
 All model-facing input obeys existing prompt/steer/follow-up limits. Chat exit is zero only when every admitted run/maintenance operation in that
 invocation completed successfully and cleanup is conclusive. Any failed,
 cancelled, bound-reached or unknown operation makes exit nonzero, even after a
-later successful prompt. A locally refused command does not itself mark a run
-failed; startup/configuration refusal is nonzero. Report each outcome separately. Existing `run`/`resume` exit semantics are unchanged.
+later successful prompt. An interactive locally refused command does not itself mark a run
+failed; piped refusal and startup/configuration refusal are nonzero. Report each outcome separately. Existing `run`/`resume` exit semantics are unchanged.
 No second durable conversation state lives in the terminal.
 
 **Tracing.** `--trace`/`--no-trace`, `--trace-level calls|returns|arguments`,
@@ -117,7 +178,10 @@ repeatable `--trace-module`, `--trace-max-entry-bytes`,
 Expose them on chat, ask and daemon startup only when that command owns the
 runtime. Existing non-owning commands reject them. Absent modules use ADR 0030's
 existing Loopex-only default. No arbitrary module atoms; reject unsupported
-selectors. Limits may only lower 4,096 bytes/entry, 2,000 entries/second,
+selectors. File/CLI modules contain at most 64 strings of at most 128 bytes,
+resolved through the host's compiled trusted-module inventory. Accept exact
+admitted module names and only the `Loopex.*` and `LoopexProtocol.*` wildcard
+selectors; lookup never creates an atom from input. Limits may only lower 4,096 bytes/entry, 2,000 entries/second,
 8,192 queued entries. The reference host uses the diagnostic sink and a bounded
 consumer with 256-entry backlog, shedding excess entries with a separate drop
 counter. Never enqueue unbounded output while stderr stalls. Startup failure
@@ -134,7 +198,9 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
   no interpolation/discovery and no credential reads during effective inspection.
 - Precedence/origin matrix, mandatory file limits, prompt replacement/append,
   provider mismatch, absent role models and disabled-role refusal.
-- Public-facade conversation tests for each command state, non-TTY, EOF,
+- Public-facade conversation tests for each command state, TTY and pipe ordering,
+  barriers, dynamically identified answers/declines, EOF, input/output bounds,
+  marker spoofing, output stalls, fail-fast pipe errors,
   interrupts, idempotent resubmission and old-command compatibility.
 - Resume after file edits preserves committed configuration/catalog; explicit
   settled changes commit atomically; in-flight changes refuse.

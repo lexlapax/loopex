@@ -19,9 +19,11 @@ Host policy decides first. An allowed interaction-class call creates a question
 through the serial session owner; it issues no executor grant or job. An answer
 is content and grants nothing. Later effects still consult host policy.
 
-Durable questions survive restart with the same identity. An ephemeral host may
-supply a responder for questions within one call; that state vanishes with its
-runtime and cannot be resumed. Absent responder denies before question admission.
+Durable questions survive restart with the same identity. The existing
+ephemeral session API accepts host answers during its live session. The one-shot
+`run/2` wrapper may additionally supply a responder within that call. Ephemeral
+state vanishes with its runtime and cannot recover after process loss. In the
+one-shot wrapper only, absent responder denies before model-question admission.
 Unattended `ask` keeps its current behavior and gains no implicit terminal prompt.
 
 Answered, declined or expired questions can produce distinct tool results while
@@ -29,9 +31,9 @@ remaining run bounds allow continuation. Run abort or deadline remains terminal.
 Waiting never pauses a deadline. A failed or late responder cannot grant authority
 or keep the runtime alive after cleanup.
 
-This proposal treats an interaction tool without an executor implementation as
-outside the vision's seven executor-tool implementation budget. Maintainer
-acceptance must confirm that interpretation before implementation.
+This proposal depends on acceptance of the narrow M7 amendment to both vision
+files. The question tool is an explicit addition to the seven workspace tools,
+not an exemption inferred from its dispatch location.
 
 <a id="concept-adr-0045-consequences"></a>
 ### Observable Consequences

@@ -9,6 +9,12 @@ Status: **standalone repository seed — founding document**
 
 Date: **2026-08-14**
 
+**M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
+tool budget in sections 14, 23 and 26 are proposals authorized for drafting by
+the maintainer. Review both files with M7. Until acceptance, the prior seven-tool
+and no-built-in-sub-agent clauses remain governing; dependent implementation
+must not begin. Other vision boundaries are unchanged.
+
 Project: **Loopex — “the loop, in Elixir”**
 
 Repository: **[github.com/lexlapax/loopex](https://github.com/lexlapax/loopex)**
@@ -305,10 +311,23 @@ possible action in the kernel.
 
 Technical depth: [Tool contract, seven-tool surface, registry, and resolution](vision-technical.md#technical-vision-tools)
 
-The reference distribution supplies seven conformance-tested implementations;
-the active default profile is selected from prompt-cost, safety, and task
-evidence. Tools remain ordinary behaviours resolved through explicit
-registries.
+**Proposed M7 amendment.** The reference distribution supplies seven
+conformance-tested workspace tools. It may additionally supply a model question
+tool and an opt-in host tool for serial read-only helpers. The session owner
+retains question truth; the host owns helper roles, policy, budgets and routing.
+The bundled helper allows one active child per parent run, with no nested or
+writable helpers and no core helper scheduler. Independent parent sessions may
+run concurrently; this adds no global scheduler or restriction on separately
+scoped host orchestration. The active profile is selected from prompt-cost, safety and task
+evidence, counting every advertised tool in the short-prompt target.
+
+This narrows the seven-tool/no-built-in-sub-agent principle to support the M7
+coding workflow without adding a team framework. The external review showed
+that host placement alone did not exempt bundled tools from the old budget.
+Compatibility requires versioned tool, interaction and session contracts; old
+sessions retain their admitted generations. Rollback uses proved readers or a
+pre-upgrade backup, never deletion of new facts. The proposed ADRs 0045 and 0046
+supply the implementation and evidence obligations.
 
 <a id="concept-vision-executor-protocol"></a>
 ### 15. Executor protocol and brain/hand topology
@@ -497,6 +516,10 @@ vectors; trust uses negative tests; claimed integrations and packages use their
 real paths. Fakes do not replace evidence for a claimed provider, store,
 isolation boundary, or package.
 
+The proposed M7 tool-budget amendment counts question and helper definitions in
+the reference prompt measurement and requires separate interaction and helper
+fault evidence. It does not waive the under-1,000-token reference target.
+
 Minimalism is enforced through concrete exclusions and accepted-plan budgets,
 not a universal line count. The core has no external runtime dependency beyond
 the single telemetry event dispatcher the dependency doctrine admits, one
@@ -544,7 +567,8 @@ The project is an independent greenfield implementation of a multi-instance,
 host-neutral OTP coding-session and effects runtime. It uses direct OTP, small
 edge behaviours, a core whose only external dependency is the standard
 telemetry event dispatcher, a provider-neutral model port,
-seven reference tool implementations, serial tool execution by default, and
+seven reference workspace tool implementations, with the proposed optional
+question and host helper tools from section 14, serial tool execution by default, and
 separate durable truth planes.
 
 Technical depth: [Complete numbered founding-decision record](vision-technical.md#technical-vision-founding-decisions)

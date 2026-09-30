@@ -126,18 +126,17 @@ Technical depth: [Durable-service candidate proof](roadmap-technical.md#technica
 #### Minimal runnable Loopex — v0.3 candidate
 
 Can a host or another agent run the same kernel without assembling the durable
-stack? The accepted [M6 plan](plans/M6.md#concept) answers this through one-call
+stack? The Closed [M6 plan](plans/M6.md#concept) answers this through one-call
 ephemeral embedding, the standalone `loopex ask` command, and the full durable
 profile. It adds three read-only tools and named skill directories, while
 leaving core's runtime library unchanged. [ADR 0039](adr/0039-ephemeral-embedded-profile.md#concept)
 governs the ephemeral profile's host-VM credential scope and cleanup limits.
 Acceptance authorizes implementation, not a release or a public-surface freeze.
 
-The subsequent draft sequence is the coding-agent proof, placed first as M7
-on 2026-09-29, then the installed durable operator, the store engine
-successor, and the governed extension runtime. Those
-[drafts](drafts/README.md) are not accepted plans; their scope and release
-versions remain decisions for their own acceptance.
+The next planning candidate is the Open [M7 coding-agent proof](plans/M7.md#concept),
+followed by the installed durable operator, store engine and governed extension
+runtime [drafts](drafts/README.md) for M8–M10. M7 and the successors are unaccepted;
+their scope and release versions remain decisions for their own acceptance.
 
 Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technical-roadmap-minimal-runnable)
 

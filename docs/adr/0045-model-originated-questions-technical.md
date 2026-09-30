@@ -10,7 +10,14 @@ Concept: [Context and decision](0045-model-originated-questions.md#concept-adr-0
 
 A tool definition may specify `class: interaction`; absent class remains
 `effect` semantically and keeps its original definition bytes. M7 admits class `interaction` only for the reviewed `loopex.ask` definition
-and exact argument schema. Other interaction identifiers/schemas refuse at
+and exact argument schema. Its new definition-format generation retains the
+normal identity/schema fields and adds `class: interaction`; declare
+`effect_class: read_only`, `idempotency_class: never_blind_retry`, and explicit
+budgets `wall_time_ms: 600000`, `output_bytes: 16384`, `artifact_bytes: 0`.
+The owner applies the stricter interaction/run limits below, not executor
+dispatch defaults. Versioned definition validation admits zero artifact budget
+only for this interaction class, whose results retain no output artifacts.
+Other interaction identifiers/schemas refuse at
 registration; no generic owner dispatch framework is implied. Reference `loopex.ask` arguments
 are `question` nonempty UTF-8 <=2 KiB and optional `choices`, one to eight
 nonempty labels <=256 bytes. Derive unique stable choice IDs `choice-1` through
@@ -45,16 +52,28 @@ a new provider turn. Identical command replay returns historical disposition;
 conflicting ID reuse, independent second answer and late answer refuse without
 mutation. Snapshots and replay preserve pending producer/kind/choices and terminal
 answer disposition; model-facing result includes the chosen label or text and
-a distinct decline/expiry category.
+a distinct decline/expiry category. Preserve the exact bounded answer in
+projection; ADR 0041's 2,048-byte executor-result excerpt rule does not apply.
+Ordinary complete-group compaction and final request byte/token preflight still
+apply; irreducible oversized content refuses before provider dispatch.
 
-**Ephemeral host interface.** `run/2` options gain `question_responder`, an explicit
+**Ephemeral host interface.** Preserve released `start_session/1`, `ask/3`,
+`answer/3`, history and stop semantics. Extend `answer/3` with tagged text, choice
+and decline responses while retaining the choice-ID shorthand for existing
+callers. Validate producer/kind through the same serial owner and mutation slot.
+Creator ownership, call deadlines, `last_result`, cancellation and cleanup remain.
+A manually hosted live session can answer without a callback.
+
+The one-shot `run/2` options gain `question_responder`, an explicit
 host function taking a bounded DTO of interaction ID, prompt, kind, choice IDs/
 labels and absolute expiry. It returns `{:text, binary}`, `{:choice, id}` or
-`:decline`; invalid shape/exception becomes `responder_failed`, never a grant.
+`:decline`. Invalid shape or exception initiates ordinary run abort; it is not
+a new question disposition. Join the worker and runtime cleanup, then return
+`responder_failed` if cleanup is proved. Cleanup uncertainty takes precedence.
+No failed callback leaves its question live waiting for expiry or grants authority.
 The function itself stays host-local, outside durable/plain boundary data. Run it
 in a supervised monitored worker outside the session owner with no provider
-credential passed in its DTO. Its answer returns through normal interaction
-validation. Use one serial responder worker per pending question. On success,
+credential passed in its DTO. Its answer returns through the same extended `answer/3` validation path. Use one serial responder worker per pending question. On success,
 decline, invalid return, exception, expiry, caller abort and run deadline, prove
 the worker terminated and join it within existing cleanup grace before another
 question or successful cleanup. Reject late messages by identity and runtime
@@ -70,7 +89,8 @@ one-call and cleanup rules otherwise remain unchanged.
 Concept: [Observable consequences](0045-model-originated-questions.md#concept-adr-0045-consequences).
 
 - Commit-before-event, producer-specific lifecycle and no executor grant/job.
-- Text/choice bounds, unique IDs, decline, no second policy evaluation and no
+- Text/choice bounds, answers above 2,048 bytes preserved through restart,
+  encoded-size overflow refusal, unique IDs, decline, no second policy evaluation and no
   privilege change; later tool policy still consulted.
 - Answer/expiry/abort races, identical replay, conflicting reuse, late answers,
   durable restart with same pending question, truthful terminal precedence.
@@ -88,5 +108,6 @@ Concept: [Compatibility and rollback](0045-model-originated-questions.md#concept
 An old protocol client must not silently receive a text interaction through an
 unchanged schema. Unsupported negotiation fails before attachment. Old durable
 readers require exact fixtures, and new producer/text records follow the M7
-backup/reader matrix. Paused deadlines, general workflows and reusable ephemeral
-conversations remain outside this decision.
+backup/reader matrix. Paused deadlines and general workflows remain outside
+this decision. Existing multi-prompt ephemeral sessions remain supported; the
+one-shot wrapper still stops its session before returning.

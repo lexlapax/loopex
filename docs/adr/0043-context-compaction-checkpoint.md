@@ -6,7 +6,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) only its deferral of compaction
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure to allow bounded maintenance first. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept) and [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)
 - **Prerequisite for:** M7 outcome 3
 

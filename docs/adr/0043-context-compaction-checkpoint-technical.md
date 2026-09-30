@@ -34,24 +34,36 @@ Grow this tail backward by complete groups and intervening inputs while it fits
 a 2,048-estimated-token target; the mandatory tail may exceed that target.
 
 From the oldest remaining range, select the largest contiguous prefix ending
-at a complete-group boundary that fits a 16,384-byte canonical JSON source
-envelope, including the prior checkpoint summary and carry-forward. If no eligible
+at a complete-group boundary that fits both the 16,384-byte encoded source
+envelope, including prior summary/carry-forward, and the fully rendered
+maintenance request's token/record/depth/cardinality limits with its reply
+reserve. Search smaller complete prefixes before refusing; the source cap alone
+does not prove the maintenance request fits. If no eligible
 raw range exists, make no provider call: explicit compact records idempotent
 `unchanged` only if the current request also fits; otherwise preserve the named
 staging refusal. When an eligible range exists, explicit compact may produce
 a useful bounded checkpoint even if the current model window already fits.
-This permits preparation for a smaller model window. Never truncate tool results
-or omit user facts.
-If the first group and preceding inputs cannot fit, stop with
+This permits preparation for a smaller model window. Executor-backed tool results use ADR 0041
+artifact projections; model-question results retain their exact bounded answer
+or disposition without an executor receipt or implicit artifact reference; selection never silently truncates those projections or
+omits raw user inputs from the range being summarized. Compaction does not fetch
+full artifacts. Prior summary/carry-forward, projected groups and JSON framing
+all spend the same 16,384-byte source envelope.
+If the first complete group, preceding inputs and prior checkpoint cannot fit
+those combined constraints, stop with
 `compaction_input_too_large`.
 
-The summary request uses host instructions with fixed sections: goal, constraints,
-progress, decisions, next steps and critical context. It has no tools and reserves
+The reference host owns a versioned compaction instruction block with fixed
+sections: goal, constraints, progress, decisions, next steps and critical
+context. It passes exact bytes/digest to the maintenance configuration; core
+does not author the summary prompt or copy project instructions into host trust. It has no tools and reserves
 1,024 reply tokens. Full token/record/depth/cardinality preflight still applies.
 Reject a model incapable of that reserve or insufficient remaining budget before
-dispatch. Output is closed JSON with `summary` UTF-8 at most 4,096 bytes and
-`carry_forward` containing arrays `files_read` and `files_changed`, together at
-most 2,048 encoded bytes. Bound each path to 1,024 bytes and each list to 32
+dispatch. Output is closed JSON with `summary` at most 4,096 bytes after canonical JSON
+string encoding, including quotes and escaping, and `carry_forward` containing
+arrays `files_read` and `files_changed`, together at most 2,048 encoded bytes.
+The whole encoded summary/carry-forward envelope is at most 6,144 bytes, so
+independently maximal members may need to be smaller to leave room for framing. Bound each path to 1,024 bytes and each list to 32
 entries. Unknown/invalid/oversize output fails without a hidden repair call.
 
 Measure the next candidate projection before and after substitution using the
@@ -66,7 +78,10 @@ checkpoint ID if any, first-kept identity, summary/carry-forward bytes, strategy
 `loopex.compaction.reference` revision 1, exact model/reasoning/configuration
 version, usage, summary-input digest and ordered covered-record integrity digest.
 Ranges extend contiguously without gaps/cycles and never split tool/result groups.
-Projection uses a marked summary element with summary provenance, followed by
+Projection renders a canonical user-context element labelled `compaction_summary`,
+with checkpoint identity, covered-range digest and summary provenance; it is
+untrusted conversation data and never a system instruction or synthetic tool
+result. Adapter vectors fix this rendering. It is followed by
 every later canonical element from the first-kept identity in original order,
 including any unsummarized middle and the protected tail. No summary text becomes authority or a fabricated raw fact.
 
@@ -93,7 +108,8 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
 
 - Property histories cover complete cut boundaries, contiguous ranges, deterministic
   replay, no cycles and preservation of raw receipts/outcomes.
-- Byte/token edges, oversized single turn, fixed/system context that cannot fit,
+- Byte/token edges, a small model window where a smaller complete prefix fits
+  but the byte-maximal prefix does not, oversized single turn, fixed/system context that cannot fit,
   invalid summary and no-progress refusal; no silent tool truncation.
 - Attempt/turn/token/deadline accounting, four-attempt ceiling and no restart reset.
 - Fault cuts at summary settlement/checkpoint commit/publication, including

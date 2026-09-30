@@ -48,9 +48,10 @@ Technical depth: [Evidence](0049-explicit-host-configuration-technical.md#techni
 
 An operator can validate the file, inspect values and origins without reading
 credentials, and start a conversation with explicit bounds. Invalid/unknown
-input refuses before runtime startup. A non-TTY chat refuses with a direction
-to existing `ask` or protocol clients; M7 does not invent a piped interaction
-language. Normal text is a new prompt only while settled; active-run input must
+input refuses before runtime startup. Chat accepts interactive and piped input
+with the same text/slash grammar. A `/wait` barrier sequences scripted prompts;
+answers and declines name the actual pending interaction. Piped errors stop the
+script and report nonzero status. Normal text is a new prompt only while settled; active-run input must
 name its action. EOF detaches only after explicit abort and bounded cleanup of
 this foreground-owned work, reporting uncertainty if cleanup cannot be proved.
 

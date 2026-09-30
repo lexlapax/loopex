@@ -30,7 +30,27 @@ The reference default lives in the CLI host; reusable composition accepts
 explicit bytes or the fallback. Environment facts are captured at creation or
 explicit configuration, not regenerated on replay. The configuration transaction
 in ADR 0044 validates model, instructions, ceilings and immutable tool definitions
-together. File paths and role aliases do not enter the instruction record.
+together. Prompt-file paths do not enter the instruction record. Workspace and
+enabled role names are deliberate host environment facts below, never authority.
+The reference host uses instruction version `loopex.reference.v1` for its
+default, `loopex.explicit.v1` for an explicit base file and `loopex.role.v1` for
+role instructions. Their bytes, not file names or timestamps, define the digest.
+Its environment section is compact UTF-8 JSON with ASCII-sorted object keys,
+no insignificant whitespace, escaped quotes/backslashes, the standard short
+escapes for backspace/formfeed/LF/CR/tab, `\u00xx` for other controls, and
+unescaped valid non-ASCII characters. This is a versioned host JSON renderer,
+not the Erlang-term `LoopexProtocol.Canonical` encoding. Pin byte vectors.
+Fields are `workspace` as the exact resolved root accepted by the local executor,
+`platform` as `{os: darwin|linux|other, architecture: aarch64|x86_64|other}`
+with string values, and `tool_profile` as the selected profile name. For a
+helper-enabled parent include `enabled_roles` sorted by ASCII name plus
+`catalog_digest` as `sha256:` followed by 64 lowercase hex digits. These are
+captured host facts, not shell output.
+The complete rendered section must fit 4 KiB, including escaping; oversize
+refuses. No clock, ambient env values or credential references are included.
+Explicit instruction reconfiguration refreshes mutable host facts while keeping
+the immutable tool/catalog facts equal to the session binding.
+
 Legacy fallback text and request revisions are handled explicitly in decoder
 fixtures, without rewriting already staged requests.
 
