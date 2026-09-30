@@ -13,8 +13,9 @@ The host maps `--max-steps` to `max_turns`, `--deadline-ms` to `deadline_ms`,
 `--max-tokens` selects the reply cap in ADR 0044's committed session
 configuration; context_token_budget and system_class_tokens are committed
 there too. On resume, conflicting flags for these configuration fields refuse
-and require settled configure. Parse
-positive integers without coercing strings, floats, booleans or overflow.
+and require settled configure. CLI flags parse positive decimal integers;
+JSON file members must already be integer values, with no coercion of strings,
+floats or booleans. Reject overflow at the boundary owning that value.
 Apply the runtime's existing accepted maximum for each value where one exists;
 otherwise cap host JSON integers at 2^53−1. Cross-field admission must leave a
 positive input budget and obey the 65,536-byte request-record ceiling.

@@ -55,7 +55,8 @@ Label its source separately from the artifact object digest/size; never invent
 object offsets by parsing a spill notice. Explicit range reads alone return
 `excerpt_source: artifact_object` with offsets into the verified object. Retain
 the existing full eight-member artifact reference durably. Select the longest
-UTF-8-safe excerpt that fits after framing/reference measurement; binary content
+UTF-8-safe excerpt within both the aggregate allowance below and this result's
+framing/reference measurement; binary content
 gets a bounded description and reference, not implicit text decoding. An
 unrepresentable metadata envelope produces a named staging refusal, never a
 silently absent result. Model-question results preserve the exact bounded
@@ -91,6 +92,34 @@ bytes already lost by old truncation. Idempotent object/use retention converges.
 Resolve an ambiguous preparation commit by its preallocated transaction ID
 before staging or publication. Pure projection performs no reads or writes.
 Original receipts and committed model requests remain immutable.
+
+**Aggregate excerpt allocation.** Revision 1 uses one shared raw-prefix byte
+allowance `q` in `0..2048` for eligible executor receipt-content excerpts.
+Each takes the longest UTF-8-safe prefix of at most `q` raw bytes whose complete
+encoded result remains at most 2,048 bytes. A shorter source saturates at its
+full length. Zero emits an empty excerpt with explicit omission when source
+content exists; it never omits the result or its required metadata. Binary
+descriptions, user/assistant/question content, call identities/generations,
+outcomes, explicit artifact-range results and frozen native prefixes are fixed.
+An excerpt is eligible only with an already usable committed artifact reference.
+Allocation grants no extra retention/preparation work: inline sources use the
+bounded preparation episode below before they can become eligible.
+
+Measure the required-context candidate at zero with both existing header
+variants: the initial resource receipt header and the reserved longest empty
+header (`retained_content_missing`). If that minimum fails, use existing eligible compaction or
+named refusal; no smaller excerpt can solve it. Otherwise select the largest
+`q` by bounded integer binary search, requiring both header variants to fit for
+every candidate with the actual
+staging serializer, fixed-point receipt, token, depth and cardinality checks.
+Pin fixed-schema, monotone size/token vectors so this search cannot skip a
+valid candidate. Ordinary optional-resource admission then uses the remaining
+capacity under ADR 0017; allocation does not displace required facts for optional
+resources. Full final preflight remains mandatory. Retain the projection
+revision and resulting source ranges in the staged request/provenance. During
+an open native exchange, only newly appended eligible results may vary.
+This adds no call-count cap and promises no capacity for every otherwise valid
+assistant group; identities, arguments and reference metadata can be irreducible.
 
 Preparation has one episode per staging identity: oldest-first, one source per
 transaction, at most 16 sources and 1,048,576 source-record bytes total, each
@@ -179,6 +208,10 @@ Concept: [Observable consequences](0041-session-lineage-projection-and-context-b
   original bytes/outcomes remain inspectable; measure actual task fixtures too.
 - Encoded excerpts with quotes/control characters/multibyte text and long valid
   references; first/middle/final/empty ranges, exact next offsets, no recursion.
+- Multi-call aggregate allocation, monotone candidate sizes, optional-resource
+  withholding including reserved empty-header growth, zero-prefix metadata
+  overflow and unchanged frozen prefixes;
+  no omitted result, extra preparation allowance or shortened explicit range read.
 - Wrong-session/orphan/forged uses, denied policy, injected resolution, missing
   artifacts and digest/range corruption refuse without widening authority.
 - Retention/preparation/staging fault cuts and commit_unknown fencing; cancelled

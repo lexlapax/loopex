@@ -154,6 +154,89 @@ Complete artifacts are retained in `/tmp/loopex-m7-maintenance-9431b1c9/`:
 | `output.json` | `a4c4fb2d6d02619de0a75e27e86b7bdb3029250ef9fa14daead18c5cd80e3f88` |
 | `measurements.json` | `dd4e5f92b5234c0ff3559d18684166280e7506e8e00c9a4ece5ac9d7f3f2b899` |
 
+### Aggregate result sizing
+
+At checkpoint `bdb48d73c23c7cb4bddea8b4f55988287336087a`, a bounded probe used
+the current four-tool coding profile, system instructions, request serializer,
+Store normalization and current receipt construction. Each source reply calls
+`read(path="a")` with distinct IDs. Current `ProviderAttempt` validation admits
+the supplied reply/settlement shapes. The result notice is an explicit M7
+prototype encoded inside existing tool-message content, not implemented output.
+
+| Calls | Source settlement bytes | Request with maximal excerpts | Request with zero excerpts |
+| --- | ---: | ---: | ---: |
+| 8 | 1,544 | 51,957 | 26,317 |
+| 12 | 1,828 | 72,041 | 33,581 |
+| 64 | 5,549 | 333,162 | 128,042 |
+
+For twelve calls, 1,326 raw ASCII excerpt bytes per result yields a 65,513-byte
+current-shaped request. Its 23-byte margin does not prove a final M7 fit:
+new configuration/continuation provenance is absent. The prototype's zero-text
+notice is 447 JSON bytes; this is a fixture cost, not a universal minimum.
+The 64-call reply fits, but its required result metadata cannot fit this next
+request even without excerpt text. Individual executor-intent records were not
+constructed, and no runtime/provider workflow ran. The 1,024-member collection
+ceiling is not a guarantee of 1,024 admissible calls or messages.
+
+ADR 0041 now specifies shared-prefix allocation over eligible retained outputs,
+with exact full preflight, preserved explicit range reads and frozen prefixes,
+unchanged preparation limits and irreducible refusal. It neither shrinks
+user/model-authored content nor creates a new call-count limit.
+The paragraph review caught a receipt-growth edge: allocation must pass both
+the initial resource header and the existing reserved longest empty header,
+so later optional-resource withholding cannot consume unreserved bytes.
+
+Artifacts are retained in `/tmp/loopex-m7-aggregate-results-bdb48d73/`:
+
+| File | SHA-256 |
+| --- | --- |
+| `probe.exs` | `f8b268df923470095baa6c4b24eaa85db59f928cd6e26b9da831bcc1f74bd96d` |
+| `inputs.exs` | `26f153c9e8575a415cd363e816209f74e979495d2318d2c4626ac02fc7ede2fc` |
+| `results.exs` | `e3aea9f36e5060dea3689a1060e7f8125a30cacf8178040b22f6b48b844b1c4d` |
+
+### Native-reference capacity comparison
+
+A separate probe at `bdb48d73` compares full native capsules with an unselected
+adapter-created local-reference layout. The authored three-round cache-repair
+example has two calls and two distinct text blocks per round, literal thinking
+and redacted-thinking blocks, and six 1,313-byte result strings. Five/eight
+rounds repeat those operation shapes with fresh identities solely for sizing.
+Model identity, signatures, outcomes and usage are synthetic; no task ran.
+
+| Rounds | Full / reference request-record bytes | Full / reference stored-envelope JSON bytes |
+| --- | ---: | ---: |
+| 3 | 68,473 / 55,841 | 10,915 / 4,561 |
+| 5 | 111,517 / 88,433 | 19,090 / 7,433 |
+| 8 | 170,003 / 134,277 | 29,755 / 11,739 |
+
+The proposed layout preserves block order. Text descriptors consume exact
+UTF-8 slices from canonical assistant text; tool descriptors retain native
+ID/name and refer to that same reply/request's canonical arguments. Thinking,
+signatures and redacted data remain literal. Capture verifies full lossless
+expansion before atomic settlement. Staging checks exact source bindings;
+dispatch expands from the self-contained request only, without journal or
+artifact reads. Unequal canonical/native IDs need explicit mapping vectors;
+this fixture uses equal IDs and does not prove that path.
+
+Only the three-round reference case fits the measured 64 KiB record. Expanded
+envelope sizes remain 10,915/19,090/29,755, so the unchanged expanded 16 KiB gate
+also rejects five/eight rounds. Preserving the conservative expanded-envelope
+estimator yields 10,263/17,305/26,856 input estimates; references do not reduce
+provider input. No cap, estimator policy, delivery mode or model subset changed.
+
+The probe measures supplied proposed-v2 records with the current serializer,
+Store and context admission plus a current-style receipt/continuation descriptor.
+Final M7 schemas and some binding metadata are absent. It is not a decoder,
+replay, fault, provider-token or quality proof. It demonstrates storage savings
+and their limits; the continuation/headroom decision remains open.
+
+Exact sources, inputs, candidate records and report are retained under
+`/tmp/loopex-m7-native-references-bdb48d73/`. `SHA256SUMS` binds all artifacts
+except itself, with SHA-256
+`46589a0d02632a37090fcb68df91d1ff19fd843f6e10b0c44a4c18427b0da2b9`.
+The `measurements.json` SHA-256 is
+`6410d09b9c914a8484b2c155c691cc894534488c57dcfccd2606c40c4492ad3c`.
+
 ### Finding dispositions
 
 “Repaired” means the proposal now states the requirement and planned witness.
@@ -162,11 +245,11 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | # | Disposition | Reason, repair or remaining work |
 | --- | --- | --- |
 | 1 | Valid; pending maintainer choice | The oldest eligible group can exceed the summary source bound permanently. The excerpt/chunk/admission question is pending. |
-| 2 | Partly valid; pending design | Finite headroom and avoidable native/canonical duplication are real. Three-to-five rounds is not a universal limit. Specify lossless local references and a measured pre-exchange reserve without moving required request data outside its digest. |
+| 2 | Partly valid; bounded comparison retained, design pending | Local-reference prototypes reduce one three-round record from 68,473 to 55,841 bytes but five/eight-round examples still fail. Counts remain fixture-dependent. Representation, expanded-cap semantics and a useful pre-exchange reserve remain unselected; required data cannot leave request digest coverage. |
 | 3 | Partly valid; pending matrix | Manual thinking is not Haiku-only: the current official matrix also permits older Opus/Sonnet families. Always-on models cannot satisfy the draft's universal thinking-off maintenance rule. ReqLLM's adaptive display injection conflicts with `provider_default`. Resolve the supported matrix and maintenance policy explicitly. |
 | 4 | Small complete example measured; quality proof remains | A useful authored fixture fits the declared input/output caps and current-shaped record with receipt. This does not prove provider output tokens or quality. Retain the reserve pending actual implemented witnesses; do not infer that every maximal member must fit simultaneously. |
 | 5 | Existing rule overlooked; concrete join repaired | ADR 0041 already required new output to spill before receipt. Clarify the encoded projection trigger and require new search-tool artifact allowances; old one-byte allowances cannot retain their output. |
-| 6 | Partly valid; pending aggregate projection | Eight results alone is not a demonstrated overflow; twelve synthetic results are. Define an aggregate projection policy and multi-call vectors while keeping frozen native prefixes unchanged. |
+| 6 | Aggregate proposal repaired; finite capacity retained | The complete baseline probe fits eight maximal outputs, repairs twelve with a shared allowance, and demonstrates irreducible metadata overflow at 64. ADR 0041 now allocates eligible excerpts together with exact preflight, unchanged preparation limits and frozen-prefix/range-read protection. Final M7 records still require measurement. |
 | 7 | Usability choice pending | Batched calls mean 1 KiB reads need not consume fifteen turns, but explicit retrieval is still costly. Decide its usable bound separately from unsolicited excerpts. |
 | 8 | Deliberate compatibility restriction; pending disposition | Old generations lack artifact retrieval. Choose a bounded inline compatibility exception or name this refusal explicitly in upgrade expectations; never migrate tool definitions implicitly. |
 | 9 | Meaningful prototypes measured; target risk remains | Complete ordinary profiles fit after bounded wording work. Helper-enabled coding reaches exactly 1,000 and therefore refuses. No impossible-target claim or ceiling increase follows; actual final profiles and path/catalog margins still need proof. |
@@ -232,11 +315,14 @@ subscription guarantee; no required existing diagnostic check is removed.
 The protocol pass found that both existing generation digests cover metadata,
 while the Node vector runner proves framing rather than method payloads. The
 new inventory requires complete payload identity and independent semantic
-witnesses. A further source check found prompt/follow-up normalization drops
-authored bounds. New command versions must bind those inputs, while replay of
-an existing command returns its captured defaults and historical digest.
-Partial bound overrides remain supported; no unrelated all-fields requirement
-was introduced.
+witnesses. A further source check found prompt/follow-up normalization omits
+authored bounds. A subsequent authority check confirmed that ADRs 0011/0017
+deliberately specify the old identity; it is not a source conformance defect.
+ADR 0046 now explicitly proposes the new authored-bound identity, preserving
+historical digests and replay. Prompt partial overrides remain supported.
+The first inventory incorrectly applied those ordinary overrides to follow-up
+as well. That overreach is removed: follow-up adds only its own absolute
+ceiling and preserves ordinary limit inheritance from the active run.
 The same pass adds exact new bound encodings without narrowing core integer
 domains, a new bounded snapshot revision, allowlisted public projections and
 independent Node digest assertions before mutation. Literal payload vectors

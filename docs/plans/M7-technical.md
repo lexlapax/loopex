@@ -32,7 +32,7 @@ Accepted decisions that constrain the work:
 | Decision | Constraint on M7 |
 | --- | --- |
 | [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage; ADR 0041 amends tool-result projection, ADR 0042 system-text ownership, ADR 0043 raw-only projection/compaction deferral, and ADR 0044 session-fixed model/empty continuation |
-| [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure and ADR 0046 adds the explicit deadline ceiling |
+| [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure and ADR 0046 adds the explicit deadline ceiling and versions authored-bound command identity |
 | [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, session configuration placement and charged continuation; ADR 0046 extends the closed prompt/follow-up bounds |
 | [ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | Existing relative deadline remains; ADR 0046 explicitly permits an earlier committed absolute cutoff, including before first staging |
 | [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain |
@@ -76,7 +76,8 @@ this inventory does not silently select dual service or refusal.
 | `session.create` | Versioned session-option validation for resolved configuration, instructions and immutable selections under ADRs 0042/0044/0046. Remote input cannot supply provider capabilities, credential routes, host catalogs or registry modules. |
 | New `session.configure` | Existing request/command correlation plus a nonempty closed configuration update containing only ADR 0044's mutable fields. Foreground attachment authority and daemon writer-epoch/controller authority apply before mutation. |
 | New `session.compact` | Existing request/command correlation plus explicit maintenance `bounds` containing `max_attempts`, `deadline_ms`, `token_budget` under ADR 0043. Same authority as other mutations; admission/unknown/refusal are distinct from completion. |
-| `session.prompt`, `session.follow_up` | A closed optional `bounds` object accepts the existing limit overrides (`max_turns`, `token_budget`, `deadline_ms`) and ADR 0046's optional `deadline_at_ms`. Preserve current partial-override behavior: capture host defaults for omitted ordinary limits once at admission. Bind authored bounds in the new command identity and retain effective bounds across queue promotion/replay. Steer cannot smuggle a new deadline. |
+| `session.prompt` | A closed optional `bounds` object accepts the existing limit overrides (`max_turns`, `token_budget`, `deadline_ms`) and ADR 0046's optional `deadline_at_ms`. Preserve prompt partial-override behavior: capture host defaults for omitted ordinary limits once at admission. Bind authored bounds in the new command identity and retain effective bounds on replay. |
+| `session.follow_up` | Optional closed `bounds` accepts only `deadline_at_ms`. Retain that authored ceiling through queue promotion; omission supplies no inherited absolute ceiling. Ordinary turn/token/relative limits retain ADRs 0013/0017's inheritance from the active run. Reject attempts to override them; steer cannot supply bounds. |
 | `session.respond_interaction` | Keep the correlated `interaction_id` and command identity. `answer` has exactly one branch: `{choice_id}`, `{text}` or `{disposition: declined}`. Text/decline are model-question-only under ADR 0045; policy-defer retains its choice branch. |
 | Configuration records | `session.configured`, inspection and attachment snapshots use an explicit allowlist: committed configuration version, exact model/reasoning, effective reply/context/system limits and instruction version/digest. Exclude raw instruction bytes, model capability/provider mapping envelopes, host binding maps, credential references, capability handles and private native continuation. An unresolved legacy configuration is explicit, never a fabricated default. |
 | Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest and owning configuration/maintenance identity. `context.compaction_progress` remains transient. Snapshots distinguish active maintenance from a settled session without exposing provider permits or private recovery records. |
@@ -104,15 +105,17 @@ strings, including exactly `0` for zero, without narrowing the core domain.
 Canaries prove absence of private fields in both servers' events, inspection,
 snapshots and progress, not merely the successful configured response.
 
-Current `SessionState.normalize_command/1` omits prompt/follow-up bounds from
-the normalized command identity. Parser plumbing alone therefore cannot prove
-that replaying an ID with different limits conflicts. Version new normalized
-commands/digests to bind the exact authored bounds, including omission. Look up
+ADRs 0011/0017 deliberately omit ordinary bound configuration from normalized
+command identity, and current `SessionState.normalize_command/1` implements
+that rule. ADR 0046 now proposes the explicit amendment: version new normalized
+commands/digests to bind exact authored prompt bounds or the follow-up ceiling,
+including omission. Parser plumbing alone cannot establish that behavior. Look up
 a duplicate's retained fact before resolving defaults or the clock again;
 effective bounds are captured once in its admission record. Preserve historical
 normalized bytes, digests and duplicate behavior under their original version.
 Vectors cover a changed bound under the same new command ID, an unchanged
-authored retry after host defaults change, and old-command replay.
+authored retry after host defaults change, old-command replay, and follow-up
+inheritance with only its own explicit absolute ceiling.
 
 Extend `apps/loopex_protocol/priv/schema/` and `priv/vectors/`, their literal
 schema/conformance tests, and both `clients/node/loopex-client.mjs` and

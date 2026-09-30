@@ -6,7 +6,7 @@ Technical depth: [Serial read-only child sessions](0046-child-session-tool-techn
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment.
+- **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field and their normalized command identity for newly authored bounds, preserving historical digests and ordinary follow-up inheritance; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept) and [ADR 0049](0049-explicit-host-configuration.md#concept)
 - **Prerequisite for:** M7 outcome 7
 
@@ -55,6 +55,12 @@ parent's earlier abort commit. Only confirmed cleanup permits a cleaned result.
 Cancellation before a job can be identified closes new helper admission for
 that host instance and reports uncertainty. A host restart restores admission
 through normal fencing and recovery; ordinary local-tool behavior stays intact.
+
+New command identities bind the caller's explicit limits, so reusing an ID
+with different limits refuses. Repeating the original command keeps its first
+result even if host defaults changed. Historical command identities retain
+their original meaning. A queued follow-up may add an absolute cutoff, while
+its ordinary limits still inherit from the active run.
 
 This proposal depends on acceptance of the narrow M7 amendment to both vision
 files. It explicitly permits this opt-in host helper while retaining the bans

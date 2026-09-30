@@ -77,7 +77,8 @@ composition and core invent none.
 The entrypoints are `Loopex.start_link/1` through `Runtime.start_link/1`,
 durable `LoopexComposition.start/1` and ephemeral
 `LoopexComposition.Ephemeral.start_session/1`. Missing or nil is unconfigured;
-per-call overrides refuse. Extend their closed validators and forward through
+per-call overrides refuse. Extend startup validation and existing closed option
+lists and forward through
 runtime `Control` into each coordinator, plus durable runtime assembly and
 ephemeral `SessionOwner.runtime_options/1`. Two runtimes may carry different
 blocks without shared state. Commit episode identity and the closed capture
@@ -190,6 +191,9 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   from its retained block; a subsequent episode uses the new option or refuses
   if it is absent. Two runtimes retain distinct blocks. Public create/configure
   cannot replace that host option.
+- Direct Runtime, durable and ephemeral composition forward the same exact
+  block. Missing/corrupt captured episode data refuses even when the current
+  runtime has a valid block; it is not repair authority.
 - Fault cuts at summary settlement/checkpoint commit/publication, including
   commit_unknown and ambiguous provider attempt; no duplicate dispatch.
 - Real long conversation passes the limit and correctly refers to summarized work;

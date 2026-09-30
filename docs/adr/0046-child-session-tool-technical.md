@@ -185,6 +185,19 @@ the cutoff and delayed recovery while the child owner remains alive. No core
 parent identity or child-specific deadline logic is introduced. Cancellation or expiry
 cannot publish a successful receipt while cleanup is uncertain.
 
+The new normalized-command revision binds exact authored prompt bounds,
+including omission, before defaults are resolved. Prompt overrides remain
+partial and closed to `max_turns`, `token_budget`, `deadline_ms` and
+`deadline_at_ms`. Follow-up `bounds` is closed to `deadline_at_ms` alone;
+ordinary limits inherit under ADRs 0013/0017 and do not read current defaults
+at promotion. Steer accepts no bounds. This explicitly amends ADRs 0011/0017's
+old normalized identity, which omitted ordinary bound configuration. Resolve
+effective prompt defaults once at admission, retain them separately, and
+check duplicate command facts before resolving them again. Preserve old
+normalized bytes/digests and their duplicate behavior. Test changed authored
+limits under one new ID, identical replay after defaults change, follow-up
+inheritance and old-command replay.
+
 **Result.** Apply ADR 0041's 2,048-encoded-byte model projection to helper results
 as well, retaining larger available text through the artifact path. Retain up to
 16 KiB of final child text with an explicit truncation
