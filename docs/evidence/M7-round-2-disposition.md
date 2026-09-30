@@ -80,17 +80,20 @@ changing the estimator or removing fields and validation refinements.
 | --- | ---: | ---: |
 | Coding chat | 1,061 | 2,420 / 809 |
 | Read-only chat | 865 | 2,360 / 789 |
-| Helper-enabled coding chat | 1,282 | 2,990 / 1,000 |
-| Helper-enabled read-only chat | 1,086 | 2,930 / 980 |
+| Helper-enabled coding chat | 1,282 | 2,990 / 1,000, invalid compact task schema |
+| Helper-enabled read-only chat | 1,086 | 2,930 / 980, invalid compact task schema |
 | Reviewer child | 688 | 1,969 / 659 |
 
 The system class sums `ceil(bytes/3)` separately for the canonical system
 message and each `ToolDefinition.model_facing/1` encoding. It is not a provider
-token count or a whole request-record size. The coding/helper candidate fails
-the strict `< 1000` rule at exactly 1,000. This near miss does not establish
-impossibility; it also gives no useful margin for longer workspace paths or
-larger role catalogs. Other profiles demonstrate arithmetic feasibility for
-these supplied inputs, not instruction effectiveness.
+token count or a whole request-record size. A subsequent schema audit found that
+the compacting helper recursively removed every key named `description`, including
+the task tool's required `properties.description` field. The retained compact
+helper profiles are invalid, so neither 1,000 nor 980 is feasibility evidence
+for a complete helper schema. The required field must be restored before further
+sizing. Non-helper profiles are unaffected by that specific defect and show
+arithmetic feasibility for their supplied inputs, not instruction effectiveness.
+No profile measurement promises capacity for every workspace path or role catalog.
 
 Current tool schemas support primitive fields, required members, enums, items
 and descriptions. Bounds, exclusive branches and role membership remain
@@ -106,6 +109,50 @@ retained in `/tmp/loopex-m7-profile-9431b1c9/`:
 | `probe.exs` | `72326fef7783108b8cf989128b3bcad2cba18ceb526c99f68dc8bb4b442a4e6d` |
 | `inputs.exs` | `9892dc90f507ffe14b46ce78ebba4da24c59ea44e24a62c1d0d2652be6d05eb1` |
 | `results.exs` | `c9e163df21610d428697b2b3c561ef223f33d1c5b4ab556b7596fe9497ea9b9a` |
+
+### Corrected helper profile and margin
+
+A schema comparison against the current proposal restored the required task
+`description` property. With the old compact wording, the corrected total is
+1,020 rather than 1,000. Two bounded wording candidates retain the same six
+tools, exact parameter shapes and required fields, useful role instructions,
+the complete catalog digest and host-policy authority. The fuller candidate is
+1,024 and the concise candidate is 985 at this repository path with
+`researcher`/`reviewer`.
+
+Review found two ambiguous phrases in the concise candidate. The corrected
+task description says helpers cannot delegate, without appearing to forbid
+the parent from using the tool. The read description binds only `length` to
+1,024 bytes, not `offset`. This correction costs five estimated tokens.
+
+| Corrected concise profile | Estimated system-class tokens |
+| --- | ---: |
+| Exact repository path and two roles | 990 |
+| 96-byte workspace path and the same roles | 1,010 |
+| 96-byte path and longer role names | 1,018 |
+| 256-byte path and the same roles | 1,063 |
+| Exact path and sixteen maximum-length role names | 1,339 |
+
+The fitting example has nine tokens of strict headroom. With all other facts
+fixed, 28 additional ASCII path bytes fit and 29 refuse. This proves a narrow
+complete-schema arithmetic example, not comfortable capacity for arbitrary
+paths/catalogs. No ceiling, schema or authority requirement was removed. The
+proposed question generation is still unsupported by the current definition
+validator; no production generation or prompt was adopted. Provider usability,
+final request admission and actual reference-profile margins remain to be proved.
+
+Retained directory: `/tmp/loopex-m7-profile-margin-ed7a3eb3/`. Original candidate
+artifacts remain unchanged; the correction has its own subdirectory and manifest.
+
+| File | SHA-256 |
+| --- | --- |
+| `README.md` | `a20343d1e37a857da91a8d12335400ee5ca05daad7e0ad9e032f1a104236e078` |
+| `wording-candidates.json` | `48ee4d1bd222a379727f29463bad9e5788f59167ed586302bb8b418ef2b8f2dc` |
+| `measurements.json` | `6a46b999c8a92a41a84d9755919699e470ead0d06bef6f7f3429354e4176a381` |
+| `SHA256SUMS` | `90e9c8ec83a623b94912605c53b89474b5ed2fcb02b7816275d177fabe3a9229` |
+| `correction/README.md` | `198e049b50140f3598261ba7b2c0bed77a267bdb1514c1cad9ab49ed19ca8621` |
+| `correction/measurements.json` | `fa63c4bb46b853a8fe655b12ebafee4c01590b8378457ab7fa832a853b358a10` |
+| `correction/SHA256SUMS` | `44ff9dbbb3aba63b1e6518a1d10e7d04fdaee18c466baf1a115f192a47b86bb1` |
 
 ### Maintenance sizing example
 
@@ -301,12 +348,14 @@ describe Sonnet 5.5's separate `between_tools` mode: at supported effort, a
 request with no tools produces text only. That needs its own verified adapter
 mapping; it is not generic support for `disabled`.
 
-These API facts do not establish support in pinned ReqLLM. A pending maintainer
-question offers three policies: restrict long-session support to verified
-thinking-off maintenance; configure a separate summarizer for always-on parents;
-or enlarge the same model's maintenance reasoning/reply allowance and prove its
-capacity. No choice has been recorded for this question. The selected inclusion
-of bounded ordinary thinking in M7 remains in force under every option.
+These API facts do not establish support in pinned ReqLLM. The maintainer selected
+[B: configure a separate summarizer](../developer/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30)
+for always-on conversation models, retaining the small thinking-off maintenance
+budget. Restricting long-session support to thinking-off-capable conversation
+models and increasing the maintenance reasoning allowance were not selected.
+The proposal repair adds explicit model configuration, routing and recovery
+bindings. Ordinary bounded thinking in M7 remains selected; its useful capacity
+and native delivery/privacy choices still require disposition.
 
 ### Finding dispositions
 
@@ -317,13 +366,13 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | --- | --- | --- |
 | 1 | A incorporated in proposed contract | ADR 0043 now defines complete-prefix selection followed by marked serialized excerpts of the oldest eligible whole unit, including terminal input-only runs. Fixed head/tail allocation covers large prompts, arguments and group metadata; inherited omission provenance distinguishes raw coverage from bytes the summarizer saw. Originals remain readable. No new admission restriction or chunked model workflow was selected; integrated implementation evidence remains required. |
 | 2 | Partly valid; bounded comparison retained, design pending | Local-reference prototypes reduce one three-round record from 68,473 to 55,841 bytes but five/eight-round examples still fail. Counts remain fixture-dependent. Representation, expanded-cap semantics and a useful pre-exchange reserve remain unselected; required data cannot leave request digest coverage. |
-| 3 | Partly valid; pending matrix | Manual thinking is not Haiku-only: the current official matrix also permits older Opus/Sonnet families. Always-on models cannot satisfy the draft's universal thinking-off maintenance rule. ReqLLM's adaptive display injection conflicts with `provider_default`. Resolve the supported matrix and maintenance policy explicitly. |
+| 3 | Separate summarizer selected and drafted; ordinary matrix pending | Manual thinking is not Haiku-only. The selected explicit thinking-off summarizer lets an always-on conversation model compact without changing its ordinary mode. The ordinary supported-mode matrix and ReqLLM's adaptive display injection versus `provider_default` still need resolution. |
 | 4 | Small complete example measured; quality proof remains | A useful authored fixture fits the declared input/output caps and current-shaped record with receipt. This does not prove provider output tokens or quality. Retain the reserve pending actual implemented witnesses; do not infer that every maximal member must fit simultaneously. |
 | 5 | Existing rule overlooked; concrete join repaired | ADR 0041 already required new output to spill before receipt. Clarify the encoded projection trigger and require new search-tool artifact allowances; old one-byte allowances cannot retain their output. |
 | 6 | Aggregate proposal repaired; finite capacity retained | The complete baseline probe fits eight maximal outputs, repairs twelve with a shared allowance, and demonstrates irreducible metadata overflow at 64. ADR 0041 now allocates eligible excerpts together with exact preflight, unchanged preparation limits and frozen-prefix/range-read protection. Final M7 records still require measurement. |
 | 7 | Usability choice pending | Batched calls mean 1 KiB reads need not consume fifteen turns, but explicit retrieval is still costly. Decide its usable bound separately from unsolicited excerpts. |
 | 8 | Deliberate compatibility restriction; pending disposition | Old generations lack artifact retrieval. Choose a bounded inline compatibility exception or name this refusal explicitly in upgrade expectations; never migrate tool definitions implicitly. |
-| 9 | Meaningful prototypes measured; target risk remains | Complete ordinary profiles fit after bounded wording work. Helper-enabled coding reaches exactly 1,000 and therefore refuses. No impossible-target claim or ceiling increase follows; actual final profiles and path/catalog margins still need proof. |
+| 9 | Corrected complete example measured; margin remains narrow | Earlier helper numbers omitted a required property. Restored schemas and two wording repairs produce a 990-token example for this checkout, but a 96-byte path already reaches 1,010. No schema/cap relaxation or provider-quality claim follows; actual demonstrated profiles and margins remain required. |
 | 10 | Claimed subtraction rejected; wording repaired | 8,192 is the fallback input budget. ADR 0041 now says so explicitly. Actual mandatory-content preflight still applies. |
 | 11 | Repaired | ADR 0044 uses settlement v3, preserves ADR 0021 v2 and its accounting evidence, and charges invalid continuation conservatively. |
 | 12 | Feasible route found; delivery choice pending | Built-in Anthropic preparation plus per-request Req steps can capture buffered native replies without global provider registration. Native streaming needs additional lifecycle work; do not silently narrow its promise. |
@@ -409,8 +458,27 @@ complete-prefix preference and a bounded whole-unit excerpt fallback. It keeps
 the latest prior summary/carry-forward once and inherits an owner-computed
 omission flag. Full covered-record integrity remains distinct from excerpt
 source integrity. Ordinary question answers and artifact-range results remain
-exact; only eligible old maintenance input gets this exception. The always-on
-thinking policy remains unfinished.
+exact; only eligible old maintenance input gets this exception.
+
+The maintainer then selected a separately configured summarizer. The draft now
+uses explicit `maintenance_model`, file `maintenance.model` and
+`--compaction-model`, with no parent-model inheritance or fallback. Composition
+resolves a verified thinking-off mapping; core receives bounded plain data.
+Each episode captures it with the instruction block and effective ceilings.
+Recovery retains that model even when the current option changed or is absent;
+a new episode uses the current setting. The selected provider uses ADR 0048's
+existing custody/cleanup path and ordinary run settings remain unchanged.
+The focused follow-up review corrected the stale "prior model" wording and
+distinguished the fixed 1,024 maintenance reply allowance from ordinary
+`max_tokens`, retaining parent input/system and run spending ceilings.
+
+The same pass closed two receipt joins. Revision-4 maintenance explicitly records
+skipped project/resource-pack intake, with captured identities and zero optional
+contributions; old and ordinary receipt rules remain. `continuation_cost` now
+has an exact null/closed-map shape and separate estimator equation, without
+altering descriptor totals or exposing private data. Final representation and
+headroom choices still need their own capacity proof. This is a focused proposal
+review, not a whole-packet readiness verdict or implementation evidence.
 
 Outstanding work: resolve the pending choices,
 complete the final profile/request capacity design, update all affected

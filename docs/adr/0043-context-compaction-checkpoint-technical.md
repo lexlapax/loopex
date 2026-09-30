@@ -76,6 +76,56 @@ instructions and minimum fragments can still be irreducible in a small window.
 Neither this refusal nor strict-decrease failure authorizes trimming the protected
 tail, dropping prior summary data or opening another automatic episode.
 
+**Summarizer selection.** Add immutable optional `maintenance_model` at the same
+startup entrypoints as `maintenance_instructions` below. Durable and ephemeral
+composition accept an exact `provider:model` string and resolve it through
+ADR 0044's host capability/mapping normalizer. Validate the selected route under
+ADR 0048. Direct `Loopex.start_link/1` / `Runtime.start_link/1` receive only the
+closed resolved map `{model, reasoning, model_capabilities, provider_mapping}`,
+with the same field bounds and combined 2-KiB capability/mapping ceiling as
+ADR 0044. Reasoning is verified `none`, or `default` only when its retained
+mapping proves omission disables thinking for that exact model. No credential,
+route handle, module, provider-option bag or live resolver enters this map.
+Core validates plain data and never consults a catalog or derives a provider
+mapping from the conversation model. Composition forwards the resolved option
+through runtime `Control`, durable assembly and ephemeral
+`SessionOwner.runtime_options/1`.
+
+Absent/nil means unconfigured: ordinary work remains valid, but new maintenance
+refuses `maintenance_model_unconfigured`. It never means inherit the parent
+model. A host may explicitly select the same model. Invalid supplied selections,
+unsupported thinking-off mappings or unavailable configured routes refuse
+composition startup before owned runtime/session effects; direct core startup
+rejects invalid resolved data. Missing instructions retain their distinct
+refusal. No public create/configure/compact or per-prompt field overrides these
+host startup settings. ADR 0049 maps the model selection to explicit file/CLI
+configuration; it supplies no default summarizer.
+
+At episode admission, retain the parent configuration version and capture the
+resolved maintenance selection, instruction block, effective limits and their
+origins under a maintenance configuration digest. Derive the maintenance input
+ceiling as the minimum of the captured parent input ceiling and the selected
+summarizer's known context window minus 1,024; use the labelled 8,192-token input
+fallback for an unknown window. Retain the parent's strict system-class ceiling
+as a separate check, not permission to exceed the maintenance input ceiling.
+Require a valid positive input allowance and compatible model output limit.
+Source, complete request, depth and cardinality caps remain unchanged. This
+adds no context/reply/spending knobs. Ordinary `max_tokens` governs ordinary
+requests; maintenance has its own fixed 1,024-token reply allowance even when
+ordinary `max_tokens` is smaller. Parent input/system ceilings and run spending
+bounds still apply; the maintenance override does not rewrite them.
+
+Recovery uses the captured model, capabilities, mapping, limits and instructions
+even if current runtime options changed or are absent. Missing/corrupt capture
+refuses; current settings cannot repair it. Dispatch-required recovery needs the
+captured model's admitted provider route and renderer revision, without fallback.
+A known settled summary may finish its checkpoint without a new provider call.
+New episodes use the current runtime selection. `session.configure` changes
+ordinary configuration only. Active maintenance charges the parent run's existing
+calls/turns, token and deadline budgets; standalone bounds remain 4/60,000/32,768.
+Report maintenance model/usage separately while counting it once in overall
+usage. Neither call nor tokens spend the helper allowance.
+
 **Instructions and source encoding.** Add the optional runtime/composition
 startup option `maintenance_instructions`, immutable for that runtime instance,
 containing the closed `{version, body}` map below. It is host configuration,
@@ -175,9 +225,16 @@ excerpted messages. Maintenance instructions use ADR 0042's `host_instructions`
 variant bound to the captured maintenance configuration. Preserve v2 replay;
 preserve ADR 0025's v3 resource receipts too. These new variants require v4
 validation and are not accepted under either old revision. Maintenance performs
-no optional resource intake. If an admitted manifest requires ADR 0025's fixed
-resource header, retain it with `not_evaluated` and empty block rows, and charge
-that metadata in the request preflight.
+no optional resource intake. Its `project_resource` member is exactly
+`{disposition: "not_evaluated_maintenance", detail: null}`. If an admitted
+manifest requires ADR 0025's fixed resource header, retain it with
+`not_evaluated` and empty block rows. These successful-request dispositions are
+permitted only for revision-4 maintenance; ordinary requests and v2/v3 replay
+keep their prior rules. Bind header manifest/selection digests to resource
+admission state captured with the episode's session version. Require no project
+or resource-pack descriptors and zero costs in their applicable provenance
+buckets. Charge all header metadata in full record preflight. No current host
+resource reread may replace those captured identities on recovery.
 Use the actual
 serializer, fixed-point receipt and token/depth/cardinality checks for the entire
 65,536-byte request, including semantic fields and canonical bytes. Stream source
@@ -191,11 +248,10 @@ episode/checkpoint metadata bind its digest and strategy revision without a new
 duplicate source payload. Recovery reuses those staged bytes, never reselects
 against current host settings or a different projection.
 
-Maintenance has no tools and reserves 1,024 reply tokens. Retain the parent
-configuration version and a separate maintenance configuration/digest with the same exact
-model and a verified thinking-off setting: `none`, or `default` only when the
-adapter proves omission disables thinking for that exact model. Display this
-purpose-specific override; it does not change ordinary run configuration.
+Maintenance has no tools and reserves 1,024 reply tokens. Its captured separate
+configuration uses the exact selected summarizer and verified thinking-off
+mapping described above. Display this purpose-specific configuration; it does
+not change ordinary run configuration.
 Require capability evidence for that setting before dispatch, otherwise refuse
 `maintenance_reasoning_unsupported`. Do not let a manual thinking budget or
 dependency translation enlarge the 1,024-token reply reserve. Maintenance
@@ -280,11 +336,26 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   episode/range/digest, missing checkpoint and unknown variant refuse; no source
   descriptor promotes conversation data into system trust. Large-range traversal
   retains bounded pages/buffers and observes cancellation/deadline before dispatch.
+- Revision-4 maintenance with and without admitted project/resource-pack state
+  records skipped intake and zero optional costs. Unknown dispositions, changed
+  captured manifest/selection identities, any optional descriptor, and use of
+  maintenance-only dispositions by ordinary or legacy requests refuse.
 - Attempt/turn/token/deadline accounting, four-attempt ceiling and no restart reset.
 - Open-thinking-exchange refusal preserves its full prefix; after settlement,
   canonical compaction succeeds without private blocks or signature reuse.
 - Recorded maintenance thinking-off override and unsupported-mode refusal;
   actual provider reply limit remains 1,024 and ordinary run settings stay intact.
+- Explicit same/different-model selection, no-setting refusal and no fallback.
+  Composition resolves the closed plain option before core; malformed/unsupported
+  supplied settings and missing admitted routes refuse startup. One runtime's
+  choice cannot change another's. Public/per-prompt inputs cannot override it.
+- Derive the input ceiling from the summarizer window and captured parent cap,
+  test unknown-window fallback and output/system limits, and retain exact origins.
+  Active maintenance spends parent allowances once, never helper allowances.
+- Restart with changed/absent model selection or changed host catalog retains
+  admitted configuration and staged bytes. Missing route/renderer refuses a
+  required dispatch without substitution; an already settled summary still
+  completes its checkpoint without an unnecessary provider call.
 - Exact host instruction rendering/digest, missing/invalid instruction refusal,
   strict system ceiling, closed source/output shapes and UTF-8/escaping byte
   boundaries; six prose headings do not authorize additional output fields.
@@ -298,15 +369,18 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
 - Fault cuts after source staging, then summary settlement/checkpoint commit/publication, including
   commit_unknown and ambiguous provider attempt; no duplicate dispatch.
 - Real long conversation passes the limit and correctly refers to summarized work;
-  checkpoint/raw records and restart agree.
+  checkpoint/raw records and restart agree. Include an always-on conversation
+  model with an explicitly configured thinking-off summarizer on another admitted
+  provider; identify both models and their separately reported usage.
 
 <a id="technical-adr-0043-compatibility"></a>
 ### Compatibility Mechanics and Alternatives
 
 Concept: [Compatibility and rollback](0043-context-compaction-checkpoint.md#concept-adr-0043-compatibility).
 
-This first strategy uses the session model, no secondary summarizer role,
-artifact request path or abandoned-branch summarization. Its fixed caps are
+This strategy uses an explicit host-selected summarizer through the existing
+model boundary. It adds no helper role, artifact request path or abandoned-branch
+summarization. Its fixed caps are
 bounded candidate values, not measured quality claims. Any later strategy or
 cap increase changes the proposal/accepted contract explicitly; a failed fixture
 cannot be made passing by silently increasing retries.

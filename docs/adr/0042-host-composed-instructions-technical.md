@@ -32,8 +32,11 @@ no resource header applies, and ADR 0025's seventeen-key shape, resource header,
 `resource_pack` provenance bucket/source reference and validation when it does.
 The existing applicability rule determines the shape; callers cannot select one
 to avoid metadata costs. Retain six descriptor members, cost/digest recipes and
-record-relative validation. Change `provider_revision` to 4 and extend the
-closed source-reference union without removing either earlier union's variants.
+record-relative validation, subject to ADR 0043's maintenance-only resource
+dispositions and ADR 0044's continuation accounting below. Revision 4 adds
+ADR 0044's mandatory `continuation_cost` member to either outer shape, making
+seventeen or eighteen keys respectively. Change `provider_revision` to 4 and
+extend the closed source-reference union without removing earlier variants.
 Host instructions use exactly `{kind: "host_instructions", version, digest}`,
 where version is the captured instruction identifier and digest is SHA-256 of
 the exact rendered instruction bytes. Bind both to the owning request's frozen

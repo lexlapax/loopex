@@ -6,7 +6,7 @@ Technical depth: [Run model and reasoning configuration](0044-run-model-and-reas
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Also extends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement, preserving its accounting-provenance rules and the existing v2 meaning.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 adds that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also extends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement, preserving its accounting-provenance rules and the existing v2 meaning.
 - **Requires with multi-provider use:** [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Prerequisite for:** M7 outcome 4
 
@@ -29,9 +29,10 @@ Configuration becomes a durable session fact. Creation and settled-only
 context/reply limits with one version. A run captures that version at admission
 and keeps it through restart. No configuration change occurs inside a run or
 unresolved maintenance operation.
-Maintenance inherits the committed model/configuration while using ADR 0043's
-separately supplied host instructions, captured for that episode. Changing
-ordinary instructions does not replace the maintenance block.
+Maintenance retains the parent configuration identity and applicable ceilings,
+while capturing ADR 0043's separately configured summarizer and host instructions.
+Changing ordinary model or instructions does not replace those runtime settings
+or rewrite an admitted maintenance episode.
 
 A host-authorized controller may switch model or provider between runs while
 preserving canonical history. Reference CLI ownership and the daemon controller

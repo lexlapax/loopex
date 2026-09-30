@@ -24,7 +24,7 @@ implementation that depends on it:
 | [ADR 0045](../adr/0045-model-originated-questions.md#concept) | Outcome 5's tool class |
 | [ADR 0046](../adr/0046-child-session-tool.md#concept) | Outcome 7's adapter |
 | [ADR 0047](../adr/0047-reference-host-run-defaults.md#concept) | Outcome 6's mandatory configured bounds and outcome 8's measured baseline |
-| [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept) | Outcomes 4 and 7 provider routing and credential bindings |
+| [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept) | Outcomes 3, 4 and 7 provider routing and credential bindings |
 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept) | Outcomes 6 and 7 explicit configuration, roles and command grammar |
 
 Accepted decisions that constrain the work:
@@ -40,8 +40,8 @@ Accepted decisions that constrain the work:
 | [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 introduces v3 and cannot promote an invalid continuation reply to reported usage |
 | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
-| [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | Resource admission, headers and costs remain; ADRs 0042/0043 use fresh receipt revision 4 for instruction/compaction provenance and retain old v2/v3 validation |
-| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0043 adds explicit maintenance instructions at startup; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
+| [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | ADRs 0042–0044 use fresh receipt revision 4 for instruction/compaction provenance and continuation accounting; maintenance explicitly skips optional intake. Ordinary resource admission/costs and old v2/v3 validation remain |
+| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0043 adds explicit maintenance instructions and model at startup; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
 | [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) | ADR 0048 amends only its sole credential source; durable isolation, cleanup and trusted-launch exclusions remain |
 | [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Durable provider dispatch retains host-owned credential references and per-invocation custody; ADR 0048 narrowly amends its single-provider restriction |
 | [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) | Host-owned runtime tracing, bounded diagnostics and redaction remain unchanged when exposed through startup flags |
@@ -81,7 +81,7 @@ this inventory does not silently select dual service or refusal.
 | `session.follow_up` | Optional closed `bounds` accepts only `deadline_at_ms`. Retain that authored ceiling through queue promotion; omission supplies no inherited absolute ceiling. Ordinary turn/token/relative limits retain ADRs 0013/0017's inheritance from the active run. Reject attempts to override them; steer cannot supply bounds. |
 | `session.respond_interaction` | Keep the correlated `interaction_id` and command identity. `answer` has exactly one branch: `{choice_id}`, `{text}` or `{disposition: declined}`. Text/decline are model-question-only under ADR 0045; policy-defer retains its choice branch. |
 | Configuration records | `session.configured`, inspection and attachment snapshots use an explicit allowlist: committed configuration version, exact model/reasoning, effective reply/context/system limits and instruction version/digest. Exclude raw instruction bytes, model capability/provider mapping envelopes, host binding maps, credential references, capability handles and private native continuation. An unresolved legacy configuration is explicit, never a fabricated default. |
-| Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest, owner-computed `source_excerpted` flag and owning configuration/maintenance identity. Checkpoint snapshots and rendered summary provenance retain that flag, including inherited omissions. `context.compaction_progress` remains transient. Snapshots distinguish active maintenance from a settled session without exposing provider permits or private recovery records. |
+| Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest, owner-computed `source_excerpted` flag, exact summarizer model/thinking-off setting, usage and owning configuration/maintenance identity. Checkpoint snapshots and rendered summary provenance retain the flag, including inherited omissions. Active-maintenance inspection/snapshots expose captured model identity and bounds, excluding provider mappings, instruction bytes, permits, routes and private recovery records. `context.compaction_progress` remains transient. |
 | Interaction records | Pending and terminal projections preserve producer, kind, stable choices, original run/turn/call identity, expiry and answer/decline/expiry disposition. Attach snapshot and replay agree at the same cursor, including a question already pending when attachment begins. |
 | Run/bound records | Preserve the effective absolute deadline and ordinary bound/terminal outcome through committed run views, while keeping relative and absolute limits distinct. Encode new ordinary bound members as canonical positive decimal strings: `max_turns`/`token_budget` retain their current positive-integer domains, `deadline_ms` its positive uint64 domain. `deadline_at_ms` uses ADR 0046's positive JSON safe-integer domain. Apply the same conversion on output; never round through JavaScript numbers or silently impose uint64 on turns/tokens. |
 | Tool-definition format | Version the interaction-class addition and zero artifact-budget exception under ADR 0045. Preserve old effect-definition bytes; new artifact-capable read/search generations keep their own exact version/digest. The tool-definition version is distinct from session-protocol generation. |
@@ -142,7 +142,8 @@ Concept: [Explicit configuration](M7.md#concept-plan-configuration).
 [ADR 0049](../adr/0049-explicit-host-configuration-technical.md#technical-adr-0049-decision)
 is the single schema, precedence and grammar definition. It specifies explicit
 JSON, exact provider:model selection, mandatory file run limits, saved roles,
-relative-path rules, prompt files, effective value origins and trace controls.
+relative-path rules, prompt files, explicit `maintenance.model` /
+`--compaction-model`, effective value origins and trace controls.
 Core and reusable composition receive explicit options and read no files.
 
 The proposed `loopex chat --config FILE` owns a foreground durable runtime.
@@ -171,6 +172,11 @@ For maintenance source alone, ADR 0043 first seeks a complete prefix, then uses
 marked serialized excerpts of the oldest eligible whole unit when necessary.
 Original facts remain readable; a checkpoint's omission flag survives later
 summaries. The protected tail and open thinking exchange cannot be excerpted.
+The host explicitly selects the summarizer through ADR 0043; there is no inherited
+or fallback model. Each episode captures its verified thinking-off mapping and
+input ceiling derived from its own window, capped by the parent input ceiling.
+Ordinary run configuration stays unchanged, including an always-on thinking
+conversation model. Missing configuration refuses compaction before dispatch.
 Measure the
 complete final record, including both semantic messages
 and canonical bytes. Irreducible content refuses explicitly.
@@ -471,7 +477,9 @@ declines. Neither path assumes the model can be forced never to ask.
 
 #### V6. Continue after compaction
 
-1. Use the long-conversation fixture and a documented small context budget.
+1. Use the long-conversation fixture, a documented small context budget and an
+   explicit `maintenance.model` or `--compaction-model`. Inspect the selected
+   thinking-off summarizer and its admitted provider without reading credentials.
 2. Establish an early fact, then continue until automatic compaction occurs.
 3. Verify the visible checkpoint and ask about the earlier work.
 4. Explicitly compact a settled session and inspect retained raw history.
@@ -481,8 +489,15 @@ declines. Neither path assumes the model can be forced never to ask.
    outside both excerpts through host history; do not ask the model to prove
    knowledge of bytes it was never shown. A later checkpoint retains the omission
    flag. Automated cases cover large metadata, input-only runs and size failures.
-6. Reopen the session and verify the same continuation. Atomic checkpoint
-   commits and ambiguous provider attempts use controlled fault tests.
+6. Reopen the session and verify the same continuation. A prescribed fault case
+   changes/removes the startup summarizer option while an episode is admitted;
+   verify that episode keeps its recorded model and later episodes use the new
+   setting or refuse unconfigured. Atomic checkpoint commits, missing routes and
+   ambiguous provider attempts use controlled fault tests.
+7. Run the pinned case with an always-on thinking conversation model and a
+   thinking-off summarizer on another admitted provider. Verify the summary,
+   continued conversation and separate maintenance usage counted once in totals.
+   No ordinary run changes model merely because compaction occurred.
 
 #### V7. Change provider, model and reasoning
 
@@ -676,7 +691,8 @@ existing release runner, selectors, wrapper/redaction tests and the existing
 PTY helper for the changed chat workflow. The current runner's fixed eleven
 cases and one credential are implementation work, not evidence that new lanes
 already run. Required new selectors cover coding tasks, piped/attended chat,
-thinking/tool continuation, A→B→A, parent A/helper B and M7 upgrade/rollback. Credentialed lanes declare
+thinking/tool continuation, A→B→A, conversation A/summarizer B, parent A/helper B
+and M7 upgrade/rollback. Credentialed lanes declare
 separate A/B references and redact all selected values; other lanes require no
 new credentials. Preserve all existing required lanes and failure honesty.
 Both A and B are admitted hosted credentialed routes for the durable examples;
@@ -686,8 +702,10 @@ passes that complete selected-name set to its redactor and PTY driver and
 self-tests with every canary, including non-default names. Redaction cannot
 remain a fixed four-name list. The new selectors are required in the full
 closure release matrix; `--only` selects pre-merge evidence, not an exemption
-from closure. Require maintenance thinking-off on B only if that scenario
-claims compaction on B; switching alone does not establish that capability.
+from closure. The compaction lane pins an always-on conversation model and an
+explicit thinking-off summarizer, including their exact mappings. A switching
+model needs no thinking-off capability merely because it is provider B; the
+configured summarizer must have it. Switching alone proves no compaction capability.
 
 <a id="technical-plan-acceptance-issues"></a>
 ### Internal review disposition and audit targets
@@ -792,7 +810,7 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
 - Compatibility inventory before the first decoder change: configuration/instruction
   records and v3 genesis, prepared tool-result references and artifact-read resolved
   arguments, immutable tool/policy selections, maintenance/compaction records,
-  runtime/composition maintenance-instruction option and per-episode capture,
+  runtime/composition maintenance-instruction/model options and per-episode capture,
   model_request.v2 continuation, bounded adapter/canonical reply v3 and
   model_attempt_settled_v3 preserving ADR 0021's v2/accounting provenance,
   estimator revision and private/public projection,

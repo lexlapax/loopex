@@ -6218,3 +6218,15 @@ acceptance of the ADR/plan or authorization for product implementation.
 The maintainer then requested a committed and pushed checkpoint before
 restarting the agent. The remaining work is recorded in the
 [round 2 resume checkpoint](../evidence/M7-round-2-disposition.md#resume-checkpoint).
+
+<a id="disposition-m7-maintenance-model-2026-09-30"></a>
+### M7 separate summarizer choice, 2026-09-30
+
+The maintainer selected option B: support conversation models with always-on
+thinking by explicitly configuring a separate model for summarizing old history.
+Keep the small thinking-off summary budget and the existing source/request
+ceilings. Add the model setting, admitted provider routing and recovery tests;
+ordinary bounded thinking remains in M7. Revise ADR 0043 and its configuration,
+routing and plan joins. This permits a purpose-specific model call, not a helper
+agent or scheduler. It is a proposal scope decision, not exact-byte acceptance
+or authorization for product implementation.

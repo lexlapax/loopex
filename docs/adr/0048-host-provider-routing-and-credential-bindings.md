@@ -8,7 +8,7 @@ Technical depth: [Host provider routing and credential bindings](0048-host-provi
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0019](0019-host-owned-provider-protection.md#concept) only its sole `LOOPEX_PROVIDER_API_KEY` source; [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) only its single model/token/registry-binding restriction; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only its fixed selected-provider environment-variable names, durable single-source restriction and closed startup-option set for explicit provider references
 - **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)
-- **Prerequisite for:** M7 outcomes 4 and 7
+- **Prerequisite for:** M7 outcomes 3, 4 and 7
 
 <a id="concept-adr-0048-decision"></a>
 ### Context and Decision
@@ -16,7 +16,8 @@ Technical depth: [Host provider routing and credential bindings](0048-host-provi
 Technical depth: [Contract](0048-host-provider-routing-and-credential-bindings-technical.md#technical-adr-0048-decision).
 
 A parent and a read-only helper may use different providers; an existing
-conversation may explicitly switch providers between runs. The host admits a
+conversation may explicitly switch providers between runs. ADR 0043's explicitly
+configured summarizer may also use a different admitted provider. The host admits a
 bounded immutable collection of provider bindings at runtime startup, one per
 provider. The committed exact `provider:model` selects one binding. Model output,
 role text and saved defaults cannot select an unadmitted credential.
@@ -45,7 +46,7 @@ prove which provider issued the stored value.
 
 Technical depth: [Evidence](0048-host-provider-routing-and-credential-bindings-technical.md#technical-adr-0048-evidence).
 
-The operator can identify the provider used by each run and child. Provider
+The operator can identify the provider used by each run, summary and child. Provider
 A→B→A preserves canonical conversation facts and validates model capability
 and context before committing each switch. Credentials, variable names and
 custody handles remain outside durable model requests and public diagnostics.

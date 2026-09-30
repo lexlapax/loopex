@@ -134,6 +134,12 @@ committed model and unresolved staged invocations. A pending attempt keeps its
 original model/configuration/digest; a new default cannot redirect it. Role
 snapshots retain provider identity, never credential bytes. Rotation takes an
 explicit host restart/rebinding in M7; no live refresh watcher is added.
+The same dispatch rules apply to ADR 0043's separately configured maintenance
+model. Composition validates its admitted route before startup. Each admitted
+episode freezes that exact model; recovery of a required invocation uses its
+provider binding even when the current maintenance option changed or is absent.
+Missing custody/route or renderer refuses without switching to the parent model.
+An already settled summary needs no new provider dispatch to finish its checkpoint.
 
 <a id="technical-adr-0048-evidence"></a>
 ### Evidence
@@ -151,6 +157,10 @@ Concept: [Observable consequences](0048-host-provider-routing-and-credential-bin
   Bootstrap deliberately resolves all configured credentialed bindings.
 - Restart before/after configure and staged intent retains exact dispatch identity.
 - Real A→B→A with canonical tool history, and parent A/helper B, both succeed.
+- Real conversation A/summarizer B uses the selected route, counts maintenance
+  usage once in parent/standalone totals and exposes no credential references.
+  Changed/absent startup selections, lost B custody and rebinding the same B
+  provider preserve the captured request identity and cleanup guarantees.
 - Registry loss, bootstrap timeout, cancellation and trace-canary tests retain
   the accepted profile-specific cleanup guarantees.
 

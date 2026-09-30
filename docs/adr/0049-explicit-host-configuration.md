@@ -31,13 +31,18 @@ Provider references and saved role definitions belong to the host. Roles have
 no permission, workspace or tool overrides. The selected file must explicitly
 declare conversational and, when enabled, delegation limits. Instructions are
 read once as exact bounded host bytes. Project resources still require their
-separate admission. Existing sessions retain committed settings and their
-frozen role catalog; file edits affect new sessions. Explicit between-run
+separate admission. Existing sessions retain committed ordinary settings and
+their frozen role catalog; file edits to those values affect new sessions. Explicit between-run
 configuration is the only way to change admitted model or instruction settings.
 The reference host also supplies ADR 0043's shared versioned compaction
 instructions at runtime startup. They have no new file field or CLI flag;
 an admitted episode retains its block across restart, while future episodes
 use the block supplied by the current host.
+The summarizer model is explicit through `maintenance.model` or
+`--compaction-model`. There is no default or conversation-model inheritance.
+Without it ordinary work remains available and compaction reports unconfigured.
+This host setting affects new maintenance episodes; an admitted episode keeps
+its captured model across restart. It is separate from ordinary `/configure`.
 
 Tracing uses ADR 0030's runtime-scoped API, existing redaction and ceilings.
 The host reports effective scope/limits and emitted/dropped counts through a

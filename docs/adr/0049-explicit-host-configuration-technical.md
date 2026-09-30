@@ -34,6 +34,7 @@ host trust decision and is never inferred from a project file's name.
 | `session.tools` | `coding`, `read-only`, `none`; default `coding`, same meanings as `ask`; policy still required |
 | `session.skill_dirs` | Optional array, at most 16 bounded directory paths; default empty; admission unchanged |
 | `session.cleanup_grace_ms` | Existing runtime bound/default, unchanged |
+| `maintenance` | Optional closed `{model: "provider:model"}` with required exact model when present; absent means unconfigured, never inherit `session.model`. ADR 0043 fixes the thinking-off setting and maintenance bounds |
 | `roles` | Optional map of at most 16 bounded role names to required `model`, `instructions_file` and optional `reasoning` defaulting to `default` |
 | `delegation` | Optional `enabled` default false, `roles` list default empty; when enabled require nonempty enabled-role list, `max_children` from 1 to 128, positive `token_budget`, `child_bounds`; optional `max_tokens` default 4,096, `context_token_budget` derived from each child model under ADR 0041, `system_class_tokens` default 1,000 |
 | `delegation.child_bounds` | Required positive `max_turns`, `deadline_ms` at most 600,000 under the fixed task generation, and `token_budget`; no implicit spending defaults |
@@ -76,7 +77,7 @@ loopex config show --config FILE --effective
 loopex chat --config FILE [--workspace DIR] [--state-root DIR] [--resume SESSION_ID]
 ```
 
-The chat overrides are `--model`, `--reasoning`, `--max-steps`, `--deadline-ms`,
+The chat overrides are `--model`, `--reasoning`, `--compaction-model`, `--max-steps`, `--deadline-ms`,
 `--token-budget`, `--max-tokens`, `--context-token-budget`,
 `--system-class-tokens`, `--cleanup-grace-ms`, `--system-prompt-file`,
 `--append-system-prompt-file`, `--tools`, repeatable `--skill-dir`, `--policy`,
@@ -98,13 +99,26 @@ invocation configuration; in-flight bounds stay committed. A conflicting
 directs the operator to settled `/configure`; it is not a run-bound override.
 Require matching workspace/policy identity and available routes for admitted
 work. Trace/output are host-local options, not durable session configuration.
+`--compaction-model` overrides the file's `maintenance.model` for new episodes,
+including on resume; it cannot redirect an admitted episode. Show configured
+selection or `unconfigured`, its origin and any distinct active episode model
+in effective/status output without resolving credentials. No flag invents a
+default model or adds a provider binding. Composition validates the selected
+model's admitted route and verified thinking-off mapping before startup.
 
 Runtime-owning reference hosts inject the shared versioned maintenance block
 through ADR 0043's `maintenance_instructions` composition option. Keep that
 host code path common to chat and the existing reference entrypoints; add no
-config-file member, prompt-file override or trace-related fallback. Embedded
+instruction config-file member, prompt-file override or trace-related fallback. Embedded
 callers supply their own explicit block. Resume keeps an admitted episode's
 captured block even if the host has changed; new episodes use the current block.
+The separately selected `maintenance.model` / `--compaction-model` supplies
+composition's exact-string `maintenance_model` option. Composition resolves it
+to ADR 0043's closed plain runtime map. Other existing reference CLI commands
+gain no new model flag/file loader; embedding hosts may pass the equivalent
+explicit option. Missing model/instructions leave ordinary work valid but
+refuse new compaction; invalid supplied configuration refuses startup. All
+long-conversation examples and fixtures declare the summarizer explicitly.
 
 | Input | Behaviour |
 | --- | --- |
@@ -115,7 +129,7 @@ captured block even if the host has changed; new episodes use the current block.
 | `/compact` | Bounded settled compaction under ADR 0043; active use refuses |
 | `/configure JSON` | Closed mutable fields from ADR 0044, with optional ADR 0042 instruction envelope; atomic settled update; raw credential/file/role fields refuse |
 | `/abort` | Existing run abort and bounded cleanup |
-| `/status` | Committed model/bounds, pending interaction and host trace/usage status |
+| `/status` | Committed model/bounds, configured/active summarizer, pending interaction and host trace/usage status |
 | `/wait` | Pause input until prior admitted work settles, needs an answer or reports recovery/cleanup uncertainty; report exact identities before reading the next line |
 | `/quit`, EOF | Abort foreground active work, wait bounded cleanup, stop trace/runtime, print truthful outcome and exit |
 | Ctrl-C | Same cancellation path; second interrupt ends waiting with cleanup explicitly unknown |
@@ -148,7 +162,7 @@ encodings for IDs. Each object has `v:1`, an `event` and exactly its branch:
 | `input` | `input_sequence`, `command_id`, `disposition` from admitted/refused, `code` as the stable command disposition/error code |
 | `question` | `session_id`, `run_id`, `interaction_id`, `producer`, `kind`, `question`, `choices` array, `expires_at_ms`; choices empty for text |
 | `wait` | `input_sequence`, `state` from settled/question/uncertain, `session_id`, `run_id` or null, `interaction_id` or null, `outcome` or null; question requires interaction ID, uncertain requires its public uncertainty outcome |
-| `status` | `input_sequence`, `session_id`, `run_id` or null, `state`, `configuration_version`, `model`, `reasoning`, `bounds`, `interaction_id` or null, `trace`; no credential reference, role prompt or private continuation |
+| `status` | `input_sequence`, `session_id`, `run_id` or null, `state`, `configuration_version`, `model`, `reasoning`, `bounds`, `interaction_id` or null, `trace`, `maintenance`; no credential reference, role prompt or private continuation |
 | `closing` | `exit_code`, `cleanup` from confirmed/unknown, `last_outcome` or null |
 | `error` | `input_sequence` or null, `code` as a stable host error code |
 
@@ -159,7 +173,12 @@ the existing bound/uncertainty fields; they are never free-form diagnostic text.
 Status state and bounds use the public session contract. Status trace is
 exactly `{enabled, emitted, dropped}` with a Boolean and nonnegative counters;
 disabled uses false and zero counts. `/status` and `/wait` receive their own
-ordered `input` acknowledgement before their result record. TTY rendering
+ordered `input` acknowledgement before their result record. Status `maintenance`
+is exactly `{configured_model, active_model}`: each is an exact model string or
+null. Null configured model means new episodes are unconfigured; null active
+model means there is no admitted episode. A resumed episode may show a different
+active model from the current configured selection. This host status view grants
+no session mutation or provider authority. TTY rendering
 shows the same identities, labeled choices, expiry and command syntax in human
 readable form, without suggesting a default answer.
 Publish an input admission record before question/wait output caused by that
@@ -269,6 +288,10 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
   interrupts, idempotent resubmission and old-command compatibility.
 - Resume after file edits preserves committed configuration/catalog; explicit
   settled changes commit atomically; in-flight changes refuse.
+- Separate summarizer file/flag precedence, unconfigured display/refusal and
+  invalid supplied model/route/mapping refusal. Resume may select a new model
+  for later episodes without redirecting an admitted one; status distinguishes
+  active from configured model and never reads credentials.
 - Trace enable/disable, invalid scopes/limits, dropped counters, stalled stderr,
   JSON separation, runtime isolation, credential exclusions and cleanup.
 - Operator V12 exercises file-only, CLI override, malformed input and restart.

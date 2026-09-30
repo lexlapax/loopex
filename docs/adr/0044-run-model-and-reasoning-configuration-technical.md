@@ -53,7 +53,8 @@ and commit one version or one unchanged refusal. Replayed identical command ID
 returns its original disposition; different payload reuse refuses. The session
 must be settled with no unresolved effect, provider attempt or maintenance.
 Configuration preflight may report compaction required; it does not call a model
-or compact as a side effect. The operator can compact with the prior model first.
+or compact as a side effect. The operator can use the configured summarizer to
+compact before retrying configuration.
 
 Host admission first checks controller authority and any host-owned ceilings.
 Validation uses ADR 0048's admitted provider routes, declared model capabilities,
@@ -77,10 +78,13 @@ output capacity has no invented catalog guarantee. Existing explicit reply
 limits remain enforced and visible.
 
 Each new run and maintenance episode binds its configuration version at admission.
-ADR 0043's runtime `maintenance_instructions` is captured separately in the
-episode's maintenance configuration. It is absent from session genesis,
+ADR 0043's runtime `maintenance_instructions` and explicitly resolved
+`maintenance_model` are captured separately in the episode's maintenance
+configuration. They are absent from session genesis,
 ordinary configuration and public `configure`; recovery never substitutes a
-new runtime block into an admitted episode.
+new runtime block or model into an admitted episode. The ordinary configuration
+supplies the parent version and applicable ceilings, not the summarizer's model
+or provider mapping. Ordinary `configure` never mutates the runtime selection.
 `reasoning` enters canonical sampling and digest when non-default; `default`
 omits it. Existing committed request bytes and provider attempts remain immutable.
 The ReqLLM adapter maps only verified model/level combinations. Retain a closed
@@ -221,8 +225,26 @@ stands in for required native data. Extend ADR 0017's estimator revision to
 charge the entire canonical continuation envelope in addition to existing
 message/tool/system charges, using the existing ceil(bytes/3) rule. This
 conservatively counts duplicated canonical text/tool arguments; it never treats
-private state as free or subtracts an unproved provider discount. Retain this
-charge and estimator revision in the context receipt. System-class limits stay
+private state as free or subtracts an unproved provider discount.
+
+Context-provider receipt revision 4, shared with ADRs 0042/0043, adds exactly one
+mandatory outer member `continuation_cost`: null for nil continuation, otherwise
+`{content_digest, byte_cost, token_cost}`. Compute the digest and byte count over
+`Canonical.encode(staged_continuation)` and `token_cost = ceil(byte_cost / 3)`.
+The digest is lowercase SHA-256 hex. Recompute all three against the actual
+staged request at construction and replay; no caller-supplied cost is trusted.
+This is private receipt metadata, not an extra provider message or descriptor.
+Keep `totals` and every `by_provenance` bucket equal to their message/tool
+descriptor sums. Under estimator `loopex.context_bytes.v2`,
+`provider_estimated_tokens = totals.token_cost + continuation_cost.token_cost`,
+treating null as zero. Input admission uses that complete sum. Maintenance has
+nil continuation and a null cost. Existing receipt revisions 2/3 retain their
+original estimator, closed keys and block-only equations. Public projection
+retains its existing metadata allowlist; this does not expose the private
+continuation or its digest. This accounting recipe describes the currently
+proposed continuation representation; a later selected representation must
+explicitly re-prove its estimator preimage and rendered-input coverage.
+System-class limits stay
 separate. Test the final rendered provider input against the declared estimator
 preimage; provider tokenization remains an estimate, not a billing guarantee.
 
@@ -258,6 +280,10 @@ and independent Node client update precede implementation integration.
 Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md#concept-adr-0044-consequences).
 
 - Atomic creation/configure, strict validation, version capture and idempotency.
+- Revision-4 continuation-cost null/non-null branches, exact digest/cost replay,
+  descriptor totals versus complete input estimate, unchanged v2/v3 equations,
+  and public exclusion of the private cost digest. A missing or fabricated
+  continuation charge cannot pass input admission.
 - Active/unresolved change refusal; legacy model derivation versus conflict.
 - Restart at configure and staging boundaries preserves configuration/digest.
 - Reasoning capability negatives, default omission versus verified disabled mode,
