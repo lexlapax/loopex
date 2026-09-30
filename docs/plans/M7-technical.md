@@ -304,6 +304,10 @@ same preparation targets. The real multi-round case records its first request,
 subsequent complete records and input estimates; a small initial request alone
 does not prove useful continuation capacity. No fixed round count is guaranteed
 for every admitted prefix.
+The selected durable live-streaming path also proves provisional answer delivery,
+bounded native assembly and exact final block reconstruction. Interruption and
+owner loss cannot commit a partial answer, dispatch tools from deltas or retry
+an ambiguous call. Buffered ephemeral delivery retains ADR 0039's transport.
 
 Use the existing CLI coding-task fixture and release lane as the starting
 point: `apps/loopex_cli/test/coding_task_test.exs` and
@@ -552,6 +556,9 @@ declines. Neither path assumes the model can be forced never to ask.
    Record the initial reserve, complete request sizes and expanded input charges;
    storage savings do not count as lower provider input. An automated near-limit
    initial-history variant proves compaction leaves the reserve before dispatch.
+   Observe live provisional answer text when the provider supplies it. Automated
+   barriers prove progress precedes final settlement and tools wait for it;
+   fault cases cover split events, limits and interrupted signatures/messages.
    Reopen the settled session and confirm configuration and canonical history.
    The next run starts a new exchange; automated fault cuts cover open-exchange
    restart and exact replay.

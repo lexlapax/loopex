@@ -24,10 +24,13 @@ for oversized older content, retaining complete originals, and
 [option B: a separately configured summarizer](../developer/agent-context-map.md#disposition-m7-maintenance-model-2026-09-30).
 The maintainer subsequently selected
 [option A: local references and initial thinking reserve](../developer/agent-context-map.md#disposition-m7-thinking-capacity-2026-09-30).
-All three choices are drafted, including source projection, omission provenance,
-captured maintenance-model selection and expanded continuation accounting.
+The latest selection is
+[option A: live streaming](../developer/agent-context-map.md#disposition-m7-thinking-streaming-2026-09-30).
+All four choices are drafted, including source projection, omission provenance,
+captured maintenance-model selection, expanded continuation accounting and
+bounded native stream assembly.
 Further material choices will be presented one at a time, including supported
-modes, native-response delivery/privacy, protocol compatibility
+modes, public reasoning-summary policy, protocol compatibility
 and the scope of the parallel-helper ban. A report's request for a decision
 does not by itself reopen a choice the maintainer already made.
 
@@ -432,8 +435,9 @@ for always-on conversation models, retaining the small thinking-off maintenance
 budget. Restricting long-session support to thinking-off-capable conversation
 models and increasing the maintenance reasoning allowance were not selected.
 The proposal repair adds explicit model configuration, routing and recovery
-bindings. Ordinary bounded thinking in M7 remains selected; its useful capacity
-and native delivery/privacy choices still require disposition.
+bindings. Ordinary bounded thinking in M7 remains selected. The subsequent
+capacity and live-delivery selections are drafted; their integrated proof and
+the public reasoning-summary choice remain outstanding.
 
 ### Finding dispositions
 
@@ -453,7 +457,7 @@ It does not mean implemented or tested. Pending rows prevent a readiness claim.
 | 9 | Corrected complete example measured; margin remains narrow | Earlier helper numbers omitted a required property. Restored schemas and two wording repairs produce a 990-token example for this checkout, but a 96-byte path already reaches 1,010. No schema/cap relaxation or provider-quality claim follows; actual demonstrated profiles and margins remain required. |
 | 10 | Claimed subtraction rejected; wording repaired | 8,192 is the fallback input budget. ADR 0041 now says so explicitly. Actual mandatory-content preflight still applies. |
 | 11 | Repaired | ADR 0044 uses settlement v3, preserves ADR 0021 v2 and its accounting evidence, and charges invalid continuation conservatively. |
-| 12 | Feasible route found; delivery choice pending | Built-in Anthropic preparation plus per-request Req steps can capture buffered native replies without global provider registration. Native streaming needs additional lifecycle work; do not silently narrow its promise. |
+| 12 | Live streaming A selected and drafted; focused bridge probe passed | Preserve durable live answer progress and buffered ephemeral delivery. The pinned parser/provider bridge probe demonstrates early text, private complete capture, signature joining and failure latching. ADR 0044 requires complete grammar, bounded accumulation, atomic settlement, interruption/recovery and transport proof; the scratch probe does not implement or prove those full obligations. |
 | 13 | Pending maintainer choice | Existing public reasoning summaries conflict with blanket suppression. Decide permitted public summary versus private native data and name any accepted-contract amendment. |
 | 14 | Evidence gap repaired | Add real continuation after bound/cancel with a new prompt and exact rendered grouping. Unsupported rendering refuses; no invented assistant completion. |
 | 15 | Clarified | Define deterministic derived IDs and collision refusal. A chosen prefix cannot prove disjointness from native IDs. |
@@ -624,6 +628,68 @@ treated the inherited contract as sufficient authority. The lead accepted the
 clarification and coverage addition, without treating it as a new acceptance
 blocker. This bounded pass does not replace the complete-packet review.
 
+### Live-streaming selection and focused review
+
+The maintainer selected A, live streaming. The draft keeps live answer text on
+the existing durable path and adds bounded native assembly before tool admission.
+ADR 0039's ephemeral one-shot path remains buffered. The separate question about
+publishing verified provider reasoning summaries is unanswered; this selection
+does not authorize disclosure of private native thinking or signatures.
+
+A read-only source trace at `d6e5bacfc64a60d4c92f36a5e5b68ed5124c8cff`
+identified a per-invocation parser/provider callback route in pinned ReqLLM
+1.24.0. Its ordinary decoder replaces signature fragments and marks a converted
+message delta terminal before the native message stop. Its parser also logs and
+continues after an error return. Ordinary converted chunks therefore cannot
+prove complete native capture. The durable drain accumulates chunks without
+an aggregate byte bound; queue high-water counts do not fix that. The draft
+requires a separate bounded private return, exact fragment assembly, actual
+message-stop evidence and raw/parser/content bounds. It reuses the buffered
+path's 8,388,608-byte raw-body ceiling, counting cumulative stream input before
+append and decode. Existing capsule, reply and owning-record limits still apply.
+The official [stream event contract](https://platform.claude.com/docs/en/build-with-claude/streaming)
+was checked on 2026-09-30 using Context7 and the provider's documentation.
+
+One advisory reviewer found that malformed interior input followed by valid
+closure could survive the dependency's log-and-continue behavior. The lead
+accepted the finding and added a monotonic invocation-failure latch before
+suppression or raw diagnostics, exact-stream termination, an explicit flush rule
+and the failing-sequence witness. The reviewer's focused reread found the gap
+resolved with no new contradiction in those additions. This was a read-only
+task in the workspace-write environment, not formal acceptance review.
+
+The lead retained a minimal dependency-only feasibility probe at
+`/tmp/loopex-m7-stream-bridge-d6e5bacf/`. It starts the pinned StreamServer and
+injects synthetic SSE input through its HTTP-event interface; no HTTP task,
+provider or credential is used. Its five final cases passed in `run-2.log`:
+complete capture, missing message stop, unterminated final event, malformed
+interior JSON followed by valid closure, and raw overflow followed by valid
+closure. The positive case exposes answer text before completion, joins two
+signature fragments, assembles exact tool arguments and returns ordered native
+blocks privately. The checked ordinary queue and accumulator omit the private
+probe markers. Failure cases return no private completion; the probe owner
+cancels and stops the exact server.
+
+| Retained file | SHA-256 |
+| --- | --- |
+| `README.md` | `9daade4472b97016ba9ce05112fb2f3394f9749c91fdb1d425ee5bff84eea6f0` |
+| `probe.exs` | `3a86c68ed466df8e360063a15d8865376f38d5024c3dc8902050428b671aa73b` |
+| `run-2.log` | `7df4891e7e817805b89ce57c79cb88bfb3e04d3230b0ef9e34dbaa1da86ca635` |
+| `source-manifest.json` | `66267040a16c0cc3e9c30aa4932a7c90b36d8ff9aad5f8fd9d9ff82327d532ff` |
+| `SHA256SUMS` | `17ae64e6168b99cdf68c544f7b61b44d9b5d4b47572e80fb8786d1cdfff7c4e2` |
+
+The manifest pins inspected source/lock files and retained ReqLLM,
+ServerSentEvents and Jason beams. The script used existing development beams
+under Elixir 1.20.3/OTP 29; not every transitive module was rebuilt or bound.
+`run-1.log` is historical output before the unterminated-event case was added;
+the final script matches `run-2.log`. Both runs passed; the second added coverage.
+This probe covers only a small event subset. It does not prove complete grammar,
+all size boundaries, memory high-water marks, actual request/HTTP wiring,
+provider signatures, native request rendering, selected-key screening, all
+telemetry audiences, core validation/accounting/settlement, cancellation races
+or restart. Those remain implementation obligations, as does the final
+whole-packet planning review.
+
 <a id="resume-checkpoint"></a>
 ### Resume checkpoint, 2026-09-30
 
@@ -631,11 +697,12 @@ The maintainer's restart request selected A for oversized-source excerpts.
 That repair and the later B selection for a separate summarizer are drafted.
 The maintainer also answered A for thinking capacity. Its generic local-reference
 and initial-reserve repair is drafted and measured above. Do not re-ask it.
-The current unanswered question is delivery for Claude thinking modes: A keeps
-live streaming with complete-block assembly/interruption/recovery tests; B waits
-for the completed reply in those modes while ordinary non-thinking replies can
-still stream. A is recommended, not selected. Keep the existing draft promise
-until that scope choice is resolved.
+The maintainer selected A for live streaming; its repair and limited feasibility
+probe are recorded above. Do not re-ask it. The current unanswered question is
+public reasoning summaries: A permits verified provider summaries through the
+existing reasoning-progress path, with private continuation/signatures excluded;
+B hides reasoning content in thinking modes. A is recommended, not selected.
+Do not infer this privacy decision from the live-delivery choice.
 Resume this work on branch `m7` in
 `/Users/spuri/projects/lexlapax/loopex`; inspect Git before changing anything.
 All work remains planning/docs, with commits and pushes authorized. M7 is Open,
@@ -643,7 +710,8 @@ ADRs 0041–0049 are Proposed, and the paired vision amendment is unaccepted.
 Do not implement product changes or present a final external-review SHA/prompt
 until the remaining decisions, repairs and whole-packet adversarial pass finish.
 
-1. Preserve the selected source-excerpt A, summarizer B and thinking-capacity A
+1. Preserve the selected source-excerpt A, summarizer B, thinking-capacity A and
+   live-streaming A
    repairs and their sizing/review record above.
    Preserve originals,
    whole-group checkpoint cuts, exact provenance, the protected recent tail,
@@ -654,8 +722,8 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    only executor-result text leaves the original blocker unresolved.
 2. Ask remaining material questions one at a time, with plain-English options
    and consequences. The question tool was invisible to this user; display the
-   options in the chat as well. Next resolve native-response delivery, then
-   supported modes/privacy, explicit range-read usability, old
+   options in the chat as well. Next resolve public reasoning summaries, then
+   supported modes, explicit range-read usability, old
    tool/protocol compatibility and the parallel-helper ban's scope. Do not
    reopen recorded choices or infer approval from silence.
 3. Use the retained probes above. The earlier local-reference comparison is
@@ -668,10 +736,10 @@ until the remaining decisions, repairs and whole-packet adversarial pass finish.
    the exact external-review candidate SHA and a review prompt. Acceptance is
    a later maintainer decision.
 
-The latest pushed checkpoint before this cleanup-grace clarification is
-`355ade1f34db15340be6ea18fcb06a83cd44f85a`. Its documentation gate passed in
-17 seconds. The complete log is `/tmp/loopex-m7-thinking-355ade1f-docs.log`,
+The latest pushed checkpoint before this live-streaming revision is
+`d6e5bacfc64a60d4c92f36a5e5b68ed5124c8cff`. Its documentation gate passed in
+17 seconds. The complete log is `/tmp/loopex-m7-cleanup-d6e5bacf-docs.log`,
 SHA-256 `fc6b66c459cc602be769c449a1c5398939dd23edc0655fc29b3be231dff02b1c`.
-That run is not evidence for the subsequent cleanup-grace edits. Read Git
+That run is not evidence for the subsequent live-streaming edits. Read Git
 and the retained verification record for the current checkpoint; no worker owns
 repository edits. Durable records govern, not worker memory or old chat summaries.

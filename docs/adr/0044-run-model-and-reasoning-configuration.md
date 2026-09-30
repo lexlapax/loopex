@@ -24,6 +24,15 @@ conversation conversion loses or rearranges them, while retaining the existing
 transport, credential and cleanup boundaries. This proposal defines the
 selected scope; its bytes remain unaccepted.
 
+The maintainer also selected live streaming. The existing durable streaming
+path delivers answer text as it arrives, subject to ordinary progress limits.
+It assembles complete provider blocks privately before a reply can authorize
+tools. Interrupted or malformed streams may leave visible provisional text,
+but never a partial durable answer or tool call. Recovery follows the existing
+attempt rules and cannot restart an ambiguous provider call. The buffered
+ephemeral path keeps ADR 0039's non-streaming contract and must preserve the
+same complete native data before returning a reply.
+
 Configuration becomes a durable session fact. Creation and settled-only
 `configure` commit an exact model identity, reasoning, instruction envelope and
 context/reply limits with one version. A run captures that version at admission
@@ -93,6 +102,10 @@ The smaller stored form provides no token discount: admission still charges
 the complete expanded continuation in addition to canonical conversation data.
 Operators can observe earlier compaction and a named reserve refusal while the
 ordinary hard limits remain unchanged.
+Streaming clients distinguish provisional text and a closed or abandoned
+stream from the committed final answer. A silent interval while the provider
+thinks is possible; Loopex does not invent progress text or expose private
+blocks to fill it.
 
 <a id="concept-adr-0044-compatibility"></a>
 ### Compatibility and Rollback

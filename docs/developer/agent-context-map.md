@@ -6242,3 +6242,15 @@ detail. Retaining duplicate copies and stopping after short exchanges was not
 selected. ADR 0044 owns the reference representation, full-input accounting and
 initial reserve; ADRs 0041/0043 own their allocation and compaction joins. This
 authorizes drafting those contracts, not plan/ADR acceptance or product work.
+
+<a id="disposition-m7-thinking-streaming-2026-09-30"></a>
+### M7 thinking delivery choice, 2026-09-30
+
+The maintainer selected option A, live streaming, for Claude thinking modes.
+Preserve live answer text in the existing streaming path and add bounded native
+response assembly, interruption and recovery proof. Partial progress cannot
+authorize tools or replace a committed complete reply. ADR 0044 covers both
+streaming and buffered capture; ADR 0039's explicitly non-streaming ephemeral
+profile keeps its existing transport and delivery contract. Whether verified
+provider reasoning summaries may be public remains a separate question. This
+authorizes proposal revision, not acceptance or product implementation.

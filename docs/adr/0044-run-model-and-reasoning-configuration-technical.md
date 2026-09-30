@@ -293,6 +293,88 @@ implicit dependency upgrade is authorized. The raw path obeys existing input,
 reply, private-channel and cleanup bounds. A mode whose complete blocks cannot
 be captured and rendered losslessly is unsupported before dispatch.
 
+**Streaming assembly.** The selected live-delivery scope applies to the existing
+durable streaming path. ADR 0039's ephemeral caller remains buffered through its
+one-shot transport; changing it to `stream_text` would bypass that accepted
+transport/cleanup contract. Both paths must capture the same complete native
+blocks and construct the same capsule for equivalent decoded replies.
+
+The streaming adapter captures native events before ReqLLM's ordinary chunk
+conversion. Use a per-invocation bridge over the pinned provider/parser callbacks
+and ReqLLM transport, with no global provider replacement, application setting,
+second HTTP client or dependency upgrade. Preserve request option validation,
+exact model/routing, native request rendering, the existing dispatch handoff
+classification and companion lifetime. Native assembly state stays private to
+that invocation; it cannot be recovered from a public progress subscriber.
+Return completed capture over a bounded private path correlated to that same
+invocation. Never return native blocks or signatures through ordinary chunk
+metadata, dependency telemetry, progress or raw exception terms. The buffered
+caller extends its existing selected-key screening to every new captured value
+before returning it. This does not claim an existing durable per-delta key
+screen that its current drain does not implement.
+The existing converted-chunk list is not an adequate native capture or memory
+bound. Replace its unbounded accumulation on this path with bounded assembly;
+do not retain both a full event log and its assembled reply.
+
+Count raw HTTP response-body bytes before SSE parsing, including comments,
+pings and framing. The proposed stream ceiling is 8,388,608 bytes, reusing the
+buffered one-shot response ceiling. Pending framing/JSON input shares that
+ceiling, not a fresh allowance for each event. Check before append/decode;
+release consumed fragments. Completed native content still obeys this ADR's
+16,384-byte expanded cap, block limit and ordinary structural/reply bounds.
+Account for every retained accumulator and dependency queue in the memory proof;
+a chunk-queue count or a final Store refusal alone proves none of those byte
+bounds. Pings do not extend the committed deadline or count as model progress.
+The bridge must make overflow, malformed framing and JSON decode errors fatal
+before dependency code can discard them or render their raw diagnostics. Retain
+a monotonic invocation-failure latch and terminate the exact owned stream;
+later input cannot clear the latch or restore success. Pinned StreamServer logs
+and continues on a parser error return, so that return alone cannot enforce
+this rule. Validate before lossy SSE event conversion too. Test final parser
+flush as well as ordinary input; neither may turn a previous failure or
+incomplete event into successful completion.
+
+For the pinned native event grammar, require one message start, unique ordered
+block indices, type-correct deltas for an open block, matching block stops and
+one final message stop. Preserve empty blocks and event-defined content order.
+Assemble text, thinking and signature fragments exactly; finish tool-argument
+JSON as one bounded object at its block stop. No partial JSON or signature can
+become a completed block. Message-level usage updates are cumulative: retain the
+final supported totals, not their sum. Preserve missing/invalid counter evidence
+and use the existing accounting rule; dependency zero defaults cannot turn
+absent counts into reported usage.
+Allow documented pings without retaining them; unsupported content/events,
+conflicting identities, invalid ordering or incomplete final framing fail with
+the existing bounded error shape. Native provider fallback or server tools are
+not silently interpreted as the selected model or local application tools.
+Pinned ReqLLM currently marks a converted `message_delta` terminal before the
+native `message_stop`, and its thinking-signature update replaces a prior
+fragment. The invocation bridge must defer converted terminal completion until
+the actual native message stop, concatenate signature fragments and reject
+incomplete flush/EOF. A converted finish reason or successful metadata task
+alone cannot establish complete native capture.
+
+Answer-text and supported tool-call progress use ADR 0011's existing transient
+projection as they arrive, with its payload limits, sequence/count rules and
+credential/terminal-control exclusions. Private capture does not add a public
+event type. A slow or disconnected subscriber may lose progress without losing
+private assembly or changing the eventual reply. No tool policy evaluation or
+dispatch begins until the complete native message, canonical reply and capsule
+validate and the owner commits their atomic settlement. A block stop, progress
+closure or partial tool argument is never that authority.
+
+On stream error, premature EOF, cancellation, deadline or assembly-bound failure,
+stop emitting progress and clean up through the existing invocation owner.
+For non-cancellation failure before a complete reply exists, preserve ADR 0018's
+started-call failure and conservative accounting; a completed but invalid reply
+follows this ADR's prevalidation rejection rule. Admitted cancellation retains
+its existing precedence, cleanup outcome and abandoned-stream close. Earlier
+visible text remains provisional, not a durable assistant message or checkpoint
+source. Owner loss discards incomplete assembly;
+recovery uses committed attempt/settlement evidence and never reconnects using a
+provider response ID, appends to a partial reply or repeats an ambiguous call.
+Late complete replies stay evidence only under the existing attempt rules.
+
 Freeze the first request's complete rendered system, tools, messages, artifact
 excerpts and canonical-ID mapping. Every next request extends that same prefix
 with assistant arrays expanded from the exact retained layouts and their
@@ -428,6 +510,25 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   the private-store and credential guarantees must not imply secrecy from it.
 - A real selected Claude thinking/tool loop, including multiple tools/rounds;
   raw block fidelity, redacted/interleaved blocks, signatures and native ID mapping.
+- Streamed/buffered native-equivalence vectors and one live durable thinking case
+  with answer progress before complete reply settlement. Controlled barriers prove
+  this ordering without a latency threshold or a requirement that every model
+  produce text before tools. The ephemeral case remains buffered.
+- Native streams split across UTF-8, SSE and JSON boundaries; empty/interleaved
+  blocks, cumulative usage, signature completion and exact argument assembly.
+  Reject duplicate/out-of-order indices, wrong-kind deltas, unknown blocks,
+  missing stops, premature EOF and provider error/fallback events before tools.
+- Raw-body, pending-parser, expanded-content and block-count boundary vectors;
+  repeated pings, slow subscribers and bounded dependency queues. Retain measured
+  memory/counter evidence; no full raw-event/chunk log may grow alongside assembly.
+- An interior malformed SSE/JSON event followed by valid block/message stops
+  remains failed: abandoned progress, conservative started-call accounting,
+  cleanup, no canonical reply or tools, and no automatic retry. A parser return,
+  flush or later valid terminator cannot hide the lost event.
+- Cut the stream before/after signature and block completion, before message
+  completion and around reply settlement. Prove provisional progress closure,
+  no partial durable answer/tool dispatch, truthful accounting, cleanup in each
+  transport profile and no retry/reconnect of dispatched-or-unknown work.
 - Crash/commit_unknown cuts at reply settlement, tool intent and next staging;
   no lost capsule, stale source, late-reply activation or duplicate provider call.
 - Compact and expanded capsule/aggregate limits, complete-record boundaries and
@@ -469,3 +570,11 @@ freeze above. ReqLLM capture/render vectors must cover its pinned
 `providers/anthropic/response.ex` and `providers/anthropic/context.ex` losses.
 No provider credential or live
 call was used for this planning research.
+
+The official [stream event contract](https://platform.claude.com/docs/en/build-with-claude/streaming),
+checked 2026-09-30, describes indexed block assembly, partial tool JSON,
+thinking signatures, cumulative usage and message completion. These event facts
+do not supply Loopex dispatch, recovery or publication authority. Pinned local
+ReqLLM exposes provider decoding callbacks before ordinary stream chunks, but
+its chunk queue does not bound the accumulated response. The implementation
+must prove the per-invocation bridge and bounds above with the retained version.
