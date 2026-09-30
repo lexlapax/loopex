@@ -137,6 +137,8 @@ The next planning candidate is the Open [M7 coding-agent proof](plans/M7.md#conc
 followed by the installed durable operator, store engine and governed extension
 runtime [drafts](drafts/README.md) for M8–M10. M7 and the successors are unaccepted;
 their scope and release versions remain decisions for their own acceptance.
+M7 acceptance also reviews the labelled question/helper amendment in both
+vision files; it has no separate implied acceptance through this roadmap.
 
 Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technical-roadmap-minimal-runnable)
 

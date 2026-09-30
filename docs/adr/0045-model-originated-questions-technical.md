@@ -64,6 +64,20 @@ callers. Validate producer/kind through the same serial owner and mutation slot.
 Creator ownership, call deadlines, `last_result`, cancellation and cleanup remain.
 A manually hosted live session can answer without a callback.
 
+| Entry point | New options and ownership |
+| --- | --- |
+| `start_session/1` | Startup `questions`, ADR 0048 `provider_bindings`, ADR 0049 `trace`; reject `question_responder` |
+| `run/2` | Same startup options plus one-shot-only `question_responder`; consume the responder locally and pass only startup options to `start_session/1` |
+| `ask/3` | Existing per-call options unchanged; startup configuration belongs to the live session |
+
+Both `start_session/1` and `run/2` add closed Boolean option `questions`,
+default false. False preserves the existing frozen tool definitions and adds
+no question tool. True adds the exact reviewed question generation before
+creation, except that an empty base tool profile with questions enabled
+refuses, matching ADR 0049's `none` contract. This does not make existing
+policy-defer interactions model questions. The one-shot wrapper with questions
+enabled but no responder denies model questions before opening an interaction.
+
 The one-shot `run/2` options gain `question_responder`, an explicit
 host function taking a bounded DTO of interaction ID, prompt, kind, choice IDs/
 labels and absolute expiry. It returns `{:text, binary}`, `{:choice, id}` or
@@ -82,6 +96,11 @@ not successful completion. Synchronous host callback work must not block the
 owner's timer/cancellation path. Reuse the single ephemeral runtime through this
 wait; do not recursively create another call/session. ADR 0039's credential,
 one-call and cleanup rules otherwise remain unchanged.
+Supplying a responder while `questions` is false refuses as conflicting
+configuration. Abort/expiry may forcibly terminate the callback mid-effect;
+there is no rollback of host effects. Non-recursion is a documented obligation
+of trusted host code, not a claimed sandbox or an enforceable code-inspection
+rule. The callback worker is part of the owning call's monitored cleanup tree.
 
 <a id="technical-adr-0045-evidence"></a>
 ### Evidence
@@ -97,6 +116,8 @@ Concept: [Observable consequences](0045-model-originated-questions.md#concept-ad
 - New schema/generation negotiation, snapshots and independent Node client.
 - Ephemeral answer success, no responder denial, exception/invalid reply,
   blocked responder, abort/deadline, late delivery and joined cleanup.
+- Omitted/false question option preserves old staged tool-definition bytes;
+  true selects the exact new generation, and conflicting options refuse.
 - Real attended question changes the fixture's implemented behavior; a one-call
   ephemeral host demonstration answers without claiming restart persistence.
 

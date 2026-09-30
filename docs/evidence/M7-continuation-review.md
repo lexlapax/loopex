@@ -1,5 +1,10 @@
 # M7 thinking continuation and helper recovery review
 
+Historical checkpoint: `10749d084bd74487aac423d9640ac2eb1d05bee6`.
+The [round 2 external assessment](M7-external-review-2.md) reopens its readiness
+conclusion. The findings and hashes below remain records of that checkpoint,
+not of subsequent repairs.
+
 Date: 2026-09-30. Source checkpoint:
 `4c2d1c9ff93accc4161697f83f87487d14266dd7`.
 This follow-up addresses the remaining choice and a new recovery finding after

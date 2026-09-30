@@ -13,11 +13,19 @@ Current source initializes each run's conversation with `[element]` in
 run's elements only. Extend projection as a pure function over committed
 lineage: system, admitted project context, prior runs in admission order,
 current run elements and any admitted steer at its defined boundary.
+The lost lineage is a current conformance defect against accepted ADR 0010;
+the new projection/artifact policy is the proposed amendment, not the source
+of authority to remember prior runs.
 
 Join tool calls/results by `(run_id, turn_number, tool_call_id)`, never by
 turn number or provider call ID alone. Derive deterministic provider-facing
 call IDs across the entire projection; retain the mapping back to canonical
-identities. ADR 0044's open native thinking exchange is the explicit exception:
+identities. Projection revision 1 uses `lx_` followed by the first 48 lowercase
+hexadecimal SHA-256 characters of the canonical encoded run/turn/call identity.
+Check uniqueness over the complete projected mapping; a hash collision refuses
+staging rather than joining two calls. The prefix is an identifier convention,
+not proof of disjointness from provider-generated IDs.
+ADR 0044's open native thinking exchange is the explicit exception:
 freeze its prefix mapping and preserve its original native tool IDs, rejecting
 collisions before tool dispatch. After the exchange, normalize canonical history
 again. Reused provider IDs in later runs must not select an earlier
@@ -62,7 +70,14 @@ definitions and inline facts, with host inspection still available. No implicit
 tool-set migration is permitted. Small inline results remain usable.
 
 For new output too large for the projection, use the existing verified artifact
-spill path before receipt commitment. Preserve the original terminal outcome,
+spill path before receipt commitment. Measure the complete encoded projection
+including its reference notice; crossing that bound triggers retention even
+when output remains below the tool's capture/output ceiling. New M7
+grep/find/ls generations need artifact allowances sufficient for their retained
+capture ceilings; their old one-byte artifact budget cannot implement this
+path. Freeze and validate those new definitions before session creation.
+Do not lower capture limits merely to avoid retaining the promised source.
+Preserve the original terminal outcome,
 receipt and diagnostics. Retention failure cannot claim a retrievable reference;
 existing size/cleanup limits still apply. Full output means all bytes actually
 retained by that tool under its existing limit, not unbounded process output.
@@ -142,7 +157,8 @@ replaces full exact-record preflight.
 
 For a known model window `W` and reply reserve `R`, the host default is `W-R`.
 Reject `W <= R`. An explicit input budget cannot exceed `W-R` when known.
-For an unknown window use 8,192 and label the fallback; an explicit host value
+For an unknown window use an 8,192-token input budget and label the fallback;
+do not subtract the reply reserve from that fallback again. An explicit host value
 is allowed but proves no unknown model capacity. A provider/model change must
 recompute and validate the effective budget. Record budget origin and value.
 ADR 0043 owns automatic staging compaction and its bounded failure behavior.

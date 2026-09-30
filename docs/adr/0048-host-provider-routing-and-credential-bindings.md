@@ -6,7 +6,7 @@ Technical depth: [Host provider routing and credential bindings](0048-host-provi
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) only its single model/token/registry-binding restriction; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only its fixed selected-provider environment-variable names
+- **Supersedes:** [ADR 0019](0019-host-owned-provider-protection.md#concept) only its sole `LOOPEX_PROVIDER_API_KEY` source; [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) only its single model/token/registry-binding restriction; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only its fixed selected-provider environment-variable names, durable single-source restriction and closed startup-option set for explicit provider references
 - **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)
 - **Prerequisite for:** M7 outcomes 4 and 7
 
@@ -35,6 +35,10 @@ host-VM audience, ambient-tool trust and cleanup limits. These paths must not
 share a loader that gives either profile the other's credential lifetime.
 Runtime restart may rebind the same provider to a host-authorized replacement
 key; it never changes an admitted request's model or digest.
+Host binding configuration is explicit in durable and ephemeral composition
+options. Every reference host passes it through the same validated composition
+boundary. Environment-variable names identify host-selected slots; they cannot
+prove which provider issued the stored value.
 
 <a id="concept-adr-0048-consequences"></a>
 ### Observable Consequences

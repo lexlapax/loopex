@@ -37,7 +37,9 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M7 planning review](M7-planning-review.md) | Internal implementation-readiness findings, repairs, reviewed contract digests and external-audit gates; no implementation or acceptance claim. |
 | [M7 external review, round 1](M7-external-review-1.md) | Received assessment of candidate 20ff082a; retained source for the planning repairs. |
 | [M7 audit repair review](M7-audit-repair-review.md) | Historical 4c2d1c9f round 1 repairs, internal delta review, contract hashes and the gates outstanding at that revision. |
-| [M7 continuation review](M7-continuation-review.md) | Selected thinking continuation, stop-only helper recovery, prompt-cost probe and external re-audit scope. |
+| [M7 continuation review](M7-continuation-review.md) | Historical 10749d08 thinking continuation/helper recovery proposal, prompt-cost probe and internal review. Round 2 reopens its readiness assessment. |
+| [M7 external review, round 2](M7-external-review-2.md) | Received assessment of candidate 10749d08; source SHA-256 7f445b3638917d7e1c782218b13cf4e4c6efeefc6b879cac5e8e7731da6a5483. |
+| [M7 round 2 disposition](M7-round-2-disposition.md) | Source-backed triage of all 44 findings, measured synthetic bounds, proposal repairs, fresh internal findings and still-pending choices. No readiness or implementation claim. |
 
 ## Related
 

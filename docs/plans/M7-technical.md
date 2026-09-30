@@ -31,15 +31,17 @@ Accepted decisions that constrain the work:
 
 | Decision | Constraint on M7 |
 | --- | --- |
-| [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage; ADR 0044 amends session-fixed model and empty continuation |
+| [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage; ADR 0041 amends tool-result projection, ADR 0042 system-text ownership, ADR 0043 raw-only projection/compaction deferral, and ADR 0044 session-fixed model/empty continuation |
 | [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure and ADR 0046 adds the explicit deadline ceiling |
-| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, session configuration placement and charged continuation |
+| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, session configuration placement and charged continuation; ADR 0046 extends the closed prompt/follow-up bounds |
 | [ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | Existing relative deadline remains; ADR 0046 explicitly permits an earlier committed absolute cutoff, including before first staging |
 | [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain |
 | [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; ADR 0044 versions the closed reply/settlement shapes for private continuation; two attempts per logical operation and no ambiguous redispatch remain |
+| [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 introduces v3 and cannot promote an invalid continuation reply to reported usage |
 | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
-| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0045 adds bounded one-call answers and ADR 0048 permits explicit env names |
+| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
+| [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) | ADR 0048 amends only its sole credential source; durable isolation, cleanup and trusted-launch exclusions remain |
 | [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Durable provider dispatch retains host-owned credential references and per-invocation custody; ADR 0048 narrowly amends its single-provider restriction |
 | [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) | Host-owned runtime tracing, bounded diagnostics and redaction remain unchanged when exposed through startup flags |
 
@@ -101,7 +103,8 @@ Measure each actual profile. An explicit larger host ceiling does not itself
 approve a reference-product target deviation.
 
 Trace flags map only to the existing runtime-scoped host API and ceilings.
-Bounded stderr consumption, separate drop counts, redaction, credential process
+Bounded pending stderr output, separate drop/delivery-uncertainty counts,
+ADR 0030's unchanged best-effort diagnostic-sink mailbox, redaction, credential process
 exclusions and runtime cleanup are implementation obligations. They add no
 client trace method. Effective inspection never resolves a credential.
 
@@ -257,13 +260,27 @@ oracle digests. Implement these concrete oracles before the first real run:
 Fixed prompts explicitly request the question/helper calls needed by their
 scenario. Inspect committed call identities and outcomes; a model that ignores
 the required call fails that attempt. Do not retry until a favorable response.
-These are specifications to implement, not fixtures or successful proof today.
+A missed required model action is a failed real-task attempt and blocks that
+outcome's proof and closure. Label its observed cause honestly, but a
+model-nonconformance label does not turn the required task into a pass. A new
+candidate requires a substantive correction supported by a causal diagnosis,
+with prior failures retained and affected checks run under the normal rules;
+a new SHA or prompt reroll alone does not authorize retrying into green. A
+change to the task, required outcome or acceptance rule needs an explicit
+maintainer disposition before another attempt. The administrative closure
+commit cannot introduce that change. These are specifications to implement,
+not fixtures or successful proof today.
 
 The maintainer selected agent-run fixture tests and independent harness reruns.
 Add a fixture-host policy adapter supplied by trusted validation-harness
 composition to the real CLI path, with exact approved invocations and a pinned
 manifest. This bypasses no policy decision and exposes no new production config
-profile or caller-supplied policy module. Record the effective policy/manifest
+profile or caller-supplied policy module. The planned trusted entry point is
+`scripts/m7-fixture-chat.exs`: validate the ordinary explicit file and closed
+policy profile first, then inject the fixed fixture policy through host
+composition and invoke the same CLI conversation driver. Only the harness owns
+this injection; neither a config field nor a model argument names a module.
+Record the effective policy/manifest
 identity; production config retains its closed profile registry. Before the attempt, pin command bytes, executable/runner
 path and digest, cwd, permitted inputs and scrubbed environment. The trusted
 runner lives outside the writable task tree and uses absolute toolchain paths
@@ -319,6 +336,11 @@ process loss from a daemon client's detach.
 
 #### V2. Repair across prompts and restart
 
+The static-pipe variant treats an unexpected question as a recorded failed
+scenario and exits through the ordinary cleanup path. It never answers a future
+or guessed ID. A separate bidirectional-pipe case proves actual-ID answers and
+declines. Neither path assumes the model can be forced never to ask.
+
 1. Open the repair fixture and request a diagnosis without an edit.
 2. Ask for the fix by referring to the earlier diagnosis without repeating it.
 3. Have the agent run the explicitly approved test command, then rerun the
@@ -341,7 +363,10 @@ process loss from a daemon client's detach.
 
 #### V4. Steer and queue a follow-up
 
-1. Start a task with a documented opportunity to steer before its next turn.
+1. Start the pinned task and wait for its controlled tool barrier. The trusted
+   fixture holds that tool's completion until the operator has submitted the
+   steer and follow-up. Document the barrier and its bounded failure path;
+   operator timing against a fast provider is not the acceptance oracle.
 2. Steer the active objective and observe its admission/disposition.
 3. Queue a follow-up while the run remains active.
 4. Observe that the follow-up becomes a separate run with prior context.
@@ -518,9 +543,18 @@ but cannot reduce it without maintainer disposition:
 | External task and retained results | V10.1–5 |
 | Backup/restore baseline | V13.1, V13.4–6 |
 
-Every required step names the operator, tested SHA, expected/actual result,
-objective assertion and retained evidence. All remaining steps, including positive paths,
-map to automated evidence, including V8.5–7 and V5.6 responder negatives.
+Every required step names the operator as `Maintainer` or
+`Delegate: <recorded identity>`, tested SHA, expected/actual result, objective
+assertion and retained evidence. Implement `operator_step_evidence` in the
+fixed fixture manifest before demonstrations. It lists every V1–V13 step and
+subcase, its attended/automated classification, exact lane/test ID, oracle and
+evidence slot. Missing or duplicate coverage fails validation; a prose promise
+that all other steps are automated is insufficient. This includes V8.5–7 and
+V5.4–5 fault cuts and V5.6 responder negatives. V5.6's attended positive path
+uses the checked-in `scripts/m7-ephemeral-question-demo.exs` host, which invokes
+the public ephemeral API and displays the real question for the operator to
+answer. Its callback submits through the ordinary answer path; no canned
+answer may stand in for attendance.
 Missing/unavailable evidence, unexpected refusal, failed independent rerun or
 uncertain cleanup blocks closure. Preserve the repository candidate procedure:
 Proved rows assert completed implementation and name proof obligations while
@@ -529,10 +563,32 @@ produce results. An observed defect cannot be hidden behind that administrative
 allowance or a Proved label.
 
 Create and index `docs/evidence/M7-closure-runs.md` in the implementation
-candidate before its closure matrix. It contains Pending slots for every
-outcome, attended step, full run output/digest, schema/vector manifest,
-provider/model identities, backup/restore manifests, exact M6 artifact,
-security review, independent review and documentation checklist. Extend the
+candidate before its closure matrix. Its predeclared Pending slots cover:
+
+- candidate/source identity, tested implementation SHA and full toolchain pins;
+- floor/current-pair run identities, outcomes, measured durations and complete
+  retained-output references/digests, including reused CI evidence where allowed;
+- the tested fresh-source archive manifest's exact retained bytes/reference and
+  digest, under the existing archive-extraction procedure;
+- every outcome and operator step/subcase, operator identity, attended-answer
+  authority and the manifest's exact lane/test-to-step mapping;
+- fixture manifest, prompt, runner and immutable oracle digests; every task's
+  objective result and duration/turn/token/maximum-reply measurements;
+- meaningful per-profile instruction/tool/environment/role cost measurements;
+- exact provider/model/mode identities and credential-free routing metadata;
+- both protocol schema/vector manifests and independent Node consumer results;
+- upgrade/old-reader/restore lane identities, complete manifests and exact M6
+  artifact identity, plus the external task's pre-attempt pin described below;
+- security, independent and documentation review identities and conclusions.
+
+The external repository/task remains selected during testing. Before any
+attempt, write its complete pinned specification to an immutable retained
+record with a SHA-256 digest and UTC timestamp. The runner requires that record,
+records its digest at startup and checks its timestamp precedes the attempt.
+Reference it from the predeclared evidence slot; filling a slot afterward alone
+does not prove prior selection. Changing the pin creates a new recorded attempt
+and cannot reclassify the old result. A committed candidate fixture may instead
+supply that pin when selection occurs before candidate commitment. Extend the
 existing release runner, selectors, wrapper/redaction tests and the existing
 PTY helper for the changed chat workflow. The current runner's fixed eleven
 cases and one credential are implementation work, not evidence that new lanes
@@ -540,6 +596,15 @@ already run. Required new selectors cover coding tasks, piped/attended chat,
 thinking/tool continuation, A→B→A, parent A/helper B and M7 upgrade/rollback. Credentialed lanes declare
 separate A/B references and redact all selected values; other lanes require no
 new credentials. Preserve all existing required lanes and failure honesty.
+Both A and B are admitted hosted credentialed routes for the durable examples;
+M7 adds no durable local-provider support. Pin their exact models, reasoning
+mappings and selected credential variable names before the attempt. The runner
+passes that complete selected-name set to its redactor and PTY driver and
+self-tests with every canary, including non-default names. Redaction cannot
+remain a fixed four-name list. The new selectors are required in the full
+closure release matrix; `--only` selects pre-merge evidence, not an exemption
+from closure. Require maintenance thinking-off on B only if that scenario
+claims compaction on B; switching alone does not establish that capability.
 
 <a id="technical-plan-acceptance-issues"></a>
 ### Internal review disposition and audit targets
@@ -551,7 +616,14 @@ proposal contradictions. The [external round 1 assessment](../evidence/M7-extern
 then identified additional gaps. This revision records their repairs, with the
 selected bounded thinking continuation and stop-only helper recovery included.
 The [follow-up record](../evidence/M7-continuation-review.md) binds their review.
-Fresh external audit remains outstanding. This is review of planned contracts, not product evidence or
+The [round 2 disposition](../evidence/M7-round-2-disposition.md) tracks each
+subsequent finding, measured limits, repairs and pending choices. It explicitly
+withholds a new readiness/handoff claim until those choices and our own complete
+adversarial review are resolved.
+The [round 2 assessment](../evidence/M7-external-review-2.md)
+then rejected candidate `10749d08` for additional feasibility and closure gaps.
+Its claims are under source-backed review; repairs and a fresh internal
+adversarial pass precede the next external handoff. This is review of planned contracts, not product evidence or
 formal independent acceptance review.
 
 | Finding | Governing repair and implementation witness |
@@ -579,6 +651,7 @@ to mechanisms that must be owned by the serial session writer:
 | --- | --- |
 | Retained lineage/excerpts and preparation facts | Staging/recovery must agree on committed context and its exact digest |
 | Configuration/genesis and immutable tools/defer mode | Admission, recovery and dispatch must use the same durable selection |
+| Closed reasoning level in configuration | Every host, configure command and recovered run must agree on one bounded durable setting; only adapters map that setting to provider-specific options |
 | Private continuation envelope and settlement | Exact request replay and atomic reply/tool admission must agree on retained provider data; adapters interpret its content |
 | Compaction state/checkpoints | Maintenance accounting, checkpoint transactions and staging are serial session truth |
 | Model-question transitions | Answer/expiry/cancel must atomically settle the original call and release the durable interaction slot |
@@ -615,7 +688,8 @@ The integration owner also owns the source joins hidden by the earlier packet:
 configuration normalization and session genesis/migration; runtime-to-session
 tool selection; executor router binding before recovery dispatch; parent-binding
 and catalog recovery; both protocol servers and payload-schema digests; the
-CLI policy registry's fixture adapter; release selectors/credential redaction;
+trusted fixture-chat wrapper and composition policy injection, preserving the
+CLI's closed production policy registry; release selectors/credential redaction;
 and the existing attended PTY driver. Each rejoins with conformance or negative
 vectors before a real-provider demonstration. No separate implementation may
 invent a second configuration, tool-generation or session-truth contract.
@@ -636,7 +710,8 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   records and v3 genesis, prepared tool-result references and artifact-read resolved
   arguments, immutable tool/policy selections, maintenance/compaction records,
   model_request.v2 continuation, bounded adapter/canonical reply v3 and
-  model_attempt_settled_v2, estimator revision and private/public projection,
+  model_attempt_settled_v3 preserving ADR 0021's v2/accounting provenance,
+  estimator revision and private/public projection,
   question producer/text/decline records,
   host role/allowance ledger including monotonic stop records, generic absolute deadline ceiling on prompt/follow-up,
   request revision, events, snapshots and negotiated
@@ -657,6 +732,15 @@ The old reference is the published `v0.3.0` source at
 with source/toolchain/digest evidence before the fixture run. A later source-docs
 commit is not a substitute for that artifact. Extend `scripts/rollback-lane.sh`
 and its selectors to cover the M7 matrix without dropping its earlier proofs.
+Keep the v0.2.0↔v0.3.0 fixture pair pinned to those exact historical artifacts
+and its original assertions. Add a distinct v0.3.0↔M7 pair: M6-to-M7 recovery
+must preserve staged truth; M7-to-M6 new-record cases expect safe refusal or
+the isolated backup-restore procedure, never successful decoding of v3 genesis
+by M6. Do not silently retarget an old positive-read vector to M7 and invert
+its expected result. The operator first stops all owners and removes the old
+binary's access to the live upgraded root through their launch procedure;
+this is a runbook precondition, not a new store marker claimed to fence M6.
+This fixture and runbook procedure does not implement M8's backup commands.
 Quiescent backups include sessions, runtime control, artifacts, executor
 receipts, private continuation/recovery state, catalogs and host ledgers; compare complete manifests after restoring
 into an empty root. Old staged v1 requests and old tool-definition bytes remain

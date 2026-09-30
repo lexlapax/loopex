@@ -10,7 +10,8 @@ Status: **standalone repository seed — founding document**
 Date: **2026-08-14**
 
 **M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
-tool budget in sections 14, 23 and 26 are proposals authorized for drafting by
+tool budget and its interaction-flow consequences in sections 6, 10, 14, 23,
+26 and 27 are proposals authorized for drafting by
 the maintainer. Review both files with M7. Until acceptance, the prior seven-tool
 and no-built-in-sub-agent clauses remain governing; dependent implementation
 must not begin. Other vision boundaries are unchanged.
@@ -488,6 +489,12 @@ needs user input, durable host storage, or an external service returns `defer`;
 the session commits a suspended interaction and resumes only after the host
 makes a durable decision. Timeout, host failure, or malformed response fails
 closed into denial or continued suspension. It never falls through to allow.
+
+**Proposed M7 question clarification.** ADR 0045's model-originated question
+opens only after policy allows its interaction-class tool. Its answer is tool
+data, never a policy grant. Policy-defer and model-question records have distinct
+producer and response branches, even though they share the durable interaction
+slot. The policy callback contract above is unchanged.
 
 The reference CLI may deliberately use an `AllowAll` host policy for a trusted
 single developer. That convenience is documented as permissive local authority,
@@ -1015,11 +1022,15 @@ stateDiagram-v2
     awaiting_tools --> preparing: ordered results committed
     awaiting_tools --> suspended: host interaction required
     awaiting_tools --> run_terminal: cancellation / unrecoverable failure / bound reached
-    suspended --> awaiting_tools: exact interaction resolved
-    suspended --> run_terminal: denied / expired / aborted
+    suspended --> awaiting_tools: exact resolution / model question declined or expired
+    suspended --> run_terminal: policy denial or expiry / abort / bound reached
     run_terminal --> preparing: follow-up queued
     run_terminal --> idle: no queued work
 ```
+
+The two suspended-state transitions include the **proposed M7 question flow**:
+model-question decline/expiry settles a tool result, while policy interaction
+dispositions and terminal precedence remain governed by their own contracts.
 
 One active run per session is an intentional 0.x constraint. It makes context,
 tool ordering, steering, durable recovery, and interaction expectations tractable.
@@ -1050,6 +1061,10 @@ the core.
 9. Each allowed tool-operation intent commits before executor placement and
    dispatch. The job carries the full identity, epochs, fence, opaque workspace
    lease, opaque grant, deadlines, budgets, and output policy.
+   **Proposed M7 exception:** an allowed interaction-class question commits its
+   interaction through the session owner without an executor job or grant.
+   Exact answer, decline or expiry commits its ordered tool result. Another
+   tool's authority is never inferred from that result.
 10. Progress may arrive in execution order. Complete results and model-facing
     tool messages commit in the assistant’s original tool-call order.
 11. Pending steering is applied before the next model request. The loop repeats
@@ -3104,6 +3119,13 @@ The following are project doctrine unless deliberately revised:
 ## 27. Open questions and decision triggers
 
 Concept: [Open questions and decision triggers](vision.md#concept-vision-open-questions)
+
+**Proposed M7 dispositions, pending acceptance.** ADR 0041 proposes complete
+inline staged requests with retained artifacts for bulky tool output; ADR 0044
+proposes bounded plaintext private continuation with raw-history retention;
+ADR 0049 proposes explicit reference profiles. The rows below remain decision
+triggers until those proposals and their required evidence are accepted. M7
+does not settle an unrestricted sidecar or permanent profile policy.
 
 | Question | Decision trigger |
 | --- | --- |

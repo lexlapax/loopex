@@ -10,7 +10,8 @@ Status: **standalone repository seed — founding document**
 Date: **2026-08-14**
 
 **M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
-tool budget in sections 14, 23 and 26 are proposals authorized for drafting by
+tool budget and its interaction-flow consequences in sections 6, 10, 14, 23,
+26 and 27 are proposals authorized for drafting by
 the maintainer. Review both files with M7. Until acceptance, the prior seven-tool
 and no-built-in-sub-agent clauses remain governing; dependent implementation
 must not begin. Other vision boundaries are unchanged.
@@ -139,6 +140,11 @@ operation, request, workspace, executor, effect class, and fence. The executor
 validates that grant before starting. Policy may allow, deny, or suspend for a
 later decision; failure or malformed input never falls through to allow.
 
+**Proposed M7 question clarification.** A model question is a permitted request
+for task information after host policy allows the question tool. It creates no
+executor grant. Its answer cannot authorize another tool or resolve an unrelated
+policy decision. Policy-originated interactions keep their existing authority.
+
 <a id="concept-vision-dependency-doctrine"></a>
 ### 7. Stack and dependency doctrine
 
@@ -219,6 +225,12 @@ order, effect truth, cancellation, and deterministic replay. Partial or
 malformed calls never execute. Model-facing payloads and client-facing
 rendering remain separate so presentation concerns cannot shape durable loop
 truth.
+
+**Proposed M7 question flow.** Answering, declining or letting a model question
+expire returns that question's tool result and permits the active loop to
+continue. Abort and run-bound precedence remain unchanged. Policy-originated
+denial or expiry follows its existing disposition. This is the interaction
+consequence of the question tool proposed in section 14, not a new policy path.
 
 <a id="concept-vision-public-protocol"></a>
 ### 11. Public protocol and channel semantics
@@ -601,6 +613,11 @@ lasting runtime floor.
 Technical depth: [Question-by-trigger register](vision-technical.md#technical-vision-open-questions)
 
 Listing a question does not authorize work or assign it to a milestone.
+
+**Proposed M7 dispositions, pending acceptance.** ADRs 0041, 0044 and 0049
+propose the inline/artifact boundary, bounded private continuation retention and
+explicit reference profiles. Their evidence obligations remain open; listing
+them here does not accept them or select a permanent default profile.
 
 <a id="concept-vision-name-license"></a>
 ### 28. Name and license

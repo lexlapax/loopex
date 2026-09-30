@@ -1,0 +1,149 @@
+# M7 round 2 repair record
+
+Date: 2026-09-30. Reviewed base:
+`10749d084bd74487aac423d9640ac2eb1d05bee6`.
+
+## Concept
+
+M7 is not ready for acceptance or another external handoff. The external report
+identified real feasibility gaps, especially summary processing and thinking
+continuation capacity. Several numerical claims overstate what their examples
+prove. The repairs below preserve the maintainer's selected 64 KiB request
+ceiling, bounded thinking support, stop-only helper recovery, approved agent-run
+tests, strict demonstrations and interactive/piped chat.
+
+The maintainer asked for our own adversarial review and fixes after the external
+report, before receiving another candidate SHA and review prompt. That final
+packet review remains outstanding. Three internal read-only advisory workstreams
+checked the report against source, followed by fresh checks of repaired helper,
+configuration and credential contracts. They are not formal acceptance reviews.
+No product implementation, provider call or milestone acceptance is claimed.
+
+One maintainer question is pending: whether oversized old content may use
+marked excerpts, must be summarized in bounded chunks, or must be restricted
+before admission. No dependent summary mechanism has been selected. Further
+material choices will be presented one at a time, including thinking headroom
+and supported modes, native-response delivery/privacy, protocol compatibility
+and the scope of the parallel-helper ban. A report's request for a decision
+does not by itself reopen a choice the maintainer already made.
+
+## Technical depth
+
+### Source and measurement limits
+
+The received [external report](M7-external-review-2.md) is retained byte-for-byte.
+Its SHA-256 is
+`7f445b3638917d7e1c782218b13cf4e4c6efeefc6b879cac5e8e7731da6a5483`.
+Historical reports and their contract hashes still describe their original
+revisions. This record tracks subsequent proposals, not new acceptance evidence.
+
+A bounded synthetic probe used freshly compiled `Canonical.encode/1` and
+`Store.normalize_and_measure_item/2` from the reviewed base. It omitted the
+context receipt deliberately. Request measurements are lower bounds, not
+completed M7 request proofs. No real provider signatures were measured.
+
+| Input | Measured size |
+| --- | --- |
+| 10,000-character write group plus 6,000-character prior summary | 16,496 JSON bytes in summary source |
+| 12,000-character prompt plus that prior summary | 18,115 JSON bytes in summary source |
+| Eight 2,048-byte result messages plus current coding tools | 46,539 request-record bytes before receipt |
+| Same eight results plus 6,000 summary characters | 58,638 request-record bytes before receipt |
+| Twelve such results, without summary | 65,637 request-record bytes before receipt |
+| Five rounds with 512 thinking characters and an 88-character signature per round | 7,324 continuation JSON bytes; 30,464 request-record bytes before receipt |
+| Eight of those rounds | 11,533 continuation JSON bytes; 43,391 request-record bytes before receipt |
+| Five rounds with 2,048 thinking characters per round | 15,004 continuation JSON bytes; 45,824 request-record bytes before receipt |
+| Eight of those larger rounds | 23,821 continuation JSON bytes; 67,967 request-record bytes before receipt |
+
+The retained directory is `/tmp/loopex-m7-round2-size-10749d08/` on the review
+machine. Complete files and SHA-256 digests:
+
+| File | SHA-256 |
+| --- | --- |
+| `probe.exs` | `877aa809c35263ab3c6538a999f90bcddff101d0b36d4ef48391023dbef7cbe0` |
+| `inputs.exs` | `0eb66e48cd8d650a4128c489e6e1c135f744fe32c11cbe68525157e2d83660e7` |
+| `results.exs` | `1d72a3fc381c81720666037f4bb70da66c4fe13aa50756c3e6546d13e35b03fa` |
+
+These establish counterexamples and disprove universal round-count assertions.
+They do not prove useful model behavior, complete new tool-profile cost or
+acceptance of an actual rendered request.
+
+### Finding dispositions
+
+“Repaired” means the proposal now states the requirement and planned witness.
+It does not mean implemented or tested. Pending rows prevent a readiness claim.
+
+| # | Disposition | Reason, repair or remaining work |
+| --- | --- | --- |
+| 1 | Valid; pending maintainer choice | The oldest eligible group can exceed the summary source bound permanently. The excerpt/chunk/admission question is pending. |
+| 2 | Partly valid; pending design | Finite headroom and avoidable native/canonical duplication are real. Three-to-five rounds is not a universal limit. Specify lossless local references and a measured pre-exchange reserve without moving required request data outside its digest. |
+| 3 | Partly valid; pending matrix | Manual thinking is not Haiku-only: the current official matrix also permits older Opus/Sonnet families. Always-on models cannot satisfy the draft's universal thinking-off maintenance rule. ReqLLM's adaptive display injection conflicts with `provider_default`. Resolve the supported matrix and maintenance policy explicitly. |
+| 4 | Numerical necessity not established; evidence work remains | Byte maxima and the admission estimator are not a provider tokenizer or a minimum output size. Measure the actual maintenance instructions and complete valid output before changing the reserve. |
+| 5 | Existing rule overlooked; concrete join repaired | ADR 0041 already required new output to spill before receipt. Clarify the encoded projection trigger and require new search-tool artifact allowances; old one-byte allowances cannot retain their output. |
+| 6 | Partly valid; pending aggregate projection | Eight results alone is not a demonstrated overflow; twelve synthetic results are. Define an aggregate projection policy and multi-call vectors while keeping frozen native prefixes unchanged. |
+| 7 | Usability choice pending | Batched calls mean 1 KiB reads need not consume fifteen turns, but explicit retrieval is still costly. Decide its usable bound separately from unsolicited excerpts. |
+| 8 | Deliberate compatibility restriction; pending disposition | Old generations lack artifact retrieval. Choose a bounded inline compatibility exception or name this refusal explicitly in upgrade expectations; never migrate tool definitions implicitly. |
+| 9 | Estimate unproved; measurement pending | Neither a one-character-description probe nor an asserted 1,450-token profile establishes useful profile cost. Measure complete schemas and instructions before changing the target. |
+| 10 | Claimed subtraction rejected; wording repaired | 8,192 is the fallback input budget. ADR 0041 now says so explicitly. Actual mandatory-content preflight still applies. |
+| 11 | Repaired | ADR 0044 uses settlement v3, preserves ADR 0021 v2 and its accounting evidence, and charges invalid continuation conservatively. |
+| 12 | Feasible route found; delivery choice pending | Built-in Anthropic preparation plus per-request Req steps can capture buffered native replies without global provider registration. Native streaming needs additional lifecycle work; do not silently narrow its promise. |
+| 13 | Pending maintainer choice | Existing public reasoning summaries conflict with blanket suppression. Decide permitted public summary versus private native data and name any accepted-contract amendment. |
+| 14 | Evidence gap repaired | Add real continuation after bound/cancel with a new prompt and exact rendered grouping. Unsupported rendering refuses; no invented assistant completion. |
+| 15 | Clarified | Define deterministic derived IDs and collision refusal. A chosen prefix cannot prove disjointness from native IDs. |
+| 16 | Coverage clarified; headroom remains pending | Enumerate CLI JSON/transcript, Node, diagnostics and dependency telemetry witnesses. Preserve the existing private-store and host-VM audience limits. |
+| 17 | Intentional availability limit retained | Unclassified cancellation closes helpers for that router incarnation, including a local-job race. Add that explicit witness; a bounded per-job registry is optional complexity. |
+| 18 | Truthful uncertainty retained | Nested cleanup may outlast the parent's observation window. Add this case and preserve unknown even after later child cleanup; no unapproved extra spending/deadline margin. |
+| 19 | Repaired for safety | Retain original child creation inputs and resolved cleanup grace. Changed-runtime reconstruction conflicts, unavailable or unexpected lookup remain unknown, never false absence. This does not promise successful recovery under changed grace. |
+| 20 | Repaired | Every reference-host resume/prompt route classifies helpers before activation. Independent adoption, including a new prompt to a settled helper, refuses. |
+| 21 | Repaired with internal correction | Executor cancellation depends on causation and confirmed cleanup. Preserve a completed/failed child fact that won first; distinguish model-facing failure from receipt outcome. |
+| 22 | Cardinality claim rejected; ownership clarified | 128 is a ceiling, not guaranteed capacity. The 16 MiB log may refuse earlier and must reserve closing credit. Composition owns the ledger. |
+| 23 | Repaired | Volatile stop fences launches immediately. Bounded best-effort abort may proceed during unknown stop commit without authorizing new ledger mutations, refunds or success. Conservative adapter-wide uncertainty remains explicit. |
+| 24 | Repaired | State exact process/runtime-incarnation fencing. Do not claim Local's constant numeric epoch increments after restart. |
+| 25 | Repaired | Persist expiry refusal idempotently; resolve unknown admission/refusal by its original transaction, not a new clock check. |
+| 26 | Repaired | Complete bounded per-operation stop/reconciliation before affected parent activation. Expired recovery remains unknown. |
+| 27 | Partly repaired; chosen pipe behavior retained | Stdin TTY selects mode. Specify status/acknowledgement, choices and outcome framing. Static unexpected questions fail honestly; bidirectional producers answer actual IDs. No new no-question flag is implied. |
+| 28 | Repaired; fresh review applied | Name ADR 0019/0039 amendments, closed multi-binding plane, exclusive supplied-plane/reference options, all custody/launch joins and preserved legacy receipt meaning. New all-binding exclusion needs launch canaries, not reinterpretation of old false bits. |
+| 29 | Repaired | Reply/context/system budgets stay committed on resume. Only max turns, relative deadline and token budget are new-run overrides. |
+| 30 | Repaired | Explicit ephemeral `questions: true`, default false, preserves existing definitions. State callback termination and trusted-host non-recursion obligations. |
+| 31 | Repaired with an explicit limit | Propose owner-managed ephemeral trace startup, application selectors and separate drain/writer. Bound pending output and one write; preserve ADR 0030's best-effort sink mailbox. A hard whole-consumer claim is unsupported without changing all producer paths. |
+| 32 | Pending compatibility decision | Choose old-generation refusal or dual service, then close the common command/event/snapshot/bounds inventory. No reused generation name or unchanged schema digest may carry new shapes. |
+| 33 | Clarified | Keep the pinned historical pair and add a distinct M6↔M7 matrix. Source-built exact M6 artifacts are allowed with identity evidence. Blocking old-binary access is an operator precondition, not a claimed future marker. |
+| 34 | Repaired | Required new selectors join the full closure matrix. Durable A/B are hosted credentialed routes; pin their models and reference names before runs and pass every selected name through redactor/PTY self-tests. |
+| 35 | Name-as-provider-authentication claim rejected | The host authorizes variable slots; spelling cannot establish the issuer of a value. Explicit options and redacted configured-only inspection are now stated. |
+| 36 | Strict requirement retained; consequences clarified | A missed required action fails and blocks closure. No same-revision reroll or cosmetic new SHA converts it to pass. Scope/oracle changes require maintainer disposition. Add a controlled steer barrier. |
+| 37 | Repaired | Name the trusted fixture-chat wrapper, normal file validation and fixed composition injection. Production policy registry remains closed. |
+| 38 | Repaired | Enumerate closure slots, run identities, manifests, measurements, operator/reviewer identities and immutable pre-attempt external task pin. |
+| 39 | Repaired | Extend both pending vision amendments to question authority/flow consequences and pending §27 dispositions. Register already named paired vision acceptance; roadmap now points to it too. |
+| 40 | Pending maintainer clarification | Earlier record says no parallel helpers; later drafts say one per parent run. Confirm scope before calling those equivalent. |
+| 41 | Repaired | Complete the accepted ADR 0010/0017 amendment table and add settlement provenance/credential-source dependencies. |
+| 42 | Repaired | Name the attended ephemeral demo host and operator identity form; require every scenario step/subcase in the fixture evidence manifest. |
+| 43 | Clarified; measurements still pending | Record the existing lineage conformance defect, explicit profile proposal and rationale for core's closed reasoning level. Context-map decision pointers remain authority; external pin has a destination. |
+| 44 | Repaired | Concept explains host compaction instructions, native capture/render boundary and config/rollback operator coverage. |
+
+### Fresh internal findings
+
+The post-repair helper review found two defects in the revised draft. A blanket
+cancelled receipt would overwrite a child completion that won before parent
+cancellation. The repaired rule preserves causation and has a race witness.
+Repeated startup could also append another stop and exhaust reserved log credit.
+Stop is now write-once per operation, as are settlement and each attempt receipt;
+repeat recovery returns the original fact without a replacement append.
+
+The post-repair configuration review found ambiguous simultaneous supplied
+plane/binding options, credential availability claims without environment reads,
+and an implied daemon/app-server file grammar. The revised contract rejects
+mixed credential sources, labels inspection as configured-only, and keeps new
+file grammar in chat/config. Other reference hosts accept equivalent explicit
+programmatic options; their old CLI startup remains single-route.
+
+The trace review rejected a hard whole-consumer mailbox claim. The existing
+dispatcher can send drop summaries outside its saturation check, and session
+coordinators/registries also send diagnostics directly. Separating the writer
+therefore bounds pending output but cannot alone bound the drain mailbox. The
+proposal now names ADR 0030's existing best-effort limit instead of inventing a
+subscription guarantee; no required existing diagnostic check is removed.
+
+Outstanding work: resolve the pending choices,
+measure complete profile/maintenance/request examples, update all affected
+pairs, then run a fresh adversarial pass over the complete packet and repair
+its findings before preparing another external SHA/prompt. A documentation
+check alone cannot establish implementation readiness.

@@ -153,13 +153,21 @@ the adapter alone interprets provider block schemas. No provider struct, secret,
 process handle or arbitrary dependency metadata enters either form.
 
 `bounded_canonical_reply_v3` removes only the echoed `canonical_request_bytes`
-from v3, retaining its other nine fields exactly. `model_attempt_settled_v2`
-keeps ADR 0018's twelve outer fields and accepts that reply variant. Commit
+from v3, retaining its other nine fields exactly. `model_attempt_settled_v3`
+keeps the twelve outer fields and accepts that reply variant. ADR 0021 already
+owns v2; never reinterpret v2 records as carrying v3 replies. Preserve its
+compact `accounting_evidence` member and closed relations under the new kind. Commit
 reply, continuation, usage and next disposition atomically before tool intent.
-Measure the complete owning settlement against 65,536 bytes. Invalid or
-oversized continuation yields compact `unreadable_model_answer`, no canonical
-reply/tools and a terminal failure; preserve valid reported usage or the
-existing remaining-allowance estimate. Late replies remain evidence only.
+Measure the complete owning settlement against 65,536 bytes. Invalid or oversized continuation is prevalidation rejection: retain compact
+`unreadable_model_answer` with `accounting_evidence: {kind: none}`, no canonical
+reply/tools and terminal failure, charging the conservative remaining allowance
+as ADR 0021 requires. A merely plausible usage field in a rejected reply does
+not prove reported accounting. Only after the entire reply, including capsule,
+passes validation may a complete owning-record byte/depth overflow use ADR
+0021's `validated_reply_compaction_v1` evidence. Its observed/limit fields
+measure the attempted full v3 settlement, with exact reported usage only when
+that evidence validates it. Unknown extra fields, evidence kinds or dimensions
+refuse; do not invent a capsule-limit compaction dimension. Late replies remain evidence only.
 `commit_unknown` fences tool dispatch and publication until resolved. No new
 retry authority, second reply transaction or separate provider-state writer
 is introduced.
@@ -231,11 +239,12 @@ Recovery dispatches committed requests byte-for-byte under the same digest and
 ADR 0018's dispatch classification. Missing/corrupt/incompatible state refuses
 before dispatch, never reconstructs a signature, reuses a provider response ID
 as authority, or repeats an ambiguous provider attempt. Legacy v1 requests,
-v2 replies and v1 settlements decode under their old rules. No continuation
+v2 replies and v1/v2 settlements decode under their old rules. No continuation
 is synthesized for historical replies that did not retain it.
 
 Protocol adds `session.configure`, `session.configured` and configuration snapshot
 fields with a new experimental schema/generation jointly with ADRs 0043/0045.
+The same coordinated change includes ADR 0046's generic absolute deadline.
 No old client receives unknown shapes under unchanged negotiation. Exact vectors
 and independent Node client update precede implementation integration.
 
@@ -249,6 +258,18 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
 - Restart at configure and staging boundaries preserves configuration/digest.
 - Reasoning capability negatives, default omission versus verified disabled mode,
   and unchanged outgoing reply limits for manual and admitted adaptive modes.
+- Real-provider continuation after a bound or cancellation immediately after
+  tool results, followed by a new user prompt on the same thinking model.
+  Verify the exact rendered message grouping and provider acceptance without
+  resurrecting old native state or inventing an assistant completion. A mapping
+  that cannot render this canonical history is unsupported and refuses by name;
+  do not claim that one successful ordinary end_turn proves this path.
+- Native/derived ID collision yields the named unreadable-answer or staging
+  refusal before tool dispatch, with usage truth preserved.
+- Privacy witnesses name chat transcripts, one-shot JSON, independent Node
+  history/snapshots, diagnostics and ReqLLM telemetry. Host crash dumps and
+  trusted host-installed handlers retain ADR 0039's stated host-VM audience;
+  the private-store and credential guarantees must not imply secrecy from it.
 - A real selected Claude thinking/tool loop, including multiple tools/rounds;
   raw block fidelity, redacted/interleaved blocks, signatures and native ID mapping.
 - Crash/commit_unknown cuts at reply settlement, tool intent and next staging;

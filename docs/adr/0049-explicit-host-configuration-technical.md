@@ -62,7 +62,10 @@ default. No other configuration environment aliases are introduced. Credential
 variables are references resolved later, not setting overrides. Require workspace,
 state root, policy, providers and conversational bounds before starting. Report
 each effective value with `flag`, `env`, `file#pointer`, `default` or `committed`
-origin; never resolve credentials for inspection. Mutually exclusive duplicate
+origin; provider entries show configured provider identity and reference-form
+validity only, with no claim of credential availability,
+with environment-reference names redacted. Never resolve credentials for
+inspection. Mutually exclusive duplicate
 flags refuse; repeated skill directories/modules replace their file arrays.
 
 **Command grammar, proposed until implemented.**
@@ -85,10 +88,14 @@ use. `--no-helpers` may narrow a new session's file configuration; it cannot
 change an existing session's committed tool generation on resume.
 
 On resume, file defaults do not reconfigure. Use committed model, reasoning,
-instructions, tools, resources and role catalog. Explicit conflicting flags
+instructions, max_tokens, context_token_budget, system_class_tokens, tools,
+resources and role catalog. Explicit conflicting flags
 for those fields refuse and direct the operator to `/configure` for mutable
-settings; immutable tool/catalog changes require a new session. New run bounds
-come from validated invocation configuration; in-flight bounds stay committed.
+settings; immutable tool/catalog changes require a new session. Only
+max_turns, deadline_ms and token_budget for a new run come from validated
+invocation configuration; in-flight bounds stay committed. A conflicting
+`chat --resume S --max-tokens 8000` therefore refuses before dispatch and
+directs the operator to settled `/configure`; it is not a run-bound override.
 Require matching workspace/policy identity and available routes for admitted
 work. Trace/output are host-local options, not durable session configuration.
 
@@ -108,6 +115,9 @@ work. Trace/output are host-local options, not durable session configuration.
 | `//TEXT` | Literal prompt beginning `/TEXT` while settled |
 
 **Interactive and pipe framing.** Both consume UTF-8 newline-delimited input,
+with interactive mode selected only when stdin is a TTY. Redirecting stdout
+alone does not change input grammar or refusal semantics. Pipes select the
+control records below, even when stdout is a terminal. Both modes
 ignore empty lines and execute no input as shell syntax. Accept LF or CRLF;
 strip only that terminator, and count the line cap before it. A bare CR is
 invalid. Text answers require a JSON string after `--text`; decode once and
@@ -131,10 +141,20 @@ encodings for IDs. Each object has `v:1`, an `event` and exactly its branch:
 | `input` | `input_sequence`, `command_id`, `disposition` from admitted/refused, `code` as the stable command disposition/error code |
 | `question` | `session_id`, `run_id`, `interaction_id`, `producer`, `kind`, `question`, `choices` array, `expires_at_ms`; choices empty for text |
 | `wait` | `input_sequence`, `state` from settled/question/uncertain, `session_id`, `run_id` or null, `interaction_id` or null, `outcome` or null; question requires interaction ID, uncertain requires its public uncertainty outcome |
+| `status` | `input_sequence`, `session_id`, `run_id` or null, `state`, `configuration_version`, `model`, `reasoning`, `bounds`, `interaction_id` or null, `trace`; no credential reference, role prompt or private continuation |
 | `closing` | `exit_code`, `cleanup` from confirmed/unknown, `last_outcome` or null |
 | `error` | `input_sequence` or null, `code` as a stable host error code |
 
 Question content uses ADR 0045; policy-defer questions retain ADR 0024's bounds.
+Each choice is exactly `{id, label}` using its producer's public choice grammar.
+`outcome` and `last_outcome` use the public outcome object, including
+the existing bound/uncertainty fields; they are never free-form diagnostic text.
+Status state and bounds use the public session contract. Status trace is
+exactly `{enabled, emitted, dropped}` with a Boolean and nonnegative counters;
+disabled uses false and zero counts. `/status` and `/wait` receive their own
+ordered `input` acknowledgement before their result record. TTY rendering
+shows the same identities, labeled choices, expiry and command syntax in human
+readable form, without suggesting a default answer.
 Publish an input admission record before question/wait output caused by that
 input. Barriers report all earlier admitted work settled, the current question,
 or uncertainty; a transient idle boundary before queued follow-up promotion
@@ -182,12 +202,50 @@ selectors. File/CLI modules contain at most 64 strings of at most 128 bytes,
 resolved through the host's compiled trusted-module inventory. Accept exact
 admitted module names and only the `Loopex.*` and `LoopexProtocol.*` wildcard
 selectors; lookup never creates an atom from input. Limits may only lower 4,096 bytes/entry, 2,000 entries/second,
-8,192 queued entries. The reference host uses the diagnostic sink and a bounded
-consumer with 256-entry backlog, shedding excess entries with a separate drop
-counter. Never enqueue unbounded output while stderr stalls. Startup failure
+8,192 queued entries. These are the existing tracer limits, not a total host
+memory bound. `Loopex.*` maps to ADR 0030's `:loopex` application selector and
+`LoopexProtocol.*` to `:loopex_protocol`; neither performs a string-prefix scan
+that could include modules from another application.
+
+The private `diagnostics_to` drain and stderr writer are separate supervised
+processes. This is the existing diagnostic sink, not a new subscription API.
+The drain keeps consuming while the writer is stalled. Its explicit pending
+output queue admits at most 256 bounded diagnostic entries; excess trace and
+ordinary diagnostic entries are dropped with separate counters. Durable events,
+control records and model results never enter this lossy queue. The writer
+accepts one entry at a time and acknowledges completion before receiving another.
+It has no additional pending-output queue or unbounded stream of IO requests.
+
+Distinguish these bounds: ADR 0030's admitted asynchronous diagnostic-item
+ceiling is 4,096; the
+tracer has its own limits above; the drain's pending-output ceiling is 256 and
+the writer holds one entry. The drain mailbox retains ADR 0030's best-effort
+host-sink backpressure, not a hard capacity guarantee. Internal direct diagnostic
+senders and drop summaries mean even a private sink cannot honestly claim a
+hard 256-entry or 4,096-entry total mailbox limit. M7 trace flags do not redesign
+that accepted diagnostic contract. Tests report observed mailbox growth and
+drop counts separately from the proved pending-output/writer bounds.
+
+Closing the consumer stops both processes within the owner's cleanup grace.
+Count queued discarded entries by kind; an unacknowledged in-flight write is
+delivery-unconfirmed, never definitely emitted or dropped. Startup failure
 of an explicitly requested trace refuses instead of silently running untraced.
-Stop on success/failure/interrupt or daemon shutdown; trace control has no new
+Stop when the owning command/runtime ends through success, failure, interrupt
+or daemon shutdown. A prompt finishing in a live chat or ephemeral session does
+not stop its startup-enabled trace. Trace control has no new
 client protocol method. JSON stdout excludes diagnostics.
+
+Extend the closed `LoopexComposition.Ephemeral` startup/one-shot option set with
+`:trace`, absent meaning disabled. Its value uses this ADR's closed trace map,
+with the same string selectors and limits; it admits no module callback, PID,
+raw runtime reference or arbitrary sink. The existing private session owner
+validates it before startup, installs the shared stderr drain/writer and
+starts the runtime trace after capability binding and before model dispatch.
+Trace startup failure unwinds the owned composition; every termination path
+stops the trace and consumer within the existing owner cleanup contract.
+The CLI `ask` flags pass this explicit option, rather than trying to access a
+hidden runtime. Ordinary durable owners use the same consumer and existing
+runtime API. This adds no per-prompt mutation or access to another runtime.
 
 <a id="technical-adr-0049-evidence"></a>
 ### Evidence

@@ -24,7 +24,10 @@ Automatic compaction runs at initial or later model staging when eligible
 history would exceed a token or record-byte limit. It does not change prompt
 admission or require a host to resubmit a command. Explicit `compact` is admitted
 only while settled. Both use a bounded maintenance episode with the session's
-frozen model and no tools. Maintenance uses an explicitly recorded, verified
+frozen model and no tools. The host supplies a versioned compaction instruction
+block describing the summary's goal, constraints, progress, decisions, next
+steps and critical context; core stages and records its exact bytes.
+Maintenance uses an explicitly recorded, verified
 thinking-off setting so its fixed reply reserve remains valid. Unsupported
 maintenance settings refuse before dispatch. No executor work or pending
 interaction overlaps it. ADR 0044's open thinking exchange also blocks

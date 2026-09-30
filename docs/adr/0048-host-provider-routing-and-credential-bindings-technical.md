@@ -17,6 +17,9 @@ channel is added to core or to per-call model data. ADR 0039's provider-name tab
 also permits an explicit host-selected environment-variable name, validated as
 `[A-Za-z_][A-Za-z0-9_]{0,127}`; existing provider-specific defaults remain for
 existing callers.
+This also amends ADR 0019's sole-source sentence and ADR 0039's explicit
+preservation of that restriction for durable use. The accepted source files
+remain historical; their security/cleanup claims are otherwise unchanged.
 
 Validate the complete name set before any environment read or deletion. Reject
 operational variables `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `SHELL`, `USER`,
@@ -41,6 +44,44 @@ identity; it contains no env name, route token, registry PID or role alias.
 Require the configured model's provider to match its binding. No duplicate
 provider route or ambiguous alias is admitted.
 
+**Composition contract.** Add the explicit `:provider_bindings` startup option
+to durable and ephemeral composition. Its closed provider-name map uses the
+binding alternatives above and is validated before effects. Legacy callers
+omitting it retain their documented single-route defaults. A supplied map
+admits only its named routes; no default route is silently added. CLI chat,
+foreground app-server and daemon composition use this same map through explicit
+programmatic host options. Only chat/config gain ADR 0049's file grammar in M7;
+the existing app-server/daemon CLI commands retain their single-route defaults
+and gain no implicit file loader. Remote session commands cannot mutate it.
+Effective inspection reports configured provider identities and reference-form
+validity, never credential availability, environment name or value. It reads no
+environment values and does not probe custody.
+
+The new host-private credential plane has closed shape
+`{version: 2, capability, model_options, excluded_env_names}` with optional
+`capability_pid` as in the existing host-owned plane. `model_options` contains
+exactly `provider_routes`, `credential_registry`, `tracing_capability`.
+`provider_routes` maps at most 16 admitted provider names to validated opaque
+credential tokens; every token resolves in that exact validated registry and
+the tracing capability equals the plane capability. The sorted unique
+`excluded_env_names` is the union of the existing legacy exclusion set and
+validated configured credential names. With the existing single-name set it
+contains at most 17 names. It is passed only to trusted owned-launch adapters, never core
+requests, executor jobs, journals or diagnostics. Preserve the existing
+unversioned single-token plane as a separate validated legacy branch, with its
+original exclusion set. Unknown fields, mixed branches and missing tokens
+refuse before any runtime or subprocess starts. Ephemeral composition stores
+only references and uses its selected caller resolution below, never this
+durable custody plane.
+Supplying both `:provider_bindings` and `:credential_plane` is conflicting
+configuration and refuses before effects. A borrowing host validates its file
+and bindings once when opening custody. For each temporary or main composition,
+`CredentialHost.plane/1` lends the same route tokens/registry and exclusion set
+with a fresh runtime-specific tracing capability. Never reuse a capability
+already bound to another runtime. The plane supplies immutable route and
+exclusion sets. Borrowing never resolves environment variables again or adds
+default routes. Validate every supplied plane before starting owned edges.
+
 **Durable custody.** Host bootstrap resolves all configured credential references
 into separately owned custody, creates composition-bound tokens and removes
 those named values from the Loopex-owned host environment before resource/tool
@@ -51,6 +92,8 @@ log a value or read it in the adapter. Deduplicate shared env names before
 resolution/deletion; a missing value fails the startup transaction and cleans
 up every custody already created. This does not erase copies held by the
 invoking shell or other host code.
+Preserve existing exclusion behavior too: if the legacy credential name is
+not a configured route, remove it without reading or admitting its value.
 
 After the selected provider companion is ready, the excluded sender obtains
 only that binding's selected key from custody and transfers it on the existing
@@ -58,6 +101,17 @@ private bootstrap frame. One binding's loss refuses its dispatch; it cannot
 select another token. Trace exclusions cover all custodies, senders and
 credential-bearing provider subprocesses. Startup/stop failures clean all
 partially admitted bindings.
+Update `CredentialHost`, `CredentialPlane`, composition `Edges` validation,
+the durable option parser, CLI recovery's temporary/main runtime handoff,
+daemon startup, the Local executor environment builder and resource-launch
+environment builder together. Both temporary and main runtimes borrow the
+same host custody with distinct trace capabilities; a second runtime must not
+reread a deleted environment key.
+Local receipts retain their existing `provider_credential_present` meaning
+for the legacy selected variable. Do not reinterpret an old false value as
+proof about every M7 binding. The additional exclusion guarantee is proved at
+the configured launch boundaries with all admitted canaries; this proposal
+adds no credential names to receipts or new receipt field.
 
 **Ephemeral references.** Configuration validates admitted provider/reference
 forms without reading values. An invocation resolves only its selected route;
@@ -67,6 +121,11 @@ caller/tagged-pool cleanup as ADR 0039 requires. Ambient authorized host tools
 may still read environment values; this amendment adds no structural secrecy
 claim from them. Keep the selected-value reply guard and diagnostic exclusions.
 Do not delete ambient variables through the durable loader in this profile.
+The existing closed ephemeral option validator admits `:provider_bindings`
+under the same grammar. Binding maps, environment names and opaque handles
+are removed from public configuration/status views; the exact selected model
+continues to be public. Host authorization of a variable name does not verify
+the provider account behind its value; authentication failure has no fallback.
 
 **Admission and recovery.** Validate a model/reasoning switch against admitted
 routes, capabilities and projected byte/token budgets before its config commit.
@@ -100,7 +159,7 @@ Concept: [Observable consequences](0048-host-provider-routing-and-credential-bin
 
 Concept: [Compatibility and rollback](0048-host-provider-routing-and-credential-bindings.md#concept-adr-0048-compatibility).
 
-The two superseded restrictions must be named in the eventual acceptance
+The named superseded restrictions must appear in the eventual acceptance
 record and ADR index; accepted source files remain historical. Same-provider
 multi-account routing, endpoint configuration, typed binding records from
 ADR 0035, file credentials and live rotation are deferred. No new source copy

@@ -18,6 +18,9 @@ A new prompt or promoted follow-up sees the session's retained conversation,
 not only its own run. Prior prompts, assistant messages, committed tool results
 and terminal facts project in committed order. Cancelled, failed and bound-reached
 runs remain part of that history. Each new run still has its own accounting.
+This repairs a current conformance defect against ADR 0010's retained-lineage
+contract. Historical milestone evidence remains a record of its tested revision;
+the defect is not a new permission to omit earlier conversation.
 
 Command admission remains unchanged. At initial and subsequent model staging,
 core measures the whole projected request against token, record-byte, depth and

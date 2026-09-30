@@ -6,7 +6,7 @@ Technical depth: [Model-originated questions](0045-model-originated-questions-te
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) only policy-defer-only production and choice-only kind; [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) only executor dispatch for every allowed tool; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only refusal of host-answered model questions within one ephemeral call
+- **Supersedes:** [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) only policy-defer-only production and choice-only kind; [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) only executor dispatch for every allowed tool; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only refusal of host-answered model questions within one ephemeral call and its closed startup-option set for explicit question activation
 - **Prerequisite for:** M7 outcome 5
 
 <a id="concept-adr-0045-decision"></a>
@@ -25,6 +25,11 @@ ephemeral session API accepts host answers during its live session. The one-shot
 state vanishes with its runtime and cannot recover after process loss. In the
 one-shot wrapper only, absent responder denies before model-question admission.
 Unattended `ask` keeps its current behavior and gains no implicit terminal prompt.
+Ephemeral startup and `run/2` require explicit `questions: true`; its default
+is false, preserving existing tool sets. A live host supplies answers through
+`answer/3`; an enabled one-shot wrapper uses its bounded responder. Expiry or
+abort can terminate that host callback during its work. The host owns any
+callback effects and must not recursively create sessions to answer a question.
 
 Answered, declined or expired questions can produce distinct tool results while
 remaining run bounds allow continuation. Run abort or deadline remains terminal.
@@ -52,7 +57,7 @@ Technical depth: [Compatibility mechanics](0045-model-originated-questions-techn
 
 The interaction class, text kind, producer/disposition fields and snapshots
 change the experimental protocol schema. Negotiate a new generation jointly
-with configuration/compaction; reject unsupported clients before exposing new
+with configuration/compaction and ADR 0046's absolute deadline; reject unsupported clients before exposing new
 shapes. Legacy effect-tool definitions keep their behavior and do not acquire
 a new serialized member implicitly.
 

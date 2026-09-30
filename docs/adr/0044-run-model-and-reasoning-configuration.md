@@ -6,7 +6,7 @@ Technical depth: [Run model and reasoning configuration](0044-run-model-and-reas
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Also extends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement, preserving its accounting-provenance rules and the existing v2 meaning.
 - **Requires with multi-provider use:** [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Prerequisite for:** M7 outcome 4
 
@@ -19,7 +19,10 @@ The maintainer selected bounded provider continuation for M7 on 2026-09-30.
 Selected Claude thinking modes need exact provider blocks returned during tool
 use. Keep those blocks privately with their committed reply, bound to the exact
 model, configuration and current tool exchange. They are data, never authority.
-This proposal defines the selected scope; its bytes remain unaccepted.
+The adapter must capture and render native blocks before ordinary ReqLLM
+conversation conversion loses or rearranges them, while retaining the existing
+transport, credential and cleanup boundaries. This proposal defines the
+selected scope; its bytes remain unaccepted.
 
 Configuration becomes a durable session fact. Creation and settled-only
 `configure` commit an exact model identity, reasoning, instruction envelope and

@@ -9,7 +9,11 @@ Concept: [Explicit conversational run limits](0047-reference-host-run-defaults.m
 Concept: [Context and decision](0047-reference-host-run-defaults.md#concept-adr-0047-decision).
 
 The host maps `--max-steps` to `max_turns`, `--deadline-ms` to `deadline_ms`,
-`--token-budget` to `token_budget` and `--max-tokens` to the reply cap. Parse
+`--token-budget` to `token_budget`. These three are per-run bounds.
+`--max-tokens` selects the reply cap in ADR 0044's committed session
+configuration; context_token_budget and system_class_tokens are committed
+there too. On resume, conflicting flags for these configuration fields refuse
+and require settled configure. Parse
 positive integers without coercing strings, floats, booleans or overflow.
 Apply the runtime's existing accepted maximum for each value where one exists;
 otherwise cap host JSON integers at 2^53−1. Cross-field admission must leave a

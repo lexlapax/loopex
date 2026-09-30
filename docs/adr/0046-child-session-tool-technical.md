@@ -101,7 +101,10 @@ kind `prepare_parent` or `bind_parent` in binding logs, or `initialize`,
 `reserve`, `child_created`, `child_prompted`, `stop`, `settle` or `bind_receipt` in run logs. The fields below define those mutation families; unknown fields,
 versions or kinds refuse. Commit append then fsync before acknowledging.
 
-Cap a parent-run log at 16 MiB and child count at 128; capacity refusal is
+The composition application owns this ledger; core has no ledger dependency.
+Cap a parent-run log at 16 MiB and child count at 128; the byte cap can bind
+before the child-count ceiling. Neither ceiling promises that 128 maximal
+children fit. Capacity refusal is
 definite before append, never a hidden eviction. Before reserving a child,
 reserve disk-log capacity for the maximum bounded create, prompt, stop, settlement
 and final-receipt frames. Persist this storage credit with the token reservation.
@@ -131,6 +134,11 @@ refund, publication or reissue. The ledger retains:
   canonical task digest, frozen role configuration and absolute cutoff.
 - Stable create/prompt command IDs, returned child session/run IDs, original
   executor receipt tuple, child terminal evidence and final parent receipt.
+- The immutable resolved child-creation input, including cleanup grace, tool
+  definitions, policy mode and configuration, or a digest-bound retained object
+  installed before reservation under the same 1 MiB object rules as parent
+  creation. Keep the original command input and its digest as well as resolved
+  values. Current startup defaults cannot reconstruct a different create input.
 
 Use core's idempotent create command and returned session ID. Create and prompt
 command IDs derive from the logical operation, excluding executor attempt.
@@ -158,8 +166,10 @@ with optional `bounds.deadline_at_ms` on prompt and follow-up commands: a
 positive integer absolute UTC millisecond timestamp no greater than 2^53−1,
 covered by canonical command identity and committed at admission. Check command
 identity/replay before clock validation, so a duplicate admitted command keeps
-its original result after the timestamp passes. A fresh expired command refuses
-before admission. A queued follow-up retains its explicitly supplied ceiling
+its original result after the timestamp passes. A fresh expired command records
+its ordinary idempotent refusal before any run admission. Resolution of an
+uncertain admission/refusal commit uses its original identity and digest; it
+never reevaluates the clock as a new command. A queued follow-up retains its explicitly supplied ceiling
 unchanged through promotion; absent means no inherited ceiling from its parent
 run. If an admitted run or follow-up expires before first staging, settle the
 ordinary deadline terminal without provider dispatch, rather than changing its
@@ -181,7 +191,14 @@ as well, retaining larger available text through the artifact path. Retain up to
 indicator and child identity for full replay. The bounded structured trailer
 contains role/catalog digest, model, child identity, outcome, reported/estimated
 usage and separate parent/delegation/combined totals. A conclusive failed,
-cancelled or bound-reached terminal is a failed tool result. A conclusive `failed(model_call_failed)` child terminal remains a known failed
+cancelled or bound-reached child terminal is a failed model-facing tool result
+when the parent job remains active. Parent-job cancellation or its cutoff uses
+the executor contract's cancelled receipt only when cancellation caused
+termination and cleanup is confirmed. Preserve a validated completed or failed
+child fact that won before cancellation, even if receipt persistence follows
+the cancellation. Uncertain cleanup cannot produce a cancelled receipt. Keep these executor dispositions
+distinct from the child outcome carried by the model-facing result.
+A conclusive `failed(model_call_failed)` child terminal remains a known failed
 tool result, including ADR 0018's settled provider-ambiguity failure. Unknown
 child lifecycle, unresolved effect or cleanup evidence remains unknown; absence
 of a terminal cannot manufacture a known failure.
@@ -204,10 +221,13 @@ unchanged. Existing known helpers can settle or be cancelled normally.
 
 The router reference names its exact PID/incarnation, never a global alias that
 silently rebinds after failure. A replacement requires normal host construction
-and fresh runtime/executor fencing: restart the full composition and reopen
+and a fresh runtime/router incarnation: restart the full composition and reopen
 the local executor before constructing the replacement runtime/router. Reuse
 that executor's identity/epoch; do not invent a router-only job epoch or
-translate local jobs/receipts. No manager-only transparent rebind is allowed.
+translate local jobs/receipts. Local's existing identity/epoch may be constant;
+do not claim that reopening it increments a numeric epoch. The exact process
+references and runtime incarnation prevent rebinding stale calls. No
+manager-only transparent rebind is allowed.
 Stale references/jobs cannot reach it as fresh execution. Startup reconciles predecessor ledgers before admission as
 specified below. This conservative unknown-cancel case may require host restart
 to admit new helpers; it does not add an unbound durable tombstone or return a
@@ -216,13 +236,23 @@ is gone and account for calls it already sent before taking over its operation.
 
 The monotonic `stop` mutation carries the logical operation identity, original
 attempt binding, stop transaction ID and a closed reason: `cancel`, `cutoff` or
-`adapter_recovery`. After it commits, no create/prompt/activation transition is
+`adapter_recovery`. Stop is write-once per logical operation. A later cancel,
+cutoff or startup returns the original stop without appending or replacing its
+reason. Resolve an unknown first stop by its retained transaction identity
+before deciding whether it exists. Settlement is also write-once; each admitted
+attempt has at most one retained receipt, with identical replay returning the
+original bytes and conflicting replay refusing. Closing credit accounts for
+all admitted attempt receipts before their admission.
+After stop commits, no create/prompt/activation transition is
 allowed for that operation, including under a later execute attempt. Cleanup,
 terminal evidence and receipt commitment remain allowed. `cancel/2` enters the
 same owner, commits stop, then cleans up. If a launch call won first, account for
 its admission and cleanup rather than claiming it never happened. An unresolved
 stop commit fences launch, refund and successful publication. Its reserved
 closing-record credit prevents a full log from blocking this fact.
+Cancellation also closes the volatile launch fence immediately. Best-effort
+abort and cleanup of already known children continue while a stop commit is
+unresolved; they do not authorize another ledger mutation or a cleaned receipt.
 
 On adapter startup, before opening routing/admission, mark every unfinished
 predecessor operation stopped with reason adapter_recovery. A missing earlier
@@ -234,18 +264,28 @@ fence tuple; solicited receipts use the current query ID and owner epoch.
 
 | Retained gap | Stop-only recovery |
 | --- | --- |
-| Reservation; missing create result | Read `Runtime.lookup_create_result/3`; never replay create. Account for the old producer and any in-flight create before treating absence as conclusive. Missing/unavailable evidence remains unknown. |
+| Reservation; missing create result | Read `Runtime.lookup_create_result/3` with the exact retained original creation input; never replay create. Preserve cleanup grace and all resolved creation settings. Incompatible reconstruction, conflict, unexpected replies and unavailable evidence remain unknown. Account for the old producer and any in-flight create before treating absence as conclusive. |
 | Child known; prompt acknowledgement missing | Never replay prompt. Inspect/rebuild the child through prepared recovery and abort any admitted work. An unprompted child remains unprompted. |
 | Child unfinished | Abort through its live attachment, or use `Loopex.prepare_resume_session/3` to rebuild without scheduling, attach and admit an idempotent abort. Never call `activate_resume/1`; abort invalidates activation. Abandon an unused capability. |
 | Child terminal; receipt missing | Retain the original attempt-bound receipt only from conclusive terminal/cleanup evidence, preserving failure or uncertainty and actual usage. |
 | Receipt retained | Return its exact bytes through solicited reconciliation. Parent cancellation stays terminal. |
 
-Host startup and CLI resume routing derive helper identity from validated host
+Host startup and every host admission route, including CLI, foreground
+app-server and daemon resume and new-prompt paths, derive helper identity from validated host
 binding/operation records and read-only create-result resolution, checked
 against retained parent delegation intents. Complete classification precedes
 activation; missing/corrupt required records refuse instead of defaulting to
 ordinary eager resume. A session-directory discovery index is not authority.
-Recognized helpers use this path; eager resume cannot activate a stopped helper. A
+Recognized helpers use only their retained operation path. Ordinary client
+prompt admission or eager resume cannot independently adopt or activate one.
+Classification is complete before exposing those operations, even after a child
+has settled. Missing required classification refuses. This is host enforcement;
+core still has no parent or helper field.
+Startup completes bounded stop/cleanup/reconciliation for each unfinished
+operation before activating its affected parent. Each operation uses its
+original retained cleanup grace; unresolved
+work at that bound remains unknown and cannot be launched by later activation.
+A
 live child can continue until its abort is admitted. The existing absolute
 cutoff bounds it while the adapter is unavailable. Confirm every launch call,
 child admission and provider/tool cleanup before answering cleaned. An
@@ -281,6 +321,20 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
 - Cancel before execute registration closes helper admission; a delayed execute
   cannot launch, stale references cannot rebind, and local-tool receipt bytes
   remain unchanged. Unknown job cancellation is never falsely cleaned.
+- Cancelling an unclassified local job can close helper admission even if the
+  local executor later proves cleanup. Record that availability consequence.
+- Child lookup after cleanup-grace/default changes uses the retained create
+  input; conflict/unavailability remains unknown. Every host refuses independent
+  prompt/resume adoption of both active and settled helper sessions.
+- Maximum-frame capacity reserves completion credit and refuses further children
+  before 128 when necessary. Unknown stop commits still permit bounded abort
+  attempts without admitting new ledger mutations or launches.
+- Repeated restart after a committed stop, at the log-cap boundary, appends no
+  replacement stop and preserves the original reason, settlement and receipt.
+- Parent observation can end before nested child cleanup completes. The parent
+  stays unknown even if later receipt lookup finds completed child cleanup.
+  Parent-job cancellation uses the executor receipt's causation rule; a child
+  terminal before cancellation but before bind_receipt retains its proven fact.
 - Repeated receipt lookup performs no mutations or dispatch; completed receipt
   preserves its exact original binding and cannot reopen the parent.
 - Budget reservation, known overshoot, unknown charge, no double settlement or

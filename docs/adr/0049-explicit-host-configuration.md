@@ -6,7 +6,7 @@ Technical depth: [Explicit host configuration and conversation command](0049-exp
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing
+- **Supersedes:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only its closed ephemeral startup-option set, adding an opt-in owner-managed trace configuration; credential audience and cleanup guarantees remain unchanged
 - **Depends on:** [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0047](0047-reference-host-run-defaults.md#concept) and [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Prerequisite for:** M7 outcomes 6 and 7
 
@@ -37,9 +37,15 @@ configuration is the only way to change admitted model or instruction settings.
 
 Tracing uses ADR 0030's runtime-scoped API, existing redaction and ceilings.
 The host reports effective scope/limits and emitted/dropped counts through a
-bounded stderr consumer, separately from result output. Chat has text output only; existing `ask --output
+stderr writer with bounded pending output, separately from result output.
+The diagnostic sink mailbox keeps ADR 0030's best-effort backpressure; these
+flags do not promise a total host-memory bound. Chat has text output only; existing `ask --output
 json` retains its defined format and carries no diagnostics on stdout. No raw debug mode or
 VM-global tracing is added.
+Ephemeral startup and one-shot composition accept the same opt-in trace
+configuration. Their private owner starts and stops tracing with its runtime
+and the stderr drain/writer. An embedding caller gains no raw runtime
+reference or remote trace authority through that option.
 
 <a id="concept-adr-0049-consequences"></a>
 ### Observable Consequences
