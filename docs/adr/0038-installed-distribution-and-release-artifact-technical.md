@@ -46,7 +46,7 @@ targets, and glibc 2.35 from an Ubuntu 22.04 container.
 **macOS distribution.** A downloaded archive carries the quarantine
 attribute, and Gatekeeper refuses an unsigned or un-notarized `beam.smp`
 extracted from it. Ad hoc signing does not clear a download. The decision
-open before acceptance is whether `0.3.0` is signed and notarized under a
+open before acceptance is whether `<installed-version>` is signed and notarized under a
 developer account, or whether the operator guide documents removing the
 attribute after verification; the smoke lane simulates the quarantined
 download either way and proves the documented path.
@@ -54,12 +54,12 @@ download either way and proves the documented path.
 **Layout of the extracted archive.**
 
 ```text
-loopex-0.3.0-<platform>/
+loopex-<installed-version>-<platform>/
   bin/loopex                 the promoted launcher (POSIX sh)
   bin/loopex-release         the mix release start script the launcher invokes
   erts-<version>/            the bundled runtime system
   lib/<app>-<version>/       every included application
-  releases/0.3.0/            the release's boot and configuration files
+  releases/<installed-version>/            the release's boot and configuration files
   companion/                 the protected provider companion and its launch file
   MANIFEST.json              see below
   SOURCE_IDENTITY            the M5-defined source identity of the tree it was built from
@@ -85,21 +85,21 @@ same code serves both.
 
 ```json
 {
-  "release": "0.3.0",
+  "release": "<installed-version>",
   "source_commit": "<40-hex>",
   "source_identity_sha256": "<64-hex>",
   "toolchain": {"elixir": "1.20.3", "otp": "29.0.5", "openssl": "<embedded version>"},
   "platform": "darwin-arm64",
   "platform_minimum": "<macOS version | glibc version>",
-  "files": [{"path": "bin/loopex", "size": 1234, "sha256": "<64-hex>"}],
-  "archive_sha256": "<64-hex>"
+  "files": [{"path": "bin/loopex", "size": 1234, "sha256": "<64-hex>"}]
 }
 ```
 
 `files` lists every file in the archive except `MANIFEST.json` itself, sorted
 by raw path bytes, one entry per regular file with symbolic links recorded as
-`{"path", "link": "<target>"}`. `archive_sha256` is the digest of the
-`.tar.gz` and is repeated in `loopex-0.3.0-<platform>.tar.gz.sha256`.
+`{"path": "...", "link": "<target>"}`. The archive SHA-256 appears only in
+the external `loopex-<installed-version>-<platform>.tar.gz.sha256` checksum or
+attestation, never inside the archive whose digest it names.
 `loopex version --verify` recomputes every file digest against the manifest
 and reports the first mismatch.
 
@@ -118,19 +118,22 @@ empty temporary home:
 1. Verify the archive against its checksum file; extract as a quarantined
    download would be; `scripts/release/assert-linkage.sh` over the extraction
    exits `0`; `bin/loopex version --verify` exits `0`.
-2. `bin/loopex init --provider <adapter:model> --credential env:LOOPEX_PROVIDER_API_KEY --policy <profile>`,
-   `doctor` exits `0` and reports the reference resolvable; a second profile
-   with a `file` credential is added by `config set` and selected once by
-   `--provider`.
+2. Initialize the home with the accepted successor grammar over ADR 0049's
+   schema. Configure two admitted provider env references and exact model
+   choices; validate, inspect origins and run `doctor`. No file credential or
+   unaccepted provider-selection grammar is assumed.
 3. Run `loopex run --daemon` with no daemon running: it starts the daemon on
    demand and completes one real provider session; detach, attach as
    observer, take over, `daemon stop`; every step is the M5 workflow through
    the installed command.
 4. Start again on demand; list and resume the session; complete it;
    `daemon logs` prints a bounded redacted log.
-5. `store backup` the closed root; extract the previous release beside the
-   first, switch, `store restore` into an empty root, list: the binary and
-   storage rollback contract in that order.
+5. Retain a pre-upgrade closed-root backup and an actually available prior
+   artifact. Restore into an empty root using a verified restoration tool that
+   supports that backup, then start the matching prior binary and validate its
+   sessions. The first binary distribution may use the prior source release;
+   do not assume it had an installed layout or a `store restore` command.
+   Separately prove same-version backup/restore of the candidate's newer root.
 6. Delete the directory; the home is intact; `ls` proves nothing was written
    outside the home, the workspace and the lane's temporary directory, which
    the lane proves by a before-and-after inventory of the filesystem roots
@@ -161,9 +164,10 @@ the Port and OS guard; the credential still crosses the private channel; the
 composition-bound token resolved through host custody is unchanged. Only the
 path resolution changes, and the digest verification before launch is kept.
 
-**Rollback.** Binary: switch back to the previous directory. Storage: ADR 0036's
-restore. The plan's single demonstration performs both in order: back up,
-switch to the previous release, restore, run.
+**Rollback.** Follow step 5 of the installed smoke above: retain a pre-upgrade
+backup and available prior artifact, restore with a compatible tool, then start
+the matching prior binary. Do not assume the old artifact contains a restore
+command or an installed directory layout.
 
 **Rejected alternatives.**
 
@@ -174,7 +178,7 @@ switch to the previous release, restore, run.
   versions; no consumer justifies it.
 - *Service-manager installation* is host policy and a later milestone.
 - *Homebrew or distribution packaging* depends on publication and on name
-  clearance; it is not `0.3.0` scope.
+  clearance; it is not `<installed-version>` scope.
 - *A release without ERTS* would require an installed Erlang of the exact
   version and could not claim "no toolchain required".
 - *Building the release from the development toolchain* was the first draft

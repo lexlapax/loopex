@@ -62,7 +62,7 @@ Concept: [Observable consequences](0036-daemon-grade-store-engine-and-migration.
 
 1. It refuses while the placement lock or the writer marker is held, with the
    same classes the daemon's startup uses.
-2. It reads the `0.2` root through the local adapter's own reader, never a
+2. It reads each supported local-format root through the corresponding adapter reader, never a
    private copy of the format, so a record the local adapter cannot read is a
    refusal before any write.
 3. It writes the target beside the source under a fixed temporary name, then
@@ -81,11 +81,15 @@ target writes, after verification, between rename and source retirement, and
 after completion, and asserts the converged state and the exit class of the
 next run in each case.
 
-**Reader boundary.** The root carries a format version file written last. A
-`0.2` reader that opens a `0.3` root refuses with `store_format_unsupported`,
-a class M5's exit-status map does not carry and M7 adds; it writes nothing.
-The `0.3` reader opens `0.2` roots read-only for `loopex doctor` and the
-listing, and refuses to serve sessions from one until migrated.
+**Reader boundary.** The installed candidate adds a container-format marker
+and refuses unknown formats before mutation. A missing marker identifies only
+a legacy container, not the durable-record capabilities it contains. Validate
+record support before serving it. M7 configuration, compaction, interactions and
+host ledger state must appear in the source fixtures and backup inventory.
+The engine candidate alone requires explicit container migration; the installed
+candidate does not require migration merely because a supported local root lacks
+a marker. Retain exact old binaries to test their real behavior. Never claim an
+old binary emits a new refusal class or honors a marker it never understood.
 
 **Backup and restore.** `loopex store backup <root> <archive>` produces one
 archive of a closed root with a manifest of every file, its size and SHA-256,
@@ -103,8 +107,10 @@ The vision's migration list is discharged item by item in the technical plan
 of the milestone that ships the engine: source and target versions, forward
 migration, interrupted detection and recovery, backup/restore as downgrade
 policy, the previous-binary boundary, and the packaged rollback procedure.
-M7's technical plan discharges the items that apply to `0.4.0`'s unchanged
-format and marks the rest not applicable until then. Extension-state fixtures
+M8's technical plan distinguishes its unchanged container from M7's new record
+capabilities and binds exact supported binary/root combinations. Unsupported
+downgrade restores a pre-upgrade backup with a matching reader; it loses later
+facts and cannot be described as reopening the newer root. Extension-state fixtures
 do not apply; no extension state exists.
 
 **Alternatives rejected.**

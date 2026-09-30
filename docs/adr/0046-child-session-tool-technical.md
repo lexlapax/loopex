@@ -1,105 +1,165 @@
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [Child-session tool](0046-child-session-tool.md#concept).
+Concept: [Serial read-only child sessions](0046-child-session-tool.md#concept).
 
 <a id="technical-adr-0046-decision"></a>
-### Adapter and Bounds
+### Contract
 
 Concept: [Context and decision](0046-child-session-tool.md#concept-adr-0046-decision).
 
-**Present state, read from source on 2026-09-29.**
+The composition routes `loopex.task` to this adapter and existing tools to the
+local executor through the existing executor behaviour. Policy, grant validation,
+intent-before-dispatch, fencing and receipt validation are unchanged. The router
+must preserve the existing local executor's request and receipt bytes.
 
-| Fact | Location |
-| --- | --- |
-| Every allowed call runs `executor.module.execute(reference, job, grant, [], progress)` | `apps/loopex/lib/loopex/runtime/session_coordinator.ex` |
-| The runtime has one configured executor module | `session_coordinator.ex`; `apps/loopex_composition/lib/loopex_composition.ex` |
-| Core exposes `create_session/3`, `command/2`, `next_event/1` and `session_status/2` | `apps/loopex/lib/loopex.ex` |
-| Composition has no child-session function | `apps/loopex_composition/lib/loopex_composition.ex` |
-| A session record has no origin or lineage field | `apps/loopex/lib/loopex/runtime/session_state.ex` |
-| One workspace lease per runtime, with no exclusivity check | `apps/loopex_executor_local/lib/workspace_lease.ex`; `loopex_composition.ex` |
-| The durable composition restricts `active_tools` to seven identifiers | `apps/loopex_composition/lib/loopex_composition/durable_options.ex` |
-
-**Routing.** The composition configures one executor module that routes by
-tool identifier: the child-session identifier to the child adapter, every
-other to the local executor. The router holds no state and adds no
-behaviour to the local path. It runs the executor conformance suite.
-
-**The reference definition.** Identifier `loopex.task`, class `effect`,
-registered through the runtime's tool set when the host opts in.
+The tool is class `effect`, disabled by default. Its closed arguments are:
 
 | Argument | Bound |
 | --- | --- |
-| `description` | Non-empty UTF-8 of at most 256 bytes, shown to the operator |
-| `prompt` | Non-empty UTF-8 of at most 16 KiB |
+| `role` | Required enabled role name matching `[a-z][a-z0-9_-]{0,63}` |
+| `description` | Nonempty UTF-8, at most 256 bytes |
+| `prompt` | Nonempty UTF-8, at most 16 KiB |
 
-**Grant and job.** The call is an ordinary effect. Policy is consulted, a
-grant is issued, and the effect intent commits before the adapter runs. The
-adapter validates the grant as the local executor does.
+The host retains the enabled role catalog, exact instruction bytes/digests,
+provider/model settings and delegation limits before publishing the parent's
+task-tool generation. Its digest binds the definition's role enumeration and
+host session record. Catalog changes affect new sessions only. No per-call
+model, credential, policy, tool, workspace or budget override is admitted.
+Missing or corrupt retained catalog data refuses dispatch; current files are
+never recovery substitutes.
 
-**Child identity.** The child's session identifier is derived from the
-parent's operation identity and attempt. A retried or recovered operation
-therefore finds the same child and creates no second one.
+**Private ledger.** Version 1 lives under the host's state root and is scoped by
+runtime identity and parent session/run. One serial adapter owner and an
+exclusive store lock protect it. A host-private ledger module provides
+`open`, `commit(tx_id, expected_version, mutation)`, `lookup(tx_id)` and `read`.
+It does not extend `Loopex.Store`'s closed transaction union or manufacture a
+session journal. Reuse only independent file/framing helpers where suitable.
 
-**Child configuration.**
+The ledger directory is `delegation/<runtime-id-sha256>/` under the state root,
+owned under the same exclusive host placement lease. Reject symlinks and paths
+outside that root. Never recover a live writer's file. An immutable catalog is
+canonical JSON at most 1 MiB, content-addressed by SHA-256, installed by fsynced
+temporary-file rename and directory fsync before its reference is committed.
+Each parent-run log is named by the SHA-256 of its canonical identity tuple.
+Its version-1 file header precedes frames with a fixed header containing magic,
+version, big-endian 32-bit payload length and a SHA-256 header checksum, then
+canonical UTF-8 JSON payload and a 32-byte SHA-256 payload digest. Validate the
+complete header checksum before using its length. A complete invalid header
+refuses; it cannot be reclassified as an interrupted append. Payload is at
+most 65,536 bytes. Each frame is one atomic logical transaction containing
+`version`, `tx_id`, `expected_version`, `mutation_digest`, and one mutation of
+kind `initialize`, `reserve`, `child_created`, `child_prompted`, `settle` or
+`bind_receipt`. The fields below define those mutation families; unknown fields,
+versions or kinds refuse. Commit append then fsync before acknowledging.
 
-| Setting | Value |
-| --- | --- |
-| Model and reasoning | The parent's committed configuration |
-| Instructions | The host's block, with a host-supplied child appendix |
-| Active tools | `loopex.read`, `loopex.grep`, `loopex.find`, `loopex.ls`, unless the host widens it |
-| Turn and token bounds | Host values |
-| Deadline | The earlier of the host's child deadline and the parent run's remaining time |
-| Policy and workspace | The parent's |
+Cap a parent-run log at 16 MiB and child count at 128; capacity refusal is
+definite before append, never a hidden eviction. Before reserving a child,
+reserve disk-log capacity for the maximum bounded create, prompt, settlement
+and final-receipt frames. Persist this storage credit with the token reservation.
+Other appends cannot consume its closing-record credit. Release it only after
+conclusive terminal settlement and receipt persistence. Insufficient capacity
+refuses before child creation, so the cap never prevents recording admitted
+work's terminal evidence. Replay validates the whole
+prefix, identity, sequence and digest. Only an incomplete final frame may be
+removed after exclusive recovery establishes the previous writer is gone;
+a complete invalid header, payload checksum mismatch or interior corruption
+refuses, never skips. Test every header/length-byte corruption separately from
+genuine crash-truncated headers and payloads. Transaction IDs
+index original results: identical replay returns the result, conflicting reuse
+refuses. `lookup` returns committed, proven absent after complete recovery, or
+unknown. A partial write/fsync error returns unknown until replay resolves it.
+No compaction or retention policy is added in M7; a quiescent host may retain or
+retire the complete root under existing host policy. Do not write another
+session's journal. A ledger `commit_unknown` fences this
+adapter's mutation domain until resolved; it cannot authorize child creation,
+refund, publication or reissue. The ledger retains:
 
-**Result.** At most 16 KiB of the child's final assistant text, then a
-fixed trailer naming the child session, its terminal outcome and its usage.
-A child that ends other than `completed` yields a failed tool result with
-that outcome.
+- Catalog identity and parent-run allowance: child count, reserved tokens,
+  settled reported/estimated usage and unknown charges.
+- Logical operation identity `(parent_session_id, parent_run_id, operation_id)`,
+  canonical task digest, frozen role configuration and absolute cutoff.
+- Stable create/prompt command IDs, returned child session/run IDs, original
+  executor receipt tuple, child terminal evidence and final parent receipt.
 
-**Cancellation.** Cancelling the parent's job aborts the child's run and
-waits for its terminal before answering, within the existing cleanup grace.
+Use core's idempotent create command and returned session ID. Create and prompt
+command IDs derive from the logical operation, excluding executor attempt.
+Different arguments under the same identity refuse. Retain each original
+attempt tuple separately; operation deduplication does not make an old receipt
+valid for a new attempt.
 
-**Recovery.** After owner loss the parent's effect is unresolved. The
-adapter answers reconciliation from the child session's durable terminal.
-A child with no terminal is resumed or reported unknown by the ordinary
-rules; the parent never re-runs the prompt blindly.
+**Allowance.** All limits come explicitly from ADR 0049. Initialize once per
+parent run. In one ledger transaction, check child count and aggregate remaining
+tokens, reserve `min(child_token_budget, remaining)` and increment child count.
+Commit before creating the child. Replays of that operation reuse its reservation.
+Pass the reserved token threshold and configured turn/reply limits to the child.
+Settle exactly once using retained terminal usage. Reported overshoot charges in
+full; unknown usage consumes the reservation and prevents a speculative refund.
+Refund only conclusively unused tokens; child count is never refunded after
+admission. Exhaustion denies the next child, not the parent's own remaining work.
+Independent parent runs have independent allowances; resumed runs never reset one.
 
-**Writes.** A host that widens the child's tools to `write`, `edit` or
-`bash` accepts that both sessions act on one workspace. They never act at
-once, because the parent waits.
+**Deadline.** Persist `min(parent_job_deadline, admission_time + child_deadline_ms)`
+as the absolute cutoff before create. Extend the generic run-bound contract
+with optional `deadline_at_ms`, an absolute UTC millisecond ceiling committed
+at prompt admission. Effective deadline is the earlier of that ceiling and the
+existing relative deadline; all staging, dispatch, timers and recovery obey it.
+A past ceiling refuses before dispatch. The coordinator uses a monotonic timer
+for a live owner and recomputes remaining time from the persisted absolute
+ceiling after recovery, like existing durable deadlines. Owner loss cannot
+extend it. The adapter passes that exact ceiling in its idempotent prompt and
+also aborts on its own cutoff. Test loss of the adapter owner immediately before
+the cutoff and delayed recovery while the child owner remains alive. No core
+parent identity or child-specific deadline logic is introduced. Cancellation or expiry
+cannot publish a successful receipt while cleanup is uncertain.
+
+**Result.** Retain up to 16 KiB of final child text with an explicit truncation
+indicator and child identity for full replay. The bounded structured trailer
+contains role/catalog digest, model, child identity, outcome, reported/estimated
+usage and separate parent/delegation/combined totals. A conclusive failed,
+cancelled or bound-reached terminal is a failed tool result. A conclusive `failed(model_call_failed)` child terminal remains a known failed
+tool result, including ADR 0018's settled provider-ambiguity failure. Unknown
+child lifecycle, unresolved effect or cleanup evidence remains unknown; absence
+of a terminal cannot manufacture a known failure.
+
+**Recovery.** Cover reservation→create→prompt→terminal→receipt as separate gaps.
+Re-present identical public command IDs after missing acknowledgements. Reconcile
+from retained child evidence and the full original operation/attempt/request
+digest/session epoch/executor epoch/identity/fence tuple. Solicit receipts with
+the current reconciliation query ID and current owner epoch. Resume the existing
+child only under ordinary model/effect ambiguity rules. Absence of a receipt,
+missing ledger state or an unfinished child never proves that dispatch did not
+happen. Stale unsolicited results are rejected. A currently solicited, fully validated
+receipt may preserve a terminal fact after cancellation without reopening the
+cancelled parent run or granting new authority.
 
 <a id="technical-adr-0046-evidence"></a>
 ### Evidence
 
 Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-consequences).
 
-- The router passes the executor conformance suite, and every local tool's
-  request and receipt bytes equal those without the router.
-- The child's first staged request contains its prompt and instruction
-  block and nothing from the parent.
-- A child's tool set containing `loopex.task` or `loopex.ask` is refused at
-  creation.
-- The child's deadline never exceeds the parent's remaining time.
-- Parent cancel ends the child before the parent's cancellation settles.
-- A crash injected after the child's terminal and before the parent's
-  receipt resolves to the child's result with no second child.
-- A failed, cancelled or bound-reached child yields a failed tool result.
-- A source check finds no child, parent or scheduler concept in
-  `apps/loopex`.
-- Real provider: a parent delegates one search and uses the answer.
+- Executor conformance and local-tool byte equivalence through the router.
+- Fresh child context, role-catalog immutability across config edits/restart,
+  cross-provider selection and rejection of unknown/disabled roles.
+- Read-only tools, policy denial, no nesting/questions and no tool widening.
+- Store/process failure before and after every ledger and child-command boundary;
+  unresolved ledger commit fences dispatch, exactly one child and one prompt.
+- Budget reservation, known overshoot, unknown charge, no double settlement or
+  restart reset, exhausted-child-count refusal and separate visible totals.
+- Delayed admission at the absolute cutoff; parent cancellation, stuck child,
+  stale receipt, cleanup uncertainty and parent owner succession.
+- Real provider parent on A and child on B; investigation and review fixtures
+  return known findings with unchanged helper workspace bytes.
 
 <a id="technical-adr-0046-compatibility"></a>
-### Compatibility and Rejected Alternatives
+### Compatibility Mechanics and Alternatives
 
 Concept: [Compatibility and rollback](0046-child-session-tool.md#concept-adr-0046-compatibility).
 
-- *The model runs `loopex ask` through `bash`.* This works today with no
-  change and is pi's approach. Rejected as the only path: the child's
-  policy, bounds and identity would be outside the parent's session and
-  invisible to its operator. It remains available to any host.
-- *A scheduler in core with parallel children.* Rejected by the vision.
-- *Share the parent's history with the child.* Rejected. It defeats the
-  purpose, which is a separate context.
-- *Charge child usage to the parent's token budget.* Deferred. It needs a
-  core accounting change the proof does not require.
+Version, bound and validate every ledger record before use. Unsupported or
+malformed state opens read-only for diagnosis or refuses before mutation and
+dispatch. Back up the complete quiescent host root, including ledger and child
+sessions, before upgrade. Downgrade restores that backup; it cannot erase or
+replay unresolved operations. Implement the ledger format specified above with replay and corruption fixtures;
+record actual fixture identities before integration. A queue, parallel workers, writable children, nested delegation
+and charging children to core parent counters are outside this decision.

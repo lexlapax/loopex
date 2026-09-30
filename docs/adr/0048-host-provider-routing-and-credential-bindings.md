@@ -1,0 +1,60 @@
+<a id="concept"></a>
+## Concept
+
+Technical depth: [Host provider routing and credential bindings](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth).
+
+- **Status:** Proposed
+- **Date:** 2026-09-30
+- **Decision owner:** Maintainer
+- **Supersedes:** [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) only its single model/token/registry-binding restriction; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only its fixed selected-provider environment-variable names
+- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)
+- **Prerequisite for:** M7 outcomes 4 and 7
+
+<a id="concept-adr-0048-decision"></a>
+### Context and Decision
+
+Technical depth: [Contract](0048-host-provider-routing-and-credential-bindings-technical.md#technical-adr-0048-decision).
+
+A parent and a read-only helper may use different providers; an existing
+conversation may explicitly switch providers between runs. The host admits a
+bounded immutable collection of provider bindings at runtime startup, one per
+provider. The committed exact `provider:model` selects one binding. Model output,
+role text and saved defaults cannot select an unadmitted credential.
+
+Configuration stores only named environment references. No raw keys, files,
+keychain lookups, commands, custom endpoints or multiple accounts for one
+provider enter M7. Missing or mismatched binding refuses before dispatch; no
+provider fallback is allowed.
+
+Durable composition retains host custody and the separate-process handoff.
+Ephemeral composition retains caller-only value resolution and ADR 0039's
+host-VM audience, ambient-tool trust and cleanup limits. These paths must not
+share a loader that gives either profile the other's credential lifetime.
+Runtime restart may rebind the same provider to a host-authorized replacement
+key; it never changes an admitted request's model or digest.
+
+<a id="concept-adr-0048-consequences"></a>
+### Observable Consequences
+
+Technical depth: [Evidence](0048-host-provider-routing-and-credential-bindings-technical.md#technical-adr-0048-evidence).
+
+The operator can identify the provider used by each run and child. Provider
+A→B→A preserves canonical conversation facts and validates model capability
+and context before committing each switch. Credentials, variable names and
+custody handles remain outside durable model requests and public diagnostics.
+
+<a id="concept-adr-0048-compatibility"></a>
+### Compatibility and Rollback
+
+Technical depth: [Compatibility mechanics](0048-host-provider-routing-and-credential-bindings-technical.md#technical-adr-0048-compatibility).
+
+The amendment leaves readiness, trace exclusion, private credential transfer,
+deadlines, teardown and missing-custody refusal unchanged. It does not accept
+ADR 0035's typed durable decision redesign. Existing single-provider callers
+remain valid. Downgrade of roots with M7 configuration follows ADR 0044.
+
+## Governance Record
+
+| Decision | Authority | Authority evidence | Bound bytes |
+| --- | --- | --- | --- |
+| Acceptance | — | — | — |

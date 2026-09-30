@@ -11,7 +11,7 @@ An agent is a loop around an LLM. Loopex makes that loop an OTP-native,
 embeddable runtime for durable coding-agent sessions and controlled effects:
 a small, provider-neutral model loop with truthful recovery, versioned client
 contracts and location-transparent tool execution. Governed live extensions
-remain future scope in the M9 draft.
+remain future scope in the M10 draft.
 It is a minimal terminal coding harness on its own, and small enough to
 disappear inside a larger host.
 
@@ -26,7 +26,7 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M7` is open; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
@@ -204,7 +204,7 @@ without entering the kernel.
   process, isolated container/microVM, or trusted remote worker — behind one
   job/receipt protocol. Distribution connects trusted gateways only; the
   sandbox is the OS boundary, never the BEAM.
-- **Future governed live extensions:** the M9 draft targets quiescent trusted
+- **Future governed live extensions:** the M10 draft targets quiescent trusted
   OTP generations with tested migration and exact rollback. No extension
   manifest or lifecycle API ships in the current source.
 - **A seven-tool coding surface** (`read write edit bash grep find ls`)

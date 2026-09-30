@@ -9,8 +9,8 @@ Technical depth: [Selection procedure, migration contract and candidate evidence
 - **Supersedes:** [ADR 0031](0031-daemon-grade-store-selection-and-migration.md#concept)
   for the store selection only, once this pair is accepted; ADR 0031's local
   adapter, its documented ceilings and its root-retirement procedure remain
-  the `0.2` record and the `0.3` migration source
-- **Prerequisite for:** M7 outcomes 3 and 6 (draft; this was M6 before the maintainer's reframing of 2026-09-26, and the successor is the M8 draft), accepted before any format
+  the historical `0.2` record; migration fixtures also include valid post-M7 records
+- **Prerequisite for:** M8 outcomes 3 and 6 (draft; this was M6 before the maintainer's reframing of 2026-09-26, and the successor is the M9 draft), accepted before any format
   marker, reader boundary, backup or restore code is written; the engine
   adapter, the migration and the capacity refusal it fixes are implemented by
   the successor milestone under this same decision
@@ -52,14 +52,14 @@ measurement would repeat the mistake ADR 0031 corrected.
    removes the two ceilings the operator meets. SQLite is the alternative if
    the measured replay or index bounds are not met, and choosing it is also a
    dependency decision, taken in the same acceptance.
-3. **Every `0.2` root migrates forward, once, explicitly.** Migration is an
+3. **Every supported local-format root migrates forward, once, explicitly.** Migration is an
    operator command, never a side effect of opening a root. It converges when
    interrupted, it never destroys the source until the target verifies, and
    the oldest reader of a migrated root is the release that ships the engine.
-   A format marker is written into every root from `0.3.0` on, so that a
-   binary refuses a root whose format it does not know with a named reason
-   rather than corrupting it; `0.3.0` writes the marker and enforces the
-   boundary, and the successor's migration starts from it.
+   The installed candidate adds a format marker and its own unknown-format
+   refusal. This cannot retrofit released readers. Container format, durable
+   record capabilities and binary version are distinct; exact reader fixtures
+   must establish supported combinations before acceptance.
 4. **Backup and restore are operator commands on a closed root** that produce
    and consume one verifiable archive, and restore is the rollback procedure:
    a previous binary is not a rollback plan when storage has changed, so the
@@ -77,19 +77,19 @@ measurement would repeat the mistake ADR 0031 corrected.
 
 Technical depth: [Migration and interrupted-import contract](0036-daemon-grade-store-engine-and-migration-technical.md#technical-adr-0036-migration).
 
-From `0.3.0`, `loopex store backup` and `loopex store restore` exist, refuse a
+In the installed candidate, `loopex store backup` and `loopex store restore` exist, refuse a
 live root, print what they will do before they do it, and `loopex doctor`
 reports the root's format marker. From the release that ships the engine, an
 operator opens a root and it opens in bounded time whatever its history
 length, because replay is bounded by the index rather than by the log; the
 256 MiB retirement procedure disappears for migrated roots; `loopex store
 migrate` exists under the same rules and is, with the daemon, the only writer
-of the new format; `doctor` reports whether a migration is pending; and a
-`0.3` daemon pointed at a migrated root exits with a named class rather than
+of the new format; `doctor` reports whether a migration is pending; and the installed candidate's
+daemon pointed at a migrated root exits with a named class rather than
 serving it.
 
 What does not change: session identity, command identity, the journal's
-public event schema and every generation-2 wire record, the placement lock and
+public event schema and wire records of its accepted predecessor, the placement lock and
 writer marker rules ADR 0031 and ADR 0032 fixed, and the daemon-owned listing
 index ADR 0032 owns, which is rebuilt from the migrated root rather than
 migrated itself.
@@ -103,8 +103,8 @@ The release that ships the engine is the first durable migration milestone,
 so the vision's list applies to it in full: supported source and target
 versions, forward migration, interrupted-migration detection and recovery,
 backup and restore as the downgrade policy, the previous-binary reopening
-boundary, and an exact packaged rollback procedure. `0.3.0` changes no format
-and discharges the items that apply to an unchanged one: the format marker,
+boundary, and an exact packaged rollback procedure. The installed candidate retains the local storage container and discharges
+its own reader-capability obligations: the format marker,
 the reader boundary, and backup and restore. The private journal schema is
 surface 1 in the vision's list and freezes nothing here; the public protocol
 is untouched. Rejected alternatives and the reasons are in the companion.

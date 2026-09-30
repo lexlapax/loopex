@@ -1,0 +1,481 @@
+<a id="technical-depth"></a>
+## Technical depth
+
+Concept: [M7 coding-agent proof](M7.md#concept).
+
+<a id="technical-plan-prerequisites"></a>
+### Prerequisites and Acceptance Points
+
+Concept: [Purpose](M7.md#concept-plan-purpose).
+
+Concept: [Design decisions](M7.md#concept-plan-decisions).
+
+M6 is Closed. Nine decisions are proposed with this candidate. Each is
+accepted before the implementation that depends on it:
+
+| Decision | Accepted before |
+| --- | --- |
+| [ADR 0041](../adr/0041-session-lineage-projection-and-context-budget.md#concept) | Outcome 1's projection change |
+| [ADR 0042](../adr/0042-host-composed-instructions.md#concept) | Outcome 2's instruction option |
+| [ADR 0043](../adr/0043-context-compaction-checkpoint.md#concept) | Outcome 3's checkpoint record |
+| [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept) | Outcome 4's configuration record and outcome 7's resolved per-role model configuration |
+| [ADR 0045](../adr/0045-model-originated-questions.md#concept) | Outcome 5's tool class |
+| [ADR 0046](../adr/0046-child-session-tool.md#concept) | Outcome 7's adapter |
+| [ADR 0047](../adr/0047-reference-host-run-defaults.md#concept) | Outcome 6's mandatory configured bounds and outcome 8's measured baseline |
+| [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept) | Outcomes 4 and 7 provider routing and credential bindings |
+| [ADR 0049](../adr/0049-explicit-host-configuration.md#concept) | Outcomes 6 and 7 explicit configuration, roles and command grammar |
+
+Accepted decisions that constrain the work:
+
+| Decision | Constraint on M7 |
+| --- | --- |
+| [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage |
+| [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Prompt, steer and follow-up admission rules are unchanged |
+| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Context admission is budgeted and refuses by named dimension |
+| [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | Tool definitions, grants and the reserved `loopex.` namespace |
+| [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Interactions are durable, bounded and grant nothing |
+| [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADR 0045 adds bounded one-call answers and ADR 0048 permits explicit env names |
+| [ADR 0034](../adr/0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | Durable provider dispatch retains host-owned credential references and per-invocation custody; ADR 0048 narrowly amends its single-provider restriction |
+| [ADR 0030](../adr/0030-observability-tracing-and-telemetry.md#concept) | Host-owned runtime tracing, bounded diagnostics and redaction remain unchanged when exposed through startup flags |
+
+Vision sections that bind the work: what Loopex is not (§3.2), compaction
+(§12.5), model identity and provider state (§13.4), the context pipeline
+(§13.5) and the minimalism budgets (§23.4).
+
+Proposed ADR 0037 governs installed discovery in M8, not this milestone.
+Public protocol additions in ADRs 0043–0045 must share one experimental
+negotiation revision, vectors and independent-client proof. Acceptance binds the
+proposal contracts; source implementation and numeric schema identifiers are
+verified at the first protocol integration before any new wire shape is exposed.
+
+<a id="technical-plan-configuration"></a>
+### Explicit configuration contract
+
+Concept: [Explicit configuration](M7.md#concept-plan-configuration).
+
+[ADR 0049](../adr/0049-explicit-host-configuration-technical.md#technical-adr-0049-decision)
+is the single schema, precedence and grammar definition. It specifies explicit
+JSON, exact provider:model selection, mandatory file run limits, saved roles,
+relative-path rules, prompt files, effective value origins and trace controls.
+Core and reusable composition receive explicit options and read no files.
+
+The proposed `loopex chat --config FILE` owns a foreground durable runtime.
+It adds settled prompts and explicit steer/follow-up/answer/compact/configure/
+abort/status actions, bounded EOF/interrupt cleanup and non-TTY refusal. Existing
+`ask`, `run`, `resume` and daemon client semantics remain, except explicit trace
+startup controls on owning hosts. Remote chat attachment is M8 successor work.
+
+ADR 0047 preserves 16 turns, 600,000 ms and 1,000,000 run tokens as documented
+starting values; the file must declare them or other valid explicit values.
+The reply default remains 4,096. Helpers require independent child-count,
+aggregate-token and per-child bounds, with no silent spending defaults.
+ADR 0046 persists reservations and outcomes across restart. Operator output
+separates parent usage, helper usage and combined totals; token thresholds stop
+subsequent work and do not promise exact provider invoice caps.
+
+Model requests, including the normalized record envelope and receipt, remain
+at most 65,536 bytes. ADR 0043 fixes summary input/output limits and a four-attempt
+maintenance ceiling. Irreducible content refuses rather than silently truncating.
+The reference default prompt and default tool set must stay below 1,000 estimated
+tokens. Demonstrated opt-in sets need their own measurement and explicit ceiling.
+
+Trace flags map only to the existing runtime-scoped host API and ceilings.
+Bounded stderr consumption, separate drop counts, redaction, credential process
+exclusions and runtime cleanup are implementation obligations. They add no
+client trace method. Effective inspection never resolves a credential.
+
+<a id="technical-plan-comparison"></a>
+### Comparison Basis
+
+Concept: [Purpose](M7.md#concept-plan-purpose).
+
+Read from source on branch `m6` on 2026-09-29:
+
+| Fact | Location |
+| --- | --- |
+| Turn continuation and bound order | `apps/loopex/lib/loopex/runtime/session_coordinator.ex` `settle_turn/2`; `apps/loopex/lib/loopex/bounds.ex` |
+| Fixed instruction block | `session_coordinator.ex` `system_block/1` |
+| Request options: model, active tools, `max_tokens`, deadline | `session_coordinator.ex` `model_candidate/5` |
+| A run's conversation starts as its prompt alone | `apps/loopex/lib/loopex/runtime/session_state.ex`, both `Map.put(state.conversation, run_id, [element])` sites |
+| Reasoning is streamed back and no setting is sent | `apps/loopex_llm_reqllm/lib/loopex/llm/req_llm.ex` |
+| Tools: read, write, edit, bash, grep, find, ls | `apps/loopex_executor_local/lib/coding_tools.ex` |
+| Interaction kind is exactly `choice` | `apps/loopex/lib/loopex/interaction.ex` |
+
+The earlier Pi and opencode comparison was an exploratory source summary,
+not a versioned compatibility assessment. The current proposal relies on the
+specific Pi documentation below and Loopex's own contracts. It copies no
+implementation, tests or private contract, and creates no Pi compatibility
+claim.
+
+<a id="technical-plan-specialization"></a>
+### Pi research and scope mapping
+
+Concept: [Specialized agents and the milestone boundary](M7.md#concept-plan-specialization).
+
+Primary documentation was checked on 2026-09-29, after Context7 resolved
+`/earendil-works/pi`. Context7 also returned material about a separate Pico
+API; that does not establish the Pi coding-agent CLI's built-in behavior.
+The live documentation is a dated comparison, not a dependency pin.
+
+| Suggested strategy | Verified capability and correction | M7 disposition proposed |
+| --- | --- | --- |
+| Markdown specialization | [Prompt templates](https://pi.dev/docs/latest/prompt-templates) expand text into the current conversation. They do not create another session or enforce a tool restriction | Resolve saved host roles to instructions/model settings and use existing admitted skills; no role type in core or new template language |
+| Project instructions | [Configuration](https://pi.dev/docs/latest/configuration) distinguishes discovered context files from trusted project configuration. Project system overrides live in `.pi/SYSTEM.md`, with `.pi/APPEND_SYSTEM.md` for appending | Preserve Loopex's project-resource admission and provenance; never promote a repository file into trusted system content merely because of its name |
+| Terminal teams and branches | Pi's [session guide](https://pi.dev/docs/latest/sessions) distinguishes `/tree` within one session file from `/fork` into another. Neither operation creates a Git worktree | Document ordinary session separation; do not claim a terminal pane or conversation fork isolates filesystem writes |
+| Automatic delegation | The [Pi overview](https://pi.dev/) excludes built-in subagents and points to extensions. Its [subagent example](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/subagent/README.md) supplies separate processes and configurable tools | Learn from explicit child context and tool selection; implement ADR 0046 as a Loopex host adapter, not a Pi launcher |
+| Programmatic orchestration | [RPC](https://pi.dev/docs/latest/rpc) controls a long-lived subprocess through JSONL; print/JSON and an SDK are also available | Keep the existing Loopex facade and protocol as the shared contract; a Pi adapter needs its own later scope and failure mapping |
+
+Pi's [security boundary](https://pi.dev/docs/latest) leaves tools and
+extensions with the process's permissions. A prompt role is therefore not
+evidence of read-only execution. For Loopex, demonstrate read-only helpers
+with an explicit tool set and policy, and describe the local executor's
+existing trust limits. Do not claim OS isolation.
+
+For the two M7 examples, the explicit host file saves a repository-investigation
+role and a review role with instructions and model choices. Both use the same
+four read-only tools. The parent supplies a bounded task prompt; the host
+resolves the selected role before admitting child work. A role name embedded
+in free text grants nothing. Define the selection field and which configured
+roles the host exposes rather than interpreting arbitrary model text as
+configuration.
+
+The maintainer selected automatic parent-initiated delegation among the
+host-enabled roles after helper opt-in. Include a validated role selector in
+the task tool's bounded arguments and expose only the admitted role choices.
+Every call still consults host policy; allowed calls do not require an extra
+M7 confirmation step. Refuse unknown/disabled roles and prevent arguments
+from overriding role credentials, tool policy or bounds. Record the resolved
+role identity and configuration with the child for inspection and recovery.
+
+ADR 0046 freezes the parent role catalog and selected child settings, with
+stable operation-bound command IDs and a private host ledger. ADR 0048 supplies
+one admitted env-reference binding per provider; durable custody and ephemeral
+caller resolution stay distinct. Host restart may explicitly rebind the same
+provider to a replacement key without redirecting a committed model request.
+
+ADR 0044 specifies pure cross-provider history conversion and A→B→A proof.
+Canonical text and tool facts survive; incompatible opaque continuation and
+reasoning state does not. No parallel, nested or write-capable helper is included.
+
+<a id="technical-plan-evidence"></a>
+### Evidence Obligations and Mapping
+
+Concept: [Outcomes](M7.md#concept-plan-outcomes).
+
+Concept: [Scope and non-goals](M7.md#concept-plan-scope).
+
+Concept: [How each outcome is verified](M7.md#concept-plan-verification).
+
+| # | Fast check | Release check |
+| --- | --- | --- |
+| 1 | The second run's staged request contains the first run's prompt, assistant messages and tool results in committed order. The projection is rebuilt identically after owner succession and restart. Accounting for the new run starts at zero | The second prompt of a real session refers to the first |
+| 2 | Staged bytes equal the host's composed block. The digest changes when the block changes. An oversize or malformed block is refused before dispatch. Project files stay in separate provenance classes. Core retains only ADR 0042's compatibility fallback | The default block drives a real task; record its cost with the active tools |
+| 3 | The checkpoint records input range, summary, model identity, usage and integrity digest. Projection substitutes it and keeps the first later raw record verbatim. Raw records remain readable. Recovery selects the last committed checkpoint, fences uncertain commits and never repeats an ambiguous summary attempt. Tool receipts and effect outcomes are unchanged by a summary | A real session passes its context limit and continues |
+| 4 | Run configuration commits provider/model and reasoning. Adapter conformance proves cross-provider history conversion, tool-call identity normalization and incompatible-state removal. Restart uses the admitted configuration; missing routes and in-run changes refuse | One session continues A→B→A across providers, retaining earlier facts and tool results, including restart |
+| 5 | Policy permits the question before interaction admission. Durable replay re-presents the same question; ephemeral interaction state ends with its runtime. Both hold no provider call while waiting. Answer/expiry differ; cancellation stays terminal. Test the explicit ephemeral answer path, absent/failed responder, deadlines, duplicate/late answers and cleanup. Answers grant nothing | A real model asks and uses an answer through the durable command and the ephemeral host-answer interface |
+| 6 | The command drives the public session contract only. Steer, follow-up, question and interrupt paths each have a test over a pseudo-terminal or piped input. Configuration tests cover explicit file selection, flag precedence, prompt files, invalid values and resume semantics | Attended conversation of at least three prompts using the documented flags and config file |
+| 7 | Saved roles resolve to exact provider/model/instruction settings and separate credential references without widening policy. Routing and custody have conformance/canary coverage. The child has its own identity, bounds and read-only tools. Recovery uses recorded settings; parent cancel propagates; nesting refuses; failures preserve uncertainty | A real parent delegates investigation and review sequentially using saved roles, including a helper on a different provider |
+| 8 | The task set and its acceptance checks are fixtures in the repository | Every task completes against the real provider. Transcripts and workspace diffs are retained outside the repository with digests |
+| 9 | Runbook commands use the same fixture setup and objective checks as outcome 8. Tests cover failure cases that require controlled injection | A named operator follows the documented workflow on the tested SHA; record steps, observations, failures and evidence references |
+
+Each coding task states its starting workspace, its prompt and a check that
+decides pass or fail without reading the model's prose, such as a test suite
+that must pass. A task that passes only on retry is a failure to explain.
+
+Use the existing CLI coding-task fixture and release lane as the starting
+point: `apps/loopex_cli/test/coding_task_test.exs` and
+`scripts/check-release.sh`. Extend the existing interaction, context,
+provider, executor and protocol suites at the changed boundaries. Select
+unattended pre-merge release lanes under the verification guide when those
+boundaries change. The closure matrix remains the repository's two checks,
+with retained exact-SHA evidence; operator validation does not replace them.
+
+Outcome 6's fast proof includes schema/precedence, each conversation state and
+trace enable/disable, limits, bounded stderr, dropped counts and redaction.
+Outcome 7 includes durable role-catalog recovery, allowance reservation/settlement,
+known overshoot, unknown usage and no restart reset. First protocol integration
+adds the negotiated schema and independent Node fixtures for every changed
+command/event/snapshot. No outcome is proved by tests of only the happy path.
+
+The proposed fixed task catalog is:
+
+| Task | Starting fixture and input | Objective completion check |
+| --- | --- | --- |
+| Repair | A small repository with a seeded boundary bug and a failing test; diagnose, then fix using a second prompt referring to the diagnosis | The original failing test and regression suite pass; the patch stays within named paths and leaves checks intact |
+| Bounded feature | A repository with a missing option and an ambiguous default; ask the operator, implement the chosen behavior, then run tests | Tests prove the chosen default and explicit alternative, with no unrelated changes |
+| Investigation and review | A repository with a known call chain and a prepared defect; delegate search, then use a separately instructed read-only review example | Results identify the fixture's known locations and defect; workspace bytes are unchanged by the helper |
+| Long conversation | A bounded fixture with early facts, several dependent steps and enough context to trigger compaction | Later assertions still match the early facts and resulting files; checkpoint, raw history and restart observations agree |
+| External repository | Maintainer-selected repository and pinned starting commit, a bounded real task and disposable checkout; target and task pending selection | Agreed repository tests and task-specific assertions pass; retained diff obeys the allowed-path/change constraints |
+
+The accepted catalog must name the actual fixture paths, initial content
+digests, prompts, acceptance commands and allowed diff constraints before
+the real-provider run. These rows specify what to build, not completed proof.
+
+The maintainer selected the fixture set plus an external repository task on
+2026-09-30. Retain the external source URL or checkout provenance, exact base
+SHA, prerequisite versions, initial worktree state, task prompt, allowed
+paths, test commands and objective success criteria. Keep the user's original
+checkout untouched. The task's changes remain evidence in the disposable
+checkout; no external merge, push or publication is implied. Establish the
+repository and task during testing, as the maintainer explicitly directed on
+2026-09-30. Their selection is not a plan-acceptance prerequisite. Pin the
+starting commit, task and pass criteria before the demonstration attempt;
+retain failures without changing the task to turn an observed failure into
+a pass.
+
+<a id="technical-plan-operator-validation"></a>
+### Scenario steps and evidence
+
+Concept: [Operator validation](M7.md#concept-plan-operator-validation).
+
+Deliver an indexed runbook under `docs/operator/` with copyable commands and
+expected output for the implemented command grammar. The following steps are
+the scenario specification. M7 syntax is specified in ADR 0049 but is not implemented yet; these steps
+are validation requirements, not a claim that the commands run today. Fill in exact commands alongside each feature and
+verify them against the real command before closure.
+
+Every scenario begins from a named build and disposable workspace/state root.
+It states the selected provider/model, declared time/token/turn bounds,
+prerequisites, expected observations, objective checks, evidence destination,
+failure interpretation and cleanup. Use existing M6 build, `ask`, `run`,
+`resume` and daemon instructions for baseline steps. Distinguish foreground
+process loss from a daemon client's detach.
+
+#### V1. Establish the baseline
+
+1. Record the source SHA, toolchain and model identity, and build the command.
+2. Create the fixture workspace and separate temporary Loopex state root.
+3. Run a read-only one-shot request and a durable request through documented
+   existing commands.
+4. Inspect the rendered terminal outcome and the workspace check. A legacy
+   `run` or `resume` exit status of zero proves rendering, not task success.
+5. Retain output and the fixture identity before continuing.
+
+#### V2. Repair across prompts and restart
+
+1. Open the repair fixture and request a diagnosis without an edit.
+2. Ask for the fix by referring to the earlier diagnosis without repeating it.
+3. Ask for verification and run the fixture's acceptance command independently.
+4. Close and reopen the settled session using its recorded identity.
+5. Ask about the original decision and verify continuity against retained
+   history and the resulting patch.
+
+#### V3. Admit instructions and specialize work
+
+1. Prepare a distinctive benign project instruction and an explicit review skill.
+2. Inspect and admit their exact bytes, then perform the fixture task.
+3. Repeat from a fresh fixture with the resource declined; inspect admitted
+   context and resulting behavior.
+4. Change the resource, admit its new identity, and verify the receipt changes.
+5. Ask for an action denied by policy and verify that admitted instructions
+   and the review role cannot authorize it.
+
+#### V4. Steer and queue a follow-up
+
+1. Start a task with a documented opportunity to steer before its next turn.
+2. Steer the active objective and observe its admission/disposition.
+3. Queue a follow-up while the run remains active.
+4. Observe that the follow-up becomes a separate run with prior context.
+5. Exercise late steering and confirm that it is explicitly unapplied when
+   it misses the applicable boundary.
+
+#### V5. Ask, answer and recover a question
+
+1. Start the ambiguous feature task and observe the model's question.
+2. Answer it, then verify the selected behavior with the fixture tests.
+3. Repeat with a pending question across restart and verify the same identity.
+4. Exercise expiry, denied presentation and cancellation using documented
+   fixture cases; inspect their distinct results.
+5. Verify that an answer requesting more authority cannot bypass the next
+   policy decision. Provider inactivity while waiting is proved by tests.
+6. Run the equivalent ambiguous task through one ephemeral call with a
+   configured host answer path. Supply the answer and verify the result.
+   Demonstrate absent responder and cancellation behavior without claiming
+   restart recovery; the interaction disappears with that runtime.
+
+#### V6. Continue after compaction
+
+1. Use the long-conversation fixture and a documented small context budget.
+2. Establish an early fact, then continue until automatic compaction occurs.
+3. Verify the visible checkpoint and ask about the earlier work.
+4. Explicitly compact a settled session and inspect retained raw history.
+5. Reopen the session and verify the same continuation. Atomic checkpoint
+   commits and ambiguous provider attempts use controlled fault tests.
+
+#### V7. Change provider, model and reasoning
+
+1. Complete a run and record its model and reasoning configuration.
+2. Select a supported model on provider B through its separate credential
+   reference and submit a follow-up referring to work from provider A.
+3. Select a supported non-default reasoning level, then reopen the settled
+   session and confirm the committed configuration and retained history.
+4. Switch back to provider A and verify continuity with the fixture's facts
+   and earlier tool results.
+5. Request an unsupported level or an in-run change and verify refusal
+   before a new provider dispatch. Exercise a missing provider binding and
+   verify refusal without fallback. V8 proves the separate parent/child workflow.
+
+#### V8. Delegate bounded investigation and review
+
+1. Save investigation and review roles in the explicit config file with
+   instructions and supported exact models, then enable explicitly bounded read-only
+   helpers. Record provider A for the parent and provider B for the review role.
+2. Ask the parent to delegate the fixture's repository investigation using
+   the configured role.
+3. Inspect the separate child identity, transcript, outcome and usage, then
+   verify that the parent uses its findings.
+4. Repeat with the saved review role on provider B and verify its
+   selected provider/model, the known finding and unchanged workspace.
+5. Exercise child failure, bound exhaustion and parent cancellation. Observe
+   truthful parent settlement; nested delegation and question tools refuse.
+   Deduplication and reconciliation after crashes are automated proof.
+6. Exhaust a small delegation allowance across serial children; verify that
+   another child refuses while the parent's remaining budget stays distinct.
+   Inspect parent, helper and combined usage, then restart and verify no reset.
+7. Reject an unknown/disabled role. Edit a role file, reopen the parent and
+   verify its retained catalog still governs already admitted work.
+
+#### V9. Refuse, interrupt and recover
+
+1. Trigger a policy-denied effect and verify no effect occurred.
+2. Interrupt a foreground task and inspect its cancellation/cleanup result.
+3. Recover a disposable durable session after controlled process loss and
+   inspect the committed outcome before submitting more work.
+4. Detach a daemon client, reattach and verify that client absence alone did
+   not cancel the daemon-owned run.
+5. When recovery reports an unknown effect, preserve the root for inspection.
+   Do not demonstrate recovery by blindly repeating the request.
+
+#### V10. Record the coding-task result and clean up
+
+1. Run the repeatable fixtures from their pinned initial content and prompts.
+   Choose the external repository/task during testing; record base SHA, allowed
+   paths and objective checks before the attempt. Create its disposable checkout,
+   execute the task and retain the original results and diff.
+2. Run every objective acceptance command and inspect the allowed diff.
+3. Record elapsed duration, usage, largest reply and terminal outcome for
+   each task; retain failed attempts as well as successful ones.
+4. Stop the fixture-owned processes and retain redacted logs, workspace diffs
+   and checks outside the workspace and repository with SHA-256 digests.
+5. Remove only disposable state whose process cleanup is confirmed. Preserve
+   uncertain state and report the incomplete scenario.
+
+#### V11. Enable and inspect tracing
+
+1. Start a disposable foreground runtime with tracing enabled through the
+   documented flag, then repeat with the explicit config file.
+2. Run a small task and inspect the selected trace level, module scope,
+   emitted/dropped counts and redacted entries.
+3. Override a file-enabled trace with the disable flag and verify the
+   effective configuration. Reject invalid options and excessive limits.
+4. Repeat through existing `ask --output json` with trace startup flags and
+   confirm diagnostics do not enter the result stream. Chat remains text-only. Use automated canaries to prove payload redaction and
+   runtime isolation; operators need not inspect real credentials.
+5. Finish or interrupt the host and verify trace cleanup. Document the
+   distinct daemon-startup procedure without adding remote trace authority.
+
+#### V12. Resolve explicit configuration
+
+1. Validate a complete explicit file and inspect effective values/origins without
+   resolving credentials. Start chat with file values only.
+2. Override model/reasoning, limits, prompt files and trace settings through flags;
+   inspect the committed settings and staged instruction digest.
+3. Refuse duplicate/unknown JSON members, bad paths, malformed values and missing
+   mandatory run/delegation limits before provider dispatch.
+4. Edit defaults and role files, then resume a settled session. Verify committed
+   configuration and role snapshots persist. Apply a permitted explicit
+   `/configure` change and verify it affects only the next run.
+5. Refuse in-flight changes and immutable tool/catalog changes. Confirm legacy
+   one-shot defaults and unattended behavior remain unchanged.
+
+The evidence record includes the tested SHA, fixture digests, toolchain,
+provider/model identifiers, prompts and operator answers, session/run/child
+identities, complete redacted output, expected versus observed results,
+workspace diff, acceptance-check output, measured durations and usage.
+Reference the operator run from the closure evidence page. Reuse the current
+release runner and redaction path. Record who attended; an automated answer
+fixture cannot be described as a person validating the workflow.
+
+The maintainer selected an attended core workflow run by the maintainer or
+a named operator, with automated coverage of the full failure matrix.
+Identify the attended steps in the runbook before the candidate run; every
+other scenario still has instructions and mapped automated evidence.
+
+<a id="technical-plan-acceptance-issues"></a>
+### Internal review disposition and audit targets
+
+Concept: [Design decisions](M7.md#concept-plan-decisions).
+
+The internal implementation-readiness review corrected the following proposal
+contradictions. This is review of planned contracts, not product evidence or
+formal independent acceptance review.
+
+| Finding | Governing repair and implementation witness |
+| --- | --- |
+| Full-lineage joins could cross runs | ADR 0041 keys results by run/turn/call and tests repeated provider call IDs |
+| Admission and byte-limit claims conflicted with ADR 0017 | ADR 0041 retains staging failure and optional withholding; exact normalized record measurement stays at 65,536 bytes |
+| Compaction was unbounded and unsafe after uncertain commits | ADR 0043 bounds episodes/input/output, retains attempts/checkpoints and fences ambiguity |
+| Instruction updates/fallback lacked a durable contract | ADR 0042 uses ADR 0044's atomic settled configuration with exact bytes and strict ceiling |
+| Provider changes omitted accepted amendments | ADRs 0044/0048 name ADR 0010/0034/0039 restrictions and preserve profile-specific custody |
+| Questions conflated restart, cancellation and ephemeral lifetime | ADR 0045 defines producer/response branches, a bounded responder and terminal precedence |
+| Helpers allowed writes and changed identity on retry | ADR 0046 fixes read-only scope, immutable catalogs, operation IDs, durable budget and recovery evidence |
+| Larger defaults contradicted maintainer choice | ADR 0047 requires configured limits and retains current starting values |
+| Config/CLI/tracing were unspecified | ADR 0049 supplies one closed schema and command contract; ADR 0037 becomes M8-only discovery |
+| Successors promised unsupported downgrade | M8–M10 drafts and Proposed ADRs 0036–0038 distinguish container format, record capability and binary version |
+
+External audit should challenge these repaired contracts and the outcome-to-proof
+mapping. Exact fixture paths/content/prompts and the external repository task are
+implementation/testing deliverables, fixed before their demonstration attempts.
+The external target remains deferred by the maintainer. No successful product
+run, accepted ADR or completed milestone is asserted by this packet.
+
+<a id="technical-plan-ownership"></a>
+### Workstreams and Rejoin Order
+
+Concept: [Workstreams](M7.md#concept-plan-workstreams).
+
+| Phase | Work and rejoin condition |
+| --- | --- |
+| 0. Specify | Accept the proposed contracts; build the task fixtures and executable scenario commands from the fixed grammar. Accept prerequisite ADRs before dependent implementation |
+| 1. First complete workflow | Reproduce lost cross-run history, then implement continuity and host instructions under one owner. Integrate a minimal conversational command and prove two prompts plus restart |
+| 2. Long-lived work | Add compaction under the same projection/staging owner. Integrate model/reasoning configuration and verify compatible history after a change |
+| 3. Operator control | Add model questions to the existing interaction lifecycle; complete conversation steering, answers, follow-up, interrupt and noninteractive behavior |
+| 4. Bounded helper | Integrate the host adapter after outcomes 1, 2 and 4; prove identity, read-only policy, cancellation and recovery before role examples |
+| 5. Acceptance evidence | Complete the coding-task set and operator runbook, measure defaults, reconcile documentation and retain the closure matrix and attended evidence on the exact candidate |
+
+One integrator owns changes to the coordinator, state reducer and shared
+protocol. Parallel work is limited to non-overlapping adapters, fixtures or
+documentation after their contracts are settled, with a worktree per writer.
+The early conversational slice is extended in place as later capabilities
+join; it must not acquire a second loop or durable state owner.
+
+<a id="technical-plan-compatibility"></a>
+### Compatibility, Migration and Rollback
+
+Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
+
+- The instruction envelope and the projection are covered by the staged
+  request digest, so the change is visible in every retained request.
+- New records require M7-aware readers. Old-reader behavior and supported
+  rollback are established by the exact fixtures and procedure below.
+- Already staged requests keep their exact bytes. Recovery obeys existing
+  provider ambiguity rules, and later requests use the run's committed
+  configuration; upgrade does not promise that an interrupted run completes.
+- Compatibility inventory before the first decoder change: configuration/instruction
+  records, maintenance/compaction records, question producer/text/decline records,
+  host role/allowance ledger, request revision, events, snapshots and negotiated
+  protocol generation. Each has versioned vectors and an explicit unsupported-reader
+  behavior; bump private format metadata where needed before emitting new records.
+- Upgrade fixtures include actual M6 roots with settled and unresolved model/tool
+  operations. Preserve staged requests and resolve uncertainty without redispatch.
+- Downgrade tests use the exact retained M6 binary on disposable copies. Do not
+  claim that it recognizes a future marker or error. If it cannot safely refuse
+  a new root, the supported procedure is to prevent that binary from opening the
+  root and restore a quiescent pre-upgrade backup with the matching binary.
+- A legacy root with no new records may reopen only if the exact fixture proves
+  it. Normal M7 startup may already write new configuration; no broad backward-read
+  promise follows from an unchanged storage container.
+
+No installer, tag, publication or compatibility freeze is part of M7. A release
+label is separately selected. Accepted historical plans and evidence remain
+records of their own revisions.

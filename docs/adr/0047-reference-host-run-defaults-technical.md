@@ -1,60 +1,50 @@
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [Reference host run defaults](0047-reference-host-run-defaults.md#concept).
+Concept: [Explicit conversational run limits](0047-reference-host-run-defaults.md#concept).
 
 <a id="technical-adr-0047-decision"></a>
-### Values and Measurement
+### Contract
 
 Concept: [Context and decision](0047-reference-host-run-defaults.md#concept-adr-0047-decision).
 
-**Present state, read from source on 2026-09-29.**
+The host maps `--max-steps` to `max_turns`, `--deadline-ms` to `deadline_ms`,
+`--token-budget` to `token_budget` and `--max-tokens` to the reply cap. Parse
+positive integers without coercing strings, floats, booleans or overflow.
+Apply the runtime's existing accepted maximum for each value where one exists;
+otherwise cap host JSON integers at 2^53−1. Cross-field admission must leave a
+positive input budget and obey the 65,536-byte request-record ceiling.
 
-| Fact | Location |
-| --- | --- |
-| `@default_bounds %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}` | `apps/loopex/lib/loopex/runtime.ex` |
-| `@default_sampling %{"max_tokens" => 4_096}` | `runtime.ex` |
-| Per-command bounds merge over the runtime defaults | `apps/loopex/lib/loopex/runtime/session_coordinator.ex`, `resolve_bounds` |
-| `--max-steps` and `--deadline-ms` map to `max_turns` and `deadline_ms` | `apps/loopex_cli/lib/ask_options.ex`; `apps/loopex_cli/lib/loopex_cli/durable_ask.ex` |
-| The ephemeral profile defaults to 16 steps, 600,000 ms and 4,096 tokens | `apps/loopex_composition/lib/loopex_composition/ephemeral/options.ex` |
-| ADR 0010 requires a configured value with a default and names no number | ADR 0010 |
-| Interaction expiry is at most 600,000 ms and never past the run deadline | ADR 0024 technical |
+The selected file must itself have all three run-bound keys even if a flag
+would override one. Invalid base declarations refuse rather than being hidden
+by an override. Echo resolved values and origins without reading credentials.
+Core and `ask` keep 16 turns, 600,000 ms and 1,000,000 run tokens where applicable,
+and the existing 4,096 reply cap. Compaction uses ADR 0043's separately bounded
+settled operation or charges an active run; child accounting follows ADR 0046.
 
-**Where the values live.** In the reference host's conversational command,
-passed as per-command bounds. The reusable composition and core keep their
-present defaults.
-
-**Relation to the context budget.** The reply limit is the reserve
-subtracted from the model's context window in
-[ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept).
-Raising the reply limit lowers the room for history by the same amount.
-
-**Measurement.** For each task in the coding-task set the release lane
-records turns used, tokens charged, wall time and the largest single reply.
-A default is confirmed when every task completes under it with headroom,
-and corrected otherwise. The record is retained with the closure evidence.
+For every coding task retain turns, reported/estimated tokens, wall duration,
+largest reply, bound reached and objective result. Retain failed attempts. A
+baseline increase needs a recorded reason and maintainer disposition before it
+becomes the recommendation; a retry with larger limits is a distinct attempt.
 
 <a id="technical-adr-0047-evidence"></a>
 ### Evidence
 
 Concept: [Observable consequences](0047-reference-host-run-defaults.md#concept-adr-0047-consequences).
 
-- The conversational command commits the four values with each run, and
-  each flag overrides its value.
-- `ask` commits the unchanged values.
-- A run that reaches each bound ends `bound_reached` naming it.
-- The measurement record exists for every task and supports the final
-  values.
+- File omissions, invalid values and conflicting CLI input refuse before dispatch.
+- File values and flag overrides reach the committed run; resume retains them.
+- Each bound produces its existing truthful terminal outcome.
+- `ask` and core default fixtures remain unchanged.
+- Every real task has a measurement record, including failed attempts; no larger
+  recommendation is presented as selected without its disposition.
 
 <a id="technical-adr-0047-compatibility"></a>
-### Compatibility and Rejected Alternatives
+### Compatibility Mechanics and Alternatives
 
 Concept: [Compatibility and rollback](0047-reference-host-run-defaults.md#concept-adr-0047-compatibility).
 
-- *No turn limit,* as pi has. Rejected. ADR 0010 requires declared bounds
-  so that a run ends with a truthful outcome.
-- *Raise core's defaults.* Rejected. Embedding hosts would change behaviour
-  without asking.
-- *Record the values in the plan only.* Possible, since the choice is
-  reversible. A decision record is used because the values bound what a
-  default installation can spend.
+Larger automatic defaults and an unbounded mode were rejected. Requiring file
+limits implements the maintainer's choice even when the command has flags.
+The configuration schema is experimental; ADR 0049 owns its version and readers.
+No default increase is required for acceptance of this proposal.

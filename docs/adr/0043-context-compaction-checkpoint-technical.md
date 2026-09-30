@@ -1,92 +1,108 @@
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [Context compaction checkpoint](0043-context-compaction-checkpoint.md#concept).
+Concept: [Bounded context compaction checkpoints](0043-context-compaction-checkpoint.md#concept).
 
 <a id="technical-adr-0043-decision"></a>
-### Record and Trigger
+### Contract
 
 Concept: [Context and decision](0043-context-compaction-checkpoint.md#concept-adr-0043-decision).
 
-**Present state, read from source on 2026-09-29.** No compaction exists in
-code. A staged request over the context budget makes no provider call and
-ends the run `failed(context_budget_exceeded, false)`. The vision names a
-`compact` session command, a `context.compacted` event and a
-`context.compaction_progress` progress kind, and lists the checkpoint fields
-in §12.5.
+**Episode.** Derive identity from the triggering run/staging identity or explicit
+compact command ID. Persist frozen configuration, captured session version,
+attempt count, bounds, usage and checkpoint progress. Block conflicting mutation
+until settled. Steer/follow-up admission keeps its existing ordering and cannot
+change the captured summary range. No live provider/executor or interaction
+may overlap summary dispatch.
 
-**The checkpoint record.** It carries the vision's fields:
+At most four provider attempts total per episode, including retries allowed
+only after proven `not_dispatched`. ADR 0018's two-attempt limit per logical
+model operation remains. An active episode consumes a model-call/turn unit for
+each summary dispatch and its provider usage under the active run's bounds.
+Standalone `compact` accepts explicit `{max_attempts, deadline_ms, token_budget}`
+within ceilings 4, 60,000 and 32,768 respectively. The reference `/compact` uses
+4/60,000/32,768, displayed before submission; programmatic callers declare them.
+All counters and the absolute deadline survive restart. Limit exhaustion prevents
+another attempt; final-call token overshoot is reported, not discarded.
 
-| Member | Content |
-| --- | --- |
-| `input_range` | First and last summarized record identities, and the lineage they belong to |
-| `summary` | Bounded UTF-8 under the fixed outline |
-| `carry_forward` | Structured fields: files read, files changed |
-| `strategy` | Strategy identity and revision; `loopex.compaction.reference` revision 1 |
-| `model` | Model and provider identity, and usage of the summarizing call |
-| `first_kept` | Identity of the first later raw record kept verbatim |
-| `integrity_digest` | Digest over the ordered summarized record identities |
+**Selection and size.** Select ordered canonical conversation elements, excluding
+maintenance records. An assistant reply plus every terminal result of its tool
+calls is one indivisible group; an assistant reply with no calls is a group alone.
+Keep user/steer elements in their original order, including those preceding each
+group. Preserve current prompt/steer and the newest complete assistant group.
+Grow this tail backward by complete groups and intervening inputs while it fits
+a 2,048-estimated-token target; the mandatory tail may exceed that target.
 
-**Cut point.** The cut falls only on a turn boundary: after a turn's last
-tool result, or after an assistant message with no tool calls. A tool call
-is never separated from its result. The tail kept verbatim is the newest
-turns whose estimate fits the host's `keep_recent_tokens`.
+From the oldest remaining range, select the largest contiguous prefix ending
+at a complete-group boundary that fits a 16,384-byte canonical JSON source
+envelope, including the prior checkpoint summary and carry-forward. No eligible
+raw range means no provider call. Never truncate tool results or omit user facts.
+If the first group and preceding inputs cannot fit, stop with
+`compaction_input_too_large`.
 
-**Projection.** The system class, project blocks, then one user-role
-message carrying the summary inside a marked summary element, then the
-records from `first_kept` onward. A later checkpoint's input range may
-include an earlier checkpoint's summary, and then supersedes it in the
-projection.
+The summary request uses host instructions with fixed sections: goal, constraints,
+progress, decisions, next steps and critical context. It has no tools and reserves
+1,024 reply tokens. Full token/record/depth/cardinality preflight still applies.
+Reject a model incapable of that reserve or insufficient remaining budget before
+dispatch. Output is closed JSON with `summary` UTF-8 at most 4,096 bytes and
+`carry_forward` containing arrays `files_read` and `files_changed`, together at
+most 2,048 encoded bytes. Bound each path to 1,024 bytes and each list to 32
+entries. Unknown/invalid/oversize output fails without a hidden repair call.
 
-**Trigger.** With `B` the context budget and `R` the host's reserve, the
-host compacts when the estimate of the next request exceeds `B - R`. The
-estimate is ADR 0017's estimator. Core evaluates the threshold; the host
-supplies `R` and `keep_recent_tokens`.
+Measure the next candidate projection before and after substitution using the
+same staging serializer and estimator. Require strict decrease in both exact
+record bytes and estimated tokens. Stop with `compaction_no_progress` otherwise.
+If still oversized, another bounded prefix may be summarized within the episode's
+remaining attempts. After exhaustion retain checkpoints and the existing named
+staging failure; do not restart an automatic episode for the same staging identity.
 
-**The summarizing call.** It is an ordinary committed model attempt under
-[ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept), with an
-empty tool set. Its input is the serialized range, with each tool result
-bounded to a fixed number of bytes. Its usage is charged to the run in
-flight, or recorded against the session when no run is active.
+**Checkpoint.** Retain original lineage/range, newly consumed raw range, prior
+checkpoint ID if any, first-kept identity, summary/carry-forward bytes, strategy
+`loopex.compaction.reference` revision 1, exact model/reasoning/configuration
+version, usage, summary-input digest and ordered covered-record integrity digest.
+Ranges extend contiguously without gaps/cycles and never split tool/result groups.
+Projection uses a marked summary element with summary provenance, followed by
+every later canonical element from the first-kept identity in original order,
+including any unsummarized middle and the protected tail. No summary text becomes authority or a fabricated raw fact.
 
-**Commit order.** The summarizing attempt settles, then the checkpoint
-commits, then `context.compacted` publishes, then the next request stages
-against the new projection. A crash before the checkpoint commit leaves the
-prior projection; the attempt's usage stays recorded.
+**Commit and recovery.** Derive a distinct maintenance operation ID from episode
+ID and summary ordinal; allowed retries retain that ID and cannot collide with
+ordinary run/turn identities. Reuse ADR 0018 permits, dispatch classification and
+accounting with explicit `compaction` purpose. Successful settlement retains
+bounded summary bytes in `checkpoint_pending`; it neither appends a normal
+assistant answer nor completes the parent run. Commit the checkpoint, publish
+`context.compacted`, then return to the original staging identity if bounds
+permit. A reply after committed abort/deadline is retained as evidence only and
+cannot create a checkpoint. Retain checkpoint tx ID,
+expected version and mutation digest. A `commit_unknown` fences mutation and
+publication until resolution. A known settled summary may finish its checkpoint
+without another provider call. Ambiguous attempts follow ADR 0018 and stop the
+episode; checkpoint absence alone says nothing about dispatch. Cancellation
+prevents new attempts and follows normal cleanup; accepted checkpoints remain.
+Progress `context.compaction_progress` is transient, never checkpoint evidence.
 
 <a id="technical-adr-0043-evidence"></a>
 ### Evidence
 
 Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept-adr-0043-consequences).
 
-- The record carries every member above, and the integrity digest
-  recomputes from the journal.
-- The projection after compaction holds the summary and the verbatim tail,
-  and no summarized record.
-- Every summarized record remains readable through the existing replay
-  surface.
-- No cut separates a tool call from its result, across a property test of
-  generated histories.
-- Tool receipts, effect outcomes and interaction records are byte-identical
-  before and after.
-- A crash injected at each commit step leaves either the prior projection or
-  the complete checkpoint.
-- A compaction whose summary itself cannot fit ends with a named refusal and
-  no checkpoint.
-- A run that would have failed for context compacts and completes.
-- Real provider: a session passes its context limit and continues with a
-  correct reference to summarized work.
+- Property histories cover complete cut boundaries, contiguous ranges, deterministic
+  replay, no cycles and preservation of raw receipts/outcomes.
+- Byte/token edges, oversized single turn, fixed/system context that cannot fit,
+  invalid summary and no-progress refusal; no silent tool truncation.
+- Attempt/turn/token/deadline accounting, four-attempt ceiling and no restart reset.
+- Fault cuts at summary settlement/checkpoint commit/publication, including
+  commit_unknown and ambiguous provider attempt; no duplicate dispatch.
+- Real long conversation passes the limit and correctly refers to summarized work;
+  checkpoint/raw records and restart agree.
 
 <a id="technical-adr-0043-compatibility"></a>
-### Compatibility and Rejected Alternatives
+### Compatibility Mechanics and Alternatives
 
 Concept: [Compatibility and rollback](0043-context-compaction-checkpoint.md#concept-adr-0043-compatibility).
 
-- *Prune old tool outputs without a summary.* Rejected as the only
-  mechanism. It loses facts with no record of what was lost. It may return
-  later as a second strategy under the same record.
-- *A smaller, cheaper model for summaries.* Rejected for now. It adds a
-  second model role and a second credential path for one call.
-- *Compaction owned entirely by the host.* Rejected. The projection is
-  core's, and a substitution core cannot verify would break exact staging.
-- *Delete summarized records.* Rejected by the vision.
+This first strategy uses the session model, no secondary summarizer role,
+artifact request path or abandoned-branch summarization. Its fixed caps are
+bounded candidate values, not measured quality claims. Any later strategy or
+cap increase changes the proposal/accepted contract explicitly; a failed fixture
+cannot be made passing by silently increasing retries.

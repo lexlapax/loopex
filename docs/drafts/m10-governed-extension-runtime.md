@@ -1,18 +1,18 @@
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Prerequisites and evidence](m9-governed-extension-runtime-technical.md#technical-depth).
+Technical depth: [Prerequisites and evidence](m10-governed-extension-runtime-technical.md#technical-depth).
 
 **Draft, not a registered plan.** This draft comes from the maintainer's
 reframing of 2026-09-26 and is refined as earlier milestones proceed. It moves
-into `docs/plans/` as the Open lookahead once M8 closes.
+into `docs/plans/` as the Open lookahead once M9 closes.
 
 <a id="concept-plan-purpose"></a>
 ### Purpose
 
-Technical depth: [Prerequisites](m9-governed-extension-runtime-technical.md#technical-plan-prerequisites).
+Technical depth: [Prerequisites](m10-governed-extension-runtime-technical.md#technical-plan-prerequisites).
 
-**M9 is the governed extension runtime,** the rung the
+**M10 is the governed extension runtime,** the rung the
 [roadmap](../roadmap.md#concept-roadmap-governed-extension-runtime) projects.
 Its product question is:
 
@@ -27,7 +27,7 @@ protocol into OS isolation, as the vision requires.
 <a id="concept-plan-outcomes"></a>
 ### Outcomes
 
-Technical depth: [Evidence](m9-governed-extension-runtime-technical.md#technical-plan-evidence).
+Technical depth: [Evidence](m10-governed-extension-runtime-technical.md#technical-plan-evidence).
 
 | # | Outcome |
 | --- | --- |
@@ -39,7 +39,7 @@ Technical depth: [Evidence](m9-governed-extension-runtime-technical.md#technical
 <a id="concept-plan-scope"></a>
 ### Scope and Non-Goals
 
-Technical depth: [Evidence](m9-governed-extension-runtime-technical.md#technical-plan-evidence).
+Technical depth: [Evidence](m10-governed-extension-runtime-technical.md#technical-plan-evidence).
 
 **Scope.** The manifest, promotion into a retained trusted artifact,
 quiescent activation, state migration fixtures, rollback, and the operator
@@ -55,13 +55,13 @@ documentation.
 <a id="concept-plan-decisions"></a>
 ### Design Decisions
 
-Technical depth: [Prerequisites](m9-governed-extension-runtime-technical.md#technical-plan-prerequisites).
+Technical depth: [Prerequisites](m10-governed-extension-runtime-technical.md#technical-plan-prerequisites).
 
 **What stays.**
 [ADR 0003](../adr/0003-extension-contract-boundary.md#concept) keeps the
 extension contract boundary.
 
-**Still to be decided,** before M9 opens:
+**Still to be decided,** before M10 opens:
 
 - the manifest and namespace decision;
 - the activation and rollback decision;

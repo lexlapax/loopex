@@ -1,66 +1,54 @@
-# 0047. Reference host run defaults
-
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Values, measurement and evidence](0047-reference-host-run-defaults-technical.md#technical-depth).
+Technical depth: [Explicit conversational run limits](0047-reference-host-run-defaults-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-29
+- **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** nothing. No accepted decision fixes the numeric defaults
-- **Prerequisite for:** M7 outcomes 6 and 8 (draft), accepted before the
-  conversational command's defaults are written
+- **Supersedes:** nothing
+- **Prerequisite for:** M7 outcomes 6 and 8
 
 <a id="concept-adr-0047-decision"></a>
 ### Context and Decision
 
-Technical depth: [Values and measurement](0047-reference-host-run-defaults-technical.md#technical-adr-0047-decision).
+Technical depth: [Contract](0047-reference-host-run-defaults-technical.md#technical-adr-0047-decision).
 
-Every run has declared bounds, and ADR 0010 requires that. The default
-values exist only in code: 16 turns, 1,000,000 tokens, 10 minutes and a
-4,096-token reply. They were sized for short workflow tests. A real coding
-task often needs more than 16 model calls, and a file written in one tool
-call can exceed 4,096 tokens. A question put to the operator also spends
-the same 10 minutes while it waits.
+Conversational work must declare its spending and lifetime bounds. The
+maintainer selected the current baseline plus mandatory configuration, not the
+earlier proposed larger defaults.
 
-**The decision.**
+The selected configuration file must contain `max_turns`, `deadline_ms` and
+`token_budget` for conversational runs. Missing values refuse before startup;
+flags may override valid file values but cannot supply missing declarations.
+Document 16 turns, 600,000 ms and 1,000,000 tokens as starting values an operator
+can select. Retain the 4,096 reply-token default. Core, reusable composition and
+one-shot `ask` keep their existing defaults.
 
-1. **Core's defaults do not change.** An embedding host that names no bounds
-   gets today's values.
-2. **The reference host sets its own defaults for coding work:**
-
-   | Bound | One-shot `ask` | Conversational command |
-   | --- | --- | --- |
-   | Turns per run | 16, unchanged | 64 |
-   | Deadline per run | 10 minutes, unchanged | 60 minutes |
-   | Tokens per run | 1,000,000, unchanged | 4,000,000 |
-   | Reply limit | 4,096, unchanged | 16,384 |
-
-3. **Every bound stays declared and visible.** The command prints the
-   bounds in effect when a run starts, and each has a flag.
-4. **The values are provisional until measured.** The coding-task set
-   records turns, tokens and time per task. The values above are confirmed
-   or corrected from that record before closure.
-5. **There is no unbounded mode.**
+Every effective limit is visible before a run. There is no unbounded mode.
+An operator may explicitly configure other supported positive values. Changing
+the documented baseline requires retained task measurements and maintainer
+disposition. Helper spending is separately declared under ADR 0046.
 
 <a id="concept-adr-0047-consequences"></a>
 ### Observable Consequences
 
 Technical depth: [Evidence](0047-reference-host-run-defaults-technical.md#technical-adr-0047-evidence).
 
-A conversational run can work for up to an hour and spend up to four times
-the tokens of a one-shot run before it stops with a named bound. Scripts
-that call `ask` see no change.
+A file omission cannot silently authorize a large conversation. The operator
+sees turns, deadline, run token threshold and reply limit before submitting work.
+Waiting for an answer and compaction consume their applicable deadlines and
+budgets. A token threshold is checked between calls and may be exceeded by the
+last completed provider call; it is not an exact invoice cap.
 
 <a id="concept-adr-0047-compatibility"></a>
 ### Compatibility and Rollback
 
-Technical depth: [Compatibility and rejected alternatives](0047-reference-host-run-defaults-technical.md#technical-adr-0047-compatibility).
+Technical depth: [Compatibility mechanics](0047-reference-host-run-defaults-technical.md#technical-adr-0047-compatibility).
 
-Bounds are committed per run, so a change of defaults affects only runs
-admitted after it. Restoring the old values is a change of four constants
-in the reference host.
+Committed run limits survive restart. New file defaults affect new runs only;
+they do not change an in-flight run. This decision changes no core accounting
+or one-shot defaults. Reverting host recommendations cannot undo consumed usage.
 
 ## Governance Record
 

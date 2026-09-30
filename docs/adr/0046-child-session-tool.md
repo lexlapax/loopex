@@ -1,81 +1,74 @@
-# 0046. Child-session tool
-
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Adapter, bounds and evidence](0046-child-session-tool-technical.md#technical-depth).
+Technical depth: [Serial read-only child sessions](0046-child-session-tool-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-29
+- **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing
-- **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept),
-  [ADR 0042](0042-host-composed-instructions.md#concept) and
-  [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)
-- **Prerequisite for:** M7 outcome 7 (draft), accepted before the adapter
-  is written
+- **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept) and [ADR 0049](0049-explicit-host-configuration.md#concept)
+- **Prerequisite for:** M7 outcome 7
 
 <a id="concept-adr-0046-decision"></a>
 ### Context and Decision
 
-Technical depth: [Adapter and bounds](0046-child-session-tool-technical.md#technical-adr-0046-decision).
+Technical depth: [Contract](0046-child-session-tool-technical.md#technical-adr-0046-decision).
 
-A search across a large codebase can fill a conversation with output the
-main task never needs again. Coding agents handle this by handing a bounded
-piece of work to a helper with its own context, and keeping only its answer.
+A helper can investigate a repository or review code without filling the
+parent's context. M7 provides an opt-in host executor adapter over ordinary
+sessions. Core gains no parent field, role type, delegation counter or scheduler.
 
-The vision excludes "a built-in sub-agent scheduler" from Loopex and its
-minimalism budget says "no built-in sub-agent". It also says such
-capabilities "may exist in hosts, adapters, extensions". The maintainer's
-direction of 2026-09-29 is a host tool.
+The parent may automatically choose a host-enabled role within policy and
+explicit limits. The host freezes the role catalog at parent-session creation.
+Each role supplies exact instructions, provider/model and reasoning. The child
+receives the task and those instructions, with fresh context. It never inherits
+the parent's conversation or reads a changed role file during recovery.
 
-**The decision.**
+Only one child operation is active per parent run. Children cannot delegate or
+ask questions. Their fixed tools are read, grep, find and ls. M7 admits no
+widening to write, edit or bash. Parent and child use the same policy and
+workspace; unrelated sessions can still modify that workspace. This is a tool
+restriction, not OS isolation or workspace exclusivity.
 
-1. **Core does not change for this.** No scheduler, no parent field and no
-   child concept enter the kernel. A child is an ordinary session.
-2. **The tool is an executor adapter in the host's composition.** It
-   implements the existing executor behaviour. Its job is to create a
-   session, submit one prompt, wait for the terminal, and return the final
-   answer.
-3. **One child at a time, one level deep.** The parent run waits for the
-   tool result like any other. A child's tool set never contains this
-   tool or the question tool.
-4. **The child starts empty.** It receives the prompt the parent wrote and
-   the host's instruction block. It does not receive the parent's history.
-5. **The child is read-only by default.** Its tools are `read`, `grep`,
-   `find` and `ls`. A host may widen that set explicitly.
-6. **The child has its own bounds and the same policy.** The host sets its
-   turn and token bounds. Its deadline never outlasts the parent's. Every
-   child tool call is decided by the same host policy as the parent's.
-7. **The result names the child.** The parent's tool result carries the
-   child's final text, its session identity, its terminal outcome and its
-   usage. The operator can open the child session to read everything it
-   did.
-8. **The tool is opt-in.** It is in no default active set.
+The host keeps a durable private ledger for role snapshots, operation identity,
+child evidence and a separate per-parent-run delegation allowance. Reservation
+precedes child creation. Parent and delegation counters stay distinct; their
+combined reported usage is visible. Token thresholds stop subsequent work and
+are not hard provider billing ceilings. An uncertain usage result cannot release
+reserved budget. Child count also bounds repeated low-token calls.
 
-**Vision reading for the maintainer.** This record reads "built-in" as
-"in the kernel or active by default". An opt-in adapter in the reference
-host's composition is outside it. Acceptance confirms that reading, or names
-a vision amendment.
+A generic committed absolute-deadline ceiling, available to any bounded run,
+enforces the child cutoff no later than its parent job's cutoff. Core gains
+this bound but no child-specific mechanism. Parent cancellation aborts the child and waits for truthful cleanup
+within the existing grace; uncertainty remains unknown. Stable logical identities
+prevent a recovered delegation from creating or prompting a second child.
+
+The vision excludes built-in subagents. This proposal interprets that boundary
+as excluding kernel scheduling and default activation while permitting this
+opt-in host adapter. Acceptance must explicitly confirm that reading. A contrary
+disposition requires a separately authorized vision change before implementation.
 
 <a id="concept-adr-0046-consequences"></a>
 ### Observable Consequences
 
 Technical depth: [Evidence](0046-child-session-tool-technical.md#technical-adr-0046-evidence).
 
-A model can delegate a search and get back a short answer. The session list
-shows child sessions as sessions. Child usage is reported but is not charged
-to the parent's token budget, so the host's child bounds are the limit on
-what delegation can spend.
+The operator can inspect the role, task, provider/model, child identity,
+terminal outcome and usage. A result returns bounded text plus that evidence.
+No additional approval is mandatory for an already allowed delegation. Unknown
+roles, exhausted allowances and unavailable recovery evidence refuse safely.
 
 <a id="concept-adr-0046-compatibility"></a>
 ### Compatibility and Rollback
 
-Technical depth: [Compatibility and rejected alternatives](0046-child-session-tool-technical.md#technical-adr-0046-compatibility).
+Technical depth: [Compatibility mechanics](0046-child-session-tool-technical.md#technical-adr-0046-compatibility).
 
-Nothing durable changes shape. Removing the adapter removes the tool, and
-sessions that used it keep their tool results. The ephemeral profile does
-not offer the tool.
+The ledger is new host-owned persistent state and has its own versioned reader
+and backup procedure. Core child sessions remain ordinary sessions. Removing
+the adapter does not make an unresolved delegated operation safe to repeat.
+Old readers must refuse unsupported host state before dispatch. Ephemeral
+embedding does not offer helpers in M7.
 
 ## Governance Record
 

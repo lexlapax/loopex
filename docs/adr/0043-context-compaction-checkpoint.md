@@ -1,81 +1,62 @@
-# 0043. Context compaction checkpoint
-
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Checkpoint record, trigger and evidence](0043-context-compaction-checkpoint-technical.md#technical-depth).
+Technical depth: [Bounded context compaction checkpoints](0043-context-compaction-checkpoint-technical.md#technical-depth).
 
 - **Status:** Proposed
-- **Date:** 2026-09-29
+- **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)
-  only in its clause that compaction stays out of scope, which it left to
-  "the milestone whose long-lived sessions produce the measured token curve"
-- **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept)
-- **Prerequisite for:** M7 outcome 3 (draft), accepted before any checkpoint
-  record is written
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) only its deferral of compaction
+- **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept) and [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)
+- **Prerequisite for:** M7 outcome 3
 
 <a id="concept-adr-0043-decision"></a>
 ### Context and Decision
 
-Technical depth: [Record and trigger](0043-context-compaction-checkpoint-technical.md#technical-adr-0043-decision).
+Technical depth: [Contract](0043-context-compaction-checkpoint-technical.md#technical-adr-0043-decision).
 
-Once a session carries its history, its requests grow until they no longer
-fit. Without a remedy the session stops being usable: the next prompt is
-refused, or a long run fails when its own tool output fills the budget.
+Compaction substitutes a model-written summary for an old contiguous range of
+conversation while retaining all raw facts. It never changes receipts, authority,
+outcomes or tool evidence. The session owner commits each checkpoint before it
+publishes or stages against it.
 
-The vision specifies the remedy. A compaction checkpoint summarizes a range
-of history. The projection may substitute the checkpoint for that range. Raw
-records remain in durable history, and a summary cannot alter receipts,
-outcomes, authority or facts.
+Automatic compaction runs at initial or later model staging when eligible
+history would exceed a token or record-byte limit. It does not change prompt
+admission or require a host to resubmit a command. Explicit `compact` is admitted
+only while settled. Both use a bounded maintenance episode with the session's
+frozen model and no tools. No executor work or pending interaction overlaps it.
 
-**The decision.**
+Keep the current input and a recent complete tail verbatim. Summarize only whole
+eligible turns, with bounded source and output. Every checkpoint must strictly
+reduce both projected token count and exact record size. An oversized indivisible
+turn, invalid summary, no progress or exhausted episode produces a named refusal.
+Useful checkpoints already committed remain; failed work cannot roll them back.
 
-1. **Compaction is a session command.** `compact` is admitted while the
-   session is settled. It commits a checkpoint through the serial session
-   owner, like any other durable fact.
-2. **The session's own model writes the summary.** Compaction is one model
-   call with no tools. It uses the run model and the provider path of the
-   session. There is no second model role.
-3. **Compaction runs between runs by default.** When a prompt or follow-up
-   would be refused for context, the reference host compacts first and then
-   admits it. The operator sees that compaction happened.
-4. **A run may compact once it is at risk.** When the next request of a run
-   in flight would exceed the budget, the run compacts the history before
-   its current turn boundary and continues. This replaces today's
-   `failed(context_budget_exceeded)` when compaction can make room.
-5. **Recent history is kept verbatim.** The checkpoint covers the oldest
-   records. A recent tail, sized by a host value, projects unchanged.
-6. **The summary has a fixed outline:** goal, constraints, progress,
-   decisions, next steps and critical context. The compaction instructions
-   are host content under
-   [ADR 0042](0042-host-composed-instructions.md#concept), with a reference
-   default.
-7. **A checkpoint is provenance-typed.** The model sees the summary marked
-   as a summary of earlier conversation, never as something it or the
-   operator said.
-8. **Failure leaves the session as it was.** A failed or interrupted
-   compaction commits no checkpoint, and the prior projection stands.
+Active maintenance consumes the run's call/turn, token and deadline budgets.
+Standalone maintenance requires explicit limits and cannot exceed four attempts,
+60,000 ms or 32,768 tokens. Recovery retains attempts and usage; an uncertain
+provider result or checkpoint commit never authorizes another summarization.
 
 <a id="concept-adr-0043-consequences"></a>
 ### Observable Consequences
 
 Technical depth: [Evidence](0043-context-compaction-checkpoint-technical.md#technical-adr-0043-evidence).
 
-A long session keeps working. The operator is told when history was
-summarized and can compact on request. The model may lose detail that the
-summary omitted; the full records remain readable by the operator. Each
-compaction costs one model call, which is charged and recorded.
+The operator sees when compaction occurs and can inspect the summary and its
+covered raw records. Long conversations can continue when bounded summaries
+make room. Some detail may be omitted; raw records remain readable. There is
+no promise that every conversation can fit.
 
 <a id="concept-adr-0043-compatibility"></a>
 ### Compatibility and Rollback
 
-Technical depth: [Compatibility and rejected alternatives](0043-context-compaction-checkpoint-technical.md#technical-adr-0043-compatibility).
+Technical depth: [Compatibility mechanics](0043-context-compaction-checkpoint-technical.md#technical-adr-0043-compatibility).
 
-The checkpoint is a new record kind and a new public event. A root without a
-checkpoint is unchanged. A binary that predates the record refuses a root
-that carries one. Abandoned-branch summarization stays out of scope, as the
-vision keeps it a separate operation.
+Checkpoints, maintenance state and usage are new durable records, with a new
+public event and progress kind. An unsupported reader must refuse before
+mutation where its decoder supports that guarantee; exact old-reader fixtures
+establish actual behavior. Rollback uses a retained pre-upgrade backup with its
+matching binary, not removal of checkpoint records.
 
 ## Governance Record
 

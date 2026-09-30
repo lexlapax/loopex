@@ -4,74 +4,57 @@
 Concept: [Session lineage projection and context budget](0041-session-lineage-projection-and-context-budget.md#concept).
 
 <a id="technical-adr-0041-decision"></a>
-### Projection and Admission
+### Contract
 
 Concept: [Context and decision](0041-session-lineage-projection-and-context-budget.md#concept-adr-0041-decision).
 
-**Present state, read from source on 2026-09-29.**
+Current source initializes each run's conversation with `[element]` in
+`apps/loopex/lib/loopex/runtime/session_state.ex`; the coordinator stages that
+run's elements only. Extend projection as a pure function over committed
+lineage: system, admitted project context, prior runs in admission order,
+current run elements and any admitted steer at its defined boundary.
 
-| Fact | Location |
-| --- | --- |
-| A prompt installs `[element]` as the run's whole conversation | `apps/loopex/lib/loopex/runtime/session_state.ex`, prompt admission |
-| A promoted follow-up does the same | `session_state.ex`, follow-up promotion |
-| `elements/2` returns one run's elements | `session_state.ex` |
-| Staging reads `SessionState.elements(state.durable, run_id)` | `apps/loopex/lib/loopex/runtime/session_coordinator.ex`, `prepare_model_request` |
-| Default context budget is 8,192 | `apps/loopex_composition/lib/loopex_composition.ex`, `context_token_budget/1` |
-| The accepted rule | ADR 0010 technical, "Resuming a run versus prompting a session", Projection row |
+Join tool calls/results by `(run_id, turn_number, tool_call_id)`, never by
+turn number or provider call ID alone. Derive deterministic provider-facing
+call IDs across the entire projection; retain the mapping back to canonical
+identities. Reused provider IDs in later runs must not select an earlier
+result. A terminal fact may supply its committed denied/cancelled/failed/unknown
+result; missing facts refuse staging rather than synthesizing success or
+raising an uncontrolled owner crash.
 
-**Projection order.** The system class, admitted project blocks, then for
-each prior run in admission order its user message and each turn's assistant
-message followed by that turn's tool results in call order, then the current
-run's elements, then a steer message if one is staged. `Conversation.project/2`
-stays a pure function of committed elements.
+Apply ADR 0017's estimator and exact normalized `model_request_committed`
+record measurement, including context receipt, envelope and fixed-point
+self-size. Preserve its depth/cardinality limits and strict system ceiling.
+The 65,536-byte bound is not merely a message or canonical-request bound.
+Check before provider intent/dispatch as the accepted staging rules require.
 
-**Run boundaries.** The projection adds no marker between runs. A provider
-sees an ordinary alternating conversation. A run that ended with an
-assistant message followed directly by the next user message is already
-valid for every adapter in the conformance suite.
-
-**Incomplete turns.** A prior run that ended with tool calls lacking results
-cannot be projected as-is, because providers reject an unanswered call. Each
-such call projects its committed terminal record: `cancelled`, `denied`,
-`failed` or `outcome_unknown`. A call with no committed terminal is a defect
-and the projection raises, as it does today within a run.
-
-**Admission.** The context measurement of ADR 0017 runs over the full
-projected request at prompt admission and at each later staging. The
-refusal record and its dimension are unchanged.
-
-**Host default.** The reference host computes
-`context_window - reply_reserve` from the model's declared capabilities, with
-`reply_reserve` equal to the run's `max_tokens`. When the window is unknown
-the host keeps 8,192 and says so.
+For a known model window `W` and reply reserve `R`, the host default is `W-R`.
+Reject `W <= R`. An explicit input budget cannot exceed `W-R` when known.
+For an unknown window use 8,192 and label the fallback; an explicit host value
+is allowed but proves no unknown model capacity. A provider/model change must
+recompute and validate the effective budget. Record budget origin and value.
+ADR 0043 owns automatic staging compaction and its bounded failure behavior.
 
 <a id="technical-adr-0041-evidence"></a>
 ### Evidence
 
 Concept: [Observable consequences](0041-session-lineage-projection-and-context-budget.md#concept-adr-0041-consequences).
 
-- The first change is a failing test: two prompts in one session, and the
-  second staged request contains the first run's elements.
-- A follow-up promoted after a terminal projects the same lineage.
-- The projection is byte-identical after owner succession and after restart.
-- A prior run ended by cancel, bound or failure projects with its terminal
-  tool results.
-- A session whose lineage exceeds the budget refuses the next prompt at
-  admission and makes no provider call.
-- The new run's turn, token and deadline accounting start at zero.
-- Real provider: the second prompt of a session refers to the first.
+- Two prompts and promoted follow-ups include all retained lineage with fresh
+  per-run accounting; restart and owner succession project identical bytes.
+- Two runs reuse turn 1 and the same tool-call ID but distinct results; no cross-join.
+- Failure/cancel/unknown terminal fixtures preserve canonical facts.
+- Exact record boundaries at 65,535/65,536/65,537 bytes, receipt growth and
+  estimator boundaries; required staging failure versus optional withholding.
+- Known/unknown model windows, invalid reserve and explicit override constraints.
+- Real multi-prompt task refers correctly to earlier diagnosis and tool evidence.
 
 <a id="technical-adr-0041-compatibility"></a>
-### Compatibility and Rejected Alternatives
+### Compatibility Mechanics and Alternatives
 
 Concept: [Compatibility and rollback](0041-session-lineage-projection-and-context-budget.md#concept-adr-0041-compatibility).
 
-- *Keep per-run conversations and amend ADR 0010.* Rejected. It leaves
-  Loopex unable to hold a conversation, which the coding-agent proof exists
-  to test.
-- *Project only the last N runs.* Rejected. It silently drops history. The
-  compaction checkpoint is the governed way to shorten a projection.
-- *Truncate old tool results to fit.* Rejected for the same reason, and
-  because ADR 0010 forbids dropping history to fit.
-- *Keep 8,192 as the reference default.* Rejected. It was sized for a
-  single run and makes continuity unusable.
+Truncating the oldest N runs or tool-result bytes is rejected. Compaction is
+an explicit retained substitution. Do not claim byte identity for newly staged
+legacy sessions after lineage expands; only already committed requests are
+immutable. Root-reader compatibility is covered by the M7 plan's matrix.

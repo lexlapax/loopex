@@ -1,18 +1,18 @@
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [M9 governed extension runtime](m9-governed-extension-runtime.md#concept).
+Concept: [M10 governed extension runtime](m10-governed-extension-runtime.md#concept).
 
 <a id="technical-plan-prerequisites"></a>
 ### Prerequisites
 
-Concept: [Purpose](m9-governed-extension-runtime.md#concept-plan-purpose).
+Concept: [Purpose](m10-governed-extension-runtime.md#concept-plan-purpose).
 
-Concept: [Design decisions](m9-governed-extension-runtime.md#concept-plan-decisions).
+Concept: [Design decisions](m10-governed-extension-runtime.md#concept-plan-decisions).
 
-M8 closes first. The serial barriers still apply: extension namespaces and
+M9 closes first. The serial barriers still apply: extension namespaces and
 activation proof come before any public-protocol decision. The decisions this
-draft names are proposed as ADRs before M9 opens. The vision's trust-boundary
+draft names are proposed as ADRs before M10 opens. The vision's trust-boundary
 and VM-ownership rules bind every one of them:
 
 - same-VM extensions are trusted generations, not sandboxes;
@@ -22,9 +22,9 @@ and VM-ownership rules bind every one of them:
 <a id="technical-plan-evidence"></a>
 ### Evidence
 
-Concept: [Outcomes](m9-governed-extension-runtime.md#concept-plan-outcomes).
+Concept: [Outcomes](m10-governed-extension-runtime.md#concept-plan-outcomes).
 
-Concept: [Scope and non-goals](m9-governed-extension-runtime.md#concept-plan-scope).
+Concept: [Scope and non-goals](m10-governed-extension-runtime.md#concept-plan-scope).
 
 This follows the roadmap's
 [governed-extension proof](../roadmap-technical.md#technical-roadmap-governed-extension-runtime):

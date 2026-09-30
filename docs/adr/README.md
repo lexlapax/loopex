@@ -57,6 +57,8 @@ a decision adds a new record rather than rewriting the old one.
 | 0045 | Model-originated questions | Proposed | [Decision](0045-model-originated-questions.md#concept) | [Technical depth](0045-model-originated-questions-technical.md#technical-depth) |
 | 0046 | Child-session tool | Proposed | [Decision](0046-child-session-tool.md#concept) | [Technical depth](0046-child-session-tool-technical.md#technical-depth) |
 | 0047 | Reference host run defaults | Proposed | [Decision](0047-reference-host-run-defaults.md#concept) | [Technical depth](0047-reference-host-run-defaults-technical.md#technical-depth) |
+| 0048 | Host provider routing and credential bindings | Proposed | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
+| 0049 | Explicit host configuration | Proposed | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -202,17 +204,12 @@ credential token per provider where 0034 fixes one per **composed model
 configuration** — bound at composition, resolved per call. No part of it
 runs inside M5.
 
-0036 to 0038 were proposed on 2026-09-21 with the plan that was then M6. The
-maintainer's reframing of 2026-09-26 moved that plan to the M7 draft, and
-0036's successor half to the M8 draft. They are: the daemon-grade store engine and its explicit `0.2`
-migration, backup and restore, which supersedes 0031's selection once
-accepted and fills its engine cell from a retained measured experiment
-first; host configuration and path discovery, with the default home
-resolved by the reference host's launcher and configuration layer only, as
-a narrow amendment to 0003; and the installed distribution, one
-platform-specific OTP release archive with the runtime system bundled and
-the existing launcher promoted. They accept nothing, and each is accepted
-before the M7 or M8 outcome that depends on it.
+0036 to 0038 were proposed for the earlier installed-operator plan. The current
+sequence places their work in M8 installation/readiness and M9 store migration,
+after M7 coding-agent proof. ADR 0037 extends M7's explicit configuration with
+installed discovery and writers; it introduces no separate role/provider schema.
+All three remain Proposed. Exact installed/engine versions and retained rollback
+artifacts must be selected before their successor acceptance.
 
 0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on
 2026-09-27. It adds an ephemeral composition profile beside the durable one,
@@ -231,12 +228,10 @@ plain-English stderr recovery guidance after the fixed `ask` diagnostic. The
 [acceptance disposition](../developer/agent-context-map.md#disposition-m6-adr-0040-acceptance-2026-09-28)
 binds its exact Proposed pair and leaves 0039's other decisions unchanged.
 
-0041 to 0047 were proposed on 2026-09-29 with the draft M7 coding-agent
-proof. They are: session lineage projection, which implements 0010's
-lineage clause and sizes the context budget; host-composed instructions;
-the context compaction checkpoint; run model and reasoning configuration,
-which conflicts with clause 7 of Proposed 0037; model-originated questions,
-which narrowly amend 0009 and 0024; the child-session tool; and the
-reference host's run defaults. 0045 and 0046 each state a reading of the
-vision's minimalism budget that acceptance must confirm. They accept
-nothing, and each is accepted before the M7 outcome that depends on it.
+0041 to 0047 were first proposed on 2026-09-29 and revised during the
+2026-09-30 internal readiness review. ADRs 0048 and 0049 add narrow provider
+binding amendments and explicit configuration. Together, 0041–0049 are M7's
+proposed prerequisites: lineage, instructions, compaction, model configuration,
+questions, serial read-only helpers, explicit limits, provider custody and host
+configuration. ADRs 0045/0046 state vision readings acceptance must confirm.
+No proposal is accepted by this preparation; each blocks its dependent outcome.

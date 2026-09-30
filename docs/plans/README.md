@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M7` is open; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M6` — 2026-09-29 |
-| Blockers | None; `M6` is closed and its governance row is recorded |
-| Authorized work | Explicitly authorized planning, ADR, and review work only; no product implementation until the next milestone is accepted |
-| Next maintainer decision | Open the next milestone, or defer it |
-| Next transition | Write the next milestone's plan pair and move it to Open |
+| Blockers | `M7` is open and not accepted; the maintainer must accept its plan pair; `M7` waits on ADR 0041, ADR 0042, ADR 0043, ADR 0044, ADR 0045, ADR 0046, ADR 0047, ADR 0048, and ADR 0049 before the outcomes that depend on them |
+| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
+| Next maintainer decision | Accept or reject the `M7` plan pair; disposition [ADR 0041](../adr/0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](../adr/0042-host-composed-instructions.md#concept), [ADR 0043](../adr/0043-context-compaction-checkpoint.md#concept), [ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept), [ADR 0045](../adr/0045-model-originated-questions.md#concept), [ADR 0046](../adr/0046-child-session-tool.md#concept), [ADR 0047](../adr/0047-reference-host-run-defaults.md#concept), [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept), and [ADR 0049](../adr/0049-explicit-host-configuration.md#concept) |
+| Next transition | Record the acceptance governance row and move `M7` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -139,6 +139,7 @@ representable.
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
 | `M5` | Closed | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 | `M6` | Closed | [concept](M6.md) | [technical depth](M6-technical.md) | — |
+| `M7` | Open | [concept](M7.md) | [technical depth](M7-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact

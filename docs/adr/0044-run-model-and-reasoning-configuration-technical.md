@@ -4,82 +4,75 @@
 Concept: [Run model and reasoning configuration](0044-run-model-and-reasoning-configuration.md#concept).
 
 <a id="technical-adr-0044-decision"></a>
-### Record and Options
+### Contract
 
 Concept: [Context and decision](0044-run-model-and-reasoning-configuration.md#concept-adr-0044-decision).
 
-**Present state, read from source on 2026-09-29.**
+The closed configuration contains exact `model` string, `reasoning`,
+`configuration_version`, `instructions` bytes/digest under ADR 0042, `max_tokens`,
+`context_token_budget`, `system_class_tokens` and budget origins. Initial legacy
+fallback may be represented explicitly without rewriting prior requests. Active
+tools remain the immutable generation under ADR 0009; changing them is out of
+M7's configure command.
 
-| Fact | Location |
-| --- | --- |
-| The model is a coordinator launch option | `apps/loopex/lib/loopex/runtime/session_coordinator.ex`, `init` |
-| The model string is durable only inside each committed request | `apps/loopex/lib/loopex/runtime/session_state.ex`; `apps/loopex/lib/loopex/model.ex` |
-| `session.configured` does not exist in code | search of `apps/*/lib` |
-| `loopex resume` accepts no model flag and performs no model comparison | `apps/loopex_cli/lib/loopex_cli.ex` |
-| Core validates `max_tokens` and plain data in `sampling`, and names no other key | `model.ex`, `validate_semantics` |
-| The durable composition accepts exactly `%{"max_tokens" => n}` | `apps/loopex_composition/lib/loopex_composition/durable_options.ex` |
-| The adapter passes no reasoning option | `apps/loopex_llm_reqllm/lib/loopex/llm/req_llm.ex`, `call_options/3` |
-| ReqLLM 1.24.0 accepts `reasoning_effort` and `reasoning_token_budget` | `deps/req_llm/lib/req_llm/provider/options.ex` |
+`configure` is a normal idempotent session command containing any nonempty subset
+of mutable model/reasoning/instructions/max_tokens/context_token_budget/
+system_class_tokens. Merge against committed state, validate the whole candidate,
+and commit one version or one unchanged refusal. Replayed identical command ID
+returns its original disposition; different payload reuse refuses. The session
+must be settled with no unresolved effect, provider attempt or maintenance.
+Configuration preflight may report compaction required; it does not call a model
+or compact as a side effect. The operator can compact with the prior model first.
 
-**The configuration record.**
+Validation uses ADR 0048's admitted provider routes, declared model capabilities,
+ADR 0041's window/reserve calculation and exact byte/token staging preflight with
+the retained history and immutable active tools. Recompute derived budgets when
+a model or reply reserve changes; explicit overrides remain explicit and must
+still fit. A rejected candidate changes neither projection nor defaults.
 
-| Member | Content |
-| --- | --- |
-| `model` | Exact model identity string, as the adapter names it |
-| `reasoning` | One of `none`, `low`, `medium`, `high`, `default` |
-| `configuration_version` | Integer, incremented per change |
+Each new run and maintenance episode binds its configuration version at admission.
+`reasoning` enters canonical sampling and digest when non-default; `default`
+omits it. Existing committed request bytes and provider attempts remain immutable.
+The ReqLLM adapter maps admitted levels to its verified `reasoning_effort` support;
+never assume every model accepts every catalog value. Unknown capability permits
+`default` only. Reasoning token budgets and provider-specific option bags stay out.
 
-The active tool set stays where ADR 0009 commits it. It joins this record
-only if a later decision lets it change after session start.
+For projection under a new model, strip opaque continuation tokens, reasoning
+signatures/content and provider-specific tool metadata from messages produced by
+incompatible model identities. Keep canonical text, tool arguments and committed
+results. Normalize tool IDs deterministically from `(run_id, turn, call_id)`
+under ADR 0041; return to A does not resurrect stripped B-affine state or old
+continuation tokens. M7 uses canonical-history replay only: continuation remains empty even for
+the same model, as ADR 0010 requires. Retained provider-private reasoning,
+signatures and response state never become later request input. Conversion is
+a pure projection, not journal rewriting. Native continuation requires a separate
+amendment and is outside this decision.
 
-**The command.** `configure` is admitted only while the session is settled.
-It is idempotent under its command identity. A refused configuration commits
-a refusal record and changes nothing.
-
-**Request staging.** `reasoning` enters the canonical request as a sampling
-member, so the staged request digest covers it. `default` omits the member,
-which keeps requests staged before this decision byte-identical.
-
-**Adapter mapping.** The ReqLLM adapter maps `none`, `low`, `medium` and
-`high` to the same `reasoning_effort` values. It sends no token budget. The
-wider ReqLLM values are not admitted.
-
-**Capability.** The adapter's capability answer for a model gains
-`reasoning_levels`, the subset it accepts. An unknown model answers with
-`default` alone.
-
-**Provider-affine state.** On a change of model or provider, the projection
-drops reasoning content blocks and provider tool-call metadata from prior
-assistant messages, and keeps text, tool calls and tool results. Tool-call
-identifiers are normalized as the vision's conformance list requires.
+Protocol adds `session.configure`, `session.configured` and configuration snapshot
+fields with a new experimental schema/generation jointly with ADRs 0043/0045.
+No old client receives unknown shapes under unchanged negotiation. Exact vectors
+and independent Node client update precede implementation integration.
 
 <a id="technical-adr-0044-evidence"></a>
 ### Evidence
 
 Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md#concept-adr-0044-consequences).
 
-- A configuration change commits one record and publishes one event, and a
-  snapshot carries the current configuration.
-- A change submitted during a run is refused.
-- A run recovered after restart stages with the configuration committed at
-  its admission.
-- A level outside the model's declared subset is refused.
-- A request staged with `default` equals one staged before this decision.
-- The adapter conformance suite covers same-model continuation,
-  compatible-model continuation, a model change between runs and tool-call
-  identifier normalization.
-- Real provider: one session completes two runs on two models, and one run
-  at `high` reports reasoning usage.
+- Atomic creation/configure, strict validation, version capture and idempotency.
+- Active/unresolved change refusal; legacy model derivation versus conflict.
+- Restart at configure and staging boundaries preserves configuration/digest.
+- Reasoning capability negatives, default omission and real non-default usage.
+- Deterministic same-model/cross-provider history, repeated tool IDs and raw-history
+  preservation; real A→B→A with restart and tool results.
+- Schema negotiation, events/snapshots and independent client vectors.
 
 <a id="technical-adr-0044-compatibility"></a>
-### Compatibility and Rejected Alternatives
+### Compatibility Mechanics and Alternatives
 
 Concept: [Compatibility and rollback](0044-run-model-and-reasoning-configuration.md#concept-adr-0044-compatibility).
 
-- *Keep the model fixed at composition start,* as Proposed ADR 0037 has it.
-  Rejected. It leaves the session's model unrecorded and resume unchecked.
-- *Switch models inside a run.* Rejected. A run is one bounded unit with one
-  staged configuration.
-- *Pass the provider's own reasoning options through.* Rejected. It puts
-  provider vocabulary into a committed core record.
-- *A reasoning token budget.* Deferred. A level is enough for the proof.
+A future adapter may extend capability mapping through a new explicit decision.
+No within-run switching, automatic model routing or mutable tool generation is
+admitted. Legacy-root upgrade records the inferred configuration only when its
+identity is proved. Exact downgrade fixtures must distinguish unchanged staged
+requests from new configuration/schema support; backups preserve the prior state.
