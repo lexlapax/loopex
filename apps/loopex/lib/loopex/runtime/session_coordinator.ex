@@ -30,6 +30,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Interaction
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
+  alias Loopex.Runtime.Instructions
   alias Loopex.Runtime.ProviderLifetime
   alias Loopex.Runtime.ResourceContext
   alias Loopex.Runtime.SessionState
@@ -3554,9 +3555,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # `staged_request_digest`, so a change to it is a visible change of what was
   # dispatched rather than an invisible drift in how the model was instructed.
   defp system_block(_state) do
-    "loopex.system.v1: You are a coding agent working in a real workspace. " <>
-      "Use the tools you are given to inspect and change files, and run commands " <>
-      "when you need to. Continue until the task is done, then stop."
+    {:ok, text} = Instructions.render(Instructions.legacy())
+    text
   end
 
   # Concept: the operator's deadline is checked before a provider is called, not

@@ -17,6 +17,8 @@ Part of the [evidence index](README.md).
   replay validation, and terminal-derived unknown/cancelled call results.
 - Done: conversation integration candidate fast check; all 11 suites pass
   2,638 tests at `2d804649ca82ce87b58511bc0739c93e700c7559`.
+- Done: pinned artifact-read generation vectors and pure capability binding;
+  instruction capture/render validation preserves exact legacy staging bytes.
 - Running: T00 contract/fixture inventory and T01 boundary verification; next
   integration slice is T03 host instructions with T04 persisted configuration.
   Host instruction/configuration binding and non-nil continuation costs remain
@@ -94,6 +96,15 @@ Part of the [evidence index](README.md).
   compiled documentation ordering passes with 930 covered entries. Executor
   registration, live range retrieval and v3 genesis binding remain pending.
 
+- 2026-10-01: pure instruction capture/render validation now implements ADR 0042's
+  closed four-member input, ASCII version grammar, byte-counted UTF-8 section
+  bounds and exact blank-line rendering. Captured section bytes retain the
+  rendered SHA-256; replay validation rejects substitutions and extra members.
+  Legacy staging uses the same immutable fallback bytes. Instruction/conversation/
+  context tests pass 136 cases in 25.3 seconds; compiled documentation ordering
+  passes with 936 covered entries. Host configuration, complete system costs and
+  configuration-bound receipt provenance remain pending.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -126,6 +137,7 @@ Part of the [evidence index](README.md).
 - [ ] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
 ## T03 — Implement host-composed instructions
 - [ ] Replace core’s fixed instructions with the accepted host instruction map and rendering.
+- [x] Implement pure closed instruction capture, exact rendering and retained-digest validation; preserve legacy fallback bytes through the shared renderer.
 - [ ] Keep project and skill resources separately typed and admitted.
 - [ ] Capture workspace/environment facts and exact selected tool schemas.
 - [ ] Enforce the configured system ceiling and complete serialized-request limit.
