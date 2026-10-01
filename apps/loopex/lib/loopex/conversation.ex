@@ -45,6 +45,8 @@ defmodule Loopex.Conversation do
 
   @outcomes [:completed, :failed, :denied, :cancelled, :outcome_unknown]
 
+  alias LoopexProtocol.Canonical
+
   @typedoc """
   ## Concept
 
@@ -117,6 +119,38 @@ defmodule Loopex.Conversation do
   @doc """
   ## Concept
 
+  Projects complete committed session lineage with unambiguous model-facing
+  tool identities, retaining the canonical source identity beside each message.
+
+  ## Technical depth
+
+  Projection revision 1 joins calls and results by run, turn and call identity.
+  Each provider-facing ID is `lx_` plus the first 48 lowercase SHA-256 hex
+  characters of `Canonical.encode([run_id, turn_number, tool_call_id])`.
+  Missing, duplicate or orphan facts and normalized-ID collisions return
+  `context_projection_invalid`. Historical `session_entries/1` keeps its
+  original call IDs for validation of already staged legacy requests.
+  """
+  @spec lineage_entries([element()]) ::
+          {:ok, [{map(), message()}]} | {:error, :context_projection_invalid}
+  def lineage_entries(elements) when is_list(elements) do
+    with {:ok, calls, results} <- lineage_identities(elements),
+         true <- MapSet.new(Map.keys(calls)) == results,
+         true <- MapSet.size(MapSet.new(Map.values(calls))) == map_size(calls) do
+      {:ok,
+       Enum.map(project_entries(elements), fn {source, message} ->
+         {source, normalize_call_ids(source, message, calls)}
+       end)}
+    else
+      _invalid -> {:error, :context_projection_invalid}
+    end
+  end
+
+  def lineage_entries(_invalid), do: {:error, :context_projection_invalid}
+
+  @doc """
+  ## Concept
+
   Whether every tool call of the latest assistant message has a committed
   terminal result.
 
@@ -135,7 +169,7 @@ defmodule Loopex.Conversation do
       assistant ->
         answered =
           elements
-          |> Enum.filter(&(&1.kind == :tool_result and &1.turn_number == assistant.turn_number))
+          |> Enum.filter(&same_turn_result?(&1, assistant.run_id, assistant.turn_number))
           |> MapSet.new(& &1.tool_call_id)
 
         Enum.all?(assistant.tool_calls, &MapSet.member?(answered, &1.tool_call_id))
@@ -178,7 +212,7 @@ defmodule Loopex.Conversation do
       %{run_id: ^run_id, turn_number: turn_number, tool_calls: calls} ->
         answered =
           elements
-          |> Enum.filter(&(&1.kind == :tool_result and &1.turn_number == turn_number))
+          |> Enum.filter(&same_turn_result?(&1, run_id, turn_number))
           |> MapSet.new(& &1.tool_call_id)
 
         expected =
@@ -300,7 +334,7 @@ defmodule Loopex.Conversation do
   defp turn_result_entries(elements, assistant) do
     by_call =
       elements
-      |> Enum.filter(&(&1.kind == :tool_result and &1.turn_number == assistant.turn_number))
+      |> Enum.filter(&same_turn_result?(&1, assistant.run_id, assistant.turn_number))
       |> Map.new(&{&1.tool_call_id, &1})
 
     assistant.tool_calls
@@ -330,4 +364,113 @@ defmodule Loopex.Conversation do
       end
     end)
   end
+
+  defp same_turn_result?(element, run_id, turn_number),
+    do:
+      element.kind == :tool_result and element.run_id == run_id and
+        element.turn_number == turn_number
+
+  defp lineage_identities(elements) do
+    Enum.reduce_while(elements, {:ok, %{}, MapSet.new(), MapSet.new()}, fn
+      %{kind: :user_message, run_id: run, command_id: command, content: content}, acc
+      when is_binary(run) and run != "" and is_binary(command) and command != "" and
+             is_binary(content) ->
+        {:cont, acc}
+
+      %{
+        kind: :assistant_message,
+        run_id: run,
+        turn_number: turn,
+        content: content,
+        tool_calls: calls
+      },
+      {:ok, identities, results, turns}
+      when is_binary(run) and run != "" and is_integer(turn) and turn > 0 and
+             is_binary(content) and is_list(calls) ->
+        with false <- MapSet.member?(turns, {run, turn}),
+             {:ok, identities} <- lineage_calls(calls, run, turn, identities) do
+          {:cont, {:ok, identities, results, MapSet.put(turns, {run, turn})}}
+        else
+          _invalid -> {:halt, :invalid}
+        end
+
+      %{
+        kind: :tool_result,
+        run_id: run,
+        turn_number: turn,
+        tool_call_id: call,
+        content: content,
+        outcome: outcome
+      },
+      {:ok, identities, results, turns}
+      when is_binary(content) and outcome in @outcomes ->
+        identity = {run, turn, call}
+
+        if Map.has_key?(identities, identity) and not MapSet.member?(results, identity) do
+          {:cont, {:ok, identities, MapSet.put(results, identity), turns}}
+        else
+          {:halt, :invalid}
+        end
+
+      _element, _acc ->
+        {:halt, :invalid}
+    end)
+    |> case do
+      {:ok, identities, results, _turns} -> {:ok, identities, results}
+      _invalid -> {:error, :context_projection_invalid}
+    end
+  end
+
+  defp lineage_calls(calls, run, turn, identities) do
+    Enum.reduce_while(calls, {:ok, identities}, fn
+      %{tool_call_id: id, arguments: arguments, generation: generation} = call, {:ok, identities}
+      when is_binary(id) and id != "" and is_map(arguments) ->
+        valid_generation =
+          case generation do
+            {tool, version, digest}
+            when is_binary(tool) and is_binary(version) and
+                   is_binary(digest) ->
+              true
+
+            nil ->
+              is_binary(Map.get(call, :name))
+
+            _invalid ->
+              false
+          end
+
+        identity = {run, turn, id}
+
+        if valid_generation and not Map.has_key?(identities, identity) do
+          normalized = "lx_" <> binary_part(Canonical.digest([run, turn, id]), 0, 48)
+          {:cont, {:ok, Map.put(identities, identity, normalized)}}
+        else
+          {:halt, {:error, :context_projection_invalid}}
+        end
+
+      _call, _acc ->
+        {:halt, {:error, :context_projection_invalid}}
+    end)
+  end
+
+  defp normalize_call_ids(
+         %{"kind" => "session_assistant", "run_id" => run, "turn" => turn},
+         message,
+         calls
+       ) do
+    Map.update!(message, "tool_calls", fn tool_calls ->
+      Enum.map(tool_calls, fn call ->
+        Map.put(call, "tool_call_id", Map.fetch!(calls, {run, turn, call["tool_call_id"]}))
+      end)
+    end)
+  end
+
+  defp normalize_call_ids(
+         %{"kind" => "session_tool_result", "run_id" => run, "turn" => turn, "call_id" => call},
+         message,
+         calls
+       ),
+       do: Map.put(message, "tool_call_id", Map.fetch!(calls, {run, turn, call}))
+
+  defp normalize_call_ids(_source, message, _calls), do: message
 end

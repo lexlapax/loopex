@@ -30,6 +30,7 @@ defmodule Loopex.Runtime.SessionState do
   admissions; Workstream B makes them observable as eligible but does not
   dispatch them.
 
+  `run_order` retains admission and promotion order reconstructed from history.
   `conversation` holds the committed elements of each run, which
   `Loopex.Conversation` projects into the message list a turn stages. `bounds`
   holds each run's declared bounds exactly as they were committed at admission
@@ -166,6 +167,7 @@ defmodule Loopex.Runtime.SessionState do
           commands: map(),
           pending_work: map(),
           conversation: map(),
+          run_order: [binary()],
           bounds: map(),
           context_budgets: map(),
           context_refusal: map() | nil,
@@ -191,6 +193,7 @@ defmodule Loopex.Runtime.SessionState do
             commands: %{},
             pending_work: %{},
             conversation: %{},
+            run_order: [],
             bounds: %{},
             # The context-admission ceiling each run committed at its own prompt
             # admission. ADR 0017 keeps it out of `bounds` because it can never
@@ -646,6 +649,29 @@ defmodule Loopex.Runtime.SessionState do
   @spec elements(t(), binary()) :: [Conversation.element()]
   def elements(%__MODULE__{conversation: conversation}, run_id),
     do: Map.get(conversation, run_id, [])
+
+  @doc """
+  ## Concept
+
+  The committed conversation through one admitted run, in session order.
+
+  ## Technical depth
+
+  Admission and follow-up promotion append run identities during replay. This
+  read includes earlier runs regardless of their terminal outcome, preserves
+  element order within each run, and never includes a later run. Per-run reads
+  remain available for accounting and legacy staged-request validation.
+  """
+  @spec lineage_elements(t(), binary()) :: [Conversation.element()]
+  def lineage_elements(%__MODULE__{} = state, run_id) do
+    case Enum.split_while(state.run_order, &(&1 != run_id)) do
+      {earlier, [^run_id | _later]} ->
+        Enum.flat_map(earlier ++ [run_id], &elements(state, &1))
+
+      {_earlier, []} ->
+        []
+    end
+  end
 
   @doc """
   ## Concept
@@ -2237,6 +2263,7 @@ defmodule Loopex.Runtime.SessionState do
 
       patch = %{
         conversation: Map.put(state.conversation, run_id, [element]),
+        run_order: state.run_order ++ [run_id],
         bounds: Map.put(state.bounds, run_id, declared),
         context_budgets: Map.put(state.context_budgets, run_id, context_budget),
         run_resources: Map.put(state.run_resources, run_id, state.resources)
@@ -3301,6 +3328,7 @@ defmodule Loopex.Runtime.SessionState do
           context_budgets:
             Map.put(state.context_budgets, promoted, Map.get(state.context_budgets, run_id)),
           run_resources: Map.put(state.run_resources, promoted, state.resources),
+          run_order: state.run_order ++ [promoted],
           conversation: Map.put(state.conversation, promoted, [element])
       }
 

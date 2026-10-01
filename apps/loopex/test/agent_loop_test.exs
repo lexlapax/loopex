@@ -1291,6 +1291,112 @@ defmodule Loopex.AgentLoopTest do
            ]
   end
 
+  test "lineage reads retain admission order and rebuild from committed history" do
+    fixture =
+      start(script: [%{text: "first answer", calls: []}, %{text: "second answer", calls: []}])
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "first input")
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    assert {:accepted, "prompt-1"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt-1",
+               content: "first input"
+             })
+
+    assert {:accepted, "second-lineage-prompt"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "second-lineage-prompt",
+               content: "second input"
+             })
+
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    state = :sys.get_state(coordinator_of(fixture.runtime)).durable
+    assert [first, second] = state.run_order
+
+    assert Enum.map(Loopex.Runtime.SessionState.lineage_elements(state, first), & &1.content) ==
+             ["first input", "first answer"]
+
+    assert Enum.map(Loopex.Runtime.SessionState.lineage_elements(state, second), & &1.content) ==
+             ["first input", "first answer", "second input", "second answer"]
+
+    assert Loopex.Runtime.SessionState.lineage_elements(state, "unadmitted") == []
+
+    assert {:ok, recovered} =
+             Loopex.Runtime.SessionState.recover(
+               session_id,
+               Fixture.records(fixture, session_id),
+               Fixture.events(fixture, session_id)
+             )
+
+    assert recovered.run_order == state.run_order
+
+    assert Loopex.Runtime.SessionState.lineage_elements(recovered, second) ==
+             Loopex.Runtime.SessionState.lineage_elements(state, second)
+  end
+
+  test "promoted follow-ups extend lineage without inheriting earlier accounting" do
+    fixture =
+      start(
+        script: [
+          %{
+            text: "first answer",
+            calls: [],
+            hold: self(),
+            usage: %{input_tokens: 11, output_tokens: 7}
+          },
+          %{text: "follow-up answer", calls: [], hold: self()}
+        ]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "first input")
+    assert_receive {:holding, first_worker}, 5_000
+
+    assert {:error, :run_active} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "refused-prompt",
+               content: "refused"
+             })
+
+    assert {:accepted, "lineage-follow-up"} =
+             Loopex.command(attachment, %{
+               type: :follow_up,
+               command_id: "lineage-follow-up",
+               content: "next input"
+             })
+
+    send(first_worker, :release)
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    assert_receive {:holding, second_worker}, 5_000
+
+    state = :sys.get_state(coordinator_of(fixture.runtime)).durable
+    assert [first, second] = state.run_order
+
+    assert Enum.map(Loopex.Runtime.SessionState.lineage_elements(state, second), & &1.content) ==
+             ["first input", "first answer", "next input"]
+
+    {_bounds, first_charge} = Loopex.Runtime.SessionState.accounting(state, first)
+    {_bounds, second_charge} = Loopex.Runtime.SessionState.accounting(state, second)
+    assert first_charge.tokens == 18
+    assert second_charge.tokens == 0
+
+    send(second_worker, :release)
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    assert {:ok, recovered} =
+             Loopex.Runtime.SessionState.recover(
+               session_id,
+               Fixture.records(fixture, session_id),
+               Fixture.events(fixture, session_id)
+             )
+
+    assert recovered.run_order == [first, second]
+  end
+
   test "an assistant tool call and its real tool result are committed and replayed to the model" do
     script = [
       %{text: "I will write the file", calls: [call("c1")]},

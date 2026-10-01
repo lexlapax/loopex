@@ -10,7 +10,10 @@ Part of the [evidence index](README.md).
 
 - Done: reproduce cross-run conversation loss with the real session-owner path
   and a scripted model in `apps/loopex/test/agent_loop_test.exs`.
-- Running: T00 contract/fixture inventory and T01 continuity implementation.
+- Done: run-scoped result joins, replayed admission order, revision-1 normalized
+  call identities and strict complete-lineage validation. These are projection
+  foundations; the coordinator still stages per-run history.
+- Running: T00 contract/fixture inventory and T01 request/receipt integration.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
 
@@ -23,6 +26,18 @@ Part of the [evidence index](README.md).
   validation by the staged record/receipt generation; join results by complete
   run/turn/call identity; preserve old staged requests and old receipt decoders.
 
+- 2026-10-01: conversation unit tests pass (12 tests, 0.08 seconds). The full
+  agent-loop file passes 103 of 104 tests (24.7 seconds); the sole failure is
+  the retained second-prompt regression. Admission-order recovery and promoted
+  follow-up accounting tests pass. Compiled documentation ordering passes.
+- Revision-1 normalized IDs bind `Canonical.encode([run_id, turn_number,
+  tool_call_id])`; fixed r1/r2 vectors retain the exact 48-hex prefix. Source
+  references keep the original run/turn/call identities. Historical projection
+  retains its saved call IDs. Request/receipt generation integration remains.
+- Next: implement the accepted v2 request and revision-4 receipt/configuration
+  join before switching coordinator staging to the normalized full lineage;
+  keep legacy receipt validation on per-run elements.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [ ] Pin schema definitions, digests, compatibility vectors and provider mappings.
@@ -34,9 +49,9 @@ Part of the [evidence index](README.md).
 ## T01 — Preserve conversation across prompts and restarts
 - [x] First add a failing test reproducing the current loss of earlier conversation.
 - [ ] Project the complete committed conversation into subsequent model requests.
-- [ ] Join tool calls and results using their run, turn and call identities.
+- [x] Join tool calls and results using their run, turn and call identities.
 - [ ] Normalize provider-facing call IDs and reject collisions or incomplete joins.
-- [ ] Reset each run’s accounting without deleting conversation or recovery facts.
+- [x] Reset each run’s accounting without deleting conversation or recovery facts.
 - [ ] Preserve already staged requests unchanged.
 - [ ] Test multiple prompts, follow-ups, tools, cancellation, failed runs, restart and uncertain commits.
 ## T02 — Handle large tool output and bounded artifact reads

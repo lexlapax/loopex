@@ -92,6 +92,96 @@ defmodule Loopex.ConversationTest do
     assert :erlang.term_to_binary(project(elements)) == :erlang.term_to_binary(project(elements))
   end
 
+  test "reused turns and call IDs join only results from their own run" do
+    first = [user("first"), assistant(1, [call("a")]), result(1, "a", :completed, "FIRST")]
+
+    second =
+      [user("second"), assistant(1, [call("a")]), result(1, "a", :completed, "SECOND")]
+      |> Enum.map(&Map.put(&1, :run_id, "r2"))
+
+    assert first
+           |> Kernel.++(second)
+           |> project()
+           |> Enum.filter(&(&1["role"] == "tool"))
+           |> Enum.map(& &1["content"]) == ["FIRST", "SECOND"]
+  end
+
+  test "an earlier run's result cannot settle or skip a later run's call" do
+    first = [user("first"), assistant(1, [call("a")]), result(1, "a")]
+
+    second =
+      [user("second"), assistant(1, [call("a"), call("b")])]
+      |> Enum.map(&Map.put(&1, :run_id, "r2"))
+
+    elements = first ++ second
+    refute Conversation.turn_settled?(elements)
+    assert Conversation.admits_result?(elements, "r2", "a")
+    refute Conversation.admits_result?(elements, "r2", "b")
+
+    second_a = result(1, "a") |> Map.put(:run_id, "r2")
+    second_b = result(1, "b") |> Map.put(:run_id, "r2")
+    refute Conversation.turn_settled?(elements ++ [second_a])
+    assert Conversation.turn_settled?(elements ++ [second_a, second_b])
+  end
+
+  test "lineage projection normalizes reused native IDs and retains canonical source identities" do
+    first = [user("first"), assistant(1, [call("a")]), result(1, "a", :completed, "FIRST")]
+
+    second =
+      [user("second"), assistant(1, [call("a")]), result(1, "a", :completed, "SECOND")]
+      |> Enum.map(&Map.put(&1, :run_id, "r2"))
+
+    assert {:ok, entries} = Conversation.lineage_entries(first ++ second)
+
+    [{first_source, first_result}, {second_source, second_result}] =
+      Enum.filter(entries, fn {_source, message} -> message["role"] == "tool" end)
+
+    assert first_source == %{
+             "kind" => "session_tool_result",
+             "run_id" => "r1",
+             "turn" => 1,
+             "call_id" => "a"
+           }
+
+    assert second_source == %{first_source | "run_id" => "r2"}
+    assert first_result["content"] == "FIRST"
+    assert second_result["content"] == "SECOND"
+
+    assert first_result["tool_call_id"] ==
+             "lx_adfbf624bd36e582d5fc4c575141eb5cb0efcb5b04be3b5b"
+
+    assert second_result["tool_call_id"] ==
+             "lx_8f8e0a74b2435a40929d61a60348fe748b4c06843285c87f"
+
+    assistant_ids =
+      for {_source, %{"role" => "assistant", "tool_calls" => [call]}} <- entries,
+          do: call["tool_call_id"]
+
+    assert assistant_ids == [first_result["tool_call_id"], second_result["tool_call_id"]]
+    assert {:ok, ^entries} = Conversation.lineage_entries(first ++ second)
+    assert Enum.at(project(first), 2)["tool_calls"] |> hd() |> Map.fetch!("tool_call_id") == "a"
+  end
+
+  test "lineage projection refuses incomplete, duplicate and orphan canonical facts" do
+    base = [user("go"), assistant(1, [call("a")]), result(1, "a")]
+
+    for invalid <- [
+          Enum.take(base, 2),
+          base ++ [result(1, "a")],
+          base ++ [result(1, "orphan")],
+          [user("go"), result(1, "a"), assistant(1, [call("a")])],
+          [user("go"), assistant(1, [call("a"), call("a")]), result(1, "a")],
+          base ++ [assistant(1, [])],
+          base ++ [%{kind: :unrecognized}],
+          base ++ [Map.put(result(1, "a"), :run_id, "other-run")]
+        ] do
+      assert {:error, :context_projection_invalid} = Conversation.lineage_entries(invalid)
+    end
+
+    assert {:ok, []} = Conversation.lineage_entries([])
+    assert {:error, :context_projection_invalid} = Conversation.lineage_entries(:invalid)
+  end
+
   test "a turn is unsettled while any call of the latest assistant message is unanswered" do
     calls = [call("a"), call("b")]
     base = [user("go"), assistant(1, calls)]
