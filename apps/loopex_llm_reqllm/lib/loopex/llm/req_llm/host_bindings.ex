@@ -14,7 +14,11 @@ defmodule Loopex.LLM.ReqLLM.HostBindings do
 
   alias Loopex.LLM.ReqLLM.InProcess.Guards
 
-  @reserved ~w(PATH HOME TMPDIR TMP TEMP SHELL USER LOGNAME PWD OLDPWD SHLVL IFS CDPATH ENV BASH_ENV ZDOTDIR)
+  # Concept: operational names cannot serve as credential slots.
+  # Technical depth: ADR 0048 permits narrower adapter exclusions. LC_ALL is
+  # also reserved because reference-host placement probes require LC_ALL=C;
+  # admitting it would conflict with removing every credential name at launch.
+  @reserved ~w(LC_ALL PATH HOME TMPDIR TMP TEMP SHELL USER LOGNAME PWD OLDPWD SHLVL IFS CDPATH ENV BASH_ENV ZDOTDIR)
   @prefixes ~w(LD_ DYLD_ ERL_ ELIXIR_ MIX_ RELEASE_ BASH_ LOOPEX_)
   @legacy "LOOPEX_PROVIDER_API_KEY"
   @name ~r/\A[A-Za-z_][A-Za-z0-9_]{0,127}\z/

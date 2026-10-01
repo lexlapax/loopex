@@ -424,8 +424,9 @@ defmodule LoopexComposition.ResourcePacks do
 
   The caller must provide the Git executable, revision, selected path, state
   root, workspace identity, and the explicit host-policy allow decision. Git
-  runs with no ambient configuration or credential prompt. The installed
-  directory is published only after the complete pack passes validation.
+  runs with no ambient configuration or credential prompt. Host-private
+  `:excluded_env_names` reaches the import executor's first-image launch boundary.
+  The installed directory is published only after the complete pack passes validation.
   """
   @spec add(binary(), binary(), keyword()) :: {:ok, map()} | refusal()
   def add(workspace, source, options)
@@ -1127,7 +1128,11 @@ defmodule LoopexComposition.ResourcePacks do
     }
 
   defp import_config(workspace, source, options) do
-    with {:ok, workspace_ref} <- required_binary(options, :workspace_ref),
+    excluded =
+      Keyword.get(options, :excluded_env_names, [Loopex.LLM.ReqLLM.credential_variable()])
+
+    with :ok <- LoopexComposition.ProviderBindings.validate_exclusions(excluded),
+         {:ok, workspace_ref} <- required_binary(options, :workspace_ref),
          {:ok, state_root} <- required_binary(options, :state_root),
          {:ok, rev} <- required_binary(options, :rev),
          true <- Regex.match?(@git_oid, rev),
@@ -1151,11 +1156,18 @@ defmodule LoopexComposition.ResourcePacks do
          git: git,
          deadline: deadline,
          authorization: {:host_policy, :allow},
+         excluded_env_names: excluded,
          open_authority_close: open_authority_close_seam()
        }}
     else
-      false -> error(:invalid_revision, "revision must be one exact lowercase Git object ID")
-      {:error, {_reason, _detail}} = refusal -> refusal
+      {:error, :invalid_credential_exclusions} ->
+        error(:invalid_options, "invalid credential exclusions")
+
+      false ->
+        error(:invalid_revision, "revision must be one exact lowercase Git object ID")
+
+      {:error, {_reason, _detail}} = refusal ->
+        refusal
     end
   end
 
@@ -1524,7 +1536,8 @@ defmodule LoopexComposition.ResourcePacks do
                  workspace_leases: %{lease_id => lease},
                  ledger_root: ledger,
                  artifacts: artifacts,
-                 claim_wait_ms: @import_claim_wait_ms
+                 claim_wait_ms: @import_claim_wait_ms,
+                 excluded_env_names: config.excluded_env_names
                ] ++ executor_seams(config)
              ) do
         {:ok,

@@ -188,6 +188,21 @@ defmodule LoopexComposition.SkillAcquisitionTest do
     commit = git!(source, ["rev-parse", "HEAD"])
     tree = git!(source, ["rev-parse", "#{commit}:imported"])
 
+    excluded = Enum.sort(["LOOPEX_PROVIDER_API_KEY", "M7_IMPORT_A", "M7_IMPORT_B"])
+    Code.ensure_loaded!(Loopex.Executor.Local)
+    trace = :trace.session_create(:m7_import_launch_exclusions, self(), [])
+
+    on_exit(fn ->
+      try do
+        :trace.session_destroy(trace)
+      catch
+        _, _ -> :ok
+      end
+    end)
+
+    assert 1 = :trace.function(trace, {Loopex.Executor.Local, :start_link, 1}, true, [:local])
+    assert 1 = :trace.process(trace, self(), true, [:call, :set_on_spawn])
+
     assert {:ok, pack} =
              ResourcePacks.add(workspace, source,
                workspace_ref: "workspace:test",
@@ -196,8 +211,13 @@ defmodule LoopexComposition.SkillAcquisitionTest do
                path: "imported",
                git_executable: git,
                executor_authorization: {:host_policy, :allow},
-               deadline_ms: 10_000
+               deadline_ms: 10_000,
+               excluded_env_names: excluded
              )
+
+    assert_receive {:trace, _, :call, {Loopex.Executor.Local, :start_link, [executor_options]}}
+    assert Keyword.fetch!(executor_options, :excluded_env_names) == excluded
+    :trace.session_destroy(trace)
 
     assert pack["commit"] == commit
     assert pack["tree_digest"] == tree
@@ -215,6 +235,7 @@ defmodule LoopexComposition.SkillAcquisitionTest do
 
     receipts = retained_executor_receipts(state_root)
     assert length(receipts) == 5 + length(pack["files"])
+    refute inspect(receipts) =~ "M7_IMPORT_"
     assert Enum.all?(receipts, &(&1.tool_id == "loopex.bash"))
     assert Enum.all?(receipts, &(&1.outcome == :completed))
     assert Enum.all?(receipts, &(&1.child_environment_names == ["PATH"]))
@@ -662,6 +683,21 @@ defmodule LoopexComposition.SkillAcquisitionTest do
       assert staging_paths(workspace) == []
       assert Path.wildcard(Path.join(state, "resource-packs/provenance/*.etf")) == []
     end
+  end
+
+  test "invalid launch exclusions refuse before import directories or subprocesses" do
+    root = tmp_dir!("invalid-exclusions")
+    workspace = Path.join(root, "workspace")
+    state_root = Path.join(root, "state")
+
+    assert {:error, {:invalid_options, "invalid credential exclusions"}} =
+             ResourcePacks.add(workspace, "https://example.invalid/unused",
+               excluded_env_names: ["HOME", "LOOPEX_PROVIDER_API_KEY"],
+               state_root: state_root
+             )
+
+    refute File.exists?(workspace)
+    refute File.exists?(state_root)
   end
 
   test "credential-bearing source forms refuse before Git or retention" do

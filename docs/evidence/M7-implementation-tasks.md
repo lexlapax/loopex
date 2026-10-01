@@ -104,6 +104,8 @@ Part of the [evidence index](README.md).
   borrowing hosts retain custody while issuing fresh trace capabilities.
 - Done: executor-local launch exclusions reach ordinary jobs and cleanup helpers;
   first images exclude all 17 names even when reintroduced after the snapshot.
+- Done: validated credential exclusions reach project revision discovery, skill-import
+  executors and placement probes; placement release accepts the same scoped probe.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -119,6 +121,44 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: Project revision discovery, resource-import executors and placement
+  probes now accept the same bounded sorted credential-exclusion list. Shared
+  validation rejects malformed lists before discovery reads entries, import
+  creates directories, or a placement probe starts its subprocess.
+  Discovery and placement explicitly unset every captured name at System.cmd;
+  resource import passes the list into the actual local executor constructor.
+  Placement release can use the same scoped probe as acquisition and inspection.
+  The legacy single-name defaults and existing receipt fields remain unchanged.
+  The reference adapter additionally reserves `LC_ALL`, as ADR 0048 permits
+  narrower exclusions: placement requires `LC_ALL=C`, which would conflict with
+  removing that name if it were admitted as a credential slot. The shared
+  binding validator rejects it before custody reads or startup.
+  Tests observe discovery after all 17 names are reintroduced, actual placement
+  acquisition/inspection/release, the actual import executor's startup options,
+  unchanged receipts, invalid-name refusal and custody admission. Final focused
+  suites pass 42 cases on current in 38.3 seconds and on the floor in 37.9 seconds.
+  Complete outputs:
+  - `/private/tmp/loopex-m7-composition-exclusions-final-verified-current.log`, SHA-256
+    `594b395860ff77139ae7a98db2d194036d43d050032d710280787e1ecdac4f04`.
+  - `/private/tmp/loopex-m7-composition-exclusions-verified-floor.log`, SHA-256
+    `c63d9b7c9669ff0ace83475d8d7bd82e998c9903233ed3aa388ff167756e87cf`.
+  Two test-witness defects were fixed before this proof. The first tried to read
+  job context from the separate bounded unlink worker; it now observes the real
+  executor constructor. The floor then exposed an order-dependent trace install
+  before module loading. A fresh-VM diagnostic proved zero matched functions
+  before loading and one after; the test explicitly loads the module and asserts
+  both trace-install counts. Neither timeout nor required check was relaxed.
+  Retained diagnosis:
+  - `/private/tmp/loopex-m7-composition-exclusions-current.log`, SHA-256
+    `fa5da6cee0d9d98716ba012a57a5cc4cb41dfda0c1794ac6998498e10a6fef36`.
+  - `/private/tmp/loopex-m7-composition-exclusions-floor.log`, SHA-256
+    `79aae65f5fe9d92ff6a9e14006cdd9a9de0f8a645093cd44967c5ede298afc62`.
+  - `/private/tmp/loopex-m7-import-trace-load-diagnostic.log`, SHA-256
+    `b36ac8dd48de8ed6ecb51bc153fb5a86f5ea616289374e1b13860119b9dc0a98`.
+  Runtime composition and reference-host entrypoints still need to forward the
+  plane's immutable list. Version-2 durable planes remain refused until that
+  integration also supplies route validation and selected-model startup.
 
 - 2026-10-01: The trusted local executor accepts a bounded, sorted unique
   `excluded_env_names` startup list containing the legacy provider key. It
@@ -1167,7 +1207,8 @@ Part of the [evidence index](README.md).
 - [x] Admit the durable adapter's closed token-route branch and select the committed provider before child startup; prove selected private bootstrap and unbound-route refusal.
 - [x] Share explicit durable credential loading between direct and borrowing plane constructors, with complete-name validation, deduplicated reads, joined partial-start cleanup and fresh borrowed trace capabilities.
 - [x] Carry configured launch exclusions through executor job and drain ownership, preserving legacy receipts; prove first-image exclusion after reinsertion and real job/helper propagation.
-- [ ] Forward validated exclusions through composition executors, project Git discovery, resource imports and placement probes before admitting version-2 planes.
+- [x] Validate and forward captured exclusions inside project Git discovery, resource-import executors and placement probes, including lock release; reject the conflicting LC_ALL credential slot before loading.
+- [ ] Forward credential-plane exclusions through reference-host entrypoints and runtime composition before admitting version-2 planes.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
 - [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.

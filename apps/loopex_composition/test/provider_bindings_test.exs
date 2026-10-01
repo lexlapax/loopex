@@ -2,6 +2,35 @@ defmodule LoopexComposition.ProviderBindingsTest do
   use ExUnit.Case, async: true
   alias LoopexComposition.ProviderBindings
 
+  test "launch exclusions retain the whole closed credential-name policy" do
+    legacy = "LOOPEX_PROVIDER_API_KEY"
+    assert :ok = ProviderBindings.validate_exclusions([legacy])
+
+    assert :ok =
+             ProviderBindings.validate_exclusions(
+               Enum.sort([legacy | Enum.map(1..16, &"KEY_#{&1}")])
+             )
+
+    for names <- [
+          nil,
+          [],
+          ["KEY"],
+          [legacy, legacy],
+          ["Z_KEY", legacy],
+          Enum.sort([legacy | Enum.map(1..17, &"KEY_#{&1}")]),
+          Enum.sort([legacy, "HOME"]),
+          Enum.sort([legacy, "LC_ALL"]),
+          Enum.sort([legacy, "LD_PRELOAD"]),
+          Enum.sort([legacy, "LOOPEX_OTHER"]),
+          [legacy, "bad=name"],
+          [legacy, 7],
+          [legacy, String.duplicate("x", 129)]
+        ] do
+      assert {:error, :invalid_credential_exclusions} =
+               ProviderBindings.validate_exclusions(names)
+    end
+  end
+
   test "maintenance selection is explicit, routed and requires a registered thinking-off mapping" do
     routes = %{
       "anthropic" => env("HOST_REFERENCE_ONLY_KEY"),
@@ -207,7 +236,7 @@ defmodule LoopexComposition.ProviderBindingsTest do
 
   test "every operational name and prefix refuses before resolution" do
     names =
-      ~w(PATH HOME TMPDIR TMP TEMP SHELL USER LOGNAME PWD OLDPWD SHLVL IFS CDPATH ENV BASH_ENV ZDOTDIR)
+      ~w(LC_ALL PATH HOME TMPDIR TMP TEMP SHELL USER LOGNAME PWD OLDPWD SHLVL IFS CDPATH ENV BASH_ENV ZDOTDIR)
 
     prefixes = ~w(LD_ DYLD_ ERL_ ELIXIR_ MIX_ RELEASE_ BASH_ LOOPEX_)
 

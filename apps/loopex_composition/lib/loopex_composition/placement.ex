@@ -87,10 +87,14 @@ defmodule LoopexComposition.Placement do
   liveness check rather than requiring this to have run.
   """
   @spec release(Path.t()) :: :ok
-  def release(owner_handle) do
+  def release(owner_handle), do: release(owner_handle, &process_incarnation/1)
+
+  @doc false
+  @spec release(Path.t(), process_probe()) :: :ok
+  def release(owner_handle, process_probe) when is_function(process_probe, 1) do
     with {:ok, path} <- canonical_path(owner_handle) do
       _ =
-        with_guard(path, &process_incarnation/1, fn ->
+        with_guard(path, process_probe, fn ->
           release_locked(path, owner_handle)
         end)
     end
@@ -508,10 +512,25 @@ defmodule LoopexComposition.Placement do
   @spec process_incarnation(binary(), Path.t()) :: {:ok, binary()} | {:error, term()}
   @probe_bound_ms 5_000
 
-  def process_incarnation(pid, probe \\ "/bin/ps") when is_binary(pid) and is_binary(probe) do
+  def process_incarnation(pid, probe \\ "/bin/ps") when is_binary(pid) and is_binary(probe),
+    do: process_incarnation(pid, probe, [Loopex.LLM.ReqLLM.credential_variable()])
+
+  @doc false
+  @spec process_incarnation(binary(), Path.t(), [binary()]) :: {:ok, binary()} | {:error, term()}
+  def process_incarnation(pid, probe, excluded) when is_binary(pid) and is_binary(probe) do
+    with :ok <- LoopexComposition.ProviderBindings.validate_exclusions(excluded),
+         do: probe_incarnation(pid, probe, excluded)
+  end
+
+  # Concept: placement acquisition and release use the host's same exclusions.
+  # Technical depth: the immutable list crosses into the bounded probe worker;
+  # every System.cmd launch explicitly unsets each name, even after reinsertion.
+  defp probe_incarnation(pid, probe, excluded) do
     parent = self()
     reference = make_ref()
-    {asker, monitor} = spawn_monitor(fn -> send(parent, {reference, ask(pid, probe)}) end)
+
+    {asker, monitor} =
+      spawn_monitor(fn -> send(parent, {reference, ask(pid, probe, excluded)}) end)
 
     # Technical depth: bounded for the reason the writer lock's probe is -- a
     # helper that hangs must not hang the command's placement acquisition, and
@@ -531,11 +550,11 @@ defmodule LoopexComposition.Placement do
     end
   end
 
-  defp ask(pid, probe) do
+  defp ask(pid, probe, excluded) do
     try do
       case System.cmd(probe, ["-o", "lstart=", "-p", pid],
              stderr_to_stdout: true,
-             env: [{"LC_ALL", "C"}, {Loopex.LLM.ReqLLM.credential_variable(), nil}]
+             env: [{"LC_ALL", "C"} | Enum.map(excluded, &{&1, nil})]
            ) do
         {output, 0} ->
           case String.trim(output) do

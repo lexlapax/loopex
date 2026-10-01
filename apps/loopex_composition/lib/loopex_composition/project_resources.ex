@@ -81,7 +81,11 @@ defmodule LoopexComposition.ProjectResources do
   def discover(workspace, options) when is_list(options) do
     after_containment = Keyword.get(options, :after_containment, fn _resolved -> :ok end)
 
-    with {:ok, root} <- real_path(workspace),
+    excluded =
+      Keyword.get(options, :excluded_env_names, [Loopex.LLM.ReqLLM.credential_variable()])
+
+    with :ok <- LoopexComposition.ProviderBindings.validate_exclusions(excluded),
+         {:ok, root} <- real_path(workspace),
          {:ok, root_identity} <- directory_identity(root) do
       case discover_entries(root, root_identity, after_containment) do
         [] ->
@@ -93,11 +97,15 @@ defmodule LoopexComposition.ProjectResources do
             workspace: %{
               workspace_ref: workspace_reference(root, root_identity),
               repository_origin: nil,
-              revision: revision(workspace)
+              revision: revision(workspace, excluded)
             }
           }
       end
     else
+      {:error, :invalid_credential_exclusions} ->
+        excluded("project resources", "the host credential exclusions are invalid")
+        nil
+
       {:error, reason} ->
         excluded(
           "the workspace #{workspace}",
@@ -449,11 +457,11 @@ defmodule LoopexComposition.ProjectResources do
   # and the content, so a changed revision invalidates it. A workspace that is
   # not a repository has no revision, and `nil` is the honest answer rather than
   # a placeholder that would make two different trees look like one.
-  defp revision(workspace) do
-    # The provider credential never enters a workspace-scoped child.
+  defp revision(workspace, excluded) do
+    # The captured credential names are removed even if host code reinserts them.
     case System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"],
            stderr_to_stdout: true,
-           env: [{Loopex.LLM.ReqLLM.credential_variable(), nil}]
+           env: Enum.map(excluded, &{&1, nil})
          ) do
       {output, 0} -> String.trim(output)
       _absent -> nil

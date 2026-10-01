@@ -27,6 +27,7 @@ defmodule LoopexComposition.CredentialBindingsTest do
   test "all references validate before reading deleting or starting any edge" do
     for invalid <- [
           Map.put(bindings(), "openrouter", env("HOME")),
+          Map.put(bindings(), "openrouter", env("LC_ALL")),
           Map.put(bindings(), "unknown", env(@first)),
           %{"ollama" => %{"credential" => %{"none" => true}}}
         ] do
@@ -179,7 +180,7 @@ defmodule LoopexComposition.CredentialBindingsTest do
     send(collector, {:result, self()})
     reads = receive do: ({:reads, ^collector, reads} -> reads)
     :erlang.trace_pattern({System, :get_env, 1}, false, [:local])
-    {result, Enum.filter(reads, &(&1 in [@first, @second, @legacy]))}
+    {result, Enum.filter(reads, &(&1 in [@first, @second, @legacy, "LC_ALL"]))}
   end
 
   defp collect(reads) do

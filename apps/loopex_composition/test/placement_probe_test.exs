@@ -1,7 +1,7 @@
 defmodule LoopexComposition.PlacementProbeTest do
   @moduledoc false
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias LoopexComposition.Placement
 
@@ -53,6 +53,46 @@ defmodule LoopexComposition.PlacementProbeTest do
     started = System.monotonic_time(:millisecond)
     assert {:error, :process_probe_timeout} = Placement.process_incarnation("1", hanging)
     assert System.monotonic_time(:millisecond) - started < 15_000
+  end
+
+  test "acquisition, inspection and release probes remove the captured credential names" do
+    names = Enum.sort(["LOOPEX_PROVIDER_API_KEY", "M7_PLACEMENT_A", "M7_PLACEMENT_B"])
+    prior = Map.new(names, &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      for {name, value} <- prior do
+        if value, do: System.put_env(name, value), else: System.delete_env(name)
+      end
+    end)
+
+    checks = Enum.map_join(names, "\n", &"[ \"${#{&1}+x}\" != x ] || exit 42")
+
+    script =
+      probe_script(checks <> "\n[ \"$LC_ALL\" = C ] || exit 43\nprintf fixture-incarnation\n")
+
+    probe = fn pid -> Placement.process_incarnation(pid, script, names) end
+
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-placement-exclusions-#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(root) end)
+    Enum.each(names, &System.put_env(&1, "synthetic-placement-secret"))
+
+    assert {:ok, handle} = Placement.acquire(root, probe)
+    assert {:ok, pid} = Placement.live_owner(root, probe)
+    assert pid == System.pid()
+    assert :ok = Placement.release(handle, probe)
+    assert :none = Placement.live_owner(root, probe)
+    assert Enum.all?(names, &(System.get_env(&1) == "synthetic-placement-secret"))
+
+    assert {:error, :invalid_credential_exclusions} =
+             Placement.process_incarnation(System.pid(), script, [
+               "HOME",
+               "LOOPEX_PROVIDER_API_KEY"
+             ])
   end
 
   defp probe_script(body) do

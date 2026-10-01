@@ -7,6 +7,59 @@ defmodule LoopexComposition.ProjectResourcesTest do
 
   alias LoopexComposition.ProjectResources
 
+  test "revision discovery removes every captured credential name after host reinsertion" do
+    root = workspace()
+    bin = Path.join(root, "bin")
+    File.mkdir!(bin)
+    File.write!(Path.join(root, "AGENTS.md"), "project instructions")
+    names = Enum.sort(["LOOPEX_PROVIDER_API_KEY" | Enum.map(1..16, &"M7_PROJECT_KEY_#{&1}")])
+    prior = Map.new(["PATH" | names], &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      for {name, value} <- prior do
+        if value, do: System.put_env(name, value), else: System.delete_env(name)
+      end
+    end)
+
+    checks = Enum.map_join(names, "\n", &"[ \"${#{&1}+x}\" != x ] || exit 42")
+    git = Path.join(bin, "git")
+    File.write!(git, "#!/bin/sh\n#{checks}\nprintf fixture-revision\n")
+    File.chmod!(git, 0o700)
+    System.put_env("PATH", bin <> ":" <> (prior["PATH"] || "/usr/bin:/bin"))
+    Enum.each(names, &System.delete_env/1)
+
+    found =
+      ProjectResources.discover(root,
+        excluded_env_names: names,
+        after_containment: fn _ ->
+          Enum.each(names, &System.put_env(&1, "synthetic-project-secret"))
+        end
+      )
+
+    assert found.workspace.revision == "fixture-revision"
+    refute inspect(found) =~ "M7_PROJECT_KEY"
+    refute inspect(found) =~ "synthetic-project-secret"
+    assert Enum.all?(names, &(System.get_env(&1) == "synthetic-project-secret"))
+  end
+
+  test "invalid launch exclusions stop discovery before reading project entries" do
+    root = workspace()
+    File.write!(Path.join(root, "AGENTS.md"), "project instructions")
+    parent = self()
+
+    output =
+      capture_io(:stderr, fn ->
+        assert nil ==
+                 ProjectResources.discover(root,
+                   excluded_env_names: ["HOME", "LOOPEX_PROVIDER_API_KEY"],
+                   after_containment: fn _ -> send(parent, :read_invalid_exclusions) end
+                 )
+      end)
+
+    assert output =~ "credential exclusions are invalid"
+    refute_receive :read_invalid_exclusions
+  end
+
   test "root project-resource trust is shared by both reference hosts" do
     workspace = workspace()
     File.write!(Path.join(workspace, "AGENTS.md"), "always run the tests")

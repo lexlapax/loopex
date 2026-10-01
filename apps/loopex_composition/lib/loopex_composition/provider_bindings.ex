@@ -142,6 +142,28 @@ defmodule LoopexComposition.ProviderBindings do
   @doc """
   ## Concept
 
+  Admit the immutable credential-name exclusions passed to trusted launchers.
+
+  ## Technical depth
+
+  ADR 0048 requires the sorted unique union of the legacy provider key and at
+  most sixteen configured credential slots. Validate the same slot grammar as
+  binding admission, including operational-name exclusions, without reading or
+  deleting any environment value. The list stays in host-private launch data.
+  """
+  @spec validate_exclusions(term()) :: :ok | {:error, :invalid_credential_exclusions}
+  def validate_exclusions(names) when is_list(names) and length(names) in 1..17 do
+    if Loopex.LLM.ReqLLM.credential_variable() in names and
+         names == Enum.sort(Enum.uniq(names)) and Enum.all?(names, &valid_env_name?/1),
+       do: :ok,
+       else: {:error, :invalid_credential_exclusions}
+  end
+
+  def validate_exclusions(_), do: {:error, :invalid_credential_exclusions}
+
+  @doc """
+  ## Concept
+
   Check a credential slot without resolving its value.
 
   ## Technical depth
