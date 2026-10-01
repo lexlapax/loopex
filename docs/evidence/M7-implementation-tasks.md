@@ -15,7 +15,10 @@ Part of the [evidence index](README.md).
   foundations; the coordinator now stages the complete committed lineage.
 - Done: v2 request staging, revision-4 nil-continuation receipts, exact lineage
   replay validation, and terminal-derived unknown/cancelled call results.
-- Running: T00 contract/fixture inventory and T01 boundary verification.
+- Done: conversation integration candidate fast check; all 11 suites pass
+  2,638 tests at `2d804649ca82ce87b58511bc0739c93e700c7559`.
+- Running: T00 contract/fixture inventory and T01 boundary verification; next
+  integration slice is T03 host instructions with T04 persisted configuration.
   Host instruction/configuration binding and non-nil continuation costs remain
   in T03/T04/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
@@ -64,8 +67,18 @@ Part of the [evidence index](README.md).
   Focused checks pass: core 35 tests in 23.6 seconds and composition 10 tests
   in 10.2 seconds. No historical evidence or reader behavior was changed.
 
+- 2026-10-01: candidate `2d804649ca82ce87b58511bc0739c93e700c7559` fast check passed in
+  842 seconds: 11 application suites, 2,638 passed tests. Full output:
+  `/private/tmp/loopex-m7-2d804649-fast-check.log`,
+  `sha256:47eb0c4b1c6c355e896adda494e82d05f0f6f772a6912df7cbdeaf0222053f7e`.
+  Its exact identity is retained separately in
+  `/private/tmp/loopex-m7-2d804649-fast-check.sha`. This is current-toolchain
+  development integration evidence; the M7 closure matrix remains pending.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
+- [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
+- [ ] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
 - [ ] Pin schema definitions, digests, compatibility vectors and provider mappings.
 - [ ] Create the M7 fixture manifest with exact prompts, budgets, allowed changes and objective results.
 - [ ] Assign every operator step and negative scenario to a named test or demonstration.
@@ -271,3 +284,35 @@ Part of the [evidence index](README.md).
 - [ ] Push the authorized tag/publication and verify its target.
 - [ ] Reuse unchanged-source closure evidence; do not rerun the suite or provider matrix.
 The required test inventory includes 28 named M7 cases, their fixed thinking/question subcases, deterministic negative tests, all 13 operator scenarios, the retained legacy release cases, independent Node workflows, process-boundary load tests and both rollback pairs.
+
+## T00 contract inventory
+
+Accepted contracts mapped to implementation owners. This inventory records
+required joins; exact payload vectors and fixture manifests remain separate
+unchecked T00 obligations. New readers/writers must rejoin these contracts
+before a provider demonstration.
+
+| Boundary | Authority | Retained/new generation | Implementation owners | Status |
+| --- | --- | --- | --- | --- |
+| Conversation and result joins | ADR 0041 | Run/turn/call identity; admitted lineage order; revision-1 normalized IDs | Conversation; SessionState; SessionCoordinator | Implemented; broader boundary vectors remain |
+| Tool-output preparation | ADR 0041 | Immutable receipt plus versioned prepared-reference/preparation-state facts and exact source digests | SessionState; SessionCoordinator; ArtifactStore; local executor | Pending |
+| Artifact read capability | ADR 0041 | loopex.artifact_read.v1 binding from literal tool-generation table; resolved executor arguments | ToolDefinition; SessionGenesis; local read tool; SessionCoordinator | Pending |
+| Instruction envelope | ADR 0042 | Closed version/base/environment/appendix map, exact rendered bytes/digest | SessionGenesis; configuration reducer; host composition | Pending |
+| Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Nil-continuation generation join implemented; instruction/maintenance bindings pending |
+| Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Pending |
+| Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pending |
+| Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pending |
+| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pending |
+| Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
+| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Pending |
+| Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
+| Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
+| Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
+| Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
+| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Pending |
+| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Pending |
+| Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
+| Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |
+| Ephemeral entry points | ADRs 0042–0045/0048/0049 | Combined closed startup options; one-call responder consumed locally; joined termination | Ephemeral.Options/Preflight/Bootstrap/SessionOwner; facade | Pending |
+| Execution evidence | M7 technical acceptance contract | Fixed fixture/operator manifest; Pending scaffold; hash-chained single-writer attempts and fsync barriers | mix loopex.m7_evidence; release runner; PTY driver; evidence files | Pending |
+| Upgrade and rollback | M7 compatibility contract | Exact retained M6 artifact/root fixtures; retain old rollback pair and add distinct M7 pair | rollback lane/scripts; Store recovery; operator instructions | Pending |
