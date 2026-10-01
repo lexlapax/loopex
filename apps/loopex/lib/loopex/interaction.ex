@@ -91,21 +91,25 @@ defmodule Loopex.Interaction do
   """
   @spec model_answer(model_request(), term()) ::
           {:ok, map()} | {:error, :invalid_interaction_answer}
-  def model_answer(%{kind: kind}, %{"disposition" => "declined"} = answer)
-      when kind in [:choice, :text] and map_size(answer) == 1,
-      do: {:ok, answer}
+  def model_answer(request, answer) do
+    with {:ok, ^answer} <- LoopexProtocol.Session.Answer.normalize(answer) do
+      case {request, answer} do
+        {%{kind: kind}, %{"disposition" => "declined"}} when kind in [:choice, :text] ->
+          {:ok, answer}
 
-  def model_answer(%{kind: :text}, %{"text" => text} = answer)
-      when map_size(answer) == 1 and is_binary(text) and byte_size(text) in 1..8_192 do
-    if String.valid?(text), do: {:ok, answer}, else: {:error, :invalid_interaction_answer}
+        {%{kind: :text}, %{"text" => _}} ->
+          {:ok, answer}
+
+        {%{kind: :choice}, %{"choice_id" => id}} ->
+          if offered?(request, id), do: {:ok, answer}, else: {:error, :invalid_interaction_answer}
+
+        _ ->
+          {:error, :invalid_interaction_answer}
+      end
+    else
+      _ -> {:error, :invalid_interaction_answer}
+    end
   end
-
-  def model_answer(%{kind: :choice} = request, %{"choice_id" => id} = answer)
-      when map_size(answer) == 1 do
-    if offered?(request, id), do: {:ok, answer}, else: {:error, :invalid_interaction_answer}
-  end
-
-  def model_answer(_, _), do: {:error, :invalid_interaction_answer}
 
   @statuses ~w(pending answered denied expired cancelled declined)
 

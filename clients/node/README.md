@@ -18,6 +18,18 @@ imports anything outside Node's own standard library.
 | `interaction-workflow.mjs` | The chain: find and select an admitted skill, submit a task, answer the host policy's question, watch the tool run, read the artifact it kept |
 | `daemon-client.mjs` | The generation-2 connection to a running daemon over its Unix-domain socket, sharing the wire helpers above |
 | `daemon-takeover.mjs` | The cross-process takeover: observe a session another client controls, wait for that controller's lease to lapse, take control with a fresh epoch, abort the running work and release |
+| `question-answer.mjs` | Decode the closed M7 choice/text/decline answer payload; preparation for the coordinated generation-3/4 switch |
+| `question-answer-vectors.mjs` | Independently check literal answer vectors and UTF-8/identity byte boundaries |
+
+Run the M7 answer payload checks with the pinned Node interpreter:
+
+```bash
+node clients/node/question-answer-vectors.mjs apps/loopex_protocol/priv/vectors/question-answer.v1.json
+```
+
+This checks payloads only. The foreground and daemon clients still require
+their coordinated M7 initialization, complete schema-digest pins and live
+workflow updates before sending the new branches.
 
 ## Running it
 

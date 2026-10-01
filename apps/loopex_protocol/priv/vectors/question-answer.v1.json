@@ -1,0 +1,26 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "interaction_answer",
+  "cases": [
+    {"name": "choice", "input": {"choice_id": "Y2hvaWNlLTI"}, "decoded": {"choice_id": "choice-2"}},
+    {"name": "opaque_choice", "input": {"choice_id": "AP8"}, "decoded_choice_hex": "00ff"},
+    {"name": "inherited_unused_bits", "input": {"choice_id": "Zh"}, "decoded": {"choice_id": "f"}},
+    {"name": "text", "input": {"text": "literal null"}, "decoded": {"text": "literal null"}},
+    {"name": "unicode_text", "input": {"text": "é"}, "decoded": {"text": "é"}},
+    {"name": "decline", "input": {"disposition": "declined"}, "decoded": {"disposition": "declined"}},
+    {"name": "sentinel_is_text", "input": {"text": "declined"}, "decoded": {"text": "declined"}},
+    {"name": "mixed_text_choice", "input": {"text": "answer", "choice_id": "Y2hvaWNlLTI"}, "error": "invalid_answer"},
+    {"name": "mixed_decline_text", "input": {"disposition": "declined", "text": "answer"}, "error": "invalid_answer"},
+    {"name": "empty_text", "input": {"text": ""}, "error": "invalid_answer"},
+    {"name": "numeric_text", "input": {"text": 1}, "error": "invalid_answer"},
+    {"name": "null_text", "input": {"text": null}, "error": "invalid_answer"},
+    {"name": "padded_choice", "input": {"choice_id": "Y2hvaWNlLTI="}, "error": "invalid_answer"},
+    {"name": "empty_choice", "input": {"choice_id": ""}, "error": "invalid_answer"},
+    {"name": "incomplete_choice", "input": {"choice_id": "Z"}, "error": "invalid_answer"},
+    {"name": "bad_choice_alphabet", "input": {"choice_id": "+w"}, "error": "invalid_answer"},
+    {"name": "unknown_disposition", "input": {"disposition": "expired"}, "error": "invalid_answer"},
+    {"name": "extra_member", "input": {"text": "answer", "authority": true}, "error": "invalid_answer"},
+    {"name": "empty_object", "input": {}, "error": "invalid_answer"},
+    {"name": "array", "input": [], "error": "invalid_answer"}
+  ]
+}

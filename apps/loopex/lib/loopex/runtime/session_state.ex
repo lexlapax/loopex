@@ -5617,28 +5617,11 @@ defmodule Loopex.Runtime.SessionState do
 
   defp normalize_interaction_answer(command) do
     case {fetch(command, :answer), fetch(command, :choice_id)} do
-      {{:ok, answer}, :error} when is_map(answer) and map_size(answer) == 1 ->
-        cond do
-          fetch(answer, :disposition) == {:ok, "declined"} ->
-            {:ok, %{answer: %{"disposition" => "declined"}}}
-
-          match?({:ok, _}, fetch(answer, :text)) ->
-            case fetch(answer, :text) do
-              {:ok, text} when is_binary(text) and byte_size(text) in 1..8_192 ->
-                if String.valid?(text), do: {:ok, %{answer: %{"text" => text}}}, else: :error
-
-              _ ->
-                :error
-            end
-
-          match?({:ok, _}, fetch(answer, :choice_id)) ->
-            case fetch_binary(answer, :choice_id) do
-              {:ok, id} -> {:ok, %{choice_id: id}}
-              _ -> :error
-            end
-
-          true ->
-            :error
+      {{:ok, answer}, :error} ->
+        case LoopexProtocol.Session.Answer.normalize(answer) do
+          {:ok, %{"choice_id" => id}} -> {:ok, %{choice_id: id}}
+          {:ok, normalized} -> {:ok, %{answer: normalized}}
+          :error -> :error
         end
 
       {:error, {:ok, id}} when is_binary(id) and byte_size(id) > 0 ->

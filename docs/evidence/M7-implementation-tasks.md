@@ -47,7 +47,11 @@ Part of the [evidence index](README.md).
   retains one question and one settlement without repeating provider work.
 - Done: commit-unknown recovery re-presents exact question/response payloads;
   disk-backed Store restarts retain the pending identity and settled answer.
-- Next: pin question decoder and public-event vectors, then prompt-file and mapping
+- Done: shared closed answer normalization and literal answer payload/schema
+  vectors pass both the Elixir and independent Node decoders.
+- Next: complete question projection/private-record vectors and the remaining M7
+  configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
+  continue prompt-file and mapping
   preparation, effective inspection and command entry wiring, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
@@ -364,6 +368,22 @@ Part of the [evidence index](README.md).
   evidence, not a VM/OS restart, real-provider or full integration result.
   T16 cleanup diagnostics and T09 decoder/public-event vectors remain pending.
 
+- 2026-10-01: `Session.Answer` centralizes the closed choice/text/decline response
+  union. Core command normalization and producer-specific answer validation use
+  it while retaining old flat choice admission and normalized choice-command
+  digests. Literal answer schema and 20 language-neutral vectors cover opaque
+  identities, UTF-8 text, decline, mixed/unknown members, padding and malformed
+  identity strings. Exact decoded identity and UTF-8 byte limits are checked by
+  both implementations; encoded identities are bounded before decoding. The
+  independent Node decoder deliberately matches the inherited base64 decoder's
+  unused-bit behavior. Five answer tests including the pinned Node payload
+  runner pass in 0.07 seconds; configured questions, legacy policy answers and
+  input-algebra checks pass 45 cases in 17.9 seconds. Compilation, formatting
+  and documentation ordering pass with 972 covered entries. No live server
+  generation or method changed: accepted M7 requires one coordinated switch
+  containing complete configuration, compaction, bounds and question schemas.
+  These are payload checks, not live transport, authority or privacy-canary proof.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -491,6 +511,8 @@ Part of the [evidence index](README.md).
 - [x] Prove commit-unknown re-presentation retains exact pending and response bytes.
 - [x] Prove local-store process restart retains the pending question and final answer.
 - [ ] Pin pending/response decoder vectors and public question event schemas.
+- [x] Pin the shared closed answer schema/union and independent Elixir/Node payload vectors.
+- [ ] Join that answer schema and decoder to the complete M7 /3-/4 contracts and both authorized mutation paths.
 ## T10 — Complete chat controls, pipes and tracing
 - [ ] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.
 - [ ] Implement the exact pipe grammar and closed control records.

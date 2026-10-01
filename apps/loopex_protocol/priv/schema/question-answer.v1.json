@@ -1,0 +1,32 @@
+{
+  "format": "loopex.experimental.payload-contract/1",
+  "contract": "interaction_answer",
+  "authority": "docs/adr/0045-model-originated-questions-technical.md",
+  "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+  "additional_members": "refuse",
+  "one_of": [
+    {
+      "required": ["choice_id"],
+      "choice_id": {
+        "encoding": "unpadded_base64url_of_original_opaque_bytes",
+        "original_min_bytes": 1,
+        "original_max_bytes": 65536
+      }
+    },
+    {
+      "required": ["text"],
+      "text": {"encoding": "utf8", "min_bytes": 1, "max_bytes": 8192}
+    },
+    {
+      "required": ["disposition"],
+      "disposition": {"enum": ["declined"]}
+    }
+  ],
+  "owner_admission": {
+    "policy_defer": ["choice_id"],
+    "model_tool_choice": ["offered_choice_id", "declined"],
+    "model_tool_text": ["text", "declined"],
+    "resolved_question": "refuse_independent_response",
+    "identical_committed_command": "replay_historical_admission"
+  }
+}
