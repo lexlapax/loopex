@@ -92,6 +92,10 @@ existing host-root path byte-for-byte, and does not pass it to a Store decoder o
 retire it with the source store. Whole-root backup/restore includes that ledger,
 its role snapshots and root-relative layout; restoration to a new root preserves
 those relative paths and bytes. Interrupted migration verifies them unchanged.
+The successor Store implements M7's read-only `creation_provenance/3` callback,
+including derived stable per-runtime create ordinals and complete watermark
+paging; adapter absence is unavailable, never proven absence. Its conformance
+fixtures include the new query alongside M7 record readers.
 The engine candidate alone requires explicit container migration; the installed
 candidate does not require migration merely because a supported local root lacks
 a marker. Retain exact old binaries to test their real behavior. Never claim an
@@ -134,4 +138,5 @@ do not apply; no extension state exists.
 **Open before acceptance.** The engine cell and the retained experiment record
 it cites; the adapter application's name; the exact capacity ceiling the
 definite refusal enforces and how the operator configures it, which ADR 0049's
-version-1 schema carries once this pair names the key.
+successor schema version or an explicit ADR 0049 amendment carries once this
+pair names the key. The closed version-1 schema is never extended in place.

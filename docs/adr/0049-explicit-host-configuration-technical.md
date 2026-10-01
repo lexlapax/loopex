@@ -91,7 +91,11 @@ change an existing session's committed tool generation on resume.
 On resume, file defaults do not reconfigure. Use committed model, reasoning,
 instructions, max_tokens, context_token_budget, system_class_tokens, tools,
 resources, role catalog and the complete delegation declaration retained in the
-ADR 0046 parent binding. The declaration includes enabled roles, max_children,
+ADR 0046 parent binding. A session whose retained tool selection lacks `loopex.task` needs no delegation
+binding: delegation is disabled and helper-enabled file defaults are ignored.
+If its selection contains task, a matching enabled binding is mandatory; missing
+or contradictory binding refuses activation, never downgrades to ordinary.
+The declaration includes enabled roles, max_children,
 aggregate delegation token_budget, child_bounds and child reply/context/system
 limits. New parent runs initialize their separate allowances from this immutable
 declaration; resumed runs reuse their counters. File edits never substitute
@@ -105,8 +109,14 @@ max_turns, deadline_ms and token_budget for a new run come from validated
 invocation configuration; in-flight bounds stay committed. A conflicting
 `chat --resume S --max-tokens 8000` therefore refuses before dispatch and
 directs the operator to settled `/configure`; it is not a run-bound override.
-Require matching workspace/policy identity and available routes for admitted
-work. Trace/output are host-local options, not durable session configuration.
+Require matching workspace and ADR 0024 policy identity for pending interactions,
+and available routes for admitted work. Core has no session-wide policy identity.
+A settled session has no core session-wide policy identity, so this proposal
+adds no such resume comparison. The fixture runbook reopens through the same
+trusted wrapper and fixed case policy/manifest, with those identities retained
+in the case execution record; pending interactions still require ADR 0024's
+identity. A different host policy is an explicit host authority choice, not a
+core replay default or a matching identity claim. Trace/output are host-local options, not durable session configuration.
 
 Cleanup grace retains ADR 0016's separate immutable contract. File/default
 `session.cleanup_grace_ms` applies only to new sessions. Resume recovers the
@@ -115,7 +125,10 @@ interrupt/cancellation bounds and effective inspection with `committed` origin.
 An omitted or matching `--cleanup-grace-ms` preserves it. A conflicting explicit
 flag follows the existing prepared-owner abandonment and refusal path without
 activating recovered work; failed abandonment retains the existing unconfirmed
-conflict result. Neither `/configure` nor a new run changes this value.
+conflict result. Every conflicting resume flag detected after preparation,
+including model/reply/tool/helper flags, uses the same abandonment path and
+unconfirmed-failure rule; "before activation" never means leaking a prepared owner.
+Neither `/configure` nor a new run changes this value.
 
 `--compaction-model` overrides the file's `maintenance.model` for new episodes,
 including on resume; it cannot redirect an admitted episode. Show configured
@@ -179,21 +192,26 @@ encodings for IDs. Each object has `v:1`, an `event` and exactly its branch:
 | --- | --- |
 | `input` | `input_sequence`, `command_id`, `disposition` from admitted/refused/unknown, `code` as the stable command disposition/error code |
 | `question` | `session_id`, `run_id`, `interaction_id`, `producer`, `kind`, `question`, `choices` array, `expires_at_ms`; choices empty for text |
-| `wait` | `input_sequence`, `state` from settled/question/uncertain, `session_id`, `run_id` or null, `interaction_id` or null, `command_id` or null, `outcome` or null; question requires interaction ID; uncertain uses the public uncertainty outcome, or `commit_unknown` with its unresolved command ID |
+| `wait` | `input_sequence`, `state` from settled/question/uncertain, `session_id`, `run_id` or null, `interaction_id` or null, `command_id` or null, `outcome` or null; question requires interaction ID; uncertain uses the public uncertainty outcome, `commit_unknown` with its unresolved command ID, or host-only `cleanup_unknown` with a known run ID or null and command_id null |
 | `status` | `input_sequence`, `session_id`, `run_id` or null, `state`, `configuration_version`, `model`, `reasoning`, `bounds`, `interaction_id` or null, `trace`, `maintenance`, `policy`; no credential reference, role prompt or private continuation |
 | `closing` | `exit_code`, `cleanup` from confirmed/unknown, `last_outcome` or null |
 | `error` | `input_sequence` or null, `code` as a stable host error code |
 
 Question content uses ADR 0045; policy-defer questions retain ADR 0024's bounds.
 Each choice is exactly `{id, label}` using its producer's public choice grammar.
-`outcome` and `last_outcome` use the public outcome object, including
-the existing bound/uncertainty fields; they are never free-form diagnostic text.
+`last_outcome` and ordinary `outcome` values use the public outcome object,
+including the existing bound/uncertainty fields. Only an uncertain wait may
+instead use the literal host observation code `commit_unknown` or
+`cleanup_unknown` with the branch fields above. No outcome is free-form
+diagnostic text.
 Status state and bounds use the public session contract. Status trace is
 exactly `{enabled, emitted, dropped}` with a Boolean and nonnegative counters;
 disabled uses false and zero counts. `/status` and `/wait` receive their own
 ordered `input` acknowledgement before their result record. Status `maintenance`
-is exactly `{configured_model, active_model}`: each is an exact model string or
-null. Null configured model means new episodes are unconfigured; null active
+is exactly `{configured_model, active_model, warning}`: model members are exact strings or
+null; warning is null or `maintenance_unconfigured`. Warn only when committed
+conversation mapping requires continuation and configured_model is null. Startup
+warnings on resume use that committed mapping, not file defaults. Null configured model means new episodes are unconfigured; null active
 model means there is no admitted episode. A resumed episode may show a different
 active model from the current configured selection. This host status view grants
 no session mutation or provider authority. TTY rendering
@@ -237,10 +255,25 @@ Pipe syntax/state refusal stops further input and exits nonzero after cleanup.
 Interactive local refusal leaves the conversation usable. Admission
 `commit_unknown` emits `input` disposition `unknown` with the original command ID;
 it never claims refusal or absence of a committed run. Stop further pipe input,
-report an uncertain barrier for the preceding command through its ordinary
-resolution path, with `outcome: commit_unknown` and that command ID if admission
-remains unresolved, and perform bounded cleanup. Other barriers set command ID
-to null. This host command status does not invent a public run outcome. An interactive
+capture the ordinary host shutdown deadline from the committed interrupt/cleanup
+bounds. Observe coordinator rediscovery/resolution for at most the cleanup grace,
+shortened by remaining shutdown/output time; never resend the command. If it
+resolves to admitted active work, request normal abort and perform cleanup within
+the remaining shutdown bound before emitting a wait barrier. If it resolves to
+a committed refusal or conclusive non-admission, report the stable refusal/error
+code without a second input acknowledgement; abort/clean any earlier foreground
+work before the barrier. Use settled with run/outcome null only if no admitted
+foreground operation exists; otherwise only committed terminal/question facts
+justify those states. If cleanup is
+unconfirmed before any such fact exists, emit uncertain with host-only
+`outcome: cleanup_unknown`, the known run ID or null, and command_id null.
+If admission or a cleanup mutation remains unresolved, emit uncertain with
+`outcome: commit_unknown` and that exact unresolved command ID. `/quit` and abort
+remain fenced while a mutation is unknown; never claim an abort acknowledgement.
+The one captured shutdown deadline is not renewed by resolution or nested cleanup.
+Exit nonzero on every branch because admission was unknown. These host uncertainty
+codes describe observation, not a fabricated public run outcome. Other barriers
+set command ID to null. This host command status does not invent a public run outcome. An interactive
 host also fences further mutations until ordinary resolution. No blind command
 retry, synthetic settled barrier or success exit follows unknown admission.
 
@@ -316,10 +349,17 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
   no interpolation/discovery and no credential reads during effective inspection.
 - Precedence/origin matrix, mandatory file limits, prompt replacement/append,
   provider mismatch, absent role models and disabled-role refusal.
+- Unknown admission resolving to active work then bounded abort, conclusive
+  refusal/non-admission with and without earlier work, unresolved-at-deadline,
+  and cleanup lacking a terminal fact have exact control-record vectors. No
+  active run can become a synthetic settled barrier or stale commit_unknown.
 - Public-facade conversation tests for each command state, TTY and pipe ordering,
   barriers, dynamically identified answers/declines, EOF, input/output bounds,
   marker spoofing, output stalls, fail-fast pipe errors,
   interrupts, idempotent resubmission and old-command compatibility.
+- Helper-enabled file resume of an old non-task session stays disabled; a task
+  selection without its expected binding refuses. Fixture validation reopens through the same pinned wrapper; pending
+  interactions enforce their retained policy identity.
 - Resume after file edits preserves committed configuration/catalog; explicit
   settled changes commit atomically; in-flight changes refuse.
 - Resume with changed/omitted file cleanup grace and omitted/matching/conflicting

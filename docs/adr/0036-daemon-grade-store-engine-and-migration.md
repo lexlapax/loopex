@@ -41,7 +41,9 @@ measurement would repeat the mistake ADR 0031 corrected.
    conformance suite and the process and store fault matrix unchanged. Core
    gains no dependency: the engine and any library it needs live in one new
    adapter application, under the dependency direction ADR 0001 fixes and the
-   core budget the vision names.
+   core budget the vision names. Its port inventory includes accepted M7
+   additions, including read-only creation provenance and complete stable-ordinal
+   paging; a missing implementation is unavailable rather than absence.
 2. **The engine is selected by a measured experiment on the private ports**,
    run on both supported toolchain pairs, whose retained record is attached to
    this pair before acceptance. The candidates and the measurements are named
@@ -59,7 +61,9 @@ measurement would repeat the mistake ADR 0031 corrected.
    The installed candidate adds a format marker and its own unknown-format
    refusal. This cannot retrofit released readers. Container format, durable
    record capabilities and binary version are distinct; exact reader fixtures
-   must establish supported combinations before acceptance.
+   must establish supported combinations before acceptance. Store records migrate;
+   M7's host ledger remains byte-for-byte at its
+   host-root paths outside the Store. Whole-root backup and restore include them.
 4. **Backup and restore are operator commands on a closed root** that produce
    and consume one verifiable archive, and restore is the rollback procedure:
    a previous binary is not a rollback plan when storage has changed, so the

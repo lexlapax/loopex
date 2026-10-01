@@ -69,19 +69,25 @@ exception changes neither the original answer nor its ordinary projection.
 
 **Artifact capability identity.** The reference host registers the exact M7
 `loopex.read` implementation-generation identity and tool-definition digest as
-artifact-capable. This closed table is part of the versioned host tool registry,
-with byte vectors for its one new generation and every supported legacy entry.
+artifact-capable. The revision-1 capability table is a literal constant in core,
+independent of host registries, files and runtime defaults. It contains exact
+supported triples and a null-capability entry for each supported legacy triple.
+Registered reference definitions must match it. The projection integration owner
+pins the new `loopex.read` version and definition digest, legacy triples and byte
+vectors in phase 0, before phase 1 can create an M7 session.
 Capture the resolution in ADR 0044's closed `tool_selection.artifact_read`
 member, not an unspecified extra genesis field. It is null, or exactly
 `{revision: "loopex.artifact_read.v1", tool_id, tool_version, definition_digest}`.
-The triple must name the one selected read definition and match the exact
-artifact-capable registered generation. The registry's fixed revision-1 table
-contains the literal supported triples pinned before implementation; no caller
-can supply or edit it through create/configure. Core validates that binding at
-admission and replay without looking up a changed host file. Legacy v2 selection
+The triple must name the selected `loopex.read` generation, if any, and match
+the exact artifact-capable literal entry. Other IDs, including a tool merely
+named `read`, gain no capability. Core derives the binding from retained exact
+definitions at create and rejects an internal supplied mismatch. Public callers
+cannot supply `tool_selection` or `artifact_read`. Replay uses the same immutable
+literal table, without consulting the host registry. Legacy v2 selection
 reconstruction uses its retained exact definitions and the same literal legacy
 entries, resolving null for generations without support; it never rewrites old
-genesis or upgrades an old read generation by name. Unknown generations refuse selection. Do not infer capability from a
+genesis or upgrades an old read generation by name. An unknown `loopex.read` generation refuses that selection; other tool IDs
+resolve artifact_read to null and gain no retrieval support. Do not infer capability from a
 version prefix, advertised name or a guessed schema field. A legacy exact table
 entry without this capability follows the inline branch below. Changing the table
 requires a new generation/admitted selection, never a replay-time reinterpretation.
@@ -202,6 +208,13 @@ full numeric request overflow keeps its numeric dimension. A failure before
 projection exists uses `projection_state: unavailable` and no invented counts.
 This does not change executor retrieval/tool-result error schemas.
 
+Prepare only sources in the selected ordinary projection after compaction and
+tail selection; excluded old sources consume no preparation credit. Retain the
+episode-start deadline and which run/caller/absolute cutoff shortened it. An
+earlier ordinary cutoff produces its existing run-bound/cancellation outcome;
+only the independent 60,000-ms preparation cutoff produces
+`artifact_preparation_deadline`. Recovery cannot change its origin.
+
 **Explicit read range.** A new generation of `read` accepts either its existing
 workspace `path` inputs or `artifact_use`, nonnegative byte `offset` and positive
 `length <= 4,096`; the alternatives are exclusive. `artifact_use` is the existing
@@ -211,7 +224,13 @@ Unknown, orphan, other-session and forged uses refuse. Possession is no grant;
 ordinary host policy evaluates the requested use/range and the executor validates
 its normal grant. Cross-session sharing is outside this branch.
 
-After validating original model arguments, the owner adds executor-only
+The supported schema subset describes member types; the owner additionally
+enforces both closed argument branches, exclusivity, UTF-8 and range bounds
+before policy or effect intent. Unknown members, both branches, missing range
+members and a supplied `resolved_artifact` produce the existing
+`invalid_tool_arguments` tool-call disposition. Policy and deferred interaction
+identity use only the validated original model arguments. After allow, the owner
+adds executor-only
 `resolved_artifact` to the new read generation's validated arguments. It contains `reference` as the frozen full reference and `source` with
 `record_kind`, `journal_version`, `record_digest`, `run_id`, `operation_id`,
 `attempt` and `tool_call_id`. All are bounded plain existing identity types. Model-supplied copies
@@ -219,7 +238,11 @@ of this member refuse. Journal the resolved job before dispatch; its existing
 canonical job digest binds this member and the requested range. No top-level
 executor protocol field is added. The executor validates the model-argument
 projection, grant/digest, object/use consistency and provenance against the job's
-session identity. The owner proves committed membership; a digest alone does
+session identity. Executor lookup selects by exact `(tool_id, tool_version)`,
+then checks the digest; the first definition with that ID is insufficient. Its
+argument validator enforces the same closed model branches plus the required
+owner-only resolution on the artifact branch. The path branch forbids resolution.
+Legacy generations keep their own validators. The owner proves committed membership; a digest alone does
 not prove journal inclusion. Recovery reuses the journaled resolution.
 
 Use one job-owned verified transfer window per read and close it on every path.
@@ -295,6 +318,10 @@ Concept: [Observable consequences](0041-session-lineage-projection-and-context-b
   withholding including reserved empty-header growth, zero-prefix metadata
   overflow and unchanged frozen prefixes;
   no omitted result, extra preparation allowance or shortened explicit range read.
+- Replay validates capabilities with the host registry unavailable or changed.
+  Coexisting read generations resolve by ID/version. Both-branch, extra-member,
+  injected-resolution and range errors fail before policy; allowed jobs alone
+  carry owner resolution and bind it in their digest.
 - Wrong-session/orphan/forged uses, denied policy, injected resolution, missing
   artifacts and digest/range corruption refuse without widening authority.
 - Retention/preparation/staging fault cuts and commit_unknown fencing; cancelled

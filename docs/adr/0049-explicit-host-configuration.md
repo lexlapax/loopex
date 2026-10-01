@@ -27,6 +27,16 @@ adds trace startup controls to runtime-owning commands. A connected client
 never gains runtime trace authority. Remote conversational-terminal attachment
 and installed lifecycle management remain successor work.
 
+The file requires an existing closed-registry policy profile. Tool profiles are
+coding, read-only and none. Chat enables questions in nonempty profiles; helpers
+remain opt-in with a complete declaration. None disables both and refuses an
+enabled helper declaration. The selected set is immutable. The trusted fixture
+host may inject its pinned test policy after ordinary file validation; inspection
+shows harness origin and identity. The validation cases reopen through that
+same pinned wrapper; only pending interactions carry a retained core policy
+identity. There is no file
+policy-module option.
+
 Provider references and saved role definitions belong to the host. Roles have
 no permission, workspace or tool overrides. The selected file must explicitly
 declare conversational and, when enabled, delegation limits. Instructions are
@@ -43,7 +53,9 @@ an admitted episode retains its block across restart, while future episodes
 use the block supplied by the current host.
 The summarizer model is explicit through `maintenance.model` or
 `--compaction-model`. There is no default or conversation-model inheritance.
-Without it ordinary work remains available and compaction reports unconfigured.
+Without it ordinary work remains available only while ordinary staging and any
+initial thinking reserve fit, and compaction reports unconfigured. Status warns
+when the committed conversation requires continuation but has no summarizer.
 This host setting affects new maintenance episodes; an admitted episode keeps
 its captured model across restart. It is separate from ordinary `/configure`.
 

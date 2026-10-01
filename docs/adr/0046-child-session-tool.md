@@ -6,7 +6,7 @@ Technical depth: [Serial read-only child sessions](0046-child-session-tool-techn
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field and their normalized command identity for newly authored bounds, preserving historical digests and ordinary follow-up inheritance; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment. Extends [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) with runtime-private read-only effect-intent and creation-provenance queries, including a Store read callback, without granting activation or mutation authority. Amends [ADR 0016](0016-configured-cancellation-observation.md#concept) only to permit exact retained v2/v3 genesis in historical create lookup; committed cleanup values and observation bounds remain unchanged.
+- **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field and their normalized command identity for newly authored bounds, preserving historical digests and ordinary follow-up inheritance; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment. Extends [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) with runtime-private read-only effect-intent and creation-provenance queries, including a Store read callback, without granting activation or mutation authority. Also adds a shared pure genesis resolver and a host-private live create variant accepting its validated complete payload; helper recovery cannot invoke that variant. Amends [ADR 0016](0016-configured-cancellation-observation.md#concept) only to permit exact retained v2/v3 genesis in historical create lookup; committed cleanup values and observation bounds remain unchanged.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept) and [ADR 0049](0049-explicit-host-configuration.md#concept)
 - **Prerequisite for:** M7 outcome 7
 
@@ -65,12 +65,13 @@ including after settlement. Child cleanup can finish after the parent's
 observation window; the parent then remains unknown even after a clean child stop.
 
 The router classifies every forwarded local or helper job. Cancelling a known
-local job leaves helper admission open. An unclassified cancellation closes new
-helper admission for that host instance, including other daemon sessions, and
-reports uncertainty. Classification is retained for the router's lifetime so
-late cancellation cannot turn a completed known job into an unknown one. Its
-bounded registry refuses new distinct jobs when full; existing jobs and cleanup
-remain available. Restart the full composition to replenish that registry.
+local job leaves helper admission open. Its bounded active-job registry reclaims
+capacity as jobs settle; ordinary sequential work cannot exhaust a lifetime
+registration quota. A cancel without classification fences that exact job ID
+against delayed launch and reports uncertainty. Only exhaustion of the separate
+bounded cancellation-tombstone table closes helper admission across the host
+until full restart. Durable helper bindings route historical receipts after
+active rows leave the registry.
 An unresolved host-ledger commit separately fences that adapter's mutations,
 including settlement for other parent sessions, until recovery resolves it.
 These limits do not change local request or receipt bytes.

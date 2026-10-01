@@ -11,7 +11,12 @@ Concept: [Context and decision](0043-context-compaction-checkpoint.md#concept-ad
 **Episode.** Derive identity from the triggering run/staging identity or explicit
 compact command ID. Persist frozen configuration, captured session version,
 attempt count, bounds, usage and checkpoint progress. Capture its trigger as
-`ordinary_limit`, `thinking_headroom` or `explicit`; the thinking trigger also
+`ordinary_limit`, `thinking_headroom`, `explicit` or `canonical_rendering`.
+Trigger precedence is hard-limit failure, then thinking-headroom failure,
+then rendering-only explicit repair, then ordinary explicit. The last rendering
+case is an explicit compact command whose captured current mapping cannot
+render terminal tool history; it is never an automatic rendering-only trigger.
+The thinking trigger also
 retains ADR 0044's rule revision and derived byte/input targets. Derive them from
 the captured ordinary configuration, never the summarizer's input allowance.
 Recovery validates and reuses that capture; it cannot reset the trigger or
@@ -59,11 +64,14 @@ not a promise that the resulting summary satisfies an arbitrary future window.
 This applies to automatic and explicit compaction, including cancelled or bound
 runs. Never release current-run inputs or an open exchange. Recompute the minimum;
 if the truly protected content still cannot fit, refuse by the relevant bound.
-Grow the retained tail backward only while each complete group plus intervening
+The minimum tail is a contiguous suffix, including all later input-only units;
+no earlier group can be retained while a later eligible unit is covered. Grow
+the retained tail backward only while each complete group plus intervening
 inputs fits both the 2,048-estimated-token preference and the applicable complete
 request limits/targets. Optional tail growth cannot prevent initial preparation.
 A group released by this rule cannot be re-added by optional tail growth in the
-same selection. Selection and this exception use strategy revision 3.
+same selection. For canonical_rendering capture the last offending eligible
+unit; optional tail growth stops before any offending unit. Selection and this exception use strategy revision 3.
 
 From the oldest remaining range, select the largest contiguous prefix ending
 at a complete-unit boundary that fits both the 16,384-byte encoded source
@@ -72,8 +80,12 @@ maintenance request's token/record/depth/cardinality limits with its reply
 reserve. Search smaller complete prefixes before refusing; the source cap alone
 does not prove the maintenance request fits. If no eligible
 raw range exists, make no provider call: explicit compact records idempotent
-`unchanged` only if the current request also fits; otherwise preserve the named
-staging refusal. When an eligible range exists, explicit compact may produce
+`unchanged` only if the current candidate fits and passes canonical rendering; otherwise preserve the named
+staging refusal. If the irreducible protected candidate exceeds limits/targets, its numeric
+refusal precedes missing maintenance settings because no summary can help it.
+Otherwise, when eligible history needs maintenance, an absent model precedes
+absent instructions; unsupported mapping precedes source sizing.
+When an eligible range exists, explicit compact may produce
 a useful bounded checkpoint even if the current model window already fits.
 This permits preparation for a smaller model window. Begin with ADR 0041's
 canonical projections: executor-backed results use artifact projections and
@@ -103,7 +115,8 @@ ADR 0044's host capability/mapping normalizer. Validate the selected route under
 ADR 0048. Direct `Loopex.start_link/1` / `Runtime.start_link/1` receive only the
 closed resolved map `{model, reasoning, model_capabilities, provider_mapping}`,
 with the same field bounds and combined 2-KiB capability/mapping ceiling as
-ADR 0044. Maintenance requires `reasoning: none`,
+ADR 0044. At startup reject a known context window at or below 1,024 or a known
+output capacity below 1,024. Maintenance requires `reasoning: none`,
 `provider_mapping.thinking: {mode: disabled}` and `continuation_required: false`.
 The exact renderer proves its outgoing request disables thinking without raising
 the committed reply ceiling; `default` and `{mode: omitted}` cannot establish
@@ -135,7 +148,9 @@ ceiling as the minimum of the captured parent input ceiling and the selected
 summarizer's known context window minus 1,024; use the labelled 8,192-token input
 fallback for an unknown window. Retain the parent's strict system-class ceiling
 as a separate check, not permission to exceed the maintenance input ceiling.
-Require a valid positive input allowance and compatible model output limit.
+Require a positive derived input allowance. A system-class overflow is the
+version-2 numeric failure with the captured parent system ceiling, before intent.
+Insufficient remaining run spending uses the existing run-bound outcome.
 Source, complete request, depth and cardinality caps remain unchanged. This
 adds no context/reply/spending knobs. Ordinary `max_tokens` governs ordinary
 requests; maintenance has its own fixed 1,024-token reply allowance even when
@@ -144,8 +159,10 @@ bounds still apply; the maintenance override does not rewrite them.
 
 Recovery uses the captured model, capabilities, mapping, limits and instructions
 even if current runtime options changed or are absent. Missing/corrupt capture
-refuses; current settings cannot repair it. Dispatch-required recovery needs the
-captured model's admitted provider route and renderer revision, without fallback.
+makes the session unavailable before scheduling; it cannot fabricate a run
+terminal or use current settings to repair the capture. Dispatch-required recovery needs the
+captured model's admitted provider route and renderer revision, without fallback. Missing captured routes/renderers likewise make recovery
+unavailable; they do not authorize a new episode.
 A known settled summary may finish its checkpoint without a new provider call.
 New episodes use the current runtime selection. `session.configure` changes
 ordinary configuration only. Active maintenance charges the parent run's existing
@@ -188,7 +205,8 @@ waive either. Missing instructions refuse `maintenance_instructions_unconfigured
 unknown fields, invalid text or section bounds refuse
 `maintenance_instructions_invalid` at startup validation, before provider intent.
 A maintenance refusal preserves the triggering staging identity and its named
-failure. Core supplies no fallback, ordinary-session substitution, template
+failure. Numeric summary-request preflight uses the maintenance measurement
+scope below, never invents measurements of the ordinary candidate. Core supplies no fallback, ordinary-session substitution, template
 expansion or promotion of project instructions into host trust.
 
 The reference block requests goal, constraints, progress, decisions, next steps
@@ -246,7 +264,9 @@ a maintenance request whose existing episode/summary ordinal and captured range
 bind that digest. The summary variant resolves the exact committed checkpoint
 used by ordinary projection. At construction and replay, validate those owning
 records and recompute the descriptor from the actual final message. Unknown,
-missing, substituted or cross-episode references refuse. Both descriptors use
+missing, substituted or cross-episode references produce
+`context_projection_invalid` before intent, or unavailable recovery if their
+owning retained data is corrupt. Both descriptors use
 `session` / `session_owned_durable_truth`: this authenticates the committed
 source, not the truth of its claims or authority of its instructions.
 Their six members and canonical message cost/digest recipe remain unchanged.
@@ -289,7 +309,9 @@ starts with nil continuation and never consumes or creates a reusable ordinary
 exchange. Private thinking is excluded from summary input and checkpoint data.
 Full token/record/depth/cardinality preflight still applies.
 Reject a model incapable of that reserve or insufficient remaining budget before
-dispatch. Output is closed JSON with `summary` at most 4,096 bytes after canonical JSON
+dispatch. A summary reply must have no tool calls; otherwise fail maintenance_summary_invalid
+without policy/executor dispatch, charging its validated usage. Output is closed
+JSON with `summary` at most 4,096 bytes after canonical JSON
 string encoding, including quotes and escaping, and `carry_forward` containing
 arrays `files_read` and `files_changed`, together at most 2,048 encoded bytes.
 The whole encoded summary/carry-forward envelope is at most 6,144 bytes, so
@@ -297,7 +319,10 @@ independently maximal members may need to be smaller to leave room for framing. 
 entries. Unknown/invalid/oversize output fails without a hidden repair call. The 6,144-byte
 limit is an admission ceiling, not output capacity promised by 1,024 tokens.
 The reference instruction asks for a compact envelope below 3,072 encoded bytes.
-A native `max_tokens` stop, its normalized `length` equivalent, or unknown completion stop, even with parseable JSON, fails as
+ADR 0044's v3 reply carries the adapter-validated `completion` classification;
+maintenance requires that version and `completion: natural`. A native
+`max_tokens` stop, its normalized `length` equivalent (`completion: limit`),
+or unknown completion, even with parseable JSON, fails as
 `maintenance_summary_incomplete`; malformed, extra-key or oversized output fails
 as `maintenance_summary_invalid`. Both consume the attempt and observed or
 conservative usage under the existing accounting rules; neither permits a repair
@@ -308,10 +333,18 @@ same staging serializer and estimator. For a thinking-headroom trigger, compare
 the same minimum required projection at `q=0`, with optional resources absent,
 so enlarging excerpts after compaction cannot hide the reduction. Its inclusive
 byte/input targets govern stopping; other triggers use the ordinary hard limits.
-Require strict decrease in both exact
-record bytes and estimated tokens. Stop with `compaction_no_progress` otherwise.
-If still above the applicable limits or targets, another bounded prefix may be
-summarized within the episode's remaining attempts. After exhaustion retain
+For ordinary-limit, thinking-headroom and ordinary explicit triggers, require
+strict decrease in both exact record bytes and estimated tokens; otherwise stop
+with `compaction_no_progress`. For `canonical_rendering`, progress instead means
+the new checkpoint advances its contiguous raw cut toward the captured last
+offending unit and the resulting candidate passes all hard limits.
+A small group may become a larger summary. Earlier nonoffending units may
+need consuming first because coverage remains contiguous. Continue within the
+same bounded episode until canonical rendering also passes; each checkpoint
+consumes newly covered raw units and never summarizes only its prior summary. No repeated cut, automatic new episode
+or byte/token limit exception is permitted.
+If still above applicable limits/targets or still rendering-ineligible, another
+bounded prefix may be summarized within remaining attempts. After exhaustion retain
 checkpoints and the existing named
 staging or thinking-headroom failure; do not restart an automatic episode for
 the same staging identity. A maintenance failure retains its more specific
@@ -326,20 +359,27 @@ failure retain their exact rules, including the 1,000 system limit. New staging
 uses `context_admission_refused_v2`; never replay old bytes as the new revision.
 Its exact members are ADR 0017's nineteen-key v1 shape with `kind` changed to
 v2, the four members `category`, `dimension`, `observed`, `limit` replaced by
-`failure`, and four added members `configuration_version`, `episode_id`, `targets` and
-`projection_state`. Configuration is the captured version; episode is null or its bounded
-owning identity. All earlier count/digest/disposition rules remain for the canonical descriptor
+`failure`, and five added members: `configuration_version`, `episode_id`,
+`targets`, `projection_state` and `measurement_scope`. Configuration is the
+captured version; episode is null or its bounded owning identity. All earlier count/digest/disposition rules remain for the canonical descriptor
 sequence. The complete estimate additionally includes continuation under ADR
 0044; it is not asserted equal to descriptor subtotals alone. Use ADR 0044's
 estimator for new requests, including continuation cost. `targets` is null for
 ordinary hard-limit refusal, or exactly `{revision, record_target, input_target}`
 with ADR 0044's captured rule and recomputed values. No source text is retained. `projection_state` is `measured` or `unavailable`.
-Numeric failures require measured. With measured, compact counts/digest/estimate
-describe the last captured minimum ordinary projection, not an admitted request;
-record cost may still be null under the earlier preflight-order rules. With
-unavailable, permitted only for a nonnumeric failure before projection exists,
+Numeric failures require measured. With measured, measurement_scope is exactly
+`ordinary` or `maintenance`; counts/digest/estimate describe that captured
+required-only candidate, not an admitted request. Ordinary uses the last minimum
+projection; maintenance requires its owning episode and captured summary request
+configuration, with targets null and the episode's derived input allowance.
+Its system limit remains the captured parent system ceiling. Measured record
+cost may still be null under the earlier preflight-order rules. With unavailable,
+permitted only for a nonnumeric failure before projection exists, measurement_scope
+is null and
 the four counts, ordered descriptor digest, provider estimate and record cost
-are all null, never fabricated zero observations. Captured configuration/budgets
+are all null, never fabricated zero observations. Its `project_disposition` is
+`not_evaluated_required_failure`; a missing projection cannot claim resource
+admission or maintenance evaluation. Captured configuration/budgets
 and any derived targets remain required. For nonnumeric preparation failure,
 record cost is null. Standalone compact
 uses its episode record instead and emits no invented context-refusal run record.
@@ -348,8 +388,9 @@ The new `failure` is one of these exact closed objects:
 
 - `{version: 2, category: "context_budget_exceeded" | "thinking_exchange_headroom",
   retryable: false, dimension, observed, limit, hard_limit}`. The dimension is
-  one of ADR 0017's five values. Counts are unsigned 64-bit integers; limits are
-  positive. Ordinary token, byte and structural limits retain ADR 0017's
+  one of ADR 0017's five values. Private observed/limit/hard_limit are unsigned 64-bit integers; limit/hard_limit
+  are positive. New public wire/pipe projections encode these values as canonical
+  decimal strings, without changing private measurement relations. Ordinary token, byte and structural limits retain ADR 0017's
   measurement relations, with `hard_limit == limit`; system limit instead equals
   the captured configured `system_class_tokens` and refuses at `observed >= limit`.
   Other dimensions refuse only above the limit. Headroom permits only
@@ -369,16 +410,49 @@ The new `failure` is one of these exact closed objects:
   fabricated numeric budget observation. Invalid startup configuration has no
   run record and remains a startup validation error.
 
-For an active ordinary run, commit the v2 refusal with its failed
-`run_terminal_committed` in one transaction, substituting only the nested failure
+For an active ordinary run with an admitted episode, commit in this order in
+one transaction: episode terminal, v2 refusal, failed `run_terminal_committed`.
+The refusal immediately precedes the run terminal, with no intervening record.
+Without an episode, commit only the latter two. Permit refusal v2 at the
+maintenance stage, bound to that episode. Preserve the no-second-settlement rule, substituting only the nested failure
 union in ADR 0017's exact terminal shape. Bind its configuration, staging identity,
 measurements and optional episode to the owning records. Maintain cancellation,
 deadline, provider failure and commit-unknown precedence; those existing outcomes
 keep their own schemas and do not become preparation failures. A completed
 maintenance failure records its cause in the episode terminal and ends the
 triggering run with that same projection, without a second provider settlement.
-For standalone compact, the episode terminal and idempotent command result carry
-this same closed failure union, without inventing a run. `unchanged` is successful
+Standalone compact measures current canonical history plus captured fixed
+configuration under current hard limits/rendering rules; it invents no prompt
+or run-staging identity. Its episode terminal and idempotent completed-command
+result are exactly `{disposition, checkpoint_id, failure, usage, cleanup}`.
+Dispositions are `checkpointed`, `unchanged` and `failed`. Checkpoint_id is the
+latest checkpoint produced by this episode or null; checkpointed requires one,
+unchanged requires null, and failed may retain a partial checkpoint. Cleanup is
+`confirmed` or `unknown`; success requires confirmed. Failure is null iff
+successful, otherwise exactly one of:
+
+- the version-2 context failure union above;
+- `{category: "model_call_failed", retryable: false}`;
+- `{category: "cancelled", retryable: false}`;
+- `{category: "bound_reached", retryable: false, bound, observed,
+  declared_limit, accounting_source}`, with bound `max_attempts`, `deadline_ms`
+  or `token_budget`. Observed is a nonnegative integer and declared_limit the
+  captured positive bound. Accounting_source is reported/estimated only for
+  token_budget, null otherwise. Public numbers use exact decimal strings.
+
+These branches retain normal provider/cancellation/spending precedence and
+measurements without a synthetic run identity. Usage is exactly `{attempts, reported_tokens, estimated_tokens, total_tokens}`.
+Attempts is the episode attempt counter within its captured ceiling. Token
+counters are nonnegative integers summing validated reported charges and the
+existing conservative estimated charges once; total equals reported plus
+estimated. Public counters use exact decimal strings. This summarizes retained
+accounting, without creating reported usage from an invalid reply. A failed result is never a
+successful checkpoint completion merely because a partial checkpoint exists.
+Admission acknowledgement is distinct from completion. `session.abort` also
+cancels active standalone maintenance through its episode identity and normal
+bounded cleanup; it creates no run or run-terminal record. This explicitly
+extends ADR 0011's abort handling under the new generations. No run/refusal
+record is invented. `unchanged` is successful
 only under the selection rule above. Exhausted attempts/usage/deadline retain the
 existing bound outcome and its measurements. An episode's before/after projection
 measurements prove no-progress locally; they are not new public payload fields.
@@ -460,6 +534,14 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
 - Repeated checkpoints retain only the latest prior summary/carry-forward and
   inherit `source_excerpted`. Inspection, events, snapshots and model rendering
   agree. A model cannot clear the flag by returning a complete-looking summary.
+- Small offending terminal groups may grow into bounded summaries under an
+  explicit rendering trigger; multiple offending groups require advancing cuts
+  until rendering passes. Other triggers still require both strict decreases.
+  No-range rendering failure cannot return unchanged.
+- Parseable truncated/unknown-stop summary replies fail while their fully validated
+  usage remains charged; exact v2 replies cannot prove maintenance completeness.
+  Refusal transaction order, standalone result branches, unavailable recovery,
+  configured system ceilings and receipt-reference failure routes have vectors.
 - Exact source/summary message rendering, one descriptor per final message,
   revision-4 source-reference bindings and legacy v2/v3 receipt replay. Substituted
   episode/range/digest, missing checkpoint and unknown variant refuse; no source

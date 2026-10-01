@@ -117,7 +117,8 @@ these facts from the verified exact mapping, including provider-default behavior
 Core uses them without interpreting the provider's thinking mode; a reasoning
 label alone cannot establish either fact. `canonical_terminal_tool_history` is
 true only when that exact mapping/renderer has verified the post-terminal
-canonical rendering below; unverified support is false.
+canonical rendering below; ordinary unverified support is false. The explicit
+candidate-conformance bootstrap below is the sole test-host exception.
 The closed `thinking` variants are
 `{mode: omitted}`, `{mode: disabled}`, `{mode: manual, budget_tokens: positive_integer}`
 and `{mode: adaptive, effort: low | medium | high, display: summarized}`.
@@ -156,8 +157,12 @@ below; these conformance rows use that exact identity.
 | `claude-fable-5-1` | `none` | Refuse before commitment; no request | — | — | Thinking cannot be disabled |
 
 Mapping revisions are `loopex.anthropic.haiku45.v1` and
-`loopex.anthropic.fable51.v1` respectively. These define the summary
-classification used below; there is no independently authored disclosure bit.
+`loopex.anthropic.fable51.v1` respectively. These also propose `canonical_terminal_tool_history: true` for every dispatchable
+row in this table; the refused Fable none row has no mapping. Deterministic conformance must prove the declared shape before candidate
+conformance use. The counted real post-terminal cases must prove true before
+ordinary support admission. A failed positive
+case cannot silently change the value to false or omit its required behavior.
+These define the summary classification used below; there is no independently authored disclosure bit.
 Haiku manual low/medium/high classify supported native thinking text as a
 provider summary: its omitted display setting defaults to summarized under the
 [provider display contract](https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display),
@@ -169,6 +174,16 @@ capsule and record bounds. A syntactically valid reply allowance promises no
 number of thinking/tool rounds. With the unchanged 4,096 ordinary reply default,
 manual `high` refuses. An explicit larger allowance, such as 8,192, uses existing
 configuration and must pass all bounds; dependency code cannot grant the increase.
+The trusted conformance host may resolve these fixed candidate descriptors
+solely for their already-declared counted real cases after deterministic
+conformance. It uses the real adapter/session path, unchanged bounds and policy,
+and explicitly labels the row unverified in its retained case record. This is
+host-local test composition, not a public flag, new core field, credential or
+authority bypass. A successful retained owning witness gates ordinary support
+registration/advertisement; failure follows the fixed disposition rule. This
+bootstrap is part of the first counted case and authorizes no extra calibration
+or failed-case reroll. Ordinary host resolution still refuses unverified rows.
+
 Haiku's manual mode does not claim interleaved thinking support. No new beta
 headers, `between_tools`, extra effort levels or raw provider-option bags are
 introduced. The Haiku thinking-off row supplies one maintenance conformance
@@ -181,13 +196,17 @@ route switching without claiming cross-vendor model diversity. The always-on
 conversation model need not disable thinking.
 
 Inspect the final request after dependency normalization, not only Loopex's
-input options. In pinned ReqLLM, `reasoning_effort: none` removes the option;
+input options, including final headers and transport controls. A dependency-
+injected interleaved-thinking beta header or an unadmitted display/body override
+refuses before HTTP launch; preserve required authentication/routing headers.
+The invocation wrapper validates the complete normalized request, not just its
+JSON body. In pinned ReqLLM, `reasoning_effort: none` removes the option;
 it does not send `thinking.type: disabled`. Default omission likewise must not
 use ReqLLM's `reasoning_effort: default`, which can enable thinking. Set the
 verified native disabled/manual/adaptive values explicitly where selected.
 Reject unadmitted manual-to-adaptive conversion, reply-limit increases or
-display injection before dispatch. Only conformance-complete exact rows may
-be admitted; an unknown default that may need private continuation cannot
+display injection before HTTP launch. Validation performed after start_stream/4
+remains dispatched_or_unknown under the handoff rule, even if HTTP was prevented. Only conformance-complete exact rows may enter ordinary support admission; an unknown default that may need private continuation cannot
 bypass that rule. Additional exact model mappings need the same bounded
 contract and evidence, not a family-name inference or automatic catalog update.
 
@@ -197,7 +216,10 @@ verified provider summary. Keep that classification in the versioned adapter
 mapping, not a caller-authored permission flag or a new core provider taxonomy.
 Apply it before converting native events, emitting progress or incrementing
 the public delta counter. For streaming, verify the response identity and
-supported event kind before its first eligible fragment. An unverified mode,
+supported event kind before its first eligible fragment. Revision 1 requires
+the native response model to equal the row's literal model identity and permits
+only a native `thinking_delta` inside its validated thinking block as summary
+text; signatures and redacted-thinking deltas are ineligible. An unverified mode,
 changed response identity or unexpected event cannot inherit another mapping's
 summary classification. Malformed native streams retain the failure rules below.
 
@@ -234,11 +256,16 @@ continuation-material exclusion only for the verified text projection. ADR 0023'
 public progress kinds and field names are unchanged. Ephemeral calls remain
 buffered without a new progress callback or post-hoc summary disclosure.
 
-**Private reply and request forms.** Revision `loopex.model_request.v2` retains
+**Private reply and request forms.** Every newly staged ordinary or maintenance request uses
+`loopex.model_request.v2`, including nil continuation; v1 is read-only. This revision retains
 the same top-level semantic members and digest coverage, admitting `continuation`
 as nil or the envelope below. Old v1 bytes remain immutable. An adapter reply
-uses `bounded_adapter_reply_v3`, the exact nine fields of ADR 0018's v2 plus
-`continuation`, either nil or this closed capsule:
+uses `bounded_adapter_reply_v3`, the exact nine fields of ADR 0018's v2 plus `completion` and `continuation`.
+`completion` is exactly `natural`, `limit` or `unknown`, validated from the final
+native stop reason: ordinary end-turn/tool-use are natural, max-token/length
+are limit, and absent/unrecognized reasons are unknown. Adapters retain no raw
+stop strings. Maintenance requires natural; other reply rules remain unchanged.
+`continuation` is nil or this closed capsule:
 
 ```text
 {format: "loopex.anthropic.content_refs.v1", provider: "anthropic", model: exact_model,
@@ -347,19 +374,23 @@ the adapter alone interprets provider block schemas. No provider struct, secret,
 process handle or arbitrary dependency metadata enters either form.
 
 `bounded_canonical_reply_v3` removes only the echoed `canonical_request_bytes`
-from v3, retaining its other nine fields exactly. `model_attempt_settled_v3`
+from v3, retaining its other ten fields exactly. `model_attempt_settled_v3`
 keeps the twelve outer fields and accepts that reply variant. ADR 0021 already
 owns v2; never reinterpret v2 records as carrying v3 replies. Preserve its
 compact `accounting_evidence` member and closed relations under the new kind.
 M7 writes `model_attempt_settled_v3` for every newly committed settlement:
 ordinary, maintenance, error-only, nil-continuation, unreadable and validated
-reply compaction. Historical v1/v2 kinds are read-only under their original
-validators, including when an older request later receives a new v3 settlement.
+reply compaction. Historical v1/v2 kinds are read-only under their original validators, including
+when an older request later receives a new v3 settlement. This explicitly amends
+ADR 0021's v2-only writer clause. Within each session the first v3 settlement is
+a monotonic cutover: no later newly appended v1/v2 settlement is valid. Historical
+earlier versions remain readable; recovery validates that ordering.
 An exact nine-member v2 adapter reply is still admissible when the staged
-request requires no continuation, including eligible legacy requests. Validate
-it under v2, then normalize to v3 by adding only `continuation: nil`. A request
-requiring continuation rejects a v2 reply. V3 adapter replies have exactly ten
-members and their canonical projections nine; extra keys and mixed shapes
+request requires no continuation, including eligible legacy requests, but not maintenance. V2 requires all nine
+keys, including `provider_response_id` even when nil; an eight-key reply refuses.
+Validate v2, then add `continuation: nil` and `completion: unknown`. A request
+requiring continuation or maintenance completeness rejects v2. V3 adapter replies
+have exactly eleven members and their canonical projections ten; extra keys and mixed shapes
 refuse. V3 model-call errors retain ADR 0021's two-member result; unreadable and
 compacted results retain its three-member result and closed accounting-evidence
 union. Commit reply, continuation, usage and next disposition atomically before
@@ -487,13 +518,16 @@ The bridge must make overflow, malformed framing and JSON decode errors fatal
 before dependency code can discard them or render their raw diagnostics. Retain
 a monotonic invocation-failure latch and terminate the exact owned stream;
 later input cannot clear the latch or restore success. The invocation owner
-observes private fatal failure independently of chunk enumeration, terminates
+runs the drain in a separate invocation-owned monitored process and observes
+private fatal failure independently of its blocked enumeration. It terminates
 the exact stream and wakes and joins the blocked drain through existing cleanup.
 Infinite dependency timers cannot defer this handling. Pinned StreamServer logs
 and continues on a parser error return, so that return alone cannot enforce
 this rule. Validate before lossy SSE event conversion too. Test final parser
 flush as well as ordinary input; neither may turn a previous failure or
-incomplete event into successful completion.
+incomplete event into successful completion. The wrapper implements every
+provider/parser callback probed by the pinned StreamServer; conformance records
+that exact callback inventory and exercises each path, including final flush.
 
 For the pinned native event grammar, require one message start, unique ordered
 block indices, type-correct deltas for an open block, matching block stops and
@@ -567,9 +601,11 @@ model/configuration/renderer within that exchange; no cross-model native reuse
 is promised.
 
 For post-terminal canonical rendering, emit retained assistant text/tool calls
-without old private blocks. Render each following ordered tool-result group in
-one native user content array, followed by any adjacent admitted user text in
-canonical order, including the new prompt. Do not fabricate an assistant
+without old private blocks. Omit an empty assistant text block, while preserving
+nonempty text and calls in their canonical order. Render each following ordered
+tool-result group and adjacent admitted user text, including the new prompt,
+in one native user content array: all results first, then text in canonical
+order. Do not emit a separate adjacent user message for that text. Do not fabricate an assistant
 completion or change that grouping to imply one. This rule applies to retained
 canonical groups; it does not rewrite the frozen prefix of an open exchange.
 Before ordinary provider intent, inspect the projected history after any admitted
@@ -752,8 +788,8 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   context charges, including combined large excerpts and duplicate request
   representations. Measure a useful multi-round fixture with the final generic
   node overhead and revision-4 receipt; earlier prototype sizes are not proof.
-  Before admitting an exact mapping, complete deterministic native request/response
-  and bound conformance. Its owning real-provider cases retain compact/expanded capsule
+  Before candidate conformance use of an exact mapping, complete deterministic
+  native request/response and bound conformance. Its owning real-provider cases retain compact/expanded capsule
   sizes, block counts and owning settlement sizes. Synthetic signatures prove
   mechanics only; a live sample promises no future response size. A real bound
   failure remains a failed attempt under the fixed evidence/disposition rule,
@@ -778,8 +814,13 @@ This ADR owns M7's coordinated wire-generation replacement in
 Foreground `/3` and daemon `/4` use full `loopex.experimental/N` names, distinct
 payload-complete schema digests and their existing different authority rules.
 Compute each digest with `LoopexProtocol.Canonical.digest/1`, encoding revision
-`loopex.canonical.v1`, over one closed manifest containing generation, ordered
-methods/record families/error codes, limits and complete payload definitions.
+`loopex.canonical.v1`, over one closed manifest with exactly `generation`,
+`canonicalization_revision` (the literal `loopex.canonical.v1`), `methods`,
+`record_families`, `error_codes`, `limits` and `payload_definitions`. Those
+inventories are ordered; definitions include every request, result, public
+event/snapshot and referenced nested union. Unknown manifest keys refuse.
+Integer-only literal schema data, duplicate-key rejection and pinned list order
+make its independent Node preimage reproducible.
 Pin every list's order, the manifest preimage and the resulting literal digest
 in vectors. JSON transport encoding is not the schema-digest recipe.
 Old-only or wrong-server offers refuse before attachment or session authority;

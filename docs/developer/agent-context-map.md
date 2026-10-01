@@ -6334,3 +6334,17 @@ The previous governing clauses remain visible beside the proposals. M7 and its
 nine prerequisite ADR pairs still require exact-byte acceptance before dependent
 implementation. The selected scope does not add encryption, a key service or
 selective private-record deletion.
+
+<a id="disposition-m7-round4-evidence-loss-2026-09-30"></a>
+### M7 post-dispatch evidence-loss choice, 2026-09-30
+
+The maintainer selected A: retain a post-dispatch attempt with lost recording or
+attendance as evidence unavailable, require a causal fix and a new candidate,
+and rerun the affected checks only after independent review of that correction.
+A new SHA alone does not authorize a retry; same-SHA replacement is not allowed.
+A missing required model action remains a failed strict demonstration. The
+[plan verdict contract](../plans/M7-technical.md#technical-plan-evidence) and
+[round 4 disposition](../evidence/M7-round-4-disposition.md) carry this choice.
+The optional extra live capsule calibration was not selected; no additional
+provider call is authorized by this planning repair. All plan/ADR/vision bytes
+remain proposals pending external re-audit and exact-byte acceptance.

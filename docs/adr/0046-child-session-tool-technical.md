@@ -79,8 +79,9 @@ temporary-file rename and directory fsync before its reference is committed.
 A parent-binding log is keyed by runtime identity and original parent-create
 command ID. Retain an immutable resolved creation object, at most 1 MiB, before
 `prepare_parent` commits its digest, original command/input digest, catalog
-digest and exact task generation. Then call core create with that exact command
-and payload. Commit `bind_parent` with the returned session ID before publishing
+digest and exact task generation. Resolve the exact genesis before prepare through the shared pure helper below.
+Then use the host-private exact-genesis create variant with the original command
+and payload; the normal create writer shares its validator. Commit `bind_parent` with the returned session ID before publishing
 the handle or allowing prompts. The object also retains the closed delegation
 declaration: `enabled`, ordered enabled `roles`, `max_children`, aggregate
 `token_budget`, `child_bounds`, `max_tokens`, and per-role resolved
@@ -120,8 +121,12 @@ and sha256 binds those decoded ETF bytes. This private codec serializes the
 plain map directly; it is not the tagged map tree used by protocol Canonical.
 Bound decoded payloads by their owning core limit before parsing, reject compressed
 ETF and noncanonical base64, decode with safe existing-atom rules, validate the
-owning closed plain-data schema, and require exact equality after re-encoding
-with that same deterministic ETF recipe. This is a
+owning closed plain-data schema and require decoding to consume the complete
+retained payload, with no trailing bytes. Integrity is the SHA-256 of the retained bytes;
+do not require re-encoding equality across OTP releases. Deterministic encoding
+is a writer recipe, not a cross-major byte-stability guarantee. Readers validate
+retained bytes without replacing them. Cross-floor/current-pair fixtures prove
+that each pair reads the other's retained object. This is a
 private representation, never arbitrary-term acceptance or an atom-creation path.
 The host invokes the shared genesis validator after decoding retained genesis.
 Measure complete JSON after encoding, including base64 expansion, for object,
@@ -171,9 +176,10 @@ before those mutations resume. The ledger retains:
 - Stable create/prompt command IDs, returned child session/run IDs, original
   executor receipt tuple, child terminal evidence and final parent receipt.
 - The immutable resolved child-creation input, including cleanup grace, tool
-  definitions, policy mode and configuration, or a digest-bound retained object
-  installed before reservation under the same 1 MiB object rules as parent
-  creation. Keep original options/input and their digest, plus the exact fully
+  definitions, policy mode and configuration, in a mandatory digest-bound
+  retained object installed before reservation under the same 1 MiB object rules
+  as parent creation. Frames retain only its digest/reference, never inline
+  base64 genesis; closing credit includes that fixed reference. Keep original options/input and their digest, plus the exact fully
   resolved v2/v3 genesis submitted at creation, including its normalized options
   and runtime_configuration. The parent creation object retains the same pair.
   Use one planned pure core helper, `Loopex.Runtime.SessionGenesis.normalize/1`,
@@ -181,8 +187,24 @@ before those mutations resume. The ledger retains:
   complete v2/v3 payload and returns `{:ok, normalized_genesis}` or
   `{:error, :invalid_session_genesis | :session_configuration_too_large}`; it
   inserts no defaults and performs no Store call. Composition must not duplicate
-  its closed decoders or normalization. Current startup defaults
-  cannot reconstruct a different create input.
+  its closed decoders or normalization. A second pure helper, `SessionGenesis.resolve/2`, accepts normalized session
+  options and an explicit closed input map `{genesis_version,
+  runtime_configuration, initial_configuration, tool_selection,
+  policy_defer_mode}` for v3; v2 accepts only version and runtime configuration.
+  Values are already resolved startup data, including actual cleanup grace and
+  exact definitions; it performs no catalog, registry, Store or clock lookup.
+  It constructs the payload then calls normalize/1, with the same result union.
+  Control and composition share this resolver; no host copies its schema.
+  The new host-private `Runtime.create_session_with_genesis/4` accepts runtime,
+  command ID, original session options and that complete genesis. Its canonical
+  create identity binds both original options and the exact genesis digest;
+  conflicting genesis under one ID refuses. It checks duplicate identity first, validates options equality and the complete
+  retained payload, and commits exactly that genesis without substituting current
+  defaults. Fresh creation still validates registered generations and admitted
+  host configuration; failure changes no prior mapping. It returns the existing
+  create result union. This live-authorized variant is not exposed on the wire
+  and is never called by helper recovery. Current startup defaults cannot
+  reconstruct a different create input.
 
 Use core's idempotent create command and returned session ID. Create and prompt
 command IDs derive from the logical operation, excluding executor attempt.
@@ -309,39 +331,43 @@ ledger codec below. Decode by field schema, never by guessing a string's shape. 
 binding refuses; an exact repeated job reuses the row. A row supplies routing
 and cancellation bounds, never a launch permit or a replacement grant.
 
-Retain registered rows until that exact router incarnation ends, including
-after execute returns; no timer or settlement evicts them. Cap the registry at
-4,096 rows and 8,388,608 total canonical JSON bytes, including each row's key.
-Before admitting a new distinct job, measure both limits. If either would be
-exceeded, return the existing `{:error, {:refused_before_effect,
-:router_registration_capacity}}` executor result without forwarding or ledger
-mutation. Existing rows, cancellation, receipt reads and cleanup remain usable;
-there is no automatic restart or eviction. The host diagnostic names registry
-capacity and the full-composition restart remedy. Existing private job/receipt
-contracts and public failure projection stay unchanged. Recovery may seed a
-row from validated committed intent evidence before cancelling that job; this
-does not authorize execution and obeys the same limits. If classification cannot
-be retained, refuse activation rather than attempting unclassified recovery.
+Keep rows only while execution/cancellation is active, capped at 4,096 rows and
+8,388,608 canonical JSON bytes including keys. A local row is removed after its
+callback returns and any concurrent cancel observer has finished. A helper row
+may then leave this active table because its original job binding and receipts
+remain in the validated durable helper index below. Capacity refuses a new
+concurrent registration with `{:error, {:refused_before_effect,
+:router_registration_capacity}}`; settlement reclaims capacity. This is not a
+lifetime-throughput limit. Existing cancellation and receipt reads remain usable.
+Recovery registers only unresolved jobs from validated intents before cancelling;
+settled historical jobs use the read index, without consuming active rows. An
+incomplete classification refuses affected activation, never guesses a route.
 
 Known local cancellation forwards unchanged to Local and does not close helper
 admission. Known helper cancellation uses only its durable operation stop.
 Derive the cancellation callback's absolute monotonic observation deadline once
 on entry from the registered parent job's `cleanup_grace_ms` and
-`Executor.cancellation_bounds/1`; queueing and nested waits spend that deadline.
+`Executor.cancellation_bounds/1`, minus a fixed 250-ms reply margin. Core begins
+its observation earlier; this margin permits bounded handoff delay, not a
+scheduling guarantee. Local cancellation forwards immediately on a dedicated
+path, never queued behind ledger or child-stop work. Nested waits spend the
+remaining deadline; an answer that misses core's window remains unconfirmed.
 Do not use the current runtime grace or renew the deadline between child waits.
 The child may have a longer committed grace. Its cleanup can therefore finish
 after the parent's observation window; return unconfirmed and preserve the
 parent's unknown outcome without a refund or later terminal rewrite.
 
-A cancel that arrives before registration has no bound digest and cannot create
-a durable stop, as ADR 0016 requires. It closes the volatile
-`helper_admission_closed` flag for this router incarnation and returns
-unconfirmed unless the unchanged local executor establishes a conclusive
-receipt. The flag also covers any other genuinely unclassifiable job ID; never
-claim that absence identifies its route. It prevents every later helper launch,
-including delayed execute registration, and never reopens in this incarnation.
-This may affect all parents in a daemon host. Existing classified helpers can
-settle or be cancelled normally. Local request and receipt bytes remain unchanged.
+A cancel before registration has no bound digest and cannot create a durable
+stop. First consult the validated helper job index. For a genuinely unknown ID,
+insert an incarnation-local tombstone for that exact ID before returning
+unconfirmed or forwarding to Local. Every later registration of that ID refuses
+launch. Tombstones are monotonic and capped separately at 4,096 entries and
+8,388,608 encoded bytes. Only inability to retain a new tombstone closes the
+incarnation-wide `helper_admission_closed` flag; that fence prevents every later
+helper launch and requires full host restart. A late cancel of an evicted local
+job therefore fences its ID, not unrelated parents. A conclusive validated Local
+receipt can establish local classification, but absence alone cannot. Classified
+helpers may still settle or cancel. Local request/receipt bytes remain unchanged.
 
 The router reference names its exact PID/incarnation, never a global alias that
 silently rebinds after failure. A replacement requires normal host construction
@@ -354,8 +380,8 @@ references and runtime incarnation prevent rebinding stale calls. No
 manager-only transparent rebind is allowed.
 Stale references/jobs cannot reach it as fresh execution. Startup reconciles predecessor ledgers before admission as
 specified below. This conservative unknown-cancel case may require host restart
-to admit new helpers; it does not add an unbound durable tombstone or return a
-false cleaned result. Establish that a predecessor producer
+to admit new helpers after tombstone overflow; it creates no durable launch
+authority or false cleaned result. Establish that a predecessor producer
 is gone and account for calls it already sent before taking over its operation.
 
 The monotonic `stop` mutation carries the logical operation identity, original
@@ -376,7 +402,7 @@ stop commit fences launch, refund and successful publication. Its reserved
 closing-record credit prevents a full log from blocking this fact.
 Classified cancellation also closes that operation's volatile launch fence
 immediately. It does not close the incarnation-wide `helper_admission_closed`
-flag; only the unclassified-cancel path above does that. Best-effort
+flag; only tombstone-capacity exhaustion above does that. Best-effort
 abort and cleanup of already known children continue while a stop commit is
 unresolved; they do not authorize another ledger mutation or a cleaned receipt.
 
@@ -403,7 +429,11 @@ in braces below denote closed plain maps; tagged API results are tuples.
   Return all executor kinds; composition selects the retained task generation.
   Empty `rows` does not end a scan: only `next_cursor: nil` proves that the
   captured prefix is complete. Preserve Store's 65,536-byte per-record bound;
-  at most 16 rows and 1,114,112 `Canonical.encode/1` bytes may leave one call.
+  at most 16 rows and 1,114,112 uncompressed plain ETF bytes, measured with
+  `:erlang.external_size/1` as the Store does, may leave one call. Charge the
+  complete response envelope; stop before the cap with a cursor advancing only
+  past scanned records. A single unrepresentable row is invalid_history, never
+  skipped or an apparent complete page.
   This private API returns plain data, not the ledger JSON representation. Invalid cursor
   scope, ordering, gaps or unsupported records refuse; an available empty
   session differs from absent/unavailable history. The closed errors are
@@ -435,7 +465,8 @@ in braces below denote closed plain maps; tagged API results are tuples.
   ordinal; each page returns `{:page, {version: 1, runtime_id,
   through_create_ordinal, rows, next_cursor}}`. Rows are the historical projection
   above plus `create_ordinal`, ordered by that ordinal, each at most 65,536 bytes;
-  complete response is at most 1,114,112 canonical bytes. Runtime wraps a valid
+  complete response is at most 1,114,112 plain ETF bytes under the same size
+  and early-stop rule as effect_intents. An unrepresentable row is unavailable. Runtime wraps a valid
   page in `{:ok, {:page, projection}}`. Only nil next_cursor proves complete
   coverage. Point queries never return pages. Invalid cursors return unexpected;
   incomplete/corrupt indexes return store_unavailable, never an empty page.
@@ -469,9 +500,11 @@ and joins its committed mapping before exposing session mutations. An unseen
 session triggers a complete creation-watermark delta scan and intent coverage
 before classification, or remains fenced. New commits cannot be omitted by
 reusing an old cut as current completeness proof.
-The host then joins creating-command
-provenance to deterministic child-create IDs derived from those intents, not
-only reservations whose log files happen to exist. During a still-accountable
+The host then joins creating-command provenance to deterministic child-create
+IDs derived from those intents, not only reservations whose logs happen to exist.
+An ID match alone is insufficient: where retained creation input exists, its
+exact genesis/create digest must also match. Conflicts remain fenced; a colliding
+client ID never grants helper or ordinary mutation authority. During a still-accountable
 in-flight create, defer mutation classification until the mapping is conclusive.
 A helper's provenance remains helper-owned after settlement or log loss.
 Unresolved evidence fences the affected parent/helper; it does not downgrade
@@ -557,8 +590,27 @@ child admission and provider/tool cleanup before answering cleaned. An
 unaccounted call, live child, callback failure or uncertain cleanup answers
 unconfirmed/unknown; no success or speculative usage refund conceals that gap.
 
-`retained_receipt/2` is observational, as the executor contract requires. It
-reads a retained receipt or returns the existing unresolved/in-flight error;
+`retained_receipt/2` first routes by job ID through the helper index built from
+complete validated intent coverage joined to ledger operation/attempt bindings.
+Include every original attempt, including predecessor-incarnation jobs and
+recover_uncreated receipts; an active row is not required. The index is a derived
+read index over retained truth, with bounded paged construction and a bounded
+4,096-entry/8-MiB cache. The ledger owns `lookup_job(reference, job_id)`: it reads
+one derived entry keyed by SHA-256 of that ID under its private index directory,
+then validates the referenced source-intent and ledger frame/receipt. Entries
+contain original job binding, source reference, run-log identity and frame offset,
+at most 65,536 JSON bytes; they are installed atomically under the exclusive host
+lease. They grant no authority and are not another journal. Rebuild the complete
+index from validated intent/ledger coverage at startup; live registration updates
+it before exposing work, and receipt binding updates it before publication.
+Eviction preserves that point lookup. Missing/corrupt index or source coverage
+means unresolved until rebuild, never absence or fallback to a local route. It carries no launch authority or independent
+truth writer. Local receipt lookup is used only for a proven local route, or
+to obtain a conclusive validated Local receipt for an unknown ID; unknown plus
+Local absence stays `effect_unresolved`. A helper lookup returns its exact
+original receipt tuple for core's current solicited reconciliation validation.
+The callback is observational: it reads a retained receipt or returns the existing
+unresolved/in-flight error;
 it starts no worker and commits no stop, create, prompt or recovery mutation.
 Startup recovery and cancel perform those actions separately. Missing receipt
 is not proof of no dispatch and cannot become `absent` for an unresolved
@@ -571,6 +623,15 @@ receipt may preserve an earlier fact without reopening the parent run.
 Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-consequences).
 
 - Executor conformance and local-tool byte equivalence through the router.
+  More than 4,096 sequential ordinary jobs reclaim active capacity; delayed
+  local cancels do not fence unrelated helpers. Pre-registration cancel blocks
+  that ID, tombstone overflow fences helpers, and concurrent helper stops do not
+  delay local cancel forwarding. Predecessor and recovered-no-child receipts
+  route without active registration and retain their original binding.
+  Exact resolved genesis is available before prepare; changed startup grace
+  cannot alter live exact-genesis creation or historical lookup. Cross-toolchain
+  ledger objects validate without re-encoding equality; child frames contain
+  object references and remain within the JSON frame cap.
 - Fresh child context, role-catalog immutability across config edits/restart,
   cross-provider selection and rejection of unknown/disabled roles.
 - Per-session tool selection, immutable policy mode, allow/deny/defer, no
@@ -583,15 +644,16 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   manager is down, then recovery: zero prompt submissions/provider dispatches.
 - Both sides of create/prompt acknowledgement, live versus dormant child,
   stop fsync uncertainty, cancel/launch ordering and blocked eager activation.
-- Cancel before execute registration closes helper admission; a delayed execute
-  cannot launch, stale references cannot rebind, and local-tool receipt bytes
-  remain unchanged. Unknown job cancellation is never falsely cleaned.
-- Registered local cancellation, including after execute returned, leaves helper
-  admission open; helper cancellation remains operation-scoped. Race a cancel
-  before registration and prove the disclosed incarnation-wide fence. Fill each
-  registry bound independently: no forwarding at exhaustion, no eviction,
-  duplicate/cancel/receipt paths remain available, and full composition restart
-  preserves recovery truth before replenishing capacity.
+- Cancel before registration fences that exact ID; delayed execute cannot launch
+  while unrelated helpers remain available. Tombstone overflow separately proves
+  the incarnation-wide helper fence. Stale references cannot rebind and unknown
+  cancellation is never falsely cleaned; Local receipt bytes stay unchanged.
+- Registered or evicted local cancellation leaves unrelated helper admission
+  open; helper cancellation remains operation-scoped. Fill active registry count
+  and byte limits independently, prove refusal before forwarding, then settle and
+  reuse capacity. Historical receipts use the durable index without active rows.
+  Fill tombstone limits separately; only full restart resets that monotonic fence,
+  preserving stop-only recovery and unresolved ledger truth.
 - Core query conformance for both Stores: no write, owner acquisition,
   coordinator start or dispatch; bounded empty matching pages still advance;
   fixed high-water coverage, missing/corrupt history, wrong-runtime selectors,

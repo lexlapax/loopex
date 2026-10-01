@@ -6,7 +6,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure and closed refusal/failure shapes to allow bounded maintenance first and versioned preparation failures and its closed receipt source-reference union for maintenance and checkpoint provenance. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure and closed refusal/failure shapes to allow bounded maintenance first and versioned preparation failures and its closed receipt source-reference union for maintenance and checkpoint provenance. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules. Also extends ADR 0011 abort handling to cancel active standalone maintenance without creating a run.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) and [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Also extends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with explicit maintenance instructions and model selection; its one-shot interface, credential audience and cleanup guarantees remain unchanged
 - **Maintenance resource receipts:** Narrowly amends [ADR 0017](0017-durable-context-admission-budget.md#concept) and [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) so a successful maintenance request can explicitly record that optional resource intake was skipped; ordinary admission and older receipt validation remain unchanged
@@ -68,10 +68,12 @@ newest group, if retaining it would block the next request by size or unsupporte
 tool-history rendering. Explicit compact can also cover it to prepare for a
 smaller model. Current-run inputs
 and open exchanges remain protected. Failure projections are versioned and name
-either the measured bound or the precise preparation failure; old records keep
-their old validation. Every checkpoint must strictly reduce both
-projected token count and exact record size. Insufficient room for the minimum
-excerpt, invalid summary, no progress or exhausted episode produces a named
+either the measured ordinary/maintenance bound or the precise preparation failure; old records keep
+their old validation. Size preparation must strictly reduce both projected
+token count and exact record size. Explicit repair of unsupported terminal
+rendering instead advances coverage past offending groups within hard limits
+until rendering passes; a small group may become a larger summary. Insufficient room for the minimum
+excerpt, invalid or incompletely generated summary, no progress or exhausted episode produces a named
 refusal. Useful checkpoints already committed remain; failed work cannot roll
 them back.
 
@@ -79,7 +81,9 @@ Active maintenance consumes the run's call/turn, token and deadline budgets.
 In a helper session, that usage is part of the child's total and therefore its
 delegation charge. Maintenance in the delegating parent spends only that parent's
 run budget, not the separate helper allowance.
-Standalone maintenance requires explicit limits and cannot exceed four attempts,
+Standalone maintenance has a closed completion result, including truthful
+cleanup and partial-checkpoint identity after failure. Abort cancels an active
+standalone episode without inventing a run. Standalone maintenance requires explicit limits and cannot exceed four attempts,
 60,000 ms or 32,768 tokens. Recovery retains attempts and usage; an uncertain
 provider result or checkpoint commit never authorizes another summarization.
 

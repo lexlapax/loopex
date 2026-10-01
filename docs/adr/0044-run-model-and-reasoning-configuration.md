@@ -6,7 +6,8 @@ Technical depth: [Run model and reasoning configuration](0044-run-model-and-reas
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 amends [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) to add that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also extends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement, preserving its accounting-provenance rules and the existing v2 meaning. Qualifies ADR 0011's continuation-material exclusion solely for verified provider summary text in existing transient reasoning progress. Extends [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with reasoning configuration; its buffered transport and cleanup remain unchanged.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 amends [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) to add that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also extends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement and its monotonic v3-only writer cutover, preserving its accounting-provenance rules and the existing v2 meaning. Qualifies ADR 0011's continuation-material exclusion solely for verified provider summary text in existing transient reasoning progress. Extends [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with reasoning configuration; its buffered transport and cleanup remain unchanged.
+- **Requires:** acceptance of the labelled [vision continuation amendment](../vision.md#concept-vision-model-boundary) and [section 13.4](../vision-technical.md#technical-vision-model-boundary), under the [authorized scope](../developer/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30)
 - **Requires with multi-provider use:** [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Prerequisite for:** M7 outcomes 4 and 7
 - **Coordinated wire amendment:** Replaces [ADR 0023](0023-experimental-public-session-protocol.md#concept)/[ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept)'s served generations and schema-digest inputs through the M7 contract below; their authority, framing and connection-lifecycle rules remain
@@ -32,7 +33,10 @@ tools. Interrupted or malformed streams may leave visible provisional text,
 but never a partial durable answer or tool call. Recovery follows the existing
 attempt rules and cannot restart an ambiguous provider call. The buffered
 ephemeral path keeps ADR 0039's non-streaming contract and must preserve the
-same complete native data before returning a reply.
+same complete native data before returning a reply. Versioned replies also
+classify completion as natural, limit-stopped or unknown. Maintenance accepts
+only a naturally completed reply; valid-looking truncated JSON cannot create
+a checkpoint. Validated reply usage is still charged.
 
 The maintainer selected verified public reasoning summaries. When the exact
 provider/model mode establishes that returned text is a user-facing summary,
@@ -46,7 +50,11 @@ private block is summarized locally to create public output.
 
 Configuration becomes a durable session fact. Creation and settled-only
 `configure` commit an exact model identity, reasoning, instruction envelope and
-context/reply limits with one version. A run captures that version at admission
+context/reply limits with one version. It also retains the host-resolved
+capability and provider-mapping descriptor as bounded gating data. Core checks
+its closed shape, declared limits and generic continuation flags; adapters alone
+interpret thinking modes and translate native provider controls. A configuration
+records the mapping rather than consulting a mutable catalog during replay. A run captures that version at admission
 and keeps it through restart. No configuration change occurs inside a run or
 unresolved maintenance operation. Ephemeral `start_session/1` and one-shot
 `run/2` accept explicit initial instructions, reasoning and system ceiling;
@@ -88,6 +96,13 @@ their own exact verified mapping. Manual `high` conflicts with the existing
 4,096 reply default and refuses unless the operator explicitly configures a
 larger permitted reply limit. M7 does not raise that default or promise every
 current Claude model.
+
+A candidate mapping first passes deterministic conformance, then runs its
+already-required counted live cases through the real session and adapter path.
+The trusted test host labels it unverified and preserves ordinary bounds, policy
+and attempt accounting. Successful retained proof permits ordinary support; a
+failed case follows the fixed disposition procedure. This permits the first
+proof without adding a calibration run or a failed-case retry.
 
 Before a new thinking exchange, leave half the complete request-record capacity
 and up to 8,192 estimated input tokens available for its continuation. Earlier

@@ -10,7 +10,8 @@ Status: **standalone repository seed — founding document**
 Date: **2026-08-14**
 
 **M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
-tool budget and interaction flow in sections 6, 10, 14, 23 and 26, bounded
+tool budget and interaction flow in sections 6, 10, 14, 23 and 26, their
+linked terminology/provenance notes in sections 5 and 12.3, bounded
 provider continuation in section 13.4, and linked decision-trigger dispositions
 in section 27 are authorized proposals. The maintainer extended drafting scope
 to section 13.4 on 2026-09-30. Review both files with M7. Until acceptance, the
@@ -316,11 +317,17 @@ available.
 
 **Proposed M7 continuation amendment, section 13.4.** Core may validate and
 account for a bounded provider-neutral envelope and local references into its
-own reply/request. Adapters still interpret the provider data. Private plaintext
+own reply/request. It may retain the host-resolved mapping descriptor as
+bounded gating data; adapters alone interpret its thinking modes and native
+controls. Private plaintext
 continuation stays under the private store's protections with raw history; it is
 not public history or authority. This narrows opaque ownership only as specified
 in ADR 0044, with versioned readers, exact rendering and rollback evidence before
-implementation. The technical section retains the governing clause until acceptance.
+implementation. Selected Claude tool workflows requiring unchanged thinking
+blocks motivate this change. Legacy sessions retain empty continuation without
+rewriting historical replies; rollback restores a quiescent pre-upgrade backup
+when the old reader cannot handle new records. The technical section retains the
+governing clause until acceptance.
 
 <a id="concept-vision-tools"></a>
 ### 14. Tools and the coding surface
@@ -346,7 +353,8 @@ unfinished cleanup across runs, with no nested or
 writable helpers and no core helper scheduler. Independent parent sessions may
 run concurrently; this adds no global scheduler or restriction on separately
 scoped host orchestration. The active profile is selected from prompt-cost, safety and task
-evidence, counting every advertised tool in the short-prompt target.
+evidence, counting every advertised tool and rendered environment fact,
+including workspace paths, in the short-prompt target.
 
 This narrows the seven-tool/no-built-in-sub-agent principle to support the M7
 coding workflow without adding a team framework. The external review showed

@@ -27,7 +27,7 @@ Concept: [Scope and non-goals](m9-store-engine-successor.md#concept-plan-scope).
 | # | Evidence |
 | --- | --- |
 | 1 | The store conformance suite and the fault-injection suites run against the new adapter on both toolchain pairs |
-| 2 | A migration interrupted at every recorded step converges on rerun to the same root; fixtures at the local adapter's capacity boundary and with the complete [M7 compatibility inventory](../plans/M7-technical.md#technical-plan-compatibility) migrate with identical bytes/order and serve their sessions |
+| 2 | A migration interrupted at every recorded step converges on rerun to the same root; fixtures at the local adapter's capacity boundary and with the complete [M7 compatibility inventory](../plans/M7-technical.md#technical-plan-compatibility) have their Store records migrate with identical bytes/order and serve their sessions; host ledgers are verified unchanged in place outside the Store and remain in whole-root backup/restore |
 | 3 | A root driven to the engine's bound refuses by name and stays openable |
 | 4 | The exact supported predecessor binary refuses the migrated root before writes; the retained pre-migration backup restores through a compatible tool and opens under its matching binary |
 

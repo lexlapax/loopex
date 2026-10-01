@@ -234,7 +234,7 @@ binding amendments and explicit configuration. Together, 0041–0049 are M7's
 proposed prerequisites: lineage, instructions, compaction, model configuration
 and bounded private thinking continuation,
 questions, serial read-only helpers, explicit limits, provider custody and host
-configuration. ADRs 0045/0046 now require the explicit narrow amendment to both
+configuration. ADRs 0044/0045/0046 now require the explicit narrow amendment to both
 vision files, authorized for drafting after external review and still pending
 acceptance. The revised pairs name their exact accepted-clause amendments.
 No proposal is accepted by this preparation; each blocks its dependent outcome.
@@ -244,4 +244,6 @@ ephemeral instruction/reasoning options and read-only helper recovery queries.
 The paired vision proposal now includes section 13.4 after the maintainer
 authorized drafting it; all governing clauses remain visible pending acceptance.
 The [round 3 disposition](../evidence/M7-round-3-disposition.md) records repairs
-and limits. No ADR status changes in this preparation.
+and limits. No ADR status changes in this preparation. The [round 4 report](../evidence/M7-external-review-4.md)
+supersedes that readiness assessment; its [disposition](../evidence/M7-round-4-disposition.md)
+repairs the remaining contracts and records the current internal review.

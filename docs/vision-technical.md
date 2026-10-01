@@ -10,7 +10,8 @@ Status: **standalone repository seed — founding document**
 Date: **2026-08-14**
 
 **M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
-tool budget and interaction flow in sections 6, 10, 14, 23 and 26, bounded
+tool budget and interaction flow in sections 6, 10, 14, 23 and 26, their
+linked terminology/provenance notes in sections 5 and 12.3, bounded
 provider continuation in section 13.4, and linked decision-trigger dispositions
 in section 27 are authorized proposals. The maintainer extended drafting scope
 to section 13.4 on 2026-09-30. Review both files with M7. Until acceptance, the
@@ -325,6 +326,10 @@ Concept: [Stable domain language](vision.md#concept-vision-domain-language)
 | **Code generation** | VM-global immutable set of loaded trusted extension artifacts and module revisions, coordinated across every affected runtime in that VM. |
 | **Resource pack** | Prompts, context, skills, templates, and static assets. “Data-only” means no direct code loading, not inherently safe instructions. |
 | **Projection** | Rebuildable view derived from durable records: model context, public snapshot, search index, or client rendering state. |
+
+**Proposed M7 terminology note, section 5.** Effect tools have executor
+requirements. ADR 0045's interaction tool is settled by the session owner and
+requires no executor job; it still grants no permission.
 
 Use precise qualifiers when saying “agent state.” Session state, private
 journal state, public projection state, provider-native continuation state,
@@ -1113,6 +1118,10 @@ terminal fact keeps it, exactly as cancellation never overwrites one.
 - **`respond_interaction`** answers exactly one pending `interaction_id` with
   host decision context.
 
+**Proposed M7 clarification, section 10.3.** Host policy responses keep decision
+context; model-question responses are bounded user data and grant no authority.
+The exact producer/interaction identity distinguishes these meanings.
+
 If a run is active, Loopex never guesses whether new user input is steering or
 a follow-up. A stale, duplicate, expired, or mismatched interaction response is
 rejected. `abort` is a separate durable cancellation request.
@@ -1453,6 +1462,11 @@ The private journal preserves everything required to recover and project:
 - operation attempts, recovery decisions, and unknown outcomes;
 - compatible opaque provider-continuation sidecars or their references.
 
+**Proposed M7 clarification, section 12.3.** The bounded envelope/local-reference
+continuation and host-resolved descriptor in section 13.4 replace the opaque
+sidecar rule only for ADR 0044's named format. Other provider data retains the
+governing opaque rule above.
+
 Model context, client snapshots, search indexes, and renderings are projections.
 They may be rebuilt or replaced. They never rewrite the facts they summarize.
 
@@ -1655,7 +1669,10 @@ normalization.
 **Proposed M7 amendment to section 13.4.** ADR 0044 narrows the opaque-sidecar
 rule for its bounded continuation format. Core validates the provider-neutral
 closed envelope, identity bindings, local reference layout and its bounded
-expansion for accounting against the owning canonical reply/request. Adapters
+expansion for accounting against the owning canonical reply/request. It also
+retains the host-resolved capability/mapping descriptor as closed gating data;
+core validates declared limits and flags without interpreting thinking modes
+or translating provider options. Adapters
 alone interpret provider block types, signatures and native rendering semantics.
 References never fetch history or artifacts. Exact supported mappings/renderers,
 private record revisions and old-reader/rollback evidence gate implementation.
@@ -1666,8 +1683,11 @@ the runtime. Hosts own access controls and retirement. This selects the existing
 private-store protection alternative above; it does not claim encryption or add
 a key service. Public projections exclude private blocks, apart from the verified
 transient summary text explicitly permitted by ADR 0044. Model switches end
-incompatible reuse without deleting original records. The evidence is the selected
-thinking/tool workflow and bounded generic expansion proof; this permits no
+incompatible reuse without deleting original records. Required evidence covers
+selected Claude workflows requiring unchanged thinking blocks and bounded
+generic expansion. Legacy sessions keep empty continuation without
+synthesizing new historical replies. Rollback uses a quiescent pre-upgrade backup
+when exact old-reader fixtures cannot prove support; this permits no
 provider semantic interpreter or helper scheduler in core.
 
 Model roles such as `fast`, `capable`, or `thinking`, along with a unified
