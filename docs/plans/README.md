@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M7` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M7` is accepted; next candidate `M8` is open.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M6` — 2026-09-29 |
-| Blockers | None; `M7` is accepted and implementation may proceed |
-| Authorized work | Implementation inside the accepted `M7` plan pair, landing on `main` in small reviewed changes |
-| Next maintainer decision | None until `M7` is ready for independent review |
-| Next transition | Move `M7` to In progress and implement the accepted outcomes with `bash scripts/check.sh` green; the completed tested commit then moves it to In review |
+| Blockers | None for `M7` delivery; `M8` cannot be accepted or implemented until `M7` closes; `M8` waits on ADR 0037, ADR 0038, ADR 0050, and ADR 0051 before the outcomes that depend on them |
+| Authorized work | Implementation inside the accepted `M7` plan pair, landing on `main` in small reviewed changes; planning and review for Open `M8`, with no `M8` product implementation |
+| Next maintainer decision | Record disposition [ADR 0037](../adr/0037-host-configuration-and-path-discovery.md#concept), [ADR 0038](../adr/0038-installed-distribution-and-release-artifact.md#concept), [ADR 0050](../adr/0050-daemon-attached-conversation.md#concept), and [ADR 0051](../adr/0051-store-readiness-marker-backup-and-restore.md#concept) now; afterward, none until `M7` is ready for independent review; `M8` cannot be accepted before `M7` closes |
+| Next transition | Complete `M7`, move it to In progress, then make its tested candidate by moving it to In review; run the closure matrix and independent review, close it, then accept or reject `M8` |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -38,6 +38,15 @@ binds every historical pair's digests and records the integration instruction.
 All prerequisites are accepted and implementation may begin. M7's outcome rows
 remain Open; its register stays Accepted until product implementation starts.
 No partially accepted subset authorizes dependent implementation.
+
+The maintainer opened `M8` for planning on 2026-09-30 from accepted `main`. The
+[opening record](../developer/agent-context-map.md#disposition-m8-opening-2026-09-30)
+holds the instruction. M8 is a planning lookahead on its own branch: it carries
+no implementation authority, and the capsule's request to disposition its four
+Proposed ADRs is satisfied only after they are reconciled with the closed M7
+baseline. The status contract admits an Open successor only beside an Accepted
+predecessor, so the `m8` branch keeps M7's row at Accepted and rejoins `main`
+under that rule.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the
 exact seed-bootstrap sentinel shown above. After that, its milestone name is
@@ -150,6 +159,7 @@ representable.
 | `M5` | Closed | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 | `M6` | Closed | [concept](M6.md) | [technical depth](M6-technical.md) | — |
 | `M7` | Accepted | [concept](M7.md) | [technical depth](M7-technical.md) | — |
+| `M8` | Open | [concept](M8.md) | [technical depth](M8-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact

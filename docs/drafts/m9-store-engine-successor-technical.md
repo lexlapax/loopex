@@ -12,10 +12,11 @@ Concept: [Design decisions](m9-store-engine-successor.md#concept-plan-decisions)
 
 | Decision | Acceptance point |
 | --- | --- |
-| [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept) | Accepted in M8 with its engine cell filled from the retained experiment record, before any M9 adapter code |
+| [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept) | Accepted with M9, its engine cell filled from the retained experiment record on both toolchain pairs, before any M9 adapter code |
 
-M8 closes first. It supplies the format marker, the reader boundary, and backup
-and restore that the migration starts from.
+M8 closes first. Under ADR 0051 it supplies the format marker, the reader
+boundary, and backup and restore that the migration starts from. The selection
+experiment is M9 preparation, not M8 evidence.
 
 Capacity configuration follows ADR 0036's versioned successor-schema or explicit
 ADR 0049 amendment path. Version-1 config keeps its closed members; migration

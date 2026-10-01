@@ -59,6 +59,8 @@ a decision adds a new record rather than rewriting the old one.
 | 0047 | Reference host run defaults | Accepted | [Decision](0047-reference-host-run-defaults.md#concept) | [Technical depth](0047-reference-host-run-defaults-technical.md#technical-depth) |
 | 0048 | Host provider routing and credential bindings | Accepted | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
 | 0049 | Explicit host configuration | Accepted | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
+| 0050 | Daemon-attached conversation | Proposed | [Decision](0050-daemon-attached-conversation.md#concept) | [Technical depth](0050-daemon-attached-conversation-technical.md#technical-depth) |
+| 0051 | Store readiness: marker, reader boundary, backup and restore | Proposed | [Decision](0051-store-readiness-marker-backup-and-restore.md#concept) | [Technical depth](0051-store-readiness-marker-backup-and-restore-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -207,9 +209,19 @@ runs inside M5.
 0036 to 0038 were proposed for the earlier installed-operator plan. The current
 sequence places their work in M8 installation/readiness and M9 store migration,
 after M7 coding-agent proof. ADR 0037 extends M7's explicit configuration with
-installed discovery and writers; it introduces no separate role/provider schema.
-All three remain Proposed. Exact installed/engine versions and retained rollback
-artifacts must be selected before their successor acceptance.
+installed discovery, writers and lifecycle commands; it introduces no separate
+role/provider schema. All three remain Proposed. Exact installed/engine
+versions and retained rollback artifacts must be selected before their
+successor acceptance.
+
+0050 and 0051 were proposed on 2026-09-30 with the Open
+[M8 plan](../plans/M8.md#concept). 0050 lets the conversation command attach to
+the running service and makes the service read ADR 0049's configuration file at
+startup. 0051 takes the format marker, reader boundary, backup and restore out
+of 0036, so the installed release's readiness work does not wait on the engine
+experiment; 0036 keeps the engine selection, migration and capacity refusal for
+the M9 draft. M8's prerequisites are 0037, 0038, 0050 and 0051. None can be
+accepted before M7 closes.
 
 0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on
 2026-09-27. It adds an ephemeral composition profile beside the durable one,

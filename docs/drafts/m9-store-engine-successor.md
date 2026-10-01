@@ -19,10 +19,12 @@ Technical depth: [Prerequisites](m9-store-engine-successor-technical.md#technica
 > never loses a committed fact?
 
 The `0.2` local store is a full-replay log. It stops at 256 MiB and asks the
-operator to retire the root. M8 adds a format marker, a reader boundary, and
-backup and restore. It also takes the engine decision from a retained measured
-experiment under [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept).
-M9 builds what that decision selects.
+operator to retire the root. The Open [M8 plan](../plans/M8.md#concept) adds a
+format marker, a reader boundary, and backup and restore under
+[ADR 0051](../adr/0051-store-readiness-marker-backup-and-restore.md#concept).
+M9 takes the engine decision from a retained measured experiment under
+[ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept)
+and builds what that decision selects.
 
 <a id="concept-plan-outcomes"></a>
 ### Outcomes
@@ -60,5 +62,6 @@ engine migration; complete backup/restore includes it and its child sessions.
 Technical depth: [Prerequisites](m9-store-engine-successor-technical.md#technical-plan-prerequisites).
 
 [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept) is the governing
-decision. It is accepted by M8, once its engine cell is filled from the
-experiment record, and M9 implements the successor half it names.
+decision. Its measured selection experiment runs as M9 is prepared. The pair is
+accepted with M9, once its engine cell is filled from the experiment record,
+and M9 implements the engine, migration and capacity refusal it names.

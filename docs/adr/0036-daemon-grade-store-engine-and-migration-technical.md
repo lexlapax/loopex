@@ -81,10 +81,10 @@ target writes, after verification, between rename and source retirement, and
 after completion, and asserts the converged state and the exit class of the
 next run in each case.
 
-**Reader boundary.** The installed candidate adds a container-format marker
-and refuses unknown formats before mutation. A missing marker identifies only
-a legacy container, not the durable-record capabilities it contains. Validate
-record support before serving it. The complete [M7 compatibility inventory](../plans/M7-technical.md#technical-plan-compatibility)
+**Reader boundary.** The container-format marker, the unknown-format refusal
+and the record-support check belong to
+[ADR 0051](0051-store-readiness-marker-backup-and-restore.md#concept);
+migration reads its source through that boundary. The complete [M7 compatibility inventory](../plans/M7-technical.md#technical-plan-compatibility)
 must appear in source fixtures and backup inventory, including child sessions,
 receipts, continuation, command revisions and immutable selections. The host
 ledger is outside `Loopex.Store`: in-place engine migration leaves it at its
@@ -104,12 +104,11 @@ candidate does not require migration merely because a supported local root lacks
 a marker. Retain exact old binaries to test their real behavior. Never claim an
 old binary emits a new refusal class or honors a marker it never understood.
 
-**Backup and restore.** `loopex store backup <root> <archive>` produces one
-archive of a closed root with a manifest of every file, its size and SHA-256,
-the format version and the source commit that produced it; `loopex store
-restore <archive> <root>` refuses a non-empty target, verifies every digest,
-and restores atomically. Rollback is `restore` of the pre-migration backup
-under the previous release, and the plan proves it.
+**Backup and restore.** ADR 0051 defines `loopex store backup` and `loopex
+store restore`, their archive and their refusals. Migration retires its source
+under an archive name that restore command accepts. Rollback is `restore` of
+the pre-migration backup under the previous release, and the engine
+milestone's plan proves it.
 
 <a id="technical-adr-0036-compatibility"></a>
 ### Compatibility and Rollback Mechanics
@@ -139,7 +138,8 @@ do not apply; no extension state exists.
   withdrew its own successor half.
 
 **Open before acceptance.** The engine cell and the retained experiment record
-it cites; the adapter application's name; the exact capacity ceiling the
+it cites, produced as the store successor milestone is prepared and not as M8
+evidence; the adapter application's name; the exact capacity ceiling the
 definite refusal enforces and how the operator configures it, which ADR 0049's
 successor schema version or an explicit ADR 0049 amendment carries once this
 pair names the key. The closed version-1 schema is never extended in place.

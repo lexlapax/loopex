@@ -21,6 +21,16 @@ installed successor reuses that reader and schema, then adds a documented
 configuration writers and lifecycle diagnostics. Core and reusable composition
 still receive explicit values and never discover home directories.
 
+Lifecycle commands start, stop and report on the service, and a command that
+asks for the service may start it on demand. The service reads the home's
+configuration file at startup under
+[ADR 0050](0050-daemon-attached-conversation.md#concept). A service started on
+demand inherits the environment of the command that starts it. That command
+first checks that each configured credential reference is present, never
+reading a value, and refuses by name without starting anything when one is
+absent. Readiness is reported as it is: serving, still classifying helper
+history, or closed with the session whose history could not be read.
+
 This proposal no longer introduces another role/provider schema or fixes a
 session's model at process launch. ADRs 0044/0048/0049 govern committed selection,
 custody and explicit configuration. Only named environment references are

@@ -2,11 +2,12 @@
 
 Future milestone pairs, not registered or accepted. A draft authorizes no
 implementation or release. The [milestone register](../plans/README.md) owns
-status; [M7 coding-agent proof](../plans/M7.md#concept) is Accepted for implementation.
+status; [M7 coding-agent proof](../plans/M7.md#concept) is Accepted for implementation
+and [M8 installed durable operator](../plans/M8.md#concept) is its Open planning
+successor, moved from this directory on 2026-09-30.
 
 | Draft | Concept | Technical depth |
 | --- | --- | --- |
-| M8: installed durable operator | [Concept](m8-installed-durable-operator.md#concept) | [Technical depth](m8-installed-durable-operator-technical.md#technical-depth) |
 | M9: store engine successor | [Concept](m9-store-engine-successor.md#concept) | [Technical depth](m9-store-engine-successor-technical.md#technical-depth) |
 | M10: governed extension runtime | [Concept](m10-governed-extension-runtime.md#concept) | [Technical depth](m10-governed-extension-runtime-technical.md#technical-depth) |
 

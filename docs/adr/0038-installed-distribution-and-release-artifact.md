@@ -10,8 +10,8 @@ Technical depth: [Artifact contents, companion placement and smoke proofs](0038-
   rule that a minimal runtime distribution carries no compiler, and
   [ADR 0019](0019-host-owned-provider-protection.md#concept)'s separate
   protected provider companion, to an installed artifact
-- **Depends on:** [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for installed initialization and configuration discovery
-- **Prerequisite for:** M8 outcomes 1, 5 and 6 (draft; this was M6 before the maintainer's reframing of 2026-09-26), accepted before any release
+- **Depends on:** [ADR 0037](0037-host-configuration-and-path-discovery.md#concept) for installed initialization and configuration discovery, and [ADR 0051](0051-store-readiness-marker-backup-and-restore.md#concept) for backup and restore
+- **Prerequisite for:** M8 outcomes 1, 6 and 7 (this was M6 before the maintainer's reframing of 2026-09-26), accepted before any release
   build, manifest or install script is written
 
 <a id="concept-adr-0038-decision"></a>
@@ -87,7 +87,7 @@ minimal runtime distribution carries no compiler.
 7. **The install and rollback contract is explicit.** Install is extract and
    run; upgrade is extract beside and switch. Switching back is supported only
    when the exact prior reader is proved compatible with the root. Otherwise
-   restore a quiescent pre-upgrade backup using ADR 0036 and its matching binary.
+   restore a quiescent pre-upgrade backup using ADR 0051 and its matching binary.
    The plan proves the binary and root procedure together. Uninstall is delete
    the directory; the home is the operator's and is never deleted.
 8. **Publication is a separate maintainer decision** after closure, gated on
@@ -119,7 +119,7 @@ until publication and permanent afterward. The archive's contents are
 therefore fixed by this decision, not by convenience: one archive contains the
 whole reference host and nothing that is a separately versioned library. Hex
 packages are not published by M8. Binary rollback by switching directories
-requires proved reader compatibility; otherwise use ADR 0036's backup restore
+requires proved reader compatibility; otherwise use ADR 0051's backup restore
 with its matching binary. The two are proved together in
 one demonstration so that "restart the old binary" is never mistaken for a
 plan.

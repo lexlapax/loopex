@@ -57,6 +57,7 @@ starting from the founding vision and moving to the implemented subsystems.
 | Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
 | Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
 | M7 coding-agent planning | [Open M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | ADRs 0041–0049 and the narrow vision amendment remain proposed. Read the [external review](../evidence/M7-external-review-1.md), [scope decisions](#disposition-m7-audit-scope-2026-09-30) and [thinking-continuation choice](#disposition-m7-thinking-continuation-2026-09-30), [authorized section 13.4 amendment](#disposition-m7-continuation-vision-amendment-2026-09-30), [round 5 decisions](#disposition-m7-round5-outage-2026-09-30) and [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) before dependent work. |
+| M8 installed-operator planning | [Open M8 plan](../plans/M8.md#concept) | [Prerequisites and proof](../plans/M8-technical.md#technical-depth) | Planning lookahead beside Accepted M7; no product implementation. Read the [opening record](#disposition-m8-opening-2026-09-30) and Proposed ADRs 0037, 0038, 0050 and 0051. ADR 0036 now covers only the M9 engine, migration and capacity refusal. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Architecture as implemented | [Architecture](architecture.md#concept) | [Architecture invariants and mechanics](architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
@@ -367,6 +368,7 @@ end of the file.
 | M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27); [implementation start](#disposition-m6-implementation-start-2026-09-27) |
 | M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30), [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30) and [proposed rollback retarget](#disposition-m7-round5-rollback-proposal-2026-09-30); [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) and [proposed logical-matrix rule](#disposition-m7-round6-matrix-proposal-2026-09-30); earlier choices remain recorded in the [M7 plan](../plans/M7.md#concept) |
 | M7 acceptance, 2026-09-30 | [Plan pair, ADRs 0041–0049 and paired vision amendments accepted](#disposition-m7-acceptance-2026-09-30); implementation may begin under the accepted ownership sequence |
+| M8 planning, from 2026-09-30 | [Opened as the planning successor from accepted `main`](#disposition-m8-opening-2026-09-30); six author proposals and three maintainer choices remain open |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -6502,3 +6504,49 @@ The roadmap pair and project README are updated with this acceptance; M8–M10
 remain drafts, with no successor implementation authority. The maintainer
 explicitly authorizes committing/pushing this record and merging/pushing it to
 `main`. No tag, package, release or milestone closure is authorized.
+
+<a id="disposition-m8-opening-2026-09-30"></a>
+### M8 opened as the planning successor — 2026-09-30
+
+After M7's acceptance reached `main` at
+`e78fa64c10ac68b73fd8965098653d2917820e51`, the maintainer asked for a
+zoom-out on what M8 should contain, and then instructed:
+
+> m8 based on your analysis above. m8 should be it's own branch based on main
+> as a base to branch from.
+
+This opens the [M8 plan pair](../plans/M8.md#concept) for planning and review
+on branch `m8`, created from that `main` commit. The earlier installed-operator
+draft moved from `docs/drafts/` into `docs/plans/` and was rewritten against
+M7's accepted contracts. The register records M8 as `Open` beside Accepted M7.
+The status contract admits that shape only while the predecessor is Accepted,
+which is why the lookahead branches from the governance-only integration and
+not from M7's product branch.
+
+The analysis made these proposals, which the plan carries as reversible author
+proposals P1 to P6. The instruction to open from the analysis does not select
+them; they are selected or changed at M8's acceptance.
+
+| # | Proposal |
+| --- | --- |
+| P1 | The conversation attaches to the running service in M8, as a new outcome |
+| P2 | The store engine decision moves to M9; Proposed ADR 0051 takes the marker, reader boundary, backup and restore out of Proposed ADR 0036 |
+| P3 | The rollback predecessor is the closed M7 source build; upgrade between two installed releases is claimed by the release after M8 |
+| P4 | Credentials stay environment references; a service started on demand inherits its starter's environment, and that command refuses by name when a reference is absent |
+| P5 | Attachment is requested explicitly and never implied by a home's existence |
+| P6 | An unreadable session history is recovered by restore from backup, with no per-session quarantine |
+
+Three choices are the maintainer's alone and remain open: the installed
+version label, the supported hosts with their minimum base systems, and the
+macOS download path.
+
+This change also creates Proposed [ADR 0050](../adr/0050-daemon-attached-conversation.md#concept)
+and [ADR 0051](../adr/0051-store-readiness-marker-backup-and-restore.md#concept),
+and narrows Proposed ADRs 0036, 0037 and 0038 to match. No accepted ADR, no
+vision text and no M7 file changes. The M9 draft now owns the engine selection
+experiment.
+
+M8 carries no implementation authority. It cannot be accepted before M7
+closes, and its four prerequisite ADRs are reconciled with the delivered M7
+baseline before any of them is dispositioned. No release version, package,
+publication or merge is authorized by this record.

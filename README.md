@@ -26,7 +26,7 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; active milestone `M7` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M7` is accepted; next candidate `M8` is open.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
@@ -35,7 +35,10 @@ The accepted [M7 coding-agent proof](docs/plans/M7.md#concept) is ready for
 implementation: conversation continuity, host instructions, compaction,
 model/reasoning control, questions, conversational chat, bounded read-only
 helpers and operator validation. Its nine outcomes remain to be proved. M6 is
-the last closed product checkpoint; successors remain drafts.
+the last closed product checkpoint. The Open
+[M8 installed durable operator plan](docs/plans/M8.md#concept) is its planning
+successor and cannot be accepted before M7 closes; later successors remain
+drafts.
 
 ## What Loopex Provides
 

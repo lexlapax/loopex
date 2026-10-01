@@ -10,15 +10,25 @@ Technical depth: [Selection procedure, migration contract and candidate evidence
   for the store selection only, once this pair is accepted; ADR 0031's local
   adapter, its documented ceilings and its root-retirement procedure remain
   the historical `0.2` record; migration fixtures also include valid post-M7 records
-- **Prerequisite for:** M8 outcomes 3 and 6 (draft; this was M6 before the maintainer's reframing of 2026-09-26, and the successor is the M9 draft), accepted before any format
-  marker, reader boundary, backup or restore code is written; the engine
-  adapter, the migration and the capacity refusal it fixes are implemented by
-  the successor milestone under this same decision
+- **Prerequisite for:** the M9 draft's engine adapter, migration and capacity
+  refusal, accepted with its engine cell filled before any adapter or
+  migration code is written. The format marker, reader boundary, backup and
+  restore this record first proposed are decided separately by
+  [ADR 0051](0051-store-readiness-marker-backup-and-restore.md#concept)
+  for M8
 
 <a id="concept-adr-0036-decision"></a>
 ### Context and Decision
 
 Technical depth: [Selection procedure](0036-daemon-grade-store-engine-and-migration-technical.md#technical-adr-0036-decision).
+
+**Scope split, 2026-09-30.** This record first proposed the store engine and
+the installed release's readiness work together. The readiness work is now
+Proposed [ADR 0051](0051-store-readiness-marker-backup-and-restore.md#concept),
+so that backup and restore do not wait on the engine experiment. This record
+keeps the engine selection, the migration and the capacity refusal. Where the
+text below mentions the marker, the reader boundary, backup or restore, ADR
+0051 owns their contract and this record states only how migration uses them.
 
 ADR 0031 selected the existing local adapter for `0.2.0` and stated its
 ceilings plainly: a hard 256 MiB log capacity, a 4 MiB frame ceiling, full
@@ -58,17 +68,17 @@ measurement would repeat the mistake ADR 0031 corrected.
    operator command, never a side effect of opening a root. It converges when
    interrupted, it never destroys the source until the target verifies, and
    the oldest reader of a migrated root is the release that ships the engine.
-   The installed candidate adds a format marker and its own unknown-format
-   refusal. This cannot retrofit released readers. Container format, durable
+   The installed candidate's format marker and unknown-format refusal come
+   from ADR 0051. They cannot retrofit released readers. Container format, durable
    record capabilities and binary version are distinct; exact reader fixtures
    must establish supported combinations before acceptance. Store records migrate;
    M7's host ledger remains byte-for-byte at its
    host-root paths outside the Store. Whole-root backup and restore include them.
-4. **Backup and restore are operator commands on a closed root** that produce
-   and consume one verifiable archive, and restore is the rollback procedure:
-   a previous binary is not a rollback plan when storage has changed, so the
-   plan's rollback proof is a restore of the pre-migration backup under the
-   previous release.
+4. **Restore is the migration's rollback procedure.** ADR 0051 supplies
+   backup and restore as operator commands on a closed root. A previous binary
+   is not a rollback plan when storage has changed, so the engine milestone's
+   rollback proof is a restore of the pre-migration backup under the previous
+   release.
 5. **A capacity refusal is definite and survivable** on the new adapter: the
    Store answers a refusal without terminating, so a daemon keeps its
    attachments and stops in an orderly way. ADR 0031 rejected this change for
@@ -81,9 +91,8 @@ measurement would repeat the mistake ADR 0031 corrected.
 
 Technical depth: [Migration and interrupted-import contract](0036-daemon-grade-store-engine-and-migration-technical.md#technical-adr-0036-migration).
 
-In the installed candidate, `loopex store backup` and `loopex store restore` exist, refuse a
-live root, print what they will do before they do it, and `loopex doctor`
-reports the root's format marker. From the release that ships the engine, an
+Backup, restore and the marker report arrive with the installed candidate
+under ADR 0051. From the release that ships the engine, an
 operator opens a root and it opens in bounded time whatever its history
 length, because replay is bounded by the index rather than by the log; the
 256 MiB retirement procedure disappears for migrated roots; `loopex store
@@ -108,7 +117,7 @@ so the vision's list applies to it in full: supported source and target
 versions, forward migration, interrupted-migration detection and recovery,
 backup and restore as the downgrade policy, the previous-binary reopening
 boundary, and an exact packaged rollback procedure. The installed candidate retains the local storage container and discharges
-its own reader-capability obligations: the format marker,
+its own reader-capability obligations under ADR 0051: the format marker,
 the reader boundary, and backup and restore. The private journal schema is
 surface 1 in the vision's list and freezes nothing here; the public protocol
 is untouched. Rejected alternatives and the reasons are in the companion.

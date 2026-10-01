@@ -139,8 +139,11 @@ were accepted at `2986150b878151524ecdd9bac5a9779e69e196b4`; the
 [disposition](developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds those bytes. M7 owns continuity, instructions, compaction, model control,
 questions, conversational chat, bounded helpers and operator validation.
-The installed durable operator, store engine and governed extension runtime
-[drafts](drafts/README.md) for M8–M10 follow it and remain unaccepted. M7 has no
+The Open [M8 installed durable operator plan](plans/M8.md#concept) is its
+planning successor: installation, home configuration, service lifecycle, an
+attached conversation, and backup and restore. The store engine and governed
+extension runtime [drafts](drafts/README.md) for M9 and M10 follow. All three
+remain unaccepted, and M8 cannot be accepted before M7 closes. M7 has no
 selected release version or publication authority; this roadmap grants none.
 
 Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technical-roadmap-minimal-runnable)

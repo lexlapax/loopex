@@ -31,6 +31,21 @@ temporary in the same directory, fsync, rename and fsync the directory. Use a
 single owner lock with explicit stale-lock recovery; PID existence alone is not
 proof against PID reuse. A failed update leaves prior bytes unchanged.
 
+**Lifecycle and readiness.** The installed lifecycle commands pass the
+selected file to `loopex daemon --config` under ADR 0050; they add no second
+reader. Trace controls stay daemon startup inputs under ADR 0049, from flags
+or the file, and no attached client supplies them. Concurrent starts converge
+on one daemon through the existing placement lock. On-demand start runs the
+diagnostic command's reference-presence check for every configured credential
+reference and refuses by name before spawning when one is absent. The spawned
+service inherits that command's environment and nothing else supplies
+credentials. Readiness has three states: `serving`; `classifying`, with ADR
+0046's covered and enumerated session counts; and `closed`, with the session
+identifier from ADR 0046's refusal. On-demand start waits for `serving` up to
+a bound fixed before acceptance and otherwise reports the state it found. A
+discovered file reuses ADR 0049's `file#pointer` origin; inspection also
+states which file was selected and why, and adds no origin member.
+
 The narrow ADR 0003 amendment permits only the installed reference host's
 launcher/configuration layer to read the user's home and pass explicit absolute
 paths inward. All tests/helpers still use temporary homes. No other application
@@ -43,7 +58,9 @@ Concept: [Observable consequences](0037-host-configuration-and-path-discovery.md
 
 M8 must prove explicit versus discovered configuration equivalence, origin
 reporting, temporary-home isolation, atomic update crash cuts, stale-lock refusal,
-missing provider/policy refusal and no credential read during inspection. Its
+missing provider/policy refusal and no credential read during inspection. It
+must also prove concurrent-start convergence, the absent-reference refusal
+before any spawn, and each of the three readiness states. Its
 operator demonstration uses the actual installed artifact and matching rollback
 artifact. M7 does not claim these outcomes.
 
