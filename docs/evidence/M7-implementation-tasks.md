@@ -86,11 +86,20 @@ Part of the [evidence index](README.md).
   ordering passes with 925 covered entries. The coordinated v3 decoder/writer,
   configuration and exact-genesis live facade remain unchecked.
 
+- 2026-10-01: literal artifact-read revision 1 binds both complete generation
+  triples to retained canonical preimages. Four released reference revisions
+  share the legacy null capability; the planned 1.1.0 range definition has an
+  explicit binding. Unknown read generations, duplicate selections and modified
+  bindings refuse. Focused capability/genesis tests pass 12 cases in 0.04 seconds;
+  compiled documentation ordering passes with 930 covered entries. Executor
+  registration, live range retrieval and v3 genesis binding remain pending.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
 - [ ] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
 - [ ] Pin schema definitions, digests, compatibility vectors and provider mappings.
+- [x] Pin legacy and planned M7 read-definition canonical preimages/digests and the revision-1 literal artifact-read capability table.
 - [ ] Create the M7 fixture manifest with exact prompts, budgets, allowed changes and objective results.
 - [ ] Assign every operator step and negative scenario to a named test or demonstration.
 - [ ] Prepare the indexed closure-evidence scaffold with results marked Pending.
@@ -107,6 +116,7 @@ Part of the [evidence index](README.md).
 ## T02 — Handle large tool output and bounded artifact reads
 - [ ] Prepare bounded excerpts while retaining complete original results.
 - [ ] Implement capability checks from the exact frozen tool definitions and literal capability table.
+- [x] Implement and test pure exact-generation derivation and retained-binding validation; runtime selection and executor dispatch integration remain pending.
 - [ ] Keep replay independent of current host-registry availability.
 - [ ] Validate artifact ownership and arguments in the session owner before policy admission; add resolved executor data after approval.
 - [ ] Implement 4-KiB range reads, encoded-result limits, offsets, progress and EOF.
