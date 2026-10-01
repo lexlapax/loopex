@@ -240,6 +240,7 @@ defmodule Loopex.Executor.Local do
   @job_context_keys [
     :loopex_cleanup_grace_ms,
     :loopex_process_probe,
+    :loopex_excluded_env_names,
     :loopex_inflight_table,
     :loopex_effect_owner,
     :loopex_cleanup_episode,
@@ -288,7 +289,11 @@ defmodule Loopex.Executor.Local do
   ## Technical depth
 
   Lease pids and the ledger path are edge-private. Identity, epoch, and fence
-  are the plain values jobs and receipts bind.
+  are the plain values jobs and receipts bind. `:excluded_env_names` is a
+  trusted launch-only list of at most 17 sorted unique environment names,
+  including the legacy provider key. It defaults to that key alone and never
+  enters jobs or receipts. Composition validates credential-slot policy before
+  supplying this list; this executor validates its bounded launch representation.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options) when is_list(options), do: GenServer.start_link(__MODULE__, options)
@@ -1236,6 +1241,7 @@ defmodule Loopex.Executor.Local do
 
     process_probe = Keyword.get(options, :process_probe, @default_process_probe)
     claim_wait_ms = Keyword.get(options, :claim_wait_ms, @claim_wait_ms)
+    excluded_env_names = Keyword.get(options, :excluded_env_names, [@credential_name])
 
     # Concept: one paired sample of both clocks, from one place a case can
     # substitute.
@@ -1266,7 +1272,7 @@ defmodule Loopex.Executor.Local do
         is_integer(claim_wait_ms) and claim_wait_ms >= 0 and
         is_binary(process_probe) and String.starts_with?(process_probe, "/") and
         not String.contains?(process_probe, <<0>>) and is_function(clock_provider, 0) and
-        is_function(open_authority_close, 2) and
+        is_function(open_authority_close, 2) and valid_excluded_env_names?(excluded_env_names) and
         Enum.all?(leases, fn {id, pid} -> is_binary(id) and is_pid(pid) end)
 
     with true <- valid,
@@ -1281,6 +1287,7 @@ defmodule Loopex.Executor.Local do
       # committed value with its live owner, which is what `cancel/2` consumes.
       Process.put(:loopex_cleanup_grace_ms, cleanup_grace_ms)
       Process.put(:loopex_process_probe, process_probe)
+      Process.put(:loopex_excluded_env_names, excluded_env_names)
 
       # Concept: the in-flight table belongs to this executor, not to whichever
       # caller happened to start the first job.
@@ -1308,6 +1315,7 @@ defmodule Loopex.Executor.Local do
          cleanup_grace_ms: cleanup_grace_ms,
          claim_wait_ms: claim_wait_ms,
          process_probe: process_probe,
+         excluded_env_names: excluded_env_names,
          session: session,
          dispatch_closed: false,
          dispatch_cell: :atomics.new(1, signed: false),
@@ -1653,6 +1661,8 @@ defmodule Loopex.Executor.Local do
 
       {worker, monitor} =
         spawn_monitor(fn ->
+          Process.put(:loopex_excluded_env_names, state.excluded_env_names)
+
           result =
             drain_groups_work(
               executor,
@@ -2252,6 +2262,7 @@ defmodule Loopex.Executor.Local do
 
     Process.put(:loopex_cleanup_grace_ms, job_cleanup_grace_ms(placement, job))
     Process.put(:loopex_process_probe, placement.process_probe)
+    Process.put(:loopex_excluded_env_names, placement.excluded_env_names)
     Process.put(:loopex_inflight_table, placement.inflight_table)
     Process.put(:loopex_effect_owner, placement.executor)
 
@@ -4566,6 +4577,7 @@ defmodule Loopex.Executor.Local do
     table = inflight_table()
     grace = cleanup_grace_ms()
     probe = process_probe()
+    excluded_env_names = excluded_env_names()
     session_fence = Process.get(:loopex_session_fence)
 
     # Progress is delivered by the execute caller, not by the process owner. A
@@ -4584,6 +4596,7 @@ defmodule Loopex.Executor.Local do
         Process.put(:loopex_inflight_table, table)
         Process.put(:loopex_cleanup_grace_ms, grace)
         Process.put(:loopex_process_probe, probe)
+        Process.put(:loopex_excluded_env_names, excluded_env_names)
         Process.put(:loopex_session_fence, session_fence)
 
         case await_owned_process_start(caller, guard, tag, job.job_id) do
@@ -5778,6 +5791,21 @@ defmodule Loopex.Executor.Local do
     open_launcher("/usr/bin/env", [], environment, workspace, before_open)
   end
 
+  @doc false
+  @spec launcher_probe_port(binary(), :coding | :demonstration, (-> term()), [binary()]) ::
+          port()
+  def launcher_probe_port(workspace, kind, before_open, excluded_env_names) do
+    true = valid_excluded_env_names?(excluded_env_names)
+    prior_context = snapshot_job_context()
+    Process.put(:loopex_excluded_env_names, excluded_env_names)
+
+    try do
+      launcher_probe_port(workspace, kind, before_open)
+    after
+      restore_job_context(prior_context)
+    end
+  end
+
   defp launcher_port_options(environment, workspace) do
     [
       :binary,
@@ -5809,8 +5837,9 @@ defmodule Loopex.Executor.Local do
   # ones approximates replacement in the only vocabulary the option has. It is
   # not atomic replacement: another process in this VM can add a differently
   # named variable after the snapshot and before the spawn. The provider
-  # credential is therefore removed explicitly after the snapshot, whatever the
-  # intended environment contains and whenever that key was added.
+  # credential and every host-configured exclusion are therefore removed
+  # explicitly after the snapshot, whatever the intended environment contains
+  # and whenever those names were added.
   #
   # `env -i` in the arguments is kept. It is the exact construction boundary for
   # the downstream command, which receives only the declared `PATH`. M2 makes no
@@ -5818,12 +5847,29 @@ defmodule Loopex.Executor.Local do
   # mutation of arbitrary environment names inside this VM.
   defp spawn_environment(environment) do
     cleared = for {name, _value} <- System.get_env(), do: {String.to_charlist(name), false}
-    credential = String.to_charlist(@credential_name)
+    excluded = Enum.map(excluded_env_names(), &String.to_charlist/1)
 
     (cleared ++ environment)
-    |> Enum.reject(fn {name, _value} -> name == credential end)
-    |> Kernel.++([{credential, false}])
+    |> Enum.reject(fn {name, _value} -> name in excluded end)
+    |> Kernel.++(Enum.map(excluded, &{&1, false}))
   end
+
+  # Concept: each executor carries its own immutable launch exclusions.
+  # Technical depth: job callers restore their previous context after execution;
+  # launch and drain workers receive the owning executor's list explicitly.
+  # Cleanup helpers use the same context and launch boundary as ordinary jobs.
+  defp excluded_env_names,
+    do: Process.get(:loopex_excluded_env_names, [@credential_name])
+
+  defp valid_excluded_env_names?(names) when is_list(names) and length(names) in 1..17 do
+    @credential_name in names and names == Enum.sort(Enum.uniq(names)) and
+      Enum.all?(names, fn name ->
+        is_binary(name) and byte_size(name) in 1..128 and
+          Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, name)
+      end)
+  end
+
+  defp valid_excluded_env_names?(_), do: false
 
   defp child_environment do
     [

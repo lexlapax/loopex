@@ -102,6 +102,8 @@ Part of the [evidence index](README.md).
   private credential bootstrap and cleanup path.
 - Done: shared explicit durable binding loading and version-2 plane construction;
   borrowing hosts retain custody while issuing fresh trace capabilities.
+- Done: executor-local launch exclusions reach ordinary jobs and cleanup helpers;
+  first images exclude all 17 names even when reintroduced after the snapshot.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -117,6 +119,29 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: The trusted local executor accepts a bounded, sorted unique
+  `excluded_env_names` startup list containing the legacy provider key. It
+  retains that list only in private executor/job context, transfers it to launch
+  and drain workers, and restores the caller's context after execution. The
+  single production Port boundary explicitly removes every listed name after
+  the ambient snapshot; ordinary jobs and cleanup helpers use that boundary.
+  Existing jobs and receipt fields are unchanged. A real first-image witness
+  reinserts all 17 admitted names after the snapshot for both coding and
+  demonstration environments. A separate actual-job trace proves that configured
+  exclusions reach the ordinary launch and its cleanup helpers; malformed lists
+  refuse before ledger creation. The focused executor and coding suites pass
+  147 cases on current in 122.0 seconds and on the floor in 119.4 seconds.
+  Complete outputs:
+  - `/private/tmp/loopex-m7-executor-exclusions-current.log`, SHA-256
+    `6987a3d3bf4ab8d2a4d815e022a371b9adb0b1429a27789323eee87f8986502d`.
+  - `/private/tmp/loopex-m7-executor-exclusions-floor.log`, SHA-256
+    `b7f8153ed99e9a957c3291da5228e489feb0f02f2919e73e2071da31950c735e`.
+  The first sandboxed invocation could not acquire Mix's local TCP lock and
+  executed no tests; the recorded runs used the authorized local test environment.
+  Composition forwarding, project discovery, resource-import executors and
+  placement probes remain pending. Version-2 credential planes are still
+  refused by durable runtime composition until those paths join.
 
 - 2026-10-01: CredentialPlane's explicit-binding branch and CredentialHost.open/1
   now share one loader. It validates all references before environment access,
@@ -1141,6 +1166,8 @@ Part of the [evidence index](README.md).
 - [ ] Implement named provider and credential bindings through the existing custody boundaries.
 - [x] Admit the durable adapter's closed token-route branch and select the committed provider before child startup; prove selected private bootstrap and unbound-route refusal.
 - [x] Share explicit durable credential loading between direct and borrowing plane constructors, with complete-name validation, deduplicated reads, joined partial-start cleanup and fresh borrowed trace capabilities.
+- [x] Carry configured launch exclusions through executor job and drain ownership, preserving legacy receipts; prove first-image exclusion after reinsertion and real job/helper propagation.
+- [ ] Forward validated exclusions through composition executors, project Git discovery, resource imports and placement probes before admitting version-2 planes.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
 - [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.

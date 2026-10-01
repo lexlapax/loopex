@@ -2240,6 +2240,100 @@ defmodule Loopex.Executor.LocalTest do
     assert :absent = Local.receipt(fixture.executor, job.job_id)
   end
 
+  test "launch exclusions reach jobs and cleanup helpers without entering receipts" do
+    names = Enum.sort(["LOOPEX_PROVIDER_API_KEY", "M7_EXECUTOR_A", "M7_EXECUTOR_B"])
+    fixture = fixture("binding-exclusions", excluded_env_names: names)
+    on_exit(fn -> stop_fixture(fixture) end)
+    parent = self()
+    tracer = spawn(fn -> exclusion_trace_loop(parent, []) end)
+    mfa = {Local, :spawn_environment, 1}
+    helper = {Local, :launch_guarded_helper, 4}
+    :erlang.trace_pattern(mfa, [{:_, [], [{:return_trace}]}], [:local])
+    :erlang.trace_pattern(helper, true, [:local])
+    :erlang.trace(self(), true, [:call, :set_on_spawn, {:tracer, tracer}])
+
+    try do
+      {job, grant} = job_and_grant(fixture, "excluded-job", "loopex.demo.write")
+      assert {:ok, receipt} = Local.execute(fixture.executor, job, grant)
+      assert receipt.outcome == :completed
+      assert receipt.child_environment_names == ["PATH"]
+      refute receipt.provider_credential_present
+      refute inspect(receipt) =~ "M7_EXECUTOR"
+      refute Map.has_key?(receipt, :excluded_env_names)
+      refute Map.has_key?(job, :excluded_env_names)
+      assert Process.get(:loopex_excluded_env_names) == nil
+
+      delivered = :erlang.trace_delivered(:all)
+      assert_receive {:trace_delivered, :all, ^delivered}, 5_000
+      send(tracer, :report)
+      assert_receive {:exclusion_trace, events}, 5_000
+      assert :helper in events
+      environments = for {:environment, env} <- events, do: env
+      assert length(environments) >= 2
+
+      for environment <- environments, name <- names do
+        assert List.keyfind(environment, String.to_charlist(name), 0) ==
+                 {String.to_charlist(name), false}
+      end
+    after
+      :erlang.trace(self(), false, [:call, :set_on_spawn])
+      :erlang.trace_pattern(mfa, false, [:local])
+      :erlang.trace_pattern(helper, false, [:local])
+      Process.exit(tracer, :kill)
+    end
+  end
+
+  test "malformed launch exclusions refuse before creating the executor ledger" do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-invalid-exclusions-#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(root) end)
+    legacy = "LOOPEX_PROVIDER_API_KEY"
+
+    for names <- [
+          nil,
+          [],
+          ["M7_A"],
+          [legacy, legacy],
+          ["M7_A", legacy],
+          [legacy, "bad=name"],
+          [legacy, "bad\x00name"],
+          [legacy, 1],
+          Enum.sort([legacy | Enum.map(1..17, &"M7_#{&1}")])
+        ] do
+      assert {:stop, :invalid_executor_configuration} =
+               Local.init(
+                 identity: "invalid",
+                 epoch: 1,
+                 fencing_token: 1,
+                 workspace_leases: %{},
+                 ledger_root: root,
+                 excluded_env_names: names
+               )
+
+      refute File.exists?(root)
+    end
+  end
+
+  defp exclusion_trace_loop(parent, events) do
+    receive do
+      {:trace, _, :return_from, {Local, :spawn_environment, 1}, environment} ->
+        exclusion_trace_loop(parent, [{:environment, environment} | events])
+
+      {:trace, _, :call, {Local, :launch_guarded_helper, _arguments}} ->
+        exclusion_trace_loop(parent, [:helper | events])
+
+      :report ->
+        send(parent, {:exclusion_trace, Enum.reverse(events)})
+
+      _other ->
+        exclusion_trace_loop(parent, events)
+    end
+  end
+
   defp fixture(label, extra \\ []) do
     root =
       Path.join(

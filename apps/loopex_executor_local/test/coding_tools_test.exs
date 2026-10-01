@@ -3508,6 +3508,46 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute demonstration.provider_credential_present
   end
 
+  test "all configured exclusions survive reinsertion after the launch snapshot" do
+    root = workspace()
+    names = Enum.sort(["LOOPEX_PROVIDER_API_KEY" | Enum.map(1..16, &"M7_LAUNCH_#{&1}")])
+    prior = Map.new(names, &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      for {name, value} <- prior do
+        if value, do: System.put_env(name, value), else: System.delete_env(name)
+      end
+    end)
+
+    for kind <- [:coding, :demonstration] do
+      Enum.each(names, &System.delete_env/1)
+
+      port =
+        Local.launcher_probe_port(
+          root,
+          kind,
+          fn ->
+            Enum.each(names, &System.put_env(&1, "synthetic-late-secret"))
+          end,
+          names
+        )
+
+      loaded = read_exclusion_probe(port, "")
+      assert parse_environment(loaded) == %{"PATH" => "/usr/bin:/bin"}
+      refute loaded =~ "synthetic-late-secret"
+      assert Process.get(:loopex_excluded_env_names) == nil
+    end
+  end
+
+  defp read_exclusion_probe(port, bytes) do
+    receive do
+      {^port, {:data, chunk}} -> read_exclusion_probe(port, bytes <> chunk)
+      {^port, {:exit_status, 0}} -> bytes
+    after
+      5_000 -> flunk("first-image exclusion probe did not exit")
+    end
+  end
+
   test "every executor spawn supplies an environment override that excludes the provider credential" do
     # Concept: explicit provider-credential removal has to reach every spawn,
     # not only the coding-tool path a behavioural case happened to exercise.
