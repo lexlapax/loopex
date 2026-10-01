@@ -56,6 +56,17 @@ non-force push/remote observation. The earlier a234247e documentation check is
 not rerun or presented as proof of changed bytes. Check results and timings are
 recorded only after execution; no paid lane or product test is claimed here.
 
+The first validation candidate, `64da6bba903cdb85b522e4bc9588a3dafceca30e`,
+could not start Mix compilation: the workspace-write sandbox denied the local
+TCP socket required for Mix's filesystem lock (`:eperm`). The complete failed
+invocation is retained in `/tmp/loopex-m7-round9-64da6bba-docs.log`, SHA-256
+`79fee04897875c13799c474f6aa48b6e580a3bdc127a78a9a953656a4f4522bc`, and its result file records exit 1, 0.718 seconds and a clean
+unchanged candidate. It is evidence unavailable, never PASS. The causal
+prerequisite correction is to invoke the unchanged documentation command with
+the host permissions needed for that local lock. This recorded correction
+forms a new candidate; validation does not repeat on the failed SHA. No check,
+bound or assertion is removed, and a new SHA alone is not the correction.
+
 The initial retained report is
 `/tmp/loopex-m7-external-review-9-a234247e.md`, SHA-256
 `4cbef758d032f1e937ed0d2d7af69024d500c743d8120a9255d35c71cb757f17`.
