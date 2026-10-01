@@ -154,6 +154,29 @@ defmodule Loopex.Runtime.SessionConfiguration do
   @doc """
   ## Concept
 
+  Project only the committed configuration settings an operator may inspect.
+
+  ## Technical depth
+
+  The allowlist contains version, model, reasoning, effective reply/context/
+  system ceilings and instruction version/digest. Raw instructions, capability
+  provenance and provider mapping stay private. Nil explicitly means legacy
+  configuration has not been resolved; no current default is substituted.
+  """
+  @spec public_view(map() | nil) :: map() | nil
+  def public_view(nil), do: nil
+
+  def public_view(configuration) do
+    configuration
+    |> Map.take(
+      ~w(configuration_version model reasoning max_tokens context_token_budget system_class_tokens)
+    )
+    |> Map.put("instructions", Map.take(configuration["instructions"], ~w(version digest)))
+  end
+
+  @doc """
+  ## Concept
+
   Validate one complete resolved configuration against its immutable tools.
 
   ## Technical depth

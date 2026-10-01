@@ -51,6 +51,8 @@ Part of the [evidence index](README.md).
   vectors pass both the Elixir and independent Node decoders.
 - Done: pure whole-candidate configuration updates validate every mutable member,
   advance one version and recompute derived ceilings while retaining explicit ones.
+- Done: pure atomic configuration admission/replay retains exact command identity,
+  one instruction copy, unchanged earlier run captures and an allowlisted event.
 - Next: join configuration preparation to settled owner admission, retained-history
   preflight and atomic commit; complete question projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
@@ -62,6 +64,16 @@ Part of the [evidence index](README.md).
 
 ## Development observations
 
+- 2026-10-01: pure configuration admission/replay, update, genesis, configured
+  runtime, interaction and input regressions pass 88 tests in 17.9 seconds.
+  Accepted configuration rows retain full instruction bytes once; their authored
+  changes carry a checked version/digest descriptor, and replay reconstructs the
+  original command preimage. Tampered candidates, command identities and
+  settled-only refusal categories during active work are rejected. These prove
+  reducer preparation only: owner history/request preflight, host resolution,
+  maintenance quiescence, live configure and coordinated public wire remain open.
+  The run still emits the separately tracked OwnerGroup shutdown_error/noproc
+  diagnostics; passing assertions do not resolve that T16 investigation.
 - 2026-10-01: the focused second-prompt regression executed one test and failed:
   the next request contains only the new prompt. This is a development red,
   not closure evidence. No provider call was made.
@@ -503,6 +515,7 @@ Part of the [evidence index](README.md).
 ## T08 — Implement model selection and private thinking continuation
 - [ ] Implement committed per-run model/reasoning configuration and the permitted configure fields.
 - [x] Prepare closed whole-candidate mutable updates with bounded inputs, monotonic versions and retained explicit/derived budget origins.
+- [x] Prepare atomic configuration admission/replay with exact command identity, single-copy instructions, retained earlier run captures and public event allowlists.
 - [ ] Join prepared candidates to settled configure admission, exact history preflight, atomic commit and replay.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
@@ -661,7 +674,7 @@ before a provider demonstration.
 | Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 implemented; remaining variants/projections pending |
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
-| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure whole-candidate update preparation complete; settled admission, history preflight and atomic commit/replay pending |
+| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure whole-candidate preparation and atomic admission/replay implemented; owner history preflight, host resolution, maintenance quiescence and live configure pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
 | Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |

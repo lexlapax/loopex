@@ -1743,6 +1743,58 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: configuration changes retain one candidate or one unchanged refusal.
+  # Technical depth: host preparation is separate from authored command bytes.
+  # Duplicate lookup has already happened; replay rederives the candidate from
+  # captured facts, never from a catalog or a new runtime default. Owner history
+  # preflight must precede supplying a prepared candidate at this pure boundary.
+  defp propose_new(state, %{type: :configure} = command, digest) do
+    candidate = command.resolved_bounds[:configuration_candidate]
+
+    admission =
+      cond do
+        not configuration_settled?(state) ->
+          "rejected_configuration_not_settled"
+
+        is_nil(state.configuration) ->
+          "rejected_legacy_configuration_unresolved"
+
+        is_nil(candidate) ->
+          "rejected_configuration_not_prepared"
+
+        configuration_candidate(state, command.changes, candidate) != :ok ->
+          "rejected_invalid_session_configuration"
+
+        true ->
+          "accepted"
+      end
+
+    record = %{
+      "command_type" => "configure",
+      "command_id" => command.command_id,
+      "command_digest" => digest,
+      "admission" => admission,
+      "changes" => configuration_record_changes(command.changes, admission),
+      "prior_configuration_version" => configuration_version(state),
+      "configuration" => if(admission == "accepted", do: candidate, else: nil),
+      kind: "session_configuration_admitted_v1"
+    }
+
+    with {:ok, next} <- apply_command_record(state, record) do
+      events = Enum.drop(next.expected_events, length(state.expected_events))
+
+      admitted_proposal(
+        state,
+        command,
+        digest,
+        "configure",
+        record,
+        events,
+        next.commands[command.command_id].reply
+      )
+    end
+  end
+
   defp propose_new(%__MODULE__{active_run_id: nil} = state, %{type: :prompt} = command, digest) do
     run_id = stable_id("run", state.session_id, command.command_id)
     reply = {:accepted, command.command_id}
@@ -2268,6 +2320,7 @@ defmodule Loopex.Runtime.SessionState do
               "prompt_admitted_v2",
               "prompt_admitted_v3",
               "model_question_response_admitted_v1",
+              "session_configuration_admitted_v1",
               "command_admission_refused_v1"
             ] do
     # Technical depth: a pending refusal marker admits exactly one next row, and
@@ -2396,6 +2449,9 @@ defmodule Loopex.Runtime.SessionState do
   defp admissible_command_kind?("model_question_response_admitted_v1", record),
     do: record["command_type"] == "interaction_answer" and record["admission"] == "accepted"
 
+  defp admissible_command_kind?("session_configuration_admitted_v1", record),
+    do: record["command_type"] == "configure"
+
   defp admissible_command_kind?("prompt_admitted_v2", record),
     do: record["command_type"] == "prompt" and record["admission"] == "accepted"
 
@@ -2477,6 +2533,50 @@ defmodule Loopex.Runtime.SessionState do
 
       {:ok, {:accepted, command_id}, run_id, Map.put(state.pending_work, run_id, work),
        expected_events, patch}
+    end
+  end
+
+  defp command_effect(
+         state,
+         %{kind: "session_configuration_admitted_v1"} = record,
+         "configure",
+         admission,
+         command_id
+       ) do
+    with true <- map_size(record) == 8,
+         {:ok, changes} <- configuration_command_changes(record),
+         command = %{type: :configure, command_id: command_id, changes: changes},
+         {:ok, digest} <- command_digest(command),
+         true <- digest == record["command_digest"],
+         true <- record["prior_configuration_version"] == configuration_version(state) do
+      case admission do
+        "accepted" ->
+          with true <- configuration_settled?(state),
+               :ok <- configuration_candidate(state, command.changes, record["configuration"]) do
+            event = %{
+              "command_id" => command_id,
+              "configuration" => SessionConfiguration.public_view(record["configuration"]),
+              event_id: stable_id("event-configuration", state.session_id, command_id),
+              kind: "session.configured"
+            }
+
+            {:ok, {:accepted, command_id}, nil, state.pending_work,
+             state.expected_events ++ [event], %{configuration: record["configuration"]}}
+          else
+            _ -> {:error, :invalid_configuration_transition}
+          end
+
+        refusal ->
+          with true <- is_nil(record["configuration"]),
+               {:ok, reason} <- configuration_refusal(state, refusal) do
+            {:ok, {:error, reason}, state.active_run_id, state.pending_work,
+             state.expected_events, %{}}
+          else
+            _ -> {:error, :invalid_configuration_transition}
+          end
+      end
+    else
+      _ -> {:error, :invalid_configuration_transition}
     end
   end
 
@@ -2670,6 +2770,102 @@ defmodule Loopex.Runtime.SessionState do
     do: {:ok, :invalid_interaction_answer}
 
   defp rejected_command_reason(_reason), do: :error
+
+  defp configuration_version(%{configuration: nil}), do: nil
+  defp configuration_version(state), do: state.configuration["configuration_version"]
+
+  # Concept: an accepted instruction update retains its exact bytes once.
+  # Technical depth: the candidate contains the captured instruction sections;
+  # authored-change identity retains their version/digest descriptor. Replay
+  # verifies that descriptor and reconstructs the full command preimage before
+  # checking its digest, avoiding a second copy that would consume the Store
+  # item ceiling without proving anything new. Refusals retain their raw changes.
+  defp configuration_record_changes(changes, "accepted") do
+    if Map.has_key?(changes, "instructions"),
+      do: Map.update!(changes, "instructions", &Map.take(&1, ~w(version digest))),
+      else: changes
+  end
+
+  defp configuration_record_changes(changes, _refusal), do: changes
+
+  defp configuration_command_changes(record) do
+    changes = record["changes"]
+
+    if record["admission"] == "accepted" and is_map(changes) and
+         Map.has_key?(changes, "instructions") do
+      with %{} = candidate <- record["configuration"],
+           %{} = instructions <- candidate["instructions"],
+           true <- changes["instructions"] == Map.take(instructions, ~w(version digest)),
+           restored = Map.put(changes, "instructions", instructions),
+           :ok <- SessionConfiguration.validate_update(restored) do
+        {:ok, restored}
+      else
+        _ -> :error
+      end
+    else
+      case SessionConfiguration.validate_update(changes) do
+        :ok -> {:ok, changes}
+        _ -> :error
+      end
+    end
+  end
+
+  defp configuration_settled?(state) do
+    is_nil(state.active_run_id) and state.pending_work == %{} and is_nil(state.aborting) and
+      is_nil(state.open_interaction) and is_nil(state.context_refusal) and is_nil(state.follow_up) and
+      not Enum.any?(state.conversation, fn {_run, elements} ->
+        Enum.any?(elements, &(&1.kind == :tool_result and &1.outcome == :outcome_unknown))
+      end)
+  end
+
+  defp configuration_candidate(
+         %{configuration: current, tool_selection: selection},
+         changes,
+         candidate
+       )
+       when is_map(current) and is_map(selection) and is_map(candidate) do
+    case SessionConfiguration.update(
+           current,
+           changes,
+           candidate["model_capabilities"],
+           candidate["provider_mapping"],
+           selection["definitions"]
+         ) do
+      {:ok, ^candidate} -> :ok
+      _ -> {:error, :invalid_configuration_transition}
+    end
+  end
+
+  defp configuration_candidate(_, _, _), do: {:error, :invalid_configuration_transition}
+
+  defp configuration_refusal(state, "rejected_configuration_not_settled") do
+    if configuration_settled?(state), do: :error, else: {:ok, :configuration_not_settled}
+  end
+
+  defp configuration_refusal(
+         %{configuration: nil} = state,
+         "rejected_legacy_configuration_unresolved"
+       ) do
+    if configuration_settled?(state), do: {:ok, :legacy_configuration_unresolved}, else: :error
+  end
+
+  defp configuration_refusal(
+         %{configuration: configuration} = state,
+         "rejected_configuration_not_prepared"
+       )
+       when is_map(configuration) do
+    if configuration_settled?(state), do: {:ok, :configuration_not_prepared}, else: :error
+  end
+
+  defp configuration_refusal(
+         %{configuration: configuration} = state,
+         "rejected_invalid_session_configuration"
+       )
+       when is_map(configuration) do
+    if configuration_settled?(state), do: {:ok, :invalid_session_configuration}, else: :error
+  end
+
+  defp configuration_refusal(_, _), do: :error
 
   # Concept: an internal transition keeps one identity while its exact Store
   # presentation is unresolved, and receives a fresh one after ownership or the
@@ -5558,6 +5754,20 @@ defmodule Loopex.Runtime.SessionState do
     with {:ok, command_id} <- fetch_binary(command, :command_id),
          {:ok, type} <- fetch_type(command) do
       case type do
+        :configure ->
+          with true <- map_size(command) == 3,
+               true <-
+                 Enum.all?(
+                   Map.keys(command),
+                   &(&1 in [:type, "type", :command_id, "command_id", :changes, "changes"])
+                 ),
+               {:ok, changes} <- fetch(command, :changes),
+               :ok <- SessionConfiguration.validate_update(changes) do
+            {:ok, %{type: :configure, command_id: command_id, changes: changes}}
+          else
+            _ -> {:error, :invalid_command}
+          end
+
         :prompt ->
           with {:ok, content} <- fetch_binary(command, :content) do
             {:ok, %{type: :prompt, command_id: command_id, content: content}}
@@ -5636,6 +5846,9 @@ defmodule Loopex.Runtime.SessionState do
     case fetch(command, :type) do
       {:ok, value} when value in [:prompt, "prompt"] ->
         {:ok, :prompt}
+
+      {:ok, value} when value in [:configure, "configure"] ->
+        {:ok, :configure}
 
       {:ok, value} when value in [:abort, "abort"] ->
         {:ok, :abort}
