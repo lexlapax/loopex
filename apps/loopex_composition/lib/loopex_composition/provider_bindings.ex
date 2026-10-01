@@ -92,12 +92,16 @@ defmodule LoopexComposition.ProviderBindings do
   conformance; unknown or default-only mappings cannot become summarizers.
   """
   @spec resolve_maintenance_model(term(), term()) :: {:ok, map() | nil} | {:error, term()}
-  def resolve_maintenance_model(nil, bindings) do
-    with {:ok, _} <- validate(bindings), do: {:ok, nil}
+  def resolve_maintenance_model(model, bindings) do
+    with {:ok, _} <- validate(bindings),
+         do: resolve_maintenance_routes(model, Map.keys(bindings))
   end
 
-  def resolve_maintenance_model(model, bindings) do
-    with {:ok, capabilities, mapping} <- resolve_selection(model, "none", 1024, bindings),
+  @doc false
+  def resolve_maintenance_routes(nil, _providers), do: {:ok, nil}
+
+  def resolve_maintenance_routes(model, providers) do
+    with {:ok, capabilities, mapping} <- resolve_selection_routes(model, "none", 1024, providers),
          {:ok, resolved} <-
            MaintenanceConfiguration.validate_model(%{
              "model" => capabilities["model"],
@@ -115,9 +119,13 @@ defmodule LoopexComposition.ProviderBindings do
 
   defp resolve_selection(model, level, max_tokens, bindings) do
     with {:ok, _validated} <- validate(bindings),
-         {:ok, capabilities} <- ModelCapabilities.capture(model),
+         do: resolve_selection_routes(model, level, max_tokens, Map.keys(bindings))
+  end
+
+  defp resolve_selection_routes(model, level, max_tokens, providers) do
+    with {:ok, capabilities} <- ModelCapabilities.capture(model),
          [provider, _] <- String.split(capabilities["model"], ":", parts: 2),
-         true <- Map.has_key?(bindings, provider),
+         true <- provider in providers,
          {:ok, mapping} <- ModelCapabilities.mapping(capabilities["model"], level, max_tokens) do
       {:ok, capabilities, mapping}
     else
@@ -152,14 +160,7 @@ defmodule LoopexComposition.ProviderBindings do
   deleting any environment value. The list stays in host-private launch data.
   """
   @spec validate_exclusions(term()) :: :ok | {:error, :invalid_credential_exclusions}
-  def validate_exclusions(names) when is_list(names) and length(names) in 1..17 do
-    if Loopex.LLM.ReqLLM.credential_variable() in names and
-         names == Enum.sort(Enum.uniq(names)) and Enum.all?(names, &valid_env_name?/1),
-       do: :ok,
-       else: {:error, :invalid_credential_exclusions}
-  end
-
-  def validate_exclusions(_), do: {:error, :invalid_credential_exclusions}
+  defdelegate validate_exclusions(names), to: Loopex.LLM.ReqLLM.HostBindings
 
   @doc """
   ## Concept

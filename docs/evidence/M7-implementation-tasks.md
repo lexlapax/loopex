@@ -106,6 +106,9 @@ Part of the [evidence index](README.md).
   first images exclude all 17 names even when reintroduced after the snapshot.
 - Done: validated credential exclusions reach project revision discovery, skill-import
   executors and placement probes; placement release accepts the same scoped probe.
+- Done: direct and borrowed version-2 durable startup validates complete planes,
+  selected routes and maintenance models before owned effects, then forwards
+  immutable exclusions to Store, executor and provider launches.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -121,6 +124,58 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: Durable composition now admits direct explicit bindings and
+  borrowed version-2 planes. Preflight checks complete plane/model-option shapes,
+  tracing-capability agreement, optional capability PID identity, every token's
+  membership in the exact registry, sorted launch exclusions, the ordinary route
+  and the separately selected maintenance route. Conflicting bindings and planes,
+  local durable routes and unbound selections refuse before owned effects.
+  Maintenance metadata is resolved once from admitted provider identities without
+  inventing credential references or inheriting an unconfigured summarizer.
+  Borrowed planes never reread reintroduced keys; direct partial-load failure
+  joins the created custodies. Tests cover start, with_runtime and start_edges,
+  public-view exclusion and the existing exhaustive durable-option subsets.
+  The launch audit also found Store writer probes and provider companion Port
+  startup. Both now receive instance-scoped exclusions; Store validates names
+  before preparing its path and keeps them out of marker/log bytes. Provider
+  configuration validates the same shared host-name grammar; the first-image
+  witness reinserts all 17 names after the snapshot. Actual provider launch
+  forwarding and cleanup retain their existing process-group conformance.
+  Current proof includes 41 durable cases in 17.8 seconds, then all five final
+  binding-startup cases in 2.2 seconds after adding partial-load cleanup; Store
+  passes 10 in 7.6 seconds and the final launcher file passes eight in 5.3 seconds.
+  Floor proof passes Store 10 in 7.3 seconds, provider 40 in 70.7 seconds and
+  durable composition 42 in 16.3 seconds, each application in its own VM.
+  Complete successful outputs:
+  - `/private/tmp/loopex-m7-durable-startup-fixed-current.log`, SHA-256
+    `f05d5b07be369a949b63f5d469ea5dbd2abe6b766c3c5151a21bb7ed95258d9b`.
+  - `/private/tmp/loopex-m7-durable-startup-final-current.log`, SHA-256
+    `5ac7c91d78bbe88be7ca3ad4db2cbbd2945dbceb307c579ac33207e866dcba5d`.
+  - `/private/tmp/loopex-m7-store-exclusions-current.log`, SHA-256
+    `bc1dcf0990476b2b2cdda9b37e070424b494079391ebd3a4a05da581331c1b5a`.
+  - `/private/tmp/loopex-m7-provider-launcher-final-current.log`, SHA-256
+    `205a0172d02f8659bc9d50595749ded8632bd8f57fb45a076b3fa6456e769b52`.
+  - `/private/tmp/loopex-m7-store-exclusions-floor.log`, SHA-256
+    `579043888dd49e9ae3c43bf42a457cd24d5cf42181d9a72a33b33c16d6b6cb2e`.
+  - `/private/tmp/loopex-m7-provider-exclusions-floor.log`, SHA-256
+    `1ae4e3c86b77e2cd37472bda5aa64e89b361c580164a6dbd6aaae932f1967f5a`.
+  - `/private/tmp/loopex-m7-durable-startup-floor.log`, SHA-256
+    `3ad16c3d8e8fbdf3cc865da37239b63cc8a4f9b975791fbccc49f4d032dfefd6`.
+  The first integration run exposed the missing Store option allowlist entry
+  and a fixture cleanup lookup after its registry had stopped. Both were fixed.
+  The provider witness needed a separate trace observer and its exclusions on
+  the actual launch fixture, rather than the earlier vector-only fixture. These
+  were code/test changes; no failing run was relabelled as a pass or retried
+  unchanged. Retained failure outputs:
+  - `/private/tmp/loopex-m7-durable-startup-current.log`, SHA-256
+    `962e37a11648cd91ed21aaffef57f83d1637c669103e9f609aaac4c3250502e4`.
+  - `/private/tmp/loopex-m7-provider-exclusions-current.log`, SHA-256
+    `58a56679a32584168cb1e3c281657c75d43a2039332e878cb3f192fae951ba53`.
+  - `/private/tmp/loopex-m7-provider-exclusions-fixed-current.log`, SHA-256
+    `b238e73296b5fde40ced7fcd78ec9e918046cf0c977311856da4a5d1db01bba6`.
+  Daemon binding ownership/conflict handling, CLI entrypoints and helper-host
+  forwarding remain pending. This checkpoint does not claim those workflows.
 
 - 2026-10-01: Project revision discovery, resource-import executors and placement
   probes now accept the same bounded sorted credential-exclusion list. Shared
@@ -1208,7 +1263,9 @@ Part of the [evidence index](README.md).
 - [x] Share explicit durable credential loading between direct and borrowing plane constructors, with complete-name validation, deduplicated reads, joined partial-start cleanup and fresh borrowed trace capabilities.
 - [x] Carry configured launch exclusions through executor job and drain ownership, preserving legacy receipts; prove first-image exclusion after reinsertion and real job/helper propagation.
 - [x] Validate and forward captured exclusions inside project Git discovery, resource-import executors and placement probes, including lock release; reject the conflicting LC_ALL credential slot before loading.
-- [ ] Forward credential-plane exclusions through reference-host entrypoints and runtime composition before admitting version-2 planes.
+- [x] Admit direct and borrowed version-2 planes in durable runtime composition, validating every token route and resolving explicit maintenance selection before owned effects; prove all three constructor lifecycles and partial-loading cleanup.
+- [x] Forward immutable exclusions to Store writer probes, executor launches and provider companions; preserve private model options and unchanged marker, job and receipt formats.
+- [ ] Wire provider bindings and captured exclusions through daemon and CLI entrypoints, including discovery, placement acquisition/release and helper preparation.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
 - [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.

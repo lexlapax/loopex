@@ -28,6 +28,61 @@ defmodule Loopex.Store.Local.WriterLockHolderTest do
   # still-running VM. Everything else refuses, including a marker carrying no
   # identity to check and an identifier the operating system has since reused.
 
+  test "writer identity and recovery probes remove instance-scoped credential names" do
+    names = ~w(LOOPEX_PROVIDER_API_KEY M7_STORE_A M7_STORE_B)
+    prior = Map.new(names, &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      for {name, value} <- prior do
+        if value, do: System.put_env(name, value), else: System.delete_env(name)
+      end
+    end)
+
+    Enum.each(names, &System.put_env(&1, "synthetic-store-secret"))
+    checks = Enum.map_join(names, "\n", &"[ \"${#{&1}+x}\" != x ] || exit 42")
+    probe = probe_script(checks <> "\nexec /bin/ps \"$@\"\n")
+    path = store_path()
+
+    assert {:ok, holder} =
+             Local.start_link(path: path, process_probe: probe, excluded_env_names: names)
+
+    on_exit(fn -> if Process.alive?(holder), do: stop(holder) end)
+    marker = path <> ".writer"
+    bytes = File.read!(marker)
+    refute bytes =~ "M7_STORE"
+    refute bytes =~ "synthetic-store-secret"
+
+    assert {:error, {:store_writer_active, ^marker}} =
+             Local.start_link(
+               path: path,
+               process_probe: probe,
+               excluded_env_names: names,
+               recover_stale_writer: true
+             )
+
+    assert File.read!(marker) == bytes
+    stop(holder)
+    assert Enum.all?(names, &(System.get_env(&1) == "synthetic-store-secret"))
+  end
+
+  test "invalid launch exclusions refuse before preparing a log path" do
+    path = Path.join(store_path(), "uncreated/store.log")
+
+    for invalid <- [
+          nil,
+          [:bad],
+          ["LC_ALL"],
+          ["bad=name"],
+          ["A", "A"],
+          Enum.map(1..18, &"KEY_#{&1}")
+        ] do
+      assert {:error, :invalid_store_launch_exclusions} =
+               Local.start_link(path: path, excluded_env_names: invalid)
+
+      refute File.exists?(Path.dirname(path))
+    end
+  end
+
   test "a live holder in this VM refuses a recovering opener and keeps its marker" do
     path = store_path()
     {:ok, holder} = Local.start_link(path: path)

@@ -81,6 +81,16 @@ defmodule Loopex.LLM.ReqLLM.HostBindings do
 
   def valid_env_name?(_), do: false
 
+  @doc false
+  def validate_exclusions(names) when is_list(names) and length(names) in 1..17 do
+    if @legacy in names and names == Enum.sort(Enum.uniq(names)) and
+         Enum.all?(names, &valid_env_name?/1),
+       do: :ok,
+       else: {:error, :invalid_credential_exclusions}
+  end
+
+  def validate_exclusions(_), do: {:error, :invalid_credential_exclusions}
+
   defp validate_route(provider, binding, catalog) when is_binary(provider) do
     case Map.fetch(catalog, provider) do
       {:ok, profile} -> validate_binding(binding, profile, "/providers/" <> provider)

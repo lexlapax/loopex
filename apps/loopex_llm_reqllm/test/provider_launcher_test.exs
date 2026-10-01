@@ -33,7 +33,37 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
   end
 
   test "guard alone owns descriptors and proves cooperative child cessation", %{root: root} do
+    Code.ensure_loaded!(ProviderLauncher)
+    parent = self()
+
+    observer =
+      spawn(fn ->
+        receive do
+          event ->
+            send(parent, event)
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    trace = :trace.session_create(:m7_provider_launch_exclusions, observer, [])
+
+    on_exit(fn ->
+      Process.exit(observer, :kill)
+
+      try do
+        :trace.session_destroy(trace)
+      catch
+        _, _ -> :ok
+      end
+    end)
+
+    assert 1 = :trace.function(trace, {ProviderLauncher, :spawn_environment, 1}, true, [:local])
+    assert 1 = :trace.process(trace, self(), true, [:call])
     {owned, nonce, namespace, pid_path} = launch(root, false)
+    assert_receive {:trace, _, :call, {ProviderLauncher, :spawn_environment, [names]}}
+    assert names == ~w(LOOPEX_PROVIDER_API_KEY M7_PROVIDER_A M7_PROVIDER_B)
+    :trace.session_destroy(trace)
+    send(observer, :stop)
     assert eventually(fn -> File.regular?(pid_path) end)
     child = pid_path |> File.read!() |> String.trim() |> String.to_integer()
     assert File.read!(Path.join(root, "descriptors")) == "closed\n"
@@ -310,7 +340,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
     configuration = %{
       interpreter_path: "/bin/sh",
       worker_path: script,
-      build_manifest_sha256: String.duplicate("d", 64)
+      build_manifest_sha256: String.duplicate("d", 64),
+      excluded_env_names: ~w(LOOPEX_PROVIDER_API_KEY M7_PROVIDER_A M7_PROVIDER_B)
     }
 
     assert {:ok, owned} =

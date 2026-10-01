@@ -73,7 +73,10 @@ defmodule Loopex.Store.Local do
   ## Technical depth
 
   `:path` is required. `:fault_probe` is optional runtime-local test evidence
-  and is never encoded or exposed through the Store port.
+  and is never encoded or exposed through the Store port. Optional
+  `:excluded_env_names` supplies at most 17 sorted unique launch-only names
+  removed from writer-probe subprocesses. They enter neither log nor marker;
+  the composing host owns credential policy and validates it before startup.
 
   `:recover_stale_writer` defaults to `false` and asks for a marker left by a
   dead holder to be broken. It is a request rather than a decision: the marker
@@ -86,6 +89,7 @@ defmodule Loopex.Store.Local do
           | {:fault_probe, pid()}
           | {:recover_stale_writer, boolean()}
           | {:process_probe, Path.t()}
+          | {:excluded_env_names, [binary()]}
 
   @doc """
   ## Concept
@@ -150,12 +154,14 @@ defmodule Loopex.Store.Local do
     Process.flag(:trap_exit, true)
 
     with {:ok, path} <- fetch_path(options),
+         :ok <- WriterLock.validate_exclusions(Keyword.get(options, :excluded_env_names, [])),
          {:ok, log_identity} <- Log.prepare_path(path),
          {:ok, writer_lock} <-
            WriterLock.acquire(
              path,
              Keyword.get(options, :recover_stale_writer, false),
-             Keyword.get(options, :process_probe, "/bin/ps")
+             Keyword.get(options, :process_probe, "/bin/ps"),
+             Keyword.get(options, :excluded_env_names, [])
            ) do
       recover(options, path, log_identity, writer_lock)
     else
@@ -312,7 +318,7 @@ defmodule Loopex.Store.Local do
   end
 
   defp fetch_path(options) do
-    allowed = [:fault_probe, :path, :process_probe, :recover_stale_writer]
+    allowed = [:fault_probe, :path, :process_probe, :recover_stale_writer, :excluded_env_names]
 
     cond do
       not Keyword.keyword?(options) ->

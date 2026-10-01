@@ -28,6 +28,30 @@ defmodule LoopexComposition.DurableOptions do
   end
 
   @doc false
+  def resolve(options) do
+    with :ok <- validate(options),
+         {:ok, routes} <- LoopexComposition.Edges.admitted_routes(options),
+         [provider, _] <-
+           String.split(Keyword.get(options, :model, Loopex.LLM.ReqLLM.default_model()), ":",
+             parts: 2
+           ),
+         providers = if(routes == :legacy, do: [provider], else: routes),
+         true <- provider in providers,
+         {:ok, maintenance} <-
+           LoopexComposition.ProviderBindings.resolve_maintenance_routes(
+             Keyword.get(options, :maintenance_model),
+             providers
+           ) do
+      if Keyword.has_key?(options, :maintenance_model),
+        do: {:ok, Keyword.put(options, :maintenance_model, maintenance)},
+        else: {:ok, options}
+    else
+      false -> {:error, :provider_route_unavailable}
+      {:error, _} = error -> error
+    end
+  end
+
+  @doc false
   def definitions(options) do
     if Keyword.get(options, :active_tools, @coding) == [],
       do: [],
@@ -37,7 +61,7 @@ defmodule LoopexComposition.DurableOptions do
   @doc false
   def runtime_options(options) do
     [active_tools: Keyword.get(options, :active_tools, @coding)] ++
-      for key <- [:bounds, :sampling, :maintenance_instructions],
+      for key <- [:bounds, :sampling, :maintenance_instructions, :maintenance_model],
           {:ok, value} <- [Keyword.fetch(options, key)],
           do: {key, value}
   end

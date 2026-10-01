@@ -16,12 +16,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
 
   # Concept: the first OS image receives no ambient credential or loader input.
   # Technical depth: env -i constrains only its subsequent exec. Port removals
-  # therefore cover the host's name snapshot and unconditional known names.
+  # therefore cover the host's name snapshot, unconditional known names and
+  # the immutable configured credential names supplied by composition.
   # As ADR 0019 states, the trusted host must not concurrently introduce other
   # environment names while this snapshot is being used.
   @doc false
-  def spawn_environment do
-    (Map.keys(System.get_env()) ++ @excluded)
+  def spawn_environment(additional \\ []) do
+    (Map.keys(System.get_env()) ++ @excluded ++ additional)
     |> Enum.uniq()
     |> Enum.map(&{String.to_charlist(&1), false})
   end
@@ -85,7 +86,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
         :exit_status,
         :nouse_stdio,
         {:args, arguments},
-        {:env, spawn_environment()},
+        {:env, spawn_environment(Map.get(configuration, :excluded_env_names, []))},
         {:line, 1_024},
         {:busy_limits_msgq, {4_096, 8_192}}
       ])

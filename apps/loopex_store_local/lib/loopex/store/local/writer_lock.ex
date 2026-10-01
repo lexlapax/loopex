@@ -90,15 +90,35 @@ defmodule Loopex.Store.Local.WriterLock do
 
   @doc false
   @spec acquire(Path.t(), boolean()) :: {:ok, t()} | {:error, term()}
-  def acquire(store_path, recover_stale_writer, probe \\ @probe)
+  def acquire(store_path, recover_stale_writer, probe \\ @probe),
+    do: acquire(store_path, recover_stale_writer, probe, [])
+
+  @doc false
+  def acquire(store_path, recover_stale_writer, probe, excluded)
       when is_binary(store_path) and is_boolean(recover_stale_writer) and is_binary(probe) do
     path = store_path <> ".writer"
+    launch = {probe, excluded}
 
-    with :ok <- maybe_recover(path, recover_stale_writer, probe),
-         {:ok, marker} <- create_marker(path, probe) do
+    with :ok <- validate_exclusions(excluded),
+         :ok <- maybe_recover(path, recover_stale_writer, launch),
+         {:ok, marker} <- create_marker(path, launch) do
       {:ok, %{path: path, marker: marker}}
     end
   end
+
+  # Concept: trusted launch exclusions belong to this store instance only.
+  # Technical depth: bounded plain names enter no log or writer-marker bytes.
+  # LC_ALL stays reserved for the probe's stable process-incarnation format.
+  @doc false
+  def validate_exclusions(names) when is_list(names) and length(names) <= 17 do
+    if names == Enum.sort(Enum.uniq(names)) and
+         Enum.all?(names, fn name ->
+           is_binary(name) and byte_size(name) in 1..128 and name != "LC_ALL" and
+             Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, name)
+         end), do: :ok, else: {:error, :invalid_store_launch_exclusions}
+  end
+
+  def validate_exclusions(_), do: {:error, :invalid_store_launch_exclusions}
 
   @doc false
   @spec release(t()) :: :ok
@@ -289,10 +309,10 @@ defmodule Loopex.Store.Local.WriterLock do
     end
   end
 
-  defp ask(os_pid, probe) do
+  defp ask(os_pid, {probe, excluded}) do
     case System.cmd(probe, ["-o", "lstart=", "-p", os_pid],
            stderr_to_stdout: true,
-           env: [{"LC_ALL", "C"}]
+           env: [{"LC_ALL", "C"} | Enum.map(excluded, &{&1, nil})]
          ) do
       {output, 0} ->
         case String.trim(output) do

@@ -21,7 +21,8 @@ defmodule LoopexComposition.Edges do
   plane, so no environment variable is read here.
   """
 
-  alias LoopexComposition.CredentialPlane
+  alias LoopexComposition.{CredentialPlane, ProviderBindings}
+  alias Loopex.LLM.ReqLLM.{CredentialRegistry, ProviderConfiguration}
 
   @edge :"$loopex_composition_edge_observer"
   @owned :"$loopex_composition_owned"
@@ -45,33 +46,82 @@ defmodule LoopexComposition.Edges do
           else: {:error, {:invalid_composition_option, :credential_plane}}
 
       :error ->
-        CredentialPlane.open(start_edge)
+        case Keyword.fetch(options, :provider_bindings) do
+          {:ok, bindings} -> CredentialPlane.open(bindings, start_edge)
+          :error -> CredentialPlane.open(start_edge)
+        end
     end
   end
 
-  # Concept: a host-supplied credential plane is checked exactly before any
-  # edge starts, so a malformed handle can never reach the runtime.
-  #
-  # Technical depth: the plane holds only `capability`, `model_options` and
-  # the optional host-owned `capability_pid`; the model options are exactly the
-  # opaque token, the routing-registry handle and that same capability, each
-  # accepted only by its own validator.
-  defp valid_plane?(%{capability: capability, model_options: model_options} = plane)
-       when is_list(model_options) do
+  @doc false
+  def admitted_routes(options) do
+    case {Keyword.fetch(options, :provider_bindings), Keyword.fetch(options, :credential_plane)} do
+      {{:ok, _}, {:ok, _}} ->
+        {:error, {:invalid_composition_option, :provider_bindings}}
+
+      {{:ok, bindings}, :error} ->
+        with {:ok, _} <- ProviderBindings.validate(bindings),
+             false <- Map.has_key?(bindings, "ollama") do
+          {:ok, Map.keys(bindings)}
+        else
+          true -> {:error, {:composition, :durable_model_unsupported}}
+          {:error, _} = error -> error
+        end
+
+      {:error, {:ok, plane}} ->
+        if valid_plane?(plane) do
+          case plane do
+            %{version: 2} -> {:ok, Map.keys(plane.model_options[:provider_routes])}
+            _ -> {:ok, :legacy}
+          end
+        else
+          {:error, {:invalid_composition_option, :credential_plane}}
+        end
+
+      {:error, :error} ->
+        {:ok, :legacy}
+    end
+  end
+
+  # Concept: borrowed planes admit only their immutable routes and exclusions.
+  # Technical depth: preflight checks the whole closed shape and resolves every
+  # token in the supplied registry without reading credential values. The legacy
+  # branch keeps its separate grammar. A malformed keyword list is a refusal.
+  defp valid_plane?(
+         %{version: 2, capability: capability, model_options: options, excluded_env_names: names} =
+           plane
+       ) do
+    Map.keys(plane) --
+      [:version, :capability, :model_options, :excluded_env_names, :capability_pid] == [] and
+      model_options?(options, [:credential_registry, :provider_routes, :tracing_capability]) and
+      common_plane?(plane, capability, options) and
+      ProviderBindings.validate_exclusions(names) == :ok and
+      ProviderConfiguration.validate_routes(options[:provider_routes]) == :ok and
+      Enum.all?(options[:provider_routes], fn {_provider, token} ->
+        match?({:ok, _}, CredentialRegistry.route(options[:credential_registry], token))
+      end)
+  end
+
+  defp valid_plane?(%{capability: capability, model_options: options} = plane) do
     Map.keys(plane) -- [:capability, :model_options, :capability_pid] == [] and
-      Enum.sort(Keyword.keys(model_options)) ==
-        [:credential_registry, :credential_token, :tracing_capability] and
-      length(model_options) == 3 and
-      Loopex.Trace.Capability.validate(capability) == :ok and
-      Keyword.fetch!(model_options, :tracing_capability) == capability and
-      Loopex.LLM.ReqLLM.CredentialToken.validate(Keyword.fetch!(model_options, :credential_token)) ==
-        :ok and
-      Loopex.LLM.ReqLLM.CredentialRegistry.validate(
-        Keyword.fetch!(model_options, :credential_registry)
-      ) == :ok
+      model_options?(options, [:credential_registry, :credential_token, :tracing_capability]) and
+      common_plane?(plane, capability, options) and
+      Loopex.LLM.ReqLLM.CredentialToken.validate(options[:credential_token]) == :ok
   end
 
   defp valid_plane?(_plane), do: false
+
+  defp model_options?(options, keys) do
+    Keyword.keyword?(options) and length(options) == length(keys) and
+      Enum.sort(Keyword.keys(options)) == keys
+  end
+
+  defp common_plane?(plane, capability, options) do
+    Loopex.Trace.Capability.validate(capability) == :ok and
+      options[:tracing_capability] == capability and
+      CredentialRegistry.validate(options[:credential_registry]) == :ok and
+      (not Map.has_key?(plane, :capability_pid) or plane.capability_pid == capability.pid)
+  end
 
   @doc false
   @spec start(term(), term(), (term() -> term()), (term() -> term())) ::

@@ -85,6 +85,15 @@ defmodule LoopexComposition do
   ADR 0043. Validation precedes owned effects, and Core captures its exact bytes
   once for this runtime. Missing or nil remains unconfigured; composition
   supplies no instruction default.
+
+  Optional `:maintenance_model` resolves once against the admitted provider routes
+  with the registered thinking-off mapping and fixed maintenance reply allowance.
+  Nil remains unconfigured. Explicit `:provider_bindings` admits only its named
+  hosted routes and loads each unique credential slot once. It conflicts with a
+  supplied `:credential_plane`. Borrowed version-2 planes retain their exact
+  routes, registry and launch exclusions; borrowing never rereads credentials.
+  Every supplied plane is validated before owned effects, and its exclusions
+  reach the executor privately without entering Core configuration or jobs.
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) when is_list(options) do
@@ -163,7 +172,7 @@ defmodule LoopexComposition do
          :ok <- provider_launch(options),
          :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
          :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
-         :ok <- DurableOptions.validate(options),
+         {:ok, options} <- DurableOptions.resolve(options),
          do: {:ok, {options, root, workspace, id, policy}}
   end
 
@@ -180,7 +189,14 @@ defmodule LoopexComposition do
 
   defp provider_launch(options) do
     launch = Keyword.get(options, :provider_launch, [])
-    reserved = [:credential_token, :credential_registry, :tracing_capability]
+
+    reserved = [
+      :credential_token,
+      :credential_registry,
+      :tracing_capability,
+      :provider_routes,
+      :excluded_env_names
+    ]
 
     if Keyword.keyword?(launch) and
          Enum.all?(reserved, &(not Keyword.has_key?(launch, &1))) do
@@ -217,10 +233,10 @@ defmodule LoopexComposition do
          :ok <- File.mkdir_p(root),
          {:ok, options} <- LoopexComposition.ResourcePacks.retain_launch_option(options, root),
          {:ok, credential_plane} <- Edges.credential_plane(options, &start_edge/2),
-         {:ok, adapter} <- start_edge(Store.Local, store_options(root, options)),
+         {:ok, adapter} <- start_edge(Store.Local, store_options(root, options, credential_plane)),
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, spill} <- artifact_placement(root, options),
-         {:ok, executor} <- open_executor(root, workspace, options, spill) do
+         {:ok, executor} <- open_executor(root, workspace, options, spill, credential_plane) do
       with {:ok, runtime} <-
              start_edge(
                Loopex,
@@ -238,7 +254,13 @@ defmodule LoopexComposition do
                      model: Keyword.get(options, :model, ReqLLM.default_model()),
                      options:
                        Keyword.get(options, :provider_launch, []) ++
-                         credential_plane.model_options
+                         credential_plane.model_options ++
+                         [
+                           excluded_env_names:
+                             Map.get(credential_plane, :excluded_env_names, [
+                               ReqLLM.credential_variable()
+                             ])
+                         ]
                    }
                  ] ++
                  DurableOptions.runtime_options(options) ++
@@ -270,10 +292,12 @@ defmodule LoopexComposition do
       %{"id" => inspect(policy), "revision" => "0.2.0"}
   end
 
-  defp store_options(root, options),
+  defp store_options(root, options, credential_plane),
     do: [
       path: Path.join(root, "store.log"),
-      recover_stale_writer: Keyword.get(options, :recover_stale_writer, false)
+      recover_stale_writer: Keyword.get(options, :recover_stale_writer, false),
+      excluded_env_names:
+        Map.get(credential_plane, :excluded_env_names, [ReqLLM.credential_variable()])
     ]
 
   # Concept: the reference stack ships a working context-admission ceiling, and
@@ -325,9 +349,10 @@ defmodule LoopexComposition do
   end
 
   # The executor's declared period and probe are forwarded, never defaulted here.
-  defp open_executor(root, workspace, options, spill) do
+  defp open_executor(root, workspace, options, spill, credential_plane) do
     placement = [identity: "executor-local", epoch: 1, fencing_token: 1]
     forwarded = Keyword.take(options, [:cleanup_grace_ms, :process_probe])
+    exclusions = Map.get(credential_plane, :excluded_env_names, [ReqLLM.credential_variable()])
 
     with {:ok, workspace_ref} <- WorkspaceIdentity.reference(workspace),
          {:ok, lease} <-
@@ -337,7 +362,10 @@ defmodule LoopexComposition do
            ledger_root: Path.join(root, "receipts")
          ],
          {:ok, executor} <-
-           start_edge(Local, placement ++ owned ++ [artifacts: spill] ++ forwarded) do
+           start_edge(
+             Local,
+             placement ++ owned ++ [artifacts: spill, excluded_env_names: exclusions] ++ forwarded
+           ) do
       identity = %{module: Local, reference: executor, workspace_lease: "workspace"}
 
       {:ok,

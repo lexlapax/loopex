@@ -9,7 +9,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
   @paths [:worker_path, :interpreter_path]
   @digests [:worker_sha256, :build_manifest_sha256]
   @credential_keys [:credential_token, :credential_registry, :tracing_capability]
-  @keys @paths ++ @digests ++ [:cleanup_grace_ms, :provider_routes] ++ @credential_keys
+  @keys @paths ++
+          @digests ++
+          [:cleanup_grace_ms, :provider_routes, :excluded_env_names] ++ @credential_keys
 
   # Concept: provider execution is host-configured, never discovered through a
   # workspace or an ambient search path.
@@ -25,7 +27,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
          true <- Enum.all?(@paths, &absolute_path?(Keyword.get(options, &1))),
          true <- Enum.all?(@digests, &digest?(Keyword.get(options, &1))),
          :ok <- credential_inputs(options),
-         :ok <- optional_cleanup(options) do
+         :ok <- optional_cleanup(options),
+         :ok <- optional_exclusions(options) do
       {:ok, Map.new(options)}
     else
       _refused -> {:error, :invalid_provider_configuration}
@@ -84,6 +87,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
     {:ok, digest}
   rescue
     _error -> {:error, :provider_artifact_unavailable}
+  end
+
+  defp optional_exclusions(options) do
+    case Keyword.fetch(options, :excluded_env_names) do
+      :error -> :ok
+      {:ok, names} -> Loopex.LLM.ReqLLM.HostBindings.validate_exclusions(names)
+    end
   end
 
   defp optional_cleanup(options) do

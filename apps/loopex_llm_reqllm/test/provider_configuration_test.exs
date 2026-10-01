@@ -4,6 +4,24 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfigurationTest do
   alias Loopex.LLM.ReqLLM.{CredentialRegistry, CredentialToken, ProviderConfiguration}
   alias Loopex.Trace.Capability
 
+  test "optional launch exclusions use the complete bounded host grammar" do
+    names = ~w(LOOPEX_PROVIDER_API_KEY M7_PROVIDER_A M7_PROVIDER_B)
+
+    assert {:ok, %{excluded_env_names: ^names}} =
+             ProviderConfiguration.validate(options() ++ [excluded_env_names: names])
+
+    for invalid <- [
+          nil,
+          [],
+          ["KEY"],
+          ["HOME", "LOOPEX_PROVIDER_API_KEY"],
+          names ++ ["M7_PROVIDER_A"]
+        ] do
+      assert {:error, :invalid_provider_configuration} =
+               ProviderConfiguration.validate(options() ++ [excluded_env_names: invalid])
+    end
+  end
+
   test "provider configuration requires explicit absolute paths and both exact digest forms" do
     assert {:ok, configuration} = ProviderConfiguration.validate(options())
     assert configuration.worker_path == "/host/loopex_provider"
