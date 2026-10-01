@@ -16,7 +16,7 @@ defmodule LoopexCli.ConfigOptions do
   defaults, resolves no paths and starts no configured service.
   """
 
-  alias Loopex.LLM.ReqLLM.InProcess.Guards
+  alias LoopexComposition.ProviderBindings
   alias LoopexCli.{AskOptions, TraceSelectors}
 
   @common ~w(config workspace state-root model reasoning compaction-model max-steps
@@ -154,10 +154,9 @@ defmodule LoopexCli.ConfigOptions do
   defp value("resume", value), do: text("resume", value, 256)
 
   defp value(name, value) when name in ["model", "compaction-model"] do
-    case Guards.model(value) do
-      {:ok, _} -> {:ok, value}
-      _ -> error(:invalid_flag_value, name)
-    end
+    if ProviderBindings.valid_model?(value),
+      do: {:ok, value},
+      else: error(:invalid_flag_value, name)
   end
 
   defp value("reasoning", value), do: choice("reasoning", value, ~w(default none low medium high))

@@ -26,6 +26,20 @@ defmodule LoopexComposition.ProviderBindings do
   @doc """
   ## Concept
 
+  Check a host-selected model against the composed adapter's model syntax.
+
+  ## Technical depth
+
+  This credential-free check admits only the compiled provider names and bounded
+  literal model identifiers. It performs no catalog lookup or provider call and
+  exposes no adapter implementation data to command parsers.
+  """
+  @spec valid_model?(term()) :: boolean()
+  def valid_model?(model), do: match?({:ok, _}, Guards.model(model))
+
+  @doc """
+  ## Concept
+
   Admit the complete route map without resolving any credential.
 
   ## Technical depth

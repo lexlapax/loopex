@@ -583,6 +583,8 @@ defmodule LoopexDaemon.TelemetryParityTest do
         "role" => "assistant",
         "model" => "claude-haiku-4-5",
         "content" => [],
+        "stop_reason" => nil,
+        "stop_sequence" => nil,
         "usage" => %{"input_tokens" => 4, "output_tokens" => 0}
       }
     }

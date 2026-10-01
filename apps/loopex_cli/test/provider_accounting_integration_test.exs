@@ -50,7 +50,12 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
           diagnostics_to: self(),
           cleanup_grace_ms: 2_000,
           sampling: %{"max_tokens" => 64},
-          model: %{module: Adapter, model: Adapter.default_model(), options: options},
+          model: %{
+            module: Adapter,
+            model:
+              if(@boundary == :raw_refusal, do: "openai:gpt-4o", else: Adapter.default_model()),
+            options: options
+          },
           executor: %{
             module: AgentLoopTestExecutor,
             reference: executor,
@@ -189,50 +194,73 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
     end
   end
 
-  defp stream_body(boundary) do
+  # Concept: the raw-byte witness reaches Core's reply admission over real HTTP.
+  # Technical depth: Anthropic now refuses at its smaller native-content ceiling.
+  # The ordinary OpenAI mapping still delivers the oversized complete reply, so
+  # this case continues to prove Core's independent byte bound and accounting.
+  defp stream_body(:raw_refusal) do
+    text = String.duplicate("x", 65_537)
+
+    [
+      %{
+        "type" => "response.output_text.delta",
+        "item_id" => "msg_accounting",
+        "output_index" => 0,
+        "content_index" => 0,
+        "delta" => text
+      },
+      %{
+        "type" => "response.completed",
+        "response" => %{
+          "id" => "resp_accounting",
+          "object" => "response",
+          "model" => "gpt-4o",
+          "status" => "completed",
+          "output" => [
+            %{
+              "id" => "msg_accounting",
+              "type" => "message",
+              "role" => "assistant",
+              "status" => "completed",
+              "content" => [%{"type" => "output_text", "text" => text, "annotations" => []}]
+            }
+          ],
+          "usage" => %{"input_tokens" => 37, "output_tokens" => 11, "total_tokens" => 48}
+        }
+      }
+    ]
+    |> Enum.map_join(fn event ->
+      "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n"
+    end)
+  end
+
+  defp stream_body(:settlement_compaction) do
+    arguments = %{
+      "path" => "discarded-tool.txt",
+      "nested" => Enum.reduce(1..7, "leaf", fn _, value -> %{"next" => value} end)
+    }
+
     content =
-      case boundary do
-        :raw_refusal ->
-          [
-            %{
-              "type" => "content_block_start",
-              "index" => 0,
-              "content_block" => %{"type" => "text", "text" => ""}
-            },
-            %{
-              "type" => "content_block_delta",
-              "index" => 0,
-              "delta" => %{"type" => "text_delta", "text" => String.duplicate("x", 65_537)}
-            }
-          ]
-
-        :settlement_compaction ->
-          arguments = %{
-            "path" => "discarded-tool.txt",
-            "nested" => Enum.reduce(1..7, "leaf", fn _, value -> %{"next" => value} end)
+      [
+        %{
+          "type" => "content_block_start",
+          "index" => 0,
+          "content_block" => %{
+            "type" => "tool_use",
+            "id" => "call_Accounting",
+            "name" => "write",
+            "input" => %{}
           }
-
-          [
-            %{
-              "type" => "content_block_start",
-              "index" => 0,
-              "content_block" => %{
-                "type" => "tool_use",
-                "id" => "call_Accounting",
-                "name" => "write",
-                "input" => %{}
-              }
-            },
-            %{
-              "type" => "content_block_delta",
-              "index" => 0,
-              "delta" => %{
-                "type" => "input_json_delta",
-                "partial_json" => Jason.encode!(arguments)
-              }
-            }
-          ]
-      end
+        },
+        %{
+          "type" => "content_block_delta",
+          "index" => 0,
+          "delta" => %{
+            "type" => "input_json_delta",
+            "partial_json" => Jason.encode!(arguments)
+          }
+        }
+      ]
 
     ([
        %{
@@ -243,6 +271,8 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
            "role" => "assistant",
            "model" => "claude-haiku-4-5",
            "content" => [],
+           "stop_reason" => nil,
+           "stop_sequence" => nil,
            "usage" => %{"input_tokens" => 37, "output_tokens" => 0}
          }
        }
@@ -253,7 +283,7 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
          %{
            "type" => "message_delta",
            "delta" => %{
-             "stop_reason" => if(boundary == :raw_refusal, do: "end_turn", else: "tool_use"),
+             "stop_reason" => "tool_use",
              "stop_sequence" => nil
            },
            "usage" => %{"output_tokens" => 11}

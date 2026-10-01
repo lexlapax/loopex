@@ -605,8 +605,9 @@ defmodule Loopex.InteractionLifecycleTest do
   # Concept: the historical reader's positive control uses its own request
   # generation even as current runtime writers advance.
   # Technical depth: explicitly encode v1 bytes and revision-2 receipts, updating
-  # their adjacent digest joins and measured record cost without changing replies
-  # or interaction facts. The actual historical reducer still decides admission.
+  # their adjacent digest joins and measured record cost. Encode ordinary replies
+  # as v2 settlements, retaining every historical reply member. Interaction facts
+  # remain unchanged. The actual historical reducer still decides admission.
   defp legacy_staged_history(records) do
     replacements =
       for %{payload: %{"request" => request, kind: "model_request_committed"}} <- records,
@@ -643,9 +644,22 @@ defmodule Loopex.InteractionLifecycleTest do
           payload
         end
 
+      payload = legacy_settlement(payload)
       %{record | payload: payload}
     end)
   end
+
+  defp legacy_settlement(%{kind: "model_attempt_settled_v3"} = payload) do
+    assert payload["result"]["kind"] == "reply"
+    assert payload["result"]["reply"]["completion"] == "unknown"
+    assert payload["result"]["reply"]["continuation"] == nil
+
+    payload
+    |> Map.put(:kind, "model_attempt_settled_v2")
+    |> update_in(["result", "reply"], &Map.drop(&1, ~w(completion continuation)))
+  end
+
+  defp legacy_settlement(payload), do: payload
 
   defp legacy_digest_joins(value, replacements) when is_binary(value) do
     case Map.get(replacements, value) do

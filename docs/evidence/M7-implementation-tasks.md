@@ -77,6 +77,9 @@ Part of the [evidence index](README.md).
 - Done: join native capture/rendering to the durable worker's ReqLLM transport,
   with strict replies, eligible summary projection, fatal wakeup and owned drain
   cleanup; resolve canonical tool names through their complete generations.
+- Done: repair the historical interaction control, complete CLI/daemon native
+  fixtures, retain Core accounting witnesses over actual provider transports,
+  and route config model validation through composition.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -93,6 +96,47 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: the full fast check of
+  `ca63492e008c001046aba0dde159d2818253850e` failed 27 tests across core,
+  daemon and CLI; the other eight application suites passed, including all
+  369 adapter tests. Retained output:
+  `/private/tmp/loopex-m7-ca63492e-fast-check.log`, SHA-256
+  `00dd58b8d6af79a24a096ff59c29da83e124b7b63c2172a766b0282706214ece`.
+  The historical interaction positive control still contained a v3 settlement;
+  nine synthetic native stream builders omitted the initial null stop fields;
+  and both new configuration parsers directly named an adapter implementation.
+  The raw-byte accounting witness also reached Anthropic's new smaller native
+  ceiling before Core admission. Corrections encode the historical control's
+  v2 settlement explicitly, complete the native fixtures, route model syntax
+  through composition, and exercise the same 65,537-byte Core refusal over the
+  existing OpenAI Responses HTTP path. Settlement-depth compaction remains an
+  Anthropic HTTP witness. No bound, accounting assertion, cleanup assertion or
+  architectural scan was weakened. This failed candidate is retained as failed.
+  Focused current-toolchain validation passes the historical reader case in
+  4.0 seconds, 29 accounting/configuration/boundary cases in 6.3 seconds,
+  30 live CLI cases in 395.2 seconds and three daemon cases in 16.0 seconds.
+  The source-built foundation and multi-client cases also passed in the first
+  nine-case repair run, whose sole remaining raw-byte failure was fixed and
+  re-proved in the accounting run. That exploratory run remains recorded as
+  eight passed and one failed, not as a green run. Retained outputs:
+  - `/private/tmp/loopex-m7-config-accounting-repaired.log`, SHA-256
+    `3761ecf1a854749d167d956fe8f35c2707fc9b9dc794403b573e78db797d01dd`.
+  - `/private/tmp/loopex-m7-native-fixtures-live-cli.log`, SHA-256
+    `215b9bf248d54112e58a7f2b3485b00219d8e96f498d6577d10dec45c4004846`.
+  - `/private/tmp/loopex-m7-native-fixtures-daemon.log`, SHA-256
+    `354bc84cb671481972b734cd124c4de7e499dc706745c488dc012e6ea753540f`.
+  - `/private/tmp/loopex-m7-fixture-regression-cli.log`, SHA-256
+    `a007c6636f6203c87a517d8a7615e80d2c51b53d778234401d8e4bf791ca73a5`.
+  The floor pair passes the boundary case separately in 1.6 seconds and all
+  28 accounting/configuration cases in 7.3 seconds. Its ExUnit line selector
+  excludes the other files when mixed, so those files ran separately.
+  Warning-free compilation, formatting, 1,008-entry documentation ordering,
+  dependency direction and milestone status checks pass. Floor outputs:
+  - `/private/tmp/loopex-m7-config-accounting-floor.log`, SHA-256
+    `c83531d10ef48b2035ab9ecad4668328bab13d9a986da3fe057fd4235a20ab5b`.
+  - `/private/tmp/loopex-m7-config-accounting-floor-files.log`, SHA-256
+    `a8b9b3f810cfde4487b96f614e24ec390e407a9b60004126c5c77fe1dc466b12`.
 
 - 2026-10-01: the durable Anthropic worker now normalizes model/options/context
   before the pinned `Streaming.start_stream/4` handoff and uses invocation-owned
@@ -969,6 +1013,9 @@ Part of the [evidence index](README.md).
 - [ ] Join automated rollback artifacts to attended restore inspection without rerunning the case.
 ## T16 — Complete integration and regression checks
 - [x] Move M7 to In progress when product work begins.
+- [x] Encode the historical interaction positive control with its reader's v2 settlement format while retaining refusal of new interaction records.
+- [x] Route configuration model validation through composition and preserve the command-surface dependency scan.
+- [x] Complete native stream fixtures across CLI/daemon workflows and retain real-HTTP Core byte-refusal and settlement-depth accounting witnesses.
 - [ ] Keep outcome rows linked to actual tests and evidence.
 - [ ] Update operator/developer documentation, indexes, compatibility guidance, README, roadmap and changelog.
 - [ ] Update verification guidance to the accepted M7 procedures.

@@ -20,7 +20,6 @@ defmodule LoopexCli.ConfigSchema do
   reading that inventory starts no application and resolves no credential.
   """
 
-  alias Loopex.LLM.ReqLLM.InProcess.Guards
   alias LoopexCli.{AskOptions, TraceSelectors}
   alias LoopexComposition.ProviderBindings
 
@@ -304,10 +303,9 @@ defmodule LoopexCli.ConfigSchema do
   defp array_members(_, pointer, _, _, _), do: error(:invalid_type, pointer)
 
   defp model(value, pointer) do
-    case Guards.model(value) do
-      {:ok, _} -> :ok
-      {:error, _} -> error(:invalid_model, pointer)
-    end
+    if ProviderBindings.valid_model?(value),
+      do: :ok,
+      else: error(:invalid_model, pointer)
   end
 
   defp role_name(value, pointer) do
