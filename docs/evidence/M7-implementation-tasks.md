@@ -6,6 +6,13 @@ Execution checklist supplied by the maintainer. The accepted
 and proof obligations. This checklist records work; it introduces no decisions.
 Part of the [evidence index](README.md).
 
+Progress reports use the maintainer's original T00–T19 checklist. Each task's
+Original checklist section preserves its supplied items; only those checkboxes
+count toward original-checklist completion. Added implementation subtasks are
+tracked separately and do not increase the original denominator. An unchecked
+original item may have substantial partial implementation; it closes only when
+its entire stated outcome is proved.
+
 ## Current work
 
 - Done: reproduce cross-run conversation loss with the real session-owner path
@@ -126,6 +133,13 @@ Part of the [evidence index](README.md).
   beyond a wait line, exact answer decoding and malformed-input refusal.
 - Next: join configuration preparation and ChatInput to the runtime-owning chat
   driver, bounded output and first complete conversation workflow.
+- Running: new-chat configuration preparation and explicit durable question-tool
+  wiring are local, uncommitted changes. Current-toolchain tests pass 31 CLI
+  configuration cases and 17 constructor cases; floor and structural checks remain.
+- Decision pending: expose captured genesis through the existing Loopex creation
+  facade, or keep that facade unchanged and route chat through composition to
+  the accepted host-private exact-genesis operation. No dependent public API
+  change has been made.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -141,6 +155,14 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: Restored reporting against the maintainer's original numbered
+  checklist after clarification. It contains 20 tasks and 186 original items;
+  20 original items are checked, with all top-level tasks still open. Earlier
+  86/262 reporting counted added implementation work and is not the original
+  checklist's completion measure. Original T09 recovery proof is restored as
+  one checked item, supported by its pure, live-owner and local-Store restart
+  witnesses below; those implementation witnesses remain separate additions.
 
 - 2026-10-01: ChatInput reads one LF/CRLF line at a time with a 65,536-byte
   pre-terminator ceiling. It consumes no next-command byte after a wait line.
@@ -1335,17 +1357,27 @@ Part of the [evidence index](README.md).
   during pure preparation.
 
 ## T00 — Prepare the specifications and test fixtures
+
+### Original checklist
+
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
-- [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
-- [ ] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
 - [ ] Pin schema definitions, digests, compatibility vectors and provider mappings.
-- [x] Pin legacy and planned M7 read-definition canonical preimages/digests and the revision-1 literal artifact-read capability table.
 - [ ] Create the M7 fixture manifest with exact prompts, budgets, allowed changes and objective results.
 - [ ] Assign every operator step and negative scenario to a named test or demonstration.
 - [ ] Prepare the indexed closure-evidence scaffold with results marked Pending.
 - [ ] Retain the exact historical binaries and session roots needed for migration and rollback.
 - [ ] Verify manifest completeness, invalid-manifest rejection and actual instruction/tool-schema costs.
+
+### Added implementation subtasks
+
+- [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
+- [ ] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
+- [x] Pin legacy and planned M7 read-definition canonical preimages/digests and the revision-1 literal artifact-read capability table.
+
 ## T01 — Preserve conversation across prompts and restarts
+
+### Original checklist
+
 - [x] First add a failing test reproducing the current loss of earlier conversation.
 - [x] Project the complete committed conversation into subsequent model requests.
 - [x] Join tool calls and results using their run, turn and call identities.
@@ -1353,10 +1385,13 @@ Part of the [evidence index](README.md).
 - [x] Reset each run’s accounting without deleting conversation or recovery facts.
 - [x] Preserve already staged requests unchanged.
 - [ ] Test multiple prompts, follow-ups, tools, cancellation, failed runs, restart and uncertain commits.
+
 ## T02 — Handle large tool output and bounded artifact reads
+
+### Original checklist
+
 - [ ] Prepare bounded excerpts while retaining complete original results.
 - [ ] Implement capability checks from the exact frozen tool definitions and literal capability table.
-- [x] Implement and test pure exact-generation derivation and retained-binding validation; runtime selection and executor dispatch integration remain pending.
 - [ ] Keep replay independent of current host-registry availability.
 - [ ] Validate artifact ownership and arguments in the session owner before policy admission; add resolved executor data after approval.
 - [ ] Implement 4-KiB range reads, encoded-result limits, offsets, progress and EOF.
@@ -1364,11 +1399,16 @@ Part of the [evidence index](README.md).
 - [ ] Preserve legacy inline behavior where the complete request fits.
 - [ ] Test escaping, Unicode, forged references, cross-session access, digest mismatch, exhaustion, cancellation and recovery.
 - [ ] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
+
+### Added implementation subtasks
+
+- [x] Implement and test pure exact-generation derivation and retained-binding validation; runtime selection and executor dispatch integration remain pending.
+
 ## T03 — Implement host-composed instructions
+
+### Original checklist
+
 - [ ] Replace core’s fixed instructions with the accepted host instruction map and rendering.
-- [x] Implement pure closed instruction capture, exact rendering and retained-digest validation; preserve legacy fallback bytes through the shared renderer.
-- [x] Stage captured v3 instructions with configuration-bound revision-4 provenance and exact system/tool costs; reject substituted configuration/source identities on replay.
-- [x] Implement reference-host default/explicit/role capture, bounded regular-file reads and exact JSON environment byte/digest vectors; live configuration/chat wiring remains pending.
 - [ ] Keep project and skill resources separately typed and admitted.
 - [ ] Capture workspace/environment facts and exact selected tool schemas.
 - [ ] Enforce the configured system ceiling and complete serialized-request limit.
@@ -1376,28 +1416,44 @@ Part of the [evidence index](README.md).
 - [ ] Preserve old receipt decoding.
 - [ ] Test admitted, declined, changed and oversized instructions, long paths, restart and exact staged bytes.
 - [ ] Prove instructions cannot widen policy or helper authority.
+
+### Added implementation subtasks
+
+- [x] Implement pure closed instruction capture, exact rendering and retained-digest validation; preserve legacy fallback bytes through the shared renderer.
+- [x] Stage captured v3 instructions with configuration-bound revision-4 provenance and exact system/tool costs; reject substituted configuration/source identities on replay.
+- [x] Implement reference-host default/explicit/role capture, bounded regular-file reads and exact JSON environment byte/digest vectors; live configuration/chat wiring remains pending.
+
 ## T04 — Implement configuration, genesis and provider routing
+
+### Original checklist
+
 - [x] Implement the shared pure genesis resolver and validator.
+- [x] Support exact-genesis creation, finding duplicates before expanding changed defaults.
+- [ ] Implement the closed configuration-file schema and command-line grammar.
+- [ ] Implement file/flag precedence, validation and effective-value display.
+- [ ] Require explicit conversation bounds in the file, including when flags override them.
+- [ ] Retain committed session settings, tool selections, roles and delegation declarations.
+- [ ] Allow maintenance settings to change new episodes while preserving already admitted episodes.
+- [ ] Implement named provider and credential bindings through the existing custody boundaries.
+- [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
+- [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
+- [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.
+
+### Added implementation subtasks
+
 - [x] Share the v2 resolver/decoder between creation and replay; pin unchanged transaction bytes and exact normalized byte boundaries.
 - [x] Extend that same resolver/decoder with v3 configuration, immutable tool selection and literal artifact-read derivation.
 - [x] Validate closed captured configuration, combined metadata byte limits, budget origins and complete system-class tool costs; retain v3 settings through pure replay.
 - [x] Resolve complete initial configurations through that validator, deriving known/unknown context budgets and retaining explicit/default origins.
 - [x] Integrate v3 creation and configuration-aware live owner staging, including frozen request/receipt identities.
-- [x] Support exact-genesis creation, finding duplicates before expanding changed defaults.
-- [ ] Implement the closed configuration-file schema and command-line grammar.
 - [x] Implement bounded JSON syntax decoding with exact integers, redacted errors and duplicate-key JSON pointers; prove callbacks under both supported toolchains.
 - [x] Implement shared pure provider-binding/reference validation and sorted launch exclusions from the adapter's compiled catalog; environment resolution/custody/startup integration remains pending.
 - [x] Validate closed authored-file objects, required conversation bounds, role/route/delegation relationships, explicit context ceilings and trace limit domains before overrides.
 - [x] Load bounded selected regular config files, retaining authored/resolved profiles with config-relative literal paths and resolved byte bounds; prompt-file and effective-profile admission remain later stages.
 - [x] Resolve trace selectors through fixed trusted application-module manifests without input atom creation or application startup; owning trace startup/drain/teardown integration remains pending.
 - [x] Parse the complete chat/config-inspection flag grammar with duplicate/conflict refusal, bounded array overrides, exact numeric domains and shared registries; effective-profile and command-entry integration remains pending.
-- [ ] Implement file/flag precedence, validation and effective-value display.
 - [x] Compose new-session file/flag/LOOPEX_HOME precedence and harmless literal defaults with complete value origins and array replacement; capability/instruction admission and redacted effective display remain pending.
 - [x] Join selected new-session declarations, captured instructions and tool definitions to credential-free route/mapping resolution and whole-configuration admission, preserving effective budget origins.
-- [ ] Require explicit conversation bounds in the file, including when flags override them.
-- [ ] Retain committed session settings, tool selections, roles and delegation declarations.
-- [ ] Allow maintenance settings to change new episodes while preserving already admitted episodes.
-- [ ] Implement named provider and credential bindings through the existing custody boundaries.
 - [x] Admit the durable adapter's closed token-route branch and select the committed provider before child startup; prove selected private bootstrap and unbound-route refusal.
 - [x] Share explicit durable credential loading between direct and borrowing plane constructors, with complete-name validation, deduplicated reads, joined partial-start cleanup and fresh borrowed trace capabilities.
 - [x] Carry configured launch exclusions through executor job and drain ownership, preserving legacy receipts; prove first-image exclusion after reinsertion and real job/helper propagation.
@@ -1408,10 +1464,11 @@ Part of the [evidence index](README.md).
 - [x] Extend the offline CLI credential cache and shared startup to borrow explicit routes, refuse rebinding and scope discovery/placement exclusions; verify existing recovery workflows on both toolchains.
 - [x] Forward explicit foreground-server provider/model/maintenance options with preflight refusal and real subprocess startup/EOF cleanup on both toolchains.
 - [ ] Finish provider bindings and captured exclusions through chat, daemon-command and remaining ask/helper entrypoints, including discovery and helper preparation.
-- [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
-- [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
-- [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.
+
 ## T05 — Update records, protocols and independent clients
+
+### Original checklist
+
 - [ ] Implement every new record/request generation before emitting it.
 - [ ] Add foreground protocol /3 and daemon protocol /4.
 - [ ] Produce complete payload-schema manifests and reproducible digests.
@@ -1422,7 +1479,11 @@ Part of the [evidence index](README.md).
 - [ ] Test negotiation order, malformed offers, digest mismatches, old clients, authority checks and replay.
 - [ ] Verify private thinking, credentials and host-only data never enter public projections.
 - [ ] Run the required independent-client workflows.
+
 ## T06 — Build the first complete chat workflow
+
+### Original checklist
+
 - [ ] Add loopex chat through the existing session/runtime facade.
 - [ ] Join explicit configuration, continuity and instructions.
 - [ ] Support prompts, status, wait, abort, bounded output and truthful shutdown.
@@ -1430,10 +1491,11 @@ Part of the [evidence index](README.md).
 - [ ] Preserve existing ask, durable-run and embedded workflows.
 - [ ] Test startup refusal, admission failure, output and cleanup.
 - [ ] Later retain the required attended multi-prompt proof.
+
 ## T07 — Implement automatic and explicit compaction
-- [x] Validate explicit Core maintenance model/instruction startup settings and privately forward exact captured instruction bytes to session owners.
-- [x] Validate and forward explicit maintenance instructions through all durable constructors and ephemeral startup before owned effects, preserving per-call refusal.
-- [x] Resolve the separately configured host summarizer and prove its fixed-budget thinking-off native request and natural completion through both transports.
+
+### Original checklist
+
 - [ ] Select complete eligible conversation groups.
 - [ ] Protect open exchanges and their complete native prefixes from compaction or re-rendering.
 - [ ] Have the owner select and encode bounded source excerpts; have the model produce the summary.
@@ -1445,8 +1507,31 @@ Part of the [evidence index](README.md).
 - [ ] Test oversized oldest/newest groups, small problematic groups, trailing inputs, omitted content, length stops and non-progress.
 - [ ] Inject crashes around preparation, staging, settlement, checkpoint and publication.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
+
+### Added implementation subtasks
+
+- [x] Validate explicit Core maintenance model/instruction startup settings and privately forward exact captured instruction bytes to session owners.
+- [x] Validate and forward explicit maintenance instructions through all durable constructors and ephemeral startup before owned effects, preserving per-call refusal.
+- [x] Resolve the separately configured host summarizer and prove its fixed-budget thinking-off native request and natural completion through both transports.
+
 ## T08 — Implement model selection and private thinking continuation
+
+### Original checklist
+
 - [ ] Implement committed per-run model/reasoning configuration and the permitted configure fields.
+- [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
+- [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
+- [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
+- [ ] Implement continuation accounting, reserves and compaction headroom targets.
+- [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
+- [x] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
+- [x] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
+- [x] Test the bridge against a local HTTP server before integrating live-provider proofs.
+- [ ] Test model switching, crashes, cancellation, malformed replies, overflow, usage accounting and privacy.
+- [ ] Complete the seven thinking-round subcases, nine bound subcases and cancellation witness, including their prescribed subsequent prompts.
+
+### Added implementation subtasks
+
 - [x] Prepare closed whole-candidate mutable updates with bounded inputs, monotonic versions and retained explicit/derived budget origins.
 - [x] Prepare atomic configuration admission/replay with exact command identity, single-copy instructions, retained earlier run captures and public event allowlists.
 - [x] Gate prepared configuration admission/replay on captured terminal-tool-history capability, preserving empty-completion and cross-run semantics.
@@ -1457,42 +1542,40 @@ Part of the [evidence index](README.md).
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [x] Register all nine literal reasoning cells after deterministic native request/response, bound, disclosure and terminal-history conformance; share exact mappings with transport validation.
 - [ ] Join registered reasoning subsets and exact mapping resolution to whole-profile preparation.
-- [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
 - [x] Prepare exact v2/v3 callback projection, source-bound v3 settlement readers and monotonic historical-prefix recovery before writer migration.
 - [x] Emit v3 for every new ordinary settlement, migrate exact callback fixtures, and prove whole-record accounting, required-capsule admission and historical schemas through live recovery.
-- [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
 - [x] Implement pure exact native-array capture and reconstruction through the shared expander, with closed fields and stop/call relations.
 - [x] Build and validate bounded aggregate request envelopes from full committed settlements and lineage positions, including source/configuration replay checks.
 - [x] Charge the complete expanded ordinary envelope in revision-four receipts and independently verify every retained cost field.
 - [x] Preserve frozen project input through owner recovery, reject native-ID collisions before tools, and retain replayable aggregate-overflow preparation failures.
 - [ ] Resolve and implement the numeric refusal schema for frozen project/resource input; prove its exact bounds and replay.
 - [ ] Prove frozen resource-pack input and steer ordering across continuation/restart boundaries.
-- [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
-- [ ] Implement continuation accounting, reserves and compaction headroom targets.
-- [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
-- [x] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
 - [x] Implement bounded native event assembly and pinned SSE parse/flush validation with permanent failure, exact content reconstruction and cumulative usage evidence.
 - [x] Render captured native requests and seal the final Finch request; prove exact tools, controls and ceilings against the pinned builder and hook order.
-- [x] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
 - [x] Join native capture and request sealing to the durable worker, with strict reply fields and an owned, monitored drain.
 - [x] Prove local HTTP framing, private/public projection, blocked-drain failure, owner death and telemetry exclusion.
 - [x] Share full-generation canonical call rendering and refuse malformed argument repair across ordinary and native request paths.
 - [x] Join buffered native capture/rendering to OneShotHTTP1 with invocation-correlated private state, complete native identity/usage checks and selected-key screening.
 - [x] Keep native request bytes out of Finch metadata through bounded one-use body streams without changing wire framing or response delivery.
-- [x] Test the bridge against a local HTTP server before integrating live-provider proofs.
-- [ ] Test model switching, crashes, cancellation, malformed replies, overflow, usage accounting and privacy.
-- [ ] Complete the seven thinking-round subcases, nine bound subcases and cancellation witness, including their prescribed subsequent prompts.
+
 ## T09 — Implement model-originated questions
+
+### Original checklist
+
 - [x] Register the exact question-tool generation without changing old effect definitions.
-- [x] Pin its format-v2 canonical preimage/digest and enforce exact schema/byte/choice limits before policy.
-- [x] Separate interaction tools from executor dispatch and reject nested policy defer.
-- [x] Replace the interim policy-allow refusal with committed model-question pending and producer-specific terminal transitions.
 - [x] Admit questions through policy; no executor grant or job is created.
 - [x] Implement producer identity, options, text answers, decline and expiry.
 - [x] Atomically settle the interaction, original tool result, response identity and next action.
 - [x] Preserve the existing policy-defer lifecycle.
 - [ ] Test denial, deferred policy, large answers, overflow, duplicate/stale responses, cancellation and expiry.
 - [x] Test crashes before and after pending-question and response commits.
+- [x] Prove recovery retains the actual pending question identity.
+
+### Added implementation subtasks
+
+- [x] Pin its format-v2 canonical preimage/digest and enforce exact schema/byte/choice limits before policy.
+- [x] Separate interaction tools from executor dispatch and reject nested policy defer.
+- [x] Replace the interim policy-allow refusal with committed model-question pending and producer-specific terminal transitions.
 - [x] Prove pure recovery retains the actual committed pending question identity.
 - [x] Prove live owner restart retains that identity and settles it once.
 - [x] Prove commit-unknown re-presentation retains exact pending and response bytes.
@@ -1500,8 +1583,11 @@ Part of the [evidence index](README.md).
 - [ ] Pin pending/response decoder vectors and public question event schemas.
 - [x] Pin the shared closed answer schema/union and independent Elixir/Node payload vectors.
 - [ ] Join that answer schema and decoder to the complete M7 /3-/4 contracts and both authorized mutation paths.
+
 ## T10 — Complete chat controls, pipes and tracing
-- [x] Implement bounded single-line framing and explicit chat-action parsing, with wait-line backpressure, exact JSON answers and malformed-input refusal on both toolchains; driver admission remains pending.
+
+### Original checklist
+
 - [ ] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.
 - [ ] Implement the exact pipe grammar and closed control records.
 - [ ] Enforce record limits, bounded input admission, the 256-KiB output queue and control-drain deadline.
@@ -1512,7 +1598,15 @@ Part of the [evidence index](README.md).
 - [ ] Add the independently draining diagnostic consumer with drop and unconfirmed-delivery accounting.
 - [ ] Test PTYs, fragmented pipes, actual question IDs, barriers, slow readers, EOF and signals.
 - [ ] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
+
+### Added implementation subtasks
+
+- [x] Implement bounded single-line framing and explicit chat-action parsing, with wait-line backpressure, exact JSON answers and malformed-input refusal on both toolchains; driver admission remains pending.
+
 ## T11 — Implement specialized read-only helpers
+
+### Original checklist
+
 - [ ] Implement saved roles with exact instructions, models, credentials and finite allowances.
 - [ ] Register the opt-in helper tool and immutable read-only tool selection.
 - [ ] Add the required read-only runtime/store provenance and effect-intent queries.
@@ -1528,8 +1622,11 @@ Part of the [evidence index](README.md).
 - [ ] Test read-only authority, nesting refusal, budgets, concurrent parents, cancellation and exhausted-call reopening.
 - [ ] Inject faults at every binding, reserve, create, prompt, stop, settlement, receipt and cache boundary.
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
+
 ## T12 — Complete ephemeral support
-- [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
+
+### Original checklist
+
 - [ ] Forward accepted instruction, model, reasoning, provider-binding, maintenance, question and trace options.
 - [ ] Preserve reusable embedded sessions and buffered transport.
 - [ ] Keep questions opt-in and preserve old tool selections.
@@ -1540,7 +1637,15 @@ Part of the [evidence index](README.md).
 - [ ] Test blocked, invalid, failed and late callbacks, cancellation, expiry and cleanup uncertainty.
 - [ ] Preserve the existing credential and transport-cleanup guarantees.
 - [ ] Complete the attended ephemeral-question witness.
+
+### Added implementation subtasks
+
+- [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
+
 ## T13 — Complete coding fixtures and operator instructions
+
+### Original checklist
+
 - [ ] Implement the repair fixture and its independent sum assertions.
 - [ ] Implement the feature fixture requiring the nil-encoding question.
 - [ ] Implement the review fixture with the exact duplicate-fee finding and call chain.
@@ -1551,7 +1656,11 @@ Part of the [evidence index](README.md).
 - [ ] Make every V1–V13 instruction runnable, with one owner and evidence slot per step/subcase.
 - [ ] Complete the specified human-attended steps with a named operator.
 - [ ] Collect previous executions without adding extra model attempts.
+
 ## T14 — Implement attempts tracking and evidence validation
+
+### Original checklist
+
 - [ ] Implement the canonical, hash-chained attempts index and fsync-before-dispatch.
 - [ ] Implement single-writer ownership and safe evidence handoff between machines.
 - [ ] Implement all attempt states, verdict classes and legal transitions.
@@ -1562,7 +1671,11 @@ Part of the [evidence index](README.md).
 - [ ] Add the M7 evidence validator to the existing two check commands.
 - [ ] Implement M7 lane selectors while preserving all legacy cases.
 - [ ] Test truncation, forks, duplicate writers, interrupted handoff, resume, abandonment, redaction and every verdict route.
+
 ## T15 — Prove migration and rollback
+
+### Original checklist
+
 - [ ] Upgrade exact settled and unresolved M6 roots without changing staged requests.
 - [ ] Prove unknown effects are not redispatched.
 - [ ] Observe the actual historical reader against disposable new-format roots.
@@ -1572,12 +1685,12 @@ Part of the [evidence index](README.md).
 - [ ] Restore into an empty root and compare complete manifests.
 - [ ] Restore workspace state separately from runtime state.
 - [ ] Join automated rollback artifacts to attended restore inspection without rerunning the case.
+
 ## T16 — Complete integration and regression checks
-- [x] Restore the reference composition size gate by consolidating preflight in the existing DurableOptions owner; preserve validation precedence and constructor behavior on both toolchains.
+
+### Original checklist
+
 - [x] Move M7 to In progress when product work begins.
-- [x] Encode the historical interaction positive control with its reader's v2 settlement format while retaining refusal of new interaction records.
-- [x] Route configuration model validation through composition and preserve the command-surface dependency scan.
-- [x] Complete native stream fixtures across CLI/daemon workflows and retain real-HTTP Core byte-refusal and settlement-depth accounting witnesses.
 - [ ] Keep outcome rows linked to actual tests and evidence.
 - [ ] Update operator/developer documentation, indexes, compatibility guidance, README, roadmap and changelog.
 - [ ] Update verification guidance to the accepted M7 procedures.
@@ -1586,11 +1699,21 @@ Part of the [evidence index](README.md).
 - [ ] Run required selected real-provider, Node, daemon, long-bound and cross-UID lanes.
 - [ ] Run changed process-boundary cases thirty times under the prescribed pinned Linux load.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
+
+### Added implementation subtasks
+
+- [x] Restore the reference composition size gate by consolidating preflight in the existing DurableOptions owner; preserve validation precedence and constructor behavior on both toolchains.
+- [x] Encode the historical interaction positive control with its reader's v2 settlement format while retaining refusal of new interaction records.
+- [x] Route configuration model validation through composition and preserve the command-surface dependency scan.
+- [x] Complete native stream fixtures across CLI/daemon workflows and retain real-HTTP Core byte-refusal and settlement-depth accounting witnesses.
 - [x] Investigate and fix OwnerGroup supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain failing-before and process-lifetime evidence independently of passing assertions.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
 
 ## T17 — Assemble and test the closure candidate
+
+### Original checklist
+
 - [ ] Provision both supported toolchains, pinned Node, provider bindings and the legacy Ollama witness.
 - [ ] Provision Linux cross-UID support, descriptor limits, retained evidence storage and attendance.
 - [ ] Finish all source, fixtures and documentation before committing the tested candidate.
@@ -1601,7 +1724,11 @@ Part of the [evidence index](README.md).
 - [ ] Complete every M7 case, subcase and operator evidence join.
 - [ ] Retain outputs, manifests, usage, sizes, durations, failures and independent review with digests.
 - [ ] Present the exact candidate for the maintainer’s closure decision.
+
 ## T18 — Close M7 and merge back into main
+
+### Original checklist
+
 - [ ] Obtain explicit closure approval on the tested candidate and evidence.
 - [ ] Create the administrative direct child confined to the five permitted paths and regions.
 - [ ] Record both tested and administrative identities correctly.
@@ -1609,7 +1736,11 @@ Part of the [evidence index](README.md).
 - [ ] Fast-forward main to the administrative closure commit under the maintainer’s integration authority.
 - [ ] Push and verify the resulting repository state.
 - [ ] Clean up landed worker branches/worktrees; retain m7 through implementation and decide its disposition after closure.
+
 ## T19 — Prepare and publish the separately authorized release
+
+### Original checklist
+
 - [ ] Select the release label before testing any version-dependent source changes.
 - [ ] On the administrative SHA, prove confinement, documentation structure and documentation meaning.
 - [ ] Compare tested and administrative source archives using the required complete manifests.
@@ -1617,7 +1748,6 @@ Part of the [evidence index](README.md).
 - [ ] Create the authorized annotated tag at the administrative SHA.
 - [ ] Push the authorized tag/publication and verify its target.
 - [ ] Reuse unchanged-source closure evidence; do not rerun the suite or provider matrix.
-The required test inventory includes 28 named M7 cases, their fixed thinking/question subcases, deterministic negative tests, all 13 operator scenarios, the retained legacy release cases, independent Node workflows, process-boundary load tests and both rollback pairs.
 
 ## T00 contract inventory
 
