@@ -26,6 +26,7 @@ defmodule Loopex.Runtime.Control do
   use GenServer
 
   alias Loopex.Instrumentation
+  alias Loopex.Model
   alias Loopex.ResumeActivation
   alias Loopex.Runtime.DaemonRoute
   alias Loopex.Runtime.EventDispatcher
@@ -33,6 +34,8 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.SessionGenesis
+  alias Loopex.Runtime.SessionConfiguration
+  alias Loopex.Runtime.Instructions
   alias Loopex.Runtime.StreamRelay
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Owner
@@ -522,6 +525,18 @@ defmodule Loopex.Runtime.Control do
 
       true ->
         create_session(state, command_id, session_options, from, mode)
+    end
+  end
+
+  def handle_call(
+        {:create_session_with_genesis, token, command_id, session_options, genesis},
+        from,
+        state
+      ) do
+    if token == state.token and is_nil(state.quiescing) do
+      create_session(state, command_id, session_options, from, :detailed, genesis)
+    else
+      {:reply, {:error, :runtime_unavailable}, state}
     end
   end
 
@@ -2184,11 +2199,13 @@ defmodule Loopex.Runtime.Control do
   # Store error attributed to a session that already exists. The period is this
   # runtime's option, which ADR 0016 makes a default for new sessions only:
   # recovery reconstructs the committed value from this record instead.
-  defp create_session(state, command_id, session_options, from, mode) do
+  defp create_session(state, command_id, session_options, from, mode, supplied_genesis \\ :legacy) do
     with true <- valid_identifier?(command_id),
-         {:ok, genesis} <- session_genesis(session_options, state.cleanup_grace_ms),
+         {:ok, genesis} <-
+           creation_genesis(session_options, state.cleanup_grace_ms, supplied_genesis),
          {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis),
-         {:ok, fresh?} <- create_command_absent?(state, command_id, transaction) do
+         {:ok, fresh?} <- create_command_absent?(state, command_id, transaction),
+         :ok <- validate_fresh_selection(state, genesis, fresh?) do
       {outcome, lane} = resolve_transaction(state.lane, transaction)
       state = %{state | lane: lane}
       transaction_session_id = Map.get(transaction, :session_id)
@@ -2318,6 +2335,52 @@ defmodule Loopex.Runtime.Control do
           )
 
         {:reply, reply, state}
+    end
+  end
+
+  defp creation_genesis(options, grace, :legacy), do: session_genesis(options, grace)
+
+  defp creation_genesis(options, _grace, supplied) when is_map(options) do
+    with {:ok, genesis} <- SessionGenesis.normalize(supplied),
+         {:ok, normalized, _bytes} <-
+           Store.normalize_and_measure_item(:record, %{
+             "options" => options,
+             kind: "original_options"
+           }),
+         true <- normalized["options"] == genesis["options"] do
+      {:ok, genesis}
+    else
+      {:error, :session_configuration_too_large} = error -> error
+      _invalid -> {:error, :invalid_session_creation}
+    end
+  end
+
+  defp creation_genesis(_options, _grace, _supplied), do: {:error, :invalid_session_creation}
+
+  # Concept: historical creation replays without reacquiring current selections.
+  # Technical depth: only a proved fresh create checks the runtime's admitted
+  # definitions and model route. The transaction binds complete captured genesis
+  # and its normalized original options, never current cleanup defaults.
+  defp validate_fresh_selection(_state, _genesis, false), do: :ok
+  defp validate_fresh_selection(_state, %{kind: "session_genesis_v2"}, true), do: :ok
+
+  defp validate_fresh_selection(state, %{kind: "session_genesis_v3"} = genesis, true) do
+    definitions = genesis["tool_selection"]["definitions"]
+    configuration = genesis["initial_configuration"]
+    model = configuration["model"]
+
+    with true <- Enum.all?(definitions, &(&1 in state.tools)),
+         true <- is_nil(state.model) or state.model.model == model,
+         {:ok, text} <- Instructions.render(configuration["instructions"]),
+         {:ok, _request} <-
+           Model.request(model, [%{"role" => "system", "content" => text}],
+             tools: definitions,
+             sampling: SessionConfiguration.sampling(configuration),
+             deadline: 0
+           ) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_session_creation}
     end
   end
 

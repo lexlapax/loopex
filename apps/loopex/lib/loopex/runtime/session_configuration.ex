@@ -87,6 +87,44 @@ defmodule Loopex.Runtime.SessionConfiguration do
 
   def validate(_configuration, _definitions), do: {:error, :invalid_session_configuration}
 
+  @doc """
+  ## Concept
+
+  The sampling settings bound by an admitted configuration.
+
+  ## Technical depth
+
+  Includes the exact resolved mapping in canonical request bytes. Default
+  reasoning omits its override; other admitted levels carry their literal value.
+  The caller supplies an already validated configuration.
+  """
+  @spec sampling(map()) :: map()
+  def sampling(configuration) do
+    sampling = Map.take(configuration, ~w(max_tokens provider_mapping))
+
+    if configuration["reasoning"] == "default",
+      do: sampling,
+      else: Map.put(sampling, "reasoning", configuration["reasoning"])
+  end
+
+  @doc """
+  ## Concept
+
+  The instruction identity used by a configured request's context receipt.
+
+  ## Technical depth
+
+  The closed host_instructions reference retains exactly captured version and
+  rendered-content digest. The descriptor separately measures the full message.
+  The caller supplies an already validated configuration.
+  """
+  @spec instruction_source(map()) :: map()
+  def instruction_source(configuration) do
+    configuration["instructions"]
+    |> Map.take(~w(version digest))
+    |> Map.put("kind", "host_instructions")
+  end
+
   defp valid_capabilities?(configuration) do
     capabilities = configuration["model_capabilities"]
 

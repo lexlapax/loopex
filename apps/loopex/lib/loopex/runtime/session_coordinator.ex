@@ -31,6 +31,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
   alias Loopex.Runtime.Instructions
+  alias Loopex.Runtime.SessionConfiguration
   alias Loopex.Runtime.ProviderLifetime
   alias Loopex.Runtime.ResourceContext
   alias Loopex.Runtime.SessionState
@@ -2865,7 +2866,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     with {:ok, deadline} <- run_deadline(declared),
          staging = Map.put(staging, :deadline, deadline),
-         {:ok, max_tokens} <- declared_max_tokens(state),
+         {:ok, max_tokens} <- declared_max_tokens(state, run_id),
          staging = Map.put(staging, :max_tokens, max_tokens),
          {:ok, proposal} <- stage_candidate(state, staging),
          {:ok, next} <- commit_internal(state, proposal) do
@@ -3079,26 +3080,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     with {:ok, entries} <- Conversation.lineage_entries(staging.elements),
          messages =
-           [%{"role" => "system", "content" => system_block(state)}] ++
+           [%{"role" => "system", "content" => system_block(state, staging.run_id)}] ++
              Enum.map(blocks, &%{"role" => "user", "content" => &1}) ++
              Enum.map(entries, &elem(&1, 1)),
          {:ok, request} <-
-           Model.request(state.model.model, messages ++ steer_message(staging.steer),
-             tools: state.active_tools,
-             sampling: %{"max_tokens" => staging.max_tokens},
+           Model.request(
+             request_model(state, staging.run_id),
+             messages ++ steer_message(staging.steer),
+             tools: request_tools(state, staging.run_id),
+             sampling: request_sampling(state, staging),
              deadline: staging.deadline
            ),
          {:ok, receipt} <-
            context_receipt(
              request,
              context_sources(
+               state,
                sources,
                entries,
                staging.steer,
                staging.run_id
              ),
              project_receipt,
-             state.context_token_budget,
+             SessionState.context_token_budget(state.durable, staging.run_id),
              resource_header
            ) do
       {:ok, %{request: request, receipt: receipt}}
@@ -3308,8 +3312,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # candidate measured under an eligible resolution keeps that resolution in its
   # receipt while contributing no descriptor, and a source list derived from the
   # receipt alone would describe a message the request does not contain.
-  defp context_sources(project_sources, session_entries, steer, run_id) do
-    [source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
+  defp context_sources(state, project_sources, session_entries, steer, run_id) do
+    reference =
+      case SessionState.run_configuration(state.durable, run_id) do
+        nil -> %{"kind" => "system", "identity" => "loopex.system.v1"}
+        configuration -> SessionConfiguration.instruction_source(configuration)
+      end
+
+    [source(reference, "system")] ++
       project_sources ++
       Enum.map(session_entries, fn {source_reference, _message} ->
         source(source_reference, "session")
@@ -3524,7 +3534,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp declared_max_tokens(state) do
+  defp declared_max_tokens(state, run_id) do
+    case SessionState.run_configuration(state.durable, run_id) do
+      nil -> legacy_max_tokens(state)
+      configuration -> {:ok, configuration["max_tokens"]}
+    end
+  end
+
+  defp legacy_max_tokens(state) do
     configured =
       Keyword.get(state.model.options, :max_tokens) ||
         get_in(state.sampling, ["max_tokens"])
@@ -3554,9 +3571,36 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Technical depth: carried inside the staged bytes and therefore covered by
   # `staged_request_digest`, so a change to it is a visible change of what was
   # dispatched rather than an invisible drift in how the model was instructed.
-  defp system_block(_state) do
-    {:ok, text} = Instructions.render(Instructions.legacy())
+  defp system_block(state, run_id) do
+    instructions =
+      case SessionState.run_configuration(state.durable, run_id) do
+        nil -> Instructions.legacy()
+        configuration -> configuration["instructions"]
+      end
+
+    {:ok, text} = Instructions.render(instructions)
     text
+  end
+
+  defp request_model(state, run_id) do
+    case SessionState.run_configuration(state.durable, run_id) do
+      nil -> state.model.model
+      configuration -> configuration["model"]
+    end
+  end
+
+  defp request_tools(state, run_id) do
+    case SessionState.run_configuration(state.durable, run_id) do
+      nil -> state.active_tools
+      _configuration -> state.durable.tool_selection["definitions"]
+    end
+  end
+
+  defp request_sampling(state, staging) do
+    case SessionState.run_configuration(state.durable, staging.run_id) do
+      nil -> %{"max_tokens" => staging.max_tokens}
+      configuration -> SessionConfiguration.sampling(configuration)
+    end
   end
 
   # Concept: the operator's deadline is checked before a provider is called, not
@@ -5705,7 +5749,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
     resolved =
       state
       |> resolve_bounds(command)
-      |> Map.put(:context_token_budget, state.context_token_budget)
+      |> Map.put(
+        :context_token_budget,
+        case state.durable.configuration do
+          nil -> state.context_token_budget
+          configuration -> configuration["context_token_budget"]
+        end
+      )
 
     {state, resolved}
   end
@@ -6374,6 +6424,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # closed, while the run timer can terminate the callback at the earlier
   # committed deadline without leaving an orphan host operation behind. No
   # effect intent or grant exists until the supervised answer is admitted.
+  defp policy_defer_mode(state) do
+    if state.durable.policy_defer_mode == "refuse", do: :refuse_defer, else: :admit_defer
+  end
+
   defp start_policy_consultation(%{policy: nil} = state, work, call, _definition),
     do: commit_tool_terminal(state, work, call, :denied, "policy_unavailable")
 
@@ -6382,7 +6436,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     task =
       Task.Supervisor.async_nolink(state.owner_workers, fn ->
-        Policy.evaluate_callback(state.policy, request, :admit_defer)
+        Policy.evaluate_callback(state.policy, request, policy_defer_mode(state))
       end)
 
     state = put_in_flight(state, task.ref, {:policy, work.run_id, task.pid})
@@ -6618,7 +6672,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
               task =
                 Task.Supervisor.async_nolink(state.owner_workers, fn ->
-                  Policy.evaluate_callback(state.policy, request, :admit_defer)
+                  Policy.evaluate_callback(state.policy, request, policy_defer_mode(state))
                 end)
 
               state = put_in_flight(state, task.ref, {:policy, work.run_id, task.pid})
@@ -6845,7 +6899,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # message records the exact bytes each call resolved through rather than a
   # bare name a later registry edit could repoint.
   defp resolve_active_tool(state, name) do
-    case Enum.find(state.active_tools, &(Map.fetch!(&1, "name") == name)) do
+    case Enum.find(
+           request_tools(state, state.durable.active_run_id),
+           &(Map.fetch!(&1, "name") == name)
+         ) do
       nil -> {:error, {:unknown_tool, name}}
       definition -> {:ok, definition}
     end

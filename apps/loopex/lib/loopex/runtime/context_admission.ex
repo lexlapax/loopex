@@ -23,7 +23,7 @@ defmodule Loopex.Runtime.ContextAdmission do
   This module owns the ADR 0017 admission boundary. Evaluation is ordered and
   the first failure wins, so a refusal is reproducible from the same inputs:
 
-  1. the `system` provenance class against its strict 1,000-token ceiling,
+  1. the `system` provenance class against its captured strict ceiling,
      where one below fits while exactly at and above refuse;
   2. the whole provider-visible request against the run's committed
      `context_token_budget`;
@@ -55,12 +55,13 @@ defmodule Loopex.Runtime.ContextAdmission do
   ## Technical depth
 
   Token observations are supplied rather than recomputed here, because only the
-  live constructor holds the exact provider-visible preimage. The three limit
-  members are passed explicitly so the caller and this boundary cannot disagree
-  about which ceiling was applied.
+  live constructor holds the exact provider-visible preimage. The context,
+  byte and structural limits are explicit. A captured system ceiling overrides
+  the immutable 1,000-token legacy fallback; malformed explicit ceilings refuse.
   """
   @type observations() :: %{
           required(:system_class_tokens) => non_neg_integer(),
+          optional(:system_class_token_ceiling) => pos_integer(),
           required(:provider_estimated_tokens) => non_neg_integer(),
           required(:context_token_budget) => pos_integer(),
           required(:context_record_byte_ceiling) => pos_integer(),
@@ -118,11 +119,23 @@ defmodule Loopex.Runtime.ContextAdmission do
   # at the ceiling refuses -- so a host-owned system prompt that has grown to
   # consume the whole reserved class is caught by its own name instead of being
   # reported as a total-budget failure the operator cannot locate.
-  defp system_class(%{system_class_tokens: observed})
-       when observed >= @system_class_token_ceiling,
-       do: refused("system_class_tokens", observed, @system_class_token_ceiling, nil)
+  defp system_class(%{system_class_tokens: observed} = observations)
+       when is_integer(observed) and observed >= 0 do
+    limit = Map.get(observations, :system_class_token_ceiling, @system_class_token_ceiling)
 
-  defp system_class(_observations), do: :ok
+    cond do
+      not (is_integer(limit) and limit > 0 and limit <= 18_446_744_073_709_551_615) ->
+        {:error, :invalid_system_class_ceiling}
+
+      observed >= limit ->
+        refused("system_class_tokens", observed, limit, nil)
+
+      true ->
+        :ok
+    end
+  end
+
+  defp system_class(_observations), do: {:error, :invalid_system_class_observation}
 
   defp context_tokens(%{provider_estimated_tokens: observed, context_token_budget: limit})
        when observed > limit,

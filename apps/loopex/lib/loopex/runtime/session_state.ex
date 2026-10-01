@@ -88,6 +88,10 @@ defmodule Loopex.Runtime.SessionState do
     no_decision binding_changed staged_empty context_token_budget
     context_record_bytes
   )
+  @context_refusal_v2_keys Enum.sort(
+                             (@context_refusal_keys -- ~w(category dimension observed limit)) ++
+                               ~w(failure configuration_version episode_id targets projection_state measurement_scope)
+                           )
 
   alias Loopex.ArtifactStore
   alias Loopex.Bounds
@@ -97,6 +101,8 @@ defmodule Loopex.Runtime.SessionState do
   alias Loopex.Runtime.ContextAdmission
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionGenesis
+  alias Loopex.Runtime.SessionConfiguration
+  alias Loopex.Runtime.Instructions
   alias Loopex.Store
   alias LoopexProtocol.Canonical
   alias LoopexProtocol.ToolDefinition
@@ -179,6 +185,7 @@ defmodule Loopex.Runtime.SessionState do
           run_order: [binary()],
           bounds: map(),
           context_budgets: map(),
+          run_configurations: map(),
           context_refusal: map() | nil,
           deadlines: map(),
           steer: map(),
@@ -213,6 +220,7 @@ defmodule Loopex.Runtime.SessionState do
             # succession, and restart must all reuse the value the predecessor
             # committed rather than whatever the current process now defaults to.
             context_budgets: %{},
+            run_configurations: %{},
             # The transient marker ADR 0017 installs when the first row of a
             # context refusal has been applied and its terminal has not. It is
             # in-memory only: it changes no durable-derived run state, and a
@@ -707,6 +715,20 @@ defmodule Loopex.Runtime.SessionState do
   @doc """
   ## Concept
 
+  The configuration a run bound at admission, including promoted follow-ups.
+
+  ## Technical depth
+
+  The immutable projection references captured committed settings rather than
+  current runtime defaults. Nil identifies legacy or unknown runs explicitly.
+  """
+  @spec run_configuration(t(), binary() | nil) :: map() | nil
+  def run_configuration(%__MODULE__{} = state, run_id),
+    do: Map.get(state.run_configurations, run_id)
+
+  @doc """
+  ## Concept
+
   The bounds declared for one run and the tokens charged against them so far.
 
   ## Technical depth
@@ -824,7 +846,7 @@ defmodule Loopex.Runtime.SessionState do
     turn_number = next_turn_number(work)
     record = model_request_record(state, run_id, request, options, turn_number)
 
-    case admit_context_candidate(record) do
+    case admit_context_candidate(record, state) do
       {:ok, fixed} -> {:ok, fixed}
       {:refused, refusal} -> context_refusal_result(record, refusal, work, turn_number)
       {:error, reason} -> {:error, reason}
@@ -891,7 +913,7 @@ defmodule Loopex.Runtime.SessionState do
         do: "model_request_committed",
         else: "model_request_committed_resources_v1"
 
-    %{
+    record = %{
       "run_id" => run_id,
       "turn_id" => stable_id("turn", run_id, turn_number),
       "operation_id" => model_operation_id(run_id, turn_number),
@@ -901,9 +923,26 @@ defmodule Loopex.Runtime.SessionState do
       "context_receipt" => Keyword.get(options, :context_receipt),
       kind: kind
     }
+
+    case run_configuration(state, run_id) do
+      nil ->
+        record
+
+      configuration ->
+        record
+        |> Map.put(
+          :kind,
+          if(kind == "model_request_committed",
+            do: "model_request_committed_v2",
+            else: "model_request_committed_resources_v2"
+          )
+        )
+        |> Map.put("configuration_version", configuration["configuration_version"])
+    end
   end
 
-  defp admit_context_candidate(%{"context_receipt" => receipt} = record) when is_map(receipt) do
+  defp admit_context_candidate(%{"context_receipt" => receipt} = record, state)
+       when is_map(receipt) do
     observations = %{
       system_class_tokens: get_in(receipt, ["totals", "by_provenance", "system", "token_cost"]),
       provider_estimated_tokens: Map.get(receipt, "provider_estimated_tokens"),
@@ -912,6 +951,15 @@ defmodule Loopex.Runtime.SessionState do
       context_record_depth_limit: Store.max_item_depth(),
       context_record_cardinality_limit: Store.max_item_cardinality()
     }
+
+    observations =
+      case run_configuration(state, record["run_id"]) do
+        nil ->
+          observations
+
+        configuration ->
+          Map.put(observations, :system_class_token_ceiling, configuration["system_class_tokens"])
+      end
 
     # Concept: only a structurally inadmissible candidate skips the fixed point,
     # and it skips it to be named, not to be waved through.
@@ -931,7 +979,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp admit_context_candidate(record), do: resolve_record_byte_cost(record)
+  defp admit_context_candidate(record, _state), do: resolve_record_byte_cost(record)
 
   defp record_byte_cost_candidate(record) do
     case resolve_record_byte_cost(record) do
@@ -963,13 +1011,15 @@ defmodule Loopex.Runtime.SessionState do
     session = Enum.count(message_blocks, &(&1["provenance_class"] == "session")) - steer
 
     if system + session + steer + tools == length(blocks) do
-      {:refused,
-       compact_refusal(receipt, refusal, work, turn_number, %{
-         system: system,
-         session: session,
-         steer: steer,
-         tools: tools
-       })}
+      compact =
+        compact_refusal(receipt, refusal, work, turn_number, %{
+          system: system,
+          session: session,
+          steer: steer,
+          tools: tools
+        })
+
+      {:refused, configured_refusal(compact, record["configuration_version"])}
     else
       {:refused_not_required_only, refusal}
     end
@@ -1010,6 +1060,32 @@ defmodule Loopex.Runtime.SessionState do
       "limit" => Map.fetch!(refusal, "limit"),
       kind: "context_admission_refused_v1"
     }
+  end
+
+  defp configured_refusal(compact, nil), do: compact
+
+  defp configured_refusal(compact, version) do
+    failure =
+      Map.take(compact, ~w(category dimension observed limit))
+      |> Map.merge(%{
+        "version" => 2,
+        "retryable" => false,
+        "measurement_scope" => "ordinary",
+        "hard_limit" => compact["limit"]
+      })
+
+    compact
+    |> Map.drop(~w(category dimension observed limit))
+    |> Map.merge(%{
+      :kind => "context_admission_refused_v2",
+      "failure" => failure,
+      "token_estimator" => "loopex.context_bytes.v2",
+      "configuration_version" => version,
+      "episode_id" => nil,
+      "targets" => nil,
+      "projection_state" => "measured",
+      "measurement_scope" => "ordinary"
+    })
   end
 
   # Technical depth: a truthfully empty staged manifest keeps `staged_empty`
@@ -1643,6 +1719,17 @@ defmodule Loopex.Runtime.SessionState do
       kind: "prompt_admitted_v2"
     }
 
+    record =
+      case state.configuration do
+        nil ->
+          record
+
+        configuration ->
+          record
+          |> Map.put(:kind, "prompt_admitted_v3")
+          |> Map.put("configuration_version", configuration["configuration_version"])
+      end
+
     events = prompt_events(state.session_id, command.command_id, run_id, command.content)
 
     admitted_proposal(state, command, digest, "prompt", record, events, reply)
@@ -2085,7 +2172,12 @@ defmodule Loopex.Runtime.SessionState do
            payload: %{kind: kind} = record
          }
        )
-       when kind in ["command_admitted", "prompt_admitted_v2", "command_admission_refused_v1"] do
+       when kind in [
+              "command_admitted",
+              "prompt_admitted_v2",
+              "prompt_admitted_v3",
+              "command_admission_refused_v1"
+            ] do
     # Technical depth: a pending refusal marker admits exactly one next row, and
     # a command row is not it. The tail guard was applied only to the internal
     # clause below, so a validly stamped command row landing between a refusal
@@ -2115,9 +2207,12 @@ defmodule Loopex.Runtime.SessionState do
        )
        when kind in [
               "context_admission_refused_v1",
+              "context_admission_refused_v2",
               "deadline_staging_failed_v1",
               "model_request_committed",
+              "model_request_committed_v2",
               "model_request_committed_resources_v1",
+              "model_request_committed_resources_v2",
               "model_attempt_opened_v1",
               "model_attempt_settled_v1",
               "model_attempt_settled_v2",
@@ -2207,6 +2302,11 @@ defmodule Loopex.Runtime.SessionState do
   defp admissible_command_kind?("prompt_admitted_v2", record),
     do: record["command_type"] == "prompt" and record["admission"] == "accepted"
 
+  defp admissible_command_kind?("prompt_admitted_v3", record),
+    do:
+      map_size(record) == 12 and record["command_type"] == "prompt" and
+        record["admission"] == "accepted"
+
   # Technical depth: `observed` must be a positive integer strictly above the
   # fixed limit. A retained refusal at or below the ceiling describes a candidate
   # that would have fitted, which is invalid history rather than a refusal to
@@ -2241,7 +2341,8 @@ defmodule Loopex.Runtime.SessionState do
     with {:ok, run_id} <- record_binary(record, "run_id"),
          {:ok, content} <- record_binary(record, "content"),
          {:ok, declared} <- record_bounds(record),
-         {:ok, context_budget} <- record_context_token_budget(record) do
+         {:ok, context_budget} <- record_context_token_budget(record),
+         {:ok, configuration} <- admitted_run_configuration(state, record, context_budget) do
       work = %{
         type: "model",
         stage: "model_pending",
@@ -2273,6 +2374,7 @@ defmodule Loopex.Runtime.SessionState do
         run_order: state.run_order ++ [run_id],
         bounds: Map.put(state.bounds, run_id, declared),
         context_budgets: Map.put(state.context_budgets, run_id, context_budget),
+        run_configurations: Map.put(state.run_configurations, run_id, configuration),
         run_resources: Map.put(state.run_resources, run_id, state.resources)
       }
 
@@ -2517,14 +2619,16 @@ defmodule Loopex.Runtime.SessionState do
            "staged_request_digest" => staged_request_digest,
            "request" => request,
            "applied_steer" => applied_steer,
-           kind: "model_request_committed"
+           kind: kind
          } = record
-       ) do
+       )
+       when kind in ["model_request_committed", "model_request_committed_v2"] do
     with true <- is_nil(Map.get(state.run_resources, run_id)),
          {:ok, request} <- decode_request(request),
          %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
            Map.get(state.pending_work, run_id),
          :ok <- Loopex.Model.validate_request(request),
+         :ok <- validate_request_configuration(state, record, request, run_id),
          turn_number = next_turn_number(work),
          true <- turn_id == stable_id("turn", run_id, turn_number),
          true <- operation_id == model_operation_id(run_id, turn_number),
@@ -2559,15 +2663,21 @@ defmodule Loopex.Runtime.SessionState do
            "staged_request_digest" => staged_request_digest,
            "request" => request,
            "applied_steer" => applied_steer,
-           kind: "model_request_committed_resources_v1"
+           kind: kind
          } = record
-       ) do
+       )
+       when kind in [
+              "model_request_committed_resources_v1",
+              "model_request_committed_resources_v2"
+            ] do
     with true <- not is_nil(Map.get(state.run_resources, run_id)),
-         true <- map_size(record) == 8,
+         true <-
+           map_size(record) == if(kind == "model_request_committed_resources_v1", do: 8, else: 9),
          {:ok, request} <- decode_request(request),
          %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
            Map.get(state.pending_work, run_id),
          :ok <- Loopex.Model.validate_request(request),
+         :ok <- validate_request_configuration(state, record, request, run_id),
          turn_number = next_turn_number(work),
          true <- turn_id == stable_id("turn", run_id, turn_number),
          true <- operation_id == model_operation_id(run_id, turn_number),
@@ -2829,7 +2939,8 @@ defmodule Loopex.Runtime.SessionState do
   # rows is legitimate and carries the marker into the next fetch. Reaching the
   # durable head with the marker still pending, or observing any intervening,
   # duplicated, or mismatched row, is invalid incomplete history.
-  defp apply_internal_record(state, %{kind: "context_admission_refused_v1"} = refusal) do
+  defp apply_internal_record(state, %{kind: kind} = refusal)
+       when kind in ["context_admission_refused_v1", "context_admission_refused_v2"] do
     with :ok <- validate_context_refusal(state, refusal) do
       {:ok,
        %{
@@ -3380,6 +3491,8 @@ defmodule Loopex.Runtime.SessionState do
           # the current process now defaults to.
           context_budgets:
             Map.put(state.context_budgets, promoted, Map.get(state.context_budgets, run_id)),
+          run_configurations:
+            Map.put(state.run_configurations, promoted, run_configuration(state, run_id)),
           run_resources: Map.put(state.run_resources, promoted, state.resources),
           run_order: state.run_order ++ [promoted],
           conversation: Map.put(state.conversation, promoted, [element])
@@ -3763,6 +3876,24 @@ defmodule Loopex.Runtime.SessionState do
         {:error, :invalid_context_token_budget_record}
     end
   end
+
+  defp admitted_run_configuration(%{configuration: nil}, %{kind: "prompt_admitted_v2"}, _budget),
+    do: {:ok, nil}
+
+  defp admitted_run_configuration(
+         %{configuration: configuration},
+         %{kind: "prompt_admitted_v3"} = record,
+         budget
+       )
+       when is_map(configuration) do
+    if record["configuration_version"] == configuration["configuration_version"] and
+         budget == configuration["context_token_budget"],
+       do: {:ok, configuration},
+       else: {:error, :invalid_run_configuration}
+  end
+
+  defp admitted_run_configuration(_state, _record, _budget),
+    do: {:error, :invalid_run_configuration}
 
   defp record_bounds(record) do
     Bounds.declare(%{
@@ -5212,6 +5343,41 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: a request must use the configuration its run actually admitted.
+  # Technical depth: generation, sampling, instruction text, tools and budget
+  # are compared with durable truth before receipt arithmetic can admit them.
+  defp validate_request_configuration(state, record, request, run_id) do
+    case run_configuration(state, run_id) do
+      nil ->
+        if record.kind in ["model_request_committed", "model_request_committed_resources_v1"],
+          do: :ok,
+          else: {:error, :invalid_request_configuration}
+
+      configuration ->
+        with true <-
+               record.kind in [
+                 "model_request_committed_v2",
+                 "model_request_committed_resources_v2"
+               ],
+             true <- map_size(record) == 9,
+             true <- record["configuration_version"] == configuration["configuration_version"],
+             true <- request.canonicalization_version == "loopex.model_request.v2",
+             true <- request.model == configuration["model"],
+             true <- request.sampling == SessionConfiguration.sampling(configuration),
+             true <- request.tools == state.tool_selection["definitions"],
+             {:ok, text} <- Instructions.render(configuration["instructions"]),
+             true <- List.first(request.messages) == %{"role" => "system", "content" => text},
+             true <- get_in(record, ["context_receipt", "provider_revision"]) == 4,
+             true <-
+               get_in(record, ["context_receipt", "context_token_budget"]) ==
+                 configuration["context_token_budget"] do
+          :ok
+        else
+          _invalid -> {:error, :invalid_request_configuration}
+        end
+    end
+  end
+
   # Concept: revision-three receipts bind the immutable resource selection and
   # only the resource bytes actually retained in the staged request.
   #
@@ -5678,7 +5844,7 @@ defmodule Loopex.Runtime.SessionState do
 
     with {:ok, entries} <- request_session_entries(state, run_id, version) do
       {:ok,
-       [context_source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
+       [context_source(instruction_source(state, receipt, run_id), "system")] ++
          expected_project_sources(Map.get(receipt, "project_resource")) ++
          Enum.map(entries, fn {reference, _message} -> context_source(reference, "session") end) ++
          steer}
@@ -5723,12 +5889,22 @@ defmodule Loopex.Runtime.SessionState do
     else
       with {:ok, entries} <- request_session_entries(state, run_id, version) do
         {:ok,
-         [context_source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
+         [context_source(instruction_source(state, receipt, run_id), "system")] ++
            expected_project_sources(receipt["project_resource"]) ++
            resource_sources ++
            Enum.map(entries, fn {reference, _message} -> context_source(reference, "session") end) ++
            steer}
       end
+    end
+  end
+
+  defp instruction_source(state, receipt, run_id) do
+    case {receipt["provider_revision"], run_configuration(state, run_id)} do
+      {4, configuration} when is_map(configuration) ->
+        SessionConfiguration.instruction_source(configuration)
+
+      _legacy ->
+        %{"kind" => "system", "identity" => "loopex.system.v1"}
     end
   end
 
@@ -5939,6 +6115,8 @@ defmodule Loopex.Runtime.SessionState do
   defp deadline_failure,
     do: %{"category" => "deadline_preflight_failed", "retryable" => false}
 
+  defp context_failure(%{"failure" => failure, kind: "context_admission_refused_v2"}), do: failure
+
   defp context_failure(refusal) do
     %{
       "category" => Map.fetch!(refusal, "category"),
@@ -5949,7 +6127,60 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
-  defp validate_context_refusal(state, refusal) do
+  defp validate_context_refusal(state, %{kind: "context_admission_refused_v2"} = refusal) do
+    run_id = refusal["run_id"]
+    configuration = run_configuration(state, run_id)
+    failure = refusal["failure"]
+
+    with true <- Enum.sort(Map.keys(refusal)) == @context_refusal_v2_keys,
+         true <- is_map(configuration),
+         true <- refusal["configuration_version"] == configuration["configuration_version"],
+         true <- is_nil(refusal["episode_id"]) and is_nil(refusal["targets"]),
+         true <-
+           refusal["projection_state"] == "measured" and
+             refusal["measurement_scope"] == "ordinary",
+         true <- refusal["token_estimator"] == "loopex.context_bytes.v2",
+         true <-
+           is_map(failure) and
+             Enum.sort(Map.keys(failure)) ==
+               Enum.sort(
+                 ~w(version category retryable measurement_scope dimension observed limit hard_limit)
+               ),
+         true <-
+           failure["version"] == 2 and failure["retryable"] == false and
+             failure["measurement_scope"] == "ordinary",
+         true <- failure["category"] == "context_budget_exceeded",
+         true <-
+           is_integer(failure["observed"]) and failure["observed"] >= 0 and
+             failure["observed"] <= @uint64_max,
+         true <- positive_uint64?(failure["limit"]) and failure["hard_limit"] == failure["limit"],
+         :ok <- validate_ordinary_v2_relations(state, refusal, configuration, failure) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp validate_context_refusal(state, refusal),
+    do: validate_context_refusal_base(state, refusal, 1_000, Bounds.estimator())
+
+  defp validate_ordinary_v2_relations(state, refusal, configuration, failure) do
+    common =
+      refusal
+      |> Map.drop(
+        ~w(failure configuration_version episode_id targets projection_state measurement_scope)
+      )
+      |> Map.merge(Map.take(failure, ~w(category dimension observed limit)))
+
+    validate_context_refusal_base(
+      state,
+      common,
+      configuration["system_class_tokens"],
+      "loopex.context_bytes.v2"
+    )
+  end
+
+  defp validate_context_refusal_base(state, refusal, system_limit, estimator) do
     run_id = Map.get(refusal, "run_id")
     work = Map.get(state.pending_work, run_id)
 
@@ -5959,7 +6190,7 @@ defmodule Loopex.Runtime.SessionState do
          true <- stage in ["model_pending", "turn_settled"],
          true <- Map.get(refusal, "turn_id") == stable_id("turn", run_id, next_turn_number(work)),
          true <- Map.get(refusal, "category") == "context_budget_exceeded",
-         true <- Map.get(refusal, "token_estimator") == Bounds.estimator(),
+         true <- Map.get(refusal, "token_estimator") == estimator,
          true <-
            Map.get(refusal, "descriptor_canonicalization_version") ==
              @descriptor_canonicalization_version,
@@ -5968,7 +6199,7 @@ defmodule Loopex.Runtime.SessionState do
            Map.get(refusal, "context_token_budget") == Map.get(state.context_budgets, run_id),
          true <- Map.get(refusal, "project_disposition") in @context_project_dispositions,
          true <- valid_descriptor_counts?(refusal),
-         true <- valid_context_dimension?(refusal) do
+         true <- valid_context_dimension?(refusal, system_limit) do
       :ok
     else
       _invalid -> {:error, :invalid_context_refusal}
@@ -5992,50 +6223,65 @@ defmodule Loopex.Runtime.SessionState do
   # transaction digest already protects. `record_byte_cost` is non-nil for the
   # byte dimension alone, because the token and structural dimensions are
   # decided before any record is constructed.
-  defp valid_context_dimension?(%{
-         "dimension" => "context_tokens",
-         "observed" => observed,
-         "limit" => limit,
-         "provider_estimated_tokens" => estimated,
-         "context_token_budget" => budget,
-         "record_byte_cost" => nil
-       }),
+  defp valid_context_dimension?(
+         %{
+           "dimension" => "context_tokens",
+           "observed" => observed,
+           "limit" => limit,
+           "provider_estimated_tokens" => estimated,
+           "context_token_budget" => budget,
+           "record_byte_cost" => nil
+         },
+         _system_limit
+       ),
        do: observed == estimated and limit == budget and observed > limit
 
-  defp valid_context_dimension?(%{
-         "dimension" => "context_record_bytes",
-         "observed" => observed,
-         "limit" => limit,
-         "record_byte_cost" => cost
-       }),
+  defp valid_context_dimension?(
+         %{
+           "dimension" => "context_record_bytes",
+           "observed" => observed,
+           "limit" => limit,
+           "record_byte_cost" => cost
+         },
+         _system_limit
+       ),
        do: observed == cost and limit == 65_536 and observed > limit
 
-  defp valid_context_dimension?(%{
-         "dimension" => "context_record_depth",
-         "observed" => observed,
-         "limit" => limit,
-         "record_byte_cost" => nil
-       }),
+  defp valid_context_dimension?(
+         %{
+           "dimension" => "context_record_depth",
+           "observed" => observed,
+           "limit" => limit,
+           "record_byte_cost" => nil
+         },
+         _system_limit
+       ),
        do: observed == 13 and limit == 12
 
-  defp valid_context_dimension?(%{
-         "dimension" => "context_record_cardinality",
-         "observed" => observed,
-         "limit" => limit,
-         "record_byte_cost" => nil
-       }),
+  defp valid_context_dimension?(
+         %{
+           "dimension" => "context_record_cardinality",
+           "observed" => observed,
+           "limit" => limit,
+           "record_byte_cost" => nil
+         },
+         _system_limit
+       ),
        do: observed == 1_025 and limit == 1_024
 
-  defp valid_context_dimension?(%{
-         "dimension" => "system_class_tokens",
-         "observed" => observed,
-         "limit" => limit,
-         "provider_estimated_tokens" => estimated,
-         "record_byte_cost" => nil
-       }),
-       do: limit == 1_000 and observed >= limit and observed <= estimated
+  defp valid_context_dimension?(
+         %{
+           "dimension" => "system_class_tokens",
+           "observed" => observed,
+           "limit" => limit,
+           "provider_estimated_tokens" => estimated,
+           "record_byte_cost" => nil
+         },
+         system_limit
+       ),
+       do: limit == system_limit and observed >= limit and observed <= estimated
 
-  defp valid_context_dimension?(_refusal), do: false
+  defp valid_context_dimension?(_refusal, _system_limit), do: false
 
   # Concept: the terminal row is what makes the refusal real.
   #

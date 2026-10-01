@@ -21,10 +21,11 @@ Part of the [evidence index](README.md).
   instruction capture/render validation preserves exact legacy staging bytes.
 - Done: shared v3 genesis normalization/resolution and pure replay retain closed
   configuration, exact tools, artifact-read binding and policy-defer mode.
-- Running: T00 contract/fixture inventory and T01 boundary verification; next
-  integration slice is T03 host instructions with T04 persisted configuration.
-  Host instruction/configuration binding and non-nil continuation costs remain
-  in T03/T04/T08.
+- Done: exact-genesis live creation and configuration-bound runtime staging;
+  two prompts plus restart retain captured instructions, settings and tools.
+- Running: integration verification of the captured-configuration runtime path.
+  Reference-host chat/configuration composition and non-nil continuation costs
+  remain in T03/T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
 
@@ -124,6 +125,27 @@ Part of the [evidence index](README.md).
   creation, provider mapping conformance, frozen run/configuration binding and
   configuration-aware request/receipt staging remain pending.
 
+- 2026-10-01: host-private exact-genesis creation now retains supplied v2/v3
+  bytes and normalized original options. Historical duplicates start no owner
+  and bypass changed startup defaults/registrations; fresh v3 creation checks
+  admitted definitions/model route and kernel request construction. New
+  prompt_admitted_v3 and configured model_request_committed_v2/resource v2
+  records bind the admitted configuration version. Follow-up promotion inherits
+  the captured configuration. Requests use exact captured instruction text,
+  model, reply allowance, provider mapping and immutable tools. Revision-4
+  instruction provenance is checked against the owning configuration, including
+  a self-consistent renamed-source negative case. Captured policy-defer refusal
+  denies without an interaction or executor effect. Ordinary measured numeric
+  context_admission_refused_v2 retains its own estimator, scope, configuration
+  and hard limits; v1 keeps its original rules. Maintenance/headroom/nonnumeric
+  refusal variants remain pending with compaction. Runtime/genesis/conversation/
+  context tests pass 158 cases in 25.5 seconds; configured/context tests pass
+  32 cases in 2.1 seconds, interaction coverage passes 27 cases in 12.3 seconds,
+  and configured/detailed-result checks pass 15 cases in 0.6 seconds. Compiled
+  documentation ordering passes with 941 covered entries. Full fast integration
+  verification is next; reference-host composition, public schemas, provider
+  conformance and the closure matrix remain pending.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -157,6 +179,7 @@ Part of the [evidence index](README.md).
 ## T03 — Implement host-composed instructions
 - [ ] Replace core’s fixed instructions with the accepted host instruction map and rendering.
 - [x] Implement pure closed instruction capture, exact rendering and retained-digest validation; preserve legacy fallback bytes through the shared renderer.
+- [x] Stage captured v3 instructions with configuration-bound revision-4 provenance and exact system/tool costs; reject substituted configuration/source identities on replay.
 - [ ] Keep project and skill resources separately typed and admitted.
 - [ ] Capture workspace/environment facts and exact selected tool schemas.
 - [ ] Enforce the configured system ceiling and complete serialized-request limit.
@@ -165,12 +188,12 @@ Part of the [evidence index](README.md).
 - [ ] Test admitted, declined, changed and oversized instructions, long paths, restart and exact staged bytes.
 - [ ] Prove instructions cannot widen policy or helper authority.
 ## T04 — Implement configuration, genesis and provider routing
-- [ ] Implement the shared pure genesis resolver and validator.
+- [x] Implement the shared pure genesis resolver and validator.
 - [x] Share the v2 resolver/decoder between creation and replay; pin unchanged transaction bytes and exact normalized byte boundaries.
 - [x] Extend that same resolver/decoder with v3 configuration, immutable tool selection and literal artifact-read derivation.
 - [x] Validate closed captured configuration, combined metadata byte limits, budget origins and complete system-class tool costs; retain v3 settings through pure replay.
-- [ ] Integrate v3 creation and configuration-aware live owner staging, including frozen request/receipt identities.
-- [ ] Support exact-genesis creation, finding duplicates before expanding changed defaults.
+- [x] Integrate v3 creation and configuration-aware live owner staging, including frozen request/receipt identities.
+- [x] Support exact-genesis creation, finding duplicates before expanding changed defaults.
 - [ ] Implement the closed configuration-file schema and command-line grammar.
 - [ ] Implement file/flag precedence, validation and effective-value display.
 - [ ] Require explicit conversation bounds in the file, including when flags override them.
@@ -354,10 +377,10 @@ before a provider demonstration.
 | Tool-output preparation | ADR 0041 | Immutable receipt plus versioned prepared-reference/preparation-state facts and exact source digests | SessionState; SessionCoordinator; ArtifactStore; local executor | Pending |
 | Artifact read capability | ADR 0041 | loopex.artifact_read.v1 binding from literal tool-generation table; resolved executor arguments | ToolDefinition; SessionGenesis; local read tool; SessionCoordinator | Pending |
 | Instruction envelope | ADR 0042 | Closed version/base/environment/appendix map, exact rendered bytes/digest | SessionGenesis; configuration reducer; host composition | Pending |
-| Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Nil-continuation generation join implemented; instruction/maintenance bindings pending |
-| Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Pending |
-| Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pending |
-| Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pending |
+| Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Nil-continuation and owning-instruction bindings implemented; maintenance/continuation bindings pending |
+| Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 implemented; remaining variants/projections pending |
+| Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
+| Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
 | Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Pending |

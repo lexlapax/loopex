@@ -273,6 +273,21 @@ defmodule Loopex.Runtime do
     do: {:error, :runtime_reference_required}
 
   @doc false
+  @spec create_session_with_genesis(t(), binary(), map(), map()) ::
+          {:ok, binary()} | {:error, term()}
+  def create_session_with_genesis(%__MODULE__{} = runtime, command_id, session_options, genesis) do
+    runtime
+    |> control_call(
+      {:create_session_with_genesis, runtime.token, command_id, session_options, genesis},
+      :infinity
+    )
+    |> project_detailed_session_result()
+  end
+
+  def create_session_with_genesis(_runtime, _command_id, _session_options, _genesis),
+    do: {:error, :runtime_reference_required}
+
+  @doc false
   @spec create_session_detailed(t(), binary(), map()) ::
           {:ok,
            %{

@@ -1,0 +1,517 @@
+Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/agent_loop_helper.exs", __DIR__)
+
+defmodule Loopex.ConfiguredSessionDeferringPolicy do
+  @moduledoc false
+  @behaviour Loopex.Policy
+  @impl Loopex.Policy
+  def decide(_request) do
+    {:defer,
+     %{
+       kind: :choice,
+       prompt: "Allow this write?",
+       choices: [%{id: "allow", label: "Allow"}],
+       expires_in_ms: 700
+     }}
+  end
+end
+
+defmodule Loopex.ConfiguredSessionTest do
+  use ExUnit.Case, async: false
+
+  alias Loopex.AgentLoopFixture, as: Fixture
+  alias Loopex.AgentLoopTestModel
+  alias Loopex.Runtime
+  alias Loopex.Runtime.ContextAdmission
+  alias Loopex.Runtime.Instructions
+  alias Loopex.Runtime.SessionConfiguration
+  alias Loopex.Runtime.SessionGenesis
+  alias Loopex.Runtime.SessionState
+  alias LoopexProtocol.ToolDefinition
+  alias LoopexProtocol.Canonical
+
+  test "two prompts and restart stage captured host instructions, settings and tools" do
+    fixture =
+      start(
+        script: [%{text: "first answer", calls: []}, %{text: "second answer", calls: []}],
+        max_tokens: 7
+      )
+
+    configuration = configuration(String.duplicate("captured ", 400))
+    genesis = genesis(fixture.definitions, configuration)
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(fixture.runtime, "create-v3", %{}, genesis)
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    prompt(attachment, "first", "first prompt")
+    prompt(attachment, "second", "second prompt")
+    [first, second] = AgentLoopTestModel.dispatched(fixture.model)
+    {:ok, text} = Instructions.render(configuration["instructions"])
+
+    for request <- [first, second] do
+      assert hd(request.messages) == %{"role" => "system", "content" => text}
+      assert request.sampling == SessionConfiguration.sampling(configuration)
+      assert request.tools == fixture.definitions
+    end
+
+    assert Enum.map(tl(second.messages), & &1["content"]) == [
+             "first prompt",
+             "first answer",
+             "second prompt"
+           ]
+
+    records = Fixture.records(fixture, session)
+    assert hd(records).payload == genesis
+
+    assert {:ok, recovered} =
+             SessionState.recover(session, records, Fixture.events(fixture, session))
+
+    for run <- recovered.run_order do
+      assert SessionState.run_configuration(recovered, run) == configuration
+    end
+
+    staged = Enum.filter(records, &(&1.payload.kind == "model_request_committed_v2"))
+    assert length(staged) == 2
+
+    for row <- staged do
+      assert row.payload["configuration_version"] == 1
+
+      assert hd(row.payload["context_receipt"]["blocks"])["source_reference"] ==
+               SessionConfiguration.instruction_source(configuration)
+    end
+
+    assert :ok = Loopex.stop(fixture.runtime)
+
+    restarted =
+      start(
+        store: fixture.store,
+        tools: [],
+        max_tokens: 3,
+        cleanup_grace_ms: 1,
+        script: [%{text: "third answer", calls: []}]
+      )
+
+    before_duplicate = Fixture.records(restarted, session)
+
+    assert {:ok, ^session} =
+             Runtime.create_session_with_genesis(restarted.runtime, "create-v3", %{}, genesis)
+
+    assert Fixture.records(restarted, session) == before_duplicate
+
+    assert {:ok, ^session} =
+             Loopex.resume_session(restarted.runtime, session, command_id: "resume-v3")
+
+    assert {:ok, attachment} =
+             Loopex.attach(restarted.runtime, session,
+               after_event_sequence: List.last(Fixture.events(restarted, session)).event_sequence
+             )
+
+    prompt(attachment, "third", "third prompt")
+    [third] = AgentLoopTestModel.dispatched(restarted.model)
+    assert hd(third.messages) == hd(first.messages)
+    assert third.sampling == first.sampling
+    assert third.tools == first.tools
+
+    assert Enum.map(tl(third.messages), & &1["content"]) == [
+             "first prompt",
+             "first answer",
+             "second prompt",
+             "second answer",
+             "third prompt"
+           ]
+
+    assert {:ok, final} =
+             SessionState.recover(
+               session,
+               Fixture.records(restarted, session),
+               Fixture.events(restarted, session)
+             )
+
+    assert final.cleanup_grace_ms == 5_000
+  end
+
+  test "fresh creation validates admitted definitions and normalized original options" do
+    fixture = start(script: [])
+    definition = Map.put(Fixture.tool_definition(), "description", "unregistered bytes")
+
+    assert Runtime.create_session_with_genesis(
+             fixture.runtime,
+             "unregistered",
+             %{},
+             genesis([definition])
+           ) ==
+             {:error, :invalid_session_creation}
+
+    assert Runtime.create_session_with_genesis(
+             fixture.runtime,
+             "options-mismatch",
+             %{tenant: "other"},
+             genesis(fixture.definitions)
+           ) ==
+             {:error, :invalid_session_creation}
+
+    assert Fixture.run_ids(fixture) == {}
+
+    selected = genesis(fixture.definitions) |> Map.put("options", %{"tenant" => "a"})
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "normalized",
+               %{tenant: "a"},
+               selected
+             )
+
+    assert hd(Fixture.records(fixture, session)).payload == selected
+
+    assert {:ok, ^session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "normalized",
+               %{"tenant" => "a"},
+               selected
+             )
+  end
+
+  test "one create identity cannot substitute changed captured genesis" do
+    fixture = start(script: [])
+    original = genesis(fixture.definitions)
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(fixture.runtime, "identity", %{}, original)
+
+    changed = put_in(original, ["runtime_configuration", "cleanup_grace_ms"], 1)
+
+    assert {:error, _reason} =
+             Runtime.create_session_with_genesis(fixture.runtime, "identity", %{}, changed)
+
+    assert hd(Fixture.records(fixture, session)).payload == original
+  end
+
+  test "replay rejects configuration-version substitution despite unchanged request receipts" do
+    fixture = start(script: [%{text: "answer", calls: []}])
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    prompt(attachment, "prompt", "input")
+    records = Fixture.records(fixture, session)
+    events = Fixture.events(fixture, session)
+    assert {:ok, _} = SessionState.recover(session, records, events)
+
+    for kind <- ["prompt_admitted_v3", "model_request_committed_v2"] do
+      substituted =
+        Enum.map(records, fn record ->
+          if record.payload.kind == kind,
+            do: put_in(record, [:payload, "configuration_version"], 2),
+            else: record
+        end)
+
+      assert {:error, _reason} = SessionState.recover(session, substituted, events)
+    end
+  end
+
+  test "configured input overflow commits a v2 numeric refusal without a provider call" do
+    fixture = start(script: [%{text: "must not run", calls: []}])
+
+    config =
+      configuration()
+      |> Map.put("context_token_budget", 700)
+      |> Map.put("system_class_tokens", 600)
+      |> put_in(["budget_origins", "context_token_budget"], "explicit")
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions, config)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "overflow"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "overflow",
+               content: String.duplicate("p", 2_100)
+             })
+
+    events = finish(attachment)
+    terminal = Enum.find(events, &(&1.kind == "run.finished"))
+    assert terminal["outcome"] == "failed"
+    assert terminal["failure"]["version"] == 2
+    assert terminal["failure"]["measurement_scope"] == "ordinary"
+    assert terminal["failure"]["dimension"] == "context_tokens"
+    assert terminal["failure"]["limit"] == 700
+    assert terminal["failure"]["hard_limit"] == 700
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
+    records = Fixture.records(fixture, session)
+    refusal = Enum.find(records, &(&1.payload.kind == "context_admission_refused_v2"))
+    assert refusal.payload["configuration_version"] == 1
+    assert refusal.payload["projection_state"] == "measured"
+    assert refusal.payload["episode_id"] == nil
+    assert {:ok, _} = SessionState.recover(session, records, Fixture.events(fixture, session))
+
+    invalid =
+      Enum.map(records, fn row ->
+        if row.payload.kind == "context_admission_refused_v2",
+          do: put_in(row, [:payload, "failure", "hard_limit"], 701),
+          else: row
+      end)
+
+    assert {:error, _} = SessionState.recover(session, invalid, Fixture.events(fixture, session))
+  end
+
+  test "captured refuse mode denies policy deferral without an interaction or executor effect" do
+    fixture =
+      start(
+        policy: Loopex.ConfiguredSessionDeferringPolicy,
+        script: [
+          %{
+            text: "try write",
+            calls: [%{id: "write-call", name: "write", arguments: %{"path" => "a"}}]
+          },
+          %{text: "write was denied", calls: []}
+        ]
+      )
+
+    retained = genesis(fixture.definitions) |> Map.put("policy_defer_mode", "refuse")
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(fixture.runtime, "create", %{}, retained)
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "write a"})
+
+    events = finish(attachment)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+    denial = Enum.find(events, &(&1.kind == "tool.finished"))
+    assert denial["outcome"] == "denied"
+    assert denial["reason"] == "interaction_unsupported"
+    refute Enum.any?(events, &(&1.kind == "interaction.requested"))
+
+    assert {:ok, recovered} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+
+    assert recovered.policy_defer_mode == "refuse"
+    assert is_nil(recovered.open_interaction)
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+  end
+
+  test "self-consistent renamed instruction provenance cannot replace captured source identity" do
+    fixture = start(script: [%{text: "answer", calls: []}])
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    prompt(attachment, "prompt", "input")
+
+    records =
+      Enum.map(Fixture.records(fixture, session), fn record ->
+        if record.payload.kind == "model_request_committed_v2" do
+          receipt = record.payload["context_receipt"]
+          [first | rest] = receipt["blocks"]
+          changed = put_in(first, ["source_reference", "version"], "host.v2")
+          blocks = [changed | rest]
+
+          receipt = %{
+            receipt
+            | "blocks" => blocks,
+              "ordered_descriptor_digest" => descriptor_digest(blocks)
+          }
+
+          put_in(record, [:payload, "context_receipt"], receipt)
+        else
+          record
+        end
+      end)
+
+    assert {:error, :invalid_model_request_transition} =
+             SessionState.recover(session, records, Fixture.events(fixture, session))
+  end
+
+  test "captured system ceilings retain strict edges and the legacy fallback" do
+    observations = %{
+      system_class_tokens: 4_999,
+      system_class_token_ceiling: 5_000,
+      provider_estimated_tokens: 6_000,
+      context_token_budget: 8_192,
+      context_record_byte_ceiling: 65_536,
+      context_record_depth_limit: 12,
+      context_record_cardinality_limit: 1_024
+    }
+
+    record = %{kind: "candidate"}
+    assert ContextAdmission.preflight_required_candidate(record, observations) == :ok
+
+    for observed <- [5_000, 5_001] do
+      assert {:refused,
+              %{"dimension" => "system_class_tokens", "observed" => ^observed, "limit" => 5_000}} =
+               ContextAdmission.preflight_required_candidate(record, %{
+                 observations
+                 | system_class_tokens: observed
+               })
+    end
+
+    legacy = Map.delete(observations, :system_class_token_ceiling)
+
+    assert ContextAdmission.preflight_required_candidate(record, %{
+             legacy
+             | system_class_tokens: 999
+           }) == :ok
+
+    assert {:refused, %{"limit" => 1_000}} =
+             ContextAdmission.preflight_required_candidate(record, %{
+               legacy
+               | system_class_tokens: 1_000
+             })
+
+    for limit <- [nil, 0, -1, 1.0, "5000", 18_446_744_073_709_551_616] do
+      assert ContextAdmission.preflight_required_candidate(record, %{
+               observations
+               | system_class_token_ceiling: limit
+             }) ==
+               {:error, :invalid_system_class_ceiling}
+    end
+
+    for observed <- [nil, -1, "4999"] do
+      assert ContextAdmission.preflight_required_candidate(record, %{
+               observations
+               | system_class_tokens: observed
+             }) ==
+               {:error, :invalid_system_class_observation}
+    end
+  end
+
+  defp descriptor_digest(blocks) do
+    blocks
+    |> Enum.reduce(
+      :crypto.hash_update(:crypto.hash_init(:sha256), "loopex.context.descriptors.v1" <> <<0>>),
+      fn block, digest ->
+        bytes = Canonical.encode(block)
+
+        digest
+        |> :crypto.hash_update(<<byte_size(bytes)::unsigned-big-integer-size(64)>>)
+        |> :crypto.hash_update(bytes)
+      end
+    )
+    |> :crypto.hash_final()
+    |> Base.encode16(case: :lower)
+  end
+
+  defp start(options) do
+    fixture = Fixture.start(options)
+    on_exit(fn -> Fixture.stop(fixture) end)
+    fixture
+  end
+
+  defp configuration(base \\ "Follow the host's captured instructions.") do
+    {:ok, instructions} =
+      Instructions.capture(%{
+        "version" => "host.v1",
+        "base" => base,
+        "environment" => "captured environment",
+        "appendix" => ""
+      })
+
+    %{
+      "model" => "scripted:v1",
+      "reasoning" => "default",
+      "configuration_version" => 1,
+      "instructions" => instructions,
+      "max_tokens" => 1_024,
+      "context_token_budget" => 8_192,
+      "system_class_tokens" => 5_000,
+      "budget_origins" => %{
+        "context_token_budget" => "unknown_window",
+        "system_class_tokens" => "explicit"
+      },
+      "model_capabilities" => %{
+        "model" => "scripted:v1",
+        "context_window" => nil,
+        "output_limit" => nil,
+        "reasoning_levels" => [],
+        "source_revision" => "fixture.v1",
+        "source_digest" => String.duplicate("0", 64)
+      },
+      "provider_mapping" => %{
+        "mapping_revision" => "loopex.unregistered.default.v1",
+        "renderer_revision" => "loopex.reqllm.canonical.v1",
+        "continuation_required" => false,
+        "canonical_terminal_tool_history" => false,
+        "thinking_disabled" => false,
+        "thinking" => %{"mode" => "omitted"}
+      }
+    }
+  end
+
+  defp genesis(definitions, configuration \\ configuration()) do
+    names =
+      Map.new(definitions, fn definition ->
+        {id, version, digest} = ToolDefinition.generation(definition)
+
+        {definition["name"],
+         %{"tool_id" => id, "tool_version" => version, "definition_digest" => digest}}
+      end)
+
+    assert {:ok, genesis} =
+             SessionGenesis.resolve(%{}, %{
+               genesis_version: "session_genesis_v3",
+               runtime_configuration: %{"cleanup_grace_ms" => 5_000},
+               initial_configuration: configuration,
+               tool_selection: %{"definitions" => definitions, "names" => names},
+               policy_defer_mode: "admit"
+             })
+
+    genesis
+  end
+
+  defp prompt(attachment, id, content) do
+    assert {:accepted, ^id} =
+             Loopex.command(attachment, %{type: :prompt, command_id: id, content: content})
+
+    assert Enum.find(finish(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+  end
+
+  defp finish(attachment),
+    do: collect(attachment, System.monotonic_time(:millisecond) + 5_000, [])
+
+  defp collect(attachment, deadline, events) do
+    case Loopex.next_event(attachment) do
+      {:ok, event} ->
+        if event.kind == "run.finished",
+          do: Enum.reverse([event | events]),
+          else: collect(attachment, deadline, [event | events])
+
+      other ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk(
+            "configured run did not finish: #{inspect(other)}; #{inspect(Enum.map(events, & &1.kind))}"
+          )
+        else
+          Process.sleep(10)
+          collect(attachment, deadline, events)
+        end
+    end
+  end
+end
