@@ -23,6 +23,37 @@ defmodule LoopexCli.ConfigSelectionTest do
     }
   end
 
+  test "an always-on conversation uses only its explicitly selected thinking-off summarizer",
+       fixture do
+    profile =
+      Map.put(profile(), "providers", %{
+        "openai" => env("OLD_SLOT"),
+        "anthropic" => env("ANTHROPIC_SLOT")
+      })
+
+    loaded = load(fixture, profile)
+    flags = parse(fixture, ["--model=anthropic:claude-fable-5-1", "--tools=none"])
+    assert {:ok, selection} = ConfigSelection.compose(loaded, flags, fixture.invocation, nil)
+    instructions = Loopex.Runtime.Instructions.legacy()
+    assert {:ok, unconfigured} = ConfigSelection.resolve_session(selection, instructions, [])
+    assert unconfigured.configuration["provider_mapping"]["continuation_required"]
+    assert unconfigured.maintenance_model == nil
+
+    flags =
+      parse(fixture, [
+        "--model=anthropic:claude-fable-5-1",
+        "--tools=none",
+        "--compaction-model=anthropic:claude-haiku-4-5"
+      ])
+
+    assert {:ok, selection} = ConfigSelection.compose(loaded, flags, fixture.invocation, nil)
+    assert {:ok, prepared} = ConfigSelection.resolve_session(selection, instructions, [])
+    assert prepared.configuration == unconfigured.configuration
+    assert prepared.maintenance_model["model"] == "anthropic:claude-haiku-4-5-20251001"
+    assert prepared.maintenance_model["reasoning"] == "none"
+    assert prepared.origins["/maintenance/model"] == "flag"
+  end
+
   test "session preparation joins file and flag selection with one captured instruction block",
        fixture do
     profile =

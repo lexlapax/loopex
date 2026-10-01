@@ -66,6 +66,8 @@ defmodule Loopex.Runtime do
           | {:progress_to, pid() | {:session, pid()} | nil}
           | {:diagnostics_to, pid() | nil}
           | {:model, map() | nil}
+          | {:maintenance_model, map() | nil}
+          | {:maintenance_instructions, map() | nil}
           | {:executor, map() | nil}
           | {:tool, map() | nil}
           | {:tools, [LoopexProtocol.ToolDefinition.t()]}
@@ -88,6 +90,10 @@ defmodule Loopex.Runtime do
 
   Validation completes before any child starts. The returned reference is the
   sole route to instance-owned processes; it is not registered anywhere.
+  Optional maintenance_model is ADR 0043's resolved plain model map, and
+  maintenance_instructions is its explicit version/body block. Nil remains
+  unconfigured. The runtime captures instruction bytes once and forwards both
+  settings privately to its coordinators, independently of ordinary models.
   """
   @spec start_link([option()]) :: {:ok, t()} | {:error, term()}
   def start_link(options) when is_list(options) do
@@ -840,6 +846,8 @@ defmodule Loopex.Runtime do
              progress_to: nil,
              diagnostics_to: nil,
              model: nil,
+             maintenance_model: nil,
+             maintenance_instructions: nil,
              executor: nil,
              tool: nil,
              tools: [],
@@ -867,6 +875,12 @@ defmodule Loopex.Runtime do
          {:ok, progress_to} <- validate_progress_sink(validated[:progress_to]),
          {:ok, diagnostics_to} <- validate_sink(validated[:diagnostics_to]),
          {:ok, model} <- validate_model(validated[:model]),
+         {:ok, maintenance_model} <-
+           Loopex.Runtime.MaintenanceConfiguration.validate_model(validated[:maintenance_model]),
+         {:ok, maintenance_instructions} <-
+           Loopex.Runtime.MaintenanceConfiguration.capture_instructions(
+             validated[:maintenance_instructions]
+           ),
          {:ok, executor} <- validate_executor(validated[:executor]),
          {:ok, tool} <- validate_tool(validated[:tool]),
          {:ok, tools} <- validate_tools(inherited_tool_set(validated)),
@@ -901,6 +915,8 @@ defmodule Loopex.Runtime do
          progress_to: progress_to,
          diagnostics_to: diagnostics_to,
          model: model,
+         maintenance_model: maintenance_model,
+         maintenance_instructions: maintenance_instructions,
          executor: executor,
          tool: tool,
          tools: tools,
@@ -922,7 +938,13 @@ defmodule Loopex.Runtime do
          artifact_store: artifact_store
        ]}
     else
-      {:error, :invalid_context_token_budget} -> {:error, :invalid_context_token_budget}
+      {:error, :invalid_context_token_budget} ->
+        {:error, :invalid_context_token_budget}
+
+      {:error, reason}
+      when reason in [:maintenance_model_invalid, :maintenance_instructions_invalid] ->
+        {:error, reason}
+
       # Concept: a missing host policy says so, rather than reading as a typo.
       #
       # Technical depth: every other validation failure collapses to one reason
@@ -930,8 +952,11 @@ defmodule Loopex.Runtime do
       # there to inspect. A missing policy is different: nothing in the options is
       # malformed, and an operator told only "invalid options" would look for a
       # spelling error instead of the decision they have not made.
-      {:error, :host_policy_required} -> {:error, :host_policy_required}
-      _other -> {:error, :invalid_runtime_options}
+      {:error, :host_policy_required} ->
+        {:error, :host_policy_required}
+
+      _other ->
+        {:error, :invalid_runtime_options}
     end
   end
 

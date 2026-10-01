@@ -548,6 +548,31 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
       stop(call)
     end
 
+    summary_id = "claude-haiku-4-5-20251001"
+    summary_sampling = native_sampling(summary_id, "none") |> Map.put("max_tokens", 1024)
+
+    summary_body =
+      native_response(summary_id, [%{"type" => "text", "text" => "summary"}], "end_turn")
+
+    call =
+      start(runtime, "anthropic:" <> summary_id, Jason.encode!(summary_body),
+        tls: trusted,
+        sampling: summary_sampling
+      )
+
+    {summary_result, call} = call |> begin() |> result()
+
+    assert {:ok, %{completion: "natural", continuation: nil, tool_calls: [], text: "summary"}} =
+             summary_result
+
+    assert [written] = call.writes
+    summary_request = Jason.decode!(written.body)
+    assert summary_request["max_tokens"] == 1024
+    assert summary_request["thinking"] == %{"type" => "disabled"}
+    refute Map.has_key?(summary_request, "output_config")
+    refute Map.has_key?(summary_request, "tools")
+    stop(call)
+
     id = "claude-fable-5-1"
     sampling = native_sampling(id, "default")
     ordinary = native_response(id, [%{"type" => "text", "text" => "safe"}], "end_turn")

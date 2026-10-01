@@ -12,6 +12,37 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
     :ok
   end
 
+  test "the registered summarizer disables thinking and preserves its 1024-token reserve" do
+    model = "anthropic:claude-haiku-4-5-20251001"
+    selected = cell_request(model, "none", %{"mode" => "disabled"}, false)
+
+    {:ok, request} =
+      Model.request(model, [%{"role" => "user", "content" => "summarize"}],
+        sampling: Map.put(selected.sampling, "max_tokens", 1024),
+        deadline: 123
+      )
+
+    content = [%{"type" => "text", "text" => "summary"}]
+    {server, base} = server([encode(cell_events(model, content, "end_turn"))])
+
+    assert {:ok, captured} =
+             NativeTransport.complete(prepared_request(base, request), @key, fn _ -> :ok end)
+
+    assert {:ok, %{completion: "natural", continuation: nil, tool_calls: []}} =
+             NativeContent.project(
+               model,
+               false,
+               captured.native.stop_reason,
+               captured.native.content
+             )
+
+    assert_receive {:request, ^server, _, body}
+    assert body["max_tokens"] == 1024
+    assert body["thinking"] == %{"type" => "disabled"}
+    refute Map.has_key?(body, "output_config")
+    refute Map.has_key?(body, "tools")
+  end
+
   test "every literal cell streams exact native content and only its admitted summary" do
     parent = self()
 
@@ -544,7 +575,7 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
     {:ok, prepared} =
       NativeTransport.prepare(request, context,
         base_url: base,
-        max_tokens: 8192,
+        max_tokens: Model.max_tokens(request),
         tools: provider_tools,
         max_retries: 0,
         total_timeout: :infinity,

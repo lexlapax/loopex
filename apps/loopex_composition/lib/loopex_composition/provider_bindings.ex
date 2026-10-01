@@ -22,7 +22,7 @@ defmodule LoopexComposition.ProviderBindings do
 
   alias Loopex.LLM.ReqLLM.InProcess.Guards
   alias Loopex.LLM.ReqLLM.ModelCapabilities
-  alias Loopex.Runtime.SessionConfiguration
+  alias Loopex.Runtime.{MaintenanceConfiguration, SessionConfiguration}
 
   @reserved ~w(PATH HOME TMPDIR TMP TEMP SHELL USER LOGNAME PWD OLDPWD SHLVL IFS CDPATH ENV BASH_ENV ZDOTDIR)
   @prefixes ~w(LD_ DYLD_ ERL_ ELIXIR_ MIX_ RELEASE_ BASH_ LOOPEX_)
@@ -64,15 +64,12 @@ defmodule LoopexComposition.ProviderBindings do
           {:ok, map()} | {:error, atom() | {atom(), binary()}}
   def resolve_configuration(declaration, bindings, definitions)
       when is_map(declaration) and not is_struct(declaration) do
-    with {:ok, _validated} <- validate(bindings),
-         {:ok, capabilities} <- ModelCapabilities.capture(declaration["model"]),
-         [provider, _] <- String.split(capabilities["model"], ":", parts: 2),
-         true <- Map.has_key?(bindings, provider),
-         {:ok, mapping} <-
-           ModelCapabilities.mapping(
-             capabilities["model"],
+    with {:ok, capabilities, mapping} <-
+           resolve_selection(
+             declaration["model"],
              declaration["reasoning"],
-             declaration["max_tokens"]
+             declaration["max_tokens"],
+             bindings
            ) do
       SessionConfiguration.resolve(
         Map.put(declaration, "model", capabilities["model"]),
@@ -80,13 +77,59 @@ defmodule LoopexComposition.ProviderBindings do
         mapping,
         definitions
       )
+    end
+  end
+
+  def resolve_configuration(_, _, _), do: {:error, :invalid_session_configuration}
+
+  @doc """
+  ## Concept
+
+  Resolve an explicitly selected summarizer without inheriting the conversation
+  model or reading a credential. Nil remains unconfigured.
+
+  ## Technical depth
+
+  The selected route must exist in the validated binding map. Its registered
+  none mapping must disable thinking, require no continuation and preserve the
+  fixed 1,024-token reply allowance. Core validates the closed four-member map
+  and capacity floors. Registered mappings have deterministic native completion
+  conformance; unknown or default-only mappings cannot become summarizers.
+  """
+  @spec resolve_maintenance_model(term(), term()) :: {:ok, map() | nil} | {:error, term()}
+  def resolve_maintenance_model(nil, bindings) do
+    with {:ok, _} <- validate(bindings), do: {:ok, nil}
+  end
+
+  def resolve_maintenance_model(model, bindings) do
+    with {:ok, capabilities, mapping} <- resolve_selection(model, "none", 1024, bindings),
+         {:ok, resolved} <-
+           MaintenanceConfiguration.validate_model(%{
+             "model" => capabilities["model"],
+             "reasoning" => "none",
+             "model_capabilities" => capabilities,
+             "provider_mapping" => mapping
+           }),
+         :ok <- MaintenanceConfiguration.eligible_model(resolved) do
+      {:ok, resolved}
+    else
+      {:error, :invalid_model_mapping} -> {:error, :maintenance_reasoning_unsupported}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp resolve_selection(model, level, max_tokens, bindings) do
+    with {:ok, _validated} <- validate(bindings),
+         {:ok, capabilities} <- ModelCapabilities.capture(model),
+         [provider, _] <- String.split(capabilities["model"], ":", parts: 2),
+         true <- Map.has_key?(bindings, provider),
+         {:ok, mapping} <- ModelCapabilities.mapping(capabilities["model"], level, max_tokens) do
+      {:ok, capabilities, mapping}
     else
       false -> {:error, :provider_route_unavailable}
       {:error, _} = error -> error
     end
   end
-
-  def resolve_configuration(_, _, _), do: {:error, :invalid_session_configuration}
 
   @doc """
   ## Concept

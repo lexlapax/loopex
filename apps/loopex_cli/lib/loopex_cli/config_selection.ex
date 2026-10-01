@@ -104,8 +104,9 @@ defmodule LoopexCli.ConfigSelection do
   file paths, credential references and host settings stay outside it. Derived
   input and system ceilings have default origin unless explicitly selected.
   Captured instructions include any admitted role catalog facts already, and
-  definitions include all selected host tools. Maintenance and child profiles
-  are separate preparations; this function grants no startup or dispatch.
+  definitions include all selected host tools. The optional explicit summarizer
+  resolves separately and never inherits the ordinary model. Child profiles
+  remain separate preparations; this function grants no startup or dispatch.
   """
   @spec resolve_session(term(), term(), term()) :: {:ok, map()} | {:error, term()}
   def resolve_session(
@@ -122,13 +123,22 @@ defmodule LoopexCli.ConfigSelection do
            |> Map.put("configuration_version", 1)
            |> Map.put("instructions", instructions),
          {:ok, configuration} <-
-           ProviderBindings.resolve_configuration(declaration, profile["providers"], definitions) do
+           ProviderBindings.resolve_configuration(declaration, profile["providers"], definitions),
+         {:ok, maintenance_model} <-
+           ProviderBindings.resolve_maintenance_model(
+             get_in(profile, ["maintenance", "model"]),
+             profile["providers"]
+           ) do
       origins =
         origins
         |> Map.put_new("/session/context_token_budget", "default")
         |> Map.put_new("/session/system_class_tokens", "default")
 
-      {:ok, selection |> Map.put(:configuration, configuration) |> Map.put(:origins, origins)}
+      {:ok,
+       selection
+       |> Map.put(:configuration, configuration)
+       |> Map.put(:maintenance_model, maintenance_model)
+       |> Map.put(:origins, origins)}
     else
       {:error, _} = error -> error
       _ -> {:error, {:invalid_configuration_selection, "/session"}}

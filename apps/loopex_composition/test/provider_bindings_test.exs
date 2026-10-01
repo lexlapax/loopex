@@ -2,6 +2,38 @@ defmodule LoopexComposition.ProviderBindingsTest do
   use ExUnit.Case, async: true
   alias LoopexComposition.ProviderBindings
 
+  test "maintenance selection is explicit, routed and requires a registered thinking-off mapping" do
+    routes = %{
+      "anthropic" => env("HOST_REFERENCE_ONLY_KEY"),
+      "openai" => env("OTHER_REFERENCE_ONLY_KEY")
+    }
+
+    assert {:ok, nil} = ProviderBindings.resolve_maintenance_model(nil, routes)
+
+    assert {:ok, selected} =
+             ProviderBindings.resolve_maintenance_model("anthropic:claude-haiku-4-5", routes)
+
+    assert Enum.sort(Map.keys(selected)) ==
+             ~w(model model_capabilities provider_mapping reasoning)
+
+    assert selected["model"] == "anthropic:claude-haiku-4-5-20251001"
+    assert selected["reasoning"] == "none"
+    assert selected["provider_mapping"]["thinking"] == %{"mode" => "disabled"}
+    assert selected["provider_mapping"]["thinking_disabled"]
+    refute selected["provider_mapping"]["continuation_required"]
+    refute :erlang.term_to_binary(selected) =~ "REFERENCE_ONLY_KEY"
+
+    for model <- ["anthropic:claude-fable-5-1", "openai:unregistered-summary"] do
+      assert {:error, :maintenance_reasoning_unsupported} =
+               ProviderBindings.resolve_maintenance_model(model, routes)
+    end
+
+    assert {:error, :provider_route_unavailable} =
+             ProviderBindings.resolve_maintenance_model("anthropic:claude-haiku-4-5", %{
+               "openai" => env("KEY")
+             })
+  end
+
   test "configuration resolution joins admitted routes, exact cells and captured instructions" do
     routes = %{"anthropic" => env("HOST_REFERENCE_ONLY_KEY")}
 

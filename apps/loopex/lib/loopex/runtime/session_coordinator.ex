@@ -387,6 +387,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
        workers: Keyword.fetch!(options, :workers),
        owner_workers: Keyword.fetch!(options, :owner_workers),
        model: Keyword.fetch!(options, :model),
+       maintenance_model: Keyword.get(options, :maintenance_model),
+       maintenance_instructions: Keyword.get(options, :maintenance_instructions),
        executor: Keyword.fetch!(options, :executor),
        tool: Keyword.fetch!(options, :tool),
        active_tools: Keyword.get(options, :active_tools, []),

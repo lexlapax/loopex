@@ -201,10 +201,13 @@ defmodule Loopex.Runtime.SessionConfiguration do
          true <- positive?(configuration["system_class_tokens"]),
          true <- configuration["system_class_tokens"] <= configuration["context_token_budget"],
          :ok <- Instructions.validate(configuration["instructions"]),
-         true <- valid_capabilities?(configuration),
-         true <- valid_mapping?(configuration["provider_mapping"]),
+         :ok <-
+           validate_model_metadata(
+             configuration["model"],
+             configuration["model_capabilities"],
+             configuration["provider_mapping"]
+           ),
          true <- valid_reasoning?(configuration),
-         true <- byte_size(Canonical.encode(metadata(configuration))) <= 2_048,
          true <- valid_budgets?(configuration),
          true <- Enum.all?(definitions, &ToolDefinition.valid?/1),
          {:ok, text} <- Instructions.render(configuration["instructions"]),
@@ -216,6 +219,37 @@ defmodule Loopex.Runtime.SessionConfiguration do
   end
 
   def validate(_configuration, _definitions), do: {:error, :invalid_session_configuration}
+
+  @doc """
+  ## Concept
+
+  Validate the captured model facts shared by ordinary and maintenance settings.
+
+  ## Technical depth
+
+  The exact model is nonempty UTF-8. Capabilities and mapping use their closed
+  plain-data shapes and together fit 2,048 canonical bytes. This
+  checks declared facts only, without a catalog or provider lookup. Each caller
+  separately applies its reasoning eligibility and purpose-specific ceilings.
+  """
+  @spec validate_model_metadata(term(), term(), term()) :: :ok | {:error, :invalid_model_metadata}
+  def validate_model_metadata(model, capabilities, mapping) do
+    configuration = %{
+      "model" => model,
+      "model_capabilities" => capabilities,
+      "provider_mapping" => mapping
+    }
+
+    with {:ok, _} <- Store.admit_bounded(configuration),
+         true <- text?(model),
+         true <- valid_capabilities?(configuration),
+         true <- valid_mapping?(mapping),
+         true <- byte_size(Canonical.encode(metadata(configuration))) <= 2_048 do
+      :ok
+    else
+      _ -> {:error, :invalid_model_metadata}
+    end
+  end
 
   @doc """
   ## Concept

@@ -87,6 +87,9 @@ Part of the [evidence index](README.md).
   conformance; share exact mapping resolution with transport validation.
 - Done: join new-session host selection to explicit provider routes, captured
   instructions, exact mappings and whole-configuration admission.
+- Done: validate and capture explicit Core maintenance settings, forward them
+  privately to session owners, and resolve the host's separate thinking-off
+  summarizer with fixed-budget native transport conformance.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -102,6 +105,39 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: Core startup now validates the closed maintenance model and captures
+  the exact versioned instruction bytes and digest. Runtime-local settings reach
+  each coordinator without entering ordinary session truth or public runtime
+  configuration. Startup capacity validation remains distinct from episode
+  reasoning eligibility. Composition resolves only an explicitly selected,
+  routed, registered thinking-off summarizer, and CLI preparation retains nil
+  when none is selected. Streaming HTTP and buffered TLS tests exercise the
+  fixed 1,024-token allowance, disabled thinking, absent tools and natural
+  summary completion. Current and floor focused checks passed 19 provider,
+  12 composition and 14 CLI cases. The broader Core check initially failed one
+  of 51 cases because the extracted validator added an unnecessary 512-byte
+  model limit. Removing that restriction preserved the existing independent
+  2-KiB metadata boundary test; all 51 Core cases then passed on both pairs in
+  0.3 seconds each. Initial failed outputs remain retained separately:
+  - Current: `/private/tmp/loopex-m7-maintenance-startup-current.log`, SHA-256
+    `271ef1debdf4891dfe083a8e9f0e761c30b03293c5fc76eb215d9dd1486148bc`.
+  - Floor, including the passing provider/composition/CLI groups:
+    `/private/tmp/loopex-m7-maintenance-startup-floor.log`, SHA-256
+    `d285019974c9baea3d4f139f3f4f73f25f000fd7a72ecd0fc0f4cee58bc6c035`.
+  - Repaired current Core:
+    `/private/tmp/loopex-m7-maintenance-startup-repaired-core-current.log`, SHA-256
+    `9ee5a827b08ee5eaa10c800b6e1dabea1173d5cbe828a225e6f6b6ffcec08695`.
+  - Repaired floor Core:
+    `/private/tmp/loopex-m7-maintenance-startup-repaired-core-floor.log`, SHA-256
+    `6825255e5e0287467459bded3c6a3947c8f0dcb4a976af4e96dd06c4aec9c320`.
+  Durable and ephemeral host startup forwarding, the shared reference instruction
+  block, episode capture, dispatch, recovery and checkpoint accounting remain
+  pending. This checkpoint does not implement compaction. Warning-free
+  compilation, formatting, documentation ordering across 1,020 covered entries,
+  dependency direction and status checks pass. The dependency check first
+  refused the untracked new module; staging the source satisfied its tracked
+  ordinary-file requirement without changing the check.
 
 - 2026-10-01: ProviderBindings now resolves a closed initial declaration through
   complete route validation, pinned capability capture, literal alias resolution,
@@ -998,6 +1034,8 @@ Part of the [evidence index](README.md).
 - [ ] Test startup refusal, admission failure, output and cleanup.
 - [ ] Later retain the required attended multi-prompt proof.
 ## T07 — Implement automatic and explicit compaction
+- [x] Validate explicit Core maintenance model/instruction startup settings and privately forward exact captured instruction bytes to session owners.
+- [x] Resolve the separately configured host summarizer and prove its fixed-budget thinking-off native request and natural completion through both transports.
 - [ ] Select complete eligible conversation groups.
 - [ ] Protect open exchanges and their complete native prefixes from compaction or re-rendering.
 - [ ] Have the owner select and encode bounded source excerpts; have the model produce the summary.
