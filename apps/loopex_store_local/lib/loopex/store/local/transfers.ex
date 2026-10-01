@@ -210,20 +210,22 @@ defmodule Loopex.Store.Local.Transfers do
 
     budget = Keyword.get(options, :open_work_bytes, state.limits.open_work_bytes)
 
-    with {:ok, reader} <- File.open(source, [:read, :binary, :raw]),
-         {:ok, snapshot} <- open_snapshot(state) do
-      result = copy(reader, snapshot, :crypto.hash_init(:sha256), size, deadline, budget)
-      File.close(reader)
+    result =
+      File.open(source, [:read, :binary, :raw], fn reader ->
+        with {:ok, snapshot} <- open_snapshot(state) do
+          case copy(reader, snapshot, :crypto.hash_init(:sha256), size, deadline, budget) do
+            {:ok, digest} ->
+              {:ok, snapshot, digest}
 
-      case result do
-        {:ok, digest} ->
-          {:ok, snapshot, digest}
+            {:error, reason} ->
+              File.close(snapshot)
+              {:error, reason}
+          end
+        end
+      end)
 
-        {:error, reason} ->
-          File.close(snapshot)
-          {:error, reason}
-      end
-    else
+    case result do
+      {:ok, outcome} -> outcome
       {:error, :enoent} -> {:error, :unknown_artifact}
       {:error, reason} -> {:error, {:artifact_unreadable, reason}}
     end
@@ -275,12 +277,20 @@ defmodule Loopex.Store.Local.Transfers do
   defp open_snapshot(state) do
     path = Path.join(state.scratch, reference())
 
-    with {:ok, device} <- File.open(path, [:read, :write, :binary, :raw, :exclusive]),
-         :ok <- File.chmod(path, 0o600),
-         :ok <- File.rm(path) do
-      {:ok, device}
-    else
-      {:error, reason} -> {:error, {:artifact_unreadable, reason}}
+    case File.open(path, [:read, :write, :binary, :raw, :exclusive]) do
+      {:ok, device} ->
+        with :ok <- File.chmod(path, 0o600),
+             :ok <- File.rm(path) do
+          {:ok, device}
+        else
+          {:error, reason} ->
+            File.close(device)
+            File.rm(path)
+            {:error, {:artifact_unreadable, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:artifact_unreadable, reason}}
     end
   end
 

@@ -20,7 +20,10 @@ its entire stated outcome is proved.
   conversation witness remains a separate release obligation.
 - Done: T02 exact-generation capability checks now guard runtime admission,
   registry loading and the local executor's compiled tool inventory. Original
-  checklist completion is 22/186 items and 1/20 top-level tasks.
+  checklist completion is 23/186 items and 1/20 top-level tasks.
+- Done: T02 attachment-budget baseline audit distinguishes existing attachment
+  limitations from the required job-owned bounds. Snapshot creation failure now
+  closes its source descriptor before returning; both toolchains prove the repair.
 - Done: T02 resolves committed-receipt artifact membership before policy and
   binds approved ranges to their exact source in the journaled job. Prepared
   references and real range transfers remain open, so original counts are unchanged.
@@ -1501,15 +1504,57 @@ second-prompt witness and milestone closure checks remain open.
 - [ ] Add bounded preparation, aggregate excerpt allocation and job-owned transfer accounting.
 - [ ] Preserve legacy inline behavior where the complete request fits.
 - [ ] Test escaping, Unicode, forged references, cross-session access, digest mismatch, exhaustion, cancellation and recovery.
-- [ ] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
+- [x] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
 
 ### Added implementation subtasks
 
 - [x] Implement and test pure exact-generation derivation and retained-binding validation.
 - [x] Enforce the literal read-generation table during runtime/registry loading and executor startup; select executor tools by exact ID/version and retain the frozen capability through restart with an empty host registry. Artifact range execution and prepared-reference replay remain pending.
 - [x] Resolve committed-receipt artifact membership and closed range arguments before policy, keep policy/deferred identity on original arguments, and bind approved job resolution to the exact retained source. Prove cross-session refusal, uncertain receipt commits, restart and altered-source replay refusal; prepared-reference membership remains pending.
+- [x] Reproduce and repair source-descriptor leakage on snapshot creation failure; close snapshot descriptors on permission/unlink failure and verify existing transfer behavior on both supported toolchains.
+- [ ] Enforce the accepted job-owned cancellation/deadline and cumulative-work bounds when integrating range execution; the attachment implementation does not yet provide these guarantees.
 
 ### Verification evidence
+
+The attachment baseline audit follows `Runtime.EventDispatcher` through
+`Store.Local.Artifacts` into `Store.Local.Transfers`. The dispatcher counts two
+transfers per attachment, and the shared store owner counts four live transfers.
+It does not implement a connection-wide cumulative work ledger. This agrees
+with the existing disclosure in
+[runtime and embedding](../developer/runtime-and-embedding.md#technical-embedding-transfers).
+The local verifier checks the 64-MiB object limit, hashes the whole object into
+an unlinked snapshot, checks an elapsed open deadline between copy blocks, and
+subtracts source reads plus snapshot writes from its per-open budget. That
+budget is checked on the next iteration rather than reserved before storage.
+The read path bounds emitted chunks but does not enforce the advertised
+five-second read deadline. Neither adapter forwarding nor its transfer owner
+binds open/read work to an executor job's deadline or cancellation.
+
+These findings do not prove ADR 0041's job profile. Its one-window ownership,
+shared runtime capacity, shortened deadlines, pre-storage reservation, minimum
+open debit and cumulative job allowance remain implementation obligations.
+Connection-wide attachment remediation remains outside this T02 audit; no
+protocol, connection budget or attachment ownership behavior changes here.
+
+The audit also reproduced a cleanup defect: replacing the snapshot directory
+with a regular file makes snapshot creation fail after the source opens. The
+new serial regression captures that descriptor and reads it in its owning
+process after the failure acknowledgement. Before the fix it returned a source
+byte; afterward it returns `einval`, with the owner still alive and no retained
+transfer. Source opening now scopes cleanup over snapshot creation and copying.
+Snapshot permission/unlink failures also close the opened snapshot descriptor
+and attempt to remove its path. The latter branches are inspected cleanup paths;
+the deterministic fault witness exercises snapshot creation failure.
+
+Both complete transfer test files pass 30 tests in 1.5 seconds on each supported
+toolchain. Retained outputs:
+
+- Initial failing regression: `/private/tmp/loopex-m7-transfer-cleanup-before.log`,
+  SHA-256 `f323d15cfcf0dbe34aa7e80dbc2a55689aa6a22449a8b67de4e252362c5556ce`.
+- Current: `/private/tmp/loopex-m7-transfer-cleanup-current.log`, SHA-256
+  `ada62ea8a3b5c5d303bf4ef77b183f4fa10c9b86196a729d9fc57056b7514314`.
+- Floor: `/private/tmp/loopex-m7-transfer-cleanup-floor.log`, SHA-256
+  `523119e0701cfa20b6855f3232951a53ef3bd1a837969cd372a7bf3576d3bbde`.
 
 Receipt admission now reconstructs a private use index from committed executor
 receipts. The index stores the full reference and its earliest source identity;
