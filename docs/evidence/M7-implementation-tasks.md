@@ -114,6 +114,9 @@ Part of the [evidence index](README.md).
 - Done: daemon bootstrap validates explicit bindings before placement/environment
   effects, uses shared custody loading, forwards model/maintenance options and
   preserves classified cleanup for every custody plus scoped placement exclusions.
+- Done: offline CLI startup caches explicit bindings across compositions, refuses
+  rebinding, forwards model/maintenance options and scopes discovery/placement
+  exclusions. Chat, daemon-command and remaining host entrypoints are unfinished.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -129,6 +132,28 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: The offline CLI's existing credential cache accepts an explicit
+  immutable binding map and lends it through fresh trace capabilities. A changed
+  map or replacement of legacy custody refuses without consuming another value;
+  a failed load leaves no cached partial host. Runtime startup validates selected
+  ordinary and maintenance routes before loading credentials, forwards the
+  programmatic model/bounds/sampling/active-tool/maintenance options, and captures
+  exclusions for project discovery and placement acquisition/release. Runtime
+  composition receives the borrowed plane without a conflicting raw binding map.
+  Repeated real composition reaches the Core startup boundary with identical
+  tokens, distinct capabilities and original keys after environment reinsertion.
+  This proves shared offline startup; the chat driver, daemon command, foreground
+  server and remaining ask/helper entrypoint work stay open.
+  Seven new/existing cache and offline cases pass in 1.6 seconds. The affected
+  CLI, prepared-recovery, ask and context-budget regression set passes 155 cases
+  on both toolchains: current 48.4 seconds, floor 47.5 seconds.
+  - `/private/tmp/loopex-m7-offline-bindings-current.log`, SHA-256
+    `272d38f08b0bc0ca21ac07df0ce5085963ea035da76f60bca7251dc26a07ef94`.
+  - `/private/tmp/loopex-m7-offline-bindings-regression-current.log`, SHA-256
+    `40911dd043f424f6b0df6d5f7e23c2c84f25ff42167915aa7605b121c9930b7f`.
+  - `/private/tmp/loopex-m7-offline-bindings-regression-floor.log`, SHA-256
+    `3a1707a411d60fc92a904bef5cb124012c5fc1f5b6f53d8a836f6125e89215e2`.
 
 - 2026-10-01: Daemon Service accepts explicit provider bindings through the
   shared durable loader. Conflicting value-bearing credentials, invalid complete
@@ -1326,7 +1351,8 @@ Part of the [evidence index](README.md).
 - [x] Admit direct and borrowed version-2 planes in durable runtime composition, validating every token route and resolving explicit maintenance selection before owned effects; prove all three constructor lifecycles and partial-loading cleanup.
 - [x] Forward immutable exclusions to Store writer probes, executor launches and provider companions; preserve private model options and unchanged marker, job and receipt formats.
 - [x] Wire daemon bootstrap through shared binding validation/loading, multi-custody ownership and cleanup, model/maintenance forwarding and scoped placement acquisition/release.
-- [ ] Wire provider bindings and captured exclusions through CLI entrypoints, including discovery, placement acquisition/release and helper preparation.
+- [x] Extend the offline CLI credential cache and shared startup to borrow explicit routes, refuse rebinding and scope discovery/placement exclusions; verify existing recovery workflows on both toolchains.
+- [ ] Finish provider bindings and captured exclusions through chat, daemon-command, foreground-server and remaining ask/helper entrypoints, including discovery and helper preparation.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
 - [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.

@@ -1395,10 +1395,12 @@ defmodule LoopexCli do
   # reclaimed by the next acquirer through the liveness check.
   @placement_key {__MODULE__, :placement_lock}
 
-  defp own_placement(root) do
-    case Placement.acquire(root) do
+  defp own_placement(root, excluded) do
+    probe = fn pid -> Placement.process_incarnation(pid, "/bin/ps", excluded) end
+
+    case Placement.acquire(root, probe) do
       {:ok, lock} ->
-        :persistent_term.put(@placement_key, lock)
+        :persistent_term.put(@placement_key, {lock, excluded})
         :ok
 
       {:error, refusal} ->
@@ -1437,6 +1439,13 @@ defmodule LoopexCli do
       nil ->
         :ok
 
+      {lock, excluded} ->
+        :persistent_term.erase(@placement_key)
+
+        Placement.release(lock, fn pid ->
+          Placement.process_incarnation(pid, "/bin/ps", excluded)
+        end)
+
       lock ->
         :persistent_term.erase(@placement_key)
         Placement.release(lock)
@@ -1461,12 +1470,12 @@ defmodule LoopexCli do
   end
 
   defp runtime_options(flags, policy, options, resource_manifest) do
-    with :ok <- consume_credential(options),
+    with {:ok, excluded} <- consume_credential(options),
          {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
          {:ok, context} <- context_token_budget(flags),
-         :ok <- own_placement(root) do
+         :ok <- own_placement(root, excluded) do
       {:ok, placement} = facade(Loopex, :runtime_placement_id, [root])
 
       # Concept: what a workspace says about how an agent should behave is shown
@@ -1477,7 +1486,7 @@ defmodule LoopexCli do
       # the terminal -- asks. Both the manifest and whatever decision was taken
       # are carried in: with no decision the kernel journals a receipt naming
       # the manifest it withheld, rather than one saying nothing was found.
-      discovered = ProjectResources.discover(workspace)
+      discovered = ProjectResources.discover(workspace, excluded_env_names: excluded)
       decision = ProjectResources.decide(discovered, workspace)
       manifest = ProjectResources.runtime_manifest(discovered)
 
@@ -1491,7 +1500,7 @@ defmodule LoopexCli do
       # refused by a marker whose holder had already gone. Asking for the
       # recovery here is what gets past that, and it is only a request: the
       # store reads the marker's recorded holder and refuses this command
-      # unchanged if that holder is still alive. `own_placement/1` above stays
+      # unchanged if that holder is still alive. `own_placement/2` above stays
       # an additional precondition rather than the proof, because the placement
       # lock is this command's own and an embedded runtime writing the same
       # store never takes one -- so holding it says nothing at all about who is
@@ -1510,7 +1519,18 @@ defmodule LoopexCli do
          progress_to: self(),
          provider_launch: LoopexCli.ProviderLaunch.options(),
          recover_stale_writer: true
-       ] ++ resource_options ++ cleanup ++ context}
+       ] ++
+         resource_options ++
+         cleanup ++
+         context ++
+         Keyword.take(options, [
+           :model,
+           :bounds,
+           :sampling,
+           :active_tools,
+           :maintenance_model,
+           :maintenance_instructions
+         ])}
     end
   end
 
@@ -1565,11 +1585,21 @@ defmodule LoopexCli do
   # case that supplies one needs no credential.
   defp consume_credential(options) do
     if Keyword.has_key?(options, :runtime_starter) do
-      :ok
+      {:ok, ["LOOPEX_PROVIDER_API_KEY"]}
     else
-      with {:ok, _host} <- LoopexCli.CredentialCache.host(),
-           do: :ok,
-           else: ({:error, reason} -> {:error, reason})
+      with {:ok, host} <- credential_host(options),
+           do: {:ok, host.excluded_env_names || ["LOOPEX_PROVIDER_API_KEY"]}
+    end
+  end
+
+  defp credential_host(options) do
+    case Keyword.fetch(options, :provider_bindings) do
+      {:ok, bindings} ->
+        with {:ok, _resolved} <- LoopexComposition.DurableOptions.resolve(options),
+             do: LoopexCli.CredentialCache.host(bindings)
+
+      :error ->
+        LoopexCli.CredentialCache.host()
     end
   end
 
