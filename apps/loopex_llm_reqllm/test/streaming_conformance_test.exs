@@ -303,9 +303,9 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     assert output =~ "IN_PROCESS_STREAMING_CONFORMANCE_PROVED"
   end
 
-  test "each canonical delta kind is bounded plain data carrying no provider or host term" do
+  test "converted text and tool deltas are bounded plain data and unverified thinking is suppressed" do
     # Driven through the shipped adapter, because the kinds that carry provider
-    # material -- a reasoning summary, a tool call identifier and its argument
+    # material -- a tool call identifier and its argument
     # fragments -- are the ones where a provider struct or an unbounded blob
     # would actually cross.
     {_reply, deltas} =
@@ -344,7 +344,12 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
              "a model adapter"
 
     assert Enum.map(deltas, & &1.kind) |> Enum.uniq() |> Enum.sort() ==
-             Enum.sort(Model.delta_kinds())
+             Enum.sort([:text_delta, :tool_call_delta])
+
+    # Concept: ADR 0044 requires native evidence before summary disclosure.
+    # Technical depth: NativeTransportTest proves eligible reasoning through the
+    # actual HTTP/native path. A converted :thinking chunk cannot supply it.
+    refute Enum.any?(deltas, &(&1.kind == :reasoning_delta))
 
     for delta <- deltas do
       assert delta.kind in Model.delta_kinds()

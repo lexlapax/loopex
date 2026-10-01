@@ -148,7 +148,7 @@ defmodule Loopex.LLM.ReqLLM.MappingTest do
           "role" => "assistant",
           "content" => "",
           "tool_calls" => [
-            %{"tool_call_id" => "a", "tool_id" => "loopex.read", "arguments" => %{}}
+            %{"tool_call_id" => "a", "name" => "read", "arguments" => %{}}
           ]
         },
         %{"role" => "tool", "tool_call_id" => "a", "content" => "answer"}
@@ -189,6 +189,46 @@ defmodule Loopex.LLM.ReqLLM.MappingTest do
 
     assert Mapping.failure_pair("calls", Mapping.returned_class({:error, :refused})) ==
              %{"stage" => "calls", "class" => "returned_error"}
+  end
+
+  test "known canonical names use the full definition and malformed arguments are never repaired" do
+    definition = LoopexProtocol.ToolDefinition.question_definition()
+    {id, version, digest} = LoopexProtocol.ToolDefinition.generation(definition)
+
+    call = %{
+      "tool_call_id" => "a",
+      "tool_id" => id,
+      "tool_version" => version,
+      "definition_digest" => digest,
+      "arguments" => %{"question" => "which?"}
+    }
+
+    request = %{
+      tools: [definition],
+      messages: [
+        %{"role" => "assistant", "content" => "", "tool_calls" => [call]}
+      ]
+    }
+
+    assert {:ok, context} = Mapping.context_of(request)
+    assert [message] = context.messages
+    assert [rendered] = message.tool_calls
+    assert rendered.function.name == "ask"
+    assert Jason.decode!(rendered.function.arguments) == %{"question" => "which?"}
+
+    for invalid <- [
+          Map.put(call, "arguments", nil),
+          Map.put(call, "arguments", "{}"),
+          Map.put(call, "arguments", []),
+          Map.put(call, "definition_digest", String.duplicate("b", 64))
+        ] do
+      changed =
+        put_in(request, [:messages], [
+          %{"role" => "assistant", "content" => "", "tool_calls" => [invalid]}
+        ])
+
+      assert {:error, :unsupported_model_request} = Mapping.context_of(changed)
+    end
   end
 
   defp response(calls),

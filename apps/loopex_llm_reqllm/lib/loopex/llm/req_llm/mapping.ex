@@ -291,8 +291,14 @@ defmodule Loopex.LLM.ReqLLM.Mapping do
 
   Shared by both model edges. It introduces no dispatch or session authority.
   """
-  def context_of(%{messages: messages}) when is_list(messages) do
-    case Enum.reduce_while(messages, {:ok, []}, &render_message/2) do
+  def context_of(%{messages: messages} = request) when is_list(messages) do
+    names =
+      Map.new(
+        Map.get(request, :tools, []),
+        &{LoopexProtocol.ToolDefinition.generation(&1), &1["name"]}
+      )
+
+    case Enum.reduce_while(messages, {:ok, []}, &render_message(&1, &2, names)) do
       {:ok, rendered} -> {:ok, ReqLLM.Context.new(Enum.reverse(rendered))}
       {:error, reason} -> {:error, reason}
     end
@@ -300,69 +306,75 @@ defmodule Loopex.LLM.ReqLLM.Mapping do
 
   def context_of(_request), do: {:error, :unsupported_model_request}
 
-  defp render_message(%{"role" => "system", "content" => content}, {:ok, acc})
+  defp render_message(%{"role" => "system", "content" => content}, {:ok, acc}, _names)
        when is_binary(content),
        do: {:cont, {:ok, [ReqLLM.Context.system(content) | acc]}}
 
-  defp render_message(%{"role" => "user", "content" => content}, {:ok, acc})
+  defp render_message(%{"role" => "user", "content" => content}, {:ok, acc}, _names)
        when is_binary(content),
        do: {:cont, {:ok, [ReqLLM.Context.user(content) | acc]}}
 
-  defp render_message(%{"role" => "assistant"} = message, {:ok, acc}) do
+  defp render_message(%{"role" => "assistant"} = message, {:ok, acc}, names) do
     text = Map.get(message, "content", "")
 
-    case Map.get(message, "tool_calls", []) do
-      [] ->
-        {:cont, {:ok, [ReqLLM.Context.assistant(text) | acc]}}
-
-      calls ->
-        # ReqLLM's public context constructor normalizes the provider-neutral
-        # maps into its ToolCall shape before a provider encoder sees them. The
-        # arguments stay decoded here: the dependency owns its own wire encoding,
-        # and this adapter needs no second JSON implementation to reach a
-        # provider.
-        rendered =
-          Enum.map(calls, fn call ->
-            %{
-              id: call["tool_call_id"],
-              name: provider_name(call),
-              arguments: call["arguments"] || %{}
-            }
-          end)
-
-        parts = if text in [nil, ""], do: [], else: [ReqLLM.Message.ContentPart.text(text)]
-
-        {:cont, {:ok, [ReqLLM.Context.assistant(parts, tool_calls: rendered) | acc]}}
+    with true <- is_binary(text),
+         {:ok, calls} <- canonical_calls(Map.get(message, "tool_calls", []), names) do
+      parts = if text == "", do: [], else: [ReqLLM.Message.ContentPart.text(text)]
+      {:cont, {:ok, [ReqLLM.Context.assistant(parts, tool_calls: calls) | acc]}}
+    else
+      _ -> {:halt, {:error, :unsupported_model_request}}
     end
   end
 
-  defp render_message(%{"role" => "tool"} = message, {:ok, acc}) do
+  defp render_message(%{"role" => "tool"} = message, {:ok, acc}, _names) do
     content = Map.get(message, "content", "")
     id = Map.get(message, "tool_call_id")
     {:cont, {:ok, [ReqLLM.Context.tool_result(id, content) | acc]}}
   end
 
-  defp render_message(_unknown, {:ok, acc}), do: {:cont, {:ok, acc}}
+  defp render_message(_unknown, _acc, _names), do: {:halt, {:error, :unsupported_model_request}}
 
-  # Concept: the name the provider knows a call by.
-  #
-  # Technical depth: a committed call carries its generation triple, and the
-  # provider knows the tool by its model-visible name. The staged request carries
-  # the definitions, so the name is recovered from the call's own tool_id rather
-  # than guessed; a blank name is what made a second call render as `· ()` in the
-  # operator's terminal.
-  defp provider_name(call) do
-    case call do
-      %{"name" => name} when is_binary(name) and name != "" ->
-        name
+  @doc """
+  ## Concept
 
-      %{"tool_id" => tool_id} when is_binary(tool_id) ->
-        tool_id |> String.split(".") |> List.last()
+  Resolve canonical calls without guessing names or repairing malformed arguments.
 
-      _absent ->
-        "unknown"
+  ## Technical depth
+
+  Both ordinary context conversion and native rendering use the complete retained
+  generation to find known model-visible names. Unknown calls retain their literal
+  name. A missing generation binding, empty identity or non-object arguments refuse.
+  """
+  def canonical_calls(calls, names) when is_list(calls) and is_map(names) do
+    Enum.reduce_while(calls, {:ok, []}, fn
+      %{"tool_call_id" => id, "arguments" => arguments} = call, {:ok, acc}
+      when is_binary(id) and id != "" and is_map(arguments) ->
+        name =
+          case call do
+            %{"tool_id" => tool, "tool_version" => version, "definition_digest" => digest} ->
+              names[{tool, version, digest}]
+
+            %{"name" => name} ->
+              name
+
+            _ ->
+              nil
+          end
+
+        if is_binary(name) and name != "",
+          do: {:cont, {:ok, [%{id: id, name: name, arguments: arguments} | acc]}},
+          else: {:halt, {:error, :unsupported_model_request}}
+
+      _, _ ->
+        {:halt, {:error, :unsupported_model_request}}
+    end)
+    |> case do
+      {:ok, calls} -> {:ok, Enum.reverse(calls)}
+      error -> error
     end
   end
+
+  def canonical_calls(_, _), do: {:error, :unsupported_model_request}
 
   @doc """
   ## Concept

@@ -8,7 +8,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
   alias Loopex.LLM.ReqLLM.ProviderBridge
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
-  @head_bytes 32_768
+  @head_bytes 12_288
   @tail_count 512
 
   test "a blocked actual child writer retains a bounded backlog and the producer's complete reply count" do
@@ -335,6 +335,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
           "type" => "message",
           "role" => "assistant",
           "model" => "claude-haiku-4-5",
+          "stop_reason" => nil,
+          "stop_sequence" => nil,
           "content" => [],
           "usage" => %{"input_tokens" => 4, "output_tokens" => 0}
         }

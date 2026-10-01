@@ -231,7 +231,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
             "tool_calls" => [
               %{
                 "tool_call_id" => "call_MiXeD_123",
-                "tool_id" => "loopex.read",
+                "name" => "read",
                 "arguments" => %{"path" => "README.md"}
               }
             ]
@@ -620,7 +620,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
   test "private worker attributes returned incomplete completion and HTTP stream failures" do
     for {mode, stage, class} <- [
-          {:incomplete_stream, "completion", "stream_incomplete"},
+          # Native framing fails at the parser/flush boundary before converted
+          # metadata can claim completion.
+          {:incomplete_stream, "stream", "returned_error"},
           {:http_error, "stream", "stream_http_server"},
           {:reply, "handoff", "returned_error"}
         ] do
@@ -973,7 +975,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
             raise "synthetic handoff failure"
 
           _ ->
-            %{request | scheme: :http, host: "127.0.0.1", port: #{http_port}, path: "/", query: nil}
+            request
         end
       end
     end
@@ -984,6 +986,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
         match?(%{"stage" => "handoff"}, expected_configuration), persistent: true)
       Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
       Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+      Application.put_env(:req_llm, :anthropic, [base_url: "http://127.0.0.1:#{http_port}"])
       Application.put_env(:req_llm, :finch_request_adapter, CategoryProbeTransport)
       {:ok, _} = Application.ensure_all_started(:req_llm)
       :ok = :logger.set_primary_config(:level, :none)

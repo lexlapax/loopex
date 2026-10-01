@@ -14,7 +14,7 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
 
   alias Loopex.Model
   alias Loopex.Model.Continuation
-  alias Loopex.LLM.ReqLLM.NativeContent
+  alias Loopex.LLM.ReqLLM.{Mapping, NativeContent}
   alias LoopexProtocol.ToolDefinition
 
   @invalid {:error, :invalid_provider_request}
@@ -330,9 +330,30 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
       end
     )
     |> case do
-      {:ok, system, messages, calls, calls} -> {:ok, Enum.reverse(system), Enum.reverse(messages)}
-      _ -> @invalid
+      {:ok, system, messages, calls, calls} ->
+        {:ok, Enum.reverse(system), group_results(Enum.reverse(messages))}
+
+      _ ->
+        @invalid
     end
+  end
+
+  defp group_results(messages) do
+    messages
+    |> Enum.reject(&(&1 == %{"role" => "assistant", "content" => []}))
+    |> Enum.reduce([], fn
+      %{"role" => "user", "content" => content} = message,
+      [%{"role" => "user", "content" => previous} = prior | rest] = acc ->
+        if Enum.any?(previous, &(&1["type"] == "tool_result")) do
+          [%{prior | "content" => previous ++ content} | rest]
+        else
+          [message | acc]
+        end
+
+      message, acc ->
+        [message | acc]
+    end)
+    |> Enum.reverse()
   end
 
   defp message(%{"role" => "system", "content" => text}, nil, nil, _, _) when is_binary(text),
@@ -367,46 +388,13 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
          model
        )
        when is_binary(text) do
-    with {:ok, calls} <- calls(Map.get(message, "tool_calls", []), names),
+    with {:ok, calls} <- Mapping.canonical_calls(Map.get(message, "tool_calls", []), names),
          {:ok, content, ids} <- assistant(text, calls, replacement, model) do
       {:message, %{"role" => "assistant", "content" => content}, ids, []}
     end
   end
 
   defp message(_, _, _, _, _), do: @invalid
-
-  defp calls(calls, names) when is_list(calls) do
-    Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, acc} ->
-      case call do
-        %{"tool_call_id" => id, "arguments" => arguments}
-        when is_binary(id) and id != "" and is_map(arguments) ->
-          name =
-            case call do
-              %{"name" => name} ->
-                name
-
-              %{"tool_id" => tool, "tool_version" => version, "definition_digest" => digest} ->
-                names[{tool, version, digest}]
-
-              _ ->
-                nil
-            end
-
-          if is_binary(name) and name != "",
-            do: {:cont, {:ok, [%{id: id, name: name, arguments: arguments} | acc]}},
-            else: {:halt, @invalid}
-
-        _ ->
-          {:halt, @invalid}
-      end
-    end)
-    |> case do
-      {:ok, calls} -> {:ok, Enum.reverse(calls)}
-      error -> error
-    end
-  end
-
-  defp calls(_, _), do: @invalid
 
   defp assistant(text, calls, nil, _) do
     content = if text == "", do: [], else: [%{"type" => "text", "text" => text}]

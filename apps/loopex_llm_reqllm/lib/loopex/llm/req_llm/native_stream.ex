@@ -236,9 +236,10 @@ defmodule Loopex.LLM.ReqLLM.NativeStream do
               is_map(counters) do
     with true <- Enum.sort(Map.keys(delta)) == ~w(stop_reason stop_sequence),
          true <-
-           delta["stop_reason"] in ~w(end_turn tool_use max_tokens stop_sequence refusal pause_turn),
+           is_nil(delta["stop_reason"]) or
+             (text?(delta["stop_reason"]) and byte_size(delta["stop_reason"]) <= 256),
          true <- is_nil(delta["stop_sequence"]) or is_binary(delta["stop_sequence"]),
-         true <- is_nil(state.stop_reason) or state.stop_reason == delta["stop_reason"] do
+         true <- phase == :blocks or state.stop_reason == delta["stop_reason"] do
       {:ok,
        %{
          state

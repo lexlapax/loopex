@@ -65,6 +65,38 @@ defmodule Loopex.LLM.ReqLLM.NativeContentTest do
     assert empty.continuation["content"] == []
   end
 
+  test "generic replies preserve stop evidence but cannot discard private thinking" do
+    content = [%{"type" => "text", "text" => "answer"}]
+
+    for {stop, completion} <- [
+          {"end_turn", "natural"},
+          {"tool_use", "natural"},
+          {"stop_sequence", "natural"},
+          {"max_tokens", "limit"},
+          {"model_context_window_exceeded", "unknown"},
+          {"refusal", "unknown"},
+          {"pause_turn", "unknown"},
+          {nil, "unknown"},
+          {"future_reason", "unknown"}
+        ] do
+      assert {:ok, reply} = NativeContent.project(model(), false, stop, content)
+      assert reply.completion == completion
+      assert reply.continuation == nil
+      assert reply.text == "answer"
+    end
+
+    for block <- [
+          %{"type" => "thinking", "thinking" => "private", "signature" => "sig"},
+          %{"type" => "redacted_thinking", "data" => "opaque"}
+        ] do
+      assert {:error, :invalid_native_content} =
+               NativeContent.project(model(), false, "end_turn", content ++ [block])
+    end
+
+    assert {:error, :invalid_native_content} =
+             NativeContent.project(model(), true, "max_tokens", content)
+  end
+
   test "only complete matching stop and call relations admit a continuation reply" do
     tool = %{"type" => "tool_use", "id" => "n", "name" => "read", "input" => %{}}
 

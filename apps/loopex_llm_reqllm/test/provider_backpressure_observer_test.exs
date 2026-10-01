@@ -23,7 +23,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureObserverTest do
       Fixture.new(:backpressure,
         stream_prelude: sse(opening() ++ [delta("p")]),
         stream_parts:
-          {sse([delta(String.duplicate("a", 32_768))]), sse([delta("b")]), sse(ending())},
+          {sse([delta(String.duplicate("a", 12_288))]), sse([delta("b")]), sse(ending())},
         paused: true
       )
 
@@ -58,14 +58,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureObserverTest do
       assert await_proof(fixture, "drain-control-carried", request)["actual_send_calls"] == 2
       assert :erlang.resume_process(receiver)
       assert_receive {:progress, %{text: text}}, remaining(request)
-      assert text == String.duplicate("a", 32_768)
+      assert text == String.duplicate("a", 12_288)
       File.write!(Fixture.marker(fixture, "fill-writer"), "release")
       assert await_proof(fixture, "drain-control-third", request)["actual_send_calls"] == 3
       assert_receive {:progress, %{text: "b"}}, remaining(request)
       File.write!(Fixture.marker(fixture, "continue-stream"), "release")
       caller = call.caller
       assert_receive {:completed, ^caller, {:ok, reply}}, remaining(request)
-      assert reply.text == "p" <> String.duplicate("a", 32_768) <> "b"
+      assert reply.text == "p" <> String.duplicate("a", 12_288) <> "b"
       assert Fixture.methods(fixture) == ["POST"]
     after
       if Process.info(receiver, :status) == {:status, :suspended},
@@ -100,6 +100,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureObserverTest do
           "type" => "message",
           "role" => "assistant",
           "model" => "claude-haiku-4-5",
+          "stop_reason" => nil,
+          "stop_sequence" => nil,
           "content" => [],
           "usage" => %{"input_tokens" => 4, "output_tokens" => 0}
         }

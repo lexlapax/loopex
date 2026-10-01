@@ -63,7 +63,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
   @progress_atoms %{text_delta: 8, reasoning_delta: 9, tool_call_delta: 10}
   @progress_codes Map.new(@progress_atoms, fn {atom, code} -> {code, atom} end)
   @known_key_atoms ~w(canonicalization_version model messages tools sampling deadline
-    continuation canonical_request_bytes staged_request_digest text identity usage
+    continuation completion canonical_request_bytes staged_request_digest text identity usage
     tool_calls delta_count streamed provider_response_id provider endpoint input_tokens
     output_tokens kind content_index call_index tool_call_id name arguments_fragment
     arguments id role content type tool_id tool_version definition_digest description

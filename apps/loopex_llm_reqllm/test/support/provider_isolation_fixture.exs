@@ -707,7 +707,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           :diagnostics_malformed -> {:not_a_finch_request, request.host}
           :detached_descendant_malformed -> {:not_a_finch_request, request.host}
           :tagged_not_dispatched -> {:error, {:not_dispatched, "model_call_failed"}}
-          _ -> %{request | scheme: :http, host: "127.0.0.1", port: #{port}, path: "/", query: nil}
+          _ ->
+            if request.host == "127.0.0.1" and request.port == #{port}, do: request,
+              else: %{request | scheme: :http, host: "127.0.0.1", port: #{port}, path: "/", query: nil}
         end
       end
 
@@ -1107,6 +1109,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
     defmodule LoopexProviderFixtureEntry do
     def main(arguments) do
+    Application.put_env(:req_llm, :anthropic, [base_url: "http://127.0.0.1:#{port}"])
     Application.put_env(:req_llm, :finch_request_adapter, LoopexProviderFixtureTransport)
     [path | _] = Enum.map(arguments, &List.to_string/1)
     File.write!(#{inspect(Path.join(root, "pid"))}, System.pid())
@@ -1426,6 +1429,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           "type" => "message",
           "role" => "assistant",
           "model" => "claude-haiku-4-5",
+          "stop_reason" => nil,
+          "stop_sequence" => nil,
           "content" => [],
           "usage" => %{"input_tokens" => 4, "output_tokens" => 0}
         }

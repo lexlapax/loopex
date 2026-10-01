@@ -74,13 +74,16 @@ Part of the [evidence index](README.md).
   checks preserve signatures, block order and final usage with permanent failure.
 - Done: captured-cell native request rendering, exact tool/limit preservation
   and final Finch request sealing against the pinned dependency's mutation hooks.
+- Done: join native capture/rendering to the durable worker's ReqLLM transport,
+  with strict replies, eligible summary projection, fatal wakeup and owned drain
+  cleanup; resolve canonical tool names through their complete generations.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
   the dependent refusal schema without the maintainer's decision.
 - Next: complete host resolution, maintenance quiescence and checkpoint-aware
   configuration preflight; join native capture and request envelopes to
-  the transport bridge; complete question
+  the buffered OneShotHTTP1 path; complete question
   projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
   continue prompt-file and mapping
@@ -90,6 +93,65 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: the durable Anthropic worker now normalizes model/options/context
+  before the pinned `Streaming.start_stream/4` handoff and uses invocation-owned
+  provider/parser callbacks. The exact callback inventory is `stream_transport/2`,
+  `stream_protocol_parser/2`, `parse_stream_protocol/2`, `init_stream_state/1`,
+  `decode_stream_event/3`, `flush_stream_state/2` and `attach_stream/4`.
+  Native content stays in private capture; only admitted public deltas and the
+  actual message-stop marker enter dependency conversion. The private failure
+  latch independently wakes the owner, which cancels the exact stream and joins
+  its drain. The drain is linked as well as monitored so owner death also stops
+  a blocked progress callback. The selected credential enters only the private
+  request builder; raw payload telemetry is disabled per invocation, and its
+  model contains no capture handle. Capture status formatting excludes private
+  state, messages and reasons. Existing protected-companion custody remains the
+  production boundary; this adds no host-VM secrecy claim.
+  Native stop evidence now produces v3 completion/capsule fields through the
+  private codec. Generic rows reject thinking/redacted blocks and preserve
+  natural/limit/unknown classification. Converted thinking labels on other
+  paths no longer authorize reasoning disclosure. The shared canonical-call
+  mapper uses full generations and refuses malformed arguments. Terminal result
+  groups and following prompts share one native user array across empty assistant
+  completions. Buffered capture, ordinary cell registration and live-provider
+  proof remain open.
+  The local HTTP cases exercise byte-framed Unicode/tool JSON, redacted blocks,
+  exact outgoing limits, response identity, summary eligibility and invalid
+  terminal controls, malformed interior input, incomplete original EOF, raw
+  comment overflow, blocked-drain cancellation, owner death and telemetry
+  exclusion. Companion fixture routes are now selected before the final hook.
+  Backpressure fixtures use a 12,288-byte head within the native content ceiling;
+  their actual socket-pending, writer-stack, queue/count and cleanup assertions
+  remain required. Incomplete native input now fails at parser/flush rather than
+  converted completion metadata; typed transport and callback diagnostics retain
+  their closed categories.
+  Memory accounting for pinned ReqLLM 1.24.0: one cumulative 8,388,608-byte body
+  budget covers pending parser input, tool JSON and each transient decoded batch.
+  Completed native content is capped at 16,384 JSON bytes/128 blocks. Capture
+  keeps no event log, and the drain retains only one delta plus its count. Each
+  public fragment passes the Model payload bound; total queued payload and event
+  count are bounded by the same raw-body budget, including a batch that exceeds
+  the dependency's 500-chunk watermark. The synchronous single Finch producer
+  cannot add an unbounded pending-call queue. `ChunkAccumulator` ignores the
+  private delta envelope; StreamServer metadata replaces its last delta rather
+  than accumulating them, object mode is off, and fixture raw capture is refused.
+  Dependency telemetry retains bounded summaries/options and the already bounded
+  request; its model has no invocation handle and its options have no selected
+  credential. Request/capture/codec values retain their existing independent
+  bounds. These bounds include linear term overhead; no byte-exact BEAM heap
+  size or new response-header bound is claimed.
+  A broad exploratory adapter run from the dirty checkout was stopped after
+  identifying fixture-route migrations and clean-source prerequisites. It is
+  failed/incomplete evidence, not a fast-check or candidate pass.
+  Final focused checks pass 126 tests in 103.4 seconds on the current toolchain,
+  including actual companion/backpressure/failure-category cases, and 101
+  native/mapping/codec/conformance tests in 12.3 seconds on the floor pair.
+  Retained outputs:
+  - `/private/tmp/loopex-m7-native-bridge-checkpoint-current.log`, SHA-256
+    `92e5b85ff1907ff038bd9f8537e8497453c4497d04d40e670cf5e9ba1620a770`.
+  - `/private/tmp/loopex-m7-native-bridge-integrated-floor.log`, SHA-256
+    `ae90d3003bd5709c661f25ab6821e08a57b94025a30ea26de461dcbfd20e58c0`.
 
 - 2026-10-01: native request preparation now validates the nine literal captured
   cells, strict manual-budget/output-limit relation and unchanged tool definitions
@@ -810,7 +872,10 @@ Part of the [evidence index](README.md).
 - [ ] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
 - [x] Implement bounded native event assembly and pinned SSE parse/flush validation with permanent failure, exact content reconstruction and cumulative usage evidence.
 - [x] Render captured native requests and seal the final Finch request; prove exact tools, controls and ceilings against the pinned builder and hook order.
-- [ ] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
+- [x] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
+- [x] Join native capture and request sealing to the durable worker, with strict reply fields and an owned, monitored drain.
+- [x] Prove local HTTP framing, private/public projection, blocked-drain failure, owner death and telemetry exclusion.
+- [x] Share full-generation canonical call rendering and refuse malformed argument repair across ordinary and native request paths.
 - [ ] Test the bridge against a local HTTP server before integrating live-provider proofs.
 - [ ] Test model switching, crashes, cancellation, malformed replies, overflow, usage accounting and privacy.
 - [ ] Complete the seven thinking-round subcases, nine bound subcases and cancellation witness, including their prescribed subsequent prompts.
@@ -961,8 +1026,8 @@ before a provider demonstration.
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
-| Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound continuation staging, bounded shared expansion and v1 nil-only compatibility implemented; native rendering pending |
-| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; native adapter emission and maintenance accounting pending |
+| Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound staging, bounded expansion, v1 nil-only compatibility and streamed native rendering implemented; buffered join pending |
+| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable native adapter emission implemented; buffered emission and maintenance accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |

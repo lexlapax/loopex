@@ -35,16 +35,67 @@ defmodule Loopex.LLM.ReqLLM.NativeContent do
   @spec capture(term(), term(), term()) :: {:ok, map()} | {:error, :invalid_native_content}
   def capture("anthropic:" <> id = model, stop, content)
       when byte_size(id) > 0 and byte_size(model) <= 512 do
+    with {:ok, captured} <- decode(model, content),
+         {:ok, status} <- status(stop, captured.tool_calls),
+         true <- captured.continuation["status"] == status do
+      {:ok, captured}
+    else
+      _ -> @invalid
+    end
+  end
+
+  def capture(_, _, _), do: @invalid
+
+  @doc """
+  ## Concept
+
+  Admit the completed reply under its captured continuation requirement.
+
+  ## Technical depth
+
+  Generic and thinking-off rows reject private thinking blocks instead of dropping
+  them. They retain the exact native stop classification and return no capsule.
+  Required rows admit only the natural open/closed relations proved by capture/3.
+  Both paths validate the same complete bounded content before returning calls.
+  """
+  def project(model, true, stop, content), do: capture(model, stop, content)
+
+  def project("anthropic:" <> id = model, false, stop, content)
+      when byte_size(id) > 0 and byte_size(model) <= 512 and is_list(content) do
+    with true <- Enum.all?(content, &is_map/1),
+         false <- Enum.any?(content, &(&1["type"] in ["thinking", "redacted_thinking"])),
+         {:ok, completion} <- completion(stop),
+         {:ok, captured} <- decode(model, content) do
+      {:ok, %{captured | completion: completion, continuation: nil}}
+    else
+      _ -> @invalid
+    end
+  end
+
+  def project(_, _, _, _), do: @invalid
+
+  defp completion(stop) when stop in ["end_turn", "tool_use", "stop_sequence"],
+    do: {:ok, "natural"}
+
+  defp completion("max_tokens"), do: {:ok, "limit"}
+  defp completion(nil), do: {:ok, "unknown"}
+
+  defp completion(stop) when is_binary(stop) and byte_size(stop) <= 256 do
+    if String.valid?(stop), do: {:ok, "unknown"}, else: @invalid
+  end
+
+  defp completion(_), do: @invalid
+
+  defp decode(model, content) do
     with {:ok, _} <- ContentReferences.json_size(content),
          {:ok, nodes, pieces, calls} <- blocks(content, 0, [], [], [], MapSet.new()),
-         {:ok, status} <- status(stop, calls),
          text <- pieces |> Enum.reverse() |> IO.iodata_to_binary(),
          calls <- Enum.reverse(calls),
          capsule = %{
            "format" => "loopex.anthropic.content_refs.v1",
            "provider" => "anthropic",
            "model" => model,
-           "status" => status,
+           "status" => if(calls == [], do: "closed", else: "open"),
            "content" => Enum.reverse(nodes)
          },
          {:ok, ^content} <-
@@ -54,8 +105,6 @@ defmodule Loopex.LLM.ReqLLM.NativeContent do
       _ -> @invalid
     end
   end
-
-  def capture(_, _, _), do: @invalid
 
   defp status("tool_use", [_ | _]), do: {:ok, "open"}
   defp status("end_turn", []), do: {:ok, "closed"}

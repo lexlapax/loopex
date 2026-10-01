@@ -25,8 +25,9 @@ defmodule Loopex.LLM.ReqLLM do
   cleanup period. The legacy bare-model `complete/2` has no such configuration
   and always refuses; there is no shared-VM fallback or ambient worker discovery.
 
-  The companion starts ReqLLM only after protected entry and performs one
-  `ReqLLM.stream_text/3` handoff with dependency retry disabled. A proved local
+  The companion starts ReqLLM only after protected entry. Anthropic uses its
+  invocation-owned native wrapper at `ReqLLM.Streaming.start_stream/4`; other
+  providers use `ReqLLM.stream_text/3`. Dependency retry is disabled. A proved local
   pre-transport refusal is `{:error, {:not_dispatched, "model_call_failed"}}`.
   From possible invocation delivery onward, uncertainty is
   `{:error, {:dispatched_or_unknown, "model_call_failed"}}`; no raw provider
@@ -44,7 +45,14 @@ defmodule Loopex.LLM.ReqLLM do
 
   @behaviour Loopex.Model
 
-  alias Loopex.LLM.ReqLLM.{Mapping, ProviderBridge, ProviderConfiguration}
+  alias Loopex.LLM.ReqLLM.{
+    Mapping,
+    NativeContent,
+    NativeTransport,
+    ProviderBridge,
+    ProviderConfiguration
+  }
+
   alias Loopex.LLM.ReqLLM.TraceCapability.Direct
   alias Loopex.Model
 
@@ -332,15 +340,32 @@ defmodule Loopex.LLM.ReqLLM do
     with true <- byte_size(credential) in 1..65_536,
          :ok <- Model.validate_request(request),
          {:ok, context} <- Mapping.context_of(request),
-         {:ok, identity} <- identity(request.model),
          {:ok, tools} <- Mapping.provider_tools(Model.model_facing_tools(request)),
-         {:ok, options} <- call_options(request, credential, tools) do
+         {:ok, options} <- call_options(request, credential, tools),
+         {:ok, identity, options} <- prepare_transport(request, context, options) do
       {:ok, context, identity, options}
     end
   rescue
     _error -> :refused
   catch
     _class, _reason -> :refused
+  end
+
+  defp prepare_transport(%{model: "anthropic:" <> _} = request, context, options) do
+    with {:ok, prepared} <-
+           NativeTransport.prepare(request, context, Keyword.delete(options, :api_key)) do
+      identity = %{
+        provider: "anthropic",
+        model: prepared.model.id,
+        endpoint: prepared.endpoint.host
+      }
+
+      {:ok, identity, Keyword.put(options, :loopex_native_prepared, prepared)}
+    end
+  end
+
+  defp prepare_transport(request, _context, options) do
+    with {:ok, identity} <- identity(request.model), do: {:ok, identity, options}
   end
 
   @doc """
@@ -428,10 +453,37 @@ defmodule Loopex.LLM.ReqLLM do
   # classifies loss of that child as uncertainty without receiving a crash term.
   defp handoff(request, context, identity, call_options, credential, progress) do
     failure_stage("handoff", fn ->
-      case ReqLLM.stream_text(request.model, context, call_options) do
-        {:ok, response} -> drain(response, request, identity, progress, credential)
-        {:error, _reason} = failed -> failed
-        _failed -> {:error, {:provider_call_failed, @call_failed}}
+      case Keyword.fetch(call_options, :loopex_native_prepared) do
+        {:ok, prepared} ->
+          with {:ok, captured} <- NativeTransport.complete(prepared, credential, progress),
+               {:ok, content} <-
+                 NativeContent.project(
+                   request.model,
+                   prepared.profile.mapping["continuation_required"],
+                   captured.native.stop_reason,
+                   captured.native.content
+                 ) do
+            metadata = Map.put(captured.metadata, :usage, captured.native.usage)
+
+            reply =
+              Mapping.reply(
+                request,
+                identity,
+                metadata,
+                content.text,
+                content.tool_calls,
+                captured.delta_count
+              )
+
+            {:ok, Map.merge(reply, Map.take(content, [:completion, :continuation]))}
+          end
+
+        :error ->
+          case ReqLLM.stream_text(request.model, context, call_options) do
+            {:ok, response} -> drain(response, request, identity, progress, credential)
+            {:error, _reason} = failed -> failed
+            _failed -> {:error, {:provider_call_failed, @call_failed}}
+          end
       end
     end)
   end
@@ -636,18 +688,11 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp emit(%{type: :thinking, text: fragment}, progress)
-       when is_binary(fragment) and fragment != "" do
-    deltas =
-      Enum.map(split_progress_fragment(fragment), fn text ->
-        %{kind: :reasoning_delta, content_index: 0, text: text}
-      end)
-
-    case emit_checked(deltas, progress) do
-      {:ok, count} -> {:counted, count}
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  # Concept: a converted thinking label does not establish summary eligibility.
+  # Technical depth: ADR 0044 permits only the captured mapping and validated
+  # native event path to emit reasoning deltas. Other converted streams suppress
+  # them before counting or publication.
+  defp emit(%{type: :thinking}, _progress), do: :ignored
 
   defp emit(%{type: :tool_call, name: name} = chunk, progress)
        when is_binary(name) and name != "" do

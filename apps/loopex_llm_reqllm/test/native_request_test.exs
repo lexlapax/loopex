@@ -208,6 +208,39 @@ defmodule Loopex.LLM.ReqLLM.NativeRequestTest do
              NativeRequest.render(unanswered, baseline(unanswered, true), true)
   end
 
+  test "terminal tool results and a later prompt share one user array across empty completions" do
+    {original, _} = continuation_request()
+
+    messages =
+      original.messages ++
+        [
+          %{"role" => "assistant", "content" => ""},
+          %{"role" => "user", "content" => "next prompt"}
+        ]
+
+    {:ok, request} =
+      Model.request(original.model, messages,
+        tools: original.tools,
+        sampling: original.sampling,
+        deadline: original.deadline
+      )
+
+    assert {:ok, body} = NativeRequest.render(request, baseline(request, true), true)
+    assert length(body["messages"]) == 3
+
+    assert List.last(body["messages"]) == %{
+             "role" => "user",
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "canonical-call",
+                 "content" => "result"
+               },
+               %{"type" => "text", "text" => "next prompt"}
+             ]
+           }
+  end
+
   test "the final invocation hook refuses global mutations without logging request material" do
     prior = Application.fetch_env(:req_llm, :finch_request_adapter)
     Application.put_env(:req_llm, :finch_request_adapter, Loopex.NativeRequestMutationHook)
