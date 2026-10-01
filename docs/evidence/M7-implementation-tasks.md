@@ -61,8 +61,12 @@ Part of the [evidence index](README.md).
   preserving parallel shutdown, owner-worker barriers and actual fault reporting.
 - Done: join host-prepared ordinary configuration to live owner admission, exact
   retained-history sizing, atomic commit, restart and commit-boundary fault proofs.
+- Done: implement shared bounded content-reference expansion and pure exact native
+  block capture, preserving text slices, ordered arguments and both JSON ceilings.
 - Next: complete host resolution, maintenance quiescence and checkpoint-aware
-  configuration preflight; complete question projection/private-record vectors and the remaining M7
+  configuration preflight; join native capture to versioned replies/settlements,
+  source-bound request envelopes and the transport bridge; complete question
+  projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
   continue prompt-file and mapping
   preparation, effective inspection and command entry wiring, then live
@@ -72,6 +76,30 @@ Part of the [evidence index](README.md).
 
 ## Development observations
 
+- 2026-10-01: shared ContentReferences expansion implements the closed literal,
+  text_ref and tool_use_ref union against canonical text and ordered arguments.
+  Success requires complete UTF-8 text consumption, each call index exactly once,
+  one absent ASCII top-level field and the declared open/closed call relation.
+  Nested reference-shaped objects remain opaque. Incremental compact JSON counting
+  enforces 16,384 bytes, depth/cardinality bounds and 128 blocks without allocating
+  encoded JSON; expanded counting includes the complete capsule and separators.
+  The adapter's pure NativeContent capture accepts exact native field sets,
+  completed thinking signatures, redacted-thinking data and reference-only
+  replies; it re-expands and compares the complete native array before return.
+  Duplicate IDs, unknown fields, incomplete blocks and stop/call contradictions
+  refuse the entire reply. Core configuration/genesis/expansion checks pass 40
+  tests in 0.2 seconds; adapter mapping/catalog/native checks pass 19 in 2.3 seconds.
+  Final current and floor Elixir/OTP checks each pass eleven expansion tests in
+  0.2 seconds; native capture's numeric-encoder addition passes seven tests in
+  0.08 seconds on current and 0.1 seconds on floor. Numeric cases match the
+  adapter JSON encoder for floats and integers outside JavaScript's exact range.
+  Exact-limit multi-block tests include wrapper/separator costs; 455 bounded
+  nested/escape/Unicode variations match the existing compact JSON encoder.
+  Current compilation and formatting pass; documentation covers 984 entries.
+  This is codec evidence, not transport or ordinary reasoning registration.
+  Source-bound aggregate envelopes, versioned reply/settlement integration,
+  continuation accounting, bounded native streaming and mapping conformance
+  remain pending; provider dispatch still uses the existing path.
 - 2026-10-01: the private host-prepared configure path uses ordinary attachment
   routing and serial-owner fences. Duplicate lookup precedes candidate validation
   and exact prospective request measurement; configure dispatches no model or
@@ -607,7 +635,8 @@ Part of the [evidence index](README.md).
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
 - [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
-- [ ] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
+- [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
+- [x] Implement pure exact native-array capture and reconstruction through the shared expander, with closed fields and stop/call relations.
 - [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
 - [ ] Implement continuation accounting, reserves and compaction headroom targets.
 - [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
@@ -764,7 +793,7 @@ before a provider demonstration.
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
-| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Pending |
+| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Shared capsule expansion and pure native block capture implemented; complete v3 reply/settlement integration and accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
