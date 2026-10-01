@@ -24,6 +24,13 @@ its entire stated outcome is proved.
 - Done: T02 attachment-budget baseline audit distinguishes existing attachment
   limitations from the required job-owned bounds. Snapshot creation failure now
   closes its source descriptor before returning; both toolchains prove the repair.
+- Done: T02 pure range-result encoding selects the largest UTF-8 prefix within
+  the complete 8,192-byte conversation-message limit, including double escaping,
+  normalized call identity and metadata. Storage and executor integration remain open.
+- Decision recorded: on 2026-10-01 the maintainer selected the separate optional
+  `ArtifactStore.read_job_range(handle, validated_job)` callback for job reads.
+  Implement it with the accepted job bounds and shared transfer capacity; legacy
+  adapters without it refuse job reads. Existing attachment callbacks remain compatible.
 - Done: T02 resolves committed-receipt artifact membership before policy and
   binds approved ranges to their exact source in the journaled job. Prepared
   references and real range transfers remain open, so original counts are unchanged.
@@ -1513,8 +1520,46 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Resolve committed-receipt artifact membership and closed range arguments before policy, keep policy/deferred identity on original arguments, and bind approved job resolution to the exact retained source. Prove cross-session refusal, uncertain receipt commits, restart and altered-source replay refusal; prepared-reference membership remains pending.
 - [x] Reproduce and repair source-descriptor leakage on snapshot creation failure; close snapshot descriptors on permission/unlink failure and verify existing transfer behavior on both supported toolchains.
 - [ ] Enforce the accepted job-owned cancellation/deadline and cumulative-work bounds when integrating range execution; the attachment implementation does not yet provide these guarantees.
+- [x] Implement pure UTF-8 range-result encoding and prove maximal progress under the complete encoded conversation-message ceiling, including escaped content and metadata, through the real lineage projector.
+- [ ] Implement the maintainer-selected optional job-range callback and join its verified bytes to the range encoder and executor settlement.
 
 ### Verification evidence
+
+On 2026-10-01, the maintainer answered the storage-boundary decision with
+“Separate optional job-range callback (recommended).” The presented choice was
+`ArtifactStore.read_job_range(handle, validated_job)`, performing one verified
+window with job deadline/cancellation, shared four-transfer capacity, bounded
+work accounting and cleanup before return. Adapters lacking the callback refuse
+job range reads; the existing attachment triple stays compatible. The alternative
+was versioning and extending that triple with job context. This records the
+current maintainer decision authorizing the new cross-application callback;
+implementation and its conformance proof remain pending.
+
+`Executor.Local.ArtifactRange` now encodes an already verified window, without
+storage access or a claim of membership/integrity validation. It retains the
+original full reference, actual offset/count, next offset and EOF. Malformed
+UTF-8 and starts inside a codepoint refuse; a partial trailing codepoint shortens
+only before object EOF. If no whole character fits, it refuses instead of
+returning zero progress. Offset at EOF permits an empty result. A binary search
+over codepoint boundaries chooses the largest prefix fitting the encoded limit.
+
+Sizing includes the actual conversation tool-message shape, including its
+second JSON escaping of the inner range content. Revision 1's fixed 51-byte
+normalized call ID permits exact measurement without putting a fabricated ID
+into executor output. A real `Conversation.lineage_entries/1` witness uses a
+long original provider ID, retains the range bytes exactly and proves the final
+message matches that measurement. Additional cases cover escaping, UTF-8,
+metadata exhaustion, invalid windows, final ranges and maximality across seven
+limits. This prepares encoding; it does not yet enable the 1.1.0 executor tool
+or complete the original range-read checkbox.
+
+All seven range-encoding tests pass in 0.09 seconds on each supported toolchain.
+Retained outputs:
+
+- Current: `/private/tmp/loopex-m7-range-projection-current.log`, SHA-256
+  `a5a85d11d33bec3fac3c37c02870ba8c67a1e629e5450726cb9802fe4501f0e2`.
+- Floor: `/private/tmp/loopex-m7-range-projection-floor.log`, SHA-256
+  `68ef29af9d964c47bc74555be1ca5ba58444a14fb49bb57bf8da8d6d74b0cfdd`.
 
 The attachment baseline audit follows `Runtime.EventDispatcher` through
 `Store.Local.Artifacts` into `Store.Local.Transfers`. The dispatcher counts two
