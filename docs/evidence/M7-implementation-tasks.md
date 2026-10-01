@@ -29,7 +29,9 @@ Part of the [evidence index](README.md).
   bounded base/appendix/role files and retained-content byte fixtures.
 - Done: bounded host JSON syntax decoding with duplicate-key pointers and exact
   integers; pure provider-reference validation against the adapter catalog.
-- Next: closed configuration-file schema and command grammar, then live
+- Done: closed authored-file schema, bounded selected-file loading and relative
+  path resolution; trace selectors resolve through trusted module manifests.
+- Next: command grammar and effective-profile composition, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
@@ -196,6 +198,27 @@ Part of the [evidence index](README.md).
   inspection, actual custody loading, durable route dispatch and full integration
   verification of these new bytes remain pending.
 
+- 2026-10-01: `ConfigSchema` validates every authored version-1 object before
+  overrides: required bounds/policy/routes, closed optional fields, role and
+  delegation references, explicit context ceilings and bounded trace settings.
+  Turn/token spending bounds preserve integers above uint64; deadlines, cleanup
+  and context values retain their existing uint64 domains. Disabled delegation
+  and tracing still validate supplied values. Policy names reuse the existing
+  ask registry. Trace selectors resolve only exact trusted application-manifest
+  modules and the two application wildcards; existing lookalike atoms confer no
+  membership, unknown input creates no atom, and metadata reads start no app.
+- `ConfigFile` reads one selected regular file through the existing bounded
+  reader, validates JSON/schema before resolution, and retains authored/resolved
+  profiles separately. Config-relative paths preserve literal tilde/environment
+  text and symlink-sensitive parent components; resolved paths also obey the
+  4,096-byte ceiling. Prompt files, credentials and configured services are not
+  opened by this stage. Focused schema/file/selector/JSON/instruction/ask-grammar
+  checks pass 50 cases in 0.1 seconds. Warning-free compilation, formatting and
+  compiled documentation ordering pass with 956 covered entries. Model-window
+  and reasoning-support resolution, complete effective-profile validation,
+  command grammar/inspection and live creation remain pending. This checkpoint
+  has no new full integration or closure-matrix result.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -248,6 +271,9 @@ Part of the [evidence index](README.md).
 - [ ] Implement the closed configuration-file schema and command-line grammar.
 - [x] Implement bounded JSON syntax decoding with exact integers, redacted errors and duplicate-key JSON pointers; prove callbacks under both supported toolchains.
 - [x] Implement shared pure provider-binding/reference validation and sorted launch exclusions from the adapter's compiled catalog; environment resolution/custody/startup integration remains pending.
+- [x] Validate closed authored-file objects, required conversation bounds, role/route/delegation relationships, explicit context ceilings and trace limit domains before overrides.
+- [x] Load bounded selected regular config files, retaining authored/resolved profiles with config-relative literal paths and resolved byte bounds; prompt-file and effective-profile admission remain later stages.
+- [x] Resolve trace selectors through fixed trusted application-module manifests without input atom creation or application startup; owning trace startup/drain/teardown integration remains pending.
 - [ ] Implement file/flag precedence, validation and effective-value display.
 - [ ] Require explicit conversation bounds in the file, including when flags override them.
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
@@ -442,7 +468,7 @@ before a provider demonstration.
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
 | Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Pure shared reference/exclusion validation implemented; custody and startup/dispatch integration pending |
-| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON syntax/duplicate-pointer decoder implemented; schema, grammar, precedence and inspection pending |
+| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths and trusted trace selectors implemented; effective-profile admission, grammar, precedence and inspection pending |
 | Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
 | Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |
 | Ephemeral entry points | ADRs 0042–0045/0048/0049 | Combined closed startup options; one-call responder consumed locally; joined termination | Ephemeral.Options/Preflight/Bootstrap/SessionOwner; facade | Pending |

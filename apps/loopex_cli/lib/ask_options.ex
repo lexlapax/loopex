@@ -21,6 +21,9 @@ defmodule LoopexCli.AskOptions do
     "refuse-all" => LoopexCli.Policy.RefuseAll
   }
 
+  @doc false
+  def policy_profiles, do: @policies
+
   @doc """
   ## Concept
 
