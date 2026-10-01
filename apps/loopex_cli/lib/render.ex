@@ -40,6 +40,62 @@ defmodule LoopexCli.Render do
   @doc """
   ## Concept
 
+  Render a complete model or tool text item as visibly quoted chat lines.
+
+  ## Technical depth
+
+  Every LF-delimited line starts with `> `. An unterminated final line gains LF
+  before a later host record can be written. CR, ANSI, C0/C1, Unicode format
+  controls and Unicode line separators are escaped visibly. Invalid UTF-8
+  refuses, and rendering stops if the encoded item would exceed the chat
+  writer's 256-KiB queue. This function writes nothing and never truncates text.
+  """
+  @spec chat_text(term()) :: {:ok, binary()} | {:error, atom()}
+  def chat_text(text) when is_binary(text) and byte_size(text) <= 262_144 do
+    if String.valid?(text),
+      do: chat_characters(text, [], 0, true),
+      else: {:error, :invalid_output_utf8}
+  end
+
+  def chat_text(text) when is_binary(text), do: {:error, :output_overflow}
+  def chat_text(_), do: {:error, :invalid_output_text}
+
+  defp chat_characters(<<>>, parts, size, line_start) do
+    ending = if line_start, do: "", else: "\n"
+
+    if size + byte_size(ending) <= 262_144,
+      do: {:ok, IO.iodata_to_binary(Enum.reverse([ending | parts]))},
+      else: {:error, :output_overflow}
+  end
+
+  defp chat_characters(<<character::utf8, rest::binary>>, parts, size, line_start) do
+    prefix = if line_start, do: "> ", else: ""
+    rendered = chat_character(character)
+    size = size + byte_size(prefix) + byte_size(rendered)
+
+    if size <= 262_144,
+      do: chat_characters(rest, [[prefix, rendered] | parts], size, character == 10),
+      else: {:error, :output_overflow}
+  end
+
+  defp chat_character(10), do: "\n"
+  defp chat_character(13), do: "\\r"
+  defp chat_character(9), do: "\\t"
+
+  defp chat_character(character) when character < 32 or character in 127..159,
+    do: "\\x" <> (Integer.to_string(character, 16) |> String.pad_leading(2, "0"))
+
+  defp chat_character(character) do
+    text = <<character::utf8>>
+
+    if Regex.match?(~r/[\p{Cf}\p{Zl}\p{Zp}]/u, text),
+      do: "\\u{" <> Integer.to_string(character, 16) <> "}",
+      else: text
+  end
+
+  @doc """
+  ## Concept
+
   Follows a run to its end and prints what happened.
 
   ## Technical depth

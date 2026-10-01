@@ -131,8 +131,11 @@ its entire stated outcome is proved.
   startup/EOF cleanup. Host and policy witnesses pass on both toolchains.
 - Done: bounded chat line reading and explicit command parsing, with no read
   beyond a wait line, exact answer decoding and malformed-input refusal.
-- Next: join configuration preparation and ChatInput to the runtime-owning chat
-  driver, bounded output and first complete conversation workflow.
+- Done: bounded independently draining chat output and quoted transcript
+  rendering, including progress eviction, unchanged control deadlines, inherited
+  shutdown bounds and joined IO-worker cleanup on both supported toolchains.
+- Next: join configuration preparation, ChatInput and ChatOutput to the runtime-
+  owning chat driver and closed control records for the first complete workflow.
 - Done: new-chat preparation captures exact v3 genesis from file/flag selection,
   instructions and immutable tools. Explicit question selection reaches every
   durable constructor. Configuration and constructor tests pass on both supported
@@ -156,6 +159,28 @@ its entire stated outcome is proved.
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: ChatOutput admits rendered bytes only from its creating host,
+  counts active and queued writes together against 256 KiB, evicts queued
+  progress before required output, and never truncates a control record above
+  65,536 bytes. Its independent IO worker is linked and monitored. A successful
+  finish follows worker termination; IO failures, overflow and the original
+  five-second control deadline seal the writer and notify the host once.
+  Later progress and finish preserve an earlier deadline; an existing host
+  shutdown deadline can shorten finish. Owner loss joins blocked IO, and abrupt
+  manager loss kills its linked worker. OTP status excludes buffered text.
+  Render.chat_text prefixes every model/tool line, escapes terminal and Unicode
+  format controls, terminates a final fragment before the next host record and
+  refuses invalid UTF-8 or expansion beyond the queue limit. Eleven cases pass
+  in 5.6 seconds on current and 5.4 seconds on floor. Closed control schemas,
+  driver integration, real pipe/PTY tests and the prescribed Linux load runs
+  remain open; no original checklist item is closed by this standalone stage.
+  - Current: `/private/tmp/loopex-m7-chat-output-final-current.log`, SHA-256
+    `0971b7c3633f6c2ca417bd8b0d8c457af324e423786cf5e3db03021e2e0c5cea`.
+  - Floor: `/private/tmp/loopex-m7-chat-output-floor.log`, SHA-256
+    `6110f49e17f378aca7166170c74ed378f32905092979a08dc628675339d91ce9`.
+  - Initial nine-case pass: `/private/tmp/loopex-m7-chat-output-current.log`,
+    SHA-256 `3d1639b6b85e21fcd3f234283e75149eb8782e5081fa7ff998f52c6be0bdeedd`.
 
 - 2026-10-01: ChatConfiguration joins the existing explicit file/flag resolvers,
   required paths, exact instruction capture, selected tool definitions and
@@ -1640,6 +1665,7 @@ its entire stated outcome is proved.
 ### Added implementation subtasks
 
 - [x] Implement bounded single-line framing and explicit chat-action parsing, with wait-line backpressure, exact JSON answers and malformed-input refusal on both toolchains; driver admission remains pending.
+- [x] Implement the bounded independently draining output writer and escaped transcript lines; prove progress eviction, control deadlines and joined worker cleanup on both toolchains. Closed records and driver integration remain pending.
 
 ## T11 — Implement specialized read-only helpers
 
