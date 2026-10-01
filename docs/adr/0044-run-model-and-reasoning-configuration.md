@@ -6,9 +6,9 @@ Technical depth: [Run model and reasoning configuration](0044-run-model-and-reas
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 amends [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) to add that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also explicitly amends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement and its monotonic v3-only writer cutover, preserving its accounting-provenance rules and the existing v2 meaning. Qualifies ADR 0011's continuation-material exclusion solely for verified provider summary text in existing transient reasoning progress. Extends [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with reasoning configuration; its buffered transport and cleanup remain unchanged.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include a completion classification, mandatory nine-key version-2 Model-port replies and bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 amends [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) to add that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also explicitly amends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement and its monotonic v3-only writer cutover, preserving its accounting-provenance rules and the existing v2 meaning. Qualifies ADR 0011's continuation-material exclusion solely for verified provider summary text in existing transient reasoning progress. Extends [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with reasoning configuration; its buffered transport and cleanup remain unchanged.
 - **Requires:** acceptance of the labelled [vision continuation amendment](../vision.md#concept-vision-model-boundary) and [section 13.4](../vision-technical.md#technical-vision-model-boundary), under the [authorized scope](../developer/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30)
-- **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept) and [ADR 0046](0046-child-session-tool.md#concept)
+- **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0043](0043-context-compaction-checkpoint.md#concept), [ADR 0045](0045-model-originated-questions.md#concept) and [ADR 0046](0046-child-session-tool.md#concept)
 - **Requires with multi-provider use:** [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Prerequisite for:** M7 outcomes 4 and 7
 - **Coordinated wire amendment:** Replaces [ADR 0023](0023-experimental-public-session-protocol.md#concept)/[ADR 0032](0032-daemon-attachment-residency-and-replay.md#concept)'s served generations and schema-digest inputs through the M7 contract below; their authority, framing and connection-lifecycle rules remain
@@ -101,7 +101,9 @@ current Claude model.
 The maintainer selected ordinary availability at M7 closure. After per-cell
 deterministic conformance, the tested implementation bytes register all nine
 selected model/level cells for ordinary host resolution. Their counted live
-continuation, post-terminal and summary witnesses must pass before closure;
+continuation, post-terminal and summary witnesses must pass before closure. The
+post-terminal witness proves the provider accepts the canonical request and that
+thinking resumes on the following exchange;
 there is no candidate-only resolver or source registration after testing. A
 failed witness blocks closure under the fixed disposition procedure. It grants
 no calibration run, omitted cell or failed-case retry.
@@ -164,7 +166,16 @@ Technical depth: [Compatibility mechanics](0044-run-model-and-reasoning-configur
 New configuration records/events, private continuation replies/settlements and
 snapshot fields require an M7 reader. Old requests and settlements keep their
 original meanings. Private continuation is retained in recovery state, never
-in public configuration snapshots.
+in public configuration snapshots. A Model adapter must now return every
+version-2 reply member, including a nil response identity; an embedder's adapter
+that omits that formerly optional member has its replies refused as unreadable
+until it is updated. A model with no registered row is usable at `default`
+only, without private continuation; on an Anthropic route, a reply that carries
+thinking blocks fails that call and is never silently stripped. After a bound or cancelled tool run, such a
+session refuses the next prompt with `canonical_history_rendering_unsupported`
+until that group is explicitly compacted or a registered model is configured.
+The reference default becomes the dated model identity, and its old alias
+resolves to it.
 The maintainer selected updated wire clients only. M7's foreground server serves
 `loopex.experimental/3`; its daemon serves `loopex.experimental/4`. Both refuse
 older generations through the existing unsupported-generation handshake. The

@@ -66,7 +66,12 @@ stderr writer with bounded pending output, separately from result output.
 The diagnostic sink mailbox keeps ADR 0030's best-effort backpressure; these
 flags do not promise a total host-memory bound. Chat is a text transcript; piped
 mode also emits bounded versioned @loopex control lines for admissions, questions,
-barriers, status and closing. Exit succeeds only when every admitted operation
+barriers, status, errors and closing. Barrier and closing lines name run outcomes
+only; a compaction result appears in the transcript, status and exit code.
+While an admission is unresolved the owner holds internal results and admits no
+other command; an unresolvable admission stays reported as unknown, after which
+interactive chat accepts only exit. Validation accepts a credential-free
+provider binding and names the commands it cannot run. Exit succeeds only when every admitted operation
 succeeded and cleanup is confirmed. Every refusal discovered after resume
 preparation abandons the owner; unknown admission is observed through its
 coordinator resolver, without command resubmission or fabricated success.

@@ -17,7 +17,8 @@ must preserve the existing local executor's request and receipt bytes.
 local executor, then start the composite executor router closed. Start the
 runtime with that router and the exact retained reference tool generations.
 Bind the router once to that runtime reference/incarnation, resolve retained
-parent bindings, then open admission and expose the runtime. Identical binding
+parent bindings, then open admission and expose the runtime. Under the startup
+classification bound below, admission opens only when coverage is complete. Identical binding
 is idempotent; binding a different runtime refuses. Recovery dispatch also waits
 for binding. Runtime loss closes routing. Failed startup unwinds resources.
 No global lookup or unbound router may launch a helper.
@@ -235,17 +236,43 @@ Independent parent runs have independent allowances; resumed runs never reset on
 **Serial scope.** The one-active-helper limit applies to the parent session,
 across run boundaries. Before reservation, the same serial adapter owner checks
 all retained operations for that parent; an unresolved reservation, create,
-prompt, stop, terminal or cleanup obligation still occupies its slot. A new
+prompt, stop, terminal or cleanup obligation, or an excess expected operation
+under the recovery rule below, still occupies its slot. A new
 operation refuses while that slot is occupied; it is not queued. Replaying the
 same logical operation uses its retained state. Release requires conclusive
 terminal and cleanup evidence, settled accounting and persisted attempt receipts.
+Core reads only the exact tagged tuple as a refusal, so every definite adapter
+refusal decided before that operation's reserve append is attempted returns
+`{:error, {:refused_before_effect, reason}}`. The closed reasons are
+`unknown_role`, `delegation_binding_unavailable`,
+`delegation_count_exhausted`, `delegation_tokens_exhausted`,
+`helper_slot_occupied`, `ledger_capacity`, `ledger_fenced`,
+`router_unavailable`, `router_registration_capacity`, `job_binding_conflict`,
+`parent_cutoff_passed`, `cancelled_before_registration`,
+`cancelled_before_reservation`, `helper_admission_closed`,
+`helper_index_unavailable` and `helper_classification_incomplete`. A role absent
+from the retained enabled catalog is `unknown_role`, whether it was never
+defined or was disabled. Missing or corrupt binding or catalog data is
+`delegation_binding_unavailable`; an unbound or closed router is
+`router_unavailable`; a parent job cutoff already passed at reservation is
+`parent_cutoff_passed`; insufficient closing credit is `ledger_capacity`;
+another operation's unresolved ledger commit, or an unresolved `initialize`
+commit, is `ledger_fenced`. Different arguments under a retained operation
+identity are never tagged. `job_binding_conflict` is tagged only when no ledger frame
+exists for the registered job's operation; otherwise the answer is the untagged
+unresolved error. After a reserve append is attempted, or while a reserve commit
+is unresolved, the adapter returns only a bound receipt or an untagged unresolved
+error; it never returns a tagged refusal for an operation whose ledger may hold
+a reservation.
 Before opening admission, use complete classification of retained parent
 delegation intents across runs to establish the expected run/operation set, then
 reconcile its existing binding/run logs. Enumerating present hashed log files
 alone cannot establish completeness or an empty slot. The read-only query and
 missing-log recovery rules below distinguish proven uncreated work from missing
-child evidence. Corrupt or unavailable required coverage refuses the affected
-parent's helper admission; it does not erase a known unrelated session's
+child evidence. After admission has opened, corrupt or unavailable coverage for
+a session first seen then fences that session's mutations, and a `loopex.task`
+call reaching the adapter for it returns the tagged
+`helper_classification_incomplete`; it does not erase a known unrelated session's
 classification. A session whose own provenance cannot be established cannot be
 mutated as an ordinary session. Build the live occupied-slot view from
 that validated reconciliation rather than rescanning history on each call. This
@@ -337,7 +364,7 @@ Keep rows only while execution/cancellation is active, capped at 4,096 rows and
 8,388,608 canonical JSON bytes including keys. A local row is removed after its
 callback returns and any concurrent cancel observer has finished. A helper row
 may then leave this active table because its original job binding and receipts
-remain in the validated durable helper index below. Capacity refuses a new
+remain in the ledger and stay reachable through the derived job index below. Capacity refuses a new
 concurrent registration with `{:error, {:refused_before_effect,
 :router_registration_capacity}}`; settlement reclaims capacity. This is not a
 lifetime-throughput limit. Existing cancellation and receipt reads remain usable.
@@ -350,6 +377,16 @@ incomplete classification refuses affected activation, never guesses a route.
 
 Known local cancellation forwards unchanged to Local and does not close helper
 admission. Known helper cancellation uses only its durable operation stop.
+A registered helper job whose operation has had no reserve append attempted has
+nothing durable to stop: its cancel appends nothing, closes that operation's
+volatile launch fence, makes the pending execute return the tagged
+`cancelled_before_reservation` refusal and answers cleaned, because no child or
+provider effect is possible. It writes no ledger frame and occupies no slot in
+that incarnation. If core consumes the refusal before its cleanup settles, the
+call is a pre-effect failure and is never charged. If the coordinator's
+execute-result reserve consumes it first, the existing coordinator records the
+call unknown, and restart then applies the conservative missing-reservation rule
+below. An attempted or unresolved reserve uses the stop rule instead.
 Derive the cancellation callback's absolute monotonic observation deadline once
 on entry for helper cancellation from the registered parent job's `cleanup_grace_ms` and
 `Executor.cancellation_bounds/1`, minus a fixed 250-ms reply margin. Core begins
@@ -426,24 +463,35 @@ payloads through wire schemas, progress or diagnostics. Unknown fields and
 versions refuse; callers never construct atoms from returned input. Field lists
 in braces below denote closed plain maps; tagged API results are tuples.
 
-- `Runtime.effect_intents(runtime, session_id, cursor, limit)` accepts `nil`
-  or the closed cursor `{version: 1, runtime_id, session_id, through_version,
-  after_version}` and integer `limit` from 1 to 16. The first call captures
+- `Runtime.effect_intents(runtime, session_id, cursor, limit)` accepts `nil`,
+  the closed cursor `{version: 1, runtime_id, session_id, through_version,
+  after_version}` or, as a first call only, the closed resume form `{version: 1,
+  runtime_id, session_id, resume_after_version, prefix_token}` defined under the
+  startup classification bound below, and integer `limit` from 1 to 16. The first call captures
   `through_version` from `Store.ownership_head/3`; later calls scan that same
   immutable prefix through `Store.load_records/4`. Each call scans at most
   `limit` private records, advances past every scanned record, and returns
   `{:ok, {version: 1, runtime_id, session_id, through_version, scanned_through,
-  rows, next_cursor}}`. Rows are a closed union: `{kind: "intent", journal_version,
+  prefix_token, rows, next_cursor}}`. Rows are a closed union: `{kind: "intent", journal_version,
   job}` for effect_intent_committed, with the validated plain JobRequest projection;
-  or `{kind: "terminal", journal_version, run_id, tool_call_id, disposition}`.
+  or `{kind: "terminal", journal_version, run_id, tool_call_id or null, disposition}`.
   Terminal disposition is `refused_before_effect`, `receipt_committed` or
   `outcome_unknown`. Derive it from validated reducer facts: a failed
-  tool_result_committed without an executor receipt proves pre-effect refusal;
+  tool_result_committed without an executor receipt proves pre-effect refusal,
+  as does core's own cancelled tool_result_committed after an intent, which the
+  coordinator commits only when the job never crossed the port;
   a committed executor receipt proves receipt_committed; other terminal facts
   without conclusive receipt remain outcome_unknown. Never infer it from reason
-  text, model output, a missing ledger or volatile executor state. Emit terminal
-  facts in journal order and join only by the exact run/tool-call identities to
-  the earlier intent. Conflicting or unsupported joins are invalid_history.
+  text, model output, a missing ledger or volatile executor state. The paged
+  query is stateless, so it emits a terminal row for every scanned tool
+  terminal, in journal order. Composition, which holds the session's open
+  intent rows across pages, discards a row whose run/tool-call identity matches
+  no earlier intent row, such as a policy denial or invalid arguments; those
+  are skipped, not invalid. It joins only by the exact run/tool-call identities
+  to that intent. The run-level
+  outcome_unknown_committed record carries no call identity: its row has
+  `tool_call_id` null and joins that run's single open intent. Conflicting or
+  otherwise unsupported joins are invalid_history.
   Exclude grants and owner-incarnation stamps. Return all executor kinds;
   composition selects the retained task generation after complete coverage.
   Empty `rows` does not end a scan: only `next_cursor: nil` proves that the
@@ -458,7 +506,8 @@ in braces below denote closed plain maps; tagged API results are tuples.
   session differs from absent/unavailable history. The closed errors are
   `invalid_query`, `session_absent`, `history_unavailable`, `invalid_history`
   and `runtime_unavailable`, returned as `{:error, reason}`. Composition's
-  startup recovery deadline applies between pages; timeout never means complete.
+  startup classification bound below applies between pages; timeout never means
+  complete.
 - `Runtime.creation_provenance(runtime, selector)` accepts exactly
   `{kind: :command, command_id}`, `{kind: :session, session_id}`, or
   `{kind: :runtime_page, cursor, limit}`. The first two are point queries. The new
@@ -515,10 +564,63 @@ history to classify. Durable hosts construct the router and complete the scan
 below even when new delegation is disabled, so an old helper cannot be adopted
 as ordinary work. A resumed parent with task uses its committed enabled binding
 under ADR 0049; file defaults cannot disable it. No file flag proves a root
-helper-free or skips classification. Retain measured
+helper-free. A validated coverage entry only resumes the scan and classifies
+nothing. Retain measured
 startup duration, pages/records read and peak buffers for a large-history fixture,
-plus deadline exhaustion that refuses incomplete classification; no throughput
+plus bound exhaustion that refuses incomplete classification; no throughput
 or service-time promise is introduced.
+
+**Startup classification bound.** The maintainer selected a fixed, resumable
+bound on 2026-09-30. Each host start spends at most 60,000 ms, measured
+monotonically, on the enumeration and scan below; M7 adds no configuration key.
+Progress is retained in the disposable `job-index-v1` cache as one coverage
+entry per enumerated session, exactly `{version: 1, kind: "coverage",
+runtime_id, session_id, covered_through_version, prefix_token,
+expected_sha256}`. `effect_intents/4` gains two members for this, and no Store
+callback is added. Each result carries `prefix_token` for its `scanned_through`
+record: core's runtime Control derives it as the SHA-256 of the Store-returned
+private record at that version, that is its journal version, owner epoch,
+incarnation ID and `:erlang.term_to_binary(payload, [:deterministic])`. The host
+treats it as opaque, compares it only for equality and stores it as canonical
+padded base64. The resume form `{version: 1, runtime_id, session_id,
+resume_after_version, prefix_token}` captures a fresh `through_version`, re-reads
+that one record through `load_records/4`, answers `invalid_query` when the
+derived token differs and otherwise scans from the next version. An entry's
+`covered_through_version` and token are those of one returned page boundary: the
+last page's `scanned_through` when no scanned intent row lacks its terminal row,
+otherwise the highest page `scanned_through` below the first such intent row.
+When no page boundary qualifies the session has no entry and is scanned from
+the start. No intent/terminal join therefore crosses the watermark.
+`expected_sha256` is the SHA-256 of the canonical JSON array, ordered by
+`source_intent.journal_version`, of the `{job, source_intent}` members of every
+job entry whose `job.session_id` is that session and whose source version is at
+or below the watermark; an empty array is hashed as `[]`. Validation lists the
+job-index directory once per start and groups entries by session; that listing
+counts against the bound. A missing, corrupt or mismatched entry is discarded
+and that session is rescanned. A toolchain change, Store migration or other
+token change costs one resumable rescan, never a false classification.
+Coverage entries are scan progress, not classification or authority. The ledger
+and creation-provenance joins below still run for every expected operation; the
+entries share the private host directory's lease and trust with the ledger.
+
+Durable admission opens only when coverage of the captured creation cut is
+complete; the bound never opens it partially, because no existing session can be
+classified as ordinary before every parent's intents are covered. On exhaustion
+the host refuses activation, creation and every mutation through its durable
+routes with the host error code `helper_classification_incomplete` and integer
+`covered` and `enumerated` session counts; this host refusal is not the tagged
+executor tuple of the same reason. Read-only attachment and inspection remain, and the
+helper-disabled ephemeral path above is unaffected. A resident host continues in
+further 60,000-ms slices and opens admission once coverage is complete; a
+one-shot command reports the counts, and a later start continues from the
+retained entries. Enumeration and entry validation count against the bound. No
+start rescans a prefix whose entry validates. A root whose enumeration and
+validation alone exceed one bound completes only under a resident host; this is
+a recorded limitation. A session whose scan answers `invalid_history`,
+`history_unavailable` or `session_absent` is not covered: the host stops
+slicing, stays closed and adds that session's ID to the refusal. Restoring the
+root from backup is the exit; M7 provides no per-session quarantine. This too is
+a recorded limitation of the all-closed choice.
 
 Before opening admission, the host completely enumerates committed creating
 mappings with the runtime-page selector, then scans each enumerated session's
@@ -545,7 +647,8 @@ that session to ordinary or erase a separately established unrelated identity.
 intent with a matching committed pre-effect refusal from expected delegation
 operations, child-ID classification and allowance reconstruction. Such a refusal
 consumed no slot, requires no ledger record, and cannot fence its parent after
-restart. Every other retained task intent remains expected; no terminal or an
+restart. Core's own cancelled-before-dispatch terminal is the same pre-effect
+fact. Every other retained task intent remains expected; no terminal or an
 unknown terminal is never proof of refusal. Receipt evidence and ledger joins
 remain required for admitted work. Bounded paged/indexed construction joins
 terminal rows at the same captured cut without collecting an unbounded history.
@@ -577,8 +680,15 @@ cannot prove that the lost log never reserved a count slot. Therefore charge
 one conservative count slot, never reconstruct zero counts or refresh allowance.
 Reserve bounded credit for settlement and all original-attempt receipts before
 this mutation. If expected operations exceed the retained count or storage
-bounds, refuse that parent's recovery; do not clamp counts or discard intents.
-This transition is already stopped, creates no launch permit, and may only
+bounds, do not clamp counts or discard intents and write no `recover_uncreated`
+for the excess operation. It stays unresolved: its retained-receipt lookup
+answers `effect_unresolved`, core settles that pending call as its existing
+unknown outcome, and every later helper call on that parent session refuses
+with `helper_slot_occupied`, in every later run and after every restart, because
+the same retained intent re-derives the same excess; M7 provides no release.
+The parent's ordinary activation proceeds once its other operations reconcile;
+exhaustion or lost evidence denies further children, not the parent's own work.
+The `recover_uncreated` transition is already stopped, creates no launch permit, and may only
 settle known no-child failure and bind the original-attempt receipt. It consumes
 no child tokens and cannot later transition to reserve/create/prompt. The normal
 stop-only recovery, conclusive-receipt and slot-release rules still apply.
@@ -636,29 +746,38 @@ Include every original attempt, including predecessor-incarnation jobs and
 recover_uncreated receipts; an active row is not required. The index is a disposable, versioned derived cache over retained truth, with bounded paged construction and a bounded
 4,096-entry/8-MiB cache. The ledger owns `lookup_job(reference, job_id)`: it reads
 one derived entry keyed by SHA-256 of that ID under its private index directory,
-then validates the referenced source-intent and ledger frame/receipt. Entries
-are exactly `{version: 1, job, source_intent, run_log, frame_offset}`; job is the
+then validates the referenced source-intent and ledger frame/receipt. Job entries
+are exactly `{version: 1, kind: "job", job, source_intent, run_log, frame_offset}`,
+keyed by SHA-256 of the job ID; coverage entries are the closed map above, keyed
+by SHA-256 of the session ID under a `coverage/` subdirectory. The
+4,096-entry/8-MiB bound limits the in-memory cache only. In a job entry, job is the
 original binding, and frame_offset is null before the first operation frame,
 otherwise its validated offset. job is exactly the closed router-binding row
 above, never full canonical_request_bytes. The directory is job-index-v1 under
 the private delegation runtime directory. Entries contain no independent receipt facts,
 at most 65,536 JSON bytes; they are installed atomically under the exclusive host
-lease. They grant no authority and are not another journal. Rebuild the complete
-index from validated intent/ledger coverage at startup; live registration updates
+lease. They grant no authority and are not another journal. Rebuild the index
+from validated intent/ledger coverage at startup, reusing only entries whose
+coverage entry validates under the startup classification bound above; live registration updates
 it before exposing work, and receipt binding updates it before publication.
 An index-write failure before reservation returns refused_before_effect with
-`helper_index_unavailable`; after possible work it returns effect_unresolved
-and fences that operation until rebuild. It cannot suppress a committed receipt
+`helper_index_unavailable`. After a reserve append, whether or not a create was
+sent, it returns the untagged effect_unresolved and fences that operation until
+rebuild; stop-only recovery then settles it. It cannot suppress a committed receipt
 or report absence. Discarding the cache is safe only while admission is closed;
 rebuild from authoritative coverage before reopening.
 Eviction preserves that point lookup. Missing/corrupt index or source coverage
-means unresolved until rebuild, never absence or fallback to a local route. It carries no launch authority or independent
+means unresolved until rebuild, never absence or fallback to a local route. That
+transient state answers the untagged `{:error, :helper_index_pending}`. Core
+declines that activation's receipt reconciliation without committing a fact, and the host reconciles
+again after rebuild; it is distinct from the final `effect_unresolved` of an
+unknown ID or an excess operation. The index carries no launch authority or independent
 truth writer. Local receipt lookup is used only for a proven local route, or
 to obtain a conclusive validated Local receipt for an unknown ID; unknown plus
 Local absence stays `effect_unresolved`. A helper lookup returns its exact
 original receipt tuple for core's current solicited reconciliation validation.
 The callback is observational: it reads a retained receipt or returns the existing
-unresolved/in-flight error;
+unresolved/in-flight error or the pending error above;
 it starts no worker and commits no stop, create, prompt or recovery mutation.
 Startup recovery and cancel perform those actions separately. Missing receipt
 is not proof of no dispatch and cannot become `absent` for an unresolved
@@ -683,8 +802,25 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   and provenance fixtures cross both toolchain pairs and validate retained create
   digests through Store's own transaction recipe. Child frames contain
   object references and remain within the JSON frame cap.
-- Pre-effect refusals for exhausted allowance, unknown role and occupied slot
-  survive restart without count/token charge or parent recovery fencing; admitted
+- Every closed pre-effect refusal reason returns the tagged tuple; exhausted
+  allowance, unknown role, occupied slot and core's cancelled-before-dispatch
+  terminal survive restart without count/token charge or parent recovery
+  fencing. An intent with no terminal on a parent already at its count keeps
+  that parent activatable with helper admission refused and the call unknown.
+  Cancelling a registered job before its reserve frame appends nothing and
+  answers cleaned. Sessions with policy denials classify; the run-level unknown
+  terminal joins by run. Startup classification stops at its fixed bound,
+  resumes from validated coverage entries on the next start through the resume
+  form, rescans a session whose token or entry digest fails validation, joins an
+  intent open at the previous start to its later terminal with both above the
+  watermark, keeps durable admission closed until coverage completes and never
+  rescans a validated prefix. A resident host continues in slices and then
+  opens; the host refusal carries both counts; an unreadable session keeps the
+  root closed and names that session. A refusal consumed by the coordinator's
+  execute-result reserve is recorded unknown and takes the conservative charge
+  at the next restart. An excess operation refuses `helper_slot_occupied` in a
+  later run and after restart; `job_binding_conflict` is tagged only without a
+  ledger frame. Admitted
   missing-ledger work still takes conservative recovery. Empty intermediate pages
   cannot hide later terminal facts. Derived-cache loss/write failures and both
   helper-enabled and helper-disabled startup paths have bounded witnesses.
@@ -707,7 +843,7 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
 - Registered or evicted local cancellation leaves unrelated helper admission
   open; helper cancellation remains operation-scoped. Fill active registry count
   and byte limits independently, prove refusal before forwarding, then settle and
-  reuse capacity. Historical receipts use the durable index without active rows.
+  reuse capacity. Historical receipts use the derived index without active rows.
   Fill tombstone limits separately; only full restart resets that monotonic fence,
   preserving stop-only recovery and unresolved ledger truth.
 - Core query conformance for both Stores: no write, owner acquisition,

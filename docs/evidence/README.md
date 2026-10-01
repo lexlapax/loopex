@@ -46,6 +46,8 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M7 round 4 disposition](M7-round-4-disposition.md) | All 55 findings reconciled, selected post-dispatch evidence-loss rule, repairs and renewed internal adversarial review. |
 | [M7 external review, round 5](M7-external-review-5.md) | Received assessment of a2ce04c2; SHA-256 4a6567f11620eb3a09e8a0a7ccead61cade8e7a120c375bf3401eaa715bff74e. |
 | [M7 round 5 disposition](M7-round-5-disposition.md) | All 50 findings, recorded outage/ordinary-thinking choices, text repairs and renewed internal adversarial review. |
+| [M7 external review, round 6](M7-external-review-6.md) | Received assessment of 07b1a19c; SHA-256 0bb596b8cbf651b23ae697b297c38f6930af687b8115460cb1504104a10babfd. |
+| [M7 round 6 disposition](M7-round-6-disposition.md) | All 37 findings, three recorded maintainer choices, text repairs and renewed internal adversarial review. |
 
 ## Related
 

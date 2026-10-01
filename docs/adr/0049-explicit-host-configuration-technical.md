@@ -22,7 +22,7 @@ host trust decision and is never inferred from a project file's name.
 | --- | --- |
 | `schema_version` | Required integer `1` |
 | `paths` | Optional `workspace`, `state_root`; absolute after resolution |
-| `providers` | Required map of 1–16 supported provider names to a credential binding under ADR 0048; durable chat requires `{"credential":{"env":"NAME"}}`, while existing credential-free ephemeral composition remains valid |
+| `providers` | Required map of 1–16 supported provider names to a credential binding under ADR 0048; durable chat requires `{"credential":{"env":"NAME"}}`, while existing credential-free ephemeral composition remains valid; `config validate` accepts both ADR 0048 binding forms and names the commands a credential-free binding cannot run |
 | `policy` | Required existing reference-host policy profile name, validated against its closed registry; no permissive default |
 | `session` | Required `model` as exact `provider:model`, required `bounds`; optional `reasoning`, `max_tokens`, `context_token_budget`, `system_class_tokens`, `instructions`, `tools`, `skill_dirs`, `cleanup_grace_ms` |
 | `session.bounds` | Required positive integers `max_turns`, `deadline_ms`, `token_budget`, even when flags override |
@@ -125,7 +125,7 @@ interrupt/cancellation bounds and effective inspection with `committed` origin.
 An omitted or matching `--cleanup-grace-ms` preserves it. A conflicting explicit
 flag follows the existing prepared-owner abandonment and refusal path without
 activating recovered work; failed abandonment retains the existing unconfirmed
-conflict result. Every refusal detected after preparation, including conflicting
+conflict result. This amends ADR 0016's prepared-recovery admission: every refusal detected after preparation, including conflicting
 flags, workspace/pending-policy mismatch, missing binding and missing route, uses
 the same abandonment path and unconfirmed-failure rule; "before activation" never means leaking a prepared owner.
 Neither `/configure` nor a new run changes this value.
@@ -195,7 +195,7 @@ encodings for IDs. Each object has `v:1`, an `event` and exactly its branch:
 | `wait` | `input_sequence`, `state` from settled/question/uncertain, `session_id`, `run_id` or null, `interaction_id` or null, `command_id` or null, `outcome` or null; question requires interaction ID; uncertain uses the public uncertainty outcome, `commit_unknown` with its unresolved command ID, or host-only `cleanup_unknown` with a known run ID or null and command_id null |
 | `status` | `input_sequence`, `session_id`, `run_id` or null, `state`, `configuration_version`, `model`, `reasoning`, `bounds`, `interaction_id` or null, `trace`, `maintenance`, `policy`; no credential reference, role prompt or private continuation |
 | `closing` | `exit_code`, `cleanup` from confirmed/unknown, `last_outcome` or null |
-| `error` | `input_sequence` or null, `code` as a stable host error code |
+| `error` | `input_sequence` or null, `code` as a stable host error code or the original stable command-disposition code |
 
 Question content uses ADR 0045; policy-defer questions retain ADR 0024's bounds.
 Each choice is exactly `{id, label}` using its producer's public choice grammar.
@@ -203,13 +203,19 @@ Each choice is exactly `{id, label}` using its producer's public choice grammar.
 including the existing bound/uncertainty fields. Only an uncertain wait may
 instead use the literal host observation code `commit_unknown` or
 `cleanup_unknown` with the branch fields above. No outcome is free-form
-diagnostic text.
+diagnostic text. `run_id`, `outcome` and `last_outcome` name runs only. A
+configure, compact or answer command has no run of its own: a later `wait`
+reports the session's foreground run and its outcome exactly as it would without
+that command, or both null when no run exists. A standalone compaction's closed
+result appears in the text transcript, in `status.maintenance.last_compact` and
+in the exit code, never as a run outcome.
 Status state and bounds use the public session contract. Status trace is
 exactly `{enabled, emitted, dropped}` with a Boolean and nonnegative counters;
 disabled uses false and zero counts. `/status` and `/wait` receive their own
 ordered `input` acknowledgement before their result record. Status `maintenance`
-is exactly `{configured_model, active_model, warning}`: model members are exact strings or
-null; warning is null or `maintenance_unconfigured`. Warn only when committed
+is exactly `{configured_model, active_model, warning, last_compact}`: model members are exact strings or
+null; warning is null or `maintenance_unconfigured`; `last_compact` is null or
+ADR 0043's completed `{episode_id, command_id, result}` snapshot payload. Warn only when committed
 conversation mapping requires continuation and configured_model is null. Startup
 warnings on resume use that committed mapping, not file defaults. Null configured model means new episodes are unconfigured; null active
 model means there is no admitted episode. A resumed episode may show a different
@@ -269,6 +275,14 @@ another command. Conclusive commit applies the original proposal and publishes
 its original facts once; conclusive not_committed clears that pending proposal.
 Another unknown/fenced result leaves it fenced. Owner loss or deadline leaves
 uncertainty; it does not prove non-admission. No competing mutation is permitted.
+While that admission proposal is pending, the owner defers every other internal
+proposal in arrival order: results returned by model and executor workers, and
+the journal proposals of its run and cleanup timers. It applies them after
+resolution. The resolution tick and the resolver deadline are not deferred.
+Command admissions are never queued: they keep the existing fenced
+`commit_unknown` reply. At the deadline an unresolved proposal stays fenced and
+the deferred work meets the existing fence behavior unchanged. Deferral renews
+no run deadline, dispatches nothing and cancels no live worker early.
 The observation API reads this owner state and committed command facts without
 mutating, activating or dispatching. Its closed result is
 `{:ok, {state, disposition, code, run_id}}` or `{:error, :owner_unavailable}`.
@@ -277,15 +291,18 @@ admitted/refused disposition, stable code and its committed run ID or null.
 Not_committed has disposition null, code admission_not_committed and run_id null,
 only after the exact Store transaction returns a conclusive non-commit. Pending
 has disposition null, code commit_unknown and run_id null. Absence from a command
-index or timeout cannot produce not_committed. Owner recreation without the
-original unresolved preimage cannot fabricate this state or clear the fence.
+index or timeout cannot produce not_committed. A live owner that holds neither
+the unresolved preimage nor a committed fact for that command ID, including a
+recreated owner or an ID it never received, answers pending with code
+commit_unknown; it cannot fabricate not_committed or clear the host's own
+observation fence.
 The API is local host observation; no new remote command or effect authority. If it
 resolves to admitted active work, request normal abort and perform cleanup within
 the remaining shutdown bound before emitting a wait barrier. If it resolves to
 a committed refusal or conclusive non-admission, report the stable refusal/error
 code without a second input acknowledgement; abort/clean any earlier foreground
-work before the barrier. Use settled with run/outcome null only if no admitted
-foreground operation exists; otherwise only committed terminal/question facts
+work before the barrier. Use settled with run/outcome null only if no
+foreground run exists; otherwise only committed terminal/question facts
 justify those states. If cleanup is
 unconfirmed before any such fact exists, emit uncertain with host-only
 `outcome: cleanup_unknown`, the known run ID or null, and command_id null.
@@ -296,20 +313,25 @@ The one captured shutdown deadline is not renewed by resolution or nested cleanu
 Exit nonzero on every branch because admission was unknown. These host uncertainty
 codes describe observation, not a fabricated public run outcome. Other barriers
 set command ID to null. This host command status does not invent a public run outcome. An interactive
-host also fences further mutations until ordinary resolution. No blind command
+host also fences further mutations until the resolver reports a conclusive
+state; after the resolver deadline it reports the uncertainty and accepts only
+quit, end of input or interrupt, which exit through the still-unknown row
+without submitting an abort. No blind command
 retry, synthetic settled barrier or success exit follows unknown admission.
 
 For all branches, retain the initial `input(unknown)` once. The automatic final
 barrier uses that input_sequence; it creates no second command acknowledgement.
 Resolve admission before admitting shutdown mutations, even when an earlier run
 is active. The final records are pinned below; ordinary terminal outcomes are
-objects, never host strings. Trace/runtime teardown must also be joined.
+objects, never host strings. Trace/runtime teardown must also be joined. When
+no run exists, or the resolved command admitted no run of its own, every row
+uses the session's foreground run and outcome under the run-only rule above.
 
 | Resolution by the captured deadline | Final records after the initial input | wait fields and closing cleanup |
 | --- | --- | --- |
 | Admitted work remains active | Abort once, then wait, closing | If committed terminal and cleanup confirmed: settled, its committed run_id/outcome, interaction_id and command_id null; cleanup confirmed. Otherwise use the cleanup-unknown branch below |
 | Admitted work already terminal | wait, closing | settled only with that committed outcome and confirmed cleanup; run_id is its committed ID, interaction_id/command_id null; otherwise cleanup unknown |
-| Committed refusal | error with the original stable refusal code, then wait, closing | Clean any earlier foreground work first; settled with its terminal ID/outcome, or both null only when no operation was admitted; confirmed only after complete teardown |
+| Committed refusal | error with the original stable refusal code, then wait, closing | Clean any earlier foreground work first; settled with its terminal ID/outcome, or both null only when no run exists; confirmed only after complete teardown |
 | Conclusive not_committed | error with admission_not_committed, then wait, closing | Same earlier-work cleanup and fields as committed refusal |
 | Admission or subsequent cleanup admission still unknown | wait, closing | uncertain, outcome commit_unknown, exact unresolved command_id; run_id is a separately known committed foreground ID or null, interaction_id null; cleanup unknown |
 | Admission known, but no terminal/cleanup proof | wait, closing | uncertain, outcome cleanup_unknown, known foreground run_id or null, interaction_id/command_id null; cleanup unknown |
@@ -393,7 +415,10 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
   provider mismatch, absent role models and disabled-role refusal.
 - Unknown admission resolving to active work then bounded abort, conclusive
   refusal/non-admission with and without earlier work, unresolved-at-deadline,
-  and cleanup lacking a terminal fact have exact control-record vectors. No
+  and cleanup lacking a terminal fact have exact control-record vectors, as do
+  an unknown steer whose worker result arrives before resolution, a command
+  refused during the pending window, and wait/closing after compact and
+  configure with and without a foreground run. No
   active run can become a synthetic settled barrier or stale commit_unknown.
 - Public-facade conversation tests for each command state, TTY and pipe ordering,
   barriers, dynamically identified answers/declines, EOF, input/output bounds,

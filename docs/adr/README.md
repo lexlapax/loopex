@@ -253,3 +253,9 @@ The [round 5 report](../evidence/M7-external-review-5.md) supersedes round 4's
 readiness conclusion. Its [disposition](../evidence/M7-round-5-disposition.md)
 records all 50 findings and the selected outage/ordinary-thinking rules; these
 repairs preserve Proposed status and require external re-audit.
+
+The [round 6 report](../evidence/M7-external-review-6.md) supersedes round 5's
+readiness conclusion. Its [disposition](../evidence/M7-round-6-disposition.md)
+records all 37 findings and three maintainer choices. At acceptance, the plan's
+[prerequisite table](../plans/M7-technical.md#technical-plan-prerequisites) rows are the set
+of accepted ADRs to annotate, whatever header label names each change.

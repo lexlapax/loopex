@@ -56,7 +56,7 @@ starting from the founding vision and moving to the implemented subsystems.
 | Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 | Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
 | Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
-| M7 coding-agent planning | [Open M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | ADRs 0041–0049 and the narrow vision amendment remain proposed. Read the [external review](../evidence/M7-external-review-1.md), [scope decisions](#disposition-m7-audit-scope-2026-09-30) and [thinking-continuation choice](#disposition-m7-thinking-continuation-2026-09-30), [authorized section 13.4 amendment](#disposition-m7-continuation-vision-amendment-2026-09-30) and [round 5 decisions](#disposition-m7-round5-outage-2026-09-30) before dependent work. |
+| M7 coding-agent planning | [Open M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | ADRs 0041–0049 and the narrow vision amendment remain proposed. Read the [external review](../evidence/M7-external-review-1.md), [scope decisions](#disposition-m7-audit-scope-2026-09-30) and [thinking-continuation choice](#disposition-m7-thinking-continuation-2026-09-30), [authorized section 13.4 amendment](#disposition-m7-continuation-vision-amendment-2026-09-30), [round 5 decisions](#disposition-m7-round5-outage-2026-09-30) and [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) before dependent work. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Architecture as implemented | [Architecture](architecture.md#concept) | [Architecture invariants and mechanics](architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
@@ -365,8 +365,7 @@ end of the file.
 | Post-M4 closure procedure, 2026-09-20 and 2026-09-21 | Six unanchored entries after the M4 closure: "Closure names two commits", "Closure and release evidence sequencing", "Administrative confinement is content confinement", "Closure candidate ownership and archive producer", "Administrative reconstruction and four release proofs" and "Archive extraction ignores the caller umask". The [milestone guide](milestones.md#concept) states the resulting procedure |
 | M5, from 2026-09-21 | [Plan pair and ADR 0031–0034 acceptance](#disposition-m5-acceptance-2026-09-21); [host application role](#disposition-m5-host-role-2026-09-22); [per-session progress routing](#disposition-m5-progress-routing-2026-09-22); [escript archive exclusion](#disposition-m5-escript-exclusion-2026-09-22); [no resident window](#disposition-m5-no-resident-window-2026-09-22); [residual proofs](#disposition-m5-residual-proofs-2026-09-22); [trace sessions load named modules](#disposition-m5-trace-loads-named-modules-2026-09-23); [closure-review decisions](#disposition-m5-closure-review-2026-09-23); [release-check attendance](#disposition-m5-driver-attendance-2026-09-23); [session-index loss](#disposition-m5-session-index-lost-2026-09-23); [non-blocking daemon components](#disposition-m5-nonblocking-components-2026-09-24); [executor cancellation and the risk packet](#disposition-m5-cleaned-implies-durable-2026-09-24) |
 | M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27); [implementation start](#disposition-m6-implementation-start-2026-09-27) |
-
-| M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30) and [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30); earlier choices remain recorded in the [Open plan](../plans/M7.md#concept) |
+| M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30), [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30) and [proposed rollback retarget](#disposition-m7-round5-rollback-proposal-2026-09-30); [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) and [proposed logical-matrix rule](#disposition-m7-round6-matrix-proposal-2026-09-30); earlier choices remain recorded in the [Open plan](../plans/M7.md#concept) |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -6330,6 +6329,12 @@ scope question. Extend the proposed vision pair to section 13.4 and its section
 27 disposition: core validates bounded envelopes/local references and adapters
 interpret provider blocks; private plaintext continuation stays with raw history.
 This authorizes drafting the labelled amendment, not acceptance of its bytes.
+The maintainer-issued round 6 review brief (SHA-256
+`c084eff2f560f41d88fefd16e21a894947a13d0a0ea157df8b5e8638a0fe7f09`, retained
+outside the repository) restates that authorized scope: core also retains a closed host-resolved descriptor as
+gating data and accounts for local-reference expansion, while adapters interpret
+native provider data and modes. The drafted section 13.4 text relies on that
+restatement for its descriptor clause.
 The previous governing clauses remain visible beside the proposals. M7 and its
 nine prerequisite ADR pairs still require exact-byte acceptance before dependent
 implementation. The selected scope does not add encryption, a key service or
@@ -6384,3 +6389,40 @@ This is part of the still-Open plan packet, not an accepted procedure override.
 Implementation updates the verification guide and preserves every historical
 assertion. The existing rollback and new m7-rollback lanes share the historical
 execution instead of duplicating it.
+
+<a id="disposition-m7-round6-decisions-2026-09-30"></a>
+### M7 round 6 maintainer choices, 2026-09-30
+
+The maintainer answered three round 6 questions. First, the post-terminal
+thinking witness proves that the provider accepts the canonical request after a
+cut tool run, with exact mapping, correct facts and no old native state; one
+further prompt in the same counted subcase proves native thinking resumes. The
+request after the cut need not itself show thinking. Second, the reviewed
+outage verdict covers provider-side failures only: transport failure to the
+provider, provider server errors and provider-side timeout. Rate limits, quota
+exhaustion and loss of the runner host's own network are operator prerequisites
+under the evidence-loss rule. Third, durable host startup classifies retained
+helper history under a fixed 60,000-ms bound per start with resumable progress
+and no configuration key. As a separate proposed, reversible repair choice not
+selected by the maintainer, the durable host admits no session work until that
+classification completes, and one unreadable session history keeps it closed
+until the root is restored; the ephemeral profile, which has no helpers, is
+unaffected.
+[ADR 0044](../adr/0044-run-model-and-reasoning-configuration-technical.md#technical-adr-0044-decision),
+the [plan verdict contract](../plans/M7-technical.md#technical-plan-evidence),
+[ADR 0046](../adr/0046-child-session-tool-technical.md#technical-adr-0046-decision)
+and the [round 6 disposition](../evidence/M7-round-6-disposition.md) carry them.
+These remain proposals pending exact-byte acceptance.
+
+<a id="disposition-m7-round6-matrix-proposal-2026-09-30"></a>
+### M7 proposed logical closure matrix, 2026-09-30
+
+Round 6 requires explicit disclosure of a second proposed check change. M7 plan
+acceptance would let a closure matrix that stopped before a case's first
+dispatch continue on the same SHA through a later release-check invocation,
+once per pre-dispatch stop, keyed by a mandatory hash-chained attempts index. No started case or completed
+lane runs again; any failure of a started case stops the matrix and bars resumption.
+The existing rule that the release check runs once for the closure candidate
+stays in force for every other purpose. This is part of the still-Open plan
+packet, not an accepted procedure override; implementation updates the
+verification guide.

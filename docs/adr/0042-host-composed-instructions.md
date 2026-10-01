@@ -9,7 +9,7 @@ Technical depth: [Host-composed instructions](0042-host-composed-instructions-te
 - **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) only the fixed source of system text; [ADR 0017](0017-durable-context-admission-budget.md#concept)'s fixed system-class token ceiling, now a host value with the existing 1,000 default, and its closed receipt revision for explicit instruction provenance
 - **Extends:** [ADR 0025](0025-resource-packs-and-skill-admission.md#concept)'s receipt revision with the same instruction provenance; preserves its resource admission, header, source-reference and budget contracts
 - **Amends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with `instructions` and `system_class_tokens` for ephemeral `start_session/1` and `run/2`; defaults, buffered transport and cleanup remain
-- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for settled updates
+- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for settled updates and [ADR 0043](0043-context-compaction-checkpoint.md#concept) for refusal revision 2
 - **Prerequisite for:** M7 outcomes 2 and 7
 
 <a id="concept-adr-0042-decision"></a>

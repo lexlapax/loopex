@@ -44,7 +44,7 @@ Accepted decisions that constrain the work:
 | [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; ADR 0044 versions the closed reply/settlement shapes for completion/private continuation and makes all nine v2 Model-port keys mandatory; two attempts per logical operation and no ambiguous redispatch remain |
 | [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 explicitly amends the v2-only writer rule with a monotonic v3-only cutover and cannot promote invalid continuation to reported usage |
 | [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) and [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) | ADR 0044 replaces the served generation set and metadata-only digest with the coordinated M7 contracts below; exact negotiation, framing, session authority and connection lifecycle remain |
-| [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
+| [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments and inserts owner refinement/committed-membership resolution between validation and policy, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
 | [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) | ADR 0041 extends attachment-owned transfers to job-owned range reads, sharing runtime capacity and reusing finite verification/work/deadline ceilings |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
 | [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | ADRs 0042–0044 use fresh receipt revision 4 for instruction/compaction provenance and continuation accounting; maintenance explicitly skips optional intake. Ordinary resource admission/costs and old v2/v3 validation remain |
@@ -447,7 +447,15 @@ required model actions and objective oracle before execution. The runner records
 a mechanical result first: `pass`, `required_action_absent`, `assertion_failed`,
 `evidence_incomplete_pre_dispatch`, `evidence_incomplete_post_dispatch` or
 `provider_environment_failure`, with
-failed assertion IDs and committed boundary facts. A named independent reviewer
+failed assertion IDs and committed boundary facts. It emits exactly one, the
+first that applies in this order: pre-dispatch incomplete evidence; post-dispatch
+incomplete evidence, meaning a required retained record (capture, attendance,
+command log, index append or cleanup confirmation) is missing or unreadable, not
+an assertion that could not be evaluated because an earlier call failed;
+`provider_environment_failure`, only when a required call's
+committed terminal or retained transport record carries a provider or transport
+failure class; `required_action_absent`; `assertion_failed`; `pass`. The label is
+mechanical and never binds the reviewer's verdict. A named independent reviewer
 then assigns the cause verdict below; the runner cannot decide whether a product
 defect caused a model miss. A complete pass can be provisionally mechanical, but
 closure still requires review:
@@ -458,7 +466,7 @@ closure still requires review:
 | `product_failure` | A product, fixture or harness path fails a required assertion, including a legal capacity/refusal that prevents a required positive case; record the causal evidence. This label does not assert a code defect |
 | `model_nonconformance` | Valid committed input and complete boundary evidence show the model omitted a prescribed action or violated the fixed task oracle, with no causal product/fixture/harness failure or missing evidence |
 | `evidence_unavailable` | Missing evidence, prerequisites, attendance or unconfirmed fixture cleanup prevents a verdict about the required behavior |
-| `environment_failure` | Complete retained boundary evidence establishes an external provider/network outage after dispatch, with no causal product/fixture/harness fault or model miss; an independent reviewer confirms the diagnosis and cleanup |
+| `environment_failure` | Complete retained boundary evidence establishes a provider-side outage after the case's `started` record, as bounded below, with no causal product/fixture/harness fault or model miss; an independent reviewer confirms the diagnosis and cleanup |
 
 Environment failure is not PASS and supplies no positive behavior proof. The
 maintainer selected A on 2026-09-30: retain the failed attempt and its reviewed
@@ -468,6 +476,27 @@ The new candidate records this diagnosis/authorization; a fresh SHA alone is not
 a route. No same-SHA retry, model-miss exemption or missing-evidence substitution
 is allowed. Invalid credentials/routes, local harness faults and unconfirmed
 cleanup cannot be relabelled external outages.
+
+The maintainer bounded this class on 2026-09-30 to provider-side failures after
+the case's `started` index record: transport failure to the provider, provider
+5xx/529 responses and provider-side timeout. An HTTP 429, quota or credit
+exhaustion on the operator's account and loss of the runner host's own network
+are operator-owned prerequisites, not outages. After `started` they are
+`evidence_unavailable` under the post-dispatch rule below, whose reviewed
+correction may be a committed preflight or procedure fix for that prerequisite.
+A first call that never connects after `started` consumed the attempt; the
+reviewer classifies it by its retained cause under these two lists. When
+retained evidence establishes neither a provider-side cause nor a product,
+fixture or harness cause, the verdict is `evidence_unavailable`; a connect
+failure, rate limit or exhaustion traced to a product, fixture or harness fault
+is `product_failure`.
+
+"Only that affected case" names which prior-failure fence this verdict lifts. A
+new candidate always runs its own complete closure matrix, and no result of an
+earlier candidate is reused. For a pre-merge `--only` lane, where no scaffold
+exists yet, the carrier is a reviewed case event in state
+`authorized_next_candidate` appended to the attempts index; the lane then runs
+again only on a later commit, and the candidate scaffold reconciles that row.
 
 The reviewer distinguishes a missing model action from invalid inputs, product
 refusals and recording/attendance loss. A refusal that follows its contract can
@@ -481,15 +510,17 @@ reference/digest, diagnosis and any disposition. A new candidate incorporates
 known rows before commitment; the closure child fills only predeclared values.
 A failed unchanged case cannot run again merely because another fix produced a
 new SHA. `product_failure` needs a substantive causal correction to the affected product,
-fixture or harness and review, while preserving required assertions. A legal
-refusal with no such correction routes to a named scope amendment, not an
-accepted limitation. Pre-dispatch missing prerequisites may be repaired on the
+fixture or harness and review, while preserving required assertions. A
+`product_failure` with no assertion-preserving correction, including a legal
+refusal and a provider rejection of a registered thinking cell, routes to a named
+scope amendment under menu item 3, not an accepted limitation. Pre-dispatch missing prerequisites may be repaired on the
 same SHA only after retained proof that no model call started anywhere in that
 case; its index state is not_dispatched and no attempt was consumed. Resume the
 same logical matrix through the index below; never revisit completed cases. Post-dispatch evidence loss is evidence_unavailable, never a model
 miss. The maintainer selected A on 2026-09-30: retain the incomplete attempt,
-require an independently reviewed causal fix to the recording/attendance path,
-and run the affected checks on a new candidate. Source/configuration changes
+require an independently reviewed causal fix to the recording, attendance or
+operator-prerequisite path, and run the affected checks on a new candidate,
+inside that candidate's own complete matrix. Source/configuration changes
 must address that cause while preserving the case's assertions. A committed
 runner or attendance-procedure repair qualifies only when independent review
 shows it would have prevented the loss; an unrelated runbook edit does not.
@@ -545,23 +576,44 @@ not_dispatched cases. It never resumes a consumed incomplete case or recreates
 an attempt. The resumed invocation has a fresh retained command log joined to
 the same matrix ID; no completed fast/release lane runs again. This is one
 logical closure matrix, not a second full check or a new attendance exemption.
-It runs a contiguous attended block through executable wrappers attached to the
+Plan acceptance changes what "the release check runs once" means for M7 in this
+one respect, as the Concept and context map record: a pre-dispatch stop may be
+continued by a later invocation on the same SHA, once per pre-dispatch stop. A
+fresh full invocation refuses when the index already holds, for that candidate,
+a case at or beyond `started` with a non-null logical matrix ID.
+Any non-pass mechanical result of a case or subcase whose index state reached
+`started`, that is every result except `evidence_incomplete_pre_dispatch`, in a
+credential-free lane or a paid case, stops the logical matrix or the pre-merge
+`--only` invocation before the next case or subcase dispatch. Later cases are
+not_dispatched. Later subcases of the stopped case get no state of their own:
+they belong to that consumed attempt and are recorded as not run in its case
+event. A matrix stopped under this rule is not resumable, because its candidate
+can no longer close; no later case runs as an unapproved paid look-ahead. A
+pre-merge `--only` lane that stopped pre-dispatch may be invoked again on the
+same commit; it reuses that commit's completed null-matrix rows and dispatches
+only its not_dispatched cases.
+The full runner runs a contiguous attended block through executable wrappers attached to the
 operator's `/dev/tty`, with the existing PTY capture preserving human input and
 exact IDs. Do not run those wrappers as hidden System.cmd children expecting
 unattended stdin. Each manifest case pins finite run, standalone-maintenance,
 question/attendance and cleanup ceilings; the block ceiling is their sum plus
 its pinned setup allowance, and the runner reports elapsed steps live. These
 explicit case budgets never silently inflate a failed check's timeout; automatic
-PTY answers never establish M7 attendance. A ceiling breach is assertion_failed
-and product_failure unless missing evidence prevents classification; stop the
-matrix and mark every later zero-dispatch case not_dispatched. Print the summed
+PTY answers never establish M7 attendance. A ceiling breach adds the case's
+ceiling assertion ID to the failed assertions. Its mechanical result is still
+the first that applies in the order above, and `assertion_failed` only when
+nothing earlier applies; the reviewer assigns the cause verdict under the table
+above, so a provider-side stall or a late operator is not presumed a product
+failure. It stops the matrix under the rule above. Print the summed
 finite block ceiling before starting. Phase 0 pins per-case numbers within
 60,000-ms standalone maintenance, 120,000-ms question/tool holds, 600,000-ms
 individual run and committed cleanup bounds; case totals sum their fixed run/
 subcase counts plus a 60,000-ms setup allowance. None may be adjusted during a run.
-Before any paid M7 dispatch, complete fresh-source/build, both rollback pairs,
-node_client, long_bound and the required legacy unattended lanes in fixed order.
-Retain failures before entering the attended block; resume never repeats them. V10 collection/external execution,
+Before any paid M7 dispatch, complete in this fixed order: fresh-source/build,
+the two legacy attended rows as the first legacy real-provider rows, the
+remaining legacy unattended rows, node_client, long_bound and both rollback
+pairs. A failure in
+any of them is retained and stops the matrix before the M7 attended block. V10 collection/external execution,
 V11 tracing, V12 configuration and V13 artifact/restore steps are actions inside
 that same full invocation, with their slots and cleanup joined before success.
 
@@ -576,9 +628,9 @@ that same full invocation, with their slots and cleanup joined before success.
 | `m7.ephemeral-question` | `m7-operator`, V5.6 positive | Real displayed question, human callback answer, chosen feature oracle and ephemeral cleanup |
 | `m7.oversized-source` | `m7-operator`, V6.5 positive | Progressing checkpoint, inherited omission flag and host-readable complete sentinel/original |
 | `m7.cross-provider-maintenance` | `m7-provider`, V6.7 | Captured distinct provider routes, thinking-off summary, continued facts and usage counted once |
-| `m7.provider-switch` | `m7-operator`, V7.1–2 and V7.4 | One session's A→B→A canonical facts/tool results and captured configuration identities |
-| `m7.thinking-rounds` | `m7-operator`, V7.3 | At least two continuation requests after committed tool-result rounds, expanded outgoing-block equality, final fixture facts and settled reopen |
-| `m7.thinking-bound` / `m7.thinking-cancel` | `m7-provider`, V7.7 subcases | Prescribed bound/cancel after committed tool results; later prompt on same model preserves canonical grouping/facts without old native state; provider acceptance and truthful cleanup |
+| `m7.provider-switch` | `m7-operator`, V7.1–2 and V7.4 | One session's A→B→A canonical facts/tool results and captured configuration identities; its A leg is Haiku at `none` with a tool round, witness key `m7.provider-switch.haiku.none` |
+| `m7.thinking-rounds` | `m7-operator`, V7.3, seven fixed subcases: Haiku low/medium/high and Fable default/low/medium/high | Per subcase, at least two continuation requests after committed tool-result rounds, expanded outgoing-block equality, final fixture facts and settled reopen |
+| `m7.thinking-bound` / `m7.thinking-cancel` | `m7-provider`, V7.7; nine bound subcases, one per ADR 0044 cell, and one cancel case | Prescribed bound/cancel after committed tool results; the next prompt on the same model is accepted with canonical grouping/facts, its exact mapping and no old native state; one further prompt proves native thinking resumes on continuation-required cells; truthful cleanup |
 | `m7.policy-denial` | `m7-operator`, V9.1 | Required denied call commits its policy result; no effect intent/receipt or workspace change occurs |
 | `m7.daemon-detach` | `m7-provider`, V9.4 | Client detach/reattach while the prescribed run is active preserves run identity and does not cancel it; final oracle and cleanup pass |
 | `m7.restore` | `m7-operator`, V13.1 and V13.4–6 | Attended backup/access prevention/restore/manifest inspection joins m7.rollback's exact retained execution; no new provider call or rollback rerun |
@@ -591,8 +643,13 @@ for V3 with exact receipt identities and distinctive fixture behavior;
 `m7.steer-barrier` for V4 with committed steer/follow-up order and generated facts;
 `m7.interrupt` for V9.2 with terminal cancellation and cleanup; and
 `m7.trace.flag`, `.file` and `.json` for V11 with task assertions and separated
-redacted trace output. Their lane is `m7-operator` wherever the mandatory table
-requires attendance, otherwise `m7-provider`. The baseline cases own V1.3.ask and V1.3.durable separately. V11.5 trace cleanup
+redacted trace output. The baseline, admitted-instruction, steer-barrier,
+interrupt and all three trace cases are `m7-operator`, because the mandatory
+table attends at least one of their steps; `m7.instructions.declined` and
+`.changed` are `m7-provider`. The baseline cases own V1.3.ask and V1.3.durable separately;
+`m7.baseline.durable` pins the dated Haiku model at `default` and includes one
+tool round, and `m7.long`'s Haiku summary subcase has key
+`m7.maintenance.haiku.none`, as ADR 0044's witness table requires. V11.5 trace cleanup
 uses terminal/cleanup facts from each existing trace case; it creates no new
 provider run. Each variant has its own pinned initial root, ordered inputs and oracle; inspection steps reference those
 executions without calling a model again. V12.1–2 reuse `m7.trace.file`'s file-only
@@ -619,17 +676,22 @@ cases, and every paid M7 pre-merge --only execution must use
 `--attempts-index FILE`, an absolute retained path outside repository/workspaces.
 Phase 0 pins one campaign ID and index genesis digest in the committed manifest;
 all machines use that campaign's complete index. A fresh unrelated index cannot
-hide an earlier attempt. One designated campaign writer holds an exclusive local
+hide an earlier attempt within this trusted procedure: genesis is reproducible
+from committed data, so the anchors are the committed heads below, not the
+genesis pin. One designated campaign writer holds an exclusive local
 file lock. Local locks do not establish exclusion between machines. The trusted
 runner procedure therefore records a writer identity and ownership epoch in
 closed ownership events, separate from genesis and case events. Initial
 designation follows genesis before any case record. Before dispatch,
 the local runner checks that it is the latest designated writer and has no
-retained relinquishment marker.
+unsuperseded relinquishment marker.
 
 A handoff first quiesces the old runner with no unresolved append or active case,
 appends and fsyncs relinquishment naming the destination and preceding head/count,
-and retains a local revocation marker checked by every later invocation there.
+and retains a local relinquishment marker checked by every later invocation there.
+A marker refuses dispatch and case appends, never the acceptance step of a
+verified incoming handoff whose relinquishment names this host; that host's
+appended acceptance then supersedes it, so a correct handoff back is possible.
 Only then release the old lock and transfer the complete index and referenced
 evidence. The transferred head includes that relinquishment event. The destination
 verifies this head, quiescence evidence and source revocation before appending its acceptance of the next epoch and
@@ -639,17 +701,35 @@ or campaign. No stale copy is a valid evidence source. This is a retained
 single-writer procedure over trusted hosts, not distributed fencing by a local
 file lock. Phase 0 pins its control-event shapes, safe recovery procedure and
 two-host handoff/split-writer refusal tests. No new service is required.
+After a paid pre-merge lane ends on a commit, whether it passed or stopped, the
+next commit of that work is documentation-only and appends one line
+`index-head: <sequence> <sha256>` to the Concept file's Progress and Evidence
+section; that commit needs no paid lane, and a later paid lane refuses until the
+line exists. Preflight uses the `index-head:` line with the greatest sequence in
+the checked-out Concept file; two lines with the same sequence and different
+digests refuse.
 The scaffold records the known head/count before candidate commitment. Preflight
-requires a valid chain extending that exact head, including every subsequent
-attempt; missing history or a mismatch refuses dispatch.
+requires a valid chain extending the latest committed head, including every
+subsequent attempt; missing history or a mismatch refuses dispatch. Loss or
+unrecoverable corruption of the index therefore refuses dispatch. Only a
+recorded maintainer disposition can authorize a successor campaign; it binds the
+last committed head and count, carries every known prior row forward and records
+the lost interval as unavailable evidence. The successor's campaign ID and
+genesis are pinned by a new manifest commit, so it always starts on a new
+candidate. Its first event after designation is a closed succession event
+binding the predecessor campaign ID, the last committed head digest/count and
+the disposition reference. Phase 0 pins that event shape.
 
 The index is append-only compact sorted-key JSONL, one at-most-65,536-byte record
 per line. Its closed envelope is `{version: 1, campaign_id, sequence,
 previous_digest, body, digest}`. Sequence increases from 1; previous_digest is
 null only for genesis. Digest is SHA-256 of the exact compact JSON encoding of
-the other five members, without LF. Body is a closed versioned event union:
+the other five members, without LF. Body is a closed versioned event union of
+genesis, ownership (designation, relinquishment, acceptance), succession and
+case events:
 genesis binds only the campaign ID and codec version, avoiding a manifest/genesis
 digest cycle; case events bind the current manifest digest, candidate SHA,
+logical matrix ID or null for pre-merge lane work,
 case/subcase key, fixed specification digest, attempt ID or null, state,
 mechanical result/verdict or null, and bounded retained evidence/diagnosis/
 disposition references and digests or null. Phase 0 pins its full literal schema,
@@ -672,9 +752,12 @@ records, never overwritten. References join every command log to one logical
 matrix ID. Resume consumes only not_dispatched rows, retaining all completed
 results and prior attendance. It cannot replace a started unresolved attempt.
 Before candidate commitment, reconcile the complete index into predeclared prior
-rows. Every candidate scaffold has Pending index path, campaign/genesis digest,
-head digest/count and logical-matrix invocation-log references; its closure child
-fills those values from the extended chain without adding rows/headings.
+rows. Every candidate scaffold records the committed pre-candidate head
+digest/count and the pinned campaign/genesis digest as fixed values. It
+predeclares Pending slots for the index path, the final head digest/count and
+one cell holding the count and SHA-256 of the ordered logical-matrix
+invocation-log reference list; its closure child fills those values from the
+extended chain without adding rows/headings.
 
 A selected lane with an unresolved prior case failure refuses before any model
 call and reports evidence unavailable for the merge; it neither skips that case
@@ -872,7 +955,9 @@ second truth writer. Operator timing against a
 1. Complete a run and record its model and reasoning configuration.
 2. Select a supported model on provider B through its separate credential
    reference and submit a follow-up referring to work from provider A.
-3. Select a pinned supported Claude thinking mode and run the fixed multi-round
+3. For each of the seven continuation-required cells of ADR 0044's table, as
+   fixed attended subcases of `m7.thinking-rounds`, select that pinned Claude
+   thinking mode and run the fixed multi-round
    tool fixture. Record its admitted reply/thinking limits, private-state sizes
    and objective outgoing-block equality result without printing private blocks.
    Record the initial reserve, complete request sizes and expanded input charges;
@@ -886,7 +971,9 @@ second truth writer. Operator timing against a
    restart and exact replay. `m7.thinking-rounds` pins its measured input ceiling
    and fixtures before dispatch and requires at least two actual continuation
    requests following committed tool-result rounds; a single tool round fails
-   that oracle. Retain each request's sizes/charges and canonical identities.
+   that oracle. Each counted continuation request must replay at least one
+   retained thinking or redacted-thinking literal; an exchange with none is
+   `required_action_absent`. Retain each request's sizes/charges and canonical identities.
 4. Switch back to provider A and verify continuity with the fixture's facts
    and earlier tool results.
 5. Request an unsupported level or an in-run change and verify refusal
@@ -905,11 +992,15 @@ second truth writer. Operator timing against a
    real-provider cases. Each performs its prescribed terminal cut after committed
    tool results, then submits a new prompt on the same admitted thinking model.
    Require accepted canonical message grouping, correct fixture facts and no
-   resurrected native state. Assert from bounded native-capture classification
-   that the later reply used native thinking for each continuation-required cell.
-   For Haiku default and none, require the registered nil-continuation,
-   no-native-thinking behavior instead. Each cell must match its exact admitted
-   mapping. No private blocks enter the evidence.
+   resurrected native state. The maintainer selected this oracle on 2026-09-30:
+   that post-terminal request need not itself show native thinking, because the
+   provider may answer one request without it. Then submit one further prompt in
+   the same subcase, after that completed assistant turn, and assert from bounded
+   native-capture classification that its reply used native thinking for each
+   continuation-required cell. For Haiku default and none, require the registered
+   nil-continuation, no-native-thinking behavior on both requests instead. Each
+   cell must match its exact admitted mapping on both. Both prompts are fixed
+   steps of the one counted subcase. No private blocks enter the evidence.
    Controlled cuts are actions within each fixed case,
    not replacement attempts; missing required model actions still fail. The bound
    case pins a one-turn limit so the first complete tool group commits before
@@ -917,8 +1008,9 @@ second truth writer. Operator timing against a
    gate holds the exact second staged request before transport, after the observer
    has joined first-turn committed results; the driver admits parent abort there.
    The gate observes cancellation/cleanup, changes no request bytes and supplies
-   no fake reply. The first exchange and later same-model prompt call the real
-   provider. Retain the blocked attempt's truthful dispatch/accounting outcome.
+   no fake reply. The cancel case takes the same two later prompts and the same
+   oracle on its pinned cell. The first exchange and both later same-model
+   prompts call the real provider. Retain the blocked attempt's truthful dispatch/accounting outcome.
 
 #### V8. Delegate bounded investigation and review
 
@@ -970,7 +1062,8 @@ second truth writer. Operator timing against a
 4. Start m7.daemon-detach through the same trusted policy-injection composition
    join as the fixture chat wrapper, in its daemon host. Hold V4's pinned FIFO
    invocation while the driver records its connection closure and successful
-   reattach response. Join those host observations to the independent observer's
+   reattach response. The observer is a second, observer-role daemon connection
+   using the existing attach, snapshot and replay protocol. Join those host observations to the independent observer's
    committed cursor and same-run active snapshot before release. Detach and
    reattach are connection facts, not committed session events; the session
    observer proves that the original run stays active across the join. Verify absence
@@ -1029,10 +1122,12 @@ second truth writer. Operator timing against a
    cleanup flag. Assert the retained value and observation bounds. A conflict
    safely abandons the prepared owner before refusal; failed abandonment stays
    unconfirmed. Both conflict paths dispatch no recovered work. Include all post-prepare
-   conflicting flags, absent bindings on non-task roots (helpers disabled), and
+   conflicting flags, workspace mismatch, pending-interaction policy mismatch, a
+   missing route, absent bindings on non-task roots (helpers disabled), and
    missing bindings on task roots (activation refused).
 5. Refuse in-flight changes and immutable tool/catalog changes. Confirm legacy
-   one-shot defaults and unattended behavior remain unchanged.
+   one-shot defaults and unattended behavior remain unchanged; the default model
+   selection is the same model, now sent as its dated literal identity.
 
 #### V13. Upgrade and supported rollback
 
@@ -1131,8 +1226,9 @@ binds its case ID and manifest digest. The scaffold predeclares one Pending row
 per manifest step/subcase key, including V11.1.flag/file, V11.2.flag/file and
 V11.5.flag/file/json joined to their trace execution records. The integration owner implements `mix loopex.m7_evidence`, invoked by the
 existing fast check unconditionally before its --docs early exit, and by
-release preflight. Require the canonical M7 manifest/scaffold paths after M7
-implementation lands; absence or renaming fails rather than silently skipping. It requires those key
+release preflight, after its compilation step. The commit that adds the task
+adds the manifest and a Pending scaffold skeleton at their canonical paths; from
+that commit on, absence or renaming fails rather than silently skipping. It requires those key
 sets, exact case ownership, profile sets, oracle IDs and lane/classification
 mappings to agree before any provider demonstration. This is a task inside the
 existing check, not a third check command. Filling scaffold values uses
@@ -1241,6 +1337,10 @@ no later registration edit, candidate-only override or extra calibration is
 allowed. Failure keeps the fixed disposition and attempt accounting. The release manifest retains these mapping/renderer revisions
 with each selected case. This does not choose the
 separate hosted provider B or replace its required pre-attempt identity pin.
+Provider B's summarizer must have a registered thinking-off row in the tested
+bytes; the pre-dispatch pin selects only among registered rows. B's switching
+and helper models may be unregistered and then run under ADR 0044's generic
+descriptor at `default`.
 
 <a id="technical-plan-acceptance-issues"></a>
 ### Internal review disposition and audit targets
@@ -1267,6 +1367,9 @@ and renewed internal review are tracked in the [round 4 disposition](../evidence
 The [round 5 assessment](../evidence/M7-external-review-5.md) of a2ce04c2
 supersedes round 4's readiness conclusion. Its 50 findings, both maintainer
 choices and renewed internal review are tracked in the [round 5 disposition](../evidence/M7-round-5-disposition.md).
+The [round 6 assessment](../evidence/M7-external-review-6.md) of 07b1a19c
+supersedes round 5's readiness conclusion. Its 37 findings, three maintainer
+choices and renewed internal review are tracked in the [round 6 disposition](../evidence/M7-round-6-disposition.md).
 The repaired packet proceeds to external audit only after that review and
 clean-candidate documentation validation. This is review of planned contracts, not product evidence or
 formal independent acceptance review.
@@ -1366,7 +1469,7 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   projections and private/public projection,
   question producer/text/decline records,
   host role/allowance ledger including monotonic stop records and its disposable
-  version-1 derived job-index directory, read-only Store creation_provenance/3 callback and derived
+  version-1 derived job-index directory with its coverage entries, read-only Store creation_provenance/3 callback and derived
   stable runtime-create ordinals, generic absolute deadline ceiling on prompt/follow-up,
   request and normalized-command revisions, events, snapshots and negotiated
   protocol generation. Each has versioned vectors and an explicit unsupported-reader

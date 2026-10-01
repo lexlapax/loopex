@@ -7,6 +7,7 @@ Technical depth: [Explicit conversational run limits](0047-reference-host-run-de
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing
+- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for committed session configuration
 - **Prerequisite for:** M7 outcomes 6 and 8
 
 <a id="concept-adr-0047-decision"></a>

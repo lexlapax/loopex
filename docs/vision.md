@@ -12,7 +12,8 @@ Date: **2026-08-14**
 **M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
 tool budget and interaction flow in sections 6, 10, 14, 23 and 26, their
 linked terminology/provenance notes in sections 5 and 12.3, bounded
-provider continuation in section 13.4, and linked decision-trigger dispositions
+provider continuation in section 13.4 with its linked risk note in section 25
+of the technical file, and linked decision-trigger dispositions
 in section 27 are authorized proposals. The maintainer extended drafting scope
 to section 13.4 on 2026-09-30. Review both files with M7. Until acceptance, the
 prior clauses retained beside each proposal remain governing; dependent

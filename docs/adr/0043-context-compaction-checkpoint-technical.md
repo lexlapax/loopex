@@ -37,10 +37,27 @@ model operation remains. An active episode consumes a model-call/turn unit for
 each summary dispatch and its provider usage under the active run's bounds.
 If maintenance precedes the first ordinary request, its first staged maintenance
 request commits the run's absolute deadline under ADR 0013. Later maintenance
-and ordinary requests reuse that instant. Before that commit, episode admission captures a fixed pre-staging preparation
+and ordinary requests reuse that instant. Every run-owned episode admission captures a fixed preparation
 deadline of admission_time + 60,000 ms. Source preparation uses that deadline, shortened by any already committed
 absolute cutoff; recovery cannot renew it. This narrowly extends ADR 0013's
-first-request rule to a run-owned maintenance request.
+first-request rule to a run-owned maintenance request. Every run-owned episode
+captures this preparation cutoff, whether or not the run deadline is already
+committed; a run cutoff at or before it wins with its existing bound outcome. A
+standalone episode captures none: its own absolute cutoff governs and its expiry
+is `bound_reached` with `deadline_ms`. Expiry of the fixed cutoff during the
+source preparation that precedes the episode's first staged maintenance request
+ends the episode and its triggering run with `context_preparation_failed`, cause
+`compaction_preparation_deadline`; no run deadline instant or bound measurement
+is fabricated. Preparation for later prefixes of the same episode is bounded
+only by the run's committed deadline. The owner reads the
+clock when it proposes the episode-admission record, for this cutoff and for a
+standalone episode's absolute cutoff; command admission reads none. If ADR
+0013's deadline addition itself fails at that first maintenance staging, the run
+ends with the existing four-key `deadline_staging_failed_v1` and
+`deadline_preflight_failed` terminal pair, unchanged in shape; its validator
+additionally admits the run's `maintenance` work stage, with `turn_id` still the
+next ordinary turn. The episode terminal, committed first in that transaction,
+records cause `maintenance_deadline_unrepresentable`.
 Standalone `compact` accepts explicit `{max_attempts, deadline_ms, token_budget}`
 within ceilings 4, 60,000 and 32,768 respectively. The reference `/compact` uses
 4/60,000/32,768, displayed before submission; programmatic callers declare them.
@@ -80,14 +97,29 @@ inputs fits both the 2,048-estimated-token preference and the applicable complet
 request limits/targets. Optional tail growth cannot prevent initial preparation.
 A group released by this rule cannot be re-added by optional tail growth in the
 same selection. For canonical_rendering capture the last offending eligible
-unit; optional tail growth stops before any offending unit. Selection and this exception use strategy revision 3.
+unit; optional tail growth stops before any offending unit. Selection, the
+small-prefix rule below and this exception use strategy revision 3.
 
 From the oldest remaining range, select the largest contiguous prefix ending
 at a complete-unit boundary that fits both the 16,384-byte encoded source
 envelope, including prior summary/carry-forward, and the fully rendered
 maintenance request's token/record/depth/cardinality limits with its reply
 reserve. Search smaller complete prefixes before refusing; the source cap alone
-does not prove the maintenance request fits. If no eligible
+does not prove the maintenance request fits. A small prefix in front of a unit
+that cannot join it must not strand that unit: when the selected complete prefix
+has a `loopex.compaction.messages_json.v1` serialization, the `byte_length`
+defined below, of at most 6,144 bytes, and the
+next eligible unit exists but cannot join it within those limits, select the
+prefix together with that next unit and use the marked serialized-excerpt form
+below over that whole list. Coverage consumes every selected unit. This is
+decided before dispatch from sizes alone, never from a failed summary. If no
+quota candidate for that list fits or is valid, refuse
+`compaction_excerpt_budget_too_small` before provider intent; do not fall back
+to the complete prefix alone. The rule needs a next eligible unit. A small
+prefix that is the whole eligible range, in front of a protected tail, is still
+summarized alone and can end `compaction_no_progress`; explicit compact, which
+releases the terminal tail, is the remedy. This limitation is recorded, not
+hidden. If no eligible
 raw range exists, make no provider call: explicit compact records idempotent
 `unchanged` only if the current candidate fits and passes canonical rendering; otherwise preserve the named
 staging refusal. If the irreducible protected candidate exceeds limits/targets, its numeric
@@ -96,13 +128,17 @@ Otherwise, when eligible history needs maintenance, an absent model precedes
 absent instructions; unsupported mapping precedes source sizing.
 When an eligible range exists, explicit compact may produce
 a useful bounded checkpoint even if the current model window already fits.
-This permits preparation for a smaller model window. Begin with ADR 0041's
+This permits preparation for a smaller model window. An ordinary `explicit`
+trigger stops after its first committed checkpoint and reports `checkpointed`;
+it never continues toward attempt exhaustion merely because more eligible
+history remains. A later compact command may cover more. Begin with ADR 0041's
 canonical projections: executor-backed results use artifact projections and
 model-question results retain their exact bounded answer or disposition.
 Compaction fetches no artifact and creates no implicit artifact reference.
 
 If no complete prefix fits, select exactly the oldest eligible unit using the
-marked serialized-excerpt form below. Coverage still consumes that whole unit;
+marked serialized-excerpt form below; the small-prefix rule above selects its
+short list in the same form. Coverage still consumes every selected whole unit;
 the checkpoint cut never splits a tool/result group. Try per-end raw-byte
 quotas 4,096, 2,048, 1,024 and 512, in that order. For each, take the
 shortest UTF-8-safe prefix and suffix of at least that quota, at most three
@@ -128,9 +164,12 @@ ADR 0044. At startup reject a known context window at or below 1,024 or a known
 output capacity below 1,024. Maintenance requires `reasoning: none`,
 `provider_mapping.thinking_disabled: true` and `continuation_required: false`.
 The host resolves these generic Booleans from the exact native mapping; core
-does not inspect the `thinking` variant. Maintenance admission also requires
-deterministic adapter evidence that a complete ordinary stop produces v3
-`completion: natural`; a v2/unknown-only adapter is unsupported before dispatch.
+does not inspect the `thinking` variant. Host registration of a summarizer
+mapping also requires deterministic adapter evidence that a complete ordinary
+stop produces v3 `completion: natural`; composition startup refuses a
+v2/unknown-only adapter, as an unsupported mapping. Core receives no
+such evidence in its closed map: for a direct embedder its guarantee is the
+post-dispatch `maintenance_summary_incomplete` failure below.
 The exact renderer proves its outgoing request disables thinking without raising
 the committed reply ceiling; `default` and `{mode: omitted}` cannot establish
 this. Other providers may encode the normalized disabled selection differently.
@@ -339,7 +378,13 @@ maintenance requires that version and `completion: natural`. A native
 `max_tokens` stop, its normalized `length` equivalent (`completion: limit`),
 or unknown completion, even with parseable JSON, fails as
 `maintenance_summary_incomplete`; malformed, extra-key or oversized output fails
-as `maintenance_summary_invalid`. Both consume the attempt and observed or
+as `maintenance_summary_invalid`. An adapter reply that core cannot read at all,
+including ADR 0044's eight-key case, keeps ADR 0018's unreadable-answer
+settlement and, for a run-owned episode, its run terminal
+(`unreadable_model_answer`); a standalone episode has no run terminal. The episode's closed
+failure union has no such member and records it as `model_call_failed`. A
+well-formed nine-key v2 reply is readable: it carries `completion: unknown` and
+fails `maintenance_summary_incomplete`. Both summary failures consume the attempt and observed or
 conservative usage under the existing accounting rules; neither permits a repair
 call or a fresh automatic episode.
 
@@ -359,7 +404,8 @@ Any failed progress test, including an over-limit rendering substitution, ends
 with `compaction_no_progress`. Retain the summary only as settlement evidence;
 do not commit a checkpoint or publish `context.compacted`. Recovery performs
 this same check on `checkpoint_pending` before it may finish a checkpoint.
-For size/headroom triggers, stop once the applicable limits/targets fit. If
+For size/headroom triggers, stop once the applicable limits/targets fit;
+ordinary `explicit` stops after its first committed checkpoint. If
 canonical rendering then remains unsupported, preserve
 `canonical_history_rendering_unsupported`; do not make another paid call to
 repair rendering automatically. If a parent bound, cancellation, deadline,
@@ -429,6 +475,7 @@ The new `failure` is one of these exact closed objects:
   The closed causes are `maintenance_model_unconfigured`,
   `maintenance_instructions_unconfigured`, `maintenance_reasoning_unsupported`,
   `compaction_excerpt_budget_too_small`, `compaction_no_progress`,
+  `compaction_preparation_deadline`, `maintenance_deadline_unrepresentable`,
   `maintenance_summary_incomplete`, `maintenance_summary_invalid`, and
   `canonical_history_rendering_unsupported`, `artifact_read_unavailable`,
   `artifact_metadata_unrepresentable`, `artifact_preparation_count_exhausted`,
@@ -440,7 +487,19 @@ The new `failure` is one of these exact closed objects:
 For an active ordinary run with an admitted episode, commit in this order in
 one transaction: episode terminal, v2 refusal, failed `run_terminal_committed`.
 The refusal immediately precedes the run terminal, with no intervening record.
-Without an episode, commit only the latter two. Permit refusal v2 at the
+Without an episode, commit only the latter two. A run-owned episode ended by
+cancellation, a parent bound, provider failure or deadline-staging failure
+commits its episode terminal as the first row of the transaction that contains
+the existing run terminal. Every existing consecutive pair, ADR 0018's
+settlement then terminal and ADR 0017's `deadline_staging_failed_v1` then
+terminal, stays adjacent and unchanged. This amends the "contains exactly"
+cardinality of those ADR 0017 and ADR 0018 transactions by one leading row, for
+a run-owned episode only. The episode terminal installs a transient
+episode-pending-terminal marker and applies no effect; its failure and usage are
+validated and applied together with the run terminal that completes the same
+transaction. Reaching the durable head, or any row outside that transaction,
+with the marker pending is invalid history.
+Permit refusal v2 at the
 `maintenance` stage, bound to that episode; its closed substates are
 `source_preparation`, `model_pending`, `checkpoint_pending` and `settling`. Preserve the no-second-settlement rule, substituting only the nested failure
 union in ADR 0017's exact terminal shape. Bind its configuration, staging identity,
@@ -448,7 +507,8 @@ measurements and optional episode to the owning records. Maintain cancellation,
 deadline, provider failure and commit-unknown precedence; those existing outcomes
 keep their own schemas and do not become preparation failures. A completed
 maintenance failure records its cause in the episode terminal and ends the
-triggering run with that same projection, without a second provider settlement.
+triggering run with that same projection, without a second provider settlement;
+the deadline-staging case above keeps the run's own terminal instead.
 Standalone compact measures current canonical history plus captured fixed
 configuration under current hard limits/rendering rules; it invents no prompt
 or run-staging identity. Run-owned and standalone episode terminals share the same closed five-member
@@ -467,13 +527,15 @@ successful, otherwise exactly one of:
   declared_limit, accounting_source}`. For a run-owned episode, parent-bound
   exhaustion uses `max_turns`, `deadline_ms` or `token_budget` and copies the
   owning run's exact bound measurements and accounting source under ADRs
-  0011/0013/0017/0018. It does not replace turn exhaustion with the episode's
+  0011/0013/0017/0018. The episode's `deadline_ms` bound value corresponds to the
+  run terminal's existing `deadline` bound literal and copies its observed and
+  declared values unchanged; the run terminal keeps its own literal. It does not replace turn exhaustion with the episode's
   attempt ceiling. A run-owned episode rejects `max_attempts` in this branch;
   its independent attempt exhaustion uses the context failure specified above.
   Standalone compact admits only `max_attempts`, `deadline_ms` and `token_budget`;
   `max_turns` refuses. Attempts and tokens use their captured positive ceilings;
-  deadline declared_limit is the captured absolute cutoff and observed the
-  clock observation, never the duration. Accounting_source is null, reported
+  a standalone deadline's declared_limit is the captured absolute cutoff and
+  observed the clock observation, never the duration. Accounting_source is null, reported
   or estimated, consistent with the episode's retained usage; max_attempts uses
   null. All observations are nonnegative integers. Public numbers use exact
   decimal strings.
@@ -493,13 +555,16 @@ amends ADR 0011's abort handling under the new generations. While standalone
 maintenance is active, duplicate command IDs are checked first. Fresh prompt,
 steer, follow-up, configure, compact and interaction-response commands commit
 idempotent refusal `maintenance_active`; they cannot queue or change the episode.
+A compact command received while a run is active commits ADR 0011's existing
+`run_active` refusal, unchanged.
 Abort returns its normal admitted acknowledgement bound to the episode, then
 completion reports cancellation/cleanup; it has no run ID. Read-only attachment,
 inspection and status remain available. Run-owned maintenance keeps ordinary
 run input ordering and its captured-range protection. No run/refusal
 record is invented. `unchanged` is successful
-only under the selection rule above. Exhausted attempts/usage/deadline retain the
-existing bound outcome and its measurements. An episode's before/after projection
+only under the selection rule above. Standalone exhausted attempts/usage/deadline
+retain the bound outcome above and its measurements; a run-owned episode follows
+its owner-specific branches. An episode's before/after projection
 measurements prove no-progress locally; they are not new public payload fields.
 
 Standalone completion publishes the new `context.compaction_finished` event
@@ -566,7 +631,12 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
 - Property histories cover complete cut boundaries, contiguous ranges, deterministic
   replay, no cycles and preservation of raw receipts/outcomes.
 - Byte/token edges and a small model window where a smaller complete prefix
-  fits but the byte-maximal prefix does not. Old 12 KiB prompts, 10 KiB write
+  fits but the byte-maximal prefix does not. A short greeting exchange ahead of
+  a unit too large to join it selects both in excerpt form and progresses in one
+  call, with and without a prior checkpoint; a small prefix whose next unit can
+  join stays complete; a pair with no fitting or valid quota refuses before
+  dispatch; a sole small prefix before a protected tail shows the recorded
+  no-progress limitation and its explicit-compact remedy. Old 12 KiB prompts, 10 KiB write
   arguments, large call metadata and settled input-only runs use marked excerpts
   with maximal prior checkpoint data. No silent truncation or cut inside a group.
 - Exact fragment offsets, digests, UTF-8 boundaries, escaping expansion, the four
@@ -584,7 +654,9 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   establish the fixture's pinned input ceiling before its provider attempt.
 - Explicit compact covers a sole terminal group that fits the old window but
   prevents a smaller-model configure; then a separately admitted configure uses
-  the new summary. No provider call occurs inside configure itself.
+  the new summary. No provider call occurs inside configure itself. Ordinary
+  explicit compact over history needing several prefixes makes exactly one call
+  and reports `checkpointed`; a second command continues.
 - Old question answers and explicit artifact-range results remain exact in
   ordinary projection and original history; only maintenance source may excerpt
   them. No artifact fetch or implicit artifact/reference creation occurs.
@@ -615,6 +687,13 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
 - Attempt/turn/token/deadline accounting, four-attempt ceiling and no restart reset.
   Pre-first-ordinary maintenance commits the run deadline at its first staged
   request; fault cuts before/after that commit preserve ADR 0013 semantics.
+  Owner loss or slow traversal past the fixed pre-staging cutoff ends episode
+  and run with `compaction_preparation_deadline` and no fabricated bound; an
+  unrepresentable first maintenance deadline keeps the run's existing terminal
+  and records `maintenance_deadline_unrepresentable` in the episode. Non-refusal
+  run-owned endings commit the episode terminal first and leave each existing
+  consecutive pair adjacent; a nine-key v2 summary reply fails as incomplete and
+  an unreadable one keeps the run's unreadable-answer terminal.
   A one-turn run whose progressing first summary still needs another prefix
   retains that partial checkpoint, then ends with the parent's exact max_turns
   measurements without another dispatch. Standalone rejects that branch;

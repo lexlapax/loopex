@@ -53,7 +53,10 @@ compaction: its complete earlier prefix must remain unchanged. If that exchange
 cannot fit, stop truthfully; a later run can compact canonical history.
 
 Keep the current input verbatim and prefer a recent complete tail for automatic
-size preparation. Explicit compact releases eligible terminal-run tail units;
+size preparation. A short unit in front of one too large to join it is
+summarized together with that unit from marked excerpts, so a small leading
+exchange cannot block progress. A lone short unit in front of the protected
+tail can still fail to shrink; explicit compact is the remedy. Explicit compact releases eligible terminal-run tail units;
 failed/cancelled input-only units follow the same oldest-first release rule. Each checkpoint
 covers whole eligible groups, including settled input-only runs. Prefer complete
 source. When the oldest eligible group is too large, give the summarizer marked
@@ -86,9 +89,17 @@ Active maintenance consumes the run's call/turn, token and deadline budgets.
 In a helper session, that usage is part of the child's total and therefore its
 delegation charge. Maintenance in the delegating parent spends only that parent's
 run budget, not the separate helper allowance.
+Run-owned source preparation before the first maintenance request also has its
+own fixed 60-second cutoff, independent of the run's declared deadline; its
+expiry ends the run with a named preparation failure, not a fabricated bound.
+If the run deadline cannot be represented at that first maintenance request,
+the run ends with its existing deadline-staging failure.
 Standalone maintenance has a closed completion result, including truthful
 cleanup and partial-checkpoint identity after failure. Abort cancels an active
-standalone episode without inventing a run. Standalone maintenance requires explicit limits and cannot exceed four attempts,
+standalone episode without inventing a run. While it is active, every other new
+command is refused as `maintenance_active`; nothing queues behind it. An
+ordinary explicit compact makes one checkpoint and stops; a later command may
+cover more. Standalone maintenance requires explicit limits and cannot exceed four attempts,
 60,000 ms or 32,768 tokens. Recovery retains attempts and usage; an uncertain
 provider result or checkpoint commit never authorizes another summarization.
 

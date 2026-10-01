@@ -124,6 +124,10 @@ capture ceilings; their old one-byte artifact budget cannot implement this
 path. The phase-0 projection integration owner pins those versions/digests and
 sets each artifact allowance at least to its retained capture ceiling, proving
 that exact maximum through spill and replay before session creation.
+In a session whose frozen read generation supports `artifact_use`, the
+`loopex.bash`, write and edit tools keep their existing generations: their inline
+results above the projection cap are legacy inline sources and use the bounded
+preparation path below, including its per-episode source count.
 Do not lower capture limits merely to avoid retaining the promised source.
 Preserve the original terminal outcome,
 receipt and diagnostics. Retention failure cannot claim a retrievable reference;
@@ -224,7 +228,8 @@ workspace `path` inputs or `artifact_use`, unsigned-64-bit byte `offset` and pos
 `length <= 4,096`; the alternatives are exclusive. `artifact_use` is the existing
 `use:<sha256>` identity. The owner resolves it only from committed receipt or
 prepared-reference facts of this session in the same artifact-store namespace.
-Resolve committed membership after argument-shape validation and before policy
+This amends ADR 0009's per-call order by inserting owner refinement between its
+schema validation and policy steps. Resolve committed membership after argument-shape validation and before policy
 or effect intent. Unknown, orphan, other-session and forged uses all produce
 `invalid_tool_arguments` with the same bounded failed disposition; no policy
 question or existence-specific code is emitted. Possession is no grant;

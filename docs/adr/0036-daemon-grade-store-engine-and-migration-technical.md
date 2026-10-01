@@ -95,7 +95,10 @@ those relative paths and bytes. Interrupted migration verifies them unchanged.
 The successor Store implements M7's read-only `creation_provenance/3` callback,
 including derived stable per-runtime create ordinals and complete watermark
 paging; adapter absence is unavailable, never proven absence. Its conformance
-fixtures include the new query alongside M7 record readers.
+fixtures include the new query alongside M7 record readers. M7's scan
+`prefix_token` is derived by core from returned records and need not match
+across engines, so migration costs one resumable helper-history rescan and the
+disposable job-index cache is rebuilt, never migrated.
 The engine candidate alone requires explicit container migration; the installed
 candidate does not require migration merely because a supported local root lacks
 a marker. Retain exact old binaries to test their real behavior. Never claim an

@@ -94,7 +94,21 @@ on a core scheduler, parallel children within one parent session and writable he
 
 A committed refusal before child work starts consumes no delegation allowance
 and requires no ledger reservation. Restart joins that terminal fact to the
-intent; it cannot treat the refused call as lost work or fence its parent.
+intent; it cannot treat the refused call as lost work or fence its parent. A
+call whose refusal was not yet recorded when the host stopped is charged
+conservatively; if that exceeds the allowance, the parent keeps working without
+further helpers and the call stays unknown.
+
+Every durable host start classifies retained helper history before it admits
+work, even when new delegation is disabled, so an old
+helper is never adopted as ordinary work. That scan has a fixed 60-second bound
+per start and keeps its progress: a long history finishes over later starts, or
+in the background of a resident host. Until then the durable host admits no
+session work and reports a count of what remains; reading existing sessions and
+the ephemeral profile, which has no helpers, stay available. One unreadable
+session history keeps the durable host closed until the root is restored from
+backup. A parent whose retained
+calls exceed its allowance keeps working but can start no further helper.
 
 <a id="concept-adr-0046-consequences"></a>
 ### Observable Consequences
