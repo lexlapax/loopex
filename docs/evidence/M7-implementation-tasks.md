@@ -31,7 +31,9 @@ Part of the [evidence index](README.md).
   integers; pure provider-reference validation against the adapter catalog.
 - Done: closed authored-file schema, bounded selected-file loading and relative
   path resolution; trace selectors resolve through trusted module manifests.
-- Next: command grammar and effective-profile composition, then live
+- Done: chat/config inspection flag parsing, duplicate/conflict rejection,
+  repeatable array selection and exact numeric-domain validation.
+- Next: effective-profile precedence/composition and command entry wiring, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
@@ -219,6 +221,22 @@ Part of the [evidence index](README.md).
   command grammar/inspection and live creation remain pending. This checkpoint
   has no new full integration or closure-matrix result.
 
+- 2026-10-01: `ConfigOptions` parses the three accepted command forms and the
+  complete override inventory. Config is required; show also requires effective.
+  Inspection refuses every trace flag and resume. Chat rejects duplicate scalar
+  flags and conflicting trace booleans; repeated skill/module selections retain
+  order and their accepted item ceilings. No provider flag, implicit model,
+  positional prompt or new authority default is introduced. Models/policy/trace
+  selectors reuse the admitted registries. Decimal values preserve exact large
+  turn/token spending integers while deadline/context/cleanup fields retain
+  uint64 and trace fields retain the existing ceilings. Structural errors precede
+  value checks and errors never echo authored values. Focused options/schema/
+  ask-grammar tests pass 32 cases in 0.08 seconds; all connected configuration
+  prerequisite files pass 59 cases in 0.1 seconds. Warning-free compilation,
+  formatting and compiled documentation ordering pass with 958 covered entries.
+  Effective-profile merging, command dispatch/inspection and live chat remain
+  pending; no full integration result is claimed for these new bytes.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -274,6 +292,7 @@ Part of the [evidence index](README.md).
 - [x] Validate closed authored-file objects, required conversation bounds, role/route/delegation relationships, explicit context ceilings and trace limit domains before overrides.
 - [x] Load bounded selected regular config files, retaining authored/resolved profiles with config-relative literal paths and resolved byte bounds; prompt-file and effective-profile admission remain later stages.
 - [x] Resolve trace selectors through fixed trusted application-module manifests without input atom creation or application startup; owning trace startup/drain/teardown integration remains pending.
+- [x] Parse the complete chat/config-inspection flag grammar with duplicate/conflict refusal, bounded array overrides, exact numeric domains and shared registries; effective-profile and command-entry integration remains pending.
 - [ ] Implement file/flag precedence, validation and effective-value display.
 - [ ] Require explicit conversation bounds in the file, including when flags override them.
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
@@ -468,7 +487,7 @@ before a provider demonstration.
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
 | Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Pure shared reference/exclusion validation implemented; custody and startup/dispatch integration pending |
-| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths and trusted trace selectors implemented; effective-profile admission, grammar, precedence and inspection pending |
+| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths, trusted trace selectors and flag parser implemented; effective-profile admission, precedence, command entry and inspection pending |
 | Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
 | Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |
 | Ephemeral entry points | ADRs 0042–0045/0048/0049 | Combined closed startup options; one-call responder consumed locally; joined termination | Ephemeral.Options/Preflight/Bootstrap/SessionOwner; facade | Pending |
