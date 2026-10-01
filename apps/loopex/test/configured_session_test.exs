@@ -47,6 +47,187 @@ defmodule Loopex.ConfiguredSessionTest do
   alias LoopexProtocol.ToolDefinition
   alias LoopexProtocol.Canonical
 
+  test "required v3 capsules commit atomically through unknown replies and survive restart" do
+    for phase <- [:before, :after] do
+      capsule = closed_capsule("done")
+
+      fixture =
+        start(
+          progress_to: self(),
+          script: [
+            %{text: "done", reply_overrides: %{completion: "natural", continuation: capsule}}
+          ]
+        )
+
+      captured = continuation_configuration()
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create",
+                 %{},
+                 genesis(fixture.definitions, captured)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      hold_record_commit(fixture, "model_attempt_settled_v3", phase)
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+      {waiter, exact} = await_record_commit(fixture, session, "model_attempt_settled_v3", phase)
+      assert exact["result"]["reply"]["continuation"] == capsule
+      assert exact["result"]["reply"]["completion"] == "natural"
+
+      refute_receive {:loopex_progress, %{kind: :model_stream_closed}}, 0
+
+      if phase == :before do
+        refute Enum.any?(
+                 Fixture.events(fixture, session),
+                 &(&1.kind == "assistant.message_appended")
+               )
+      end
+
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+
+      if phase == :before,
+        do:
+          assert(
+            Enum.all?(
+              Fixture.records(fixture, session),
+              &(&1.payload.kind != "model_attempt_settled_v3")
+            )
+          )
+
+      if phase == :before do
+        Loopex.M1RuntimeTestStore.inject(
+          fixture.store,
+          {:session_journal_commit, :after_linearization_before_result}
+        )
+      end
+
+      Loopex.M1RuntimeTestStore.release(waiter)
+      events = finish(attachment)
+      assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+      assert Enum.count(events, &(&1.kind == "assistant.message_appended")) == 1
+      assert_receive {:loopex_progress, %{kind: :model_stream_closed}}, 5_000
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+      settlements =
+        Enum.filter(
+          Fixture.records(fixture, session),
+          &(&1.payload.kind == "model_attempt_settled_v3")
+        )
+
+      assert Enum.map(settlements, & &1.payload) == [exact]
+      assert :ok = Loopex.stop(fixture.runtime)
+      restarted = start(store: fixture.store, script: [])
+
+      assert {:ok, ^session} =
+               Loopex.resume_session(restarted.runtime, session, command_id: "resume")
+
+      assert {:ok, recovered} =
+               SessionState.recover(
+                 session,
+                 Fixture.records(restarted, session),
+                 Fixture.events(restarted, session)
+               )
+
+      assert recovered.provider_settlement_version == 3
+      assert AgentLoopTestModel.dispatched(restarted.model) == []
+      assert SessionState.run_configuration(recovered, hd(recovered.run_order)) == captured
+    end
+  end
+
+  test "required continuation refuses v2 and malformed v3 before tools or reported accounting" do
+    for overrides <- [
+          %{},
+          %{completion: "natural", continuation: closed_capsule("different")},
+          %{completion: "limit", continuation: closed_capsule("done")}
+        ] do
+      fixture =
+        start(
+          script: [
+            %{
+              text: "done",
+              calls: [%{id: "write-1", name: "write", arguments: %{}}],
+              usage: %{input_tokens: 7, output_tokens: 5},
+              reply_overrides: overrides
+            }
+          ]
+        )
+
+      captured = continuation_configuration()
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create",
+                 %{},
+                 genesis(fixture.definitions, captured)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+      events = finish(attachment)
+      assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "failed"
+      refute Enum.any?(events, &(&1.kind in ["assistant.message_appended", "tool.started"]))
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+
+      [settlement] =
+        Enum.filter(
+          Fixture.records(fixture, session),
+          &(&1.payload.kind == "model_attempt_settled_v3")
+        )
+
+      assert settlement.payload["result"] == %{
+               "kind" => "error",
+               "category" => "unreadable_model_answer",
+               "accounting_evidence" => %{"kind" => "none"}
+             }
+
+      assert settlement.payload["accounting"] == %{
+               "source" => "estimated",
+               "basis" => "remaining_allowance"
+             }
+
+      assert {:ok, recovered} =
+               SessionState.recover(
+                 session,
+                 Fixture.records(fixture, session),
+                 Fixture.events(fixture, session)
+               )
+
+      assert recovered.provider_settlement_version == 3
+    end
+  end
+
+  defp continuation_configuration do
+    configuration()
+    |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
+    |> put_in(["provider_mapping", "mapping_revision"], "fixture.continuation.v1")
+    |> put_in(["provider_mapping", "continuation_required"], true)
+  end
+
+  defp closed_capsule(text),
+    do: %{
+      "format" => "loopex.anthropic.content_refs.v1",
+      "provider" => "anthropic",
+      "model" => "scripted:v1",
+      "status" => "closed",
+      "content" => [
+        %{
+          "kind" => "text_ref",
+          "byte_length" => byte_size(text),
+          "template" => %{"type" => "text"},
+          "field" => "text"
+        }
+      ]
+    }
+
   test "orderly runtime shutdown joins owner groups without shutdown errors" do
     log =
       ExUnit.CaptureLog.capture_log(fn ->

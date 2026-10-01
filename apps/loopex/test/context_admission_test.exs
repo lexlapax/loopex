@@ -55,6 +55,7 @@ defmodule Loopex.ContextAdmissionTestModel do
           tool_calls: Map.get(step, :tool_calls, []),
           delta_count: 0,
           streamed: false,
+          provider_response_id: nil,
           canonical_request_bytes: request.canonical_request_bytes,
           staged_request_digest: request.staged_request_digest
         }

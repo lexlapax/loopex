@@ -92,7 +92,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
         results =
           Enum.filter(
             records,
-            &(&1.payload.kind == "model_attempt_settled_v2" and
+            &(&1.payload.kind == "model_attempt_settled_v3" and
                 &1.payload["conversation"] == "canonical")
           )
 
@@ -160,7 +160,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
             request_count: Enum.count(records, &(&1.payload.kind == "model_request_committed")),
             canonical_settlement_count:
               Enum.count(records, fn record ->
-                record.payload.kind == "model_attempt_settled_v2" and
+                record.payload.kind == "model_attempt_settled_v3" and
                   record.payload["conversation"] == "canonical"
               end),
             terminal_outcome: terminal_outcome(Enum.find(events, &(&1.kind == "run.finished")))

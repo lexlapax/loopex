@@ -1223,6 +1223,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         reply = %{
           text: "answer", identity: %{"provider" => "fixture", "model" => "fixture:model"},
           usage: %{input_tokens: 7, output_tokens: 2}, tool_calls: [], streamed: true,
+          provider_response_id: nil,
           delta_count: 10_000, canonical_request_bytes: invocation["canonical_request_bytes"],
           staged_request_digest: invocation["staged_request_digest"]
         }

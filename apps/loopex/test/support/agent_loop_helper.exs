@@ -110,6 +110,7 @@ defmodule Loopex.AgentLoopTestModel do
               tool_calls: Map.get(turn, :calls, []),
               delta_count: Map.get(turn, :delta_count, length(Map.get(turn, :deltas, []))),
               streamed: Map.get(turn, :deltas, []) != [],
+              provider_response_id: nil,
               canonical_request_bytes: request.canonical_request_bytes,
               staged_request_digest: request.staged_request_digest
             }

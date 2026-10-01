@@ -1267,7 +1267,8 @@ defmodule Loopex.Runtime.SessionState do
     request = work.request
     attempt = work.model_attempt
     termination = attempt_termination(state, run_id, work, outcome)
-    {result, conversation, usage} = attempt_result(work, outcome, termination)
+    required = continuation_required?(state, run_id)
+    {result, conversation, usage} = attempt_result(work, outcome, termination, required)
     transport = attempt_transport(outcome)
     next = attempt_next(transport, termination, result, attempt)
     accounting = attempt_accounting(transport, usage)
@@ -1342,9 +1343,10 @@ defmodule Loopex.Runtime.SessionState do
 
   # Concept: only an admitted canonical reply supplies accounting evidence.
   # Technical depth: raw Store admission precedes projection inside
-  # `canonical_reply/2`; malformed or refused input retains explicit `none`.
-  defp attempt_result(work, {:reply, raw}, termination) do
-    case ProviderAttempt.canonical_reply(raw, work.request) do
+  # `canonical_reply/3`; the run's captured mapping fixes its continuation
+  # requirement. Malformed or refused input retains explicit `none`.
+  defp attempt_result(work, {:reply, raw}, termination, required) do
+    case ProviderAttempt.canonical_reply(raw, work.request, required) do
       {:ok, reply} ->
         result = %{"kind" => "reply", "reply" => reply}
         conversation = if termination, do: "evidence_only", else: "canonical"
@@ -1356,7 +1358,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp attempt_result(_work, _outcome, _termination),
+  defp attempt_result(_work, _outcome, _termination, _required),
     do: {%{"kind" => "error", "category" => "model_call_failed"}, "none", nil}
 
   defp unreadable_result(evidence),
@@ -4312,16 +4314,17 @@ defmodule Loopex.Runtime.SessionState do
          run_id,
          request
        ) do
-    required =
-      case run_configuration(state, run_id) do
-        nil -> false
-        configuration -> configuration["provider_mapping"]["continuation_required"]
-      end
-
-    ProviderAttempt.validate_settled(record, request, required)
+    ProviderAttempt.validate_settled(record, request, continuation_required?(state, run_id))
   end
 
   defp settlement_request_agrees?(_, _, _, _), do: :ok
+
+  defp continuation_required?(state, run_id) do
+    case run_configuration(state, run_id) do
+      nil -> false
+      configuration -> configuration["provider_mapping"]["continuation_required"]
+    end
+  end
 
   defp settlement_version("model_attempt_settled_v1"), do: 1
   defp settlement_version("model_attempt_settled_v2"), do: 2

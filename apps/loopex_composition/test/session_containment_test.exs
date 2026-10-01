@@ -317,7 +317,7 @@ defmodule LoopexComposition.SessionContainmentTest do
         assert [%{payload: %{"transport" => "dispatched_or_unknown"}}] =
                  Enum.filter(records, fn record ->
                    (record.payload[:kind] || record.payload["kind"]) ==
-                     "model_attempt_settled_v2" and record.payload["run_id"] == run_id
+                     "model_attempt_settled_v3" and record.payload["run_id"] == run_id
                  end)
 
         effect_result = pre_release_effect || Task.yield(effect, 5_000)

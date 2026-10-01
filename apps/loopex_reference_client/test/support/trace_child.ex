@@ -224,7 +224,7 @@ defmodule Loopex.ReferenceClientTraceChild do
   defp model_results(records) do
     Enum.filter(
       records,
-      &(&1.payload.kind == "model_attempt_settled_v2" and
+      &(&1.payload.kind == "model_attempt_settled_v3" and
           &1.payload["conversation"] == "canonical")
     )
   end

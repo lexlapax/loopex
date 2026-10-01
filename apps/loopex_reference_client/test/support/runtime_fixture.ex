@@ -59,6 +59,7 @@ defmodule Loopex.ReferenceClientTestModel do
        tool_calls: tool_calls,
        delta_count: deltas,
        streamed: deltas > 0,
+       provider_response_id: nil,
        canonical_request_bytes: request.canonical_request_bytes,
        staged_request_digest: request.staged_request_digest
      }}

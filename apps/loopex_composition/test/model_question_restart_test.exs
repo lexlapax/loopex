@@ -41,6 +41,7 @@ defmodule LoopexComposition.ModelQuestionRestartTest do
          tool_calls: calls,
          delta_count: 0,
          streamed: false,
+         provider_response_id: nil,
          canonical_request_bytes: request.canonical_request_bytes,
          staged_request_digest: request.staged_request_digest
        }}

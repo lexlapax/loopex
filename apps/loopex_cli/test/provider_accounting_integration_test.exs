@@ -116,7 +116,7 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
       session = M1RuntimeTestStore.inspect_state(store_pid).sessions[session_id]
 
       [settlement] =
-        for %{payload: %{kind: "model_attempt_settled_v2"} = record} <- session.records,
+        for %{payload: %{kind: "model_attempt_settled_v3"} = record} <- session.records,
             do: record
 
       assert settlement["result"]["category"] == "unreadable_model_answer"

@@ -65,9 +65,11 @@ Part of the [evidence index](README.md).
   block capture, preserving text slices, ordered arguments and both JSON ceilings.
 - Done: prepare strict M7 callback projection and source-bound v3 settlement
   readers, including monotonic cutover and unchanged historical reply shapes.
+- Done: emit v3 for every new ordinary settlement, migrate exact callback
+  fixtures and preserve conservative accounting and historical reader schemas.
 - Next: complete host resolution, maintenance quiescence and checkpoint-aware
-  configuration preflight; join native capture to versioned replies/settlements,
-  source-bound request envelopes and the transport bridge; complete question
+  configuration preflight; join native capture to source-bound request envelopes
+  and the transport bridge; complete question
   projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
   continue prompt-file and mapping
@@ -78,6 +80,50 @@ Part of the [evidence index](README.md).
 
 ## Development observations
 
+- 2026-10-01: every new ordinary settlement now writes model_attempt_settled_v3,
+  including retries, transport errors, unreadable callbacks and validated reply
+  compaction. The owner uses the run's frozen continuation requirement for strict
+  nine/eleven-member callback admission; canonical successful replies retain ten
+  members. Eight-member callbacks and invalid capsules retain accounting_evidence
+  none and charge the conservative allowance before policy or executor dispatch.
+  Model's reply type declares exact v2/v3 variants with a mandatory nil-or-binary
+  response ID. Live fixtures and current-generation shape/size probes are migrated;
+  explicit historical v1/v2 fixtures keep eight-member canonical replies. Genuine
+  M2 archive readers/writers and their expected v2 tag remain unchanged.
+  Required closed capsules retain exact content through before/after-commit holds,
+  lost commit reply, atomic publication and runtime restart without another model
+  call. These are scripted model-port proofs, not native provider conformance.
+  Current core regressions pass 267 tests in 54.6 seconds. Adapter streaming/bridge
+  checks pass 56 in 43.0 seconds; composition passes 16 in 19.2 seconds; CLI coding,
+  accounting and genuine M2 compatibility pass 13 in 63.1 seconds with two existing
+  real-provider exclusions; the reference-client check passes one in 0.5 seconds
+  with one real-provider exclusion. Final targeted current checks pass 42 in 4.0
+  seconds, excluding 65 unselected protocol cases already covered by the broad
+  run. The floor pair passes all 108 writer/protocol/configured checks in 25.7
+  seconds. A syntax-tree inventory checks 24 raw reply literals across app/script
+  source and finds no omitted response-ID fields. The malformed binary-key reply
+  retains its identity failure independently of shape rejection; the dispatched
+  rollback script now supplies the mandatory nil field.
+  Complete outputs are retained outside the repository:
+  - `/private/tmp/loopex-m7-v3-writer-core-final.log`, SHA-256
+    `5ae6bc4159e85804596905b7820bfcf30d02de8b82ab7c1064bf44909fd207d6`.
+  - `/private/tmp/loopex-m7-v3-writer-adapter.log`, SHA-256
+    `1486e5f7f9767ffc37238574112ca535681506c417a27bcc459180881733ec14`.
+  - `/private/tmp/loopex-m7-v3-writer-composition.log`, SHA-256
+    `63602350ed96634d3c2b1cb475690a80b96eeb16fc2a92e27cfe9e2460a836e0`.
+  - `/private/tmp/loopex-m7-v3-writer-cli.log`, SHA-256
+    `05cc109743142831317055eb916adfd335fd7996e6752e45f95915859abec4a1`.
+  - `/private/tmp/loopex-m7-v3-writer-reference.log`, SHA-256
+    `e2077a32a5a9a20ed0d638e2ec0891561ca33aa119688efa9b9f60386d91c5e3`.
+  - `/private/tmp/loopex-m7-v3-writer-floor.log`, SHA-256
+    `258ccdd0347ea8bf86123b26e20dd5c326c01f92faf372503f7a92bc01d49a0d`.
+  - `/private/tmp/loopex-m7-v3-writer-final-focused.log`, SHA-256
+    `649a25f3cd2668431c71d2c0c9bbefff2a1b3628582dfa9259ef8b77f9691991`.
+  Source-bound request envelopes, native transport, continuation accounting and
+  mapping registration remain pending. Current compilation and formatting pass;
+  compiled documentation covers 986 entries. This does not replace the full fast
+  integration check, real-provider or complete migration/rollback lanes, or resolve
+  the separate Task.Supervisor cleanup investigation.
 - 2026-10-01: ProviderAttempt's M7 projection admits exact nine-field v2 or
   eleven-field v3 callbacks and returns the ten-field canonical v3 shape.
   Missing provider_response_id, mixed/extra fields, missing required capsules,
@@ -662,6 +708,7 @@ Part of the [evidence index](README.md).
 - [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
 - [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
 - [x] Prepare exact v2/v3 callback projection, source-bound v3 settlement readers and monotonic historical-prefix recovery before writer migration.
+- [x] Emit v3 for every new ordinary settlement, migrate exact callback fixtures, and prove whole-record accounting, required-capsule admission and historical schemas through live recovery.
 - [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
 - [x] Implement pure exact native-array capture and reconstruction through the shared expander, with closed fields and stop/call relations.
 - [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
@@ -820,7 +867,7 @@ before a provider demonstration.
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
-| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers implemented; live writer/fixture migration, request envelopes and continuation accounting pending |
+| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; native adapter emission, request envelopes and continuation accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |

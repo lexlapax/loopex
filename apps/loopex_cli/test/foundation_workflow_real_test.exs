@@ -352,7 +352,7 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
   defp provider_replies(records) do
     records
     |> Enum.filter(
-      &(&1.payload.kind == "model_attempt_settled_v2" and
+      &(&1.payload.kind == "model_attempt_settled_v3" and
           &1.payload["conversation"] == "canonical")
     )
     |> Enum.map(&get_in(&1.payload, ["result", "reply"]))

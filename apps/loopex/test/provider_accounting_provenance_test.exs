@@ -12,6 +12,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
 
   @v1 "model_attempt_settled_v1"
   @v2 "model_attempt_settled_v2"
+  @v3 "model_attempt_settled_v3"
   @max 18_446_744_073_709_551_615
 
   setup do
@@ -42,7 +43,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
     }
   end
 
-  test "v2 compaction records exact Store byte observation and this reply's reported usage", c do
+  test "v3 compaction records exact Store byte observation and this reply's reported usage", c do
     for {target, input, output} <- [
           {65_535, 7, 5},
           {65_536, 11, 2},
@@ -60,7 +61,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
                SessionState.propose_model_attempt_settled(c.state, c.work.run_id, {:reply, raw})
 
       [settlement, terminal] = proposal.records
-      assert settlement.kind == @v2
+      assert settlement.kind == @v3
 
       assert settlement["accounting"] == %{
                "source" => "reported",
@@ -136,6 +137,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
           %{raw | text: String.duplicate("x", 65_537)},
           %{raw | streamed: true},
           Map.put(raw, :unknown, "extra"),
+          Map.delete(raw, :provider_response_id),
           %{raw | tool_calls: Enum.map(1..1025, fn _ -> %{} end)}
         ] do
       {:ok, proposal} =
@@ -167,7 +169,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
            }
   end
 
-  test "v2 evidence rejects extra missing unknown keys enums limits and either reported-member mismatch",
+  test "v3 evidence rejects extra missing unknown keys enums limits and either reported-member mismatch",
        c do
     full = full_settlement(c, raw_reply(c, @max, @max))
     evidence = compact(full, "record_bytes", @max, 65_536)
@@ -238,12 +240,12 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
     assert :ok = ProviderAttempt.validate_settled(depth)
   end
 
-  test "legacy prefix replays but ambiguous v1 and downgrade after v2 refuse", c do
+  test "legacy prefixes retain their original shapes and reject downgrades", c do
     {:ok, first} =
       SessionState.propose_model_attempt_settled(c.state, c.work.run_id, :not_dispatched)
 
     assert [retry] = first.records
-    assert retry.kind == @v2
+    assert retry.kind == @v3
     {:ok, opened} = SessionState.propose_model_attempt_open(first.next, c.work.run_id)
 
     {:ok, final} =
@@ -255,10 +257,23 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
 
     all = %{final | records: first.records ++ opened.records ++ final.records}
     assert {:ok, replayed} = replay_proposal(c, all)
-    assert replayed.provider_settlement_version == 2
+    assert replayed.provider_settlement_version == 3
 
-    mixed = %{all | records: [Map.put(retry, :kind, @v1) | tl(all.records)]}
+    mixed = %{all | records: [legacy_record(retry) | tl(all.records)]}
     assert {:ok, _legacy_prefix} = replay_proposal(c, mixed)
+    v2 = %{all | records: Enum.map(all.records, &v2_record/1)}
+    assert {:ok, historical_v2} = replay_proposal(c, v2)
+    assert historical_v2.provider_settlement_version == 2
+
+    v2_downgrade = %{
+      v2
+      | records:
+          Enum.map(first.records, &v2_record/1) ++
+            opened.records ++ Enum.map(final.records, &legacy_record/1)
+    }
+
+    assert {:error, :provider_settlement_version_downgrade} = replay_proposal(c, v2_downgrade)
+
     legacy = %{all | records: Enum.map(all.records, &legacy_record/1)}
     assert {:ok, old} = replay_proposal(c, legacy)
     assert old.provider_settlement_version == 1
@@ -334,7 +349,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
         {:reply, raw_reply(c, 7, 5)}
       )
 
-    promoted = %{proposal | records: Enum.map(proposal.records, &v3_record/1)}
+    promoted = proposal
     assert {:ok, replayed} = replay_proposal(c, promoted)
     assert replayed.provider_settlement_version == 3
 
@@ -352,7 +367,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
              replay_proposal(c, %{
                promoted
                | records: [
-                   %{settlement | "result" => proposal.records |> hd() |> Map.fetch!("result")},
+                   %{settlement | "result" => settlement |> v2_record() |> Map.fetch!("result")},
                    terminal
                  ]
              })
@@ -372,41 +387,38 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
       )
 
     for prefix <- [
-          first.records,
+          Enum.map(first.records, &v2_record/1),
           Enum.map(first.records, &legacy_record/1),
-          Enum.map(first.records, &v3_record/1)
+          first.records
         ] do
       promoted = %{
         final
-        | records: prefix ++ opened.records ++ Enum.map(final.records, &v3_record/1)
+        | records: prefix ++ opened.records ++ final.records
       }
 
       assert {:ok, replayed} = replay_proposal(c, promoted)
       assert replayed.provider_settlement_version == 3
     end
 
-    for tail <- [final.records, Enum.map(final.records, &legacy_record/1)] do
+    for tail <- [Enum.map(final.records, &v2_record/1), Enum.map(final.records, &legacy_record/1)] do
       downgraded = %{
         final
-        | records: Enum.map(first.records, &v3_record/1) ++ opened.records ++ tail
+        | records: first.records ++ opened.records ++ tail
       }
 
       assert {:error, :provider_settlement_version_downgrade} = replay_proposal(c, downgraded)
     end
   end
 
-  defp v3_record(%{:kind => @v2, "result" => %{"kind" => "reply", "reply" => reply}} = record),
+  defp v2_record(%{:kind => @v3, "result" => %{"kind" => "reply", "reply" => reply}} = record),
     do: %{
       record
-      | :kind => "model_attempt_settled_v3",
-        "result" => %{
-          "kind" => "reply",
-          "reply" => Map.merge(reply, %{"completion" => "unknown", "continuation" => nil})
-        }
+      | :kind => @v2,
+        "result" => %{"kind" => "reply", "reply" => Map.drop(reply, ~w(completion continuation))}
     }
 
-  defp v3_record(%{kind: @v2} = record), do: %{record | kind: "model_attempt_settled_v3"}
-  defp v3_record(record), do: record
+  defp v2_record(%{kind: @v3} = record), do: %{record | kind: @v2}
+  defp v2_record(record), do: record
 
   defp raw_reply(c, input, output) do
     %{
@@ -423,7 +435,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
   end
 
   defp full_settlement(c, raw) do
-    {:ok, reply} = ProviderAttempt.canonical_reply(raw, c.request)
+    {:ok, reply} = ProviderAttempt.canonical_reply(raw, c.request, false)
 
     %{
       "run_id" => c.work.run_id,
@@ -441,7 +453,7 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
         "input_tokens" => raw.usage.input_tokens,
         "output_tokens" => raw.usage.output_tokens
       },
-      kind: @v2
+      kind: @v3
     }
   end
 
@@ -465,8 +477,9 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
   defp nested(0), do: "leaf"
   defp nested(depth), do: %{"n" => nested(depth - 1)}
 
-  defp legacy_record(%{kind: @v2} = record) do
-    %{record | "result" => Map.delete(record["result"], "accounting_evidence"), kind: @v1}
+  defp legacy_record(%{kind: kind} = record) when kind in [@v2, @v3] do
+    historical = v2_record(record)
+    %{historical | "result" => Map.delete(historical["result"], "accounting_evidence"), kind: @v1}
   end
 
   defp legacy_record(record), do: record

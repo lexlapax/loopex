@@ -27,6 +27,7 @@ defmodule LoopexRollbackModel do
            else: [%{id: "rollback-dispatched-grep", name: "grep", arguments: %{"path" => "notes.md", "pattern" => "rollback"}}]
          ),
        delta_count: 0,
+       provider_response_id: nil,
        streamed: false
      }}
   end

@@ -557,13 +557,13 @@ defmodule Loopex.InputAlgebraTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_attempt_settled_v2",
+        "model_attempt_settled_v3",
         self()
       )
 
     send(model, :release)
 
-    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v2",
+    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v3",
                     _transition, {:committed, _tx_id, _receipt}},
                    5_000
 

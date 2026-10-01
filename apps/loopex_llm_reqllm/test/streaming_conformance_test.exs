@@ -39,6 +39,7 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
          tool_calls: [],
          delta_count: length(chunks),
          streamed: true,
+         provider_response_id: nil,
          canonical_request_bytes: request.canonical_request_bytes,
          staged_request_digest: request.staged_request_digest
        }}
@@ -59,6 +60,7 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
          tool_calls: [],
          delta_count: 0,
          streamed: false,
+         provider_response_id: nil,
          canonical_request_bytes: request.canonical_request_bytes,
          staged_request_digest: request.staged_request_digest
        }}
@@ -1013,19 +1015,25 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     refute :canonical_request_digest in declared
   end
 
-  test "the model reply contract declares the optional provider response identifier" do
+  test "the model reply contract requires the response identifier in exact v2 and v3 shapes" do
     {:ok, types} = Code.Typespec.fetch_types(Loopex.Model)
 
-    {:type, {:reply, {:type, _line, :map, fields}, []}} =
+    {:type, {:reply, {:type, _line, :union, variants}, []}} =
       Enum.find(types, &match?({:type, {:reply, _definition, []}}, &1))
 
-    assert Enum.any?(fields, fn
-             {:type, _line, :map_field_assoc, [{:atom, _key_line, :provider_response_id}, _value]} ->
-               true
+    common =
+      ~w(text identity usage tool_calls delta_count streamed provider_response_id canonical_request_bytes staged_request_digest)a
 
-             _other ->
-               false
-           end)
+    declared =
+      for {:type, _line, :map, fields} <- variants do
+        Enum.map(fields, fn
+          {:type, _line, :map_field_exact, [{:atom, _key_line, key}, _value]} -> key
+        end)
+        |> Enum.sort()
+      end
+
+    assert Enum.sort(declared) ==
+             Enum.sort([Enum.sort(common), Enum.sort([:completion, :continuation | common])])
   end
 
   defp declared_reply_fields do
@@ -1150,6 +1158,7 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
            tool_calls: [],
            delta_count: 1,
            streamed: true,
+           provider_response_id: nil,
            canonical_request_bytes: request.canonical_request_bytes,
            staged_request_digest: request.staged_request_digest
          }}

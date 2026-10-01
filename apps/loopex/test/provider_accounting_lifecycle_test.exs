@@ -99,14 +99,20 @@ defmodule Loopex.ProviderAccountingLifecycleTest do
     events = Fixture.events(fixture, session)
     assert {:ok, _valid} = SessionState.recover(session, records, events)
 
-    settlements = Enum.filter(records, &(&1.payload.kind == "model_attempt_settled_v2"))
+    settlements = Enum.filter(records, &(&1.payload.kind == "model_attempt_settled_v3"))
     assert [first, second] = settlements
     refute first.payload["run_id"] == second.payload["run_id"]
 
     changed =
       Enum.map(records, fn record ->
         if record.journal_version == second.journal_version,
-          do: %{record | payload: %{record.payload | kind: "model_attempt_settled_v1"}},
+          do: %{
+            record
+            | payload:
+                record.payload
+                |> Map.put(:kind, "model_attempt_settled_v1")
+                |> update_in(["result", "reply"], &Map.drop(&1, ~w(completion continuation)))
+          },
           else: record
       end)
 

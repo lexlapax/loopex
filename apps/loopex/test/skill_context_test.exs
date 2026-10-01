@@ -537,7 +537,7 @@ defmodule Loopex.SkillContextTest do
 
     assert [settled] =
              after_restart
-             |> Enum.filter(&(&1.payload.kind == "model_attempt_settled_v2"))
+             |> Enum.filter(&(&1.payload.kind == "model_attempt_settled_v3"))
              |> Enum.map(& &1.payload)
 
     assert settled["transport"] == "dispatched_or_unknown"

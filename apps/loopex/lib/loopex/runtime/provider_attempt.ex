@@ -35,7 +35,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
 
   @opened_kind "model_attempt_opened_v1"
-  @settled_kind "model_attempt_settled_v2"
+  @settled_v2_kind "model_attempt_settled_v2"
   @settled_v3_kind "model_attempt_settled_v3"
   @legacy_settled_kind "model_attempt_settled_v1"
   @termination_kind "model_termination_admitted_v1"
@@ -139,14 +139,15 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
-  The kind of the record that settles one attempt.
+  The current record kind for every newly settled ordinary attempt.
 
   ## Technical depth
 
-  See `opened_kind/0`.
+  New settlements use v3, including retry and error-only verdicts. Historical
+  v1/v2 records remain readable through their original closed validators.
   """
   @spec settled_kind() :: binary()
-  def settled_kind, do: @settled_kind
+  def settled_kind, do: @settled_v3_kind
 
   @doc """
   ## Concept
@@ -298,7 +299,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_settled(map()) :: :ok | {:error, term()}
   def validate_settled(record) when is_map(record) do
-    with kind when kind in [@legacy_settled_kind, @settled_kind, @settled_v3_kind] <-
+    with kind when kind in [@legacy_settled_kind, @settled_v2_kind, @settled_v3_kind] <-
            Map.get(record, :kind, Map.get(record, "kind")),
          :ok <- exact_keys(record, @settled_keys),
          :ok <- validate_identity(record),
@@ -599,7 +600,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
        when map_size(result) == 2 and is_map(reply) and map_size(reply) == 10 do
     with :ok <- exact_keys(reply, @reply_keys ++ ~w(completion continuation)),
          :ok <-
-           validate_result(%{result | "reply" => Map.take(reply, @reply_keys)}, @settled_kind),
+           validate_result(%{result | "reply" => Map.take(reply, @reply_keys)}, @settled_v2_kind),
          true <- reply["completion"] in ~w(natural limit unknown) do
       case {reply["completion"], reply["continuation"]} do
         {_, nil} ->
@@ -617,7 +618,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   end
 
   defp validate_result(%{"kind" => "reply", "reply" => reply} = result, kind)
-       when kind in [@legacy_settled_kind, @settled_kind] and map_size(result) == 2 and
+       when kind in [@legacy_settled_kind, @settled_v2_kind] and map_size(result) == 2 and
               is_map(reply) and map_size(reply) == 8 do
     with :ok <- exact_keys(reply, @reply_keys),
          {:ok, _identity} <- reply_identity(Map.get(reply, "identity")),
@@ -654,7 +655,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
          } = result,
          kind
        )
-       when kind in [@settled_kind, @settled_v3_kind] and map_size(result) == 3,
+       when kind in [@settled_v2_kind, @settled_v3_kind] and map_size(result) == 3,
        do: validate_accounting_evidence(evidence)
 
   defp validate_result(_result, _kind), do: {:error, :invalid_attempt_settlement}
