@@ -182,6 +182,7 @@ defmodule Loopex.Runtime.SessionState do
           commands: map(),
           pending_work: map(),
           conversation: map(),
+          artifact_sources: map(),
           run_order: [binary()],
           bounds: map(),
           context_budgets: map(),
@@ -212,6 +213,10 @@ defmodule Loopex.Runtime.SessionState do
             commands: %{},
             pending_work: %{},
             conversation: %{},
+            # Concept: artifact membership comes from this session's committed receipts.
+            # Technical depth: this derived index contains full references and
+            # canonical source-payload digests, never object contents or handles.
+            artifact_sources: %{},
             run_order: [],
             bounds: %{},
             # The context-admission ceiling each run committed at its own prompt
@@ -3096,6 +3101,31 @@ defmodule Loopex.Runtime.SessionState do
     end)
   end
 
+  # Concept: a recovered artifact job must name the original committed source.
+  # Technical depth: recompute resolution from frozen request definitions and
+  # preceding receipts; a self-consistent job digest cannot substitute a use,
+  # range or source identity. Other generations retain their existing readers.
+  defp artifact_job_matches?(
+         state,
+         work,
+         %{generation: {"loopex.read", "1.1.0", _digest}} = call,
+         job
+       ) do
+    definition =
+      Enum.find(work.request.tools, &(ToolDefinition.generation(&1) == call.generation))
+
+    with %{} <- definition,
+         true <- job.tool_id == "loopex.read" and job.tool_version == "1.1.0",
+         {:ok, expected} <-
+           Loopex.Runtime.ArtifactRead.resolve(definition, call.arguments, state.artifact_sources) do
+      job.validated_arguments == expected
+    else
+      _invalid -> false
+    end
+  end
+
+  defp artifact_job_matches?(_state, _work, _call, _job), do: true
+
   defp internal_transaction_id(state, logical_tx_id) do
     stable_id(
       "internal",
@@ -3308,6 +3338,7 @@ defmodule Loopex.Runtime.SessionState do
          :ok <- Loopex.Executor.validate_job(job),
          true <- job.run_id == run_id and job.turn_id == turn_id,
          true <- job.tool_call_id == call.tool_call_id,
+         true <- artifact_job_matches?(state, work, call, job),
          true <- is_map(grant) do
       # Concept: calls run in the order the model asked for them.
       #
@@ -3323,11 +3354,14 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "receipt" => receipt,
-         kind: "executor_receipt_committed"
-       }) do
+  defp apply_internal_record(
+         state,
+         %{
+           "run_id" => run_id,
+           "receipt" => receipt,
+           kind: "executor_receipt_committed"
+         } = record
+       ) do
     with {:ok, receipt} <- decode_receipt(receipt),
          %{stage: "effect_dispatched", job: job, tool_call: call} = work <-
            Map.get(state.pending_work, run_id),
@@ -3363,6 +3397,15 @@ defmodule Loopex.Runtime.SessionState do
         state
         |> append_element(run_id, result)
         |> put_pending(run_id, next_work)
+        |> Map.update!(:artifact_sources, fn sources ->
+          Loopex.Runtime.ArtifactRead.retain(
+            sources,
+            receipt.artifacts,
+            record,
+            state.journal_version + 1,
+            job
+          )
+        end)
 
       {:ok, next,
        [

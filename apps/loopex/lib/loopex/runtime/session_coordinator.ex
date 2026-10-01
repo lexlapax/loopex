@@ -5862,7 +5862,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp dispatch_effect(state, work, call) do
     with {:ok, definition} <- resolve_active_tool(state, call.name),
-         :ok <- validate_tool_arguments(definition, call.arguments) do
+         {:ok, _resolved} <- validate_tool_arguments(state, definition, call.arguments) do
       start_policy_consultation(state, work, call, definition)
     else
       {:error, reason} ->
@@ -5877,7 +5877,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
     do: begin_model_question(state, work, call)
 
   defp dispatch_authorized_effect(state, work, call, definition, context) do
-    with {:ok, job} <- build_job(state, work, call, definition),
+    with {:ok, resolved} <- validate_tool_arguments(state, definition, call.arguments),
+         {:ok, job} <- build_job(state, work, %{call | arguments: resolved}, definition),
          {:ok, grant} <-
            Executor.issue_grant(
              grant_decision(state),
@@ -6676,7 +6677,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         case Map.get(state.durable.pending_work, run_id) do
           %{stage: "effect_pending", pending_calls: [call | _rest]} = work ->
             with {:ok, definition} <- resolve_active_tool(state, call.name),
-                 :ok <- validate_tool_arguments(definition, call.arguments) do
+                 {:ok, _resolved} <- validate_tool_arguments(state, definition, call.arguments) do
               case decision do
                 {:allow, context} ->
                   case settle_open_interaction(state, "allowed", nil) do
@@ -6764,10 +6765,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp validate_tool_arguments(definition, arguments) do
+  defp validate_tool_arguments(state, definition, arguments) do
     case ToolDefinition.validate_arguments(definition, arguments) do
-      :ok -> :ok
-      {:error, _reason} -> {:error, :invalid_tool_arguments}
+      :ok ->
+        Loopex.Runtime.ArtifactRead.resolve(definition, arguments, state.durable.artifact_sources)
+
+      {:error, _reason} ->
+        {:error, :invalid_tool_arguments}
     end
   end
 
@@ -6894,29 +6898,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
         if policy_in_flight?(state, work.run_id) do
           {:noreply, state}
         else
-          case resolve_active_tool(state, call.name) do
-            {:ok, definition} ->
-              request =
-                state
-                |> policy_request(work, call, definition)
-                |> Map.put(
-                  :interaction_response,
-                  Interaction.response_member(
-                    interaction.interaction_id,
-                    interaction.request,
-                    interaction.choice_id
-                  )
+          with {:ok, definition} <- resolve_active_tool(state, call.name),
+               {:ok, _resolved} <- validate_tool_arguments(state, definition, call.arguments) do
+            request =
+              state
+              |> policy_request(work, call, definition)
+              |> Map.put(
+                :interaction_response,
+                Interaction.response_member(
+                  interaction.interaction_id,
+                  interaction.request,
+                  interaction.choice_id
                 )
+              )
 
-              task =
-                Task.Supervisor.async_nolink(state.owner_workers, fn ->
-                  Policy.evaluate_callback(state.policy, request, policy_defer_mode(state))
-                end)
+            task =
+              Task.Supervisor.async_nolink(state.owner_workers, fn ->
+                Policy.evaluate_callback(state.policy, request, policy_defer_mode(state))
+              end)
 
-              state = put_in_flight(state, task.ref, {:policy, work.run_id, task.pid})
-              state = arm_policy_timeout(state, task.ref, work.run_id)
-              {:noreply, arm_deadline(state, work.run_id)}
-
+            state = put_in_flight(state, task.ref, {:policy, work.run_id, task.pid})
+            state = arm_policy_timeout(state, task.ref, work.run_id)
+            {:noreply, arm_deadline(state, work.run_id)}
+          else
             {:error, reason} ->
               commit_tool_failure(state, work, call, reason)
           end

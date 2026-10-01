@@ -21,6 +21,9 @@ its entire stated outcome is proved.
 - Done: T02 exact-generation capability checks now guard runtime admission,
   registry loading and the local executor's compiled tool inventory. Original
   checklist completion is 22/186 items and 1/20 top-level tasks.
+- Done: T02 resolves committed-receipt artifact membership before policy and
+  binds approved ranges to their exact source in the journaled job. Prepared
+  references and real range transfers remain open, so original counts are unchanged.
 - Done: reproduce cross-run conversation loss with the real session-owner path
   and a scripted model in `apps/loopex/test/agent_loop_test.exs`.
 - Done: run-scoped result joins, replayed admission order, revision-1 normalized
@@ -1504,8 +1507,44 @@ second-prompt witness and milestone closure checks remain open.
 
 - [x] Implement and test pure exact-generation derivation and retained-binding validation.
 - [x] Enforce the literal read-generation table during runtime/registry loading and executor startup; select executor tools by exact ID/version and retain the frozen capability through restart with an empty host registry. Artifact range execution and prepared-reference replay remain pending.
+- [x] Resolve committed-receipt artifact membership and closed range arguments before policy, keep policy/deferred identity on original arguments, and bind approved job resolution to the exact retained source. Prove cross-session refusal, uncertain receipt commits, restart and altered-source replay refusal; prepared-reference membership remains pending.
 
 ### Verification evidence
+
+Receipt admission now reconstructs a private use index from committed executor
+receipts. The index stores the full reference and its earliest source identity;
+conflicting reference bytes make a use unusable. The source digest is the
+canonical digest of the complete private receipt-record payload, alongside its
+journal position and original run/operation/attempt/call identities. This is a
+derived cache, with no new receipt fields or object reads. Ordinary path arguments
+and artifact ranges have separate closed branches for the exact M7 read generation.
+Unknown/injected/cross-session uses, invalid bounds and offsets beyond object size
+produce the same failed `invalid_tool_arguments` disposition before policy.
+Offset equal to object size remains admissible for the executor's EOF handling.
+
+Policy and deferred interaction identity retain the original model arguments.
+After allow, the journaled executor job receives `resolved_artifact`; replay
+recomputes it from preceding committed sources and frozen definitions. A
+self-consistent job digest cannot substitute the source. Receipt commit-unknown
+on either side of persistence retains one reference, and a held uncommitted
+receipt admits no subsequent read policy or job. Restart reconstructs membership
+with an empty host registry. These tests use a scripted executor to prove owner
+admission; real range IO, transfer accounting and prepared-reference records are
+still pending and the original ownership/recovery items remain unchecked.
+
+Seven new cases plus the affected artifact, agent-loop, interaction and configured
+session suites pass 165 tests on each supported pair, in 38.5 seconds on current
+and 38.7 seconds on floor.
+
+- Current admission/regressions:
+  `/private/tmp/loopex-m7-t02-artifact-admission-regressions-current.log`, SHA-256
+  `57321d9da5d4a4a0fefc299669318e28c760fa0f37cd3643cc0e59b4a22afa80`.
+- Floor admission/regressions:
+  `/private/tmp/loopex-m7-t02-artifact-admission-regressions-floor.log`, SHA-256
+  `ba8fd9afb57b534732335a060ed3de2039b4f657a6901bd2cf4c0c08eb15a9eb`.
+- Initial five-case admission proof, 0.7 seconds:
+  `/private/tmp/loopex-m7-t02-artifact-admission-current.log`, SHA-256
+  `1fc7dfee0dfdeff15191a060cd1c7bb689614bd979307c830ee34ae0d7481747`.
 
 Runtime startup and reference registry loading refuse changed read versions,
 descriptions and budgets. Both pinned read generations coexist in the runtime
@@ -1517,7 +1556,8 @@ test stages three prompts across two runtimes with the exact M7 read definition;
 the second runtime has no registered read tool, while recovered genesis retains
 the original capability digest and staged definitions.
 
-The current Core suite passes 785 tests with its five existing long-duration
+For the generation-check change at `1c3670de5cd51057dde2be23c173a5a42ab26a1b`,
+the current Core suite passes 785 tests with its five existing long-duration
 exclusions in 158.4 seconds. The 86 affected Core tests pass on the floor pair
 in 3.8 seconds. Local-executor/coding-tool tests pass 148 cases on both pairs,
 in 114.5 seconds on current and 116.5 seconds on floor.
