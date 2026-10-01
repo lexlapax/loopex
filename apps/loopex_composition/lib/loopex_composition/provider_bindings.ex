@@ -6,6 +6,10 @@ defmodule LoopexComposition.ProviderBindings do
   deletion, custody or runtime startup. A valid reference says nothing about
   credential availability and grants no provider call.
 
+  Resolve a declared session against those routes and the adapter's verified
+  model mappings before any runtime starts. The returned core configuration
+  retains instructions and limits, never credential references.
+
   ## Technical depth
 
   ADR 0048 admits one to sixteen binary-key routes from the adapter's compiled
@@ -17,6 +21,8 @@ defmodule LoopexComposition.ProviderBindings do
   """
 
   alias Loopex.LLM.ReqLLM.InProcess.Guards
+  alias Loopex.LLM.ReqLLM.ModelCapabilities
+  alias Loopex.Runtime.SessionConfiguration
 
   @reserved ~w(PATH HOME TMPDIR TMP TEMP SHELL USER LOGNAME PWD OLDPWD SHLVL IFS CDPATH ENV BASH_ENV ZDOTDIR)
   @prefixes ~w(LD_ DYLD_ ERL_ ELIXIR_ MIX_ RELEASE_ BASH_ LOOPEX_)
@@ -36,6 +42,51 @@ defmodule LoopexComposition.ProviderBindings do
   """
   @spec valid_model?(term()) :: boolean()
   def valid_model?(model), do: match?({:ok, _}, Guards.model(model))
+
+  @doc """
+  ## Concept
+
+  Resolve a host's declared session configuration against its explicit provider
+  routes and the exact selected tool definitions, without acquiring credentials.
+
+  ## Technical depth
+
+  The declaration has SessionConfiguration.resolve/4's closed shape and already
+  captured instructions. Validate every binding before catalog access, resolve
+  the sole literal model alias, require its named route, and validate the exact
+  reasoning mapping against the selected reply allowance. Core then admits the
+  complete metadata, instruction/tool system cost and context/output ceilings.
+  Only the plain resolved configuration is returned; credential references and
+  route implementation state never enter it. History, genesis size and settled
+  configuration admission remain the owning session's obligations.
+  """
+  @spec resolve_configuration(term(), term(), term()) ::
+          {:ok, map()} | {:error, atom() | {atom(), binary()}}
+  def resolve_configuration(declaration, bindings, definitions)
+      when is_map(declaration) and not is_struct(declaration) do
+    with {:ok, _validated} <- validate(bindings),
+         {:ok, capabilities} <- ModelCapabilities.capture(declaration["model"]),
+         [provider, _] <- String.split(capabilities["model"], ":", parts: 2),
+         true <- Map.has_key?(bindings, provider),
+         {:ok, mapping} <-
+           ModelCapabilities.mapping(
+             capabilities["model"],
+             declaration["reasoning"],
+             declaration["max_tokens"]
+           ) do
+      SessionConfiguration.resolve(
+        Map.put(declaration, "model", capabilities["model"]),
+        capabilities,
+        mapping,
+        definitions
+      )
+    else
+      false -> {:error, :provider_route_unavailable}
+      {:error, _} = error -> error
+    end
+  end
+
+  def resolve_configuration(_, _, _), do: {:error, :invalid_session_configuration}
 
   @doc """
   ## Concept

@@ -23,6 +23,83 @@ defmodule LoopexCli.ConfigSelectionTest do
     }
   end
 
+  test "session preparation joins file and flag selection with one captured instruction block",
+       fixture do
+    profile =
+      Map.put(profile(), "providers", %{
+        "openai" => env("OLD_HOST_SLOT"),
+        "anthropic" => env("UNRESOLVED_HOST_SLOT")
+      })
+
+    base = Path.join(fixture.config_dir, "base.txt")
+    File.write!(base, "Captured base 猫\n")
+    profile = put_in(profile, ["session", "instructions"], %{"system_file" => "base.txt"})
+    loaded = load(fixture, profile)
+
+    flags =
+      parse(fixture, [
+        "--model=anthropic:claude-haiku-4-5",
+        "--reasoning=high",
+        "--max-tokens=8192",
+        "--tools=none"
+      ])
+
+    assert {:ok, selected} = ConfigSelection.compose(loaded, flags, fixture.invocation, nil)
+
+    assert {:ok, instructions} =
+             LoopexCli.SessionInstructions.capture(
+               selected.profile["paths"]["workspace"],
+               "none",
+               selected.profile["session"]["instructions"]
+             )
+
+    File.write!(base, "Changed after capture")
+    assert {:ok, prepared} = ConfigSelection.resolve_session(selected, instructions, [])
+    assert prepared.configuration["instructions"] == instructions
+    assert prepared.configuration["instructions"]["base"] == "Captured base 猫\n"
+    assert prepared.configuration["model"] == "anthropic:claude-haiku-4-5-20251001"
+    assert prepared.configuration["context_token_budget"] == 191_808
+
+    assert prepared.configuration["provider_mapping"]["thinking"] == %{
+             "mode" => "manual",
+             "budget_tokens" => 4096
+           }
+
+    assert prepared.origins["/session/model"] == "flag"
+    assert prepared.origins["/session/context_token_budget"] == "default"
+
+    assert prepared.origins["/session/instructions/system_file"] ==
+             "file#/session/instructions/system_file"
+
+    refute :erlang.term_to_binary(prepared.configuration) =~ "UNRESOLVED_HOST_SLOT"
+    refute File.exists?(prepared.profile["paths"]["state_root"])
+  end
+
+  test "session preparation preserves explicit budget origins and refuses an unbound override",
+       fixture do
+    loaded = load(fixture, profile())
+
+    flags =
+      parse(fixture, ["--context-token-budget=9000", "--system-class-tokens=900", "--tools=none"])
+
+    assert {:ok, selected} = ConfigSelection.compose(loaded, flags, fixture.invocation, nil)
+    instructions = Loopex.Runtime.Instructions.legacy()
+    assert {:ok, prepared} = ConfigSelection.resolve_session(selected, instructions, [])
+    assert prepared.configuration["context_token_budget"] == 9000
+    assert prepared.configuration["system_class_tokens"] == 900
+    assert prepared.origins["/session/context_token_budget"] == "flag"
+    assert prepared.origins["/session/system_class_tokens"] == "flag"
+    assert prepared.configuration["budget_origins"]["context_token_budget"] == "explicit"
+
+    assert {:error, {:missing_provider_binding, "/session/model"}} =
+             ConfigSelection.compose(
+               loaded,
+               parse(fixture, ["--model=anthropic:claude-haiku-4-5"]),
+               fixture.invocation,
+               nil
+             )
+  end
+
   test "file selection retains precise origins while literal defaults stay distinct", fixture do
     loaded = load(fixture, profile())
     parsed = parse(fixture, [])

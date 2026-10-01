@@ -85,11 +85,13 @@ Part of the [evidence index](README.md).
   bytes out of Finch metadata through one-use invocation-owned body streams.
 - Done: register all nine literal adapter cells after deterministic native
   conformance; share exact mapping resolution with transport validation.
+- Done: join new-session host selection to explicit provider routes, captured
+  instructions, exact mappings and whole-configuration admission.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
   the dependent refusal schema without the maintainer's decision.
-- Next: complete host resolution, maintenance
+- Next: complete whole-profile and startup integration, maintenance
   quiescence and checkpoint-aware configuration preflight; complete question
   projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
@@ -100,6 +102,29 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: ProviderBindings now resolves a closed initial declaration through
+  complete route validation, pinned capability capture, literal alias resolution,
+  exact reasoning/reply mapping and Core's whole-configuration validator.
+  ConfigSelection joins the file/flag selection to that boundary with the host's
+  already captured instruction block and complete selected definitions. Derived
+  ceilings acquire default origins; explicit origins remain unchanged. No
+  credential reference, path or host routing value enters the core configuration,
+  and neither stage acquires credentials or starts services. Tests cover every
+  registered cell, missing routes, malformed bindings, authored metadata,
+  manual/output/context limits, unknown windows, instruction/tool system cost,
+  literal alias resolution and a prompt file changed after capture. The initial
+  CLI fixture run passed 29/31: one fixture omitted its file model's route, and
+  another expected an unbound override to survive the existing earlier schema
+  guard. Corrected fixtures preserve that guard; production code was unchanged.
+  Current focused checks pass 11 composition cases in 5.9 seconds and 31 CLI
+  cases in 1.0 second. The floor passes the same 11 in 5.7 seconds and 31 in
+  0.9 seconds. Retained floor output:
+  `/private/tmp/loopex-m7-host-configuration-preparation-floor.log`, SHA-256
+  `4052203445e6a612fcd575e8a68b44e1efb26ddcf0c7f0c3e769180c66816785`.
+  This is initial session preparation. Complete maintenance/role preparation,
+  effective-value rendering, command entry, startup and configure/resume wiring
+  remain pending.
 
 - 2026-10-01: the full fast check passed on
   `14275a2949567b885f3a91b4a47d3d042dd3e376`: all 11 application suites,
@@ -945,6 +970,7 @@ Part of the [evidence index](README.md).
 - [x] Parse the complete chat/config-inspection flag grammar with duplicate/conflict refusal, bounded array overrides, exact numeric domains and shared registries; effective-profile and command-entry integration remains pending.
 - [ ] Implement file/flag precedence, validation and effective-value display.
 - [x] Compose new-session file/flag/LOOPEX_HOME precedence and harmless literal defaults with complete value origins and array replacement; capability/instruction admission and redacted effective display remain pending.
+- [x] Join selected new-session declarations, captured instructions and tool definitions to credential-free route/mapping resolution and whole-configuration admission, preserving effective budget origins.
 - [ ] Require explicit conversation bounds in the file, including when flags override them.
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
 - [ ] Allow maintenance settings to change new episodes while preserving already admitted episodes.
@@ -1177,7 +1203,7 @@ before a provider demonstration.
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
 | Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Pure shared reference/exclusion validation implemented; custody and startup/dispatch integration pending |
-| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths, trusted trace selectors, flag parser and new-session precedence/origins implemented; capability/instruction admission, command entry and redacted inspection pending |
+| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths, trusted trace selectors, flag parser, new-session precedence/origins and initial capability/instruction admission implemented; complete role/maintenance preparation, command entry and redacted inspection pending |
 | Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
 | Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |
 | Ephemeral entry points | ADRs 0042–0045/0048/0049 | Combined closed startup options; one-call responder consumed locally; joined termination | Ephemeral.Options/Preflight/Bootstrap/SessionOwner; facade | Pending |

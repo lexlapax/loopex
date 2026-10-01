@@ -2,6 +2,114 @@ defmodule LoopexComposition.ProviderBindingsTest do
   use ExUnit.Case, async: true
   alias LoopexComposition.ProviderBindings
 
+  test "configuration resolution joins admitted routes, exact cells and captured instructions" do
+    routes = %{"anthropic" => env("HOST_REFERENCE_ONLY_KEY")}
+
+    for {model, levels} <- [
+          {"anthropic:claude-haiku-4-5", ~w(default none low medium high)},
+          {"anthropic:claude-fable-5-1", ~w(default low medium high)}
+        ],
+        level <- levels do
+      declaration = declaration(model, level)
+
+      assert {:ok, configuration} =
+               ProviderBindings.resolve_configuration(declaration, routes, [])
+
+      exact = if model == "anthropic:claude-haiku-4-5", do: model <> "-20251001", else: model
+      assert configuration["model"] == exact
+      assert configuration["reasoning"] == level
+      assert configuration["instructions"] == declaration["instructions"]
+      assert configuration["max_tokens"] == 8192
+
+      assert configuration["context_token_budget"] ==
+               configuration["model_capabilities"]["context_window"] - 8192
+
+      refute :erlang.term_to_binary(configuration) =~ "HOST_REFERENCE_ONLY_KEY"
+      assert :ok == Loopex.Runtime.SessionConfiguration.validate(configuration, [])
+    end
+  end
+
+  test "missing routes, unverified modes and authored metadata refuse before startup" do
+    routes = %{"anthropic" => env("HOST_REFERENCE_ONLY_KEY")}
+    original = declaration("anthropic:claude-haiku-4-5", "high")
+
+    assert {:error, :provider_route_unavailable} =
+             ProviderBindings.resolve_configuration(original, %{"openai" => env("KEY")}, [])
+
+    assert {:error, {:invalid_credential_reference, _}} =
+             ProviderBindings.resolve_configuration(
+               original,
+               Map.put(routes, "openai", env("HOME")),
+               []
+             )
+
+    for changed <- [
+          Map.put(original, "max_tokens", 4096),
+          Map.put(original, "reasoning", "unsupported"),
+          %{original | "model" => "anthropic:claude-fable-5-1", "reasoning" => "none"}
+        ] do
+      assert {:error, :invalid_model_mapping} =
+               ProviderBindings.resolve_configuration(changed, routes, [])
+    end
+
+    for changed <- [
+          Map.put(original, "provider_mapping", %{}),
+          Map.put(original, "model_capabilities", %{}),
+          Map.put(original, "max_tokens", 64_001),
+          Map.put(original, "context_token_budget", 200_000)
+        ] do
+      assert {:error, :invalid_session_configuration} =
+               ProviderBindings.resolve_configuration(changed, routes, [])
+    end
+  end
+
+  test "unknown model limits and explicit ceilings keep their distinct origins" do
+    declared = declaration("ollama:m7-unknown-model", "default")
+    routes = %{"ollama" => %{"credential" => %{"none" => true}}}
+    assert {:ok, inferred} = ProviderBindings.resolve_configuration(declared, routes, [])
+    assert inferred["context_token_budget"] == 8192
+    assert inferred["model_capabilities"]["output_limit"] == nil
+    assert inferred["budget_origins"]["context_token_budget"] == "unknown_window"
+    assert inferred["provider_mapping"]["mapping_revision"] == "loopex.unregistered.default.v1"
+
+    assert {:ok, explicit} =
+             ProviderBindings.resolve_configuration(
+               Map.put(declared, "context_token_budget", 8192),
+               routes,
+               []
+             )
+
+    assert explicit["budget_origins"]["context_token_budget"] == "explicit"
+  end
+
+  test "whole configuration admission measures the selected tools with instructions" do
+    declaration = declaration("anthropic:claude-haiku-4-5", "default")
+    routes = %{"anthropic" => env("HOST_REFERENCE_ONLY_KEY")}
+    tool = LoopexProtocol.ToolDefinition.question_definition()
+    {:ok, text} = Loopex.Runtime.Instructions.render(declaration["instructions"])
+
+    system =
+      Loopex.Bounds.estimate(
+        LoopexProtocol.Canonical.encode(%{"role" => "system", "content" => text})
+      )
+
+    declaration = Map.put(declaration, "system_class_tokens", system + 1)
+    assert {:ok, _} = ProviderBindings.resolve_configuration(declaration, routes, [])
+
+    assert {:error, :invalid_session_configuration} =
+             ProviderBindings.resolve_configuration(declaration, routes, [tool])
+  end
+
+  defp declaration(model, level) do
+    %{
+      "model" => model,
+      "reasoning" => level,
+      "configuration_version" => 1,
+      "max_tokens" => 8192,
+      "instructions" => Loopex.Runtime.Instructions.legacy()
+    }
+  end
+
   test "complete explicit references retain routes and sorted launch exclusions" do
     bindings = %{
       "openai" => env("HOST_Z_KEY"),

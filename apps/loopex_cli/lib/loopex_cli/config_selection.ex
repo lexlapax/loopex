@@ -13,13 +13,15 @@ defmodule LoopexCli.ConfigSelection do
   the supplied invocation directory; file paths are already config-relative.
   Array overrides replace file arrays, and no-helpers only disables delegation.
   The result is host-private data, including credential references; a renderer
-  must redact those references. Model-window/reasoning conformance, prompt-file
-  capture and whole-request admission remain later preparation stages. Context
-  budgets are left unresolved when absent, and maintenance never inherits a model.
+  must redact those references. compose/4 leaves absent context budgets unresolved;
+  resolve_session/3 joins already captured instructions and selected definitions
+  to the admitted routes and model mappings. Whole-request admission remains the
+  session owner's obligation, and maintenance never inherits a model.
   Resume uses committed truth through a separate preparation path.
   """
 
   alias LoopexCli.ConfigSchema
+  alias LoopexComposition.ProviderBindings
 
   @fields %{
     "workspace" => ~w(paths workspace),
@@ -87,6 +89,53 @@ defmodule LoopexCli.ConfigSelection do
     do: {:error, {:committed_profile_required, "/flags/resume"}}
 
   def compose(_, _, _, _), do: {:error, {:invalid_configuration_selection, ""}}
+
+  @doc """
+  ## Concept
+
+  Prepare the selected new session after the host captures its instructions and
+  complete tool generation. Retain the origin of every effective setting.
+
+  ## Technical depth
+
+  This stage consumes compose/4's new-session selection, validates the profile,
+  and resolves its explicit provider route, literal model, reasoning and bounds
+  through composition. Only configuration fields enter the core declaration;
+  file paths, credential references and host settings stay outside it. Derived
+  input and system ceilings have default origin unless explicitly selected.
+  Captured instructions include any admitted role catalog facts already, and
+  definitions include all selected host tools. Maintenance and child profiles
+  are separate preparations; this function grants no startup or dispatch.
+  """
+  @spec resolve_session(term(), term(), term()) :: {:ok, map()} | {:error, term()}
+  def resolve_session(
+        %{profile: profile, origins: origins} = selection,
+        instructions,
+        definitions
+      )
+      when is_map(origins) do
+    with {:ok, ^profile} <- ConfigSchema.validate(profile),
+         session when is_map(session) <- profile["session"],
+         declaration <-
+           session
+           |> Map.take(~w(model reasoning max_tokens context_token_budget system_class_tokens))
+           |> Map.put("configuration_version", 1)
+           |> Map.put("instructions", instructions),
+         {:ok, configuration} <-
+           ProviderBindings.resolve_configuration(declaration, profile["providers"], definitions) do
+      origins =
+        origins
+        |> Map.put_new("/session/context_token_budget", "default")
+        |> Map.put_new("/session/system_class_tokens", "default")
+
+      {:ok, selection |> Map.put(:configuration, configuration) |> Map.put(:origins, origins)}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, {:invalid_configuration_selection, "/session"}}
+    end
+  end
+
+  def resolve_session(_, _, _), do: {:error, {:invalid_configuration_selection, ""}}
 
   defp selection(profile) do
     %{profile: profile, origins: origins(profile, "", fn pointer -> "file#" <> pointer end)}
