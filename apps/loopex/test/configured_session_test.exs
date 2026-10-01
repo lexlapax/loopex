@@ -700,9 +700,120 @@ defmodule Loopex.ConfiguredSessionTest do
                }
              )
 
+    assert {:accepted, "next"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "next", content: "continue"})
+
+    terminal = Enum.find(finish(attachment), &(&1.kind == "run.finished"))
+    assert terminal["outcome"] == "failed"
+
+    assert terminal["failure"] == %{
+             "version" => 2,
+             "category" => "context_preparation_failed",
+             "retryable" => false,
+             "measurement_scope" => nil,
+             "cause" => "canonical_history_rendering_unsupported"
+           }
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    records = Fixture.records(fixture, session)
+    events = Fixture.events(fixture, session)
+    assert {:ok, _} = SessionState.recover(session, records, events)
+    refusal = Enum.find(records, &(&1.payload.kind == "context_admission_refused_v2"))
+    assert refusal.payload["projection_state"] == "unavailable"
+
+    refute Enum.any?(records, fn row ->
+             row.payload["run_id"] == refusal.payload["run_id"] and
+               row.payload.kind in ["model_request_committed_v2", "model_attempt_opened_v1"]
+           end)
+
+    for field <- ~w(system_message_count session_message_count steer_message_count
+                    tool_definition_count provider_estimated_tokens record_byte_cost
+                    ordered_descriptor_digest measurement_scope) do
+      assert is_nil(refusal.payload[field])
+
+      altered =
+        Enum.map(records, fn row ->
+          if row == refusal, do: put_in(row, [:payload, field], 0), else: row
+        end)
+
+      assert SessionState.recover(session, altered, events) == {:error, :invalid_context_refusal}
+    end
+
+    for {path, value} <- [
+          {["failure", "cause"], "artifact_preparation_failed"},
+          {["failure", "measurement_scope"], "ordinary"},
+          {["failure", "observed"], 0},
+          {["failure", "extra"], true},
+          {["configuration_version"], 2},
+          {["projection_state"], "measured"},
+          {["project_disposition"], "staged_empty"}
+        ] do
+      altered =
+        Enum.map(records, fn row ->
+          if row == refusal, do: %{row | payload: put_in(row.payload, path, value)}, else: row
+        end)
+
+      assert SessionState.recover(session, altered, events) == {:error, :invalid_context_refusal}
+    end
+
+    refusal_index = Enum.find_index(records, &(&1 == refusal))
+    assert Enum.at(records, refusal_index + 1).payload.kind == "run_terminal_committed"
+
+    assert {:error, :incomplete_context_refusal_pair} =
+             SessionState.recover(session, Enum.take(records, refusal_index + 1), [])
+  end
+
+  test "a captured compatible renderer keeps cancelled terminal results in the next run" do
+    fixture =
+      start(
+        tools: [ToolDefinition.question_definition()],
+        script: [
+          %{
+            text: "question",
+            calls: [%{id: "ask", name: "ask", arguments: %{"question" => "Explain"}}]
+          },
+          %{text: "continued", calls: []}
+        ]
+      )
+
+    compatible =
+      configuration()
+      |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
+      |> put_in(["provider_mapping", "mapping_revision"], "fixture.terminal-history.v1")
+      |> put_in(["provider_mapping", "canonical_terminal_tool_history"], true)
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions, compatible)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+    await_question(attachment)
+    assert {:accepted, "abort"} = Loopex.command(attachment, %{type: :abort, command_id: "abort"})
+    assert Enum.find(finish(attachment), &(&1.kind == "run.finished"))["outcome"] == "cancelled"
     prompt(attachment, "next", "continue")
+
     [_first, second] = AgentLoopTestModel.dispatched(fixture.model)
     assert Enum.find(second.messages, &(&1["role"] == "tool"))["outcome"] == "cancelled"
+    records = Fixture.records(fixture, session)
+
+    assert {:ok, recovered} =
+             SessionState.recover(session, records, Fixture.events(fixture, session))
+
+    refute Enum.any?(records, &(&1.payload.kind == "context_admission_refused_v2"))
+
+    assert SessionState.propose_context_preparation_failure(
+             recovered,
+             List.last(recovered.run_order),
+             :canonical_history_rendering_unsupported
+           ) == {:error, :invalid_context_refusal}
   end
 
   test "invalid question arguments fail before policy or executor admission" do

@@ -2883,6 +2883,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
          staging = Map.put(staging, :deadline, deadline),
          {:ok, max_tokens} <- declared_max_tokens(state, run_id),
          staging = Map.put(staging, :max_tokens, max_tokens),
+         :ok <- SessionState.preflight_run_history(state.durable, run_id),
          {:ok, proposal} <- stage_candidate(state, staging),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
@@ -2896,9 +2897,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # nothing. The run is over: a retained terminal is final and the same run
       # never re-enters staging, so changing context, configuration, or policy
       # requires a newly admitted run.
-      {:refused, refusal} -> commit_context_refusal(state, run_id, refusal)
-      {:deadline_unrepresentable, category} -> commit_deadline_failure(state, run_id, category)
-      {:error, reason} -> {:stop, {:model_request_failed, reason}, state}
+      {:refused, refusal} ->
+        commit_context_refusal(state, run_id, refusal)
+
+      {:deadline_unrepresentable, category} ->
+        commit_deadline_failure(state, run_id, category)
+
+      {:error, cause}
+      when cause in [:canonical_history_rendering_unsupported, :context_projection_invalid] ->
+        commit_context_preparation_failure(state, run_id, cause)
+
+      {:error, reason} ->
+        {:stop, {:model_request_failed, reason}, state}
     end
   end
 
@@ -3135,6 +3145,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
     else
       {:error, reason} -> {:stop, {:deadline_staging_failed, reason}, state}
+    end
+  end
+
+  defp commit_context_preparation_failure(state, run_id, cause) do
+    state = disarm_deadline(state, run_id)
+
+    with {:ok, proposal} <-
+           SessionState.propose_context_preparation_failure(state.durable, run_id, cause),
+         {:ok, next} <- commit_internal(state, proposal) do
+      send(self(), :advance_work)
+      {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
+    else
+      {:error, reason} -> {:stop, {:context_preparation_failed, reason}, state}
     end
   end
 

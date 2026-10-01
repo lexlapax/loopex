@@ -6710,6 +6710,88 @@ defmodule Loopex.Runtime.SessionState do
     )
   end
 
+  @doc """
+  ## Concept
+
+  Check whether this run's captured renderer supports its retained terminal
+  history before opening a provider attempt.
+
+  ## Technical depth
+
+  Uses complete lineage through the run and excludes the active run from the
+  terminal-history capability requirement. Legacy runs retain their historical
+  admission path. Configured runs use only captured mapping facts and perform
+  no catalog lookup, compaction or dispatch.
+  """
+  @spec preflight_run_history(t(), binary()) :: :ok | {:error, atom()}
+  def preflight_run_history(%__MODULE__{} = state, run_id) do
+    case run_configuration(state, run_id) do
+      nil ->
+        :ok
+
+      configuration ->
+        SessionConfiguration.preflight_history(
+          configuration,
+          lineage_elements(state, run_id),
+          Enum.reject(state.run_order, &(&1 == run_id))
+        )
+    end
+  end
+
+  @doc false
+  @spec propose_context_preparation_failure(t(), binary(), atom()) ::
+          {:ok, proposal()} | {:error, term()}
+  # Concept: a condition found before request construction ends the run without
+  # inventing a budget observation.
+  # Technical depth: the unavailable v2 projection retains captured limits and
+  # configuration, null measurements and the exact cause. The refusal and failed
+  # terminal commit together; replay independently derives the same condition.
+  def propose_context_preparation_failure(%__MODULE__{} = state, run_id, cause)
+      when cause in [:canonical_history_rendering_unsupported, :context_projection_invalid] do
+    case {run_configuration(state, run_id), Map.get(state.pending_work, run_id)} do
+      {%{} = configuration, %{stage: stage, turn_number: _} = work}
+      when stage in ["model_pending", "turn_settled"] ->
+        turn = next_turn_number(work)
+
+        refusal = %{
+          "run_id" => run_id,
+          "turn_id" => stable_id("turn", run_id, turn),
+          "failure" => %{
+            "version" => 2,
+            "category" => "context_preparation_failed",
+            "retryable" => false,
+            "measurement_scope" => nil,
+            "cause" => Atom.to_string(cause)
+          },
+          "token_estimator" => "loopex.context_bytes.v2",
+          "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
+          "project_disposition" => "not_evaluated_required_failure",
+          "system_message_count" => nil,
+          "session_message_count" => nil,
+          "steer_message_count" => nil,
+          "tool_definition_count" => nil,
+          "provider_estimated_tokens" => nil,
+          "context_token_budget" => configuration["context_token_budget"],
+          "record_byte_cost" => nil,
+          "context_record_byte_ceiling" => Store.max_item_bytes(),
+          "ordered_descriptor_digest" => nil,
+          "configuration_version" => configuration["configuration_version"],
+          "episode_id" => nil,
+          "targets" => nil,
+          "projection_state" => "unavailable",
+          "measurement_scope" => nil,
+          :kind => "context_admission_refused_v2"
+        }
+
+        propose_context_refusal(state, run_id, refusal)
+
+      _ ->
+        {:error, :invalid_context_refusal}
+    end
+  end
+
+  def propose_context_preparation_failure(_, _, _), do: {:error, :invalid_context_refusal}
+
   # Concept: the four fields an operator can act on, plus the one fact that
   # makes the ending final.
   #
@@ -6730,6 +6812,51 @@ defmodule Loopex.Runtime.SessionState do
       "observed" => Map.fetch!(refusal, "observed"),
       "limit" => Map.fetch!(refusal, "limit")
     }
+  end
+
+  defp validate_context_refusal(
+         state,
+         %{
+           "failure" => %{"category" => "context_preparation_failed"} = failure,
+           :kind => "context_admission_refused_v2"
+         } = refusal
+       ) do
+    run_id = refusal["run_id"]
+    configuration = run_configuration(state, run_id)
+
+    with true <- Enum.sort(Map.keys(refusal)) == @context_refusal_v2_keys,
+         true <-
+           Enum.sort(Map.keys(failure)) ==
+             Enum.sort(~w(version category retryable measurement_scope cause)),
+         true <- failure["version"] == 2 and failure["retryable"] == false,
+         true <- is_nil(failure["measurement_scope"]),
+         true <- run_id == state.active_run_id,
+         %{stage: stage} = work <- Map.get(state.pending_work, run_id),
+         true <- stage in ["model_pending", "turn_settled"],
+         true <- refusal["turn_id"] == stable_id("turn", run_id, next_turn_number(work)),
+         true <- is_map(configuration),
+         true <- refusal["configuration_version"] == configuration["configuration_version"],
+         true <- refusal["context_token_budget"] == configuration["context_token_budget"],
+         true <- refusal["context_record_byte_ceiling"] == Store.max_item_bytes(),
+         true <- refusal["token_estimator"] == "loopex.context_bytes.v2",
+         true <-
+           refusal["descriptor_canonicalization_version"] == @descriptor_canonicalization_version,
+         true <- refusal["project_disposition"] == "not_evaluated_required_failure",
+         true <- refusal["projection_state"] == "unavailable",
+         true <-
+           Enum.all?(
+             ~w(episode_id targets measurement_scope system_message_count
+                   session_message_count steer_message_count tool_definition_count
+                   provider_estimated_tokens record_byte_cost ordered_descriptor_digest),
+             &is_nil(refusal[&1])
+           ),
+         {:error, cause} <- preflight_run_history(state, run_id),
+         true <- cause in [:canonical_history_rendering_unsupported, :context_projection_invalid],
+         true <- failure["cause"] == Atom.to_string(cause) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_context_refusal}
+    end
   end
 
   defp validate_context_refusal(state, %{kind: "context_admission_refused_v2"} = refusal) do

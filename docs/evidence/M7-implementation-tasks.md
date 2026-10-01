@@ -55,6 +55,8 @@ Part of the [evidence index](README.md).
   one instruction copy, unchanged earlier run captures and an allowlisted event.
 - Done: terminal-tool-history capability preflight validates complete lineage,
   treats empty assistant completions as absent and gates configuration replay.
+- Done: configured ordinary staging checks terminal-history capability before
+  request intent, committing an unavailable v2 preparation refusal and terminal.
 - Next: join configuration preparation to settled owner admission, retained-history
   preflight and atomic commit; complete question projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
@@ -66,6 +68,21 @@ Part of the [evidence index](README.md).
 
 ## Development observations
 
+- 2026-10-01: configured ordinary staging now checks captured terminal-history
+  capability before request construction or provider intent. Unsupported history
+  retains an atomic unavailable v2 preparation-refusal/failed-terminal pair with
+  cause canonical_history_rendering_unsupported, captured configuration/budgets,
+  null scope and null observations. Replay derives the cause from the same retained
+  lineage and refuses fabricated numbers, changed causes/configuration, added
+  failure members and a missing paired terminal. A compatible fixture mapping
+  continues with cancelled results intact. Context, input, interaction and
+  configuration regressions pass 101 tests in 18.6 seconds. Other nonnumeric
+  preparation causes, measured preparation failures, maintenance/headroom variants,
+  real adapter conformance and coordinated wire projections remain pending.
+  Final configured-runtime assertions explicitly prove no request or provider
+  attempt opens for the refused run: 15 tests pass in 1.7 seconds. Compilation
+  is warning-free; documentation ordering covers 978 entries. OwnerGroup
+  shutdown_error/noproc diagnostics remain unresolved under T16.
 - 2026-10-01: terminal-tool-history configuration preflight passes 45 focused
   conversation/configuration/configured-runtime tests in 1.6 seconds. A later
   run's completion cannot complete an earlier terminal tool turn; empty assistant
@@ -530,6 +547,7 @@ Part of the [evidence index](README.md).
 - [x] Prepare closed whole-candidate mutable updates with bounded inputs, monotonic versions and retained explicit/derived budget origins.
 - [x] Prepare atomic configuration admission/replay with exact command identity, single-copy instructions, retained earlier run captures and public event allowlists.
 - [x] Gate prepared configuration admission/replay on captured terminal-tool-history capability, preserving empty-completion and cross-run semantics.
+- [x] Gate ordinary configured provider intent on terminal-history capability and retain the unavailable v2 preparation-failure pair without fabricated observations.
 - [ ] Join prepared candidates to settled configure admission, exact history preflight, atomic commit and replay.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
@@ -685,7 +703,7 @@ before a provider demonstration.
 | Artifact read capability | ADR 0041 | loopex.artifact_read.v1 binding from literal tool-generation table; resolved executor arguments | ToolDefinition; SessionGenesis; local read tool; SessionCoordinator | Pending |
 | Instruction envelope | ADR 0042 | Closed version/base/environment/appendix map, exact rendered bytes/digest | SessionGenesis; configuration reducer; host composition | Pending |
 | Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Nil-continuation and owning-instruction bindings implemented; maintenance/continuation bindings pending |
-| Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 implemented; remaining variants/projections pending |
+| Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 and unavailable terminal-history preparation failures implemented; other causes, maintenance/headroom and wire projections pending |
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure whole-candidate preparation and atomic admission/replay implemented; owner history preflight, host resolution, maintenance quiescence and live configure pending |
