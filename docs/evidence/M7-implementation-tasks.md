@@ -23,9 +23,10 @@ Part of the [evidence index](README.md).
   configuration, exact tools, artifact-read binding and policy-defer mode.
 - Done: exact-genesis live creation and configuration-bound runtime staging;
   two prompts plus restart retain captured instructions, settings and tools.
-- Running: integration verification of the captured-configuration runtime path.
-  Reference-host chat/configuration composition and non-nil continuation costs
-  remain in T03/T04/T06/T08.
+- Done: captured-configuration runtime candidate fast check; all 11 suites pass
+  2,679 tests at `d46c8d10881e6ba811b6c1d5204c9545aa785d37`.
+- Next: reference-host instruction composition, then chat/configuration
+  composition and non-nil continuation costs in T03/T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
 
@@ -145,6 +146,16 @@ Part of the [evidence index](README.md).
   documentation ordering passes with 941 covered entries. Full fast integration
   verification is next; reference-host composition, public schemas, provider
   conformance and the closure matrix remain pending.
+
+- 2026-10-01: candidate `d46c8d10881e6ba811b6c1d5204c9545aa785d37` fast
+  check passed in 852 seconds: 11 application suites, 2,679 passed tests and
+  33 standard exclusions. Full output:
+  `/private/tmp/loopex-m7-d46c8d10-fast-check.log`,
+  `sha256:36f2a0b3fd02dd092f36a77b44695158066e69aa1ec528032385cc40b35cfc45`.
+  Exact identity is retained separately in
+  `/private/tmp/loopex-m7-d46c8d10-fast-check.sha`. This verifies the current
+  toolchain development candidate; provider conformance, floor-toolchain checks,
+  independent-client proof and the M7 closure matrix remain pending.
 
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
