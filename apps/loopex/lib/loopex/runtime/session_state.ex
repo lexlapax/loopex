@@ -91,6 +91,7 @@ defmodule Loopex.Runtime.SessionState do
   alias Loopex.ResourcePack
   alias Loopex.Runtime.ContextAdmission
   alias Loopex.Runtime.ProviderAttempt
+  alias Loopex.Runtime.SessionGenesis
   alias Loopex.Store
   alias LoopexProtocol.Canonical
   alias LoopexProtocol.ToolDefinition
@@ -1993,9 +1994,13 @@ defmodule Loopex.Runtime.SessionState do
            payload: %{kind: "session_genesis_v2"} = payload
          }
        ) do
-    case genesis_cleanup_grace(payload) do
-      {:ok, grace} -> {:ok, %{state | journal_version: 1, cleanup_grace_ms: grace}}
-      :error -> {:error, :invalid_session_genesis}
+    case SessionGenesis.normalize(payload) do
+      {:ok, genesis} ->
+        grace = genesis["runtime_configuration"]["cleanup_grace_ms"]
+        {:ok, %{state | journal_version: 1, cleanup_grace_ms: grace}}
+
+      {:error, _reason} ->
+        {:error, :invalid_session_genesis}
     end
   end
 
@@ -2129,22 +2134,6 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp replay_admitted_record(_state, _record), do: {:error, :invalid_private_history}
-
-  defp genesis_cleanup_grace(
-         %{"options" => options, "runtime_configuration" => configuration} = payload
-       )
-       when is_map(options) and is_map(configuration) do
-    with 3 <- map_size(payload),
-         1 <- map_size(configuration),
-         {:ok, grace} <- Map.fetch(configuration, "cleanup_grace_ms"),
-         true <- is_integer(grace) and grace >= 1 and grace <= @max_cleanup_grace_ms do
-      {:ok, grace}
-    else
-      _other -> :error
-    end
-  end
-
-  defp genesis_cleanup_grace(_payload), do: :error
 
   # Concept: nothing may come between a refusal and the terminal that completes
   # it.

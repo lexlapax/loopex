@@ -32,6 +32,7 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Runtime.OwnerGroup
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionCoordinator
+  alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.StreamRelay
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Owner
@@ -2409,9 +2410,27 @@ defmodule Loopex.Runtime.Control do
       kind: "session_genesis_v2"
     }
 
-    if canonical_item_bytes(genesis) <= @genesis_item_bytes,
-      do: {:ok, genesis},
-      else: {:error, :session_configuration_too_large}
+    if canonical_item_bytes(genesis) <= @genesis_item_bytes do
+      case SessionGenesis.resolve(session_options, %{
+             genesis_version: "session_genesis_v2",
+             runtime_configuration: %{"cleanup_grace_ms" => cleanup_grace_ms}
+           }) do
+        {:error, :invalid_session_genesis} ->
+          # Concept: malformed legacy options keep their existing refusal.
+          # Technical depth: the old v2 path reported the pure Store traversal's
+          # invalid-item/structure result. Its closed genesis shape and grace
+          # were already checked here, so only options can cause this branch.
+          case Store.normalize_and_measure_item(:record, genesis) do
+            {:error, reason} -> {:error, reason}
+            _invalid -> {:error, :invalid_session_creation}
+          end
+
+        result ->
+          result
+      end
+    else
+      {:error, :session_configuration_too_large}
+    end
   end
 
   defp session_genesis(_session_options, _cleanup_grace_ms),

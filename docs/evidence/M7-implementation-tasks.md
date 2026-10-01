@@ -75,6 +75,17 @@ Part of the [evidence index](README.md).
   `/private/tmp/loopex-m7-2d804649-fast-check.sha`. This is current-toolchain
   development integration evidence; the M7 closure matrix remains pending.
 
+- 2026-10-01: shared `SessionGenesis.resolve/2` and `normalize/1` now own
+  v2 creation/replay validation. They retain normalized legacy transaction bytes,
+  require captured cleanup and closed inputs, and refuse non-plain data and
+  normalized items above 65,536 bytes. Creation preserves its legacy malformed
+  option and structural refusal taxonomy. Focused genesis/lifecycle/cancellation/
+  timer tests pass 37 cases (31.6 seconds; one standard long-bound exclusion);
+  runtime/detailed-result/fault/conversation tests pass 119 cases (24.8 seconds),
+  and ephemeral API tests pass 15 cases (7.5 seconds). Compiled documentation
+  ordering passes with 925 covered entries. The coordinated v3 decoder/writer,
+  configuration and exact-genesis live facade remain unchecked.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -114,6 +125,8 @@ Part of the [evidence index](README.md).
 - [ ] Prove instructions cannot widen policy or helper authority.
 ## T04 — Implement configuration, genesis and provider routing
 - [ ] Implement the shared pure genesis resolver and validator.
+- [x] Share the v2 resolver/decoder between creation and replay; pin unchanged transaction bytes and exact normalized byte boundaries.
+- [ ] Extend that same resolver/decoder with v3 configuration, immutable tool selection and literal artifact-read derivation.
 - [ ] Support exact-genesis creation, finding duplicates before expanding changed defaults.
 - [ ] Implement the closed configuration-file schema and command-line grammar.
 - [ ] Implement file/flag precedence, validation and effective-value display.
