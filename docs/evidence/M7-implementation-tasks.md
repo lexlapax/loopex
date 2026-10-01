@@ -72,6 +72,8 @@ Part of the [evidence index](README.md).
   and independently replayed aggregate-overflow preparation failures.
 - Done: bounded native Anthropic event assembly and pinned SSE parsing/flush
   checks preserve signatures, block order and final usage with permanent failure.
+- Done: captured-cell native request rendering, exact tool/limit preservation
+  and final Finch request sealing against the pinned dependency's mutation hooks.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -88,6 +90,26 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: native request preparation now validates the nine literal captured
+  cells, strict manual-budget/output-limit relation and unchanged tool definitions
+  before rendering controls and expanded native arrays. Known call names resolve
+  through their complete generation; retained arrays are checked against canonical
+  text and calls, and tool results use retained native IDs. Unregistered default
+  requests retain dependency rendering and have no summary disclosure eligibility.
+  The pinned Anthropic builder preserves these controls and ceilings for all nine
+  cells and a continued tool exchange. A final invocation hook compares the whole
+  Finch request after the global hook, refusing body, route, header or transport
+  mutations with a fixed error without logging request material. Only the admitted
+  tool beta is allowed, and only when tools are present.
+  Focused request/stream/capture checks pass 25 tests in 1.7 seconds on each
+  supported toolchain. Retained outputs:
+  - `/private/tmp/loopex-m7-native-request-current.log`, SHA-256
+    `4f68fef72fb21c18f4312f30ff387343c371e2823133924c883388e4ce87c089`.
+  - `/private/tmp/loopex-m7-native-request-floor.log`, SHA-256
+    `86f58a470ca55dce97e34802f416a7fc96e84d87bd2a740df0e2c85b3aba4ad8`.
+  This prepares the boundary but does not yet join the live transport, buffered
+  capture, fatal wakeup or public summary path, or register thinking support.
 
 - 2026-10-01: added the private native stream reducer used to prepare the
   invocation bridge. It admits exact message/block ordering, literal response
@@ -787,6 +809,7 @@ Part of the [evidence index](README.md).
 - [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
 - [ ] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
 - [x] Implement bounded native event assembly and pinned SSE parse/flush validation with permanent failure, exact content reconstruction and cumulative usage evidence.
+- [x] Render captured native requests and seal the final Finch request; prove exact tools, controls and ceilings against the pinned builder and hook order.
 - [ ] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
 - [ ] Test the bridge against a local HTTP server before integrating live-provider proofs.
 - [ ] Test model switching, crashes, cancellation, malformed replies, overflow, usage accounting and privacy.
