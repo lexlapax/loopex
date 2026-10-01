@@ -1653,6 +1653,48 @@ defmodule Loopex.Runtime.SessionState do
     internal_proposal(state, stable_id("interaction-answer", interaction_id, command_id), record)
   end
 
+  # Concept: retain an allowed model question before publishing its identity.
+  # Technical depth: request and generation are rederived from the pending
+  # committed call; creation and expiry are captured once before Store admission.
+  @doc false
+  def propose_model_question(state, run_id, created_at) do
+    with %{stage: "effect_pending", pending_calls: [call | _]} = work <-
+           Map.get(state.pending_work, run_id),
+         {:ok, request} <- Interaction.model_request(call.arguments) do
+      id = model_question_id(state, work, call)
+
+      record = %{
+        "producer" => "model_tool",
+        "interaction_id" => id,
+        "run_id" => run_id,
+        "turn" => work.turn_number,
+        "tool_call_id" => call.tool_call_id,
+        "argument_digest" => Interaction.digest(call.arguments),
+        "interaction_request" => Interaction.to_record(request),
+        "interaction_request_digest" => Interaction.digest(request),
+        "created_at" => created_at,
+        "expires_at" =>
+          Interaction.effective_expiry(created_at, 600_000, state.deadlines[run_id]),
+        kind: "model_question_requested_v1"
+      }
+
+      internal_proposal(state, id, record)
+    else
+      _ -> {:error, :invalid_model_question_transition}
+    end
+  end
+
+  @doc false
+  def propose_model_question_expiry(state, interaction_id, settled_at) do
+    internal_proposal(state, interaction_id <> ".expired", %{
+      "interaction_id" => interaction_id,
+      "disposition" => "expired",
+      "answer" => nil,
+      "settled_at" => settled_at,
+      kind: "model_question_settled_v1"
+    })
+  end
+
   @doc false
   @spec propose_interaction_resolution(t(), binary(), binary(), binary() | nil) ::
           {:ok, proposal()} | {:error, term()}
@@ -1868,7 +1910,7 @@ defmodule Loopex.Runtime.SessionState do
       kind: "command_admitted"
     }
 
-    {_patch, queue_events} = cancel_queues(state, run_id)
+    {_patch, queue_events} = cancel_queues(state, run_id, record)
 
     build_proposal(
       state,
@@ -1890,6 +1932,9 @@ defmodule Loopex.Runtime.SessionState do
   # them is evidence a host decided.
   defp propose_new(%__MODULE__{} = state, %{type: :interaction_answer} = command, digest) do
     case answerable(state, command) do
+      {:ok, %{producer: "model_tool"} = interaction} ->
+        model_question_response_proposal(state, command, digest, interaction)
+
       {:ok, interaction} ->
         record = %{
           "command_id" => command.command_id,
@@ -1952,7 +1997,19 @@ defmodule Loopex.Runtime.SessionState do
           state.open_interaction != interaction.interaction_id ->
             {:error, :interaction_resolved}
 
-          not Interaction.offered?(interaction.request, command.choice_id) ->
+          Map.get(interaction, :producer) == "model_tool" ->
+            at = Map.get(command.resolved_bounds, :admitted_at)
+
+            if is_integer(at) and at >= interaction.created_at and at < interaction.expires_at do
+              case Interaction.model_answer(interaction.request, command_answer(command)) do
+                {:ok, _} -> {:ok, interaction}
+                _ -> {:error, :invalid_interaction_answer}
+              end
+            else
+              {:error, :interaction_resolved}
+            end
+
+          not Interaction.offered?(interaction.request, Map.get(command, :choice_id)) ->
             {:error, :invalid_interaction_answer}
 
           true ->
@@ -1961,6 +2018,40 @@ defmodule Loopex.Runtime.SessionState do
 
       _resolved ->
         {:error, :interaction_resolved}
+    end
+  end
+
+  defp command_answer(%{choice_id: id}), do: %{"choice_id" => id}
+  defp command_answer(%{answer: answer}), do: answer
+
+  defp model_question_response_proposal(state, command, digest, interaction) do
+    answer = command_answer(command)
+    disposition = if answer == %{"disposition" => "declined"}, do: "declined", else: "answered"
+
+    record = %{
+      "command_type" => "interaction_answer",
+      "admission" => "accepted",
+      "command_id" => command.command_id,
+      "command_digest" => digest,
+      "interaction_id" => interaction.interaction_id,
+      "answer" => answer,
+      "disposition" => disposition,
+      "responded_at" => command.resolved_bounds.admitted_at,
+      kind: "model_question_response_admitted_v1"
+    }
+
+    with {:ok, next} <- apply_command_record(state, record) do
+      events = Enum.drop(next.expected_events, length(state.expected_events))
+
+      admitted_proposal(
+        state,
+        command,
+        digest,
+        "interaction_answer",
+        record,
+        events,
+        {:accepted, command.command_id}
+      )
     end
   end
 
@@ -2176,6 +2267,7 @@ defmodule Loopex.Runtime.SessionState do
               "command_admitted",
               "prompt_admitted_v2",
               "prompt_admitted_v3",
+              "model_question_response_admitted_v1",
               "command_admission_refused_v1"
             ] do
     # Technical depth: a pending refusal marker admits exactly one next row, and
@@ -2224,7 +2316,9 @@ defmodule Loopex.Runtime.SessionState do
               "tool_result_committed",
               "interaction_requested_v1",
               "interaction_answer_admitted_v1",
-              "interaction_resolved_v1"
+              "interaction_resolved_v1",
+              "model_question_requested_v1",
+              "model_question_settled_v1"
             ] do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
          incarnation == state.owner_incarnation_id and is_binary(incarnation) and
@@ -2299,6 +2393,9 @@ defmodule Loopex.Runtime.SessionState do
   defp admissible_command_kind?("command_admitted", record),
     do: not (record["command_type"] == "prompt" and record["admission"] == "accepted")
 
+  defp admissible_command_kind?("model_question_response_admitted_v1", record),
+    do: record["command_type"] == "interaction_answer" and record["admission"] == "accepted"
+
   defp admissible_command_kind?("prompt_admitted_v2", record),
     do: record["command_type"] == "prompt" and record["admission"] == "accepted"
 
@@ -2319,7 +2416,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp valid_refused_candidate?("command_record_bytes", candidate),
-    do: candidate in ~w(prompt_record steer_record follow_up_record)
+    do: candidate in ~w(prompt_record steer_record follow_up_record interaction_answer_record)
 
   defp valid_refused_candidate?("command_event_bytes", candidate),
     do: candidate == "follow_up_user_message_event"
@@ -2423,11 +2520,34 @@ defmodule Loopex.Runtime.SessionState do
   # transition, so there is no moment in which an operator was told their answer
   # was accepted while the question still reads as unanswered. The status means
   # policy resolution is owed and nothing more.
+  defp command_effect(
+         state,
+         %{kind: "model_question_response_admitted_v1"} = record,
+         "interaction_answer",
+         "accepted",
+         command_id
+       ) do
+    with true <- map_size(record) == 9 and record["disposition"] in ["answered", "declined"],
+         :ok <- model_question_command_binding(record),
+         {:ok, next, events} <- settle_model_question(state, record) do
+      {:ok, {:accepted, command_id}, next.active_run_id, next.pending_work,
+       state.expected_events ++ events,
+       %{
+         interactions: next.interactions,
+         open_interaction: next.open_interaction,
+         conversation: next.conversation
+       }}
+    else
+      _ -> {:error, :invalid_model_question_transition}
+    end
+  end
+
   defp command_effect(state, record, "interaction_answer", "accepted", command_id) do
     with {:ok, interaction_id} <- record_binary(record, "interaction_id"),
          {:ok, choice_id} <- record_binary(record, "choice_id"),
          %{status: "pending"} = interaction <- Map.get(state.interactions, interaction_id),
          true <- state.open_interaction == interaction_id,
+         true <- Map.get(interaction, :producer) != "model_tool",
          true <- Interaction.offered?(interaction.request, choice_id) do
       answered = %{interaction | status: "answered", choice_id: choice_id}
 
@@ -2517,7 +2637,7 @@ defmodule Loopex.Runtime.SessionState do
       # coordinator stops scheduling for a run that carries it, which is ADR
       # 0009's second step, and a recovering owner reads it to know an abort was
       # admitted whose outcome nobody wrote down.
-      {patch, queue_events} = cancel_queues(state, active_run_id)
+      {patch, queue_events} = cancel_queues(state, active_run_id, record)
 
       {:ok, {:accepted, command_id}, active_run_id, state.pending_work,
        state.expected_events ++ queue_events,
@@ -2780,7 +2900,8 @@ defmodule Loopex.Runtime.SessionState do
          "grant" => grant,
          kind: "effect_intent_committed"
        }) do
-    with {:ok, job} <- decode_job(job),
+    with true <- is_nil(state.open_interaction),
+         {:ok, job} <- decode_job(job),
          {:ok, grant} <- decode_grant(grant),
          %{stage: "effect_pending", pending_calls: [call | _rest], turn_id: turn_id} = work <-
            Map.get(state.pending_work, run_id),
@@ -2857,76 +2978,15 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "tool_call_id" => tool_call_id,
-         "outcome" => outcome,
-         "reason" => reason,
-         kind: "tool_result_committed"
-       }) do
-    with %{stage: "effect_" <> _phase, pending_calls: [call | _rest]} = work <-
-           Map.get(state.pending_work, run_id),
-         true <- call.tool_call_id == tool_call_id,
-         {:ok, terminal} <- decode_receipt_outcome(outcome),
-         terminal = conversation_outcome(terminal),
-         true <- terminal in Conversation.outcomes(),
-         true <- Conversation.admits_result?(elements(state, run_id), run_id, tool_call_id) do
-      result = %{
-        kind: :tool_result,
-        run_id: run_id,
-        turn_number: work.turn_number,
-        tool_call_id: tool_call_id,
-        outcome: terminal,
-        content: Conversation.result_content(terminal, reason),
-        artifacts: []
-      }
+  defp apply_internal_record(state, %{kind: "tool_result_committed"} = record) do
+    case open_interaction_record(state) do
+      %{producer: "model_tool", tool_call_id: id} ->
+        if id == record["tool_call_id"],
+          do: {:error, :invalid_tool_result_transition},
+          else: apply_tool_result_record(state, record)
 
-      remaining = Enum.reject(work.pending_calls, &(&1.tool_call_id == tool_call_id))
-      stage = if remaining == [], do: "turn_settled", else: "effect_pending"
-
-      next_work =
-        work
-        |> Map.merge(%{stage: stage, pending_calls: remaining})
-        |> Map.drop([:job, :grant, :tool_call])
-
-      next =
-        state
-        |> append_element(run_id, result)
-        |> put_pending(run_id, next_work)
-
-      # Concept: a call that started must be seen to finish, and it must finish
-      # under the name it started under.
-      #
-      # Technical depth: the operator saw `tool.started` for a dispatched call, so
-      # it is owed a `tool.finished` even when no receipt exists. Without one a
-      # failed call reads on the public plane as a tool that never ended, and
-      # without the identity a denied call reads as an opaque identifier beside a
-      # refusal — which is exactly the case an operator most needs to understand.
-      # The generation is taken from the call the model actually made, so a
-      # refused call names the tool it asked for rather than nothing.
-      # A refused or failed call spilled nothing, and says so with an empty list
-      # rather than an absent field: a consumer reading the public plane must not
-      # have to distinguish "no artifacts" from "this producer omitted the key".
-      # A call that ended without a receipt is the one case where the terminal's
-      # only explanation is the reason it carries, so the public plane carries it
-      # too: an operator reading `failed` with nothing beside it cannot tell a
-      # refused argument from a durable record that would not fit.
-      event =
-        %{
-          "run_id" => run_id,
-          "turn_id" => Map.get(work, :turn_id),
-          "tool_call_id" => tool_call_id,
-          "tool_id" => called_tool_id(call),
-          "outcome" => outcome,
-          "reason" => reason,
-          "artifacts" => [],
-          event_id: stable_id("event-tool-finished", state.session_id, tool_call_id),
-          kind: "tool.finished"
-        }
-
-      {:ok, next, [event]}
-    else
-      _other -> {:error, :invalid_tool_result_transition}
+      _ ->
+        apply_tool_result_record(state, record)
     end
   end
 
@@ -3128,6 +3188,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, run_id} <- record_binary(record, "run_id"),
          {:ok, tool_call_id} <- record_binary(record, "tool_call_id"),
          true <- run_id == state.active_run_id,
+         true <- not model_question_call?(state, run_id, tool_call_id),
          true <- creatable_round?(state, tool_call_id),
          false <- Map.has_key?(state.interactions, interaction_id),
          {:ok, request} <- interaction_request(record),
@@ -3172,6 +3233,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, command_id} <- record_binary(record, "command_id"),
          %{status: "pending"} = interaction <- Map.get(state.interactions, interaction_id),
          true <- state.open_interaction == interaction_id,
+         true <- Map.get(interaction, :producer) != "model_tool",
          true <- Interaction.offered?(interaction.request, choice_id) do
       answered = %{
         interaction
@@ -3199,6 +3261,7 @@ defmodule Loopex.Runtime.SessionState do
     with {:ok, interaction_id} <- record_binary(record, "interaction_id"),
          {:ok, resolution} <- interaction_resolution(record),
          %{} = interaction <- Map.get(state.interactions, interaction_id),
+         true <- Map.get(interaction, :producer) != "model_tool",
          true <- interaction.status in ["pending", "answered"],
          true <- state.open_interaction == interaction_id,
          true <- resolvable?(interaction, resolution) do
@@ -3215,7 +3278,279 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp apply_internal_record(state, %{kind: "model_question_requested_v1"} = record) do
+    run_id = record["run_id"]
+
+    with true <- map_size(record) == 11 and record["producer"] == "model_tool",
+         true <- run_id == state.active_run_id and is_nil(state.open_interaction),
+         %{stage: "effect_pending", pending_calls: [call | _]} = work <-
+           state.pending_work[run_id],
+         true <-
+           call.generation == ToolDefinition.generation(ToolDefinition.question_definition()),
+         true <-
+           record["tool_call_id"] == call.tool_call_id and record["turn"] == work.turn_number,
+         true <- record["interaction_id"] == model_question_id(state, work, call),
+         false <- Map.has_key?(state.interactions, record["interaction_id"]),
+         {:ok, request} <- Interaction.model_request(call.arguments),
+         true <- record["argument_digest"] == Interaction.digest(call.arguments),
+         true <- record["interaction_request"] == Interaction.to_record(request),
+         true <- record["interaction_request_digest"] == Interaction.digest(request),
+         created when is_integer(created) and created >= 0 and created <= @uint64_max <-
+           record["created_at"],
+         true <- record["expires_at"] > created and record["expires_at"] <= @uint64_max,
+         true <-
+           record["expires_at"] ==
+             Interaction.effective_expiry(created, 600_000, state.deadlines[run_id]) do
+      interaction = %{
+        producer: "model_tool",
+        interaction_id: record["interaction_id"],
+        run_id: run_id,
+        turn: work.turn_number,
+        tool_call_id: call.tool_call_id,
+        request: request,
+        status: "pending",
+        round: 0,
+        created_at: created,
+        expires_at: record["expires_at"],
+        choice_id: nil,
+        command_id: nil,
+        policy_identity: nil,
+        answer: nil,
+        disposition: nil,
+        settlement_sequence: nil,
+        argument_digest: record["argument_digest"]
+      }
+
+      {:ok,
+       %{
+         state
+         | interactions: Map.put(state.interactions, interaction.interaction_id, interaction),
+           open_interaction: interaction.interaction_id
+       }, [model_question_event(state.session_id, interaction, "interaction.requested")]}
+    else
+      _ -> {:error, :invalid_model_question_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{kind: "model_question_settled_v1"} = record) do
+    if map_size(record) == 5 and record["disposition"] == "expired" and is_nil(record["answer"]),
+      do: settle_model_question(state, record),
+      else: {:error, :invalid_model_question_transition}
+  end
+
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
+
+  defp apply_tool_result_record(state, %{
+         "run_id" => run_id,
+         "tool_call_id" => tool_call_id,
+         "outcome" => outcome,
+         "reason" => reason,
+         kind: "tool_result_committed"
+       }) do
+    with %{stage: "effect_" <> _phase, pending_calls: [call | _rest]} = work <-
+           Map.get(state.pending_work, run_id),
+         true <- call.tool_call_id == tool_call_id,
+         {:ok, terminal} <- decode_receipt_outcome(outcome),
+         terminal = conversation_outcome(terminal),
+         true <- terminal in Conversation.outcomes(),
+         true <- Conversation.admits_result?(elements(state, run_id), run_id, tool_call_id) do
+      result = %{
+        kind: :tool_result,
+        run_id: run_id,
+        turn_number: work.turn_number,
+        tool_call_id: tool_call_id,
+        outcome: terminal,
+        content: Conversation.result_content(terminal, reason),
+        artifacts: []
+      }
+
+      remaining = Enum.reject(work.pending_calls, &(&1.tool_call_id == tool_call_id))
+      stage = if remaining == [], do: "turn_settled", else: "effect_pending"
+
+      next_work =
+        work
+        |> Map.merge(%{stage: stage, pending_calls: remaining})
+        |> Map.drop([:job, :grant, :tool_call])
+
+      next =
+        state
+        |> append_element(run_id, result)
+        |> put_pending(run_id, next_work)
+
+      # Concept: a call that started must be seen to finish, and it must finish
+      # under the name it started under.
+      #
+      # Technical depth: the operator saw `tool.started` for a dispatched call, so
+      # it is owed a `tool.finished` even when no receipt exists. Without one a
+      # failed call reads on the public plane as a tool that never ended, and
+      # without the identity a denied call reads as an opaque identifier beside a
+      # refusal — which is exactly the case an operator most needs to understand.
+      # The generation is taken from the call the model actually made, so a
+      # refused call names the tool it asked for rather than nothing.
+      # A refused or failed call spilled nothing, and says so with an empty list
+      # rather than an absent field: a consumer reading the public plane must not
+      # have to distinguish "no artifacts" from "this producer omitted the key".
+      # A call that ended without a receipt is the one case where the terminal's
+      # only explanation is the reason it carries, so the public plane carries it
+      # too: an operator reading `failed` with nothing beside it cannot tell a
+      # refused argument from a durable record that would not fit.
+      event =
+        %{
+          "run_id" => run_id,
+          "turn_id" => Map.get(work, :turn_id),
+          "tool_call_id" => tool_call_id,
+          "tool_id" => called_tool_id(call),
+          "outcome" => outcome,
+          "reason" => reason,
+          "artifacts" => [],
+          event_id: stable_id("event-tool-finished", state.session_id, tool_call_id),
+          kind: "tool.finished"
+        }
+
+      {:ok, next, [event]}
+    else
+      _other -> {:error, :invalid_tool_result_transition}
+    end
+  end
+
+  defp model_question_id(state, work, call),
+    do:
+      stable_id(
+        "model-question",
+        state.session_id,
+        {work.run_id, work.turn_number, call.tool_call_id}
+      )
+
+  defp model_question_call?(state, run_id, id) do
+    case state.pending_work[run_id] do
+      %{pending_calls: [call | _]} ->
+        call.tool_call_id == id and
+          call.generation == ToolDefinition.generation(ToolDefinition.question_definition())
+
+      _ ->
+        false
+    end
+  end
+
+  defp model_question_command_binding(record) do
+    with {:ok, response} <- normalize_interaction_answer(%{answer: record["answer"]}),
+         command <-
+           Map.merge(
+             %{
+               type: :interaction_answer,
+               command_id: record["command_id"],
+               interaction_id: record["interaction_id"]
+             },
+             response
+           ),
+         {:ok, digest} <- command_digest(command),
+         true <- digest == record["command_digest"] do
+      :ok
+    else
+      _ -> {:error, :invalid_model_question_transition}
+    end
+  end
+
+  # Concept: a model answer settles its question and original call together.
+  # Technical depth: one row releases the slot, appends the exact answer to the
+  # conversation and advances pending work. No policy resolution or executor
+  # receipt is owed; command admission and its identity share this same row.
+  defp settle_model_question(state, record) do
+    id = record["interaction_id"]
+    answer = record["answer"]
+    disposition = record["disposition"]
+
+    with %{producer: "model_tool", status: "pending"} = interaction <- state.interactions[id],
+         true <- state.open_interaction == id,
+         true <- question_settlement_time?(interaction, record),
+         {:ok, content, outcome} <- model_question_result(interaction, disposition, answer),
+         {:ok, next, events} <-
+           apply_tool_result_record(state, %{
+             "run_id" => interaction.run_id,
+             "tool_call_id" => interaction.tool_call_id,
+             "outcome" => outcome,
+             "reason" => content,
+             kind: "tool_result_committed"
+           }) do
+      resolved = %{
+        interaction
+        | status: disposition,
+          disposition: disposition,
+          answer: answer,
+          choice_id: if(is_map(answer), do: answer["choice_id"], else: nil),
+          command_id: record["command_id"],
+          settlement_sequence: state.journal_version + 1
+      }
+
+      resolved = Map.put(resolved, :command_digest, record["command_digest"])
+
+      events =
+        if outcome == "completed", do: Enum.map(events, &Map.put(&1, "reason", nil)), else: events
+
+      {:ok,
+       %{next | interactions: Map.put(next.interactions, id, resolved), open_interaction: nil},
+       events ++
+         [
+           model_question_event(
+             state.session_id,
+             resolved,
+             model_question_event_kind(disposition)
+           )
+         ]}
+    else
+      _ -> {:error, :invalid_model_question_transition}
+    end
+  end
+
+  defp question_settlement_time?(interaction, %{"disposition" => "expired", "settled_at" => at}),
+    do: is_integer(at) and at >= interaction.expires_at and at <= @uint64_max
+
+  defp question_settlement_time?(_interaction, %{"disposition" => "cancelled"}), do: true
+
+  defp question_settlement_time?(interaction, %{"responded_at" => at}),
+    do: is_integer(at) and at >= interaction.created_at and at < interaction.expires_at
+
+  defp question_settlement_time?(_, _), do: false
+
+  defp model_question_result(interaction, "answered", answer) do
+    case Interaction.model_answer(interaction.request, answer) do
+      {:ok, %{"text" => text}} ->
+        {:ok, text, "completed"}
+
+      {:ok, %{"choice_id" => id}} ->
+        choice = Enum.find(interaction.request.choices, &(&1.id == id))
+        {:ok, choice.label, "completed"}
+
+      _ ->
+        :error
+    end
+  end
+
+  defp model_question_result(_interaction, "declined", %{"disposition" => "declined"}),
+    do: {:ok, "question_declined", "denied"}
+
+  defp model_question_result(_interaction, "expired", nil),
+    do: {:ok, "question_expired", "denied"}
+
+  defp model_question_result(_interaction, "cancelled", nil), do: {:ok, nil, "cancelled"}
+
+  defp model_question_result(_, _, _), do: :error
+
+  defp model_question_event_kind("answered"), do: "interaction.answered"
+  defp model_question_event_kind("declined"), do: "interaction.declined"
+  defp model_question_event_kind("expired"), do: "interaction.expired"
+  defp model_question_event_kind("cancelled"), do: "interaction.cancelled"
+
+  defp model_question_event(session_id, interaction, kind) do
+    Interaction.view(interaction)
+    |> Map.delete("kind")
+    |> Map.put("interaction_kind", Atom.to_string(interaction.request.kind))
+    |> Map.put(:kind, kind)
+    |> Map.put(
+      :event_id,
+      stable_id("model-question-event", session_id, {interaction.interaction_id, kind})
+    )
+  end
 
   # Concept: a run that ends takes its open question with it.
   #
@@ -3226,6 +3561,20 @@ defmodule Loopex.Runtime.SessionState do
   # only one open, and an operator would be shown a question nobody can answer.
   defp cancel_open_interaction(state, run_id) do
     case open_interaction_record(state) do
+      %{producer: "model_tool", run_id: ^run_id, interaction_id: interaction_id} = interaction ->
+        cancelled = %{
+          interaction
+          | status: "cancelled",
+            disposition: "cancelled",
+            settlement_sequence: state.journal_version + 1
+        }
+
+        {%{
+           state
+           | interactions: Map.put(state.interactions, interaction_id, cancelled),
+             open_interaction: nil
+         }, [model_question_event(state.session_id, cancelled, "interaction.cancelled")]}
+
       %{run_id: ^run_id, interaction_id: interaction_id} = interaction ->
         cancelled = %{interaction | status: "cancelled"}
 
@@ -3501,7 +3850,7 @@ defmodule Loopex.Runtime.SessionState do
     {next, prompt_events(state.session_id, follow_up.command_id, promoted, follow_up.content)}
   end
 
-  defp cancel_queues(state, run_id) do
+  defp cancel_queues(state, run_id, record) do
     {steer_patch, steer_events} =
       case queued_steer(state, run_id) do
         nil ->
@@ -3541,6 +3890,23 @@ defmodule Loopex.Runtime.SessionState do
     # order the journal fixed rather than a reopening.
     {interaction_patch, interaction_events} =
       case open_interaction_record(state) do
+        %{producer: "model_tool", run_id: ^run_id, interaction_id: id} ->
+          {:ok, settled, events} =
+            settle_model_question(state, %{
+              "interaction_id" => id,
+              "disposition" => "cancelled",
+              "answer" => nil,
+              "command_id" => record["command_id"],
+              "command_digest" => record["command_digest"]
+            })
+
+          {%{
+             interactions: settled.interactions,
+             open_interaction: nil,
+             conversation: settled.conversation,
+             pending_work: settled.pending_work
+           }, events}
+
         %{run_id: ^run_id, interaction_id: interaction_id} = interaction ->
           cancelled = %{interaction | status: "cancelled"}
 
@@ -5211,14 +5577,16 @@ defmodule Loopex.Runtime.SessionState do
         # already resolved.
         :interaction_answer ->
           with {:ok, interaction_id} <- fetch_binary(command, :interaction_id),
-               {:ok, choice_id} <- fetch_binary(command, :choice_id) do
+               {:ok, response} <- normalize_interaction_answer(command) do
             {:ok,
-             %{
-               type: :interaction_answer,
-               command_id: command_id,
-               interaction_id: interaction_id,
-               choice_id: choice_id
-             }}
+             Map.merge(
+               %{
+                 type: :interaction_answer,
+                 command_id: command_id,
+                 interaction_id: interaction_id
+               },
+               response
+             )}
           else
             _other -> {:error, :invalid_command}
           end
@@ -5244,6 +5612,40 @@ defmodule Loopex.Runtime.SessionState do
             _other -> {:error, :invalid_command}
           end
       end
+    end
+  end
+
+  defp normalize_interaction_answer(command) do
+    case {fetch(command, :answer), fetch(command, :choice_id)} do
+      {{:ok, answer}, :error} when is_map(answer) and map_size(answer) == 1 ->
+        cond do
+          fetch(answer, :disposition) == {:ok, "declined"} ->
+            {:ok, %{answer: %{"disposition" => "declined"}}}
+
+          match?({:ok, _}, fetch(answer, :text)) ->
+            case fetch(answer, :text) do
+              {:ok, text} when is_binary(text) and byte_size(text) in 1..8_192 ->
+                if String.valid?(text), do: {:ok, %{answer: %{"text" => text}}}, else: :error
+
+              _ ->
+                :error
+            end
+
+          match?({:ok, _}, fetch(answer, :choice_id)) ->
+            case fetch_binary(answer, :choice_id) do
+              {:ok, id} -> {:ok, %{choice_id: id}}
+              _ -> :error
+            end
+
+          true ->
+            :error
+        end
+
+      {:error, {:ok, id}} when is_binary(id) and byte_size(id) > 0 ->
+        {:ok, %{choice_id: id}}
+
+      _ ->
+        :error
     end
   end
 

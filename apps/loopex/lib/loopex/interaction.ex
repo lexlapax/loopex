@@ -2,11 +2,11 @@ defmodule Loopex.Interaction do
   @moduledoc """
   ## Concept
 
-  The question a host policy may ask before it decides, and the answer that
-  comes back. An interaction is bounded plain data: one prompt, a short list of
-  offered choices, and an expiry. It is durable session state owned by the
-  serial session owner, and it authorizes nothing by itself: only a committed
-  host-policy allow, evaluated again after the answer, can lead to a grant.
+  The session owns bounded policy-defer and model-tool questions and their
+  answers. A policy-defer answer returns to host policy for its decision; only
+  a committed allow can lead to a grant. A model-tool answer settles the original
+  question call without a policy reevaluation or executor job. Neither answer
+  grants authority to a later effect.
 
   ## Technical depth
 
@@ -18,6 +18,13 @@ defmodule Loopex.Interaction do
   own bounded opaque reference, which is retained privately and never projected.
   Anything else is malformed, and a malformed defer resolves the tool decision
   as `policy_unavailable` without creating an interaction at all.
+
+  ADR 0045's exact question tool additionally admits text questions and answers
+  up to 8 KiB, stable ordered choice identifiers, and explicit decline. Model
+  questions have a fixed requested duration of 600,000 milliseconds; the owner
+  captures the earlier run deadline. The old policy request decoder remains
+  choice-only; model pending records rederive their request from the committed
+  original tool arguments and compare every captured member during replay.
 
   The three digests this module computes stay distinct from one another and from
   any executor request digest: the policy request the host was asked, the
@@ -34,18 +41,84 @@ defmodule Loopex.Interaction do
   @max_decision_ref_bytes 256
   @max_expires_in_ms 600_000
 
-  @statuses ~w(pending answered denied expired cancelled)
+  @doc """
+  ## Concept
+
+  Turn the exact question tool's admitted arguments into a bounded interaction.
+
+  ## Technical depth
+
+  Choice identities are choice-1 through choice-8 in label order. Omitted
+  choices selects text, with an empty choices list and the fixed ten-minute
+  duration. This pure conversion grants no authority and opens no interaction.
+  """
+  @spec model_request(term()) :: {:ok, model_request()} | {:error, :invalid_interaction_request}
+  def model_request(arguments) do
+    definition = LoopexProtocol.ToolDefinition.question_definition()
+
+    case LoopexProtocol.ToolDefinition.validate_arguments(definition, arguments) do
+      :ok ->
+        choices =
+          arguments
+          |> Map.get("choices", [])
+          |> Enum.with_index(1)
+          |> Enum.map(fn {label, index} -> %{id: "choice-#{index}", label: label} end)
+
+        {:ok,
+         %{
+           kind: if(choices == [], do: :text, else: :choice),
+           prompt: arguments["question"],
+           choices: choices,
+           expires_in_ms: @max_expires_in_ms
+         }}
+
+      _invalid ->
+        {:error, :invalid_interaction_request}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Validate an answer or explicit decline against the retained model question.
+
+  ## Technical depth
+
+  The closed binary-key branches are choice_id, nonempty UTF-8 text up to
+  8,192 bytes, or disposition declined. Choice and text must match the question
+  kind. A decline is its own branch, never a sentinel answer string. Policy-defer
+  questions keep their existing choice-only admission path.
+  """
+  @spec model_answer(model_request(), term()) ::
+          {:ok, map()} | {:error, :invalid_interaction_answer}
+  def model_answer(%{kind: kind}, %{"disposition" => "declined"} = answer)
+      when kind in [:choice, :text] and map_size(answer) == 1,
+      do: {:ok, answer}
+
+  def model_answer(%{kind: :text}, %{"text" => text} = answer)
+      when map_size(answer) == 1 and is_binary(text) and byte_size(text) in 1..8_192 do
+    if String.valid?(text), do: {:ok, answer}, else: {:error, :invalid_interaction_answer}
+  end
+
+  def model_answer(%{kind: :choice} = request, %{"choice_id" => id} = answer)
+      when map_size(answer) == 1 do
+    if offered?(request, id), do: {:ok, answer}, else: {:error, :invalid_interaction_answer}
+  end
+
+  def model_answer(_, _), do: {:error, :invalid_interaction_answer}
+
+  @statuses ~w(pending answered denied expired cancelled declined)
 
   @typedoc """
   ## Concept
 
-  The validated question, as the runtime retains it.
+  The validated policy-defer question, as the runtime retains it.
 
   ## Technical depth
 
   Plain bounded data, so one of these survives a journal round trip and crosses
-  the public boundary unchanged. `:choice` is the only kind this family admits
-  today, and `decision_ref` is optional because a question may exist before any
+  the public boundary unchanged. `:choice` is the only kind this family admits,
+  and `decision_ref` is optional because a question may exist before any
   policy decision names it. Every bounded member is measured against
   `bounds/0`.
   """
@@ -57,6 +130,24 @@ defmodule Loopex.Interaction do
           optional(:decision_ref) => binary()
         }
 
+  @typedoc """
+  ## Concept
+
+  A model-tool question derived from the original committed call arguments.
+
+  ## Technical depth
+
+  Text questions have no choices. Choice questions retain one to eight ordered
+  choice-N identifiers and their exact labels. The fixed requested duration is
+  600,000 milliseconds; the session owner captures the earlier run deadline.
+  """
+  @type model_request :: %{
+          kind: :choice | :text,
+          prompt: binary(),
+          choices: [%{id: binary(), label: binary()}],
+          expires_in_ms: 600_000
+        }
+
   @doc """
   ## Concept
 
@@ -64,9 +155,9 @@ defmodule Loopex.Interaction do
 
   ## Technical depth
 
-  `answered` means answer evidence is committed and policy resolution is still
-  owed; it never means allowed. The sibling policy-decision record holds that,
-  and only an allow can lead to a grant.
+  For policy-defer, `answered` means policy resolution is still owed; it never
+  means allowed. For model-tool, `answered` settles the original call. `declined`
+  belongs only to model questions. Neither status grants a later effect.
   """
   @spec statuses() :: [binary()]
   def statuses, do: @statuses
@@ -145,10 +236,10 @@ defmodule Loopex.Interaction do
   not part of this map: it is retained as a sibling field of the record, which
   is what keeps it out of every projection built from the question itself.
   """
-  @spec to_record(request()) :: map()
-  def to_record(%{kind: @kind} = request) do
+  @spec to_record(request() | model_request()) :: map()
+  def to_record(%{kind: kind} = request) when kind in [:choice, :text] do
     %{
-      "kind" => "choice",
+      "kind" => Atom.to_string(kind),
       "prompt" => request.prompt,
       "choices" => Enum.map(request.choices, &%{"id" => &1.id, "label" => &1.label}),
       "expires_in_ms" => request.expires_in_ms
@@ -263,7 +354,28 @@ defmodule Loopex.Interaction do
         choice_id -> Map.put(projected, "choice_id", choice_id)
       end
     end)
+    |> then(fn projected ->
+      if Map.get(record, :producer) == "model_tool" do
+        projected
+        |> Map.put("producer", "model_tool")
+        |> Map.put("kind", Atom.to_string(record.request.kind))
+        |> Map.put("disposition", Map.get(record, :disposition))
+        |> Map.put("answer", model_answer_view(record))
+        |> Map.put("command_id", Map.get(record, :command_id))
+        |> Map.put("command_digest", Map.get(record, :command_digest))
+        |> Map.put("settlement_sequence", Map.get(record, :settlement_sequence))
+      else
+        projected
+      end
+    end)
   end
+
+  defp model_answer_view(%{answer: %{"choice_id" => id}, request: request}) do
+    choice = Enum.find(request.choices, &(&1.id == id))
+    %{"choice_id" => id, "label" => choice.label}
+  end
+
+  defp model_answer_view(record), do: Map.get(record, :answer)
 
   @doc """
   ## Concept

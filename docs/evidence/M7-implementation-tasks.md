@@ -41,8 +41,10 @@ Part of the [evidence index](README.md).
   and their origins, validating captured instructions and all selected schemas.
 - Done: exact v2 question-tool definition, pinned canonical preimage/digest,
   argument admission and interaction-versus-executor dispatch separation.
-- Next: join model-question pending/response/terminal truth, then prompt-file and
-  mapping preparation, effective inspection and command entry wiring, then live
+- Done: committed model-question requests and atomic answer, decline, expiry and
+  abort settlement retain the original call and response identity through replay.
+- Next: prove question crash boundaries, then prompt-file and mapping
+  preparation, effective inspection and command entry wiring, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
@@ -307,6 +309,27 @@ Part of the [evidence index](README.md).
   passing assertions do not establish cleanup-diagnostic correctness. No provider
   call or full integration result is claimed.
 
+- 2026-10-01: model-question policy allow now commits a producer-specific pending
+  request, bound to the exact original call, argument digest, derived question
+  and earlier run deadline. A single response row admits the command, settles
+  the interaction and original result, releases the slot and advances work.
+  Text, choice and decline remain distinct branches; expiry and abort settle
+  without a policy reevaluation or executor job. Legacy policy rows cannot
+  resolve model questions, and standalone result/intent rows cannot bypass an
+  open model question. Pending replay rejects substituted arguments, request
+  members, producer, call identity, turn and expiry.
+  Configured-runtime, policy-interaction and v3-genesis tests pass 52 cases in
+  12.4 seconds, including an exact 8,192-byte UTF-8 answer, duplicate/conflicting
+  and stale responses, expiry-boundary admission and atomic abort settlement.
+  The broader loop, cancellation, input-algebra and journal suites pass 161
+  cases in 72.6 seconds. Final response-identity event assertions and legacy
+  interaction checks pass 32 cases in 12.4 seconds. Warning-free compilation,
+  formatting and documentation ordering pass with 968 covered entries.
+  Supervisor shutdown_error/noproc diagnostics remain an
+  unresolved T16 follow-up. Crash injection, private/public wire vectors and
+  one-call responder integration remain pending; no provider or full integration
+  result is claimed.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -422,14 +445,16 @@ Part of the [evidence index](README.md).
 - [x] Register the exact question-tool generation without changing old effect definitions.
 - [x] Pin its format-v2 canonical preimage/digest and enforce exact schema/byte/choice limits before policy.
 - [x] Separate interaction tools from executor dispatch and reject nested policy defer.
-- [ ] Replace the interim policy-allow refusal with committed model-question pending and producer-specific terminal transitions.
-- [ ] Admit questions through policy; no executor grant or job is created.
-- [ ] Implement producer identity, options, text answers, decline and expiry.
-- [ ] Atomically settle the interaction, original tool result, response identity and next action.
-- [ ] Preserve the existing policy-defer lifecycle.
+- [x] Replace the interim policy-allow refusal with committed model-question pending and producer-specific terminal transitions.
+- [x] Admit questions through policy; no executor grant or job is created.
+- [x] Implement producer identity, options, text answers, decline and expiry.
+- [x] Atomically settle the interaction, original tool result, response identity and next action.
+- [x] Preserve the existing policy-defer lifecycle.
 - [ ] Test denial, deferred policy, large answers, overflow, duplicate/stale responses, cancellation and expiry.
 - [ ] Test crashes before and after pending-question and response commits.
-- [ ] Prove recovery retains the actual pending question identity.
+- [x] Prove pure recovery retains the actual committed pending question identity.
+- [ ] Prove live owner restart retains that identity and settles it once.
+- [ ] Pin pending/response decoder vectors and public question event schemas.
 ## T10 — Complete chat controls, pipes and tracing
 - [ ] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.
 - [ ] Implement the exact pipe grammar and closed control records.

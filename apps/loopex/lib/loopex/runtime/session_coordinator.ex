@@ -2218,16 +2218,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
         _none -> nil
       end
 
-    Instrumentation.span(
-      [:interaction],
-      %{
-        session_id: state.session_id,
-        interaction_id: interaction_id,
-        transition: :answered
-      },
-      admit,
-      &admission_category/1
-    )
+    result =
+      Instrumentation.span(
+        [:interaction],
+        %{
+          session_id: state.session_id,
+          interaction_id: interaction_id,
+          transition: :answered
+        },
+        admit,
+        &admission_category/1
+      )
+
+    case result do
+      {:reply, reply, next} when is_binary(interaction_id) ->
+        next =
+          if next.durable.open_interaction != interaction_id,
+            do: cancel_interaction_expiry(next, interaction_id),
+            else: next
+
+        {:reply, reply, next}
+
+      other ->
+        other
+    end
   end
 
   defp answered_interaction(_state, _type, admit), do: admit.()
@@ -2332,6 +2346,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     do: Bounds.declare(Map.take(resolved, [:max_turns, :token_budget, :deadline_ms]))
 
   defp propose_command(state, command, resolved) do
+    resolved = Map.put(resolved, :admitted_at, System.system_time(:millisecond))
     commit_command_proposal(state, SessionState.propose(state.durable, command, resolved))
   end
 
@@ -5663,10 +5678,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   # Concept: an interaction definition never enters the executor effect path.
-  # Technical depth: until the model-question lifecycle is joined, retain a
-  # truthful refusal after policy allow, without an intent, grant or job.
+  # Technical depth: policy allow commits a pending question; only the session
+  # owner serves it, without an executor intent, grant or job.
   defp dispatch_authorized_effect(state, work, call, %{"class" => "interaction"}, _context),
-    do: commit_tool_terminal(state, work, call, :denied, "interaction_unsupported")
+    do: begin_model_question(state, work, call)
 
   defp dispatch_authorized_effect(state, work, call, definition, context) do
     with {:ok, job} <- build_job(state, work, call, definition),
@@ -6634,6 +6649,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  defp begin_model_question(state, work, _call) do
+    with {:ok, proposal} <-
+           SessionState.propose_model_question(
+             state.durable,
+             work.run_id,
+             System.system_time(:millisecond)
+           ),
+         {:ok, next} <- commit_internal(state, proposal) do
+      {:noreply, arm_interaction_expiry(next, SessionState.open_interaction_record(next.durable))}
+    else
+      {:error, reason} -> {:stop, {:interaction_request_failed, reason}, state}
+    end
+  end
+
   # Concept: an answered question goes back to the host, with its own answer.
   #
   # Technical depth: the host receives the original request's fields plus
@@ -6789,6 +6818,28 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp resolve_interaction(state, interaction_id, run_id, resolution, reason) do
+    case SessionState.open_interaction_record(state.durable) do
+      %{producer: "model_tool", interaction_id: ^interaction_id} ->
+        with {:ok, proposal} <-
+               SessionState.propose_model_question_expiry(
+                 state.durable,
+                 interaction_id,
+                 System.system_time(:millisecond)
+               ),
+             {:ok, next} <- commit_internal(state, proposal) do
+          send(self(), :advance_work)
+          {:noreply, next}
+        else
+          {:error, commit_reason} ->
+            {:stop, {:interaction_resolution_failed, commit_reason}, state}
+        end
+
+      _ ->
+        resolve_policy_interaction(state, interaction_id, run_id, resolution, reason)
+    end
+  end
+
+  defp resolve_policy_interaction(state, interaction_id, run_id, resolution, reason) do
     with {:ok, next} <-
            commit_interaction_resolution(state, interaction_id, resolution, reason) do
       case Map.get(next.durable.pending_work, run_id) do

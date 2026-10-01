@@ -16,6 +16,20 @@ defmodule Loopex.ConfiguredSessionDeferringPolicy do
   end
 end
 
+defmodule Loopex.ConfiguredQuestionCountingPolicy do
+  @moduledoc false
+  @behaviour Loopex.Policy
+  @impl Loopex.Policy
+  def decide(request) do
+    send(
+      Process.whereis(:m7_question_policy_observer),
+      {:question_policy_call, request.tool_call_id}
+    )
+
+    {:allow, nil}
+  end
+end
+
 defmodule Loopex.ConfiguredSessionTest do
   use ExUnit.Case, async: false
 
@@ -32,7 +46,6 @@ defmodule Loopex.ConfiguredSessionTest do
 
   test "the admitted question generation never dispatches an executor effect" do
     for {policy, reason} <- [
-          {Loopex.AgentLoopTestPolicy, "interaction_unsupported"},
           {Loopex.ConfiguredSessionDeferringPolicy, "policy_unavailable"}
         ] do
       fixture =
@@ -79,6 +92,289 @@ defmodule Loopex.ConfiguredSessionTest do
                &String.starts_with?(&1.payload.kind, "effect_")
              )
     end
+  end
+
+  test "model questions settle exact text, choice and decline in one transaction" do
+    Process.register(self(), :m7_question_policy_observer)
+    text = String.duplicate("é", 4_096)
+
+    for {arguments, answer, content, disposition} <- [
+          {%{"question" => "Explain"}, %{"text" => text}, text, "answered"},
+          {%{"question" => "Choose", "choices" => ["empty", "literal_null"]},
+           %{"choice_id" => "choice-2"}, "literal_null", "answered"},
+          {%{"question" => "Explain"}, %{"disposition" => "declined"}, "question_declined",
+           "declined"}
+        ] do
+      fixture =
+        start(
+          tools: [ToolDefinition.question_definition()],
+          policy: Loopex.ConfiguredQuestionCountingPolicy,
+          script: [
+            %{text: "question", calls: [%{id: "ask-1", name: "ask", arguments: arguments}]},
+            %{text: "done", calls: []}
+          ]
+        )
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create",
+                 %{},
+                 genesis(fixture.definitions)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "prompt",
+                 content: "implement"
+               })
+
+      question = await_question(attachment)
+      assert_received {:question_policy_call, _}
+      assert question["producer"] == "model_tool"
+
+      assert question["interaction_kind"] ==
+               if(Map.has_key?(arguments, "choices"), do: "choice", else: "text")
+
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+      assert {:ok, pending} =
+               SessionState.recover(
+                 session,
+                 Fixture.records(fixture, session),
+                 Fixture.events(fixture, session)
+               )
+
+      assert pending.open_interaction == question["interaction_id"]
+
+      assert SessionState.propose_interaction_resolution(
+               pending,
+               pending.open_interaction,
+               "expired",
+               "legacy-bypass"
+             ) == {:error, :invalid_interaction_transition}
+
+      pending_interaction = pending.interactions[question["interaction_id"]]
+
+      if pending_interaction.request.kind == :choice do
+        assert SessionState.propose_interaction_answer(
+                 pending,
+                 pending.open_interaction,
+                 "legacy-bypass",
+                 "choice-1"
+               ) == {:error, :invalid_interaction_transition}
+      end
+
+      assert pending_interaction.expires_at ==
+               min(
+                 pending_interaction.created_at + 600_000,
+                 pending.deadlines[pending_interaction.run_id]
+               )
+
+      assert SessionState.propose_model_question_expiry(
+               pending,
+               question["interaction_id"],
+               pending_interaction.expires_at - 1
+             ) == {:error, :invalid_model_question_transition}
+
+      pending_records = Fixture.records(fixture, session)
+
+      for {field, changed} <- [
+            {"argument_digest", String.duplicate("0", 64)},
+            {"interaction_id", "forged"},
+            {"tool_call_id", "forged-call"},
+            {"turn", 999},
+            {"expires_at", pending_interaction.expires_at + 1},
+            {"interaction_request", %{}},
+            {"producer", "policy_defer"}
+          ] do
+        altered =
+          Enum.map(pending_records, fn row ->
+            if row.payload.kind == "model_question_requested_v1",
+              do: %{row | payload: Map.put(row.payload, field, changed)},
+              else: row
+          end)
+
+        assert SessionState.recover(session, altered, Fixture.events(fixture, session)) ==
+                 {:error, :invalid_model_question_transition}
+      end
+
+      command = %{
+        type: :interaction_answer,
+        command_id: "answer",
+        interaction_id: question["interaction_id"],
+        answer: answer
+      }
+
+      assert {:ok, late} =
+               SessionState.propose(pending, %{command | command_id: "late"}, %{
+                 admitted_at: pending_interaction.expires_at
+               })
+
+      assert late.reply == {:error, :interaction_resolved}
+      assert late.next.open_interaction == pending.open_interaction
+
+      assert {:ok, expired} =
+               SessionState.propose_model_question_expiry(
+                 pending,
+                 pending.open_interaction,
+                 pending_interaction.expires_at
+               )
+
+      assert length(expired.records) == 1
+      assert is_nil(expired.next.open_interaction)
+      assert expired.next.interactions[pending.open_interaction].status == "expired"
+
+      assert {:error, :invalid_command} =
+               Loopex.command(
+                 attachment,
+                 %{
+                   command
+                   | command_id: "oversized",
+                     answer: %{"text" => String.duplicate("x", 8_193)}
+                 }
+               )
+
+      wrong_answer =
+        if Map.has_key?(arguments, "choices"),
+          do: %{"text" => "wrong kind"},
+          else: %{"choice_id" => "choice-1"}
+
+      assert {:error, :invalid_interaction_answer} =
+               Loopex.command(
+                 attachment,
+                 %{command | command_id: "wrong-kind", answer: wrong_answer}
+               )
+
+      assert {:accepted, "answer"} = Loopex.command(attachment, command)
+
+      assert {:error, :idempotency_conflict} =
+               Loopex.command(
+                 attachment,
+                 %{command | interaction_id: "different-question"}
+               )
+
+      events = finish(attachment)
+      assert {:accepted, "answer"} = Loopex.command(attachment, command)
+
+      assert {:error, :interaction_resolved} =
+               Loopex.command(
+                 attachment,
+                 %{command | command_id: "second-answer"}
+               )
+
+      terminal = Enum.find(events, &(&1.kind in ["interaction.answered", "interaction.declined"]))
+      assert terminal["disposition"] == disposition
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+      refute_received {:question_policy_call, _}
+      [_first, second] = AgentLoopTestModel.dispatched(fixture.model)
+      result = Enum.find(second.messages, &(&1["role"] == "tool"))
+
+      assert result["content"] ==
+               if(disposition == "answered",
+                 do: content,
+                 else: Loopex.Conversation.result_content(:denied, content)
+               )
+
+      records = Fixture.records(fixture, session)
+      response = Enum.find(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+      assert Enum.count(records, &(&1.payload.kind == "model_question_response_admitted_v1")) == 1
+      assert response.payload["answer"] == answer
+      assert terminal["command_id"] == response.payload["command_id"]
+      assert terminal["command_digest"] == response.payload["command_digest"]
+      assert terminal["settlement_sequence"] == response.journal_version
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, records, Fixture.events(fixture, session))
+
+      assert is_nil(recovered.open_interaction)
+      assert recovered.interactions[question["interaction_id"]].status == disposition
+
+      refute Enum.any?(
+               records,
+               &(&1.payload.kind in [
+                   "effect_intent_committed",
+                   "executor_receipt_committed",
+                   "interaction_resolved_v1"
+                 ])
+             )
+    end
+  end
+
+  test "aborting a pending model question settles its slot and preserves a cancelled result" do
+    fixture =
+      start(
+        tools: [ToolDefinition.question_definition()],
+        script: [
+          %{
+            text: "question",
+            calls: [%{id: "ask-1", name: "ask", arguments: %{"question" => "Explain"}}]
+          },
+          %{text: "next prompt", calls: []}
+        ]
+      )
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt",
+               content: "implement"
+             })
+
+    question = await_question(attachment)
+    assert {:accepted, "abort"} = Loopex.command(attachment, %{type: :abort, command_id: "abort"})
+    events = finish(attachment)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+    cancelled = Enum.find(events, &(&1.kind == "interaction.cancelled"))
+    assert cancelled["interaction_id"] == question["interaction_id"]
+    assert cancelled["producer"] == "model_tool"
+    assert cancelled["disposition"] == "cancelled"
+    assert cancelled["command_id"] == "abort"
+    assert is_binary(cancelled["command_digest"])
+
+    assert {:ok, recovered} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+
+    assert is_nil(recovered.open_interaction)
+
+    assert Enum.find(
+             SessionState.elements(recovered, question["run_id"]),
+             &(&1.kind == :tool_result)
+           ).outcome == :cancelled
+
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+
+    assert {:error, :interaction_resolved} =
+             Loopex.command(
+               attachment,
+               %{
+                 type: :interaction_answer,
+                 command_id: "late",
+                 interaction_id: question["interaction_id"],
+                 answer: %{"text" => "too late"}
+               }
+             )
+
+    prompt(attachment, "next", "continue")
+    [_first, second] = AgentLoopTestModel.dispatched(fixture.model)
+    assert Enum.find(second.messages, &(&1["role"] == "tool"))["outcome"] == "cancelled"
   end
 
   test "invalid question arguments fail before policy or executor admission" do
@@ -585,6 +881,20 @@ defmodule Loopex.ConfiguredSessionTest do
              Loopex.command(attachment, %{type: :prompt, command_id: id, content: content})
 
     assert Enum.find(finish(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+  end
+
+  defp await_question(attachment, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 5_000
+
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "interaction.requested"} = event} ->
+        event
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline, do: flunk("no model question")
+        Process.sleep(10)
+        await_question(attachment, deadline)
+    end
   end
 
   defp finish(attachment),
