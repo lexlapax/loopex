@@ -259,3 +259,8 @@ readiness conclusion. Its [disposition](../evidence/M7-round-6-disposition.md)
 records all 37 findings and three maintainer choices. At acceptance, the plan's
 [prerequisite table](../plans/M7-technical.md#technical-plan-prerequisites) rows are the set
 of accepted ADRs to annotate, whatever header label names each change.
+
+The [round 7 report](../evidence/M7-external-review-7.md) supersedes round 6's
+readiness conclusion with four findings; its
+[disposition](../evidence/M7-round-7-disposition.md) records their repair.
+Proposed status is unchanged.

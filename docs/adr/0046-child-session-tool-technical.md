@@ -616,7 +616,15 @@ one-shot command reports the counts, and a later start continues from the
 retained entries. Enumeration and entry validation count against the bound. No
 start rescans a prefix whose entry validates. A root whose enumeration and
 validation alone exceed one bound completes only under a resident host; this is
-a recorded limitation. A session whose scan answers `invalid_history`,
+a recorded limitation. The same holds for a session whose records after an
+unmatched intent cannot be scanned within what one bound leaves after
+enumeration and entry validation: the watermark cannot pass that intent, so each
+one-shot start revisits the same suffix. A resident host keeps its live cursor
+and open-intent rows in memory between slices instead of restarting each slice
+from the persisted watermark, finishes the suffix and then treats that intent as
+the existing rules require: a task intent stays an expected operation under
+stop-only recovery; an intent of another kind is not a helper operation.
+A session whose scan answers `invalid_history`,
 `history_unavailable` or `session_absent` is not covered: the host stops
 slicing, stays closed and adds that session's ID to the refusal. Restoring the
 root from backup is the exit; M7 provides no per-session quarantine. This too is
@@ -749,7 +757,21 @@ one derived entry keyed by SHA-256 of that ID under its private index directory,
 then validates the referenced source-intent and ledger frame/receipt. Job entries
 are exactly `{version: 1, kind: "job", job, source_intent, run_log, frame_offset}`,
 keyed by SHA-256 of the job ID; coverage entries are the closed map above, keyed
-by SHA-256 of the session ID under a `coverage/` subdirectory. The
+by SHA-256 of the session ID under a `coverage/` subdirectory. The job entries
+at or below a session's watermark are exactly one entry per original attempt of
+each expected operation that remains after the pre-effect-refusal filter. Live
+registration installs a job entry before a refusal can be known, so before
+computing `expected_sha256` and installing a coverage entry the host removes the
+job entry of every scanned registration whose intent has a matching committed
+pre-effect refusal, wherever it lies relative to the watermark. Removal precedes
+publication. If either step is interrupted, the coverage entry on disk is the
+previous one, is absent, or fails its digest. The session then resumes from no
+later than its previous watermark, or is rescanned from the start, so the pair
+is scanned again and coverage beyond it is never treated as published. A
+registration with no committed terminal, or with a receipt or unknown terminal,
+keeps its entry and stays expected.
+Without this ordering a later start, which skips the validated prefix, could not
+tell a refused registration with a null frame offset from a lost reservation. The
 4,096-entry/8-MiB bound limits the in-memory cache only. In a job entry, job is the
 original binding, and frame_offset is null before the first operation frame,
 otherwise its validated offset. job is exactly the closed router-binding row
@@ -757,8 +779,9 @@ above, never full canonical_request_bytes. The directory is job-index-v1 under
 the private delegation runtime directory. Entries contain no independent receipt facts,
 at most 65,536 JSON bytes; they are installed atomically under the exclusive host
 lease. They grant no authority and are not another journal. Rebuild the index
-from validated intent/ledger coverage at startup, reusing only entries whose
-coverage entry validates under the startup classification bound above; live registration updates
+from validated intent/ledger coverage at startup, reusing only job entries at or
+below the watermark of a coverage entry that validates under the startup
+classification bound above; entries above it are rebuilt from that start's scan; live registration updates
 it before exposing work, and receipt binding updates it before publication.
 An index-write failure before reservation returns refused_before_effect with
 `helper_index_unavailable`. After a reserve append, whether or not a create was
@@ -814,7 +837,15 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   form, rescans a session whose token or entry digest fails validation, joins an
   intent open at the previous start to its later terminal with both above the
   watermark, keeps durable admission closed until coverage completes and never
-  rescans a validated prefix. A resident host continues in slices and then
+  rescans a validated prefix. A registration followed by a committed pre-effect
+  refusal, with coverage saved beyond the pair, shows on the next start no job
+  entry, no ledger reservation, no reconstructed charge and an activatable
+  parent; the same registration without a committed terminal stays expected and
+  conservative; an interrupted removal or publication leaves no validated coverage
+  beyond the pair, and the pair is scanned again. A
+  controlled scan-bound fixture shows repeated one-shot starts revisiting a
+  suffix behind an unmatched intent and a resident host completing it across
+  slices. A resident host continues in slices and then
   opens; the host refusal carries both counts; an unreadable session keeps the
   root closed and names that session. A refusal consumed by the coordinator's
   execute-result reserve is recorded unknown and takes the conservative charge

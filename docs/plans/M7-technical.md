@@ -589,9 +589,19 @@ not_dispatched. Later subcases of the stopped case get no state of their own:
 they belong to that consumed attempt and are recorded as not run in its case
 event. A matrix stopped under this rule is not resumable, because its candidate
 can no longer close; no later case runs as an unapproved paid look-ahead. A
-pre-merge `--only` lane that stopped pre-dispatch may be invoked again on the
-same commit; it reuses that commit's completed null-matrix rows and dispatches
-only its not_dispatched cases.
+paid M7 pre-merge `--only` lane, and `m7-rollback` when invoked with
+`--attempts-index`, is one logical lane per commit SHA and lane ID. A
+pre-dispatch result (`evidence_incomplete_pre_dispatch`) stops the invocation
+before the next case and suspends every selected lane that still has a
+not_dispatched case; it ends none. A suspended lane may be invoked again on the
+same commit as its continuation: it presents the same attempts index, reuses
+that commit's completed null-matrix rows and dispatches only its not_dispatched
+cases. A lane ends when every one of its cases is completed with `pass`, or when
+any case of that invocation reached `started` without a completed `pass`,
+including a case left at `started` with no result and a started non-pass in
+another lane of the same invocation. An ended lane is not invoked again with
+`--only` on that commit; this never bars the full logical matrix, whose rows
+carry a non-null matrix ID.
 The full runner runs a contiguous attended block through executable wrappers attached to the
 operator's `/dev/tty`, with the existing PTY capture preserving human input and
 exact IDs. Do not run those wrappers as hidden System.cmd children expecting
@@ -701,11 +711,28 @@ or campaign. No stale copy is a valid evidence source. This is a retained
 single-writer procedure over trusted hosts, not distributed fencing by a local
 file lock. Phase 0 pins its control-event shapes, safe recovery procedure and
 two-host handoff/split-writer refusal tests. No new service is required.
-After a paid pre-merge lane ends on a commit, whether it passed or stopped, the
-next commit of that work is documentation-only and appends one line
+After a paid pre-merge lane ends on a commit, whether it completed or stopped
+after a started non-pass, the next commit of that work appends one line
 `index-head: <sequence> <sha256>` to the Concept file's Progress and Evidence
-section; that commit needs no paid lane, and a later paid lane refuses until the
-line exists. Preflight uses the `index-head:` line with the greatest sequence in
+section; a commit that only adds this line needs no paid lane of its own. A
+suspended lane has not ended: its continuation on the original commit is the
+same lane and needs no such line. Its rows beyond the latest committed head are
+protected only by the retained single-writer index procedure above, not by a
+committed head; preflight still requires the presented index to extend the
+latest committed head, and identifies a continuation by that commit's and lane's
+rows in it. A suspended lane that will not continue on its commit, for example
+because its prerequisite repair needs a commit, is abandoned by the same
+head-recording commit: that commit records the current head, the lane's
+not_dispatched cases stay not_dispatched, its completed rows are retained and
+are not reused on any other commit, and it never continues. A paid lane is new
+when the index holds no row for its commit and lane ID; a new paid lane refuses
+while the index holds any case event at or beyond `started` after the greatest
+committed head. Phase 0 pins two vectors: one case passes, the next stops
+pre-dispatch, the lane continues on the same commit without dispatching the
+passed case again and its head is committed only after it ends; and a suspended
+lane is abandoned by a head-recording commit before a new lane runs on the next
+commit, which dispatches every case again as that commit's own work.
+ Preflight uses the `index-head:` line with the greatest sequence in
 the checked-out Concept file; two lines with the same sequence and different
 digests refuse.
 The scaffold records the known head/count before candidate commitment. Preflight
@@ -1370,6 +1397,9 @@ choices and renewed internal review are tracked in the [round 5 disposition](../
 The [round 6 assessment](../evidence/M7-external-review-6.md) of 07b1a19c
 supersedes round 5's readiness conclusion. Its 37 findings, three maintainer
 choices and renewed internal review are tracked in the [round 6 disposition](../evidence/M7-round-6-disposition.md).
+The [round 7 assessment](../evidence/M7-external-review-7.md) of 6f8d4759
+supersedes round 6's readiness conclusion. Its four findings and renewed
+internal review are tracked in the [round 7 disposition](../evidence/M7-round-7-disposition.md).
 The repaired packet proceeds to external audit only after that review and
 clean-candidate documentation validation. This is review of planned contracts, not product evidence or
 formal independent acceptance review.

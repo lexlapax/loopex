@@ -103,7 +103,10 @@ Every durable host start classifies retained helper history before it admits
 work, even when new delegation is disabled, so an old
 helper is never adopted as ordinary work. That scan has a fixed 60-second bound
 per start and keeps its progress: a long history finishes over later starts, or
-in the background of a resident host. Until then the durable host admits no
+in the background of a resident host. Two cases finish only under a resident
+host: a root whose listing alone exceeds one bound, and a session with more
+records than one start can read behind a call whose outcome the scan has not yet
+reached. Until the scan finishes the durable host admits no
 session work and reports a count of what remains; reading existing sessions and
 the ephemeral profile, which has no helpers, stay available. One unreadable
 session history keeps the durable host closed until the root is restored from
