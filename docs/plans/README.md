@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M7` is accepted; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M7` is in progress; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M6` — 2026-09-29 |
-| Blockers | None; `M7` is accepted and implementation may proceed |
+| Blockers | None; `M7` is in progress against its accepted plan pair |
 | Authorized work | Implementation inside the accepted `M7` plan pair, landing on `main` in small reviewed changes |
 | Next maintainer decision | None until `M7` is ready for independent review |
-| Next transition | Move `M7` to In progress and implement the accepted outcomes with `bash scripts/check.sh` green; the completed tested commit then moves it to In review |
+| Next transition | Ensure that `docs/evidence/M7-closure-runs.md` is indexed as a scaffold, map every outcome to evidence in the plan, then make the tested implementation commit by moving `M7` to In review; run the closure matrix and independent review from that exact SHA |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -36,7 +36,7 @@ The maintainer accepted M7, ADRs 0041–0049, the
 [acceptance disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds every historical pair's digests and records the integration instruction.
 All prerequisites are accepted and implementation may begin. M7's outcome rows
-remain Open; its register stays Accepted until product implementation starts.
+remain Open; implementation began with the cross-run conversation regression.
 No partially accepted subset authorizes dependent implementation.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the
@@ -149,7 +149,7 @@ representable.
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
 | `M5` | Closed | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 | `M6` | Closed | [concept](M6.md) | [technical depth](M6-technical.md) | — |
-| `M7` | Accepted | [concept](M7.md) | [technical depth](M7-technical.md) | — |
+| `M7` | In progress | [concept](M7.md) | [technical depth](M7-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact

@@ -1257,6 +1257,40 @@ defmodule Loopex.AgentLoopTest do
     assert length(second.messages) < length(third.messages)
   end
 
+  test "a second prompt retains the first run's committed conversation" do
+    fixture =
+      start(
+        script: [
+          %{text: "I will inspect the file", calls: [call("first-read")]},
+          %{text: "The file needs a repair", calls: []},
+          %{text: "I remember the diagnosis", calls: []}
+        ]
+      )
+
+    {_session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "Diagnose the original problem")
+
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    assert {:accepted, "prompt-2"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt-2",
+               content: "Repair the problem you just diagnosed"
+             })
+
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    [_initial, _after_tool, next_run] = AgentLoopTestModel.dispatched(fixture.model)
+
+    assert Enum.map(tl(next_run.messages), &{&1["role"], &1["content"]}) == [
+             {"user", "Diagnose the original problem"},
+             {"assistant", "I will inspect the file"},
+             {"tool", "tool output for first-read"},
+             {"assistant", "The file needs a repair"},
+             {"user", "Repair the problem you just diagnosed"}
+           ]
+  end
+
   test "an assistant tool call and its real tool result are committed and replayed to the model" do
     script = [
       %{text: "I will write the file", calls: [call("c1")]},
