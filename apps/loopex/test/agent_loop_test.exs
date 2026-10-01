@@ -1295,6 +1295,93 @@ defmodule Loopex.AgentLoopTest do
            ]
   end
 
+  test "a prompt after a failed run retains committed tools but excludes incomplete model text" do
+    fixture =
+      start(
+        script: [
+          %{text: "Inspecting before failure", calls: [call("before-failure")]},
+          %{error: :provider_unavailable, deltas: ["uncommitted answer"]},
+          %{text: "Recovered with the earlier evidence", calls: []}
+        ]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "Diagnose before failure")
+
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "failed"
+
+    assert {:accepted, "after-failure"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "after-failure",
+               content: "Continue from the evidence"
+             })
+
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    [_initial, _failed, next_run] = AgentLoopTestModel.dispatched(fixture.model)
+
+    assert Enum.map(tl(next_run.messages), &{&1["role"], &1["content"]}) == [
+             {"user", "Diagnose before failure"},
+             {"assistant", "Inspecting before failure"},
+             {"tool", "tool output for before-failure"},
+             {"user", "Continue from the evidence"}
+           ]
+
+    assert {:ok, recovered} =
+             Loopex.Runtime.SessionState.recover(
+               session_id,
+               Fixture.records(fixture, session_id),
+               Fixture.events(fixture, session_id)
+             )
+
+    live = :sys.get_state(coordinator_of(fixture.runtime)).durable
+    assert recovered.run_order == live.run_order
+    last_run = List.last(live.run_order)
+
+    assert Loopex.Runtime.SessionState.lineage_elements(recovered, last_run) ==
+             Loopex.Runtime.SessionState.lineage_elements(live, last_run)
+  end
+
+  for phase <- [:before_linearization, :after_linearization_before_result] do
+    test "a later prompt with an uncertain #{phase} commit extends conversation exactly once" do
+      fixture =
+        start(script: [%{text: "Retained answer", calls: []}, %{text: "Next answer", calls: []}])
+
+      {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "Original input")
+      assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+      pair = {:session_journal_commit, unquote(phase)}
+      :ok = M1RuntimeTestStore.inject(fixture.store, pair)
+      command = %{type: :prompt, command_id: "uncertain-prompt", content: "Next input"}
+      assert {:accepted, "uncertain-prompt"} = Loopex.command(attachment, command)
+      assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+      assert {:accepted, "uncertain-prompt"} = Loopex.command(attachment, command)
+      assert pair in M1RuntimeTestStore.observed(fixture.store)
+
+      [_initial, next_run] = AgentLoopTestModel.dispatched(fixture.model)
+
+      assert Enum.map(tl(next_run.messages), &{&1["role"], &1["content"]}) == [
+               {"user", "Original input"},
+               {"assistant", "Retained answer"},
+               {"user", "Next input"}
+             ]
+
+      assert {:ok, recovered} =
+               Loopex.Runtime.SessionState.recover(
+                 session_id,
+                 Fixture.records(fixture, session_id),
+                 Fixture.events(fixture, session_id)
+               )
+
+      assert [_, last_run] = recovered.run_order
+
+      assert Enum.map(
+               Loopex.Runtime.SessionState.lineage_elements(recovered, last_run),
+               & &1.content
+             ) == ["Original input", "Retained answer", "Next input", "Next answer"]
+    end
+  end
+
   test "lineage reads retain admission order and rebuild from committed history" do
     fixture =
       start(script: [%{text: "first answer", calls: []}, %{text: "second answer", calls: []}])

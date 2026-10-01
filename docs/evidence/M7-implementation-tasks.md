@@ -15,6 +15,10 @@ its entire stated outcome is proved.
 
 ## Current work
 
+- Done: original T01 is complete, including live conversation after failure and
+  prompt commit uncertainty on either side of persistence. Original checklist
+  completion is now 21/186 items and 1/20 top-level tasks. The real-provider
+  conversation witness remains a separate release obligation.
 - Done: reproduce cross-run conversation loss with the real session-owner path
   and a scripted model in `apps/loopex/test/agent_loop_test.exs`.
 - Done: run-scoped result joins, replayed admission order, revision-1 normalized
@@ -1433,6 +1437,7 @@ its entire stated outcome is proved.
 - [ ] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
 - [x] Pin legacy and planned M7 read-definition canonical preimages/digests and the revision-1 literal artifact-read capability table.
 
+<a id="t01-conversation-continuity"></a>
 ## T01 — Preserve conversation across prompts and restarts
 
 ### Original checklist
@@ -1443,7 +1448,41 @@ its entire stated outcome is proved.
 - [x] Normalize provider-facing call IDs and reject collisions or incomplete joins.
 - [x] Reset each run’s accounting without deleting conversation or recovery facts.
 - [x] Preserve already staged requests unchanged.
-- [ ] Test multiple prompts, follow-ups, tools, cancellation, failed runs, restart and uncertain commits.
+- [x] Test multiple prompts, follow-ups, tools, cancellation, failed runs, restart and uncertain commits.
+
+### Verification evidence
+
+T01's final original item is proved by the following live-runtime cases, with
+pure projection/replay tests supplementing them:
+
+- Multiple prompts and tools: `agent_loop_test.exs` checks the second actual
+  model request's complete ordered prompt, assistant and tool history.
+- Follow-ups: the promoted-follow-up case retains the predecessor's history
+  while its new run starts with zero charged tokens.
+- Cancellation: `configured_session_test.exs` aborts a pending model question
+  and checks that the next actual request retains its cancelled tool result.
+- Failed runs: the new agent-loop case commits a tool exchange, fails the next
+  model call after transient text, then checks the following prompt retains
+  the exchange and excludes that uncommitted text. Live and recovered lineage
+  are identical.
+- Restart: both legacy and captured-genesis cases stop the runtime and stage
+  later prompts from retained history; the configured case also preserves
+  exact captured instructions, settings and tools.
+- Uncertain commits: the new cases inject `commit_unknown` before persistence
+  and after persistence but before the Store reply. Retrying the same prompt
+  retains two total runs and exactly one later model request. The recovered
+  conversation contains each prompt and answer once.
+
+The complete `agent_loop_test.exs`, `conversation_test.exs` and
+`configured_session_test.exs` pass 151 tests on both supported pairs on
+2026-10-01. Current takes 26.9 seconds and floor takes 27.0 seconds. These
+credential-free checks complete the original T01 testing item; the real-provider
+second-prompt witness and milestone closure checks remain open.
+
+- Current output: `/private/tmp/loopex-m7-t01-continuity-current.log`, SHA-256
+  `a3fe73a479845861f7e0c53aa087e64c5435352ec21912b3584b901c1bf534f5`.
+- Floor output: `/private/tmp/loopex-m7-t01-continuity-floor.log`, SHA-256
+  `d2b576cf58dba3c0d3154f9dc6c4ed2e5337085f5a5f4b3cdbc7d40592043969`.
 
 ## T02 — Handle large tool output and bounded artifact reads
 
