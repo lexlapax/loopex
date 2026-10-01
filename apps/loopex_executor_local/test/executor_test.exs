@@ -43,6 +43,41 @@ defmodule Loopex.Executor.LocalTest do
     assert MapSet.new(Executor.required_grant_bindings()) == @oracle
   end
 
+  test "a valid grant for an unavailable read generation cannot select a different version" do
+    fixture = fixture("unavailable-read-generation")
+    on_exit(fn -> stop_fixture(fixture) end)
+    File.write!(Path.join(fixture.workspace, "source.txt"), "retained file")
+
+    for version <- ["1.1.0", "9.9.9"] do
+      {original, _grant} =
+        job_and_grant(fixture, "read-#{version}", "loopex.read", %{"path" => "source.txt"})
+
+      fields =
+        original
+        |> Map.from_struct()
+        |> Map.drop([
+          :canonical_request_bytes,
+          :canonical_request_digest,
+          :effective_job_deadline
+        ])
+        |> Map.put(:tool_version, version)
+
+      assert {:ok, job} = Executor.job(fields)
+
+      assert {:ok, grant} =
+               Executor.issue_grant(
+                 {:host_policy, :allow},
+                 job,
+                 System.system_time(:millisecond) + 60_000
+               )
+
+      assert {:error, {:refused_before_effect, :tool_definition_mismatch}} =
+               Local.execute(fixture.executor, job, grant)
+
+      assert :absent = Local.receipt(fixture.executor, job.job_id)
+    end
+  end
+
   test "an ephemeral executor needs its exact session grant and closes before a second effect" do
     cell = :atomics.new(2, signed: false)
     generation = make_ref()

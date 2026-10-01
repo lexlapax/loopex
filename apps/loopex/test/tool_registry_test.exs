@@ -95,6 +95,63 @@ defmodule Loopex.ToolRegistryTest do
              ToolRegistry.resolve(runtime, "example.read", "2.0.0")
   end
 
+  test "reference read registrations retain both exact capability generations" do
+    [legacy, range] = read_generations()
+    runtime = start_runtime("read-capability-generations", tools: [range, legacy])
+
+    for definition <- [legacy, range] do
+      assert {:ok, entry} =
+               ToolRegistry.resolve(runtime, "loopex.read", definition["tool_version"])
+
+      assert entry.definition == definition
+      assert entry.generation == ToolDefinition.generation(definition)
+
+      assert {:ok, %{"read" => generation}} =
+               ToolRegistry.compose_active_set(runtime, [
+                 {"loopex.read", definition["tool_version"]}
+               ])
+
+      assert generation == entry.generation
+    end
+  end
+
+  test "runtime and registry loading reject altered reference read generations before startup" do
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: "invalid-read-capability")
+    on_exit(fn -> GenServer.stop(store_pid) end)
+
+    for definition <- read_generations(),
+        changed <- [
+          Map.put(definition, "tool_version", "9.9.9"),
+          Map.update!(definition, "description", &(&1 <> ".")),
+          put_in(definition, ["budgets", "artifact_bytes"], 1)
+        ] do
+      assert ToolDefinition.valid?(changed)
+
+      assert {:error, :invalid_runtime_options} =
+               Loopex.start_link(
+                 runtime_id: "invalid-read-capability",
+                 context_token_budget: 8_192,
+                 store: store,
+                 tools: [changed],
+                 policy: Loopex.AgentLoopTestPolicy,
+                 policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"}
+               )
+
+      assert {:error, {:invalid_tool_set, :invalid_tool_selection}} =
+               GenServer.start(ToolRegistry, tools: [changed])
+    end
+
+    assert M1RuntimeTestStore.observed(store_pid) == MapSet.new()
+  end
+
+  defp read_generations do
+    Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
+    |> File.read!()
+    |> JSON.decode!()
+    |> Map.fetch!("vectors")
+    |> Enum.map(& &1["definition"])
+  end
+
   test "two runtimes carry independent tool registries with no global registration" do
     registered_before = MapSet.new(Process.registered())
     environment_before = Application.get_all_env(:loopex)

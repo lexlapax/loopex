@@ -1111,9 +1111,12 @@ defmodule Loopex.Runtime do
   defp validate_tools(tools) when is_list(tools) do
     normalized = Enum.map(tools, &LoopexProtocol.ToolDefinition.normalize/1)
 
-    if Enum.all?(normalized, &LoopexProtocol.ToolDefinition.valid?/1),
-      do: {:ok, normalized},
-      else: {:error, :invalid_tool_definition}
+    if Enum.all?(normalized, fn definition ->
+         LoopexProtocol.ToolDefinition.valid?(definition) and
+           match?({:ok, _}, Loopex.Runtime.ArtifactReadCapabilities.resolve([definition]))
+       end),
+       do: {:ok, normalized},
+       else: {:error, :invalid_tool_definition}
   end
 
   defp validate_tools(_tools), do: {:error, :invalid_tool_definition}

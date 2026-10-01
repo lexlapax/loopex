@@ -16,9 +16,11 @@ its entire stated outcome is proved.
 ## Current work
 
 - Done: original T01 is complete, including live conversation after failure and
-  prompt commit uncertainty on either side of persistence. Original checklist
-  completion is now 21/186 items and 1/20 top-level tasks. The real-provider
+  prompt commit uncertainty on either side of persistence. The real-provider
   conversation witness remains a separate release obligation.
+- Done: T02 exact-generation capability checks now guard runtime admission,
+  registry loading and the local executor's compiled tool inventory. Original
+  checklist completion is 22/186 items and 1/20 top-level tasks.
 - Done: reproduce cross-run conversation loss with the real session-owner path
   and a scripted model in `apps/loopex/test/agent_loop_test.exs`.
 - Done: run-scoped result joins, replayed admission order, revision-1 normalized
@@ -1489,7 +1491,7 @@ second-prompt witness and milestone closure checks remain open.
 ### Original checklist
 
 - [ ] Prepare bounded excerpts while retaining complete original results.
-- [ ] Implement capability checks from the exact frozen tool definitions and literal capability table.
+- [x] Implement capability checks from the exact frozen tool definitions and literal capability table.
 - [ ] Keep replay independent of current host-registry availability.
 - [ ] Validate artifact ownership and arguments in the session owner before policy admission; add resolved executor data after approval.
 - [ ] Implement 4-KiB range reads, encoded-result limits, offsets, progress and EOF.
@@ -1500,7 +1502,57 @@ second-prompt witness and milestone closure checks remain open.
 
 ### Added implementation subtasks
 
-- [x] Implement and test pure exact-generation derivation and retained-binding validation; runtime selection and executor dispatch integration remain pending.
+- [x] Implement and test pure exact-generation derivation and retained-binding validation.
+- [x] Enforce the literal read-generation table during runtime/registry loading and executor startup; select executor tools by exact ID/version and retain the frozen capability through restart with an empty host registry. Artifact range execution and prepared-reference replay remain pending.
+
+### Verification evidence
+
+Runtime startup and reference registry loading refuse changed read versions,
+descriptions and budgets. Both pinned read generations coexist in the runtime
+registry and resolve individually. The local executor checks its compiled
+definitions against the same literal table before starting; job resolution
+matches ID and version together. A valid host grant cannot make an unavailable
+read version execute as the legacy generation. The configured-session restart
+test stages three prompts across two runtimes with the exact M7 read definition;
+the second runtime has no registered read tool, while recovered genesis retains
+the original capability digest and staged definitions.
+
+The current Core suite passes 785 tests with its five existing long-duration
+exclusions in 158.4 seconds. The 86 affected Core tests pass on the floor pair
+in 3.8 seconds. Local-executor/coding-tool tests pass 148 cases on both pairs,
+in 114.5 seconds on current and 116.5 seconds on floor.
+
+- Current Core: `/private/tmp/loopex-m7-t02-core-fixed-current.log`, SHA-256
+  `297e08c4f0960c94139fc581b191d63f0e8d1529c4eaf44c23d58e5bc2c3d1ba`.
+- Floor Core: `/private/tmp/loopex-m7-t02-core-floor.log`, SHA-256
+  `941753f9293a8f8655f68b07d3133536ac9c4c0748cd8b1ca63bdd9b452e570c`.
+- Current executor: `/private/tmp/loopex-m7-t02-read-executor-current.log`, SHA-256
+  `b8019ca4cfc0d8905cf90673e60cf0b659400721e9fd224cedd5139d96484fca`.
+- Floor executor: `/private/tmp/loopex-m7-t02-read-executor-floor.log`, SHA-256
+  `f0345548b40d5897efd9be1a5dc7637081b4fc1782d55306cc9d1d01f0f9a5f6`.
+
+The first Core run failed six tests. Five used a stale reference read fixture
+with a 65,536-byte output budget instead of the pinned 16,384-byte value. The
+fixture now matches the literal generation without changing its exact size or
+token assertions; its obsolete startup fallback no longer turns a refusal into
+a bogus runtime reference. The sixth test depended on suppressed SASL reports
+and raw rather than translated supervisor text. It now enables that report class
+within the serial test, restores the original filter configuration and still
+requires the actual child-failure report and reason. No production logger policy
+or check was relaxed.
+
+- Initial Core failure: `/private/tmp/loopex-m7-t02-core-current.log`, SHA-256
+  `46233f458a3036707c926c07eb575a66f0fbe99f1e453f6a716fabdedd5d7136`.
+- Focused repair proof, 26 cases in 2.1 seconds:
+  `/private/tmp/loopex-m7-t02-regression-repairs-current.log`, SHA-256
+  `26a26f4e237d3a44279837b66221c6b9f5e4cef31837d10891bb7cc7cb5707f0`.
+- Initial registry test expected an internal refusal instead of the established
+  public `invalid_runtime_options` response:
+  `/private/tmp/loopex-m7-t02-read-registration-current.log`, SHA-256
+  `e66f11bae7f1c59c0ab32d44524f4590e4b4018ffb634ceeb4d5d5a95e01fbf6`.
+  Corrected 32-case run passes in 0.5 seconds:
+  `/private/tmp/loopex-m7-t02-read-registration-fixed-current.log`, SHA-256
+  `37e9f867e0ac1c0efe0af5a3fc12aa287ac6ad7b0ca6d03ca06fdc3c0afbbdbf`.
 
 ## T03 — Implement host-composed instructions
 

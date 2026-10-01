@@ -355,7 +355,8 @@ defmodule Loopex.ToolRegistry do
   # name is taken.
   defp put(entries, definition, origin) do
     with :ok <- validity(definition),
-         :ok <- namespace(definition, origin) do
+         :ok <- namespace(definition, origin),
+         {:ok, _capability} <- Loopex.Runtime.ArtifactReadCapabilities.resolve([definition]) do
       identity = {Map.fetch!(definition, "tool_id"), Map.fetch!(definition, "tool_version")}
       bytes = ToolDefinition.canonical_bytes(definition)
 

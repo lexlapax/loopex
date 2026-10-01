@@ -1855,8 +1855,15 @@ defmodule Loopex.ConfiguredSessionTest do
   end
 
   test "two prompts and restart stage captured host instructions, settings and tools" do
+    [_, range] =
+      Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
+      |> File.read!()
+      |> JSON.decode!()
+      |> Map.fetch!("vectors")
+
     fixture =
       start(
+        tools: [Fixture.tool_definition(), range["definition"]],
         script: [%{text: "first answer", calls: []}, %{text: "second answer", calls: []}],
         max_tokens: 7
       )
@@ -1953,6 +1960,13 @@ defmodule Loopex.ConfiguredSessionTest do
              )
 
     assert final.cleanup_grace_ms == 5_000
+    assert final.tool_selection["artifact_read"] == genesis["tool_selection"]["artifact_read"]
+
+    assert final.tool_selection["artifact_read"]["definition_digest"] ==
+             range["definition_digest"]
+
+    assert Loopex.ToolRegistry.resolve(restarted.runtime, "loopex.read") ==
+             {:error, :unknown_tool}
   end
 
   test "fresh creation validates admitted definitions and normalized original options" do

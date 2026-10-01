@@ -55,6 +55,20 @@ defmodule Loopex.Runtime.OwnerGroupsTest do
   end
 
   test "a private worker-supervisor fault still reports an actual child failure" do
+    # Concept: this test observes a real supervisor fault, including its report.
+    # Technical depth: Elixir suppresses SASL supervisor reports by default.
+    # Enable that report class only inside this serial test and restore the
+    # exact filter configuration, independent of the invoking shell's defaults.
+    filters = :logger.get_primary_config().filters
+
+    enabled =
+      Keyword.update!(filters, :logger_translator, fn {callback, configuration} ->
+        {callback, %{configuration | sasl: true}}
+      end)
+
+    :ok = :logger.set_primary_config(:filters, enabled)
+    on_exit(fn -> :logger.set_primary_config(:filters, filters) end)
+
     manager = start_supervised!({OwnerGroups, []})
     {:ok, group} = :supervisor.start_child(manager, [[]])
     {:ok, workers} = OwnerGroup.workers(group)
@@ -70,7 +84,7 @@ defmodule Loopex.Runtime.OwnerGroupsTest do
         await_empty(manager, System.monotonic_time(:millisecond) + 1_000)
       end)
 
-    assert log =~ "child_terminated"
+    assert log =~ "Child Loopex.Runtime.OwnerGroup of Supervisor"
     assert log =~ "owner_workers_stopped"
   end
 

@@ -184,7 +184,7 @@ defmodule Loopex.ContextAdmissionTest do
       "idempotency_class" => "safe_retry",
       "budgets" => %{
         "wall_time_ms" => 30_000,
-        "output_bytes" => 65_536,
+        "output_bytes" => 16_384,
         "artifact_bytes" => 8_388_608
       }
     },
@@ -2850,7 +2850,7 @@ defmodule Loopex.ContextAdmissionTest do
         active_tools: Enum.map(tools, &Map.fetch!(&1, "tool_id"))
       ]
 
-    runtime = start_runtime_compat(runtime_options, context_token_budget)
+    runtime = start_runtime(runtime_options, context_token_budget)
 
     fixture = %{
       runtime: runtime,
@@ -2873,21 +2873,15 @@ defmodule Loopex.ContextAdmissionTest do
   end
 
   defp restart_fixture(fixture) do
-    replacement = start_runtime_compat(fixture.runtime_options, fixture.context_token_budget)
+    replacement = start_runtime(fixture.runtime_options, fixture.context_token_budget)
     on_exit(fn -> stop_runtime(replacement) end)
     replacement
   end
 
-  # The compatibility fallback lets every later lock reach the pre-ADR behavior
-  # it names. The dedicated validation case above is what makes deleting the new
-  # required option impossible once the implementation exists.
-  defp start_runtime_compat(options, context_token_budget) do
+  defp start_runtime(options, context_token_budget) do
     with_context = Keyword.put(options, :context_token_budget, context_token_budget)
-
-    case Loopex.start_link(with_context) do
-      {:ok, runtime} -> runtime
-      {:error, :invalid_runtime_options} -> options |> Loopex.start_link() |> elem(1)
-    end
+    {:ok, runtime} = Loopex.start_link(with_context)
+    runtime
   end
 
   defp create_attached_session(fixture) do

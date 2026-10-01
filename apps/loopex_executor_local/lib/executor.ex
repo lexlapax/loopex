@@ -296,7 +296,19 @@ defmodule Loopex.Executor.Local do
   supplying this list; this executor validates its bounded launch representation.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(options) when is_list(options), do: GenServer.start_link(__MODULE__, options)
+  def start_link(options) when is_list(options) do
+    # Concept: a reference read generation cannot gain capability from its name.
+    # Technical depth: validate the compiled definitions against Core's literal
+    # table before starting an owner or opening its ledger. Each generation is
+    # checked separately because the executor may retain coexisting versions.
+    if Enum.all?(CodingTools.definitions(), fn definition ->
+         match?({:ok, _}, Loopex.Runtime.ArtifactReadCapabilities.resolve([definition]))
+       end) do
+      GenServer.start_link(__MODULE__, options)
+    else
+      {:error, :invalid_tool_definition}
+    end
+  end
 
   @doc """
   ## Concept
@@ -2936,13 +2948,36 @@ defmodule Loopex.Executor.Local do
   end
 
   defp resolve_tool(job) do
-    case tool(job.tool_id) do
+    case tool_generation(job.tool_id, job.tool_version) do
       {:ok, %{version: version, effect_class: effect_class} = found}
       when version == job.tool_version and effect_class == job.effect_class ->
         {:ok, found}
 
       _other ->
         {:error, :tool_definition_mismatch}
+    end
+  end
+
+  # Concept: retained jobs select their own generation even when newer tools coexist.
+  # Technical depth: demonstration tools keep their fixed identities; coding
+  # tools match both ID and version before their effect class is checked above.
+  defp tool_generation(id, version) when id in [@write_tool, @wait_write_tool] do
+    case tool(id) do
+      {:ok, %{version: ^version}} = found -> found
+      _other -> :error
+    end
+  end
+
+  defp tool_generation(id, version) do
+    case Enum.find(CodingTools.definitions(), fn definition ->
+           definition["tool_id"] == id and definition["tool_version"] == version
+         end) do
+      nil ->
+        :error
+
+      definition ->
+        {:ok,
+         %{id: id, version: version, effect_class: definition["effect_class"], coding: definition}}
     end
   end
 
