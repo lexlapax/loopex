@@ -5662,6 +5662,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: an interaction definition never enters the executor effect path.
+  # Technical depth: until the model-question lifecycle is joined, retain a
+  # truthful refusal after policy allow, without an intent, grant or job.
+  defp dispatch_authorized_effect(state, work, call, %{"class" => "interaction"}, _context),
+    do: commit_tool_terminal(state, work, call, :denied, "interaction_unsupported")
+
   defp dispatch_authorized_effect(state, work, call, definition, context) do
     with {:ok, job} <- build_job(state, work, call, definition),
          {:ok, grant} <-
@@ -6428,6 +6434,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
     if state.durable.policy_defer_mode == "refuse", do: :refuse_defer, else: :admit_defer
   end
 
+  defp policy_defer_mode(state, definition) do
+    if ToolDefinition.class(definition) == "interaction",
+      do: :admit_defer,
+      else: policy_defer_mode(state)
+  end
+
   defp start_policy_consultation(%{policy: nil} = state, work, call, _definition),
     do: commit_tool_terminal(state, work, call, :denied, "policy_unavailable")
 
@@ -6436,7 +6448,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     task =
       Task.Supervisor.async_nolink(state.owner_workers, fn ->
-        Policy.evaluate_callback(state.policy, request, policy_defer_mode(state))
+        Policy.evaluate_callback(state.policy, request, policy_defer_mode(state, definition))
       end)
 
     state = put_in_flight(state, task.ref, {:policy, work.run_id, task.pid})
@@ -6468,7 +6480,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
                   end
 
                 {:defer, question} ->
-                  begin_interaction(state, work, call, question)
+                  if ToolDefinition.class(definition) == "interaction" do
+                    commit_tool_terminal(state, work, call, :denied, "policy_unavailable")
+                  else
+                    begin_interaction(state, work, call, question)
+                  end
 
                 {:deny, category} when is_atom(category) ->
                   denial =

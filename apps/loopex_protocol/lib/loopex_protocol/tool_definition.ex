@@ -57,11 +57,18 @@ defmodule LoopexProtocol.ToolDefinition do
 
   `validate/1` is total and returns every reason it found rather than the first,
   so a caller fixing a definition sees the whole list in one pass.
+
+  ADR 0045 adds one exact interaction definition, returned by
+  `question_definition/0`. Its optional `class` member selects definition format
+  v2 and permits zero artifact budget only for that literal generation. An
+  absent class means effect and retains format v1 and its original bytes.
+  Interaction declarations are never schema-narrowed or completed with defaults.
   """
 
   alias LoopexProtocol.Canonical
 
   @definition_version "loopex.tool_definition.v1"
+  @interaction_definition_version "loopex.tool_definition.v2"
 
   @fields ~w(tool_id tool_version name description parameter_schema result_shape
              effect_class idempotency_class budgets)
@@ -81,6 +88,70 @@ defmodule LoopexProtocol.ToolDefinition do
   @name_pattern ~r/^[a-z][a-z0-9_]{0,63}$/
   @tool_id_pattern ~r/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/
   @version_pattern ~r/^\d+\.\d+\.\d+$/
+
+  @question_definition %{
+    "tool_id" => "loopex.ask",
+    "tool_version" => "1.0.0",
+    "name" => "ask",
+    "class" => "interaction",
+    "description" =>
+      "Ask the operator a question. Supply optional unique choices, or request a text answer.",
+    "parameter_schema" => %{
+      "type" => "object",
+      "properties" => %{
+        "question" => %{
+          "type" => "string",
+          "description" => "Nonempty UTF-8 question, at most 2,048 bytes."
+        },
+        "choices" => %{
+          "type" => "array",
+          "items" => %{"type" => "string"},
+          "description" => "One to eight distinct nonempty labels, at most 256 UTF-8 bytes each."
+        }
+      },
+      "required" => ["question"]
+    },
+    "result_shape" => %{
+      "content_type" => "json",
+      "description" => "The operator's answer, decline or expiry disposition."
+    },
+    "effect_class" => "read_only",
+    "idempotency_class" => "never_blind_retry",
+    "budgets" => %{
+      "wall_time_ms" => 600_000,
+      "output_bytes" => 16_384,
+      "artifact_bytes" => 0
+    }
+  }
+
+  @doc """
+  ## Concept
+
+  The exact model-visible question capability admitted by ADR 0045.
+
+  ## Technical depth
+
+  This immutable definition grants no authority. The session owner consults
+  policy and owns its interaction; no executor intent, grant or job serves it.
+  Question and choice byte bounds are enforced by validate_arguments/2 before
+  policy. Changed identifiers, schemas, descriptions or budgets do not register
+  as this generation. Older effect definitions retain their original fields.
+  """
+  @spec question_definition() :: t()
+  def question_definition, do: @question_definition
+
+  @doc """
+  ## Concept
+
+  Distinguish a session-owned interaction from an executor-backed effect.
+
+  ## Technical depth
+
+  Callers supply a validated definition. Omission retains the historical effect
+  meaning without adding a field to its retained bytes.
+  """
+  @spec class(t()) :: binary()
+  def class(definition), do: Map.get(definition, "class", "effect")
 
   @typedoc """
   ## Concept
@@ -181,6 +252,8 @@ defmodule LoopexProtocol.ToolDefinition do
   reported against what the host actually wrote.
   """
   @spec normalize(term()) :: term()
+  def normalize(%{"class" => "interaction"} = declaration), do: declaration
+
   def normalize(declaration) when is_map(declaration) and not is_struct(declaration) do
     schema =
       Map.get(declaration, "parameter_schema") || Map.get(declaration, "input_schema")
@@ -216,6 +289,8 @@ defmodule LoopexProtocol.ToolDefinition do
   a declaration already written in the subset.
   """
   @spec narrowing(term()) :: [binary()]
+  def narrowing(%{"class" => "interaction"}), do: []
+
   def narrowing(declaration) when is_map(declaration) and not is_struct(declaration) do
     schema = Map.get(declaration, "parameter_schema") || Map.get(declaration, "input_schema")
 
@@ -287,13 +362,14 @@ defmodule LoopexProtocol.ToolDefinition do
   Checks are independent and all run, so the result is the complete reason set
   rather than the first failure. Each reason is a bounded binary naming the
   field and what was wrong with it. A term that is not a map with exactly the
-  nine binary-keyed fields fails on shape before any field is inspected, which
-  is why the field checks may assume presence.
+  nine required binary-keyed fields and optional class fails on shape before
+  any field is inspected. A class-bearing definition must equal the admitted
+  interaction literal; no other zero-artifact declaration is admitted.
   """
   @spec validate(term()) :: [binary()]
   def validate(definition) when is_map(definition) and not is_struct(definition) do
     case shape_reasons(definition) do
-      [] -> Enum.flat_map(@fields, &field_reasons(&1, Map.fetch!(definition, &1)))
+      [] -> validate_class(definition)
       reasons -> reasons
     end
   end
@@ -324,7 +400,8 @@ defmodule LoopexProtocol.ToolDefinition do
   types, scalar array items, and string enumerations. Undeclared members remain
   ordinary JSON-Schema additions because this subset has no
   `additionalProperties` keyword; they must still be bounded JSON-like plain
-  data. A registered definition is expected, but an invalid definition fails
+  data. The question generation additionally requires its closed argument map,
+  UTF-8 byte bounds and unique labels. A registered definition is expected, but an invalid definition fails
   closed rather than turning a malformed registry entry into an unchecked call.
   """
   @spec validate_arguments(t(), term()) :: :ok | {:error, :invalid_arguments}
@@ -335,7 +412,8 @@ defmodule LoopexProtocol.ToolDefinition do
 
     valid =
       valid?(definition) and json_plain?(arguments) and
-        arguments_match_schema?(arguments, schema)
+        arguments_match_schema?(arguments, schema) and
+        (class(definition) != "interaction" or question_arguments?(arguments))
 
     if valid, do: :ok, else: {:error, :invalid_arguments}
   end
@@ -350,7 +428,7 @@ defmodule LoopexProtocol.ToolDefinition do
   ## Technical depth
 
   Covers the definition-version tag, the canonical-encoding version, and all
-  nine fields. Both version tags sit inside the covered bytes, so a retained
+  fields, including class in format v2. Both version tags sit inside the covered bytes, so a retained
   digest always states which shape and which encoding produced it. Raises when
   the definition is invalid, because canonical bytes for a record that could
   never be registered have no meaning and returning them invites a caller to
@@ -360,10 +438,16 @@ defmodule LoopexProtocol.ToolDefinition do
   def canonical_bytes(definition) do
     case validate(definition) do
       [] ->
+        fields = if Map.has_key?(definition, "class"), do: @fields ++ ["class"], else: @fields
+
         Canonical.encode(%{
-          "definition_version" => @definition_version,
+          "definition_version" =>
+            if(Map.has_key?(definition, "class"),
+              do: @interaction_definition_version,
+              else: @definition_version
+            ),
           "canonicalization_version" => Canonical.version(),
-          "definition" => Map.take(definition, @fields)
+          "definition" => Map.take(definition, fields)
         })
 
       reasons ->
@@ -435,14 +519,49 @@ defmodule LoopexProtocol.ToolDefinition do
 
   defp shape_reasons(definition) do
     keys = definition |> Map.keys() |> Enum.filter(&is_binary/1)
+    allowed = if Map.has_key?(definition, "class"), do: @fields ++ ["class"], else: @fields
 
     if map_size(definition) != length(keys) do
       ["a tool definition must use only binary keys"]
     else
       Enum.map(@fields -- keys, &"#{&1}: required field is missing") ++
-        Enum.map(keys -- @fields, &"#{&1}: is not a tool definition field")
+        Enum.map(keys -- allowed, &"#{&1}: is not a tool definition field")
     end
   end
+
+  defp validate_class(definition) do
+    cond do
+      not Map.has_key?(definition, "class") ->
+        Enum.flat_map(@fields, &field_reasons(&1, Map.fetch!(definition, &1)))
+
+      definition == @question_definition ->
+        []
+
+      true ->
+        ["class: only the exact loopex.ask interaction generation is admitted"]
+    end
+  end
+
+  defp question_arguments?(arguments) do
+    keys = Map.keys(arguments)
+
+    keys -- ~w(question choices) == [] and
+      bounded_text?(arguments["question"], 2_048) and
+      (not Map.has_key?(arguments, "choices") or
+         question_choices?(arguments["choices"], [], 0))
+  end
+
+  defp question_choices?([], _seen, count), do: count >= 1
+
+  defp question_choices?([label | rest], seen, count) when count < 8 do
+    bounded_text?(label, 256) and label not in seen and
+      question_choices?(rest, [label | seen], count + 1)
+  end
+
+  defp question_choices?(_, _, _), do: false
+
+  defp bounded_text?(text, ceiling),
+    do: is_binary(text) and byte_size(text) in 1..ceiling and String.valid?(text)
 
   defp field_reasons("tool_id", value) do
     cond do

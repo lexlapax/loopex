@@ -267,6 +267,111 @@ defmodule LoopexProtocol.ToolDefinitionTest do
     assert ToolDefinition.narrowing(definition()) == []
   end
 
+  test "the exact question generation uses v2 and preserves historical effect bytes" do
+    question = ToolDefinition.question_definition()
+    assert ToolDefinition.valid?(question)
+    assert ToolDefinition.class(question) == "interaction"
+    assert ToolDefinition.normalize(question) == question
+    assert question["budgets"]["artifact_bytes"] == 0
+
+    assert ToolDefinition.canonical_bytes(question) ==
+             Canonical.encode(%{
+               "definition_version" => "loopex.tool_definition.v2",
+               "canonicalization_version" => Canonical.version(),
+               "definition" => question
+             })
+
+    effect = definition()
+    assert ToolDefinition.class(effect) == "effect"
+    refute Map.has_key?(ToolDefinition.normalize(effect), "class")
+
+    assert ToolDefinition.canonical_bytes(effect) ==
+             Canonical.encode(%{
+               "definition_version" => "loopex.tool_definition.v1",
+               "canonicalization_version" => Canonical.version(),
+               "definition" => effect
+             })
+  end
+
+  test "the retained question vector pins the definition, canonical preimage and generation digest" do
+    vector =
+      Path.expand("../priv/vectors/question-tool.v1.json", __DIR__)
+      |> File.read!()
+      |> JSON.decode!()
+
+    assert vector["vector_version"] == "loopex.question_tool.v1"
+    assert vector["definition"] == ToolDefinition.question_definition()
+    assert {:ok, bytes} = Base.decode64(vector["canonical_bytes_base64"])
+    assert ToolDefinition.canonical_bytes(vector["definition"]) == bytes
+    assert Canonical.digest_bytes(bytes) == vector["definition_digest"]
+
+    assert ToolDefinition.generation(vector["definition"]) ==
+             {"loopex.ask", "1.0.0", vector["definition_digest"]}
+  end
+
+  test "interaction registration permits only the exact complete question generation" do
+    question = ToolDefinition.question_definition()
+
+    for changed <-
+          Enum.map(Map.keys(question), &Map.delete(question, &1)) ++
+            [
+              Map.put(question, "tool_id", "example.ask"),
+              Map.put(question, "tool_version", "1.0.1"),
+              Map.put(question, "name", "other_ask"),
+              Map.put(question, "description", "Changed"),
+              Map.put(question, "class", "effect"),
+              Map.put(question, "class", nil),
+              Map.put(question, "extra", true),
+              put_in(question, ["budgets", "artifact_bytes"], 1),
+              put_in(question, ["budgets", "wall_time_ms"], 600_001),
+              put_in(question, ["parameter_schema", "required"], []),
+              put_in(question, ["parameter_schema", "properties", "question", "enum"], ["fixed"]),
+              put_in(question, ["parameter_schema", "additionalProperties"], false)
+            ] do
+      refute ToolDefinition.valid?(changed)
+      refute ToolDefinition.valid?(ToolDefinition.normalize(changed))
+    end
+
+    refute ToolDefinition.valid?(put_in(definition(), ["budgets", "artifact_bytes"], 0))
+    refute ToolDefinition.valid?(Map.put(definition(), "class", "interaction"))
+  end
+
+  test "question arguments enforce byte limits and distinct optional choice labels" do
+    question = ToolDefinition.question_definition()
+
+    for arguments <- [
+          %{"question" => "What should the empty value mean?"},
+          %{"question" => String.duplicate("é", 1_024)},
+          %{"question" => "Pick", "choices" => [String.duplicate("é", 128)]},
+          %{"question" => "Pick", "choices" => Enum.map(1..8, &"Label #{&1}")},
+          %{"question" => "Pick", "choices" => ["empty", "literal_null"]}
+        ] do
+      assert ToolDefinition.validate_arguments(question, arguments) == :ok
+    end
+
+    for arguments <- [
+          %{},
+          %{"question" => ""},
+          %{"question" => nil},
+          %{"question" => <<255>>},
+          %{"question" => String.duplicate("é", 1_025)},
+          %{"question" => "Pick", "choices" => nil},
+          %{"question" => "Pick", "choices" => []},
+          %{"question" => "Pick", "choices" => [""]},
+          %{"question" => "Pick", "choices" => [<<255>>]},
+          %{"question" => "Pick", "choices" => [String.duplicate("é", 129)]},
+          %{"question" => "Pick", "choices" => Enum.map(1..9, &"Label #{&1}")},
+          %{"question" => "Pick", "choices" => ["same", "same"]},
+          %{"question" => "Pick", "choices" => [1]},
+          %{"question" => "Pick", "extra" => "ignored"},
+          %{"question" => "Pick", :choices => ["one"]},
+          %{"question" => "Pick", "choices" => [self()]}
+        ] do
+      assert ToolDefinition.validate_arguments(question, arguments) ==
+               {:error, :invalid_arguments}
+    end
+  end
+
   test "canonical encoding is injective over map and list shapes" do
     # A map and a list of its pairs must not collide, or two different staged
     # requests could share one digest.

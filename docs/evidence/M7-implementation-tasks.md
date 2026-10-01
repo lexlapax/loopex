@@ -39,7 +39,10 @@ Part of the [evidence index](README.md).
   preserving unknown limits and the one accepted literal Haiku alias.
 - Done: shared pure initial-configuration resolution derives context ceilings
   and their origins, validating captured instructions and all selected schemas.
-- Next: prompt-file and mapping preparation, effective inspection and command entry wiring, then live
+- Done: exact v2 question-tool definition, pinned canonical preimage/digest,
+  argument admission and interaction-versus-executor dispatch separation.
+- Next: join model-question pending/response/terminal truth, then prompt-file and
+  mapping preparation, effective inspection and command entry wiring, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
@@ -285,6 +288,25 @@ Part of the [evidence index](README.md).
   and live chat remain pending; this is focused development evidence, not a full
   integration result.
 
+- 2026-10-01: `ToolDefinition` admits only the exact reviewed `loopex.ask`
+  interaction definition under format v2. Absent class retains effect semantics,
+  format v1 and unchanged canonical fields. Interaction declarations are never
+  narrowed or completed. The retained vector pins full definition, canonical
+  preimage and digest
+  `d8cfe746ca4834f2ceabcfb5fa717fa8f53ba06461ee3ae91499fdfad25e138e`.
+  Closed question arguments enforce UTF-8 byte limits, optional nonempty
+  choice lists and distinct labels before policy. The coordinator rejects the
+  executor path for interaction definitions and classifies model-question policy
+  defer as policy_unavailable without a nested interaction. Policy allow still
+  returns interaction_unsupported until pending/answer/terminal truth is joined;
+  no successful model-question workflow is claimed. Protocol definition tests
+  pass 14 cases in 0.09 seconds; configured-runtime and registry tests pass 15
+  cases in 0.7 seconds. Warning-free compilation, formatting and documentation
+  ordering pass with 965 covered entries. Runtime test output also contains
+  supervisor shutdown_error/noproc diagnostics, retained as a T16 follow-up;
+  passing assertions do not establish cleanup-diagnostic correctness. No provider
+  call or full integration result is claimed.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -397,7 +419,10 @@ Part of the [evidence index](README.md).
 - [ ] Test model switching, crashes, cancellation, malformed replies, overflow, usage accounting and privacy.
 - [ ] Complete the seven thinking-round subcases, nine bound subcases and cancellation witness, including their prescribed subsequent prompts.
 ## T09 — Implement model-originated questions
-- [ ] Register the exact question-tool generation without changing old effect definitions.
+- [x] Register the exact question-tool generation without changing old effect definitions.
+- [x] Pin its format-v2 canonical preimage/digest and enforce exact schema/byte/choice limits before policy.
+- [x] Separate interaction tools from executor dispatch and reject nested policy defer.
+- [ ] Replace the interim policy-allow refusal with committed model-question pending and producer-specific terminal transitions.
 - [ ] Admit questions through policy; no executor grant or job is created.
 - [ ] Implement producer identity, options, text answers, decline and expiry.
 - [ ] Atomically settle the interaction, original tool result, response identity and next action.
@@ -485,6 +510,7 @@ Part of the [evidence index](README.md).
 - [ ] Run required selected real-provider, Node, daemon, long-bound and cross-UID lanes.
 - [ ] Run changed process-boundary cases thirty times under the prescribed pinned Linux load.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
+- [ ] Investigate supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain truthful cleanup evidence independently of passing assertions.
 ## T17 — Assemble and test the closure candidate
 - [ ] Provision both supported toolchains, pinned Node, provider bindings and the legacy Ollama witness.
 - [ ] Provision Linux cross-UID support, descriptor limits, retained evidence storage and attendance.

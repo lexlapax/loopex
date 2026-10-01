@@ -30,6 +30,100 @@ defmodule Loopex.ConfiguredSessionTest do
   alias LoopexProtocol.ToolDefinition
   alias LoopexProtocol.Canonical
 
+  test "the admitted question generation never dispatches an executor effect" do
+    for {policy, reason} <- [
+          {Loopex.AgentLoopTestPolicy, "interaction_unsupported"},
+          {Loopex.ConfiguredSessionDeferringPolicy, "policy_unavailable"}
+        ] do
+      fixture =
+        start(
+          tools: [ToolDefinition.question_definition()],
+          policy: policy,
+          policy_identity: %{"id" => "loopex.test.question-policy", "revision" => "1"},
+          script: [
+            %{
+              text: "I have a question",
+              calls: [%{id: "ask-1", name: "ask", arguments: %{"question" => "Which encoding?"}}]
+            },
+            %{text: "done", calls: []}
+          ]
+        )
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create-question",
+                 %{},
+                 genesis(fixture.definitions)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "prompt",
+                 content: "implement"
+               })
+
+      events = finish(attachment)
+      terminal = Enum.find(events, &(&1.kind == "tool.finished"))
+      assert terminal["outcome"] == "denied"
+      assert terminal["reason"] == reason
+      assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+      refute Enum.any?(events, &(&1.kind == "interaction.requested"))
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+
+      refute Enum.any?(
+               Fixture.records(fixture, session),
+               &String.starts_with?(&1.payload.kind, "effect_")
+             )
+    end
+  end
+
+  test "invalid question arguments fail before policy or executor admission" do
+    for arguments <- [
+          %{"question" => ""},
+          %{"question" => "Pick", "choices" => ["same", "same"]},
+          %{"question" => "Pick", "choices" => []}
+        ] do
+      fixture =
+        start(
+          tools: [ToolDefinition.question_definition()],
+          policy: Loopex.AgentLoopUnexpectedPolicy,
+          policy_identity: %{"id" => "loopex.test.question-policy", "revision" => "1"},
+          script: [
+            %{text: "question", calls: [%{id: "ask-invalid", name: "ask", arguments: arguments}]},
+            %{text: "done", calls: []}
+          ]
+        )
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create-invalid-question",
+                 %{},
+                 genesis(fixture.definitions)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "prompt",
+                 content: "implement"
+               })
+
+      events = finish(attachment)
+      terminal = Enum.find(events, &(&1.kind == "tool.finished"))
+      assert terminal["outcome"] == "failed"
+      assert terminal["reason"] == "invalid_tool_arguments"
+      refute Enum.any?(events, &(&1.kind == "interaction.requested"))
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+    end
+  end
+
   test "two prompts and restart stage captured host instructions, settings and tools" do
     fixture =
       start(
