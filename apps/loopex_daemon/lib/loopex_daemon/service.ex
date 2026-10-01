@@ -21,6 +21,13 @@ defmodule LoopexDaemon.Service do
   `LoopexComposition.start_edges/2` with the same checkpoint between its edges
   and returns exactly what it started.
 
+  Explicit `:provider_bindings` uses the shared durable loader and conflicts
+  with `:credential` before environment or placement effects. Each unique slot
+  has one owned custody; every route uses the same registry and fresh trace
+  capability. Validated exclusions cover placement acquisition and release as
+  well as the composed Store, executor and provider launches. The legacy
+  value-bearing credential branch retains its separate lifetime and defaults.
+
   Readiness is arbitrated by the sentinel: the owner submits the line, then
   after the sentinel's exact output success rechecks every component and
   sends either release authorization or the startup fatal it observed; only
@@ -49,7 +56,7 @@ defmodule LoopexDaemon.Service do
 
   alias Loopex.LLM.ReqLLM.{CredentialCustody, CredentialRegistry, CredentialToken}
   alias Loopex.Trace.Capability
-  alias LoopexComposition.Placement
+  alias LoopexComposition.{CredentialPlane, DurableOptions, Placement, ProviderBindings}
 
   alias LoopexDaemon.{
     ExitStatus,
@@ -124,6 +131,7 @@ defmodule LoopexDaemon.Service do
       components: %{},
       pids: %{},
       placement: nil,
+      excluded_env_names: [Loopex.LLM.ReqLLM.credential_variable()],
       placement_identity: nil,
       daemon_uid: nil,
       edges: %{},
@@ -233,12 +241,17 @@ defmodule LoopexDaemon.Service do
   # credential-plane step hands it to custody; `step/3` returns the state it
   # was given on a raise, which is already the state without it.
   defp run_startup(state) do
+    credential_supplied = Keyword.has_key?(state.options, :credential)
     {credential, options} = Keyword.pop_first(state.options, :credential, :missing)
     state = %{state | options: options}
     plane = fn state -> start_credential_plane(state, credential) end
 
     result =
-      with {:ok, state} <- step(state, :placement_lock_failed, &acquire_placement/1),
+      with {:ok, state} <-
+             step(state, :credential_plane_start_failed, fn state ->
+               prepare_bindings(state, credential_supplied)
+             end),
+           {:ok, state} <- step(state, :placement_lock_failed, &acquire_placement/1),
            {:ok, state} <- step(state, :credential_plane_start_failed, plane),
            {:ok, state} <- step(state, :composition_start_failed, &start_composition/1),
            {:ok, state} <- step(state, :session_index_corrupt, &start_index/1),
@@ -331,10 +344,34 @@ defmodule LoopexDaemon.Service do
     end
   end
 
+  # Concept: the complete binding set and selected routes are admitted before
+  # placement or credential effects. Conflicting credential sources stay untouched.
+  # Technical depth: preflight derives only immutable launch exclusions. The
+  # composition captures the resolved maintenance metadata when it opens its edges.
+  defp prepare_bindings(state, credential_supplied) do
+    if Keyword.has_key?(state.options, :provider_bindings) do
+      with false <- credential_supplied,
+           {:ok, validated} <-
+             ProviderBindings.validate(Keyword.fetch!(state.options, :provider_bindings)),
+           {:ok, _resolved} <- DurableOptions.resolve(state.options) do
+        {:ok, %{state | excluded_env_names: validated.excluded_env_names}}
+      else
+        _ -> {:stop, {:fatal, :credential_plane_start_failed}, state}
+      end
+    else
+      {:ok, state}
+    end
+  end
+
+  defp placement_probe(state) do
+    excluded = state.excluded_env_names
+    fn pid -> Placement.process_incarnation(pid, "/bin/ps", excluded) end
+  end
+
   defp acquire_placement(state) do
     root = option!(state, :state_root)
 
-    case Placement.acquire(root) do
+    case Placement.acquire(root, placement_probe(state)) do
       {:ok, handle} ->
         with {:ok, %File.Stat{type: :regular, uid: uid}} <- File.stat(handle),
              {:ok, placement_identity} <- Loopex.runtime_placement_id(root) do
@@ -355,8 +392,11 @@ defmodule LoopexDaemon.Service do
     end
   end
 
-  defp start_credential_plane(state, :missing),
-    do: {:stop, {:fatal, :credential_plane_start_failed}, state}
+  defp start_credential_plane(state, :missing) do
+    if Keyword.has_key?(state.options, :provider_bindings),
+      do: start_binding_plane(state),
+      else: {:stop, {:fatal, :credential_plane_start_failed}, state}
+  end
 
   defp start_credential_plane(state, credential) do
     with {:ok, registry_pid} <- CredentialRegistry.start_link([]),
@@ -388,6 +428,46 @@ defmodule LoopexDaemon.Service do
     end
   end
 
+  # Concept: daemon custody uses the same unique-name loader as direct and
+  # borrowing compositions, while this service retains every successful child.
+  # Technical depth: loader failure joins its partial children. After success,
+  # reverse-created custodies receive private numeric keys and participate in
+  # the existing classified teardown before their registry stops.
+  defp start_binding_plane(state) do
+    starter = fn module, options -> module.start_link(options) end
+
+    case CredentialPlane.load_bindings(state.options[:provider_bindings], starter) do
+      {:ok, loaded} ->
+        state = track(state, :credential_registry, loaded.registry.pid)
+
+        state =
+          loaded.pids
+          |> Enum.reject(&(&1 == loaded.registry.pid))
+          |> Enum.with_index()
+          |> Enum.reduce(state, fn {pid, index}, acc -> track(acc, {:custody, index}, pid) end)
+
+        case Capability.start_link([]) do
+          {:ok, pid} ->
+            state = track(state, :capability, pid)
+
+            case Capability.handle(pid) do
+              {:ok, capability} ->
+                plane = CredentialPlane.binding_plane(loaded, capability)
+                {:ok, put_in(state, [:components, :credential_plane], plane)}
+
+              _ ->
+                {:stop, {:fatal, :credential_plane_start_failed}, state}
+            end
+
+          _ ->
+            {:stop, {:fatal, :credential_plane_start_failed}, state}
+        end
+
+      _ ->
+        {:stop, {:fatal, :credential_plane_start_failed}, state}
+    end
+  end
+
   defp start_composition(state) do
     options =
       state.options
@@ -401,7 +481,13 @@ defmodule LoopexDaemon.Service do
         :project_decision,
         :resource_manifest,
         :artifact_transfers,
-        :context_token_budget
+        :context_token_budget,
+        :model,
+        :bounds,
+        :sampling,
+        :active_tools,
+        :maintenance_instructions,
+        :maintenance_model
       ])
       |> Keyword.put(:progress_to, {:session, self()})
       |> Keyword.merge(
@@ -1214,6 +1300,12 @@ defmodule LoopexDaemon.Service do
       :store
     ]
 
+    steps =
+      Enum.flat_map(steps, fn
+        :custody -> custody_names(state)
+        name -> [name]
+      end)
+
     Enum.reduce_while(steps, {:ok, state}, fn step, {:ok, acc} ->
       with :none <- owned_loss(acc),
            {:ok, acc} <- orderly_stop_step(acc, step, deadline) do
@@ -1367,7 +1459,22 @@ defmodule LoopexDaemon.Service do
 
   defp running_class(:store, reason), do: store_class(reason)
   defp running_class(:collaboration, reason), do: collaboration_class(reason)
-  defp running_class(name, _reason), do: Map.get(@running_classes, name, :runtime_lost)
+
+  defp running_class(name, _reason),
+    do: Map.get(@running_classes, component_kind(name), :runtime_lost)
+
+  defp component_kind({:custody, _index}), do: :custody
+  defp component_kind(name), do: name
+
+  defp custody_names(state) do
+    state.pids
+    |> Map.keys()
+    |> Enum.filter(&(component_kind(&1) == :custody))
+    |> Enum.sort()
+  end
+
+  defp stop_custodies(state),
+    do: Enum.reduce(custody_names(state), state, &stop_component(&2, &1))
 
   # Concept: components stop in the reverse of their start, with the Store
   # after every component that could still write through it.
@@ -1382,7 +1489,7 @@ defmodule LoopexDaemon.Service do
     |> stop_component(:transfers)
     |> stop_component(:index)
     |> stop_component(:capability)
-    |> stop_component(:custody)
+    |> stop_custodies()
     |> stop_component(:credential_registry)
     |> stop_component(:store, @store_stop_ms)
   end
@@ -1456,9 +1563,11 @@ defmodule LoopexDaemon.Service do
   # not proved.
   defp release_placement(%{placement: nil}), do: :ok
 
-  defp release_placement(%{placement: handle}) do
+  defp release_placement(%{placement: handle} = state) do
+    probe = placement_probe(state)
+
     {helper, monitor} =
-      spawn_monitor(fn -> exit({:placement_released, Placement.release(handle)}) end)
+      spawn_monitor(fn -> exit({:placement_released, Placement.release(handle, probe)}) end)
 
     receive do
       {:DOWN, ^monitor, :process, ^helper, {:placement_released, :ok}} ->
@@ -1512,9 +1621,14 @@ defmodule LoopexDaemon.Service do
 
   defp direct_callee_class(state, callee) do
     cond do
-      callee == state.relay -> :relay_lost
-      callee == state.registry -> :connections_lost
-      true -> Map.get(@running_classes, Map.get(state.components, {:pid, callee}))
+      callee == state.relay ->
+        :relay_lost
+
+      callee == state.registry ->
+        :connections_lost
+
+      true ->
+        Map.get(@running_classes, component_kind(Map.get(state.components, {:pid, callee})))
     end
   end
 
@@ -1523,7 +1637,7 @@ defmodule LoopexDaemon.Service do
       nil -> :ignore
       :collaboration -> collaboration_class(reason)
       :store -> store_class(reason)
-      name -> Map.get(@running_classes, name, :runtime_lost)
+      name -> running_class(name, reason)
     end
   end
 

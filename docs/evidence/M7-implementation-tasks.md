@@ -111,6 +111,9 @@ Part of the [evidence index](README.md).
   immutable exclusions to Store, executor and provider launches.
 - Done: consolidate constructor preflight in DurableOptions, restoring the
   reference composition to 154 effective lines under its unchanged 180-line gate.
+- Done: daemon bootstrap validates explicit bindings before placement/environment
+  effects, uses shared custody loading, forwards model/maintenance options and
+  preserves classified cleanup for every custody plus scoped placement exclusions.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -126,6 +129,40 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: Daemon Service accepts explicit provider bindings through the
+  shared durable loader. Conflicting value-bearing credentials, invalid complete
+  maps and unbound ordinary/maintenance selections refuse before placement or
+  environment effects under the existing credential-plane startup class. Each
+  unique slot gets one tracked custody; shared references reuse its token.
+  The existing orderly and failed-start teardown now visit every custody before
+  its registry, with custody loss retaining the existing fatal class. Fatal
+  fail-stop retains ADR 0031's bounded executor/Store tail and VM-halt lifetime
+  for the remaining VM-local components. No new failure class or wire record is
+  introduced. Placement acquisition/release capture validated exclusions;
+  composition receives the model, bounds, sampling, active-tool selection and
+  explicit maintenance settings alongside its version-2 plane.
+  New real-daemon tests cover route selection, private configuration, shared-slot
+  deduplication, pre-effect refusals, partial loading, post-bootstrap failure,
+  orderly joins and loss of either custody. The current toolchain passes 52
+  initial binding/legacy-lifecycle cases in 137.8 seconds, then all six final
+  binding cases in 1.6 seconds after adding post-bootstrap cleanup and complete
+  forwarding assertions. The floor toolchain passes the final 53-case set in
+  137.9 seconds. CLI discovery, early credential consumption and entrypoint
+  forwarding remain unfinished.
+  - `/private/tmp/loopex-m7-daemon-bindings-fixed-current.log`, SHA-256
+    `55c12430170266af60bf95cf84c7156cee29a8f21f0d4c63393938b56a839644`.
+  - `/private/tmp/loopex-m7-daemon-bindings-final-current.log`, SHA-256
+    `b7b0c5069f4e81770ae46124b04550442a7cb36ad19376afbccffd8ba7ef5c1c`.
+  - `/private/tmp/loopex-m7-daemon-bindings-floor.log`, SHA-256
+    `52cb41295740c9ad029aa49487fb1204ff73cc3d1aef6ba56cfef7c7091308c0`.
+  The first new test run failed two witnesses: it treated the second acquisition
+  probe as the release probe and required orderly custody cleanup after fatal
+  fail-stop. The corrected witnesses select a distinct release worker and follow
+  ADR 0031's VM-halt contract; in-process fixtures explicitly join remaining
+  children in cleanup. Existing lifecycle tests and bounds are unchanged.
+  Initial output: `/private/tmp/loopex-m7-daemon-bindings-current.log`, SHA-256
+  `20daa95697fcfb64c995e3a3400c95bd007edaa9b3dcaf1c4629e695cf3a41b6`.
 
 - 2026-10-01: The complete fast check on
   `53a60e346e3523c09b0e95fbfda3877146dd15ba` failed only the reference
@@ -1288,7 +1325,8 @@ Part of the [evidence index](README.md).
 - [x] Validate and forward captured exclusions inside project Git discovery, resource-import executors and placement probes, including lock release; reject the conflicting LC_ALL credential slot before loading.
 - [x] Admit direct and borrowed version-2 planes in durable runtime composition, validating every token route and resolving explicit maintenance selection before owned effects; prove all three constructor lifecycles and partial-loading cleanup.
 - [x] Forward immutable exclusions to Store writer probes, executor launches and provider companions; preserve private model options and unchanged marker, job and receipt formats.
-- [ ] Wire provider bindings and captured exclusions through daemon and CLI entrypoints, including discovery, placement acquisition/release and helper preparation.
+- [x] Wire daemon bootstrap through shared binding validation/loading, multi-custody ownership and cleanup, model/maintenance forwarding and scoped placement acquisition/release.
+- [ ] Wire provider bindings and captured exclusions through CLI entrypoints, including discovery, placement acquisition/release and helper preparation.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
 - [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.
@@ -1521,7 +1559,7 @@ before a provider demonstration.
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Core startup capture and durable/ephemeral instruction forwarding implemented; model routing, episode capture, checkpoint and compaction pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
-| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Shared reference/exclusion validation, ephemeral startup/dispatch and durable adapter token selection implemented; durable custody loading, host planes, daemon and helper integration pending |
+| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Shared reference/exclusion validation, ephemeral startup/dispatch, durable token selection and direct/borrowed/daemon custody startup implemented; CLI and helper integration pending |
 | Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths, trusted trace selectors, flag parser, new-session precedence/origins and initial capability/instruction admission implemented; complete role/maintenance preparation, command entry and redacted inspection pending |
 | Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
 | Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |
