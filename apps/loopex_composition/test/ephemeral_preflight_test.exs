@@ -30,6 +30,21 @@ defmodule LoopexComposition.Ephemeral.PreflightTest do
              )
   end
 
+  test "invalid maintenance instructions refuse before workspace or owner allocation" do
+    before_children =
+      DynamicSupervisor.count_children(LoopexComposition.Ephemeral.OwnerSupervisor)
+
+    assert {:error, :maintenance_instructions_invalid} =
+             LoopexComposition.Ephemeral.start_session(
+               policy: Policy,
+               cwd: "/nonexistent-maintenance-workspace",
+               maintenance_instructions: %{}
+             )
+
+    assert DynamicSupervisor.count_children(LoopexComposition.Ephemeral.OwnerSupervisor) ==
+             before_children
+  end
+
   test "named skill failure precedes provider selection" do
     assert {:error, {:composition, :skill_directory_unusable}} =
              Preflight.prepare(

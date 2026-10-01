@@ -36,6 +36,10 @@ defmodule LoopexComposition.Ephemeral do
   begin token gives a single owner permission to start its temporary subtree.
   Its result is withheld until the facade attachment, selected resources and
   active status have all been confirmed under the same startup deadline.
+  Optional `:maintenance_instructions` is the explicit closed version/body
+  startup map. It is validated before allocating an owner and forwarded for
+  Core's exact capture. Missing or nil stays unconfigured; per-call overrides
+  are refused.
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, reason()}
   def start_session(options) do

@@ -13,7 +13,8 @@ defmodule LoopexComposition.Ephemeral.Options do
     :max_tokens,
     :context_token_budget,
     :timeout,
-    :base_url
+    :base_url,
+    :maintenance_instructions
   ]
   @uint64_max 18_446_744_073_709_551_615
 
@@ -70,6 +71,12 @@ defmodule LoopexComposition.Ephemeral.Options do
   defp default(:max_tokens, _), do: {:ok, 4096}
   defp default(:context_token_budget, _), do: {:ok, 8192}
   defp default(:timeout, normalized), do: {:ok, min(normalized.deadline_ms + 30_000, @uint64_max)}
+  defp default(:maintenance_instructions, _), do: {:ok, nil}
+
+  defp validate(:maintenance_instructions, value) do
+    with {:ok, _capture} <- Loopex.Runtime.MaintenanceConfiguration.capture_instructions(value),
+         do: {:ok, value}
+  end
 
   defp validate(:policy, value) do
     valid =

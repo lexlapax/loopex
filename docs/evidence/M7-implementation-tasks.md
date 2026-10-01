@@ -90,6 +90,9 @@ Part of the [evidence index](README.md).
 - Done: validate and capture explicit Core maintenance settings, forward them
   privately to session owners, and resolve the host's separate thinking-off
   summarizer with fixed-budget native transport conformance.
+- Done: validate maintenance instructions before durable/ephemeral owned effects
+  and forward them through every durable constructor and ephemeral SessionOwner
+  into the real runtime and coordinator.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -105,6 +108,24 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: All three durable constructors and ephemeral startup now accept
+  explicit `maintenance_instructions`, validate them before owned effects and
+  forward the exact version/body input to Core's runtime-local capture. Missing
+  or nil remains unconfigured. Ephemeral per-call overrides remain refused.
+  Tests exercise all durable constructors, the real ephemeral runtime and
+  coordinator, exact Unicode/newline content, the inclusive body ceiling,
+  malformed-input refusal before owner allocation and public-view exclusion.
+  The four focused files pass 54 cases on the current toolchain in 19.3 seconds
+  and 54 on the floor in 19.0 seconds. Their existing deliberate cleanup faults
+  retain their diagnostic output. Complete outputs:
+  - Current: `/private/tmp/loopex-m7-maintenance-host-forward-current.log`, SHA-256
+    `1c8b253eca9b740a33890e7096fc7ac06c227882b32cb32866cedbdc9415b193`.
+  - Floor: `/private/tmp/loopex-m7-maintenance-host-forward-floor.log`, SHA-256
+    `c09270964b68f0ff125f3f4a5401c26b4b5e2904535c4f07718cfcfc2eaa2469`.
+  Provider-binding/custody integration is still required before composition can
+  forward the separately selected maintenance model. The shared reference
+  instruction block and episode/compaction implementation also remain pending.
 
 - 2026-10-01: Core startup now validates the closed maintenance model and captures
   the exact versioned instruction bytes and digest. Runtime-local settings reach
@@ -1035,6 +1056,7 @@ Part of the [evidence index](README.md).
 - [ ] Later retain the required attended multi-prompt proof.
 ## T07 — Implement automatic and explicit compaction
 - [x] Validate explicit Core maintenance model/instruction startup settings and privately forward exact captured instruction bytes to session owners.
+- [x] Validate and forward explicit maintenance instructions through all durable constructors and ephemeral startup before owned effects, preserving per-call refusal.
 - [x] Resolve the separately configured host summarizer and prove its fixed-budget thinking-off native request and natural completion through both transports.
 - [ ] Select complete eligible conversation groups.
 - [ ] Protect open exchanges and their complete native prefixes from compaction or re-rendering.
@@ -1237,7 +1259,7 @@ before a provider demonstration.
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound staging, bounded expansion, v1 nil-only compatibility and streamed/buffered native rendering implemented |
 | Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Nine ordinary adapter mappings registered with both native transports, per-cell streaming/bound/disclosure and canonical terminal-history conformance; host integration, separate summarizer and live witnesses pending |
-| Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
+| Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Core startup capture and durable/ephemeral instruction forwarding implemented; model routing, episode capture, checkpoint and compaction pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
 | Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Pure shared reference/exclusion validation implemented; custody and startup/dispatch integration pending |

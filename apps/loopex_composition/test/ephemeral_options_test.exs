@@ -51,7 +51,8 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
                 max_tokens: 4096,
                 context_token_budget: 8192,
                 timeout: 630_000,
-                base_url: nil
+                base_url: nil,
+                maintenance_instructions: nil
               }}
   end
 
@@ -105,6 +106,28 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
 
     assert Options.parse(policy: Policy, max_tokens: 1_000_001) ==
              {:error, {:invalid_option, :max_tokens}}
+  end
+
+  test "maintenance instructions are explicit startup data with no per-call override" do
+    block = %{"version" => "host.v1", "body" => "Exact bytes 猫\n"}
+
+    for value <- [nil, block] do
+      assert {:ok, selected} = Options.parse(policy: Policy, maintenance_instructions: value)
+      assert selected.maintenance_instructions == value
+
+      assert {:error, {:invalid_option, :unknown_key}} =
+               Options.ask_options([maintenance_instructions: value], 42)
+    end
+
+    for invalid <- [
+          %{},
+          Map.put(block, "extra", true),
+          %{block | "body" => ""},
+          %{block | "body" => String.duplicate("x", 2049)}
+        ] do
+      assert {:error, :maintenance_instructions_invalid} =
+               Options.parse(policy: Policy, maintenance_instructions: invalid)
+    end
   end
 
   test "outer grammar wins over missing policy and invalid values" do

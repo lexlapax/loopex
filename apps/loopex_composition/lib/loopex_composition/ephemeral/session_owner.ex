@@ -2854,6 +2854,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       bounds: %{max_turns: config.max_steps, deadline_ms: config.deadline_ms},
       sampling: %{"max_tokens" => config.max_tokens},
       context_token_budget: config.context_token_budget,
+      maintenance_instructions: Map.get(config, :maintenance_instructions),
       resource_manifest: config.skills.manifest,
       cleanup_grace_ms: state.cleanup_grace_ms
     ]

@@ -223,7 +223,8 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
   end
 
   test "the real runtime and core facade complete startup without a model call", %{tmp: tmp} do
-    configuration = configuration(tmp, %{})
+    block = %{"version" => "ephemeral.v1", "body" => "Retain exact host summary bytes 猫\n"}
+    configuration = configuration(tmp, %{}) |> Map.put(:maintenance_instructions, block)
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     {:ok, activation} = OwnerActivation.start(supervisor)
     owner = OwnerActivation.owner(activation)
@@ -231,6 +232,14 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
 
     assert {:ok, :session_ready} = SessionOwner.start_session(owner, configuration, 6_000)
     assert :atomics.get(cell, 1) == 0
+    runtime = :sys.get_state(owner).startup.registered.runtime
+    assert {:ok, children} = Runtime.children(runtime)
+    assert {:ok, captured} = Loopex.Runtime.MaintenanceConfiguration.capture_instructions(block)
+    assert :sys.get_state(children.control).maintenance_instructions == captured
+    [{_, coordinator, _, _}] = DynamicSupervisor.which_children(children.sessions)
+    assert :sys.get_state(coordinator).maintenance_instructions == captured
+    assert {:ok, public} = Runtime.configuration(runtime)
+    refute :erlang.term_to_binary(public) =~ block["body"]
     Process.exit(supervisor, :shutdown)
   end
 

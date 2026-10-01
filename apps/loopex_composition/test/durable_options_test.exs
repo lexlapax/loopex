@@ -32,6 +32,29 @@ defmodule LoopexComposition.DurableOptionsTest do
     end
   end
 
+  test "all durable entrypoints validate maintenance instructions before effects" do
+    block = %{"version" => "host.v1", "body" => "Keep exact bytes 猫\n"}
+
+    for entry <- @entries,
+        invalid <- [
+          %{},
+          Map.put(block, "extra", true),
+          %{block | "version" => "bad version"},
+          %{block | "body" => String.duplicate("x", 2049)}
+        ] do
+      assert refusal(entry, maintenance_instructions: invalid) ==
+               {:error, :maintenance_instructions_invalid}
+    end
+  end
+
+  test "explicit maintenance instructions reach every real durable constructor" do
+    for entry <- @entries, body <- ["Keep exact bytes 猫\n", String.duplicate("x", 2048)] do
+      block = %{"version" => "host.v1", "body" => body}
+      assert capture(entry, maintenance_instructions: block)[:maintenance_instructions] == block
+      assert capture(entry, maintenance_instructions: nil)[:maintenance_instructions] == nil
+    end
+  end
+
   test "an improper active selection is a refusal rather than an exception" do
     for entry <- [:start, :with_runtime, :start_edges] do
       assert refusal(entry, active_tools: ["loopex.read" | :tail]) ==
@@ -346,6 +369,15 @@ defmodule LoopexComposition.DurableOptionsTest do
     assert {:ok, configuration} = Loopex.Runtime.configuration(runtime)
     defaults = %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}
     assert configuration.bounds == Map.merge(defaults, Keyword.get(extra, :bounds, %{}))
+    assert {:ok, children} = Loopex.Runtime.children(runtime)
+
+    assert {:ok, expected} =
+             Loopex.Runtime.MaintenanceConfiguration.capture_instructions(
+               Keyword.get(extra, :maintenance_instructions)
+             )
+
+    assert :sys.get_state(children.control).maintenance_instructions == expected
+    refute Map.has_key?(configuration, :maintenance_instructions)
   end
 
   defp credential_plane do

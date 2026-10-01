@@ -80,6 +80,11 @@ defmodule LoopexComposition do
   unique defined tool ids, including an empty list; omission keeps the four
   coding tools active. Default policy identity retains revision `"0.2.0"` for
   recovery compatibility; hosts may supply their own `:policy_identity`.
+
+  Optional `:maintenance_instructions` accepts the closed version/body map from
+  ADR 0043. Validation precedes owned effects, and Core captures its exact bytes
+  once for this runtime. Missing or nil remains unconfigured; composition
+  supplies no instruction default.
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) when is_list(options) do

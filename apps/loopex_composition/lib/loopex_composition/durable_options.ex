@@ -19,7 +19,12 @@ defmodule LoopexComposition.DurableOptions do
          :ok <- check(bounds?(Keyword.get(options, :bounds, %{})), :bounds),
          :ok <-
            check(sampling?(Keyword.get(options, :sampling, %{"max_tokens" => 4_096})), :sampling),
-         do: check(active?(Keyword.get(options, :active_tools, @coding)), :active_tools)
+         :ok <- check(active?(Keyword.get(options, :active_tools, @coding)), :active_tools),
+         {:ok, _capture} <-
+           Loopex.Runtime.MaintenanceConfiguration.capture_instructions(
+             Keyword.get(options, :maintenance_instructions)
+           ),
+         do: :ok
   end
 
   @doc false
@@ -32,7 +37,7 @@ defmodule LoopexComposition.DurableOptions do
   @doc false
   def runtime_options(options) do
     [active_tools: Keyword.get(options, :active_tools, @coding)] ++
-      for key <- [:bounds, :sampling],
+      for key <- [:bounds, :sampling, :maintenance_instructions],
           {:ok, value} <- [Keyword.fetch(options, key)],
           do: {key, value}
   end
