@@ -25,8 +25,10 @@ Part of the [evidence index](README.md).
   two prompts plus restart retain captured instructions, settings and tools.
 - Done: captured-configuration runtime candidate fast check; all 11 suites pass
   2,679 tests at `d46c8d10881e6ba811b6c1d5204c9545aa785d37`.
-- Next: reference-host instruction composition, then chat/configuration
-  composition and non-nil continuation costs in T03/T04/T06/T08.
+- Done: reference-host instruction capture, exact environment JSON rendering,
+  bounded base/appendix/role files and retained-content byte fixtures.
+- Next: closed configuration-file decoding and command grammar, then live
+  chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
 
@@ -157,6 +159,21 @@ Part of the [evidence index](README.md).
   toolchain development candidate; provider conformance, floor-toolchain checks,
   independent-client proof and the M7 closure matrix remain pending.
 
+- 2026-10-01: reference-host `SessionInstructions` captures default, explicit
+  base/appendix and role sections with ADR 0042's distinct versions. The existing
+  protocol JSON encoder renders only closed workspace/platform/tool-profile
+  facts, plus sorted enabled roles and their catalog digest when present.
+  Exact escape/Unicode bytes and their independently calculated SHA-256 are
+  pinned in tests; the complete escaped environment admits 4,096 bytes and
+  refuses one byte more. The existing composition regular-file reader limits
+  each selected section to its byte ceiling plus one, validates opened identity,
+  and refuses nonregular or replaced files. Captures retain no paths and survive
+  subsequent file edits. Focused host-instruction/ask-grammar tests pass 15 cases
+  in 0.08 seconds; warning-free compilation and compiled documentation ordering
+  pass with 945 covered entries. Configuration parsing, session-creation wiring,
+  complete chat-profile system-cost targets and provider demonstrations remain
+  pending. No full integration check is claimed for this new checkpoint.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -191,6 +208,7 @@ Part of the [evidence index](README.md).
 - [ ] Replace core’s fixed instructions with the accepted host instruction map and rendering.
 - [x] Implement pure closed instruction capture, exact rendering and retained-digest validation; preserve legacy fallback bytes through the shared renderer.
 - [x] Stage captured v3 instructions with configuration-bound revision-4 provenance and exact system/tool costs; reject substituted configuration/source identities on replay.
+- [x] Implement reference-host default/explicit/role capture, bounded regular-file reads and exact JSON environment byte/digest vectors; live configuration/chat wiring remains pending.
 - [ ] Keep project and skill resources separately typed and admitted.
 - [ ] Capture workspace/environment facts and exact selected tool schemas.
 - [ ] Enforce the configured system ceiling and complete serialized-request limit.
