@@ -304,6 +304,179 @@ defmodule Loopex.ConfiguredSessionTest do
     end
   end
 
+  test "owner crashes before and after question and response commits retain one settlement" do
+    for target <- [:pending, :response], phase <- [:before, :after] do
+      fixture =
+        start(
+          tools: [ToolDefinition.question_definition()],
+          script: [
+            %{
+              text: "question",
+              calls: [%{id: "ask-1", name: "ask", arguments: %{"question" => "Explain"}}]
+            },
+            %{text: "done", calls: []}
+          ]
+        )
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create",
+                 %{},
+                 genesis(fixture.definitions)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      kind =
+        if target == :pending,
+          do: "model_question_requested_v1",
+          else: "model_question_response_admitted_v1"
+
+      if target == :pending, do: hold_question_commit(fixture, kind, phase)
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+      question = if target == :response, do: await_question(attachment)
+      parent = self()
+
+      caller =
+        if target == :response do
+          hold_question_commit(fixture, kind, phase)
+
+          spawn(fn ->
+            result =
+              try do
+                Loopex.command(attachment, question_answer(question["interaction_id"]))
+              catch
+                :exit, reason -> {:caller_exit, reason}
+              end
+
+            send(parent, {:question_caller_finished, self(), result})
+          end)
+        end
+
+      {waiter, proposed} = await_question_commit(fixture, session, kind, phase)
+      id = proposed["interaction_id"]
+      matching = Enum.filter(Fixture.records(fixture, session), &(&1.payload.kind == kind))
+      assert length(matching) == if(phase == :after, do: 1, else: 0)
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+
+      {:ok, children} = Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
+      [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
+      monitor = Process.monitor(owner)
+      Process.exit(owner, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 5_000
+
+      assert {:ok, ^session} =
+               Loopex.resume_session(fixture.runtime, session, command_id: "successor")
+
+      Loopex.M1RuntimeTestStore.release(waiter)
+
+      if caller do
+        assert_receive {:question_caller_finished, ^caller, result}, 5_000
+        assert result == {:error, :session_unavailable} or match?({:caller_exit, _}, result)
+      end
+
+      assert {:ok, successor} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      retained_question = await_question(successor)
+      assert retained_question["interaction_id"] == id
+
+      if target == :pending and phase == :after do
+        assert retained_question["expires_at"] == proposed["expires_at"]
+        assert retained_question["choices"] == proposed["interaction_request"]["choices"]
+      end
+
+      answer_command_id =
+        if target == :response and phase == :before, do: "successor-answer", else: "answer"
+
+      if target == :response and phase == :before do
+        # Concept: a proved non-commit is terminal for its transaction identity.
+        # Technical depth: ADR 0006 requires a fresh logical transaction after
+        # succession; the old ID cannot acquire new owner or timestamp bindings.
+        assert {:terminal, {:not_committed, :stale_owner_epoch}} =
+                 await_question_transaction(fixture.store, session, "answer")
+
+        assert {:error, :tx_id_conflict} = Loopex.command(successor, question_answer(id))
+      end
+
+      assert {:accepted, ^answer_command_id} =
+               Loopex.command(successor, question_answer(id, answer_command_id))
+
+      events = finish(successor)
+      assert Enum.count(events, &(&1.kind == "interaction.answered")) == 1
+      assert Enum.count(events, &(&1.kind == "tool.finished")) == 1
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+
+      records = Fixture.records(fixture, session)
+      pending = Enum.filter(records, &(&1.payload.kind == "model_question_requested_v1"))
+
+      responses =
+        Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+
+      assert length(pending) == 1
+      assert length(responses) == 1
+
+      if phase == :after,
+        do: assert(hd(if(target == :pending, do: pending, else: responses)).payload == proposed)
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, records, Fixture.events(fixture, session))
+
+      assert is_nil(recovered.open_interaction)
+      assert recovered.interactions[id].answer == %{"text" => "retained answer"}
+
+      assert {:accepted, ^answer_command_id} =
+               Loopex.command(successor, question_answer(id, answer_command_id))
+    end
+  end
+
+  defp question_answer(id, command_id \\ "answer"),
+    do: %{
+      type: :interaction_answer,
+      command_id: command_id,
+      interaction_id: id,
+      answer: %{"text" => "retained answer"}
+    }
+
+  defp hold_question_commit(fixture, kind, :before),
+    do:
+      Loopex.M1RuntimeTestStore.hold_next_record_before_linearization(fixture.store, kind, self())
+
+  defp hold_question_commit(fixture, kind, :after),
+    do: Loopex.M1RuntimeTestStore.delay_after_record(fixture.store, kind, self())
+
+  defp await_question_commit(_fixture, _session, kind, :before) do
+    assert_receive {:record_held_before_linearization, waiter, _store, ^kind, transaction}, 5_000
+    {waiter, Enum.find(transaction.records, &(&1.kind == kind))}
+  end
+
+  defp await_question_commit(fixture, session, kind, :after) do
+    assert_receive {:record_linearized, waiter, _store, ^kind, :session_journal_commit,
+                    {:committed, _, _receipt}},
+                   5_000
+
+    records = Fixture.records(fixture, session)
+    {waiter, Enum.find(records, &(&1.payload.kind == kind)).payload}
+  end
+
+  defp await_question_transaction(store, session, tx_id, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 5_000
+
+    case Loopex.M1RuntimeTestStore.transaction_status(store, session, "session", tx_id) do
+      :absent ->
+        if System.monotonic_time(:millisecond) >= deadline, do: flunk("transaction unresolved")
+        Process.sleep(10)
+        await_question_transaction(store, session, tx_id, deadline)
+
+      result ->
+        result
+    end
+  end
+
   test "aborting a pending model question settles its slot and preserves a cancelled result" do
     fixture =
       start(

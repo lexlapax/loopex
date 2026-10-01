@@ -43,7 +43,9 @@ Part of the [evidence index](README.md).
   argument admission and interaction-versus-executor dispatch separation.
 - Done: committed model-question requests and atomic answer, decline, expiry and
   abort settlement retain the original call and response identity through replay.
-- Next: prove question crash boundaries, then prompt-file and mapping
+- Done: live owner succession at all four pending/response commit boundaries
+  retains one question and one settlement without repeating provider work.
+- Next: pin question decoder and public-event vectors, then prompt-file and mapping
   preparation, effective inspection and command entry wiring, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
@@ -330,6 +332,20 @@ Part of the [evidence index](README.md).
   one-call responder integration remain pending; no provider or full integration
   result is claimed.
 
+- 2026-10-01: four owner-crash scenarios hold the actual Store immediately before
+  or after model-question pending and response commits. Killing the coordinator
+  and resuming the same session preserves the committed pending identity and
+  expiry, emits one answer and original tool result, and dispatches only the
+  next model turn. Retained committed proposal payloads compare byte-for-byte;
+  pure replay ends with the same answer and no open slot. No executor job runs.
+  The pre-response-commit case proves the old transaction's terminal stale-owner
+  non-commit and immutable-ID conflict, then settles with a fresh command ID as
+  accepted ADR 0006 requires. The post-response-commit case replays the original
+  command acceptance without another settlement. Configured-session tests pass
+  13 cases in 1.5 seconds. This is in-memory Store fault injection and live owner
+  succession; local-store process restart, ambiguous commit injection and wire
+  vectors remain separate obligations. Cleanup diagnostics remain open under T16.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -451,9 +467,11 @@ Part of the [evidence index](README.md).
 - [x] Atomically settle the interaction, original tool result, response identity and next action.
 - [x] Preserve the existing policy-defer lifecycle.
 - [ ] Test denial, deferred policy, large answers, overflow, duplicate/stale responses, cancellation and expiry.
-- [ ] Test crashes before and after pending-question and response commits.
+- [x] Test crashes before and after pending-question and response commits.
 - [x] Prove pure recovery retains the actual committed pending question identity.
-- [ ] Prove live owner restart retains that identity and settles it once.
+- [x] Prove live owner restart retains that identity and settles it once.
+- [ ] Prove commit-unknown re-presentation retains exact pending and response bytes.
+- [ ] Prove local-store process restart retains the pending question and final answer.
 - [ ] Pin pending/response decoder vectors and public question event schemas.
 ## T10 — Complete chat controls, pipes and tracing
 - [ ] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.
