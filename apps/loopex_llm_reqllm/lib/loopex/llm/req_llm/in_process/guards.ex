@@ -21,6 +21,13 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Guards do
   }
 
   @doc false
+  def binding_catalog do
+    Map.new(@providers, fn {name, {_provider, _module, variable}} ->
+      {name, %{credential_required: not is_nil(variable)}}
+    end)
+  end
+
+  @doc false
   def model(value) when is_binary(value) and byte_size(value) in 1..512 do
     with true <- String.valid?(value),
          [prefix, id] when id != "" <- String.split(value, ":", parts: 2),

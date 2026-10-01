@@ -27,7 +27,9 @@ Part of the [evidence index](README.md).
   2,679 tests at `d46c8d10881e6ba811b6c1d5204c9545aa785d37`.
 - Done: reference-host instruction capture, exact environment JSON rendering,
   bounded base/appendix/role files and retained-content byte fixtures.
-- Next: closed configuration-file decoding and command grammar, then live
+- Done: bounded host JSON syntax decoding with duplicate-key pointers and exact
+  integers; pure provider-reference validation against the adapter catalog.
+- Next: closed configuration-file schema and command grammar, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
@@ -174,6 +176,26 @@ Part of the [evidence index](README.md).
   complete chat-profile system-cost targets and provider demonstrations remain
   pending. No full integration check is claimed for this new checkpoint.
 
+- 2026-10-01: host `ConfigJson` uses OTP 27's standard-library callbacks rather
+  than adding a dependency or another syntax parser. It retains ordered object
+  members until duplicate validation, emits RFC 6901 pointers, preserves full
+  integer precision, and gives fraction/exponent syntax an internal noninteger
+  marker for schema refusal. Byte/UTF-8 checks precede parsing; exception details
+  and authored values never enter errors. Exact 256-KiB, nesting, surrogate,
+  escaped-duplicate and trailing-byte vectors pass on the current toolchain and
+  directly under Elixir 1.18.5/OTP 27 (8 tests, 0.04 seconds). This is focused
+  floor evidence, not the floor integration or closure matrix.
+- Shared `ProviderBindings` validates the complete closed route map against the
+  adapter's compiled catalog and refuses operational slots before custody or
+  environment effects. It retains references and derives sorted unique launch
+  exclusions, including the legacy key. Existing Ollama admits credential-free
+  references; credentialed routes require named slots. Focused binding/durable
+  option checks pass 21 cases in 6.2 seconds; JSON/instruction/ask-grammar checks
+  pass 23 cases in 0.07 seconds. Warning-free compilation, formatting and compiled
+  documentation ordering pass with 950 covered entries. File schema, CLI
+  inspection, actual custody loading, durable route dispatch and full integration
+  verification of these new bytes remain pending.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -224,6 +246,8 @@ Part of the [evidence index](README.md).
 - [x] Integrate v3 creation and configuration-aware live owner staging, including frozen request/receipt identities.
 - [x] Support exact-genesis creation, finding duplicates before expanding changed defaults.
 - [ ] Implement the closed configuration-file schema and command-line grammar.
+- [x] Implement bounded JSON syntax decoding with exact integers, redacted errors and duplicate-key JSON pointers; prove callbacks under both supported toolchains.
+- [x] Implement shared pure provider-binding/reference validation and sorted launch exclusions from the adapter's compiled catalog; environment resolution/custody/startup integration remains pending.
 - [ ] Implement file/flag precedence, validation and effective-value display.
 - [ ] Require explicit conversation bounds in the file, including when flags override them.
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
@@ -417,8 +441,8 @@ before a provider demonstration.
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
-| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Pending |
-| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Pending |
+| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Pure shared reference/exclusion validation implemented; custody and startup/dispatch integration pending |
+| Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON syntax/duplicate-pointer decoder implemented; schema, grammar, precedence and inspection pending |
 | Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
 | Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |
 | Ephemeral entry points | ADRs 0042–0045/0048/0049 | Combined closed startup options; one-call responder consumed locally; joined termination | Ephemeral.Options/Preflight/Bootstrap/SessionOwner; facade | Pending |
