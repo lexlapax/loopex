@@ -45,6 +45,8 @@ Part of the [evidence index](README.md).
   abort settlement retain the original call and response identity through replay.
 - Done: live owner succession at all four pending/response commit boundaries
   retains one question and one settlement without repeating provider work.
+- Done: commit-unknown recovery re-presents exact question/response payloads;
+  disk-backed Store restarts retain the pending identity and settled answer.
 - Next: pin question decoder and public-event vectors, then prompt-file and mapping
   preparation, effective inspection and command entry wiring, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
@@ -346,6 +348,22 @@ Part of the [evidence index](README.md).
   succession; local-store process restart, ambiguous commit injection and wire
   vectors remain separate obligations. Cleanup diagnostics remain open under T16.
 
+- 2026-10-01: pending-question and response commits each encounter an injected
+  after-linearization reply loss. The owner resolves the same immutable proposal
+  before acknowledgement or further work; retained payloads equal the original
+  proposals, question/answer events each occur once, and provider dispatch is
+  unchanged while the transactions are held. A composition test stops and
+  reopens the real disk-backed local Store twice, first with a pending question
+  and then with its settled choice answer. Pending identity, expiry, choices,
+  command acceptance and the exact chosen label survive; no executor job runs
+  and the already completed model turn never repeats. Both suites share the
+  same captured-v3-genesis fixture rather than separate configuration examples.
+  Configured-runtime, legacy interaction and v3-genesis checks pass 54 cases in
+  13.0 seconds; local-store restart passes one case in 0.2 seconds. Formatting,
+  warning-free compilation and patch checks pass. This is focused development
+  evidence, not a VM/OS restart, real-provider or full integration result.
+  T16 cleanup diagnostics and T09 decoder/public-event vectors remain pending.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -470,8 +488,8 @@ Part of the [evidence index](README.md).
 - [x] Test crashes before and after pending-question and response commits.
 - [x] Prove pure recovery retains the actual committed pending question identity.
 - [x] Prove live owner restart retains that identity and settles it once.
-- [ ] Prove commit-unknown re-presentation retains exact pending and response bytes.
-- [ ] Prove local-store process restart retains the pending question and final answer.
+- [x] Prove commit-unknown re-presentation retains exact pending and response bytes.
+- [x] Prove local-store process restart retains the pending question and final answer.
 - [ ] Pin pending/response decoder vectors and public question event schemas.
 ## T10 — Complete chat controls, pipes and tracing
 - [ ] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.

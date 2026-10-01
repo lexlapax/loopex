@@ -1,5 +1,6 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.ConfiguredSessionDeferringPolicy do
   @moduledoc false
@@ -33,13 +34,15 @@ end
 defmodule Loopex.ConfiguredSessionTest do
   use ExUnit.Case, async: false
 
+  import Loopex.ConfiguredGenesisFixture,
+    only: [configuration: 0, configuration: 1, genesis: 1, genesis: 2]
+
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
   alias Loopex.Runtime
   alias Loopex.Runtime.ContextAdmission
   alias Loopex.Runtime.Instructions
   alias Loopex.Runtime.SessionConfiguration
-  alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionState
   alias LoopexProtocol.ToolDefinition
   alias LoopexProtocol.Canonical
@@ -302,6 +305,101 @@ defmodule Loopex.ConfiguredSessionTest do
                  ])
              )
     end
+  end
+
+  test "commit unknown re-presents exact question and response bytes before publication" do
+    fixture =
+      start(
+        tools: [ToolDefinition.question_definition()],
+        script: [
+          %{
+            text: "question",
+            calls: [%{id: "ask-1", name: "ask", arguments: %{"question" => "Explain"}}]
+          },
+          %{text: "done", calls: []}
+        ]
+      )
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    hold_question_commit(fixture, "model_question_requested_v1", :before)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+    {pending_waiter, pending_proposal} =
+      await_question_commit(fixture, session, "model_question_requested_v1", :before)
+
+    refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "interaction.requested"))
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    :ok =
+      Loopex.M1RuntimeTestStore.inject(
+        fixture.store,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    Loopex.M1RuntimeTestStore.release(pending_waiter)
+    question = await_question(attachment)
+    assert question["interaction_id"] == pending_proposal["interaction_id"]
+    assert question["expires_at"] == pending_proposal["expires_at"]
+    hold_question_commit(fixture, "model_question_response_admitted_v1", :before)
+    parent = self()
+
+    caller =
+      spawn(fn ->
+        send(
+          parent,
+          {:unknown_answer_result, self(),
+           Loopex.command(attachment, question_answer(question["interaction_id"]))}
+        )
+      end)
+
+    {answer_waiter, answer_proposal} =
+      await_question_commit(fixture, session, "model_question_response_admitted_v1", :before)
+
+    refute_receive {:unknown_answer_result, ^caller, _}, 20
+    refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "interaction.answered"))
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    :ok =
+      Loopex.M1RuntimeTestStore.inject(
+        fixture.store,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    Loopex.M1RuntimeTestStore.release(answer_waiter)
+    assert_receive {:unknown_answer_result, ^caller, {:accepted, "answer"}}, 5_000
+    events = finish(attachment)
+    assert Enum.count(events, &(&1.kind == "interaction.answered")) == 1
+    records = Fixture.records(fixture, session)
+
+    assert Enum.filter(records, &(&1.payload.kind == "model_question_requested_v1"))
+           |> Enum.map(& &1.payload) == [pending_proposal]
+
+    assert Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+           |> Enum.map(& &1.payload) == [answer_proposal]
+
+    assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "interaction.requested")) ==
+             1
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+
+    assert {:accepted, "answer"} =
+             Loopex.command(attachment, question_answer(question["interaction_id"]))
+
+    assert {:ok, recovered} =
+             SessionState.recover(session, records, Fixture.events(fixture, session))
+
+    assert is_nil(recovered.open_interaction)
   end
 
   test "owner crashes before and after question and response commits retain one settlement" do
@@ -986,67 +1084,6 @@ defmodule Loopex.ConfiguredSessionTest do
     fixture = Fixture.start(options)
     on_exit(fn -> Fixture.stop(fixture) end)
     fixture
-  end
-
-  defp configuration(base \\ "Follow the host's captured instructions.") do
-    {:ok, instructions} =
-      Instructions.capture(%{
-        "version" => "host.v1",
-        "base" => base,
-        "environment" => "captured environment",
-        "appendix" => ""
-      })
-
-    %{
-      "model" => "scripted:v1",
-      "reasoning" => "default",
-      "configuration_version" => 1,
-      "instructions" => instructions,
-      "max_tokens" => 1_024,
-      "context_token_budget" => 8_192,
-      "system_class_tokens" => 5_000,
-      "budget_origins" => %{
-        "context_token_budget" => "unknown_window",
-        "system_class_tokens" => "explicit"
-      },
-      "model_capabilities" => %{
-        "model" => "scripted:v1",
-        "context_window" => nil,
-        "output_limit" => nil,
-        "reasoning_levels" => [],
-        "source_revision" => "fixture.v1",
-        "source_digest" => String.duplicate("0", 64)
-      },
-      "provider_mapping" => %{
-        "mapping_revision" => "loopex.unregistered.default.v1",
-        "renderer_revision" => "loopex.reqllm.canonical.v1",
-        "continuation_required" => false,
-        "canonical_terminal_tool_history" => false,
-        "thinking_disabled" => false,
-        "thinking" => %{"mode" => "omitted"}
-      }
-    }
-  end
-
-  defp genesis(definitions, configuration \\ configuration()) do
-    names =
-      Map.new(definitions, fn definition ->
-        {id, version, digest} = ToolDefinition.generation(definition)
-
-        {definition["name"],
-         %{"tool_id" => id, "tool_version" => version, "definition_digest" => digest}}
-      end)
-
-    assert {:ok, genesis} =
-             SessionGenesis.resolve(%{}, %{
-               genesis_version: "session_genesis_v3",
-               runtime_configuration: %{"cleanup_grace_ms" => 5_000},
-               initial_configuration: configuration,
-               tool_selection: %{"definitions" => definitions, "names" => names},
-               policy_defer_mode: "admit"
-             })
-
-    genesis
   end
 
   defp prompt(attachment, id, content) do
