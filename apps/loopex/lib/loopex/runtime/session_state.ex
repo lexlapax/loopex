@@ -2819,7 +2819,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp configuration_candidate(
-         %{configuration: current, tool_selection: selection},
+         %{configuration: current, tool_selection: selection} = state,
          changes,
          candidate
        )
@@ -2831,8 +2831,15 @@ defmodule Loopex.Runtime.SessionState do
            candidate["provider_mapping"],
            selection["definitions"]
          ) do
-      {:ok, ^candidate} -> :ok
-      _ -> {:error, :invalid_configuration_transition}
+      {:ok, ^candidate} ->
+        SessionConfiguration.preflight_history(
+          candidate,
+          Enum.flat_map(state.run_order, &elements(state, &1)),
+          state.run_order
+        )
+
+      _ ->
+        {:error, :invalid_configuration_transition}
     end
   end
 

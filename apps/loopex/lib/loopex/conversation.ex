@@ -151,6 +151,47 @@ defmodule Loopex.Conversation do
   @doc """
   ## Concept
 
+  Whether retained terminal runs contain tool results without a following
+  assistant completion, requiring an explicitly compatible provider renderer.
+
+  ## Technical depth
+
+  Validates the complete lineage before inspecting each named terminal run's
+  last nonempty assistant message. An empty message with no calls is absent
+  for this check. A later run's completion cannot complete an earlier run's
+  tool turn. Current nonterminal exchanges are excluded by the caller's exact
+  terminal-run identities. No content or call identity is rewritten.
+  """
+  @spec terminal_tool_history([element()], [binary()]) ::
+          {:ok, boolean()} | {:error, :context_projection_invalid}
+  def terminal_tool_history(elements, terminal_runs) when is_list(terminal_runs) do
+    with {:ok, entries} <- lineage_entries(elements) do
+      last_assistants =
+        Enum.reduce(entries, %{}, fn
+          {%{"kind" => "session_assistant", "run_id" => run}, message}, acc ->
+            if message["content"] != "" or message["tool_calls"] != [],
+              do: Map.put(acc, run, message),
+              else: acc
+
+          _entry, acc ->
+            acc
+        end)
+
+      {:ok,
+       Enum.any?(terminal_runs, fn run ->
+         case Map.get(last_assistants, run) do
+           nil -> false
+           message -> message["tool_calls"] != []
+         end
+       end)}
+    end
+  end
+
+  def terminal_tool_history(_, _), do: {:error, :context_projection_invalid}
+
+  @doc """
+  ## Concept
+
   Whether every tool call of the latest assistant message has a committed
   terminal result.
 

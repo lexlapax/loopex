@@ -21,6 +21,7 @@ defmodule Loopex.Runtime.SessionConfiguration do
   """
 
   alias Loopex.Bounds
+  alias Loopex.Conversation
   alias Loopex.Runtime.Instructions
   alias Loopex.Store
   alias LoopexProtocol.Canonical
@@ -215,6 +216,31 @@ defmodule Loopex.Runtime.SessionConfiguration do
   end
 
   def validate(_configuration, _definitions), do: {:error, :invalid_session_configuration}
+
+  @doc """
+  ## Concept
+
+  Refuse a configuration whose renderer cannot preserve terminal tool history.
+
+  ## Technical depth
+
+  The caller supplies complete retained lineage and exact terminal-run identities.
+  The captured mapping must explicitly declare canonical_terminal_tool_history
+  when any terminal tool turn lacks a nonempty assistant completion. Malformed
+  lineage refuses even when the capability is declared. This check performs no
+  dispatch or compaction; token and complete request-record preflight remain
+  separate obligations of the owner.
+  """
+  @spec preflight_history(map(), [Conversation.element()], [binary()]) ::
+          :ok | {:error, :canonical_history_rendering_unsupported | :context_projection_invalid}
+  def preflight_history(configuration, elements, terminal_runs) do
+    with {:ok, required} <- Conversation.terminal_tool_history(elements, terminal_runs) do
+      if not required or
+           get_in(configuration, ["provider_mapping", "canonical_terminal_tool_history"]) == true,
+         do: :ok,
+         else: {:error, :canonical_history_rendering_unsupported}
+    end
+  end
 
   @doc """
   ## Concept

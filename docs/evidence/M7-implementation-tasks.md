@@ -53,6 +53,8 @@ Part of the [evidence index](README.md).
   advance one version and recompute derived ceilings while retaining explicit ones.
 - Done: pure atomic configuration admission/replay retains exact command identity,
   one instruction copy, unchanged earlier run captures and an allowlisted event.
+- Done: terminal-tool-history capability preflight validates complete lineage,
+  treats empty assistant completions as absent and gates configuration replay.
 - Next: join configuration preparation to settled owner admission, retained-history
   preflight and atomic commit; complete question projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
@@ -64,6 +66,17 @@ Part of the [evidence index](README.md).
 
 ## Development observations
 
+- 2026-10-01: terminal-tool-history configuration preflight passes 45 focused
+  conversation/configuration/configured-runtime tests in 1.6 seconds. A later
+  run's completion cannot complete an earlier terminal tool turn; empty assistant
+  messages do not fabricate a completion. Complete lineage is validated before
+  inspecting the captured mapping capability. Recovered live cancelled-question
+  history rejects an unsupported candidate, accepts a compatible captured mapping
+  and rejects its substitution during replay. The compatible mapping is a fixture,
+  not evidence about a real provider. Token/request-record preflight, projected
+  checkpoint history, owner integration and ordinary provider-intent gating remain
+  open. The existing generic invalid-session-configuration command refusal is
+  retained; the named ordinary staging failure still needs its closed projection.
 - 2026-10-01: pure configuration admission/replay, update, genesis, configured
   runtime, interaction and input regressions pass 88 tests in 17.9 seconds.
   Accepted configuration rows retain full instruction bytes once; their authored
@@ -516,6 +529,7 @@ Part of the [evidence index](README.md).
 - [ ] Implement committed per-run model/reasoning configuration and the permitted configure fields.
 - [x] Prepare closed whole-candidate mutable updates with bounded inputs, monotonic versions and retained explicit/derived budget origins.
 - [x] Prepare atomic configuration admission/replay with exact command identity, single-copy instructions, retained earlier run captures and public event allowlists.
+- [x] Gate prepared configuration admission/replay on captured terminal-tool-history capability, preserving empty-completion and cross-run semantics.
 - [ ] Join prepared candidates to settled configure admission, exact history preflight, atomic commit and replay.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.

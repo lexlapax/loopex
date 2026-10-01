@@ -41,6 +41,57 @@ defmodule Loopex.ConversationTest do
 
   defp project(elements), do: Conversation.project(elements, system: "SYS")
 
+  test "terminal tool history requires capability through empty completions and later runs" do
+    tool_turn = [user("go"), assistant(1, [call("a")]), result(1, "a")]
+    assert Conversation.terminal_tool_history(tool_turn, ["r1"]) == {:ok, true}
+    assert Conversation.terminal_tool_history(tool_turn, []) == {:ok, false}
+
+    empty_completion = tool_turn ++ [assistant(2, [], "")]
+    assert Conversation.terminal_tool_history(empty_completion, ["r1"]) == {:ok, true}
+
+    later_run =
+      empty_completion ++
+        [
+          %{user("next") | run_id: "r2", command_id: "c2"},
+          %{assistant(1, [], "later completion") | run_id: "r2"}
+        ]
+
+    assert Conversation.terminal_tool_history(later_run, ["r1", "r2"]) == {:ok, true}
+    assert Conversation.terminal_tool_history(later_run, ["r2"]) == {:ok, false}
+
+    completed = tool_turn ++ [assistant(2, [], "done")]
+    assert Conversation.terminal_tool_history(completed, ["r1"]) == {:ok, false}
+    assert Conversation.terminal_tool_history([user("no model reply")], ["r1"]) == {:ok, false}
+  end
+
+  test "terminal history inspects the latest meaningful assistant turn of each run" do
+    elements = [
+      user("go"),
+      assistant(1, [call("a")]),
+      result(1, "a"),
+      assistant(2, [], "intermediate completion"),
+      assistant(3, [call("b")], ""),
+      result(3, "b", :cancelled)
+    ]
+
+    assert Conversation.terminal_tool_history(elements, ["r1"]) == {:ok, true}
+
+    assert Conversation.terminal_tool_history(elements ++ [assistant(4, [], " ")], ["r1"]) ==
+             {:ok, false}
+  end
+
+  test "terminal history refuses incomplete or duplicated lineage" do
+    unfinished = [user("go"), assistant(1, [call("a")])]
+
+    assert Conversation.terminal_tool_history(unfinished, ["r1"]) ==
+             {:error, :context_projection_invalid}
+
+    duplicate = unfinished ++ [result(1, "a"), result(1, "a")]
+
+    assert Conversation.terminal_tool_history(duplicate, ["r1"]) ==
+             {:error, :context_projection_invalid}
+  end
+
   test "the projection carries the prompt, the model's own messages, and real tool output" do
     elements = [
       user("fix the bug"),

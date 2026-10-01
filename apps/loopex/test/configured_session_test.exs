@@ -630,6 +630,63 @@ defmodule Loopex.ConfiguredSessionTest do
              &(&1.kind == :tool_result)
            ).outcome == :cancelled
 
+    changes = %{"max_tokens" => 512}
+    command = %{type: :configure, command_id: "after-cancel", changes: changes}
+    current = recovered.configuration
+
+    {:ok, unsupported} =
+      Loopex.Runtime.SessionConfiguration.update(
+        current,
+        changes,
+        current["model_capabilities"],
+        current["provider_mapping"],
+        recovered.tool_selection["definitions"]
+      )
+
+    assert {:ok, refusal} =
+             SessionState.propose(recovered, command, %{configuration_candidate: unsupported})
+
+    assert refusal.reply == {:error, :invalid_session_configuration}
+    assert refusal.next.configuration == current
+    assert refusal.events == []
+
+    {:ok, compatible} =
+      Loopex.Runtime.SessionConfiguration.update(
+        current,
+        changes,
+        Map.put(current["model_capabilities"], "reasoning_levels", ["default"]),
+        current["provider_mapping"]
+        |> Map.put("mapping_revision", "fixture.terminal-history.v1")
+        |> Map.put("canonical_terminal_tool_history", true),
+        recovered.tool_selection["definitions"]
+      )
+
+    assert {:ok, accepted} =
+             SessionState.propose(recovered, command, %{configuration_candidate: compatible})
+
+    assert accepted.reply == {:accepted, "after-cancel"}
+    [payload] = accepted.records
+
+    row = %{
+      payload: payload,
+      journal_version: recovered.journal_version + 1,
+      owner_epoch: recovered.owner_epoch,
+      owner_incarnation_id: recovered.owner_incarnation_id
+    }
+
+    retained_events =
+      Enum.with_index(accepted.events, recovered.event_sequence + 1)
+      |> Enum.map(fn {event, sequence} -> Map.put(event, :event_sequence, sequence) end)
+
+    records = Fixture.records(fixture, session)
+    events = Fixture.events(fixture, session) ++ retained_events
+    assert {:ok, _} = SessionState.recover(session, records ++ [row], events)
+
+    incompatible_row = put_in(row, [:payload, "configuration"], unsupported)
+
+    assert SessionState.recover(session, records ++ [incompatible_row], events) ==
+             {:error, :invalid_configuration_transition}
+
     assert Agent.get(fixture.executor, & &1.jobs) == []
 
     assert {:error, :interaction_resolved} =
