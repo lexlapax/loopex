@@ -38,6 +38,7 @@ defmodule Loopex.Runtime.SessionConfiguration do
   @levels ~w(default none low medium high)
   @declaration_required ~w(model reasoning configuration_version instructions max_tokens)
   @declaration_optional ~w(context_token_budget system_class_tokens)
+  @mutable ~w(model reasoning instructions max_tokens context_token_budget system_class_tokens)
   @generic %{
     "mapping_revision" => "loopex.unregistered.default.v1",
     "renderer_revision" => "loopex.reqllm.canonical.v1",
@@ -85,6 +86,70 @@ defmodule Loopex.Runtime.SessionConfiguration do
   end
 
   def resolve(_, _, _, _), do: {:error, :invalid_session_configuration}
+
+  @doc """
+  ## Concept
+
+  Validate the nonempty configuration changes an operator may request.
+
+  ## Technical depth
+
+  ADR 0044 permits exactly model, reasoning, captured instructions and the
+  reply, context and system ceilings. Version, capability metadata, provider
+  mapping, immutable tools and maintenance settings cannot be authored here.
+  This validates every provided member without resolving host facts or defaults.
+  """
+  @spec validate_update(term()) :: :ok | {:error, :invalid_configuration_update}
+  def validate_update(changes) when is_map(changes) and not is_struct(changes) do
+    if match?({:ok, _}, Store.admit_bounded(changes)) and map_size(changes) > 0 and
+         Map.keys(changes) -- @mutable == [] and
+         Enum.all?(changes, fn
+           {"model", model} -> text?(model)
+           {"reasoning", level} -> level in @levels
+           {"instructions", instructions} -> Instructions.validate(instructions) == :ok
+           {_ceiling, value} -> positive?(value)
+         end),
+       do: :ok,
+       else: {:error, :invalid_configuration_update}
+  end
+
+  def validate_update(_), do: {:error, :invalid_configuration_update}
+
+  @doc """
+  ## Concept
+
+  Prepare one complete next configuration from the committed settings and
+  explicit operator changes. A refused candidate changes no retained setting.
+
+  ## Technical depth
+
+  The host supplies resolved model capabilities and mapping separately from
+  authored changes. The configuration version advances exactly once. Existing
+  explicit context and system ceilings stay explicit unless replaced; derived
+  context ceilings are recomputed from the captured window and reply reserve,
+  and the omitted system ceiling remains the legacy 1,000. The same complete
+  validator used at genesis checks the result against the immutable tools.
+
+  This pure preparation performs no model call, catalog lookup or compaction.
+  The session owner must separately prove settled admission and exact history
+  and request-record preflight before committing the prepared candidate.
+  """
+  @spec update(term(), term(), term(), term(), term()) ::
+          {:ok, map()}
+          | {:error, :invalid_configuration_update | :invalid_session_configuration}
+  def update(current, changes, capabilities, mapping, definitions) do
+    with :ok <- validate_update(changes),
+         :ok <- validate(current, definitions),
+         declaration <-
+           current
+           |> Map.take(@declaration_required)
+           |> retain_explicit_ceiling(current, "context_token_budget")
+           |> retain_explicit_ceiling(current, "system_class_tokens")
+           |> Map.merge(changes)
+           |> Map.put("configuration_version", current["configuration_version"] + 1) do
+      resolve(declaration, capabilities, mapping, definitions)
+    end
+  end
 
   @doc """
   ## Concept
@@ -171,6 +236,12 @@ defmodule Loopex.Runtime.SessionConfiguration do
 
     @declaration_required -- keys == [] and
       keys -- (@declaration_required ++ @declaration_optional) == []
+  end
+
+  defp retain_explicit_ceiling(declaration, current, key) do
+    if current["budget_origins"][key] == "explicit",
+      do: Map.put(declaration, key, current[key]),
+      else: declaration
   end
 
   defp resolve_budgets(candidate) do

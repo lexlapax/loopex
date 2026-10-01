@@ -49,7 +49,10 @@ Part of the [evidence index](README.md).
   disk-backed Store restarts retain the pending identity and settled answer.
 - Done: shared closed answer normalization and literal answer payload/schema
   vectors pass both the Elixir and independent Node decoders.
-- Next: complete question projection/private-record vectors and the remaining M7
+- Done: pure whole-candidate configuration updates validate every mutable member,
+  advance one version and recompute derived ceilings while retaining explicit ones.
+- Next: join configuration preparation to settled owner admission, retained-history
+  preflight and atomic commit; complete question projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
   continue prompt-file and mapping
   preparation, effective inspection and command entry wiring, then live
@@ -384,6 +387,22 @@ Part of the [evidence index](README.md).
   containing complete configuration, compaction, bounds and question schemas.
   These are payload checks, not live transport, authority or privacy-canary proof.
 
+- 2026-10-01: `SessionConfiguration.update/5` prepares the complete next candidate
+  from committed configuration, a nonempty closed mutable subset and separate
+  host-resolved capability/mapping facts. Internal version, metadata, tools and
+  maintenance fields cannot be authored. Derived input budgets recompute from
+  the new captured window and reserve; explicit ceilings remain explicit even
+  when equal to defaults. Unknown windows retain the independent 8,192 input
+  fallback, and legacy system origin retains 1,000. Complete validation checks
+  captured instructions, all immutable tool schemas, known limits, metadata and
+  reasoning compatibility before returning a candidate. Version overflow and
+  invalid or oversized updates refuse without changing the committed input.
+  Update, v3-genesis and configured-runtime tests pass 42 cases in 1.6 seconds;
+  final bounded-update/genesis checks pass 28 cases in 0.1 seconds. Owner settled
+  admission, exact history/request preflight, atomic record/replay and live
+  configure remain pending. No catalog lookup, model call or compaction occurs
+  during pure preparation.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -483,6 +502,8 @@ Part of the [evidence index](README.md).
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 ## T08 — Implement model selection and private thinking continuation
 - [ ] Implement committed per-run model/reasoning configuration and the permitted configure fields.
+- [x] Prepare closed whole-candidate mutable updates with bounded inputs, monotonic versions and retained explicit/derived budget origins.
+- [ ] Join prepared candidates to settled configure admission, exact history preflight, atomic commit and replay.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
 - [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
@@ -640,7 +661,7 @@ before a provider demonstration.
 | Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 implemented; remaining variants/projections pending |
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
-| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pending |
+| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure whole-candidate update preparation complete; settled admission, history preflight and atomic commit/replay pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
 | Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
