@@ -117,6 +117,13 @@ Part of the [evidence index](README.md).
 - Done: offline CLI startup caches explicit bindings across compositions, refuses
   rebinding, forwards model/maintenance options and scopes discovery/placement
   exclusions. Chat, daemon-command and remaining host entrypoints are unfinished.
+- Done: full fast check of `cf7e875f61e86538867d54135a7c136e235e3ff1`,
+  all 11 application suites passing in 970 seconds.
+- Done: foreground app-server programmatic provider options, with whole-map and
+  selected-route preflight, fixed missing-credential refusal and real two-route
+  startup/EOF cleanup. Host and policy witnesses pass on both toolchains.
+- Next: join the existing configuration parser and resolver to chat command
+  dispatch and the first complete conversation workflow.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -132,6 +139,27 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: The exact offline-binding integration candidate
+  `cf7e875f61e86538867d54135a7c136e235e3ff1` passes the full fast check in a
+  clean detached worktree. All 11 application suites pass; total 970 seconds.
+  The complete output is `/private/tmp/loopex-m7-cf7e875f-fast-check.log`, SHA-256
+  `1aafc2f1799a25a43b6d5d3caea88b6d92cbe79471f754ff3efc30c832ddd1de`.
+  Foreground changes below were outside that exact candidate.
+
+- 2026-10-01: Foreground `Host.serve/1` accepts the closed programmatic durable
+  options without loading a configuration file. Binding and route validation
+  precede launch effects. Missing explicit credentials use a fixed diagnostic.
+  Real subprocess fixtures exercise invalid maps, unbound ordinary/maintenance
+  routes, missing credentials, two-route startup, maintenance/tool forwarding,
+  environment deletion and joined EOF cleanup of all nine owned processes.
+  Host and policy tests pass 20 cases on current and floor toolchains in 6.6 and
+  6.0 seconds respectively. Both runs also report the existing AllowAll notice
+  table's ETS transfer to `:init`; that diagnostic is retained for investigation.
+  - `/private/tmp/loopex-m7-foreground-current.log`, SHA-256
+    `32c033f3cfe25befd72e4ca13f33ec00ec55f0216c670e138add7cbcd65e6b49`.
+  - `/private/tmp/loopex-m7-foreground-floor.log`, SHA-256
+    `e17daadf7ca27e3a339014882b66244e8207eb5a0afb8daf8272f1f12977319e`.
 
 - 2026-10-01: The offline CLI's existing credential cache accepts an explicit
   immutable binding map and lends it through fresh trace capabilities. A changed
@@ -1352,7 +1380,8 @@ Part of the [evidence index](README.md).
 - [x] Forward immutable exclusions to Store writer probes, executor launches and provider companions; preserve private model options and unchanged marker, job and receipt formats.
 - [x] Wire daemon bootstrap through shared binding validation/loading, multi-custody ownership and cleanup, model/maintenance forwarding and scoped placement acquisition/release.
 - [x] Extend the offline CLI credential cache and shared startup to borrow explicit routes, refuse rebinding and scope discovery/placement exclusions; verify existing recovery workflows on both toolchains.
-- [ ] Finish provider bindings and captured exclusions through chat, daemon-command, foreground-server and remaining ask/helper entrypoints, including discovery and helper preparation.
+- [x] Forward explicit foreground-server provider/model/maintenance options with preflight refusal and real subprocess startup/EOF cleanup on both toolchains.
+- [ ] Finish provider bindings and captured exclusions through chat, daemon-command and remaining ask/helper entrypoints, including discovery and helper preparation.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
 - [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.
@@ -1532,6 +1561,8 @@ Part of the [evidence index](README.md).
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 - [x] Investigate and fix OwnerGroup supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain failing-before and process-lifetime evidence independently of passing assertions.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
+- [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
+
 ## T17 — Assemble and test the closure candidate
 - [ ] Provision both supported toolchains, pinned Node, provider bindings and the legacy Ollama witness.
 - [ ] Provision Linux cross-UID support, descriptor limits, retained evidence storage and attendance.

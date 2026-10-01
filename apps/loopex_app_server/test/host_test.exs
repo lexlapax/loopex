@@ -134,6 +134,98 @@ defmodule Loopex.AppServer.HostTest do
     end
   end
 
+  describe "explicit programmatic provider configuration" do
+    test "whole-map and selected-route refusals precede state creation" do
+      home = Path.join(root(), "uncreated-bindings")
+
+      for options <- [
+            [provider_bindings: %{"openai" => %{"credential" => %{"env" => "HOME"}}}],
+            [provider_bindings: %{}],
+            [provider_bindings: bindings(), model: "openrouter:unbound"],
+            [provider_bindings: bindings(), maintenance_model: "openrouter:unbound"],
+            [provider_bindings: bindings(), unexpected: true],
+            [:malformed]
+          ] do
+        {output, status} =
+          run("Loopex.AppServer.Host.serve(#{inspect(options)})", %{"LOOPEX_HOME" => home})
+
+        assert status == 3
+        assert output =~ "the programmatic provider configuration is invalid"
+        refute output =~ "M7_SERVER"
+        refute File.exists?(home)
+      end
+    end
+
+    test "a missing named credential reports a fixed refusal without the reference" do
+      {output, status} =
+        run(
+          "Loopex.AppServer.Host.serve(provider_bindings: #{inspect(bindings())}, model: \"openai:test\")",
+          %{"M7_SERVER_A" => "server-first-canary", "M7_SERVER_B" => nil}
+        )
+
+      assert status == 3
+      assert output =~ "a configured provider credential is unavailable"
+      refute output =~ "M7_SERVER"
+      refute output =~ "server-first-canary"
+    end
+
+    test "two routes and maintenance reach real composition and stop when input ends" do
+      entry = """
+      parent = self()
+      names = ~w(LOOPEX_PROVIDER_API_KEY M7_SERVER_A M7_SERVER_B)
+      Process.put(:"$loopex_composition_edge_observer", fn module, function, [options] = arguments ->
+        if module == Loopex do
+          unless Enum.all?(names, &(System.get_env(&1) == nil)), do: raise("credential not consumed")
+          model = Keyword.fetch!(options, :model)
+          unless model.model == "openai:test", do: raise("model not forwarded")
+          unless model.options[:excluded_env_names] == names, do: raise("exclusions not forwarded")
+          unless map_size(model.options[:provider_routes]) == 2, do: raise("routes not forwarded")
+          unless options[:maintenance_model]["reasoning"] == "none", do: raise("maintenance not forwarded")
+          unless options[:active_tools] == [], do: raise("tool selection not forwarded")
+        end
+        result = apply(module, function, arguments)
+        case result do
+          {:ok, pid} when is_pid(pid) -> send(parent, {:owned, pid})
+          {:ok, %Loopex.Runtime{supervisor: pid}} -> send(parent, {:owned, pid})
+          _ -> :ok
+        end
+        result
+      end)
+      :ok = Loopex.AppServer.Host.serve(
+        provider_bindings: #{inspect(bindings())},
+        model: "openai:test",
+        maintenance_model: "anthropic:claude-haiku-4-5",
+        active_tools: [])
+      pids = Stream.repeatedly(fn -> receive do {:owned, pid} -> pid after 0 -> nil end end)
+        |> Enum.take_while(&is_pid/1)
+      unless length(pids) == 9 and Enum.all?(pids, &(not Process.alive?(&1))),
+        do: raise("owned cleanup incomplete")
+      IO.puts("explicit routes closed")
+      """
+
+      {output, status} =
+        run(
+          entry,
+          %{
+            "M7_SERVER_A" => "server-first-canary",
+            "M7_SERVER_B" => "server-second-canary"
+          },
+          stdin_eof: true
+        )
+
+      assert status == 0, output
+      assert output =~ "explicit routes closed"
+      refute output =~ "server-first-canary"
+      refute output =~ "server-second-canary"
+    end
+  end
+
+  defp bindings,
+    do: %{
+      "openai" => %{"credential" => %{"env" => "M7_SERVER_A"}},
+      "anthropic" => %{"credential" => %{"env" => "M7_SERVER_B"}}
+    }
+
   describe "answering the workspace reference" do
     test "the host answers the reference a trust decision must carry" do
       workspace = workspace()
@@ -166,7 +258,14 @@ defmodule Loopex.AppServer.HostTest do
     arguments =
       Enum.flat_map(applications(), &["-pa", ebin(&1)]) ++ ["-e", entry]
 
-    System.cmd(elixir, arguments,
+    {executable, arguments} =
+      if Keyword.get(options, :stdin_eof, false) do
+        {"/bin/sh", ["-c", ~S(exec "$@" </dev/null), "loopex-host-test", elixir | arguments]}
+      else
+        {elixir, arguments}
+      end
+
+    System.cmd(executable, arguments,
       env: environment(overrides),
       stderr_to_stdout: Keyword.get(options, :stderr_to_stdout, true)
     )
@@ -244,7 +343,9 @@ defmodule Loopex.AppServer.HostTest do
       :loopex_llm_reqllm,
       :loopex_store_local,
       :loopex_executor_local,
-      :telemetry
+      :telemetry,
+      :llm_db,
+      :jason
     ]
 
   defp ebin(application) do

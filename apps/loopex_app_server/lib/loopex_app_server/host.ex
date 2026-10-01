@@ -49,9 +49,10 @@ defmodule Loopex.AppServer.Host do
 
   alias Loopex.AppServer.Policy
   alias Loopex.AppServer.Stdio
-  alias LoopexComposition.{ResourcePacks, WorkspaceIdentity}
+  alias LoopexComposition.{DurableOptions, ResourcePacks, WorkspaceIdentity}
 
   @policies %{"allow-all" => Policy.AllowAll, "ask" => Policy.Ask}
+  @configuration_options ~w(provider_bindings model bounds sampling active_tools maintenance_model maintenance_instructions)a
 
   @doc """
   ## Concept
@@ -66,20 +67,45 @@ defmodule Loopex.AppServer.Host do
   along with every entry until a trust decision naming it is active — so an
   operator who is going to relay such a decision needs somewhere to read it, and
   standard error is the only plane that is not the protocol.
+
+  Optional programmatic choices are `:provider_bindings`, `:model`, `:bounds`,
+  `:sampling`, `:active_tools`, `:maintenance_model` and
+  `:maintenance_instructions`, with the durable composition's grammar. The
+  complete binding set and selected routes are validated before launch effects.
+  State root, workspace, policy and companion configuration retain their fixed
+  environment inputs; this entry point reads no M7 configuration file. Omission
+  preserves the single-route default. Clients cannot change the startup bindings.
   """
-  @spec serve() :: :ok
-  def serve do
+  @spec serve(keyword()) :: :ok
+  def serve(options \\ []) do
+    case validate_options(options) do
+      :ok -> serve_validated(options)
+      :error -> refuse("the programmatic provider configuration is invalid")
+    end
+  end
+
+  defp validate_options(options) when is_list(options) do
+    with true <- Keyword.keyword?(options),
+         true <- Enum.all?(Keyword.keys(options), &(&1 in @configuration_options)),
+         {:ok, _resolved} <- DurableOptions.resolve(options),
+         do: :ok,
+         else: (_ -> :error)
+  end
+
+  defp validate_options(_options), do: :error
+
+  defp serve_validated(options) do
     case route_default_logger_to_standard_error() do
       :ok ->
-        serve_with_routed_diagnostics()
+        serve_with_routed_diagnostics(options)
 
       {:error, reason} ->
         refuse("the diagnostic logger could not be routed to standard error: #{inspect(reason)}")
     end
   end
 
-  defp serve_with_routed_diagnostics do
-    case launch() do
+  defp serve_with_routed_diagnostics(configuration) do
+    case launch(configuration) do
       {:ok, options} ->
         announce(options)
 
@@ -88,10 +114,14 @@ defmodule Loopex.AppServer.Host do
             :ok
 
           {:error, :provider_credential_required} ->
-            refuse(
-              "LOOPEX_PROVIDER_API_KEY is required, is never passed on a command line, " <>
-                "and must contain at most 65536 bytes"
-            )
+            if Keyword.has_key?(configuration, :provider_bindings) do
+              refuse("a configured provider credential is unavailable or exceeds 65536 bytes")
+            else
+              refuse(
+                "LOOPEX_PROVIDER_API_KEY is required, is never passed on a command line, " <>
+                  "and must contain at most 65536 bytes"
+              )
+            end
 
           other ->
             refuse("the composed runtime did not start or stop cleanly: #{inspect(other)}")
@@ -167,7 +197,7 @@ defmodule Loopex.AppServer.Host do
   # Technical depth: the order is the order an operator would fix them in, and
   # the first refusal wins, so a launch missing three inputs names one at a time
   # rather than printing a wall an operator has to parse.
-  defp launch do
+  defp launch(configuration) do
     with {:ok, state_root} <- state_root(),
          {:ok, workspace} <- workspace(),
          {:ok, provider_launch} <- provider_launch(),
@@ -184,7 +214,7 @@ defmodule Loopex.AppServer.Host do
          resource_manifest: manifest,
          recover_stale_writer: true,
          artifact_transfers: true
-       ]}
+       ] ++ configuration}
     end
   end
 
