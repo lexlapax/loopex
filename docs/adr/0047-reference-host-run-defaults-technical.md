@@ -22,7 +22,12 @@ positive input budget and obey the 65,536-byte request-record ceiling.
 
 The selected file must itself have all three run-bound keys even if a flag
 would override one. Invalid base declarations refuse rather than being hidden
-by an override. Echo resolved values and origins without reading credentials.
+by an override. ADR 0049's `config show --effective` exposes resolved new-session
+values and origins without reading credentials. Chat attempts its effective
+startup report through ADR 0049's bounded stderr writer; delivery is best-effort
+and never gates startup. On resume, that report distinguishes committed session
+values from invocation bounds for new runs. `/status` exposes only members of
+ADR 0049's closed status record, not every configuration field or origin.
 Core and `ask` keep 16 turns, 600,000 ms and 1,000,000 run tokens where applicable,
 and the existing 4,096 reply cap. Compaction uses ADR 0043's separately bounded
 settled operation or charges an active run; child accounting follows ADR 0046.
@@ -39,6 +44,8 @@ Concept: [Observable consequences](0047-reference-host-run-defaults.md#concept-a
 
 - File omissions, invalid values and conflicting CLI input refuse before dispatch.
 - File values and flag overrides reach the committed run; resume retains them.
+- Effective inspection exposes resolved limits without reading credentials;
+  a stalled stderr reader can prevent the startup report without blocking work.
 - Each bound produces its existing truthful terminal outcome.
 - `ask` and core default fixtures remain unchanged.
 - Every real task has a measurement record, including failed attempts; no larger

@@ -1430,9 +1430,15 @@ internal review are tracked in the [round 7 disposition](../evidence/M7-round-7-
 The [round 8 assessment](../evidence/M7-external-review-8.md) of 9392e19d found
 one remaining Concept/Technical wording mismatch. It and the final internal
 readiness review are tracked in the [round 8 disposition](../evidence/M7-round-8-disposition.md).
-The repaired packet is offered for exact-byte acceptance only after that review
-and clean-candidate documentation validation. This is review of planned contracts, not product evidence or
-formal independent acceptance review.
+The [round-9 readiness review](../evidence/M7-readiness-review-9.md) of a234247e
+then examined the whole change since the round-8 candidate, including the latest
+internal repairs. Its two contract mismatches and one optional clarification
+are repaired in the [round-9 disposition](../evidence/M7-round-9-disposition.md).
+The repaired packet is offered for exact-byte acceptance only after the repair
+recheck and clean-candidate documentation validation bound by the final receipt.
+This is review of planned contracts, not product evidence or formal independent
+acceptance review. Acceptance also updates the roadmap and project README as
+the maintainer requested, alongside the coordinated governance records.
 
 | Finding | Governing repair and implementation witness |
 | --- | --- |

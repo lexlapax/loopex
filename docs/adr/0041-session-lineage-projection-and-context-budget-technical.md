@@ -314,8 +314,9 @@ workspace path as a replacement. Whole-root backup includes these artifacts.
 
 The final request measurement is independent: semantic messages and
 `canonical_request_bytes` both retain the projection, plus receipt/envelope.
-Two 16-KiB raw outputs already consume 65,536 bytes in those two representations
-before framing. Neither the 2-KiB excerpt limit, the 8-KiB explicit-range result
+For a session with no artifact-capable read tool, two full inline 16-KiB outputs
+already consume 65,536 bytes in those two representations before framing.
+Neither the 2-KiB excerpt limit, the 8-KiB explicit-range result
 limit nor the summary-source bound
 replaces full exact-record preflight.
 

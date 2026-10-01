@@ -7,7 +7,7 @@ Technical depth: [Explicit conversational run limits](0047-reference-host-run-de
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing
-- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for committed session configuration
+- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for committed session configuration and [ADR 0049](0049-explicit-host-configuration.md#concept) for effective inspection and startup reporting
 - **Prerequisite for:** M7 outcomes 6 and 8
 
 <a id="concept-adr-0047-decision"></a>
@@ -26,7 +26,9 @@ Document 16 turns, 600,000 ms and 1,000,000 tokens as starting values an operato
 can select. Retain the 4,096 reply-token default. Core, reusable composition and
 one-shot `ask` keep their existing defaults.
 
-Every effective limit is visible before a run. There is no unbounded mode.
+Every effective limit is inspectable. Chat attempts ADR 0049's best-effort
+startup report; a stalled diagnostic reader does not block work. There is no
+unbounded mode.
 An operator may explicitly configure other supported positive values. Changing
 the documented baseline requires retained task measurements and maintainer
 disposition. Helper spending is separately declared under ADR 0046.
@@ -37,7 +39,8 @@ disposition. Helper spending is separately declared under ADR 0046.
 Technical depth: [Evidence](0047-reference-host-run-defaults-technical.md#technical-adr-0047-evidence).
 
 A file omission cannot silently authorize a large conversation. The operator
-sees turns, deadline, run token threshold and reply limit before submitting work.
+can inspect turns, deadline, run token threshold and reply limit. Chat's startup
+report is best-effort, so delivery before submitting work is not guaranteed.
 Waiting for an answer and compaction consume their applicable deadlines and
 budgets. A token threshold is checked between calls and may be exceeded by the
 last completed provider call; it is not an exact invoice cap.

@@ -84,8 +84,10 @@ The chat overrides are `--model`, `--reasoning`, `--compaction-model`, `--max-st
 `--output text`, `--no-helpers` and the trace flags below. Provider selection
 is part of exact `--model provider:model`; there is no redundant `--provider`.
 Saved roles and allowance declarations are authored in the file, not flags.
-Inspection commands accept the same overrides to show exactly what a new chat
-session would use. `config show` takes no session, reads no store and reports no
+Inspection commands accept the same non-trace overrides to show exactly what a
+new chat session would use. They reject trace flags and may display file-derived
+trace values without starting a trace. `config show` takes no session, reads no
+store and reports no
 `committed` origin; chat's effective startup report and `/status` show committed
 values on resume. Chat emits the value/origin report defined under precedence
 once at startup through its bounded stderr writer, before reading input and, on
@@ -442,7 +444,9 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
   `pending`; the interactive host refuses it locally without submitting.
 - A legacy settled session with no prior request resumes with an explicit
   `--model`, refuses and abandons its prepared owner without one, and never takes
-  a file model; offline `run`, `resume` and `cancel` reject every trace flag.
+  a file model; offline `run`, `resume` and `cancel`, and inspection commands
+  `config show` and `config validate`, reject every trace flag. Inspection may
+  display file-derived trace values without starting a trace.
 - Helper-enabled file resume of an old non-task session stays disabled; a task
   selection without its expected binding refuses. Fixture validation reopens through the same pinned wrapper; pending
   interactions enforce their retained policy identity.

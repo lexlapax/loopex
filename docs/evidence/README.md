@@ -52,6 +52,8 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M7 round 7 disposition](M7-round-7-disposition.md) | All four findings, text repairs and the internal adversarial review of those repairs. |
 | [M7 external review, round 8](M7-external-review-8.md) | Received assessment of 9392e19d; SHA-256 6f1b0d2511cb78cf48fcf31654c54bf31c0e8da5862ead3e2b9764810640ee50. |
 | [M7 round 8 disposition](M7-round-8-disposition.md) | The one round 8 finding, the final internal readiness review of the whole packet, its repairs and the author choices they made. |
+| [M7 readiness review, round 9](M7-readiness-review-9.md) | Final lead-and-advisory review of a234247e: two contract mismatches and one optional clarification, with R8-1 reconciliation, per-file verdicts and coverage limits. |
+| [M7 round 9 disposition](M7-round-9-disposition.md) | All three findings repaired; final-candidate recheck and validation binding, and the requested roadmap/README update upon acceptance. |
 
 ## Related
 
