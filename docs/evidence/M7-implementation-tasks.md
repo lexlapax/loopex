@@ -12,8 +12,12 @@ Part of the [evidence index](README.md).
   and a scripted model in `apps/loopex/test/agent_loop_test.exs`.
 - Done: run-scoped result joins, replayed admission order, revision-1 normalized
   call identities and strict complete-lineage validation. These are projection
-  foundations; the coordinator still stages per-run history.
-- Running: T00 contract/fixture inventory and T01 request/receipt integration.
+  foundations; the coordinator now stages the complete committed lineage.
+- Done: v2 request staging, revision-4 nil-continuation receipts, exact lineage
+  replay validation, and terminal-derived unknown/cancelled call results.
+- Running: T00 contract/fixture inventory and T01 boundary verification.
+  Host instruction/configuration binding and non-nil continuation costs remain
+  in T03/T04/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
 
@@ -34,9 +38,18 @@ Part of the [evidence index](README.md).
   tool_call_id])`; fixed r1/r2 vectors retain the exact 48-hex prefix. Source
   references keep the original run/turn/call identities. Historical projection
   retains its saved call IDs. Request/receipt generation integration remains.
-- Next: implement the accepted v2 request and revision-4 receipt/configuration
-  join before switching coordinator staging to the normalized full lineage;
-  keep legacy receipt validation on per-run elements.
+- 2026-10-01: the affected conversation, agent-loop, context, skill, resource
+  replay and project-trust suites pass 168 tests in 30.9 seconds. Input-algebra
+  passes 11 tests in 5.7 seconds. The original second-prompt regression and a
+  runtime-restart regression pass. These are development checks; real-provider
+  and closure evidence remain pending.
+- New requests bind v2 canonical bytes to revision-4 receipts and normalized
+  committed lineage. Retained v1 requests and revision-2/3 receipts retain
+  their historical validation. Generation mismatches, omitted/null-cost
+  violations and self-consistent substituted history are rejected.
+- T01 added subtask: derive missing cancelled/unknown results from committed
+  terminal facts before promoting follow-ups; an uncertain effect must remain
+  explicit in later context and must not be redispatched.
 
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
@@ -48,11 +61,11 @@ Part of the [evidence index](README.md).
 - [ ] Verify manifest completeness, invalid-manifest rejection and actual instruction/tool-schema costs.
 ## T01 — Preserve conversation across prompts and restarts
 - [x] First add a failing test reproducing the current loss of earlier conversation.
-- [ ] Project the complete committed conversation into subsequent model requests.
+- [x] Project the complete committed conversation into subsequent model requests.
 - [x] Join tool calls and results using their run, turn and call identities.
-- [ ] Normalize provider-facing call IDs and reject collisions or incomplete joins.
+- [x] Normalize provider-facing call IDs and reject collisions or incomplete joins.
 - [x] Reset each run’s accounting without deleting conversation or recovery facts.
-- [ ] Preserve already staged requests unchanged.
+- [x] Preserve already staged requests unchanged.
 - [ ] Test multiple prompts, follow-ups, tools, cancellation, failed runs, restart and uncertain commits.
 ## T02 — Handle large tool output and bounded artifact reads
 - [ ] Prepare bounded excerpts while retaining complete original results.

@@ -2845,7 +2845,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp prepare_model_request(state, work) do
     run_id = work.run_id
     {declared, _charged} = SessionState.accounting(state.durable, run_id)
-    elements = SessionState.elements(state.durable, run_id)
+    elements = SessionState.lineage_elements(state.durable, run_id)
 
     # Concept: a steer joins here, and only here.
     #
@@ -3076,10 +3076,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp model_candidate(state, staging, selected, project_receipt, resource_header) do
     {blocks, sources} = Enum.unzip(selected)
 
-    messages =
-      Conversation.project(staging.elements, system: system_block(state), project_blocks: blocks)
-
-    with {:ok, request} <-
+    with {:ok, entries} <- Conversation.lineage_entries(staging.elements),
+         messages =
+           [%{"role" => "system", "content" => system_block(state)}] ++
+             Enum.map(blocks, &%{"role" => "user", "content" => &1}) ++
+             Enum.map(entries, &elem(&1, 1)),
+         {:ok, request} <-
            Model.request(state.model.model, messages ++ steer_message(staging.steer),
              tools: state.active_tools,
              sampling: %{"max_tokens" => staging.max_tokens},
@@ -3090,7 +3092,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
              request,
              context_sources(
                sources,
-               Conversation.session_entries(staging.elements),
+               entries,
                staging.steer,
                staging.run_id
              ),
@@ -3247,12 +3249,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
       receipt =
         %{
           "provider_identity" => "loopex.context.reference",
-          "provider_revision" => if(resource_header, do: 3, else: 2),
+          "provider_revision" => 4,
+          "continuation_cost" => nil,
           "transformer_identity" => nil,
           "transformer_revision" => nil,
           "selector_identity" => nil,
           "selector_revision" => nil,
-          "token_estimator" => Bounds.estimator(),
+          "token_estimator" => "loopex.context_bytes.v2",
           "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
           "blocks" => blocks,
           "totals" => totals,

@@ -236,8 +236,9 @@ defmodule Loopex.ProjectResourceTrustTest do
 
     retained = receipt(fixture, session_id)
     assert retained["provider_identity"] == "loopex.context.reference"
-    assert retained["provider_revision"] == 2
-    assert retained["token_estimator"] == Bounds.estimator()
+    assert retained["provider_revision"] == 4
+    assert retained["continuation_cost"] == nil
+    assert retained["token_estimator"] == "loopex.context_bytes.v2"
     assert retained["project_resource"]["disposition"] == "staged"
     assert retained["project_resource"]["detail"] == detail
 
@@ -549,8 +550,9 @@ defmodule Loopex.ProjectResourceTrustTest do
     retained = receipt(fixture, session_id)
     assert retained["project_resource"]["disposition"] == "no_decision"
     assert retained["provider_identity"] == "loopex.context.reference"
-    assert retained["provider_revision"] == 2
-    assert retained["token_estimator"] == Bounds.estimator()
+    assert retained["provider_revision"] == 4
+    assert retained["continuation_cost"] == nil
+    assert retained["token_estimator"] == "loopex.context_bytes.v2"
     refute Enum.any?(retained["blocks"], &(&1["provenance_class"] == "project_resource"))
     assert Enum.any?(retained["blocks"], &(&1["provenance_class"] == "system"))
     assert Enum.any?(retained["blocks"], &(&1["provenance_class"] == "session"))

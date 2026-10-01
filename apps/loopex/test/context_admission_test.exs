@@ -274,7 +274,7 @@ defmodule Loopex.ContextAdmissionTest do
   @context_receipt_keys ~w(
     blocks context_record_byte_ceiling context_token_budget
     descriptor_canonicalization_version ordered_descriptor_digest
-    project_resource provider_estimated_tokens provider_identity provider_revision
+    continuation_cost project_resource provider_estimated_tokens provider_identity provider_revision
     record_byte_cost selector_identity selector_revision token_estimator totals
     transformer_identity transformer_revision
   )
@@ -942,10 +942,11 @@ defmodule Loopex.ContextAdmissionTest do
     assert normalized == committed.payload
     assert receipt["record_byte_cost"] == measured
     assert measured <= @record_limit
-    assert receipt["token_estimator"] == "loopex.context_bytes.v1"
+    assert receipt["token_estimator"] == "loopex.context_bytes.v2"
     refute receipt["token_estimator"] == "loopex.conservative_bytes.v1"
     assert receipt["provider_identity"] == "loopex.context.reference"
-    assert receipt["provider_revision"] == 2
+    assert receipt["provider_revision"] == 4
+    assert receipt["continuation_cost"] == nil
     assert {receipt["transformer_identity"], receipt["transformer_revision"]} == {nil, nil}
     assert {receipt["selector_identity"], receipt["selector_revision"]} == {nil, nil}
 
@@ -1373,6 +1374,77 @@ defmodule Loopex.ContextAdmissionTest do
     end
   end
 
+  test "revision-four replay binds its request generation and exact committed lineage" do
+    fixture = start_fixture(context_token_budget: 8_192, script: [%{text: "done"}])
+    {session_id, attachment} = create_attached_session(fixture)
+
+    assert {:accepted, "lineage-receipt"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "lineage-receipt",
+               content: "committed prompt"
+             })
+
+    assert_receive {:context_model_invoked, _worker, request}, 5_000
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+    prefix = records_through_kind(records(fixture, session_id), "model_request_committed")
+    public_prefix = recoverable_event_prefix(session_id, prefix, events(fixture, session_id))
+    assert {:ok, _baseline} = SessionState.recover(session_id, prefix, public_prefix)
+
+    substituted =
+      restage_request(%{
+        request
+        | messages:
+            replace_message(
+              request.messages,
+              &(&1["content"] == "committed prompt")
+            )
+      })
+
+    old_request = legacy_request(request)
+
+    mutations = [
+      fn payload ->
+        Map.put(payload, "request", encode_plain_for_record(old_request))
+        |> Map.put("staged_request_digest", old_request.staged_request_digest)
+      end,
+      fn payload ->
+        update_in(payload, ["context_receipt"], &Map.delete(&1, "continuation_cost"))
+      end,
+      fn payload ->
+        put_in(payload, ["context_receipt", "continuation_cost"], %{
+          "byte_cost" => 0,
+          "token_cost" => 0,
+          "content_digest" => String.duplicate("0", 64)
+        })
+      end,
+      fn payload ->
+        update_in(payload, ["context_receipt"], fn receipt ->
+          receipt
+          |> Map.delete("continuation_cost")
+          |> Map.put("provider_revision", 2)
+          |> Map.put("token_estimator", "loopex.context_bytes.v1")
+        end)
+      end,
+      fn payload ->
+        payload
+        |> Map.put("request", encode_plain_for_record(substituted))
+        |> Map.put("staged_request_digest", substituted.staged_request_digest)
+        |> update_in(["context_receipt"], &receipt_matching(&1, substituted))
+      end
+    ]
+
+    for mutate <- mutations do
+      changed =
+        mutate_model_request(prefix, fn payload ->
+          {fixed, _bytes} = resolve_record_cost(mutate.(payload))
+          fixed
+        end)
+
+      assert {:error, _reason} = SessionState.recover(session_id, changed, public_prefix)
+    end
+  end
+
   test "self consistent message tool and project substitutions cannot outrun adjacent receipt relations" do
     manifest = %{
       entries: [project_entry("adjacent project context")],
@@ -1402,7 +1474,27 @@ defmodule Loopex.ContextAdmissionTest do
     assert_receive {:context_model_invoked, _worker, request}, 5_000
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
+    request = legacy_request(request)
+
     record_prefix = records_through_kind(records(fixture, session_id), "model_request_committed")
+
+    record_prefix =
+      mutate_model_request(record_prefix, fn payload ->
+        receipt =
+          payload["context_receipt"]
+          |> Map.delete("continuation_cost")
+          |> Map.put("provider_revision", 2)
+          |> Map.put("token_estimator", "loopex.context_bytes.v1")
+
+        payload =
+          payload
+          |> Map.put("request", encode_plain_for_record(request))
+          |> Map.put("staged_request_digest", request.staged_request_digest)
+          |> Map.put("context_receipt", receipt)
+
+        {fixed, _cost} = resolve_record_cost(payload)
+        fixed
+      end)
 
     event_prefix =
       recoverable_event_prefix(session_id, record_prefix, events(fixture, session_id))
@@ -3208,7 +3300,21 @@ defmodule Loopex.ContextAdmissionTest do
                deadline: request.deadline
              )
 
-    restaged
+    if request.canonicalization_version == "loopex.model_request.v1",
+      do: legacy_request(restaged),
+      else: restaged
+  end
+
+  defp legacy_request(request) do
+    request = Map.put(request, :canonicalization_version, "loopex.model_request.v1")
+    fields = ~w(canonicalization_version model messages tools sampling deadline continuation)a
+    bytes = Canonical.encode(Enum.map(fields, &{&1, Map.fetch!(request, &1)}))
+
+    %{
+      request
+      | canonical_request_bytes: bytes,
+        staged_request_digest: Canonical.digest_bytes(bytes)
+    }
   end
 
   defp replace_message(messages, predicate) do

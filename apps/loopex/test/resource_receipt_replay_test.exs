@@ -362,7 +362,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
     ]
 
     {:ok, request} =
-      Model.request("fixture:model", messages,
+      legacy_model_request("fixture:model", messages,
         tools: [],
         sampling: %{"max_tokens" => 1},
         deadline: 1
@@ -480,7 +480,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
     ]
 
     {:ok, request} =
-      Model.request("fixture:model", messages,
+      legacy_model_request("fixture:model", messages,
         tools: [],
         sampling: %{"max_tokens" => 1},
         deadline: 1
@@ -685,7 +685,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
   end
 
   defp restage(request) do
-    Model.request(request.model, request.messages,
+    legacy_model_request(request.model, request.messages,
       tools: request.tools,
       sampling: request.sampling,
       deadline: request.deadline
@@ -703,4 +703,22 @@ defmodule Loopex.ResourceReceiptReplayTest do
 
   defp plain(value) when is_map(value),
     do: Map.new(value, fn {key, item} -> {plain(key), plain(item)} end)
+
+  # Concept: this suite keeps the revision-three resource receipt readable.
+  # Technical depth: the fixture explicitly encodes historical v1 requests;
+  # the production request constructor writes v2 and cannot select an old writer.
+  defp legacy_model_request(model, messages, options) do
+    with {:ok, request} <- Model.request(model, messages, options) do
+      request = Map.put(request, :canonicalization_version, "loopex.model_request.v1")
+      fields = ~w(canonicalization_version model messages tools sampling deadline continuation)a
+      bytes = Canonical.encode(Enum.map(fields, &{&1, Map.fetch!(request, &1)}))
+
+      {:ok,
+       %{
+         request
+         | canonical_request_bytes: bytes,
+           staged_request_digest: Canonical.digest_bytes(bytes)
+       }}
+    end
+  end
 end

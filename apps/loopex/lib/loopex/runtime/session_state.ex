@@ -2936,6 +2936,7 @@ defmodule Loopex.Runtime.SessionState do
       # still mean it. A queued follow-up becomes the next run in this same
       # transaction, so there is no window in which the session looks settled
       # while work is still owed.
+      state = complete_terminal_conversation(state, run_id, work, outcome, reconciliation_ref)
       {state, steer_events} = resolve_steer(state, run_id, unapplied_reason(outcome, bound))
       {state, interaction_events} = cancel_open_interaction(state, run_id)
       {state, promotion_events} = promote_follow_up(state, run_id)
@@ -2956,7 +2957,7 @@ defmodule Loopex.Runtime.SessionState do
          "reconciliation_ref" => reconciliation_ref,
          kind: "outcome_unknown_committed"
        }) do
-    with %{stage: "effect_dispatched", job: job} <- Map.get(state.pending_work, run_id),
+    with %{stage: "effect_dispatched", job: job} = work <- Map.get(state.pending_work, run_id),
          true <- is_binary(reconciliation_ref) and byte_size(reconciliation_ref) > 0 do
       events = [
         tool_finished_event(state.session_id, job, "outcome_unknown"),
@@ -2977,6 +2978,9 @@ defmodule Loopex.Runtime.SessionState do
       # its operator decision, and the stale follow-up could later start behind an
       # unrelated run. Resolve and promote inside this proposal so the public
       # terminal and everything it unblocks remain one durable transaction.
+      state =
+        complete_terminal_conversation(state, run_id, work, "outcome_unknown", reconciliation_ref)
+
       {state, steer_events} = resolve_steer(state, run_id, "run_terminal")
       {state, interaction_events} = cancel_open_interaction(state, run_id)
       {state, promotion_events} = promote_follow_up(state, run_id)
@@ -3287,6 +3291,48 @@ defmodule Loopex.Runtime.SessionState do
       steer ->
         {Map.update!(state, :steer, &Map.put(&1, run_id, %{steer | state: "unapplied"})),
          [steer_event(state.session_id, steer.command_id, run_id, "unapplied", reason)]}
+    end
+  end
+
+  # Concept: a terminal fact closes outstanding calls without inventing success
+  # or forgetting an uncertain effect when a later prompt projects the lineage.
+  # Technical depth: these elements are derived during replay from the terminal
+  # and its committed dispatch identity. Only that dispatched call can receive
+  # unknown; unstarted calls are cancelled. Existing committed results win.
+  defp complete_terminal_conversation(state, run_id, work, outcome, reference) do
+    elements = elements(state, run_id)
+
+    case Conversation.last_assistant(elements) do
+      nil ->
+        state
+
+      assistant ->
+        answered =
+          elements
+          |> Enum.filter(&(&1.kind == :tool_result and &1.turn_number == assistant.turn_number))
+          |> MapSet.new(& &1.tool_call_id)
+
+        Enum.reduce(assistant.tool_calls, state, fn call, current ->
+          if MapSet.member?(answered, call.tool_call_id) do
+            current
+          else
+            uncertain =
+              outcome == "outcome_unknown" and work.stage == "effect_dispatched" and
+                Map.get(Map.get(work, :job, %{}), :tool_call_id) == call.tool_call_id
+
+            result_outcome = if uncertain, do: :outcome_unknown, else: :cancelled
+
+            append_element(current, run_id, %{
+              kind: :tool_result,
+              run_id: run_id,
+              turn_number: assistant.turn_number,
+              tool_call_id: call.tool_call_id,
+              outcome: result_outcome,
+              content: Conversation.result_content(result_outcome, reference),
+              artifacts: []
+            })
+          end
+        end)
     end
   end
 
@@ -5146,6 +5192,8 @@ defmodule Loopex.Runtime.SessionState do
     receipt = Map.get(record, "context_receipt")
 
     with :ok <- validate_receipt_shell(receipt),
+         :ok <- validate_receipt_generation(receipt, request),
+         :ok <- validate_lineage_projection(state, request, run_id, applied_steer),
          {:ok, sources} <- expected_context_sources(state, receipt, run_id, applied_steer),
          {:ok, expected} <- expected_context_blocks(request, sources),
          true <- Map.get(receipt, "blocks") == expected,
@@ -5168,6 +5216,8 @@ defmodule Loopex.Runtime.SessionState do
     resources = Map.get(state.run_resources, run_id)
 
     with :ok <- validate_resource_receipt_shell(receipt),
+         :ok <- validate_receipt_generation(receipt, request),
+         :ok <- validate_lineage_projection(state, request, run_id, applied_steer),
          {:ok, resource_sources} <-
            validate_resource_pack_header(
              receipt["resource_packs"],
@@ -5197,14 +5247,15 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp validate_resource_receipt_shell(receipt) when is_map(receipt) do
-    with true <- Enum.sort(Map.keys(receipt)) == @resource_context_receipt_keys,
+    with true <-
+           Enum.sort(Map.keys(receipt)) == receipt_keys(receipt, @resource_context_receipt_keys),
          true <- receipt["provider_identity"] == "loopex.context.reference",
-         true <- receipt["provider_revision"] == 3,
+         true <- receipt["provider_revision"] in [3, 4],
          true <- receipt["transformer_identity"] == nil,
          true <- receipt["transformer_revision"] == nil,
          true <- receipt["selector_identity"] == nil,
          true <- receipt["selector_revision"] == nil,
-         true <- receipt["token_estimator"] == Bounds.estimator(),
+         true <- receipt["token_estimator"] == receipt_estimator(receipt),
          true <-
            receipt["descriptor_canonicalization_version"] ==
              @descriptor_canonicalization_version,
@@ -5383,13 +5434,15 @@ defmodule Loopex.Runtime.SessionState do
   defp resource_messages(request, state, run_id, applied_steer, project_count, staged_count)
        when is_integer(project_count) and project_count >= 0 and is_integer(staged_count) and
               staged_count >= 0 do
-    session_count = length(Conversation.session_entries(Map.get(state.conversation, run_id, [])))
-    steer_count = if applied_steer, do: 1, else: 0
-
-    if length(request.messages) == 1 + project_count + staged_count + session_count + steer_count do
+    with {:ok, entries} <-
+           request_session_entries(state, run_id, request.canonicalization_version),
+         steer_count = if(applied_steer, do: 1, else: 0),
+         true <-
+           length(request.messages) ==
+             1 + project_count + staged_count + length(entries) + steer_count do
       {:ok, request.messages |> Enum.drop(1 + project_count) |> Enum.take(staged_count)}
     else
-      {:error, :invalid_context_receipt}
+      _invalid -> {:error, :invalid_context_receipt}
     end
   end
 
@@ -5442,15 +5495,80 @@ defmodule Loopex.Runtime.SessionState do
   defp resource_sources(_rows, _messages, _resources, _reversed),
     do: {:error, :invalid_context_receipt}
 
+  defp receipt_keys(%{"provider_revision" => 4}, keys),
+    do: Enum.sort(["continuation_cost" | keys])
+
+  defp receipt_keys(_receipt, keys), do: keys
+
+  defp receipt_estimator(%{"provider_revision" => 4}), do: "loopex.context_bytes.v2"
+  defp receipt_estimator(_receipt), do: Bounds.estimator()
+
+  defp validate_receipt_generation(
+         %{"provider_revision" => 4, "continuation_cost" => nil},
+         %{canonicalization_version: "loopex.model_request.v2", continuation: nil}
+       ),
+       do: :ok
+
+  defp validate_receipt_generation(
+         %{"provider_revision" => revision},
+         %{canonicalization_version: "loopex.model_request.v1", continuation: nil}
+       )
+       when revision in [2, 3], do: :ok
+
+  defp validate_receipt_generation(_receipt, _request), do: {:error, :invalid_context_receipt}
+
+  defp request_session_entries(state, run_id, "loopex.model_request.v2"),
+    do: Conversation.lineage_entries(lineage_elements(state, run_id))
+
+  defp request_session_entries(state, run_id, "loopex.model_request.v1"),
+    do: {:ok, Conversation.session_entries(elements(state, run_id))}
+
+  # Concept: a new receipt describes exactly the committed lineage, while old
+  # staged requests retain their original per-run validation.
+  # Technical depth: recomputing receipt digests cannot admit substituted or
+  # omitted history; both normalized messages and their source bindings are
+  # independently reconstructed from the reducer's committed elements.
+  defp validate_lineage_projection(
+         _state,
+         %{canonicalization_version: "loopex.model_request.v1"},
+         _run_id,
+         _steer
+       ),
+       do: :ok
+
+  defp validate_lineage_projection(state, request, run_id, applied_steer) do
+    with {:ok, entries} <-
+           request_session_entries(state, run_id, request.canonicalization_version),
+         {:ok, steer} <- projected_steer(state, run_id, applied_steer),
+         expected = Enum.map(entries, &elem(&1, 1)) ++ steer,
+         true <- Enum.take(request.messages, -length(expected)) == expected do
+      :ok
+    else
+      _invalid -> {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp projected_steer(_state, _run_id, nil), do: {:ok, []}
+
+  defp projected_steer(state, run_id, command_id) do
+    case Map.get(state.steer, run_id) do
+      %{command_id: ^command_id, content: content} ->
+        {:ok, [%{"role" => "user", "content" => content}]}
+
+      _invalid ->
+        {:error, :invalid_context_receipt}
+    end
+  end
+
   defp validate_receipt_shell(receipt) when is_map(receipt) do
-    with true <- Enum.sort(Map.keys(receipt)) == @context_receipt_keys,
+    with true <- Enum.sort(Map.keys(receipt)) == receipt_keys(receipt, @context_receipt_keys),
          true <- Map.get(receipt, "provider_identity") == "loopex.context.reference",
-         true <- Map.get(receipt, "provider_revision") == 2,
+         true <- Map.get(receipt, "provider_revision") in [2, 4],
          true <- Map.get(receipt, "transformer_identity") == nil,
          true <- Map.get(receipt, "transformer_revision") == nil,
          true <- Map.get(receipt, "selector_identity") == nil,
          true <- Map.get(receipt, "selector_revision") == nil,
-         true <- Map.get(receipt, "token_estimator") == Bounds.estimator(),
+         true <- Map.get(receipt, "token_estimator") == receipt_estimator(receipt),
          true <-
            Map.get(receipt, "descriptor_canonicalization_version") ==
              @descriptor_canonicalization_version,
@@ -5528,7 +5646,10 @@ defmodule Loopex.Runtime.SessionState do
   # command, turn, or call therefore stops matching even when its own digest was
   # recomputed to agree with the rename.
   defp expected_context_sources(state, receipt, run_id, applied_steer) do
-    elements = Map.get(state.conversation, run_id, [])
+    version =
+      if receipt["provider_revision"] == 4,
+        do: "loopex.model_request.v2",
+        else: "loopex.model_request.v1"
 
     steer =
       case applied_steer && Map.get(state.steer, run_id) do
@@ -5548,12 +5669,13 @@ defmodule Loopex.Runtime.SessionState do
           []
       end
 
-    {:ok,
-     [context_source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
-       expected_project_sources(Map.get(receipt, "project_resource")) ++
-       Enum.map(Conversation.session_entries(elements), fn {reference, _message} ->
-         context_source(reference, "session")
-       end) ++ steer}
+    with {:ok, entries} <- request_session_entries(state, run_id, version) do
+      {:ok,
+       [context_source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
+         expected_project_sources(Map.get(receipt, "project_resource")) ++
+         Enum.map(entries, fn {reference, _message} -> context_source(reference, "session") end) ++
+         steer}
+    end
   end
 
   defp expected_resource_context_sources(
@@ -5563,7 +5685,10 @@ defmodule Loopex.Runtime.SessionState do
          applied_steer,
          resource_sources
        ) do
-    elements = Map.get(state.conversation, run_id, [])
+    version =
+      if receipt["provider_revision"] == 4,
+        do: "loopex.model_request.v2",
+        else: "loopex.model_request.v1"
 
     steer =
       case applied_steer && Map.get(state.steer, run_id) do
@@ -5589,13 +5714,14 @@ defmodule Loopex.Runtime.SessionState do
     if steer == :invalid do
       {:error, :invalid_context_receipt}
     else
-      {:ok,
-       [context_source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
-         expected_project_sources(receipt["project_resource"]) ++
-         resource_sources ++
-         Enum.map(Conversation.session_entries(elements), fn {reference, _message} ->
-           context_source(reference, "session")
-         end) ++ steer}
+      with {:ok, entries} <- request_session_entries(state, run_id, version) do
+        {:ok,
+         [context_source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
+           expected_project_sources(receipt["project_resource"]) ++
+           resource_sources ++
+           Enum.map(entries, fn {reference, _message} -> context_source(reference, "session") end) ++
+           steer}
+      end
     end
   end
 

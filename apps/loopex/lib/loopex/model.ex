@@ -36,9 +36,10 @@ defmodule Loopex.Model do
   job digests by construction, while two attempts of one model call produce one
   staged digest.
 
-  `continuation` is structurally present and always empty here. It exists so a
-  later adapter-private continuation handle can land without changing what the
-  canonicalization covers, and M2 never reads, writes, or compares it.
+  Ordinary canonical requests carry nil continuation. New requests use
+  `loopex.model_request.v2`; retained v1 requests remain readable with their
+  original bytes and digest. The continuation member stays inside the ordered
+  semantic projection in both generations.
 
   There is no sampling default anywhere. `max_tokens` is a declared committed
   value and a request built without one is refused, rather than silently
@@ -49,7 +50,8 @@ defmodule Loopex.Model do
   alias LoopexProtocol.ToolDefinition
   alias Loopex.ProgressPayload
 
-  @canonicalization_version "loopex.model_request.v1"
+  @canonicalization_version "loopex.model_request.v2"
+  @readable_versions ["loopex.model_request.v1", @canonicalization_version]
 
   @semantic_fields [
     :canonicalization_version,
@@ -357,7 +359,7 @@ defmodule Loopex.Model do
   def max_tokens(%{sampling: %{"max_tokens" => max_tokens}}), do: max_tokens
 
   defp validate_semantics(%{
-         canonicalization_version: @canonicalization_version,
+         canonicalization_version: version,
          model: model,
          messages: messages,
          tools: tools,
@@ -365,7 +367,8 @@ defmodule Loopex.Model do
          deadline: deadline,
          continuation: nil
        })
-       when is_binary(model) and byte_size(model) > 0 and byte_size(model) <= 512 and
+       when version in @readable_versions and
+              is_binary(model) and byte_size(model) > 0 and byte_size(model) <= 512 and
               is_list(messages) and length(messages) > 0 and length(messages) <= 1_024 and
               is_list(tools) and length(tools) <= 256 and
               is_integer(max_tokens) and max_tokens > 0 and max_tokens <= 1_000_000 and

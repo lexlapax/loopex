@@ -1338,6 +1338,59 @@ defmodule Loopex.AgentLoopTest do
              Loopex.Runtime.SessionState.lineage_elements(state, second)
   end
 
+  test "a prompt after runtime restart stages the retained conversation under the new generation" do
+    fixture = start(script: [%{text: "retained answer", calls: []}])
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "retained prompt")
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    assert :ok = Loopex.stop(fixture.runtime)
+
+    restarted = start(store: fixture.store, script: [%{text: "answer after restart", calls: []}])
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(restarted.runtime, session_id, command_id: "restart-lineage")
+
+    assert {:ok, resumed} = Loopex.attach(restarted.runtime, session_id, after_event_sequence: 0)
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    assert {:accepted, "prompt-after-restart"} =
+             Loopex.command(resumed, %{
+               type: :prompt,
+               command_id: "prompt-after-restart",
+               content: "refer to the retained answer"
+             })
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    [request] = AgentLoopTestModel.dispatched(restarted.model)
+    assert request.canonicalization_version == "loopex.model_request.v2"
+
+    assert Enum.map(tl(request.messages), &{&1["role"], &1["content"]}) == [
+             {"user", "retained prompt"},
+             {"assistant", "retained answer"},
+             {"user", "refer to the retained answer"}
+           ]
+
+    staged =
+      Fixture.records(restarted, session_id)
+      |> Enum.filter(&(&1.payload.kind == "model_request_committed"))
+
+    assert length(staged) == 2
+
+    for record <- staged do
+      receipt = record.payload["context_receipt"]
+      assert receipt["provider_revision"] == 4
+      assert receipt["continuation_cost"] == nil
+      assert receipt["token_estimator"] == "loopex.context_bytes.v2"
+    end
+
+    assert {:ok, _recovered} =
+             Loopex.Runtime.SessionState.recover(
+               session_id,
+               Fixture.records(restarted, session_id),
+               Fixture.events(restarted, session_id)
+             )
+  end
+
   test "promoted follow-ups extend lineage without inheriting earlier accounting" do
     fixture =
       start(
@@ -1412,12 +1465,18 @@ defmodule Loopex.AgentLoopTest do
     # The model's own prior message is replayed back to it verbatim.
     assistant = Enum.find(second.messages, &(&1["role"] == "assistant"))
     assert assistant["content"] == "I will write the file"
-    assert [%{"tool_call_id" => "c1"}] = assistant["tool_calls"]
+    [job] = Loopex.AgentLoopAnsweringExecutor.jobs(fixture.executor)
+
+    normalized_id =
+      "lx_" <> binary_part(LoopexProtocol.Canonical.digest([job.run_id, 1, "c1"]), 0, 48)
+
+    assert [%{"tool_call_id" => ^normalized_id}] = assistant["tool_calls"]
+    assert job.tool_call_id == "c1"
 
     # And so is the tool's real output, not a synthesized summary of it. M1 sent
     # the string "Tool <name> completed: completed" here.
     result = Enum.find(second.messages, &(&1["role"] == "tool"))
-    assert result["tool_call_id"] == "c1"
+    assert result["tool_call_id"] == normalized_id
     assert result["content"] == "tool output for c1"
     assert result["outcome"] == "completed"
   end
@@ -3838,7 +3897,19 @@ defmodule Loopex.AgentLoopTest do
     # The next turn is staged only once every call of that turn has an answer.
     [_first, second] = AgentLoopTestModel.dispatched(fixture.model)
     results = Enum.filter(second.messages, &(&1["role"] == "tool"))
-    assert Enum.map(results, & &1["tool_call_id"]) == ["a", "b", "c"]
+
+    assert Enum.map(results, & &1["tool_call_id"]) ==
+             Enum.map(dispatched, fn job ->
+               "lx_" <>
+                 binary_part(
+                   LoopexProtocol.Canonical.digest([job.run_id, 1, job.tool_call_id]),
+                   0,
+                   48
+                 )
+             end)
+
+    assert Enum.map(results, & &1["content"]) ==
+             ["tool output for a", "tool output for b", "tool output for c"]
   end
 
   # Concept: the runtime, wired to an executor this file can make answer with an
@@ -5884,6 +5955,12 @@ defmodule Loopex.AgentLoopTest do
     promoted_finished = Enum.find(promoted_run, &(&1.kind == "run.finished"))
     assert promoted_finished["run_id"] == promoted_prompt["run_id"]
     assert promoted_finished["outcome"] == "completed"
+
+    promoted_request = List.last(AgentLoopTestModel.dispatched(fixture.model))
+    [unknown] = Enum.filter(promoted_request.messages, &(&1["role"] == "tool"))
+    assert unknown["outcome"] == "outcome_unknown"
+    assert unknown["content"] =~ "Do not assume it succeeded and do not retry it."
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1
 
     send(worker, :release)
   end

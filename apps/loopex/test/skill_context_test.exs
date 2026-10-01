@@ -63,7 +63,8 @@ defmodule Loopex.SkillContextTest do
 
     record = resource_record(context)
     receipt = record["context_receipt"]
-    assert receipt["provider_revision"] == 3
+    assert receipt["provider_revision"] == 4
+    assert receipt["continuation_cost"] == nil
     assert receipt["resource_packs"]["status"] == "evaluated"
 
     assert Enum.map(receipt["resource_packs"]["blocks"], &{&1["pack"], &1["file"], &1["status"]}) ==
