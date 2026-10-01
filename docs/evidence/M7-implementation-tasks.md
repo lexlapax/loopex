@@ -95,6 +95,11 @@ Part of the [evidence index](README.md).
   into the real runtime and coordinator.
 - Done: join explicit ephemeral provider bindings to committed-model dispatch,
   caller-only credential resolution and separately resolved maintenance startup.
+- Done: full fast check of the maintenance/ephemeral-routing integration at
+  `7c266c4678776908b159bea13927117e1bf40bd7`, with all 11 suites passing.
+- Done: admit closed durable token-route maps and select exactly one token from
+  the committed request before provider-process startup, retaining the existing
+  private credential bootstrap and cleanup path.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -110,6 +115,36 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: The durable adapter accepts the explicit provider-routes branch
+  alongside the separate legacy single-token branch. It rejects mixed branches,
+  partial registry/capability options, malformed tokens and unsupported provider
+  keys. Before starting an invocation, the bridge selects only the committed
+  request's provider token and removes the routing table from its invocation
+  configuration. A missing route refuses before any child starts. The existing
+  excluded credential sender, registry/custody lookup, private bootstrap frame
+  and process-retirement proof are unchanged. A real companion fixture receives
+  alternating selected credentials with independently distinct lengths and
+  proves each child gone; an unbound provider produces no child or credential
+  frame. The 30-case configuration/bridge selection passes on current in
+  38.5 seconds and on the floor in 66.7 seconds. Complete outputs:
+  - `/private/tmp/loopex-m7-durable-route-current.log`, SHA-256
+    `617f6045dafbf340a6fb2b6e7e7dbb2d67aa2a1a8b368f5095f6c588a1f80457`.
+  - `/private/tmp/loopex-m7-durable-route-floor.log`, SHA-256
+    `524f0f8ff9e57d4d01681bdb4db2f4f91b8a0ec6773893362475fc3488fe4163`.
+  The shared durable binding loader, version-2 host planes, launch exclusions,
+  daemon assembly and host model/configuration wiring remain pending. This
+  adapter change does not yet make those host entrypoints accept multiple keys.
+
+- 2026-10-01: The full fast check passes on exact integration commit
+  `7c266c4678776908b159bea13927117e1bf40bd7`: all 11 application suites,
+  2,905 tests passed and 34 excluded, in 872 seconds. Compilation, formatting,
+  structure, documentation ordering, runner/archive fixtures, dependency
+  direction and version checks also pass. Complete output:
+  `/private/tmp/loopex-m7-7c266c46-fast-check.log`, SHA-256
+  `ab4f135d79d664f6bb949b872847e11e3609a53881bdec4ff53c1c66e10b289a`.
+  The checkout stayed unchanged throughout the run. Later durable routing work
+  is outside this proof and requires its own focused validation.
 
 - 2026-10-01: Ephemeral startup accepts explicit provider bindings and a separate
   maintenance model. It validates every reference, requires the ordinary and
@@ -1079,6 +1114,7 @@ Part of the [evidence index](README.md).
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
 - [ ] Allow maintenance settings to change new episodes while preserving already admitted episodes.
 - [ ] Implement named provider and credential bindings through the existing custody boundaries.
+- [x] Admit the durable adapter's closed token-route branch and select the committed provider before child startup; prove selected private bootstrap and unbound-route refusal.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
 - [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.
@@ -1310,7 +1346,7 @@ before a provider demonstration.
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Core startup capture and durable/ephemeral instruction forwarding implemented; model routing, episode capture, checkpoint and compaction pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
-| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Shared reference/exclusion validation and ephemeral startup/dispatch implemented; durable custody, daemon and helper integration pending |
+| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Shared reference/exclusion validation, ephemeral startup/dispatch and durable adapter token selection implemented; durable custody loading, host planes, daemon and helper integration pending |
 | Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths, trusted trace selectors, flag parser, new-session precedence/origins and initial capability/instruction admission implemented; complete role/maintenance preparation, command entry and redacted inspection pending |
 | Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
 | Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |

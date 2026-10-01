@@ -76,6 +76,67 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfigurationTest do
              ProviderConfiguration.validate(managed)
   end
 
+  test "durable routes are closed and select one token without legacy fallback" do
+    {:ok, registry_pid} = CredentialRegistry.start_link()
+    {:ok, registry} = CredentialRegistry.handle(registry_pid)
+    {:ok, capability_pid} = Capability.start_link()
+    {:ok, capability} = Capability.handle(capability_pid)
+    first = CredentialToken.new()
+    second = CredentialToken.new()
+    routes = %{"anthropic" => first, "openai" => second}
+
+    routed =
+      options() ++
+        [provider_routes: routes, credential_registry: registry, tracing_capability: capability]
+
+    assert {:ok, configuration} = ProviderConfiguration.validate(routed)
+
+    for {model, token} <- [
+          {"anthropic:fixture", first},
+          {"openai:fixture", second},
+          {"anthropic:fixture", first}
+        ] do
+      assert {:ok, selected} = ProviderConfiguration.select_route(configuration, model)
+      assert selected.credential_token == token
+      assert selected.credential_registry == registry
+      assert selected.tracing_capability == capability
+      refute Map.has_key?(selected, :provider_routes)
+    end
+
+    for model <- ["openrouter:unbound", "ollama:unsupported", "unknown:model", "bad"] do
+      assert {:error, :provider_route_unavailable} =
+               ProviderConfiguration.select_route(configuration, model)
+    end
+
+    for invalid <- [
+          routed ++ [credential_token: first],
+          Keyword.delete(routed, :credential_registry),
+          Keyword.delete(routed, :tracing_capability)
+        ] do
+      assert {:error, :invalid_provider_configuration} = ProviderConfiguration.validate(invalid)
+    end
+
+    for invalid <- [
+          %{},
+          nil,
+          %{"ollama" => first},
+          %{:openai => first},
+          %{"openai" => :not_a_token},
+          %{"OpenAI" => first}
+        ] do
+      assert {:error, :invalid_provider_configuration} =
+               routed
+               |> Keyword.put(:provider_routes, invalid)
+               |> ProviderConfiguration.validate()
+    end
+
+    assert {:error, :provider_route_unavailable} =
+             ProviderConfiguration.select_route(
+               Map.put(configuration, :credential_token, first),
+               "anthropic:fixture"
+             )
+  end
+
   test "managed cleanup uses the retained period and unmanaged cleanup requires an explicit value" do
     assert {:ok, 999} =
              ProviderConfiguration.cleanup_period(%{cleanup_grace_ms: 1}, {:managed, self(), 999})

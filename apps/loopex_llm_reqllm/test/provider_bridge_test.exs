@@ -116,6 +116,60 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     refute File.exists?(File.read!(Path.join(root, "namespace")))
   end
 
+  test "committed provider routing selects its custody on the real private bootstrap frame", %{
+    root: root,
+    request: original
+  } do
+    configuration = worker(root, :reply)
+    second_key = "synthetic-second-provider-key-with-distinct-size"
+    {:ok, custody_pid} = CredentialCustody.start_link(credential: second_key)
+    {:ok, custody} = CredentialCustody.reference(custody_pid)
+    second = CredentialToken.new()
+    assert :ok = CredentialRegistry.put(configuration.credential_registry, second, custody)
+    on_exit(fn -> stop_if_alive(custody_pid) end)
+    first = configuration.credential_token
+
+    configuration =
+      configuration
+      |> Map.delete(:credential_token)
+      |> Map.put(:provider_routes, %{"anthropic" => first, "openai" => second})
+
+    for {model, expected_size} <- [
+          {"anthropic:fixture", 29},
+          {"openai:fixture", byte_size(second_key)},
+          {"anthropic:fixture", 29}
+        ] do
+      assert {:ok, request} =
+               Model.request(model, original.messages,
+                 sampling: original.sampling,
+                 deadline: System.system_time(:millisecond) + 30_000
+               )
+
+      assert {:ok, reply} =
+               ProviderBridge.complete(request, configuration, Model.discard_progress())
+
+      assert reply.text == "answer"
+      assert reply.staged_request_digest == request.staged_request_digest
+      assert File.read!(Path.join(root, "credential-size")) == Integer.to_string(expected_size)
+      refute process_alive?(child_pid(root))
+    end
+
+    File.rm!(Path.join(root, "pid"))
+    File.rm!(Path.join(root, "credential-size"))
+
+    assert {:ok, unbound} =
+             Model.request("openrouter:unbound", original.messages,
+               sampling: original.sampling,
+               deadline: System.system_time(:millisecond) + 30_000
+             )
+
+    assert {:error, {:not_dispatched, "model_call_failed"}} =
+             ProviderBridge.complete(unbound, configuration, Model.discard_progress())
+
+    refute File.exists?(Path.join(root, "pid"))
+    refute File.exists?(Path.join(root, "credential-size"))
+  end
+
   test "a direct sender clears inherited named and legacy trace sessions", %{
     root: root,
     request: request

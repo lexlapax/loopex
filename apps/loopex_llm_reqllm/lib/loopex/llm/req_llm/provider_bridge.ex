@@ -33,6 +33,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   @doc false
   def complete(request, configuration, progress) when is_function(progress, 1) do
     with :ok <- Model.validate_request(request),
+         {:ok, configuration} <- ProviderConfiguration.select_route(configuration, request.model),
          true <- request.deadline > System.system_time(:millisecond),
          :ok <- ProviderConfiguration.verify_artifact(configuration) do
       case credential_mode(configuration) do

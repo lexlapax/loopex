@@ -9,7 +9,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
   @paths [:worker_path, :interpreter_path]
   @digests [:worker_sha256, :build_manifest_sha256]
   @credential_keys [:credential_token, :credential_registry, :tracing_capability]
-  @keys @paths ++ @digests ++ [:cleanup_grace_ms] ++ @credential_keys
+  @keys @paths ++ @digests ++ [:cleanup_grace_ms, :provider_routes] ++ @credential_keys
 
   # Concept: provider execution is host-configured, never discovered through a
   # workspace or an ambient search path.
@@ -100,7 +100,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
   end
 
   defp credential_inputs(options) do
-    present = Enum.filter(@credential_keys, &Keyword.has_key?(options, &1))
+    present = Enum.filter(@credential_keys ++ [:provider_routes], &Keyword.has_key?(options, &1))
 
     case present do
       [] ->
@@ -115,10 +115,52 @@ defmodule Loopex.LLM.ReqLLM.ProviderConfiguration do
           _invalid -> {:error, :invalid_provider_configuration}
         end
 
+      [:credential_registry, :tracing_capability, :provider_routes] ->
+        with :ok <- validate_routes(Keyword.fetch!(options, :provider_routes)),
+             :ok <- CredentialRegistry.validate(Keyword.fetch!(options, :credential_registry)),
+             :ok <- trace_capability(Keyword.fetch!(options, :tracing_capability)) do
+          :ok
+        else
+          _invalid -> {:error, :invalid_provider_configuration}
+        end
+
       _partial ->
         {:error, :invalid_provider_configuration}
     end
   end
+
+  # Concept: a durable provider route names opaque custody, never an ambient key.
+  # Technical depth: only the existing hosted providers are supported, and each
+  # token keeps the registry and trace capability supplied with the whole map.
+  @doc false
+  def validate_routes(routes) when is_map(routes) and map_size(routes) in 1..16 do
+    if Enum.all?(routes, fn {provider, token} ->
+         provider in ["openai", "anthropic", "openrouter"] and
+           CredentialToken.validate(token) == :ok
+       end),
+       do: :ok,
+       else: {:error, :invalid_provider_configuration}
+  end
+
+  def validate_routes(_), do: {:error, :invalid_provider_configuration}
+
+  # Concept: a committed request selects exactly one admitted provider token.
+  # Technical depth: consume the routing map before the invocation receives its
+  # configuration. Legacy single-token callers keep their existing contract.
+  # No registry lookup, credential read or process start occurs at this step.
+  @doc false
+  def select_route(%{provider_routes: routes} = configuration, model) do
+    with :ok <- validate_routes(routes),
+         false <- Map.has_key?(configuration, :credential_token),
+         {:ok, selected} <- Loopex.LLM.ReqLLM.InProcess.Guards.model(model),
+         {:ok, token} <- Map.fetch(routes, Atom.to_string(selected.provider)) do
+      {:ok, configuration |> Map.delete(:provider_routes) |> Map.put(:credential_token, token)}
+    else
+      _ -> {:error, :provider_route_unavailable}
+    end
+  end
+
+  def select_route(configuration, _model), do: {:ok, configuration}
 
   defp trace_capability(%Direct{} = direct), do: Direct.validate(direct)
   defp trace_capability(capability), do: Capability.validate(capability)
