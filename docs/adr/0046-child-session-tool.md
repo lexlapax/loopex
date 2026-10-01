@@ -3,7 +3,7 @@
 
 Technical depth: [Serial read-only child sessions](0046-child-session-tool-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field and their normalized command identity for newly authored bounds, preserving historical digests and ordinary follow-up inheritance; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment. Extends [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) with runtime-private read-only effect-intent/terminal and creation-provenance queries, including a Store read callback and a complete paged enumeration of committed create mappings by derived ordinal, without granting activation or mutation authority. Also adds a shared pure genesis resolver and a host-private live create variant accepting its validated complete payload; helper recovery cannot invoke that variant. Amends [ADR 0016](0016-configured-cancellation-observation.md#concept) to permit exact retained v2/v3 genesis in historical lookup and the live exact-genesis create variant; committed cleanup values and observation bounds remain unchanged.
@@ -158,4 +158,4 @@ embedding does not offer helpers in M7.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:029ee9cc4128d20766c79a430da9c1570ebe149ac92a818a2932e3367e1121e3`; technical `sha256:1deabc22dd44c5d4ad04cda271d62fbece7db87a6ce6b536672853413fdbfdab` |

@@ -3,7 +3,7 @@
 
 Technical depth: [Bounded context compaction checkpoints](0043-context-compaction-checkpoint-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure and closed refusal/failure shapes to allow bounded maintenance first and versioned preparation failures and its closed receipt source-reference union for maintenance and checkpoint provenance. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules. Also amends ADR 0011's exhaustive admission/abort rules for standalone maintenance and adds discoverable completion. Extends [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) so the first run-owned maintenance request may commit the run deadline before an ordinary request. Also amends ADR 0010's turn-bound check so each summary dispatch spends one turn unit, and the exact row count of ADR 0017's deadline-staging and ADR 0018's settlement-terminal transactions by one leading episode-terminal row for a run-owned episode, admitting the `maintenance` stage in the deadline-staging validator.
@@ -154,4 +154,4 @@ matching binary, not removal of checkpoint records.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:bd2f617feb030ac6c91df204ce08535c2679be26cdf2df61578ebd663da5d240`; technical `sha256:c093342142ed0b1fc089436a8755eb178b7e6661d765c6dfd8e8ad377545b9df` |

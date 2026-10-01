@@ -3,7 +3,7 @@
 
 Technical depth: [Host-composed instructions](0042-host-composed-instructions-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) only the fixed source of system text; [ADR 0017](0017-durable-context-admission-budget.md#concept)'s fixed system-class token ceiling, now a host value with the existing 1,000 default, and its closed receipt revision for explicit instruction provenance
@@ -63,4 +63,4 @@ rollback claim. New projections can differ under ADR 0041.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:c1c9f9f6d37467cf111d1799d0fc709c73ccb035aa09dd5f609e53a65e2ea928`; technical `sha256:2c7704100a54c413b17c3171797e643557573f5a3589eb43422b1cc81b786e33` |

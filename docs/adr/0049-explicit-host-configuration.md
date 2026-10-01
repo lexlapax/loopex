@@ -3,7 +3,7 @@
 
 Technical depth: [Explicit host configuration and conversation command](0049-explicit-host-configuration-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only its closed ephemeral startup-option set, adding an opt-in owner-managed trace configuration; credential audience and cleanup guarantees remain unchanged
@@ -116,4 +116,4 @@ remains Proposed ADR 0037 for M8.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:e317e526e2f8279bd79d9d47a31eb00375c29e3b5d56f3dcb8ff5c89b2902702`; technical `sha256:894637cd3fedb3f72eb741956510314e67fd7132705c76ec51c31ac1e7fe8165` |

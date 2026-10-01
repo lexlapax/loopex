@@ -10,14 +10,16 @@ Concept: [Purpose](M7.md#concept-plan-purpose).
 
 Concept: [Design decisions](M7.md#concept-plan-decisions).
 
-M6 is Closed. ADRs 0041–0049 and both labelled vision amendments form one
-coordinated exact-byte acceptance packet. No partially accepted subset authorizes
+M6 is Closed. The maintainer accepted this plan, ADRs 0041–0049 and both labelled
+vision amendments together at `2986150b878151524ecdd9bac5a9779e69e196b4` on
+2026-09-30; the [acceptance disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+binds the exact coordinated packet. No partially accepted subset authorizes
 implementation of these joins, regardless of abbreviated Depends-on headers.
 The tool-budget amendment gates questions/helpers; section 13.4 gates the shared
 configuration, projection and maintenance contracts. Both amendments are
 prerequisites for the whole packet and its nine outcome/proof obligations. Both
-amendments and all nine ADR pairs are accepted together before dependent M7
-implementation. The table identifies each decision's direct join, not separate
+amendments and all nine ADR pairs have been accepted together, so dependent M7
+implementation may begin. The table identifies each decision's direct join, not separate
 implementation authority:
 | Decision | Accepted before |
 | --- | --- |
@@ -67,7 +69,7 @@ configuration/genesis, interaction variants, events, snapshots and bounds,
 including authorization differences. The new digest includes canonical payload
 schemas, not only method/record names and limits. Independent Node vectors
 cover both servers and old/new-client combinations. Acceptance binds the
-proposal contracts; source implementation and literal schema/vector digests are
+reviewed contracts; source implementation and literal schema/vector digests are
 verified at the first protocol integration before any new wire shape is exposed.
 
 The source baseline has two different contracts: `LoopexProtocol.Session`
@@ -115,7 +117,7 @@ locally before verified initialization or after refusal; server gating remains
 mandatory against raw or nonconforming clients. Existing foreground attachment and daemon
 writer-epoch rules still apply after successful negotiation.
 
-| Member affected | Required M7 contract and owning proposal |
+| Member affected | Required M7 contract and owning ADR |
 | --- | --- |
 | `session.create` | Versioned session-option validation for resolved configuration, instructions and immutable selections under ADRs 0042/0044/0046. Remote input cannot supply provider capabilities, credential routes, host catalogs, registry modules, derived `tool_selection` or `artifact_read` bindings. |
 | New `session.configure` | Existing request/command correlation plus a nonempty closed configuration update containing only ADR 0044's mutable fields. Foreground attachment authority and daemon writer-epoch/controller authority apply before mutation. |
@@ -152,7 +154,7 @@ snapshots and progress, not merely the successful configured response.
 
 ADRs 0011/0017 deliberately omit ordinary bound configuration from normalized
 command identity, and current `SessionState.normalize_command/1` implements
-that rule. ADR 0046 now proposes the explicit amendment: version new normalized
+that rule. ADR 0046 specifies the explicit amendment: version new normalized
 commands/digests to bind exact authored prompt bounds or the follow-up ceiling,
 including omission. Parser plumbing alone cannot establish that behavior. Look up
 a duplicate's retained fact before resolving defaults or the clock again;
@@ -201,7 +203,7 @@ relative-path rules, prompt files, explicit `maintenance.model` /
 `--compaction-model`, effective value origins and trace controls.
 Core and reusable composition receive explicit options and read no files.
 
-The proposed `loopex chat --config FILE` owns a foreground durable runtime.
+The accepted `loopex chat --config FILE` contract owns a foreground durable runtime.
 It adds settled prompts and explicit steer/follow-up/answer/compact/configure/
 abort/status/wait actions, ordered TTY and pipe input, explicit answers/declines,
 bounded EOF/interrupt cleanup and fail-fast pipe errors. Existing
@@ -278,7 +280,7 @@ retains the M6 implementation, with the comparison recorded on 2026-09-29:
 | Interaction kind is exactly `choice` | `apps/loopex/lib/loopex/interaction.ex` |
 
 The earlier Pi and opencode comparison was an exploratory source summary,
-not a versioned compatibility assessment. The current proposal relies on the
+not a versioned compatibility assessment. The accepted plan relies on the
 specific Pi documentation below and Loopex's own contracts. It copies no
 implementation, tests or private contract, and creates no Pi compatibility
 claim.
@@ -293,7 +295,7 @@ Primary documentation was checked on 2026-09-29, after Context7 resolved
 API; that does not establish the Pi coding-agent CLI's built-in behavior.
 The live documentation is a dated comparison, not a dependency pin.
 
-| Suggested strategy | Verified capability and correction | M7 disposition proposed |
+| Suggested strategy | Verified capability and correction | Accepted M7 disposition |
 | --- | --- | --- |
 | Markdown specialization | [Prompt templates](https://pi.dev/docs/latest/prompt-templates) expand text into the current conversation. They do not create another session or enforce a tool restriction | Resolve saved host roles to instructions/model settings and use existing admitted skills; no role type in core or new template language |
 | Project instructions | [Configuration](https://pi.dev/docs/latest/configuration) distinguishes discovered context files from trusted project configuration. Project system overrides live in `.pi/SYSTEM.md`, with `.pi/APPEND_SYSTEM.md` for appending | Preserve Loopex's project-resource admission and provenance; never promote a repository file into trusted system content merely because of its name |
@@ -400,7 +402,7 @@ under ADR 0046's fixed bound. First protocol integration
 adds the negotiated schema and independent Node fixtures for every changed
 command/event/snapshot. No outcome is proved by tests of only the happy path.
 
-The proposed fixed task catalog is:
+The accepted fixed task catalog is:
 
 | Task | Starting fixture and input | Objective completion check |
 | --- | --- | --- |
@@ -1434,11 +1436,12 @@ The [round-9 readiness review](../evidence/M7-readiness-review-9.md) of a234247e
 then examined the whole change since the round-8 candidate, including the latest
 internal repairs. Its two contract mismatches and one optional clarification
 are repaired in the [round-9 disposition](../evidence/M7-round-9-disposition.md).
-The repaired packet is offered for exact-byte acceptance only after the repair
-recheck and clean-candidate documentation validation bound by the final receipt.
-This is review of planned contracts, not product evidence or formal independent
-acceptance review. Acceptance also updates the roadmap and project README as
-the maintainer requested, alongside the coordinated governance records.
+The repaired packet's recheck and clean-candidate documentation validation are
+bound by the final receipt. The maintainer then accepted the exact packet in the
+[recorded disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30).
+These are planning reviews, not product evidence or formal independent closure
+review. The acceptance transition updates the roadmap and project README
+alongside the coordinated governance records.
 
 | Finding | Governing repair and implementation witness |
 | --- | --- |
@@ -1475,8 +1478,9 @@ Roles, credentials, catalogs, allowances, helper routing, fixture policy and
 terminal behavior stay at the edge. Any further review should challenge these
 repaired contracts and the outcome-to-proof mapping. Exact fixture paths/content/prompts and the external repository task are
 implementation/testing deliverables, fixed before their demonstration attempts.
-The external target remains deferred by the maintainer. No successful product
-run, accepted ADR or completed milestone is asserted by this packet.
+The external target remains deferred by the maintainer. The prerequisites are
+now accepted; no successful product run or completed milestone is asserted by
+this planning record.
 
 <a id="technical-plan-ownership"></a>
 ### Workstreams and Rejoin Order
@@ -1485,7 +1489,7 @@ Concept: [Workstreams](M7.md#concept-plan-workstreams).
 
 | Phase | Work and rejoin condition |
 | --- | --- |
-| 0. Specify | Accept the proposed contracts; build the task fixtures and executable scenario commands from the fixed grammar. Accept the whole coordinated packet before dependent implementation; pin the literal read capability table and schema/vector/fixture manifests under the integration owner |
+| 0. Specify | The coordinated contracts are accepted. Build the task fixtures and executable scenario commands from the fixed grammar; pin the literal read capability table and schema/vector/fixture manifests under the integration owner |
 | 1. First complete workflow | Reproduce lost cross-run history, then implement continuity and host instructions under one owner. Integrate a minimal conversational command and prove two prompts plus restart |
 | 2. Long-lived work | Add compaction under the same projection/staging owner. Integrate model/reasoning configuration, private continuation and atomic reply settlement; prove frozen-prefix tool exchanges, maintenance thinking-off and canonical history after a change; own provider-B mapping/renderer conformance before its first pinned attempt |
 | 3. Operator control | Add model questions to the existing interaction lifecycle; complete conversation steering, answers, follow-up, interrupt and noninteractive behavior |

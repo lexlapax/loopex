@@ -17,48 +17,48 @@ a decision adds a new record rather than rewriting the old one.
 | 0005 | Milestone supersession | Proposed (parked) | [Decision](0005-milestone-supersession.md#concept) | [Technical depth](0005-milestone-supersession-technical.md#technical-depth) |
 | 0006 | Store transaction contract and owner epoch | Accepted | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
-| 0008 | Owner succession recovery and runtime placement | Accepted | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
-| 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012, 0015, and 0016) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
-| 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013, 0017, 0018, and 0025) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
-| 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012, 0013, 0014, 0016, 0017, and 0018) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0008 | Owner succession recovery and runtime placement | Accepted (M7 read-only recovery queries and exact-genesis creation extended by 0046) | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
+| 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012, 0015, and 0016; M7 artifact arguments, interaction dispatch and tool selection amended by 0041, 0045 and 0046) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
+| 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013, 0017, 0018, and 0025; M7 lineage, instructions, compaction and model continuation amended by 0041–0044) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
+| 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012, 0013, 0014, 0016, 0017, and 0018; M7 compact/configure, maintenance, reasoning summaries and deadline bounds amended by 0043–0046) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
 | 0012 | Executor cancellation capability | Accepted (partially superseded by 0016) | [Decision](0012-executor-cancellation-capability.md#concept) | [Technical depth](0012-executor-cancellation-capability-technical.md#technical-depth) |
-| 0013 | Run-deadline commitment at first request staging | Accepted (partially superseded by 0017) | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
+| 0013 | Run-deadline commitment at first request staging | Accepted (partially superseded by 0017; M7 maintenance staging and absolute deadline ceiling amended by 0043 and 0046) | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
 | 0014 | Stream closure at owner loss | Accepted (partially superseded by 0018) | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
 | 0015 | Artifact object and use identity | Accepted (partially superseded by 0028) | [Decision](0015-artifact-object-and-use-identity.md#concept) | [Technical depth](0015-artifact-object-and-use-identity-technical.md#technical-depth) |
-| 0016 | Configured cancellation observation | Accepted | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
-| 0017 | Durable context and record admission budgets | Accepted (partially superseded by 0025) | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
-| 0018 | Provider attempt authority and recovery | Accepted (partially superseded by 0021 and 0027) | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
-| 0019 | Host-owned provider protection | Accepted (partially superseded by 0029 and 0034; scoped to the durable profile by 0039) | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
+| 0016 | Configured cancellation observation | Accepted (M7 genesis, recovery lookup and prepared-owner abandonment amended by 0044, 0046 and 0049) | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
+| 0017 | Durable context and record admission budgets | Accepted (partially superseded by 0025; M7 context, receipt, refusal, genesis and deadline bounds amended by 0041–0044 and 0046) | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
+| 0018 | Provider attempt authority and recovery | Accepted (partially superseded by 0021 and 0027; M7 maintenance and closed Model/reply contracts extended by 0043 and 0044) | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
+| 0019 | Host-owned provider protection | Accepted (partially superseded by 0029 and 0034; scoped to the durable profile by 0039; sole durable credential source amended by 0048) | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
 | 0020 | Explicit prepared handoff | Accepted | [Decision](0020-explicit-prepared-handoff.md#concept) | [Technical depth](0020-explicit-prepared-handoff-technical.md#technical-depth) |
-| 0021 | Compacted provider-accounting provenance | Accepted | [Decision](0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
+| 0021 | Compacted provider-accounting provenance | Accepted (v2-only writer clause superseded by 0044's monotonic v3 cutover) | [Decision](0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
 | 0022 | Local executor supervision shell | Accepted | [Decision](0022-local-executor-supervision-shell.md#concept) | [Technical depth](0022-local-executor-supervision-shell-technical.md#technical-depth) |
-| 0023 | Experimental public session protocol | Accepted | [Decision](0023-experimental-public-session-protocol.md#concept) | [Technical depth](0023-experimental-public-session-protocol-technical.md#technical-depth) |
-| 0024 | Durable interaction lifecycle and host-policy authority | Accepted | [Decision](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
-| 0025 | Resource packs and skill admission | Accepted (source and name-order clauses superseded by 0039 for named skill directories) | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
+| 0023 | Experimental public session protocol | Accepted (served generations and schema-digest inputs superseded by 0044) | [Decision](0023-experimental-public-session-protocol.md#concept) | [Technical depth](0023-experimental-public-session-protocol-technical.md#technical-depth) |
+| 0024 | Durable interaction lifecycle and host-policy authority | Accepted (model interactions and immutable defer refusal amended by 0045 and 0046) | [Decision](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | [Technical depth](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-depth) |
+| 0025 | Resource packs and skill admission | Accepted (source and name-order clauses superseded by 0039 for named skill directories; M7 provenance, maintenance and continuation receipts amended by 0042–0044) | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
 | 0026 | Development floor refresh | Accepted | [Decision](0026-development-floor-refresh.md#concept) | [Technical depth](0026-development-floor-refresh-technical.md#technical-depth) |
 | 0027 | Provider permit retirement | Accepted | [Decision](0027-provider-permit-retirement.md#concept) | [Technical depth](0027-provider-permit-retirement-technical.md#technical-depth) |
-| 0028 | Bounded artifact retrieval | Accepted | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
+| 0028 | Bounded artifact retrieval | Accepted (job-owned range reads and shared capacity extended by 0041) | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 | 0029 | Bounded provider failure diagnostics | Accepted | [Decision](0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
-| 0030 | Observability: tracing and telemetry | Accepted | [Decision](0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
+| 0030 | Observability: tracing and telemetry | Accepted (tracing guarantees reused unchanged by 0049) | [Decision](0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
 | 0031 | Daemon store selection for `0.2.0` | Accepted | [Decision](0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
-| 0032 | Daemon attachment residency and replay | Accepted | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
+| 0032 | Daemon attachment residency and replay | Accepted (served generations and schema-digest inputs superseded by 0044) | [Decision](0032-daemon-attachment-residency-and-replay.md#concept) | [Technical depth](0032-daemon-attachment-residency-and-replay-technical.md#technical-depth) |
 | 0033 | Collaboration: controller lease and takeover | Accepted | [Decision](0033-collaboration-controller-lease-and-takeover.md#concept) | [Technical depth](0033-collaboration-controller-lease-and-takeover-technical.md#technical-depth) |
-| 0034 | Provider credential handoff over the bootstrap channel | Accepted (scoped to the durable profile by 0039) | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
+| 0034 | Provider credential handoff over the bootstrap channel | Accepted (scoped to the durable profile by 0039; single-provider restriction amended by 0048) | [Decision](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) | [Technical depth](0034-provider-credential-handoff-over-bootstrap-channel-technical.md#technical-depth) |
 | 0035 | Typed decision models as policy inputs | Proposed | [Decision](0035-typed-decision-models-as-policy-inputs.md#concept) | [Technical depth](0035-typed-decision-models-as-policy-inputs-technical.md#technical-depth) |
 | 0036 | Daemon-grade store engine and migration | Proposed | [Decision](0036-daemon-grade-store-engine-and-migration.md#concept) | [Technical depth](0036-daemon-grade-store-engine-and-migration-technical.md#technical-depth) |
 | 0037 | Host configuration and path discovery | Proposed | [Decision](0037-host-configuration-and-path-discovery.md#concept) | [Technical depth](0037-host-configuration-and-path-discovery-technical.md#technical-depth) |
 | 0038 | Installed distribution and release artifact | Proposed | [Decision](0038-installed-distribution-and-release-artifact.md#concept) | [Technical depth](0038-installed-distribution-and-release-artifact-technical.md#technical-depth) |
-| 0039 | Ephemeral embedded profile | Accepted (startup-handler order, named-root and unknown-ownership clauses narrowly superseded by 0040) | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
+| 0039 | Ephemeral embedded profile | Accepted (startup-handler order, named-root and unknown-ownership clauses narrowly superseded by 0040; M7 startup options and provider bindings narrowly amended by 0042–0045, 0048 and 0049) | [Decision](0039-ephemeral-embedded-profile.md#concept) | [Technical depth](0039-ephemeral-embedded-profile-technical.md#technical-depth) |
 | 0040 | Ephemeral startup interrupt and unnamed root | Accepted | [Decision](0040-ephemeral-startup-interrupt-and-unnamed-root.md#concept) | [Technical depth](0040-ephemeral-startup-interrupt-and-unnamed-root-technical.md#technical-depth) |
-| 0041 | Session lineage projection and context budget | Proposed | [Decision](0041-session-lineage-projection-and-context-budget.md#concept) | [Technical depth](0041-session-lineage-projection-and-context-budget-technical.md#technical-depth) |
-| 0042 | Host-composed instructions | Proposed | [Decision](0042-host-composed-instructions.md#concept) | [Technical depth](0042-host-composed-instructions-technical.md#technical-depth) |
-| 0043 | Context compaction checkpoint | Proposed | [Decision](0043-context-compaction-checkpoint.md#concept) | [Technical depth](0043-context-compaction-checkpoint-technical.md#technical-depth) |
-| 0044 | Run model and reasoning configuration | Proposed | [Decision](0044-run-model-and-reasoning-configuration.md#concept) | [Technical depth](0044-run-model-and-reasoning-configuration-technical.md#technical-depth) |
-| 0045 | Model-originated questions | Proposed | [Decision](0045-model-originated-questions.md#concept) | [Technical depth](0045-model-originated-questions-technical.md#technical-depth) |
-| 0046 | Child-session tool | Proposed | [Decision](0046-child-session-tool.md#concept) | [Technical depth](0046-child-session-tool-technical.md#technical-depth) |
-| 0047 | Reference host run defaults | Proposed | [Decision](0047-reference-host-run-defaults.md#concept) | [Technical depth](0047-reference-host-run-defaults-technical.md#technical-depth) |
-| 0048 | Host provider routing and credential bindings | Proposed | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
-| 0049 | Explicit host configuration | Proposed | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
+| 0041 | Session lineage projection and context budget | Accepted | [Decision](0041-session-lineage-projection-and-context-budget.md#concept) | [Technical depth](0041-session-lineage-projection-and-context-budget-technical.md#technical-depth) |
+| 0042 | Host-composed instructions | Accepted | [Decision](0042-host-composed-instructions.md#concept) | [Technical depth](0042-host-composed-instructions-technical.md#technical-depth) |
+| 0043 | Context compaction checkpoint | Accepted | [Decision](0043-context-compaction-checkpoint.md#concept) | [Technical depth](0043-context-compaction-checkpoint-technical.md#technical-depth) |
+| 0044 | Run model and reasoning configuration | Accepted | [Decision](0044-run-model-and-reasoning-configuration.md#concept) | [Technical depth](0044-run-model-and-reasoning-configuration-technical.md#technical-depth) |
+| 0045 | Model-originated questions | Accepted | [Decision](0045-model-originated-questions.md#concept) | [Technical depth](0045-model-originated-questions-technical.md#technical-depth) |
+| 0046 | Child-session tool | Accepted | [Decision](0046-child-session-tool.md#concept) | [Technical depth](0046-child-session-tool-technical.md#technical-depth) |
+| 0047 | Reference host run defaults | Accepted | [Decision](0047-reference-host-run-defaults.md#concept) | [Technical depth](0047-reference-host-run-defaults-technical.md#technical-depth) |
+| 0048 | Host provider routing and credential bindings | Accepted | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
+| 0049 | Explicit host configuration | Accepted | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -228,48 +228,26 @@ plain-English stderr recovery guidance after the fixed `ask` diagnostic. The
 [acceptance disposition](../developer/agent-context-map.md#disposition-m6-adr-0040-acceptance-2026-09-28)
 binds its exact Proposed pair and leaves 0039's other decisions unchanged.
 
-0041 to 0047 were first proposed on 2026-09-29 and revised during the
-2026-09-30 internal readiness review. ADRs 0048 and 0049 add narrow provider
-binding amendments and explicit configuration. Together, 0041–0049 are M7's
-proposed prerequisites: lineage, instructions, compaction, model configuration
-and bounded private thinking continuation,
-questions, serial read-only helpers, explicit limits, provider custody and host
-configuration. ADRs 0044/0045/0046 now require the explicit narrow amendment to both
-vision files, authorized for drafting after external review and still pending
-acceptance. The revised pairs name their exact accepted-clause amendments.
-No proposal is accepted by this preparation. The coordinated nine-ADR and
-paired-vision packet blocks dependent M7 implementation until accepted.
+0041–0049 are Accepted with the M7 plan and both paired vision amendments at
+`2986150b878151524ecdd9bac5a9779e69e196b4` on 2026-09-30. The
+[acceptance disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+binds each historical pair and records implementation/integration authority.
+The clauses annotated above are the complete accepted-ADR prerequisite-table
+joins; unrelated guarantees remain unchanged. Their original accepted files
+are preserved, with the newer records governing only their named amendments.
 
-M7 round 3 also proposes versioned context refusal/failure projections, explicit
-ephemeral instruction/reasoning options and read-only helper recovery queries.
-The paired vision proposal now includes section 13.4 after the maintainer
-authorized drafting it; all governing clauses remain visible pending acceptance.
-The [round 3 disposition](../evidence/M7-round-3-disposition.md) records repairs
-and limits. No ADR status changes in this preparation. The [round 4 report](../evidence/M7-external-review-4.md)
-supersedes that readiness assessment; its [disposition](../evidence/M7-round-4-disposition.md)
-repairs the remaining contracts and records the current internal review.
+The accepted M7 decisions cover lineage, instructions, compaction, model
+configuration and bounded private continuation, model questions, serial
+read-only helpers, explicit limits, provider custody and host configuration.
+All nine were accepted together, with the vision's bounded question/helper
+and section 13.4 amendments. Within each newly accepted ADR pair only its
+Concept status and empty governance row change. Proposal-era preparation text
+is read at its bound historical revision; current acceptance is recorded by
+its status and governance row. ADRs 0035–0038 remain Proposed for successor work.
 
-The [round 5 report](../evidence/M7-external-review-5.md) supersedes round 4's
-readiness conclusion. Its [disposition](../evidence/M7-round-5-disposition.md)
-records all 50 findings and the selected outage/ordinary-thinking rules; these
-repairs preserve Proposed status and require external re-audit.
-
-The [round 6 report](../evidence/M7-external-review-6.md) supersedes round 5's
-readiness conclusion. Its [disposition](../evidence/M7-round-6-disposition.md)
-records all 37 findings and three maintainer choices. At acceptance, the plan's
-[prerequisite table](../plans/M7-technical.md#technical-plan-prerequisites) rows are the set
-of accepted ADRs to annotate, whatever header label names each change.
-
-The [round 7 report](../evidence/M7-external-review-7.md) supersedes round 6's
-readiness conclusion with four findings; its
-[disposition](../evidence/M7-round-7-disposition.md) records their repair.
-Proposed status is unchanged.
-
-The [round 8 report](../evidence/M7-external-review-8.md) found one remaining
-Concept wording mismatch. Its [disposition](../evidence/M7-round-8-disposition.md)
-records that repair and a final internal readiness review of every pair.
-The [round-9 readiness review](../evidence/M7-readiness-review-9.md) examined the
-whole subsequent change. Its [disposition](../evidence/M7-round-9-disposition.md)
-repairs two remaining contract mismatches and clarifies one example, preserving
-Proposed status until coordinated exact-byte acceptance.
-Proposed status is unchanged.
+Eight external planning reports and the final lead-and-advisory round-9 review
+remain indexed in the [evidence register](../evidence/README.md). The
+[round-9 disposition](../evidence/M7-round-9-disposition.md) retains the final
+planning repairs and their review limits. Their earlier status statements
+apply to their named candidates; they are not rewritten as implementation or
+closure evidence. M7 is Accepted with all nine outcome rows still Open.

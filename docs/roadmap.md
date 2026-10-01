@@ -133,12 +133,15 @@ leaving core's runtime library unchanged. [ADR 0039](adr/0039-ephemeral-embedded
 governs the ephemeral profile's host-VM credential scope and cleanup limits.
 Acceptance authorizes implementation, not a release or a public-surface freeze.
 
-The next planning candidate is the Open [M7 coding-agent proof](plans/M7.md#concept),
-followed by the installed durable operator, store engine and governed extension
-runtime [drafts](drafts/README.md) for M8–M10. M7 and the successors are unaccepted;
-their scope and release versions remain decisions for their own acceptance.
-M7 acceptance also reviews the labelled tool, interaction and bounded-continuation amendment in both
-vision files; it has no separate implied acceptance through this roadmap.
+The Accepted [M7 coding-agent proof](plans/M7.md#concept) is ready for
+implementation. Its coordinated plan, ADRs 0041–0049 and paired vision amendments
+were accepted at `2986150b878151524ecdd9bac5a9779e69e196b4`; the
+[disposition](developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+binds those bytes. M7 owns continuity, instructions, compaction, model control,
+questions, conversational chat, bounded helpers and operator validation.
+The installed durable operator, store engine and governed extension runtime
+[drafts](drafts/README.md) for M8–M10 follow it and remain unaccepted. M7 has no
+selected release version or publication authority; this roadmap grants none.
 
 Technical depth: [Minimal-runnable candidate proof](roadmap-technical.md#technical-roadmap-minimal-runnable)
 

@@ -3,7 +3,7 @@
 
 Technical depth: [Session lineage projection and context budget](0041-session-lineage-projection-and-context-budget-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0017](0017-durable-context-admission-budget.md#concept) only its fixed 8,192-token reference-host default; implements [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)'s retained-lineage clause. ADR 0043 separately amends required-context failure timing. Also amends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept)'s deferral of model-facing artifact retrieval, its per-call order by inserting owner branch/range refinement and committed-membership resolution between schema validation and policy, and its validated-argument construction for a tool-specific resolved executor form and ADR 0010's tool-result projection to permit recorded excerpts/references. Preserves [ADR 0015](0015-artifact-object-and-use-identity.md#concept) object/use and retention guarantees. Extends [ADR 0028](0028-bounded-artifact-retrieval.md#concept) with validated job-owned range transfers, shared runtime capacity and its existing finite verification/work/deadline ceilings.
@@ -103,4 +103,4 @@ records created by other decisions. Those records need the M7 reader contract.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:2cb885b1ea791d48720333a52e5dcb9c6d03b7c9dbfd557b8cdad7662c4a8387`; technical `sha256:71c965437f8759c38095fc68f4a8c7420bdab3beb6933404f13c6c7c85574e20` |

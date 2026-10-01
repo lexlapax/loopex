@@ -3,7 +3,7 @@
 
 Technical depth: [Host provider routing and credential bindings](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0019](0019-host-owned-provider-protection.md#concept) only its sole `LOOPEX_PROVIDER_API_KEY` source; [ADR 0034](0034-provider-credential-handoff-over-bootstrap-channel.md#concept) only its single model/token/registry-binding restriction; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only its fixed selected-provider environment-variable names, durable single-source restriction and closed startup-option set for explicit provider references
@@ -65,4 +65,4 @@ remain valid. Downgrade of roots with M7 configuration follows ADR 0044.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:26602eb1948ca9034940fa52adef8f027bb43056522cda27aec54e97a76d9233`; technical `sha256:dac68afe1dc995b17783439577020ca69ea41dd3ce209d88689c203c721fb81a` |

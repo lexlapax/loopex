@@ -9,15 +9,17 @@ Status: **standalone repository seed — founding document**
 
 Date: **2026-08-14**
 
-**M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
-tool budget and interaction flow in sections 6, 10, 14, 23 and 26, their
-linked terminology/provenance notes in sections 5 and 12.3, bounded
-provider continuation in section 13.4 with its linked risk note in section 25
-of the technical file, and linked decision-trigger dispositions
-in section 27 are authorized proposals. The maintainer extended drafting scope
-to section 13.4 on 2026-09-30. Review both files with M7. Until acceptance, the
-prior clauses retained beside each proposal remain governing; dependent
-implementation must not begin. Other vision boundaries are unchanged.
+**M7 amendments accepted, 2026-09-30.** The maintainer accepted the labelled
+changes to the tool budget and interaction flow in sections 6, 10, 14, 23 and 26,
+their linked terminology/provenance notes in sections 5 and 12.3, bounded provider
+continuation in section 13.4 with its linked risk note in section 25 of the
+technical file, and linked decision-trigger dispositions in section 27 as part
+of M7 at `2986150b878151524ecdd9bac5a9779e69e196b4`. The
+[acceptance disposition](developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+binds both historical files. These amendments govern their named scope and
+permit dependent implementation. Retained historical clauses describe the prior
+state; the opaque-continuation rule still governs formats outside ADR 0044.
+Other vision boundaries are unchanged.
 
 Project: **Loopex — “the loop, in Elixir”**
 
@@ -328,7 +330,7 @@ Concept: [Stable domain language](vision.md#concept-vision-domain-language)
 | **Resource pack** | Prompts, context, skills, templates, and static assets. “Data-only” means no direct code loading, not inherently safe instructions. |
 | **Projection** | Rebuildable view derived from durable records: model context, public snapshot, search index, or client rendering state. |
 
-**Proposed M7 terminology note, section 5.** Effect tools have executor
+**Accepted M7 terminology note, section 5.** Effect tools have executor
 requirements. ADR 0045's interaction tool is settled by the session owner and
 requires no executor job; it still grants no permission.
 
@@ -497,7 +499,7 @@ the session commits a suspended interaction and resumes only after the host
 makes a durable decision. Timeout, host failure, or malformed response fails
 closed into denial or continued suspension. It never falls through to allow.
 
-**Proposed M7 question clarification.** ADR 0045's model-originated question
+**Accepted M7 question clarification.** ADR 0045's model-originated question
 opens only after policy allows its interaction-class tool. Its answer is tool
 data, never a policy grant. Policy-defer and model-question records have distinct
 producer and response branches, even though they share the durable interaction
@@ -1029,16 +1031,14 @@ stateDiagram-v2
     awaiting_tools --> preparing: ordered results committed
     awaiting_tools --> suspended: host interaction required
     awaiting_tools --> run_terminal: cancellation / unrecoverable failure / bound reached
-    suspended --> awaiting_tools: exact interaction resolved
-    suspended --> run_terminal: denied / expired / aborted
+    suspended --> awaiting_tools: exact resolution / model question declined or expired
+    suspended --> run_terminal: policy denial or expiry / abort / bound reached
     run_terminal --> preparing: follow-up queued
     run_terminal --> idle: no queued work
 ```
 
-The diagram remains governing until amendment acceptance. Under the
-**proposed M7 question flow**, the first suspended-state transition becomes
-`exact resolution / model question declined or expired`, and the second becomes
-`policy denial or expiry / abort / bound reached`. Model-question decline/expiry
+**Accepted M7 question flow.** The diagram includes model-question resolution
+and retains policy denial/expiry and terminal precedence. Model-question decline/expiry
 settles a tool result; policy dispositions and terminal precedence keep their
 own contracts.
 
@@ -1071,7 +1071,7 @@ the core.
 9. Each allowed tool-operation intent commits before executor placement and
    dispatch. The job carries the full identity, epochs, fence, opaque workspace
    lease, opaque grant, deadlines, budgets, and output policy.
-   **Proposed M7 exception:** an allowed interaction-class question commits its
+   **Accepted M7 exception:** an allowed interaction-class question commits its
    interaction through the session owner without an executor job or grant.
    Exact answer, decline or expiry commits its ordered tool result. Another
    tool's authority is never inferred from that result.
@@ -1119,7 +1119,7 @@ terminal fact keeps it, exactly as cancellation never overwrites one.
 - **`respond_interaction`** answers exactly one pending `interaction_id` with
   host decision context.
 
-**Proposed M7 clarification, section 10.3.** Host policy responses keep decision
+**Accepted M7 clarification, section 10.3.** Host policy responses keep decision
 context; model-question responses are bounded user data and grant no authority.
 The exact producer/interaction identity distinguishes these meanings.
 
@@ -1463,7 +1463,7 @@ The private journal preserves everything required to recover and project:
 - operation attempts, recovery decisions, and unknown outcomes;
 - compatible opaque provider-continuation sidecars or their references.
 
-**Proposed M7 clarification, section 12.3.** The bounded envelope/local-reference
+**Accepted M7 clarification, section 12.3.** The bounded envelope/local-reference
 continuation and host-resolved descriptor in section 13.4 replace the opaque
 sidecar rule only for ADR 0044's named format. Other provider data retains the
 governing opaque rule above.
@@ -1653,7 +1653,7 @@ Portable canonical history is necessary but may not preserve response IDs,
 reasoning signatures, provider tool-call metadata, or other model-affine state
 required for correct continuation.
 
-**Governing until amendment acceptance.** The adapter may therefore maintain an
+**Governing outside ADR 0044's accepted format.** The adapter may maintain an
 opaque private continuation sidecar:
 
 - explicitly bound to provider, model family, exact compatibility rules, and
@@ -1667,7 +1667,7 @@ Conformance tests cover same-model continuation, compatible-model continuation,
 mid-session model switching, cross-provider conversion, and tool-call ID
 normalization.
 
-**Proposed M7 amendment to section 13.4.** ADR 0044 narrows the opaque-sidecar
+**Accepted M7 amendment to section 13.4.** ADR 0044 narrows the opaque-sidecar
 rule for its bounded continuation format. Core validates the provider-neutral
 closed envelope, identity bindings, local reference layout and its bounded
 expansion for accounting against the owning canonical reply/request. It also
@@ -1810,7 +1810,7 @@ measures prompt/schema cost, shell avoidance, safety, and task utility before an
 ADR fixes the reference default. Hosts always choose their own active set
 through policy and extensions.
 
-**Proposed M7 amendment.** In addition to the seven workspace tools, the
+**Accepted M7 amendment.** In addition to the seven workspace tools, the
 reference distribution may supply `loopex.ask`, a policy-admitted interaction
 tool handled by the session owner, and opt-in `loopex.task`, implemented by the
 host executor adapter over ordinary sessions. The host owns saved roles,
@@ -1819,18 +1819,18 @@ serial within each parent session across runs, including unfinished cleanup,
 read-only and non-nested, with no question tool.
 Independent parent sessions remain concurrent; no global helper scheduler or
 ban on separately scoped host orchestration is implied. Core has no helper
-scheduler, role type, parent relation or delegation counter. ADRs 0045 and 0046
-must be accepted before those additions are implemented. Their changed
+scheduler, role type, parent relation or delegation counter. Accepted ADRs 0045 and 0046
+own those additions' implementation contracts. Their changed
 interaction/tool/session records need versioned readers and rollback proof.
 
-**Governing until amendment acceptance.** The reference CLI targets a base system
+**Reference prompt budget.** The reference CLI targets a base system
 prompt plus active built-in tool definitions under 1,000 tokens before project
 context. That is a measured
 reference-product usability budget, not a universal kernel constraint. The core
 enforces declared per-request and per-model limits; hosts may choose different
 profiles and context budgets.
 
-**Proposed M7 clarification.** Count every active tool definition, including
+**Accepted M7 clarification.** Count every active tool definition, including
 question and helper schemas, and all rendered host environment facts within that
 same measured target. The seven implementations above become the seven workspace
 tools; the target remains a reference-product budget, not a universal ceiling.
@@ -2947,16 +2947,16 @@ the separate 5,000 ms release transport-drain witness.
 
 Minimalism is tested, not declared:
 
-- Governing until acceptance: seven conformance-tested built-in tool
+- Historical pre-M7 clause: seven conformance-tested built-in tool
   implementations with an evidence-selected reference profile.
-- **Proposed M7 amendment:** seven conformance-tested workspace tool
+- **Accepted M7 amendment:** seven conformance-tested workspace tool
   implementations, plus the question and opt-in host helper tools bounded in
   section 14.2, with an evidence-selected reference profile;
 - reference CLI system and active-tool prompt target under 1,000 tokens before
   project context; host budgets remain host-owned;
-- Governing until acceptance: no built-in sub-agent, plan, objective,
+- Historical pre-M7 clause: no built-in sub-agent, plan, objective,
   background job, team workflow, social channel, or policy engine.
-- **Proposed M7 amendment:** no core sub-agent scheduler, parallel children within
+- **Accepted M7 amendment:** no core sub-agent scheduler, parallel children within
   a reference parent session, nested/writable reference helpers, plan, objective,
   background job, team workflow, social channel or
   policy engine; the serial read-only host helper is the sole added exception;
@@ -3104,8 +3104,8 @@ Concept: [Risks and countermeasures](vision.md#concept-vision-risks)
 | Package/app structure becomes its own framework | One repo/version through 0.x; split only on observed boundary and ADR. |
 | Name collides after launch | Complete clearance before first public release while rename cost is low. |
 
-**Proposed M7 section 13.4 risk note.** The provider-native-data countermeasure
-above remains governing until acceptance. The paired proposal narrows its opaque
+**Accepted M7 section 13.4 risk note.** The provider-native-data countermeasure
+above governs formats outside ADR 0044. The accepted amendment narrows its opaque
 sidecar description to the bounded provider-neutral envelope and host-resolved
 gating descriptor; adapters still own native interpretation. Its compatibility,
 privacy and rollback obligations are those in section 13.4, not a second design.
@@ -3130,12 +3130,11 @@ The following are project doctrine unless deliberately revised:
    directly; core has no Jido framework dependency.
 7. Loopex owns durable coding-session mechanics. Hosts own identity, policy,
    secrets, tenancy, placement, memory, objectives, channels, and product UI.
-8. The reference distribution supplies seven conformance-tested tool
-   implementations. Its default profile and prompt budget are evidence-driven
-   reference-product choices, not kernel policy.
-   **Proposed M7 amendment:** retain that governing sentence until acceptance,
-   then qualify the seven as workspace tools and permit the question and opt-in
-   host helper tools bounded in section 14.2.
+8. The reference distribution supplies seven conformance-tested workspace tool
+   implementations and may supply the question and opt-in host helper tools
+   bounded in section 14.2 under the accepted M7 amendment. Its default profile
+   and prompt budget are evidence-driven reference-product choices, not kernel
+   policy.
 9. Tool execution is serial by default.
 10. VM-code truth, runtime-control truth, private session journal, public
     events, snapshots, progress, and diagnostics are separate domains or
@@ -3182,12 +3181,12 @@ The following are project doctrine unless deliberately revised:
 
 Concept: [Open questions and decision triggers](vision.md#concept-vision-open-questions)
 
-**Proposed M7 dispositions, pending acceptance.** ADR 0041 proposes complete
-inline staged requests with retained artifacts for bulky tool output; ADR 0044
-proposes bounded plaintext private continuation with raw-history retention;
-ADR 0049 proposes explicit reference profiles. The rows below remain decision
-triggers until those proposals and their required evidence are accepted. M7
-does not settle an unrestricted sidecar or permanent profile policy.
+**Accepted M7 dispositions.** ADR 0041 selects complete inline staged requests
+with retained artifacts for bulky tool output; ADR 0044 selects bounded plaintext
+private continuation with raw-history retention; ADR 0049 selects explicit
+reference profiles. Their required evidence remains to be proved. The rows below
+remain triggers for further decisions outside that accepted scope; M7 does not
+settle an unrestricted sidecar or permanent profile policy.
 
 | Question | Decision trigger |
 | --- | --- |

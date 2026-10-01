@@ -365,7 +365,8 @@ end of the file.
 | Post-M4 closure procedure, 2026-09-20 and 2026-09-21 | Six unanchored entries after the M4 closure: "Closure names two commits", "Closure and release evidence sequencing", "Administrative confinement is content confinement", "Closure candidate ownership and archive producer", "Administrative reconstruction and four release proofs" and "Archive extraction ignores the caller umask". The [milestone guide](milestones.md#concept) states the resulting procedure |
 | M5, from 2026-09-21 | [Plan pair and ADR 0031–0034 acceptance](#disposition-m5-acceptance-2026-09-21); [host application role](#disposition-m5-host-role-2026-09-22); [per-session progress routing](#disposition-m5-progress-routing-2026-09-22); [escript archive exclusion](#disposition-m5-escript-exclusion-2026-09-22); [no resident window](#disposition-m5-no-resident-window-2026-09-22); [residual proofs](#disposition-m5-residual-proofs-2026-09-22); [trace sessions load named modules](#disposition-m5-trace-loads-named-modules-2026-09-23); [closure-review decisions](#disposition-m5-closure-review-2026-09-23); [release-check attendance](#disposition-m5-driver-attendance-2026-09-23); [session-index loss](#disposition-m5-session-index-lost-2026-09-23); [non-blocking daemon components](#disposition-m5-nonblocking-components-2026-09-24); [executor cancellation and the risk packet](#disposition-m5-cleaned-implies-durable-2026-09-24) |
 | M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27); [implementation start](#disposition-m6-implementation-start-2026-09-27) |
-| M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30), [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30) and [proposed rollback retarget](#disposition-m7-round5-rollback-proposal-2026-09-30); [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) and [proposed logical-matrix rule](#disposition-m7-round6-matrix-proposal-2026-09-30); earlier choices remain recorded in the [Open plan](../plans/M7.md#concept) |
+| M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30), [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30) and [proposed rollback retarget](#disposition-m7-round5-rollback-proposal-2026-09-30); [round 6 decisions](#disposition-m7-round6-decisions-2026-09-30) and [proposed logical-matrix rule](#disposition-m7-round6-matrix-proposal-2026-09-30); earlier choices remain recorded in the [M7 plan](../plans/M7.md#concept) |
+| M7 acceptance, 2026-09-30 | [Plan pair, ADRs 0041–0049 and paired vision amendments accepted](#disposition-m7-acceptance-2026-09-30); implementation may begin under the accepted ownership sequence |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -6426,3 +6427,78 @@ The existing rule that the release check runs once for the closure candidate
 stays in force for every other purpose. This is part of the still-Open plan
 packet, not an accepted procedure override; implementation updates the
 verification guide.
+
+<a id="disposition-m7-acceptance-2026-09-30"></a>
+### M7 coordinated acceptance and integration authority — 2026-09-30
+
+After the final readiness report identified exact candidate
+`2986150b878151524ecdd9bac5a9779e69e196b4`, the maintainer instructed:
+
+> I accept M7. record the acceptance, update project readme and roadmap. commit,
+> push, then merge into main and push. so that m7 is now ready for implementation
+> work to begin.
+
+This accepts the exact [M7 plan pair](../plans/M7.md#concept), ADRs 0041–0049
+and both labelled vision amendments at that reviewed candidate as one
+coordinated packet. The accepted vision scope includes the question/helper tool
+budget and interaction flow, bounded continuation and host-resolved gating data
+in section 13.4, and their linked terminology, provenance, risk, founding-decision
+and decision-trigger notes. Existing historical governing clauses are superseded
+only where the accepted amendment names a change. The author choices disclosed
+in the packet are adopted as written; no implementation contract is changed in
+this administrative transition.
+
+The bound historical pair digests are:
+
+| Pair | Concept SHA-256 | Technical depth SHA-256 |
+| --- | --- | --- |
+| M7 | `f07ce1e6f590e19881f60182e833822eaf6770101fa9731898b3642f2c5b5fb3` | `cb032f82b99009f8e2f42db77e487b55c1976c1014955083488452b9e5a3b50d` |
+| ADR 0041 | `2cb885b1ea791d48720333a52e5dcb9c6d03b7c9dbfd557b8cdad7662c4a8387` | `71c965437f8759c38095fc68f4a8c7420bdab3beb6933404f13c6c7c85574e20` |
+| ADR 0042 | `c1c9f9f6d37467cf111d1799d0fc709c73ccb035aa09dd5f609e53a65e2ea928` | `2c7704100a54c413b17c3171797e643557573f5a3589eb43422b1cc81b786e33` |
+| ADR 0043 | `bd2f617feb030ac6c91df204ce08535c2679be26cdf2df61578ebd663da5d240` | `c093342142ed0b1fc089436a8755eb178b7e6661d765c6dfd8e8ad377545b9df` |
+| ADR 0044 | `af0d0229529021f69920f5ebdaeb5a10d3dba8f351dc41d5e3ee5cc77afcf82c` | `8b3417a2c310e1c298c3944cecf445f9d9031f710c3151919b94e9f47114edb0` |
+| ADR 0045 | `0111ef2009b04b2d3b90628fe520458f568dccdc30e5fd0c602ada403a002745` | `59b8f57fe876bd4edcdd9db77465861a923e0d1422db39a30607cd8fa61a2887` |
+| ADR 0046 | `029ee9cc4128d20766c79a430da9c1570ebe149ac92a818a2932e3367e1121e3` | `1deabc22dd44c5d4ad04cda271d62fbece7db87a6ce6b536672853413fdbfdab` |
+| ADR 0047 | `4640a5289968c68bbc3389a1c131404484e0b9ec2a1eec4e08707a15a27860bb` | `d48a97c9cbed63e880252560c781bb3f49040c811f0a7a6b41a77daefb235c21` |
+| ADR 0048 | `26602eb1948ca9034940fa52adef8f027bb43056522cda27aec54e97a76d9233` | `dac68afe1dc995b17783439577020ca69ea41dd3ce209d88689c203c721fb81a` |
+| ADR 0049 | `e317e526e2f8279bd79d9d47a31eb00375c29e3b5d56f3dcb8ff5c89b2902702` | `894637cd3fedb3f72eb741956510314e67fd7132705c76ec51c31ac1e7fe8165` |
+| Vision amendments | `c8a11c7fb92a0dd7b1efeaa1ceaa807e8576db9b18fd24db6724defdb26e9fca` | `94aa852363d96a038a1a1a8be71cb6aa67a316b7fa254f621b9665ac8739b16f` |
+
+The plan and nine ADR governance rows bind these historical bytes; the ADR
+transition changes only each Concept status and empty acceptance row. Technical
+ADR files and decision text are unchanged. Proposal-era wording inside the bound
+ADR records describes their preparation; the current status and governance row
+record their acceptance. The ADR index annotates the accepted clauses amended
+by this packet, using the complete plan prerequisite table.
+
+Acceptance also adopts the M7 check-procedure changes described in the plan:
+the hash-chained logical closure matrix and indexed pre-merge lane may continue
+only after a pre-dispatch stop under their fixed rules, never rerunning a started
+case or reusing another candidate's results. The rollback proof retains the
+frozen v0.2.0↔v0.3.0 pair and adds v0.3.0↔M7; the frozen pair cannot prove new
+candidate behavior. Implementation updates the verification guide to carry
+these accepted changes without dropping historical assertions. Required model
+actions, causal corrections, independently reviewed outage/evidence-loss verdicts,
+counted thinking witnesses and attendance obligations are unchanged.
+
+The retained final readiness report is
+`/tmp/loopex-m7-round9-final-readiness.md`, SHA-256
+`c1689dc7773e4496f2b3548aff36c65ca90f77f872e3f3eac67bf042322658b9`.
+Its receipt is `/tmp/loopex-m7-round9-readiness.json`, SHA-256
+`416c4d4ee418386e74818f94f160c9a7e2ddd8f86da5608d2eb156661b428054`.
+Two model-diverse advisory readers checked the repairs under procedural
+read-only restrictions and found no remaining confirmed contract gaps. The
+review coverage limits remain recorded. The reviewed candidate's documentation
+check passed in 15.874 seconds; no live provider, product suite, release lane or
+closure result is claimed by that planning evidence.
+
+M7 is Accepted and ready for implementation under its
+[ownership and rejoin sequence](../plans/M7-technical.md#technical-plan-ownership).
+All nine outcome rows remain Open. Phase 0 pins literal schemas, capabilities,
+fixtures and evidence manifests; the first product change reproduces lost
+cross-run history with a failing test before implementing continuity and
+host-composed instructions. M6 remains the last Closed product checkpoint.
+The roadmap pair and project README are updated with this acceptance; M8–M10
+remain drafts, with no successor implementation authority. The maintainer
+explicitly authorizes committing/pushing this record and merging/pushing it to
+`main`. No tag, package, release or milestone closure is authorized.

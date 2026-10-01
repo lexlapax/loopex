@@ -3,7 +3,7 @@
 
 Technical depth: [Model-originated questions](0045-model-originated-questions-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) only policy-defer-only production and choice-only kind; [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) only executor dispatch for every allowed tool and its definition record, adding a versioned `class` member and an interaction-only zero artifact budget; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only refusal of host-answered model questions within one ephemeral call and its closed startup-option set for explicit question activation
@@ -70,4 +70,4 @@ a new serialized member implicitly.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:0111ef2009b04b2d3b90628fe520458f568dccdc30e5fd0c602ada403a002745`; technical `sha256:59b8f57fe876bd4edcdd9db77465861a923e0d1422db39a30607cd8fa61a2887` |

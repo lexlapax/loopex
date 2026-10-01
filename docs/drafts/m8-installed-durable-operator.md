@@ -4,7 +4,7 @@
 Technical depth: [M8 installed durable operator](m8-installed-durable-operator-technical.md#technical-depth).
 
 **Draft, not registered or accepted.** This successor follows the
-[Open M7 coding-agent candidate](../plans/M7.md#concept). The earlier installed
+[Accepted M7 coding-agent plan](../plans/M7.md#concept). The earlier installed
 plan was called M6, then M7. Its current number is M8; historical acceptance
 records keep their original names. No release version is selected here.
 

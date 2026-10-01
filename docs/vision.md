@@ -9,15 +9,17 @@ Status: **standalone repository seed — founding document**
 
 Date: **2026-08-14**
 
-**M7 amendment pending acceptance, 2026-09-30.** The labelled changes to the
-tool budget and interaction flow in sections 6, 10, 14, 23 and 26, their
-linked terminology/provenance notes in sections 5 and 12.3, bounded
-provider continuation in section 13.4 with its linked risk note in section 25
-of the technical file, and linked decision-trigger dispositions
-in section 27 are authorized proposals. The maintainer extended drafting scope
-to section 13.4 on 2026-09-30. Review both files with M7. Until acceptance, the
-prior clauses retained beside each proposal remain governing; dependent
-implementation must not begin. Other vision boundaries are unchanged.
+**M7 amendments accepted, 2026-09-30.** The maintainer accepted the labelled
+changes to the tool budget and interaction flow in sections 6, 10, 14, 23 and 26,
+their linked terminology/provenance notes in sections 5 and 12.3, bounded provider
+continuation in section 13.4 with its linked risk note in section 25 of the
+technical file, and linked decision-trigger dispositions in section 27 as part
+of M7 at `2986150b878151524ecdd9bac5a9779e69e196b4`. The
+[acceptance disposition](developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
+binds both historical files. These amendments govern their named scope and
+permit dependent implementation. Retained historical clauses describe the prior
+state; the opaque-continuation rule still governs formats outside ADR 0044.
+Other vision boundaries are unchanged.
 
 Project: **Loopex — “the loop, in Elixir”**
 
@@ -143,7 +145,7 @@ operation, request, workspace, executor, effect class, and fence. The executor
 validates that grant before starting. Policy may allow, deny, or suspend for a
 later decision; failure or malformed input never falls through to allow.
 
-**Proposed M7 question clarification.** A model question is a permitted request
+**Accepted M7 question clarification.** A model question is a permitted request
 for task information after host policy allows the question tool. It creates no
 executor grant. Its answer cannot authorize another tool or resolve an unrelated
 policy decision. Policy-originated interactions keep their existing authority.
@@ -229,11 +231,11 @@ malformed calls never execute. Model-facing payloads and client-facing
 rendering remain separate so presentation concerns cannot shape durable loop
 truth.
 
-**Proposed M7 question flow.** Answering, declining or letting a model question
+**Accepted M7 question flow.** Answering, declining or letting a model question
 expire returns that question's tool result and permits the active loop to
 continue. Abort and run-bound precedence remain unchanged. Policy-originated
 denial or expiry follows its existing disposition. This is the interaction
-consequence of the question tool proposed in section 14, not a new policy path.
+consequence of the question tool accepted in section 14, not a new policy path.
 
 <a id="concept-vision-public-protocol"></a>
 ### 11. Public protocol and channel semantics
@@ -316,7 +318,7 @@ Those bytes are recovery identity, not redispatch authority: an ambiguous
 provider handoff is never made safe merely by having the same payload
 available.
 
-**Proposed M7 continuation amendment, section 13.4.** Core may validate and
+**Accepted M7 continuation amendment, section 13.4.** Core may validate and
 account for a bounded provider-neutral envelope and local references into its
 own reply/request. It may retain the host-resolved mapping descriptor as
 bounded gating data; adapters alone interpret its thinking modes and native
@@ -327,8 +329,8 @@ in ADR 0044, with versioned readers, exact rendering and rollback evidence befor
 implementation. Selected Claude tool workflows requiring unchanged thinking
 blocks motivate this change. Legacy sessions retain empty continuation without
 rewriting historical replies; rollback restores a quiescent pre-upgrade backup
-when the old reader cannot handle new records. The technical section retains the
-governing clause until acceptance.
+when the old reader cannot handle new records. The technical section retains
+the prior opaque clause for formats outside ADR 0044's accepted continuation scope.
 
 <a id="concept-vision-tools"></a>
 ### 14. Tools and the coding surface
@@ -340,12 +342,12 @@ possible action in the kernel.
 
 Technical depth: [Tool contract, seven-tool surface, registry, and resolution](vision-technical.md#technical-vision-tools)
 
-**Governing until amendment acceptance.** The reference distribution supplies
+**Historical pre-M7 clause.** The reference distribution supplies
 seven conformance-tested implementations; the active default profile is selected
 from prompt-cost, safety, and task evidence. Tools remain ordinary behaviours
 resolved through explicit registries.
 
-**Proposed M7 amendment.** The reference distribution supplies seven
+**Accepted M7 amendment.** The reference distribution supplies seven
 conformance-tested workspace tools. It may additionally supply a model question
 tool and an opt-in host tool for serial read-only helpers. The session owner
 retains question truth; the host owns helper roles, policy, budgets and routing.
@@ -362,7 +364,7 @@ coding workflow without adding a team framework. The external review showed
 that host placement alone did not exempt bundled tools from the old budget.
 Compatibility requires versioned tool, interaction and session contracts; old
 sessions retain their admitted generations. Rollback uses proved readers or a
-pre-upgrade backup, never deletion of new facts. The proposed ADRs 0045 and 0046
+pre-upgrade backup, never deletion of new facts. The accepted ADRs 0045 and 0046
 supply the implementation and evidence obligations.
 
 <a id="concept-vision-executor-protocol"></a>
@@ -552,7 +554,7 @@ vectors; trust uses negative tests; claimed integrations and packages use their
 real paths. Fakes do not replace evidence for a claimed provider, store,
 isolation boundary, or package.
 
-The proposed M7 tool-budget amendment counts every advertised workspace,
+The accepted M7 tool-budget amendment counts every advertised workspace,
 question and helper definition plus rendered host/environment facts, including
 workspace paths, in the reference prompt measurement, and requires separate interaction and helper
 fault evidence. It does not waive the under-1,000-token reference target.
@@ -604,12 +606,12 @@ The project is an independent greenfield implementation of a multi-instance,
 host-neutral OTP coding-session and effects runtime. It uses direct OTP, small
 edge behaviours, a core whose only external dependency is the standard
 telemetry event dispatcher, a provider-neutral model port,
-seven reference tool implementations, serial tool execution by default, and
+seven reference workspace tool implementations, serial tool execution by default, and
 separate durable truth planes.
 
-**Proposed M7 amendment.** Section 14 would qualify the seven tools as workspace
-tools and permit the bounded question and opt-in host helper additions. The
-founding-decision summary above remains governing until acceptance.
+**Accepted M7 amendment.** Section 14 qualifies the seven tools as workspace
+tools and permits the bounded question and opt-in host helper additions. That
+qualification governs the founding-decision summary above.
 
 Technical depth: [Complete numbered founding-decision record](vision-technical.md#technical-vision-founding-decisions)
 
@@ -642,10 +644,10 @@ Technical depth: [Question-by-trigger register](vision-technical.md#technical-vi
 
 Listing a question does not authorize work or assign it to a milestone.
 
-**Proposed M7 dispositions, pending acceptance.** ADRs 0041, 0044 and 0049
-propose the inline/artifact boundary, bounded private continuation retention and
-explicit reference profiles. Their evidence obligations remain open; listing
-them here does not accept them or select a permanent default profile.
+**Accepted M7 dispositions.** ADRs 0041, 0044 and 0049 decide the inline/artifact
+boundary, bounded private continuation retention and explicit reference profiles
+for M7. Their evidence obligations remain open; plan acceptance does not prove
+those outcomes or select a permanent default profile.
 
 <a id="concept-vision-name-license"></a>
 ### 28. Name and license

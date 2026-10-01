@@ -3,7 +3,7 @@
 
 Technical depth: [Run model and reasoning configuration](0044-run-model-and-reasoning-configuration-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) session-fixed model and empty continuation field; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `configure`; [ADR 0017](0017-durable-context-admission-budget.md#concept) runtime-only context-budget placement to allow committed per-session creation/configuration. Exact staged requests and admitted run bounds remain frozen. Also amends [ADR 0016](0016-configured-cancellation-observation.md#concept)'s exact genesis shape, preserving its mandatory committed cleanup value. Amends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept)'s closed reply/settlement shapes and ADR 0017's estimator preimage to include a completion classification, mandatory nine-key version-2 Model-port replies and bounded private continuation, preserving attempt authority and both owning-record ceilings. Receipt revision 4 amends [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) to add that charge separately while preserving ADR 0017/0025 descriptor totals and old v2/v3 equations. Also explicitly amends [ADR 0021](0021-compacted-provider-accounting-provenance.md#concept) through a new v3 settlement and its monotonic v3-only writer cutover, preserving its accounting-provenance rules and the existing v2 meaning. Qualifies ADR 0011's continuation-material exclusion solely for verified provider summary text in existing transient reasoning progress. Extends [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with reasoning configuration; its buffered transport and cleanup remain unchanged.
@@ -208,4 +208,4 @@ an arbitrary current file default for an unfinished legacy run.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:af0d0229529021f69920f5ebdaeb5a10d3dba8f351dc41d5e3ee5cc77afcf82c`; technical `sha256:8b3417a2c310e1c298c3944cecf445f9d9031f710c3151919b94e9f47114edb0` |

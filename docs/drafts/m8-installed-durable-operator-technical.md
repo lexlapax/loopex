@@ -11,8 +11,9 @@ Concept: [Purpose](m8-installed-durable-operator.md#concept-plan-purpose).
 Concept: [Design decisions](m8-installed-durable-operator.md#concept-plan-decisions).
 
 M7 closes first. Its exact implemented schema, protocol generation, provider
-custody, host ledger and source identity become M8's baseline. M7 is currently
-Open, so this draft does not describe those capabilities as shipped.
+custody, host ledger and source identity become M8's baseline. M7 is Accepted
+for implementation but not Closed, so this draft does not describe those
+capabilities as shipped.
 
 | Decision | Acceptance point |
 | --- | --- |

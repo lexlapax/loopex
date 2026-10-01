@@ -3,7 +3,7 @@
 
 Technical depth: [Explicit conversational run limits](0047-reference-host-run-defaults-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** nothing
@@ -58,4 +58,4 @@ or one-shot defaults. Reverting host recommendations cannot undo consumed usage.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30) | candidate `2986150b878151524ecdd9bac5a9779e69e196b4`; concept `sha256:4640a5289968c68bbc3389a1c131404484e0b9ec2a1eec4e08707a15a27860bb`; technical `sha256:d48a97c9cbed63e880252560c781bb3f49040c811f0a7a6b41a77daefb235c21` |
