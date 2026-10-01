@@ -70,6 +70,8 @@ Part of the [evidence index](README.md).
 - Done: source-bound ordinary continuation envelopes, full expanded costs,
   frozen project content through owner recovery, native-ID collision refusal,
   and independently replayed aggregate-overflow preparation failures.
+- Done: bounded native Anthropic event assembly and pinned SSE parsing/flush
+  checks preserve signatures, block order and final usage with permanent failure.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -86,6 +88,32 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: added the private native stream reducer used to prepare the
+  invocation bridge. It admits exact message/block ordering, literal response
+  identity, type-correct deltas, concatenated signatures and parsed object
+  arguments, preserving empty and redacted blocks. Final cumulative usage
+  replaces prior counters; missing/invalid evidence remains unknown. It retains
+  assembled blocks and one open block instead of an event log. Failure clears
+  captured content and cannot be reversed by later input or flush. Raw HTTP
+  bytes, including comments/pings/framing, spend one 8,388,608-byte budget before
+  parsing. The native array has an inclusive 16,384-byte JSON cap and 128-block
+  limit. Tests pin ServerSentEvents.Parser 1.1.0 and ReqLLM 1.24.0's SSE.flush/1;
+  unknown parser states and incomplete original framing refuse instead of
+  acquiring completeness from synthetic newlines. Byte-split input reconstructs
+  the same native content as buffered capture.
+  Native assembly/capture checks pass 15 tests in 0.2 seconds on each supported
+  toolchain. Compilation is warning-free; format, documentation ordering and
+  dependency direction pass. Retained outputs:
+  - `/private/tmp/loopex-m7-native-stream-assembly-current.log`, SHA-256
+    `a16c4b78512843bef85dc7ad4b6afcff8f82d27365b7b7a90c799adfa5f5246c`.
+  - `/private/tmp/loopex-m7-native-stream-assembly-floor.log`, SHA-256
+    `f4a8dd73e158a6e5c7073f3fcc6071abe75c7fe203fe10b21322bf94e50405b1`.
+  The invocation-owned wrapper, fatal notification and blocked-drain wakeup,
+  final request-hook validation, buffered transport join, dependency queue
+  memory proof, public-summary classification and per-cell transport conformance
+  remain open. This reducer alone does not change live transport or register
+  thinking support.
 
 - 2026-10-01: ordinary open exchanges now stage the closed ADR 0044 envelope
   from committed full settlement records and canonical lineage source positions.
@@ -758,6 +786,7 @@ Part of the [evidence index](README.md).
 - [ ] Implement continuation accounting, reserves and compaction headroom targets.
 - [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
 - [ ] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
+- [x] Implement bounded native event assembly and pinned SSE parse/flush validation with permanent failure, exact content reconstruction and cumulative usage evidence.
 - [ ] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
 - [ ] Test the bridge against a local HTTP server before integrating live-provider proofs.
 - [ ] Test model switching, crashes, cancellation, malformed replies, overflow, usage accounting and privacy.
