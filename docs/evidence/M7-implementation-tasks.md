@@ -35,6 +35,8 @@ Part of the [evidence index](README.md).
   repeatable array selection and exact numeric-domain validation.
 - Done: new-session precedence composition and per-value origins, including
   flag/environment/file selection and harmless literal defaults.
+- Done: bounded model-limit capture from the verified pinned packaged catalog,
+  preserving unknown limits and the one accepted literal Haiku alias.
 - Next: model-capability and prompt-file preparation, effective inspection and command entry wiring, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
@@ -257,6 +259,17 @@ Part of the [evidence index](README.md).
   prompt capture and whole-request preflight, redacted inspection, command entry
   and live chat remain pending. No new full integration result is claimed.
 
+- 2026-10-01: adapter `ModelCapabilities` reads the pinned embedded LLMDB
+  snapshot directly and verifies its checksum and exact identity before
+  capturing bounded context/output limits. Mutable catalog filters, overlays
+  and cold loading do not select inspection metadata. The literal Haiku alias
+  selects its dated identity; other aliases remain unregistered. Unknown limits
+  stay nil, and the reasoning subset remains empty pending deterministic
+  mapping conformance. Four focused tests pass in 2.2 seconds, covering three
+  known model limits, alias behavior, unknown limits, source bindings and
+  malformed specifications. Provider dispatch and whole-profile admission remain
+  pending; no provider call or full integration result is claimed.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -355,6 +368,8 @@ Part of the [evidence index](README.md).
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 ## T08 — Implement model selection and private thinking continuation
 - [ ] Implement committed per-run model/reasoning configuration and the permitted configure fields.
+- [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
+- [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
 - [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
 - [ ] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
 - [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
