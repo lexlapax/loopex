@@ -73,6 +73,34 @@ defmodule Loopex.Runtime.SessionConfigurationAdmissionTest do
     end
   end
 
+  test "private owner-busy and history-capacity refusals replay their original unchanged response" do
+    {state, records} = state()
+    command = %{type: :configure, command_id: "configure", changes: %{"max_tokens" => 512}}
+    candidate = prepare(state, command.changes)
+
+    for {resolution, admission, reason} <- [
+          {%{configuration_candidate: candidate, configuration_owner_settled: false},
+           "rejected_configuration_owner_busy", :configuration_not_settled},
+          {%{configuration_candidate: candidate, configuration_preflight: :compaction_required},
+           "rejected_configuration_compaction_required", :compaction_required}
+        ] do
+      assert {:ok, proposal} = SessionState.propose(state, command, resolution)
+      assert proposal.reply == {:error, reason}
+      assert proposal.next.configuration == state.configuration
+      assert proposal.events == []
+      assert hd(proposal.records)["admission"] == admission
+      {committed, retained, []} = commit(state, proposal)
+      assert {:ok, recovered} = SessionState.recover(state.session_id, records ++ retained, [])
+      assert recovered.configuration == state.configuration
+
+      assert {:replayed, {:error, ^reason}} =
+               SessionState.propose(committed, command, %{
+                 configuration_candidate: candidate,
+                 configuration_owner_settled: true
+               })
+    end
+  end
+
   test "large instruction changes retain one full copy and replay the exact authored preimage" do
     {state, records} = state()
 

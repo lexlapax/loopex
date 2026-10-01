@@ -415,6 +415,26 @@ defmodule Loopex.Runtime do
   def command(_attachment, _command), do: {:error, :attachment_required}
 
   @doc false
+  @spec command_with_configuration(Attachment.t(), map(), term()) ::
+          {:accepted, binary()} | {:error, term()}
+  def command_with_configuration(%Attachment{} = attachment, command, candidate)
+      when is_map(command) do
+    with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
+           Attachment.routing(attachment),
+         {:ok, coordinator, owner} <-
+           control_call(
+             runtime,
+             {:route_command, runtime.token, session_id, attachment_id, incarnation_id}
+           ) do
+      SessionCoordinator.command_with_configuration(coordinator, owner, command, candidate)
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def command_with_configuration(_, _, _), do: {:error, :attachment_required}
+
+  @doc false
   @spec command_for_daemon(Attachment.t(), map()) ::
           {:routed, DaemonRoute.t(), {:accepted, binary()} | {:error, term()}}
           | {:error, {:superseded_before_admission, DaemonRoute.t()}}

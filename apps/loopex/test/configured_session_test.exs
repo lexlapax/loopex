@@ -78,6 +78,437 @@ defmodule Loopex.ConfiguredSessionTest do
     refute log =~ "shutdown_error", log
   end
 
+  test "live configuration commits one version and restart preserves new and earlier run captures" do
+    fixture = start(script: [%{text: "first", calls: []}, %{text: "second", calls: []}])
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    prompt(attachment, "first", "first prompt")
+
+    {:ok, instructions} =
+      Instructions.capture(%{
+        "version" => "host.v2",
+        "base" => "host-switch-canary",
+        "environment" => "",
+        "appendix" => ""
+      })
+
+    initial = configuration()
+
+    changes = %{
+      "model" => "scripted:v2",
+      "max_tokens" => 512,
+      "instructions" => instructions,
+      "context_token_budget" => 6_000
+    }
+
+    {:ok, candidate} =
+      SessionConfiguration.update(
+        initial,
+        changes,
+        Map.put(initial["model_capabilities"], "model", "scripted:v2"),
+        initial["provider_mapping"],
+        fixture.definitions
+      )
+
+    command = %{type: :configure, command_id: "configure", changes: changes}
+
+    assert {:accepted, "configure"} =
+             Runtime.command_with_configuration(attachment, command, candidate)
+
+    before_duplicate = Fixture.records(fixture, session)
+    assert {:accepted, "configure"} = Runtime.command_with_configuration(attachment, command, %{})
+    assert Fixture.records(fixture, session) == before_duplicate
+
+    assert {:error, :idempotency_conflict} =
+             Runtime.command_with_configuration(
+               attachment,
+               %{command | changes: %{"max_tokens" => 256}},
+               candidate
+             )
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    prompt(attachment, "second", "second prompt")
+    [first, second] = AgentLoopTestModel.dispatched(fixture.model)
+    assert first.model == "scripted:v1"
+    assert second.model == "scripted:v2"
+    {:ok, rendered} = Instructions.render(instructions)
+    assert hd(second.messages)["content"] == rendered
+    assert second.sampling == SessionConfiguration.sampling(candidate)
+
+    {:ok, recovered} =
+      SessionState.recover(
+        session,
+        Fixture.records(fixture, session),
+        Fixture.events(fixture, session)
+      )
+
+    [first_run, second_run] = recovered.run_order
+    assert recovered.configuration == candidate
+    assert SessionState.run_configuration(recovered, first_run) == initial
+    assert SessionState.run_configuration(recovered, second_run) == candidate
+    configured = Enum.filter(Fixture.events(fixture, session), &(&1.kind == "session.configured"))
+    assert length(configured) == 1
+    assert hd(configured)["configuration"] == SessionConfiguration.public_view(candidate)
+    refute :erlang.term_to_binary(configured) =~ "host-switch-canary"
+    assert :ok = Loopex.stop(fixture.runtime)
+
+    restarted =
+      start(store: fixture.store, tools: [], max_tokens: 3, script: [%{text: "third", calls: []}])
+
+    assert {:ok, ^session} =
+             Loopex.resume_session(restarted.runtime, session, command_id: "resume")
+
+    assert {:ok, next_attachment} =
+             Loopex.attach(restarted.runtime, session,
+               after_event_sequence: List.last(Fixture.events(restarted, session)).event_sequence
+             )
+
+    assert {:accepted, "configure"} =
+             Runtime.command_with_configuration(next_attachment, command, nil)
+
+    prompt(next_attachment, "third", "third prompt")
+    [third] = AgentLoopTestModel.dispatched(restarted.model)
+    assert third.model == "scripted:v2"
+    assert hd(third.messages)["content"] == rendered
+    assert third.sampling == SessionConfiguration.sampling(candidate)
+    assert third.tools == fixture.definitions
+  end
+
+  test "live configure reports removable history capacity without model work or projection changes" do
+    fixture = start(script: [%{text: String.duplicate("a", 7_000), calls: []}])
+    initial = configuration()
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    prompt(attachment, "prompt", String.duplicate("p", 7_000))
+    changes = %{"context_token_budget" => 600, "system_class_tokens" => 500}
+
+    {:ok, candidate} =
+      SessionConfiguration.update(
+        initial,
+        changes,
+        initial["model_capabilities"],
+        initial["provider_mapping"],
+        fixture.definitions
+      )
+
+    command = %{type: :configure, command_id: "too-small", changes: changes}
+
+    assert {:error, :compaction_required} =
+             Runtime.command_with_configuration(attachment, command, candidate)
+
+    assert {:error, :compaction_required} =
+             Runtime.command_with_configuration(attachment, command, nil)
+
+    records = Fixture.records(fixture, session)
+    assert Enum.count(records, &(&1.payload.kind == "session_configuration_admitted_v1")) == 1
+    {:ok, recovered} = SessionState.recover(session, records, Fixture.events(fixture, session))
+    assert recovered.configuration == initial
+    refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "session.configured"))
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "live configure refuses unwritable minimum request even when its configuration record fits" do
+    fixture = start(script: [])
+    initial = configuration()
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    {:ok, instructions} =
+      Instructions.capture(%{
+        "version" => "large",
+        "base" => String.duplicate("b", 32_768),
+        "environment" => "",
+        "appendix" => ""
+      })
+
+    changes = %{
+      "instructions" => instructions,
+      "system_class_tokens" => 12_000,
+      "context_token_budget" => 20_000
+    }
+
+    {:ok, candidate} =
+      SessionConfiguration.update(
+        initial,
+        changes,
+        initial["model_capabilities"],
+        initial["provider_mapping"],
+        fixture.definitions
+      )
+
+    assert {:ok, _} = Loopex.Store.admit_bounded(candidate)
+    command = %{type: :configure, command_id: "unwritable", changes: changes}
+
+    assert {:error, :invalid_session_configuration} =
+             Runtime.command_with_configuration(attachment, command, candidate)
+
+    assert {:error, :invalid_session_configuration} =
+             Runtime.command_with_configuration(attachment, command, nil)
+
+    {:ok, recovered} =
+      SessionState.recover(
+        session,
+        Fixture.records(fixture, session),
+        Fixture.events(fixture, session)
+      )
+
+    assert recovered.configuration == initial
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+  end
+
+  test "live configure refusal while a provider is active remains stable after it settles" do
+    fixture = start(script: [%{text: "done", calls: [], hold: self()}])
+    initial = configuration()
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+    assert_receive {:holding, model}, 5_000
+    changes = %{"max_tokens" => 512}
+
+    {:ok, candidate} =
+      SessionConfiguration.update(
+        initial,
+        changes,
+        initial["model_capabilities"],
+        initial["provider_mapping"],
+        fixture.definitions
+      )
+
+    command = %{type: :configure, command_id: "busy", changes: changes}
+
+    assert {:error, :configuration_not_settled} =
+             Runtime.command_with_configuration(attachment, command, candidate)
+
+    send(model, :release)
+    finish(attachment)
+
+    assert {:error, :configuration_not_settled} =
+             Runtime.command_with_configuration(attachment, command, candidate)
+
+    assert {:accepted, "settled"} =
+             Runtime.command_with_configuration(
+               attachment,
+               %{command | command_id: "settled"},
+               candidate
+             )
+
+    assert {:error, :invalid_command} =
+             Runtime.command_with_configuration(
+               attachment,
+               %{type: :prompt, command_id: "invalid", content: "never dispatch"},
+               :unprepared
+             )
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "configuration commit unknown retains exact proposal before acknowledgement and publication" do
+    fixture = start(script: [%{text: "done", calls: []}])
+    initial = configuration()
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    changes = %{"max_tokens" => 512}
+
+    {:ok, candidate} =
+      SessionConfiguration.update(
+        initial,
+        changes,
+        initial["model_capabilities"],
+        initial["provider_mapping"],
+        fixture.definitions
+      )
+
+    command = %{type: :configure, command_id: "configure", changes: changes}
+    kind = "session_configuration_admitted_v1"
+    hold_record_commit(fixture, kind, :before)
+    parent = self()
+
+    caller =
+      spawn(fn ->
+        send(
+          parent,
+          {:configure_result, self(),
+           Runtime.command_with_configuration(attachment, command, candidate)}
+        )
+      end)
+
+    {waiter, proposed} = await_record_commit(fixture, session, kind, :before)
+    refute_receive {:configure_result, ^caller, _}, 20
+    refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "session.configured"))
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
+
+    :ok =
+      Loopex.M1RuntimeTestStore.inject(
+        fixture.store,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    Loopex.M1RuntimeTestStore.release(waiter)
+    assert_receive {:configure_result, ^caller, {:accepted, "configure"}}, 5_000
+
+    assert Enum.filter(Fixture.records(fixture, session), &(&1.payload.kind == kind))
+           |> Enum.map(& &1.payload) == [proposed]
+
+    assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "session.configured")) == 1
+    assert {:accepted, "configure"} = Runtime.command_with_configuration(attachment, command, nil)
+    prompt(attachment, "next", "go")
+    [request] = AgentLoopTestModel.dispatched(fixture.model)
+    assert request.sampling == SessionConfiguration.sampling(candidate)
+
+    assert {:ok, recovered} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+
+    assert recovered.configuration == candidate
+  end
+
+  test "owner crashes at configuration commit boundaries retain one version and original disposition" do
+    for phase <- [:before, :after] do
+      fixture = start(script: [%{text: "done", calls: []}])
+      initial = configuration()
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create",
+                 %{},
+                 genesis(fixture.definitions)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      changes = %{"max_tokens" => 512}
+
+      {:ok, candidate} =
+        SessionConfiguration.update(
+          initial,
+          changes,
+          initial["model_capabilities"],
+          initial["provider_mapping"],
+          fixture.definitions
+        )
+
+      command = %{type: :configure, command_id: "configure", changes: changes}
+      kind = "session_configuration_admitted_v1"
+      hold_record_commit(fixture, kind, phase)
+      parent = self()
+
+      caller =
+        spawn(fn ->
+          result =
+            try do
+              Runtime.command_with_configuration(attachment, command, candidate)
+            catch
+              :exit, reason -> {:caller_exit, reason}
+            end
+
+          send(parent, {:configure_crash_result, self(), result})
+        end)
+
+      {waiter, proposed} = await_record_commit(fixture, session, kind, phase)
+
+      assert Enum.count(Fixture.records(fixture, session), &(&1.payload.kind == kind)) ==
+               if(phase == :after, do: 1, else: 0)
+
+      assert AgentLoopTestModel.dispatched(fixture.model) == []
+      {:ok, children} = Runtime.Supervisor.children(fixture.runtime.supervisor)
+      [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
+      monitor = Process.monitor(owner)
+      Process.exit(owner, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 5_000
+
+      assert {:ok, ^session} =
+               Loopex.resume_session(fixture.runtime, session, command_id: "successor")
+
+      Loopex.M1RuntimeTestStore.release(waiter)
+      assert_receive {:configure_crash_result, ^caller, result}, 5_000
+      assert result == {:error, :session_unavailable} or match?({:caller_exit, _}, result)
+      assert {:ok, successor} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      admitted_id = if phase == :before, do: "successor-configure", else: "configure"
+
+      if phase == :before do
+        assert {:terminal, {:not_committed, :stale_owner_epoch}} =
+                 await_session_transaction(fixture.store, session, "configure")
+
+        assert {:error, :tx_id_conflict} =
+                 Runtime.command_with_configuration(successor, command, candidate)
+
+        assert {:accepted, ^admitted_id} =
+                 Runtime.command_with_configuration(
+                   successor,
+                   %{command | command_id: admitted_id},
+                   candidate
+                 )
+      else
+        assert {:accepted, ^admitted_id} =
+                 Runtime.command_with_configuration(successor, command, nil)
+      end
+
+      records = Fixture.records(fixture, session)
+      admissions = Enum.filter(records, &(&1.payload.kind == kind))
+      assert length(admissions) == 1
+      if phase == :after, do: assert(hd(admissions).payload == proposed)
+      assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "session.configured")) == 1
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, records, Fixture.events(fixture, session))
+
+      assert recovered.configuration == candidate
+      assert candidate["configuration_version"] == initial["configuration_version"] + 1
+      prompt(successor, "next", "go")
+      [request] = AgentLoopTestModel.dispatched(fixture.model)
+      assert request.sampling == SessionConfiguration.sampling(candidate)
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+    end
+  end
+
   test "the admitted question generation never dispatches an executor effect" do
     for {policy, reason} <- [
           {Loopex.ConfiguredSessionDeferringPolicy, "policy_unavailable"}
@@ -360,13 +791,13 @@ defmodule Loopex.ConfiguredSessionTest do
              )
 
     assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
-    hold_question_commit(fixture, "model_question_requested_v1", :before)
+    hold_record_commit(fixture, "model_question_requested_v1", :before)
 
     assert {:accepted, "prompt"} =
              Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
 
     {pending_waiter, pending_proposal} =
-      await_question_commit(fixture, session, "model_question_requested_v1", :before)
+      await_record_commit(fixture, session, "model_question_requested_v1", :before)
 
     refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "interaction.requested"))
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
@@ -381,7 +812,7 @@ defmodule Loopex.ConfiguredSessionTest do
     question = await_question(attachment)
     assert question["interaction_id"] == pending_proposal["interaction_id"]
     assert question["expires_at"] == pending_proposal["expires_at"]
-    hold_question_commit(fixture, "model_question_response_admitted_v1", :before)
+    hold_record_commit(fixture, "model_question_response_admitted_v1", :before)
     parent = self()
 
     caller =
@@ -394,7 +825,7 @@ defmodule Loopex.ConfiguredSessionTest do
       end)
 
     {answer_waiter, answer_proposal} =
-      await_question_commit(fixture, session, "model_question_response_admitted_v1", :before)
+      await_record_commit(fixture, session, "model_question_response_admitted_v1", :before)
 
     refute_receive {:unknown_answer_result, ^caller, _}, 20
     refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "interaction.answered"))
@@ -462,7 +893,7 @@ defmodule Loopex.ConfiguredSessionTest do
           do: "model_question_requested_v1",
           else: "model_question_response_admitted_v1"
 
-      if target == :pending, do: hold_question_commit(fixture, kind, phase)
+      if target == :pending, do: hold_record_commit(fixture, kind, phase)
 
       assert {:accepted, "prompt"} =
                Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
@@ -472,7 +903,7 @@ defmodule Loopex.ConfiguredSessionTest do
 
       caller =
         if target == :response do
-          hold_question_commit(fixture, kind, phase)
+          hold_record_commit(fixture, kind, phase)
 
           spawn(fn ->
             result =
@@ -486,7 +917,7 @@ defmodule Loopex.ConfiguredSessionTest do
           end)
         end
 
-      {waiter, proposed} = await_question_commit(fixture, session, kind, phase)
+      {waiter, proposed} = await_record_commit(fixture, session, kind, phase)
       id = proposed["interaction_id"]
       matching = Enum.filter(Fixture.records(fixture, session), &(&1.payload.kind == kind))
       assert length(matching) == if(phase == :after, do: 1, else: 0)
@@ -526,7 +957,7 @@ defmodule Loopex.ConfiguredSessionTest do
         # Technical depth: ADR 0006 requires a fresh logical transaction after
         # succession; the old ID cannot acquire new owner or timestamp bindings.
         assert {:terminal, {:not_committed, :stale_owner_epoch}} =
-                 await_question_transaction(fixture.store, session, "answer")
+                 await_session_transaction(fixture.store, session, "answer")
 
         assert {:error, :tx_id_conflict} = Loopex.command(successor, question_answer(id))
       end
@@ -571,19 +1002,19 @@ defmodule Loopex.ConfiguredSessionTest do
       answer: %{"text" => "retained answer"}
     }
 
-  defp hold_question_commit(fixture, kind, :before),
+  defp hold_record_commit(fixture, kind, :before),
     do:
       Loopex.M1RuntimeTestStore.hold_next_record_before_linearization(fixture.store, kind, self())
 
-  defp hold_question_commit(fixture, kind, :after),
+  defp hold_record_commit(fixture, kind, :after),
     do: Loopex.M1RuntimeTestStore.delay_after_record(fixture.store, kind, self())
 
-  defp await_question_commit(_fixture, _session, kind, :before) do
+  defp await_record_commit(_fixture, _session, kind, :before) do
     assert_receive {:record_held_before_linearization, waiter, _store, ^kind, transaction}, 5_000
     {waiter, Enum.find(transaction.records, &(&1.kind == kind))}
   end
 
-  defp await_question_commit(fixture, session, kind, :after) do
+  defp await_record_commit(fixture, session, kind, :after) do
     assert_receive {:record_linearized, waiter, _store, ^kind, :session_journal_commit,
                     {:committed, _, _receipt}},
                    5_000
@@ -592,14 +1023,14 @@ defmodule Loopex.ConfiguredSessionTest do
     {waiter, Enum.find(records, &(&1.payload.kind == kind)).payload}
   end
 
-  defp await_question_transaction(store, session, tx_id, deadline \\ nil) do
+  defp await_session_transaction(store, session, tx_id, deadline \\ nil) do
     deadline = deadline || System.monotonic_time(:millisecond) + 5_000
 
     case Loopex.M1RuntimeTestStore.transaction_status(store, session, "session", tx_id) do
       :absent ->
         if System.monotonic_time(:millisecond) >= deadline, do: flunk("transaction unresolved")
         Process.sleep(10)
-        await_question_transaction(store, session, tx_id, deadline)
+        await_session_transaction(store, session, tx_id, deadline)
 
       result ->
         result

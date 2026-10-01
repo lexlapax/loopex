@@ -197,6 +197,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @doc false
+  @spec command_with_configuration(pid(), owner(), map(), term()) ::
+          {:accepted, binary()} | {:error, term()}
+  def command_with_configuration(coordinator, owner, command, candidate)
+      when is_pid(coordinator) and is_map(owner) and is_map(command) do
+    safe_call(
+      coordinator,
+      {:command_with_configuration, owner, command, {:prepared_configuration, candidate}},
+      :infinity
+    )
+  end
+
+  @doc false
   @spec command_detailed(pid(), owner(), map()) ::
           {:result, {:accepted, binary()} | {:error, term()}}
           | {:error, :superseded_before_admission}
@@ -480,7 +492,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @impl GenServer
-  def handle_call({:command, supplied_owner, command}, _from, state) do
+  def handle_call({:command, supplied_owner, command}, from, state),
+    do:
+      handle_call(
+        {:command_with_configuration, supplied_owner, command, :unprepared},
+        from,
+        state
+      )
+
+  def handle_call({:command_with_configuration, supplied_owner, command, candidate}, _from, state) do
     cond do
       not is_nil(state.drain) ->
         {:reply, {:error, :runtime_unavailable}, state}
@@ -497,7 +517,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       true ->
         case Control.current_owner(state.control, state.session_id, state.owner) do
           :ok ->
-            state |> fence_prepared_resume(command) |> commit_command(command)
+            state |> fence_prepared_resume(command) |> commit_command(command, candidate)
 
           {:error, :superseded_owner} ->
             {:reply, {:error, :superseded_owner}, superseded_owner(state)}
@@ -2177,7 +2197,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # set -- stays out. An answered interaction is also a transition of accepted
   # ADR 0024's lifecycle, and is reported as one exactly when its admission
   # succeeded.
-  defp commit_command(state, command) do
+  defp commit_command(state, command, candidate \\ :unprepared) do
     type = command_field(command, :type)
 
     admit = fn ->
@@ -2189,10 +2209,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
           type: type
         },
         fn ->
-          if resource_command?(command) do
-            commit_resource_command(state, command)
-          else
-            commit_loop_command(state, command)
+          cond do
+            candidate != :unprepared -> commit_configuration_command(state, command, candidate)
+            resource_command?(command) -> commit_resource_command(state, command)
+            true -> commit_loop_command(state, command)
           end
         end,
         &admission_category/1
@@ -2330,6 +2350,123 @@ defmodule Loopex.Runtime.SessionCoordinator do
       propose_command(state, command, resolved)
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Concept: host-prepared configuration is admitted by the same serial owner
+  # and attachment authority as an ordinary command, without dispatching work.
+  # Technical depth: public command bytes contain only authored changes. The
+  # separate candidate is validated after duplicate lookup; owner quiescence
+  # and minimum required-context admission precede its one Store transaction.
+  defp commit_configuration_command(state, command, {:prepared_configuration, candidate}) do
+    if command_field(command, :type) in [:configure, "configure"] do
+      resolved = %{
+        configuration_candidate: candidate,
+        configuration_owner_settled: configuration_owner_settled?(state)
+      }
+
+      case SessionState.propose(state.durable, command, resolved) do
+        {:ok, %{reply: {:accepted, _}} = proposal} ->
+          case preflight_configuration(state, command, proposal.next.configuration) do
+            :ok ->
+              commit_command_proposal(state, {:ok, proposal})
+
+            {:error, reason}
+            when reason in [:compaction_required, :invalid_session_configuration] ->
+              resolved = Map.put(resolved, :configuration_preflight, reason)
+
+              commit_command_proposal(
+                state,
+                SessionState.propose(state.durable, command, resolved)
+              )
+
+            {:error, reason} ->
+              {:reply, {:error, reason}, state}
+          end
+
+        result ->
+          commit_command_proposal(state, result)
+      end
+    else
+      {:reply, {:error, :invalid_command}, state}
+    end
+  end
+
+  defp configuration_owner_settled?(state) do
+    Enum.all?(
+      [state.in_flight, state.pending_cleanup, state.model_reserves, state.executor_reserves],
+      &(map_size(&1) == 0)
+    ) and is_nil(state.pending_fault) and is_nil(state.query)
+  end
+
+  # Concept: configuration must fit the history already retained, without
+  # spending a provider call or adding an invented operator prompt.
+  # Technical depth: this transient minimum candidate uses ordinary request,
+  # receipt and Store-record sizing. Its run-shaped identity and sampled
+  # deadline exist only for measurement and never enter durable state. Optional
+  # content is not resolved; its empty metadata header receives the ordinary
+  # required-context reservation. A later prompt has its own exact admission.
+  defp preflight_configuration(state, command, configuration) do
+    run_id = stable_id("run", state.session_id, command_field(command, :command_id))
+    resources = state.durable.resources
+
+    durable = %{
+      state.durable
+      | run_configurations: Map.put(state.durable.run_configurations, run_id, configuration),
+        context_budgets:
+          Map.put(state.durable.context_budgets, run_id, configuration["context_token_budget"]),
+        run_resources: Map.put(state.durable.run_resources, run_id, resources),
+        pending_work:
+          Map.put(state.durable.pending_work, run_id, %{
+            run_id: run_id,
+            stage: "model_pending",
+            turn_number: 1
+          })
+    }
+
+    with {:ok, deadline} <- run_deadline(state.bounds),
+         staging = %{
+           run_id: run_id,
+           deadline: deadline,
+           max_tokens: configuration["max_tokens"],
+           elements:
+             Enum.flat_map(state.durable.run_order, &SessionState.elements(state.durable, &1)),
+           steer: nil,
+           resources: resources
+         },
+         project = ProjectResource.receipt(:not_evaluated_required_failure, %{}),
+         header = reserved_resource_header(ResourceContext.initial_header(resources)) do
+      probe = %{state | durable: durable}
+
+      case measure_candidate(probe, staging, [], project, header) do
+        {:ok, _} ->
+          :ok
+
+        {:refused, _} ->
+          configuration_without_history(probe, staging, project, header)
+
+        {:refused_not_required_only, _} ->
+          configuration_without_history(probe, staging, project, header)
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:deadline_unrepresentable, _cause} -> {:error, :configuration_preflight_unavailable}
+    end
+  end
+
+  # Concept: compaction is a remedy only when removing history can make the
+  # candidate fit. Instructions and immutable tools cannot be compacted away.
+  # Technical depth: measure the same minimum candidate with empty lineage only
+  # after its retained-history measurement refused. This second pure check
+  # distinguishes a history-capacity refusal from an inadmissible configuration.
+  defp configuration_without_history(state, staging, project, header) do
+    case measure_candidate(state, %{staging | elements: []}, [], project, header) do
+      {:ok, _} -> {:error, :compaction_required}
+      {:refused, _} -> {:error, :invalid_session_configuration}
+      {:refused_not_required_only, _} -> {:error, :invalid_session_configuration}
+      {:error, reason} -> {:error, reason}
     end
   end
 

@@ -1759,11 +1759,20 @@ defmodule Loopex.Runtime.SessionState do
         is_nil(state.configuration) ->
           "rejected_legacy_configuration_unresolved"
 
+        command.resolved_bounds[:configuration_owner_settled] == false ->
+          "rejected_configuration_owner_busy"
+
         is_nil(candidate) ->
           "rejected_configuration_not_prepared"
 
         configuration_candidate(state, command.changes, candidate) != :ok ->
           "rejected_invalid_session_configuration"
+
+        command.resolved_bounds[:configuration_preflight] == :invalid_session_configuration ->
+          "rejected_invalid_session_configuration"
+
+        command.resolved_bounds[:configuration_preflight] == :compaction_required ->
+          "rejected_configuration_compaction_required"
 
         true ->
           "accepted"
@@ -2870,6 +2879,27 @@ defmodule Loopex.Runtime.SessionState do
        )
        when is_map(configuration) do
     if configuration_settled?(state), do: {:ok, :invalid_session_configuration}, else: :error
+  end
+
+  # Concept: an owner can refuse a configuration before changing durable truth.
+  # Technical depth: owner-worker quiescence and exact prospective request size
+  # are admission observations, not reconstruction of a provider attempt. Their
+  # captured unchanged replies remain stable after the owner or history changes.
+  defp configuration_refusal(%{configuration: configuration} = state, admission)
+       when is_map(configuration) and
+              admission in [
+                "rejected_configuration_owner_busy",
+                "rejected_configuration_compaction_required"
+              ] do
+    if configuration_settled?(state) do
+      {:ok,
+       if(admission == "rejected_configuration_owner_busy",
+         do: :configuration_not_settled,
+         else: :compaction_required
+       )}
+    else
+      :error
+    end
   end
 
   defp configuration_refusal(_, _), do: :error

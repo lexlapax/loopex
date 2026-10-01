@@ -59,8 +59,10 @@ Part of the [evidence index](README.md).
   request intent, committing an unavailable v2 preparation refusal and terminal.
 - Done: reproduce and fix false OwnerGroup shutdown_error/noproc reports while
   preserving parallel shutdown, owner-worker barriers and actual fault reporting.
-- Next: join configuration preparation to settled owner admission, retained-history
-  preflight and atomic commit; complete question projection/private-record vectors and the remaining M7
+- Done: join host-prepared ordinary configuration to live owner admission, exact
+  retained-history sizing, atomic commit, restart and commit-boundary fault proofs.
+- Next: complete host resolution, maintenance quiescence and checkpoint-aware
+  configuration preflight; complete question projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
   continue prompt-file and mapping
   preparation, effective inspection and command entry wiring, then live
@@ -70,6 +72,34 @@ Part of the [evidence index](README.md).
 
 ## Development observations
 
+- 2026-10-01: the private host-prepared configure path uses ordinary attachment
+  routing and serial-owner fences. Duplicate lookup precedes candidate validation
+  and exact prospective request measurement; configure dispatches no model or
+  executor work. A transient minimum request uses retained lineage, immutable
+  tools, candidate instructions/bounds and required resource metadata through the
+  ordinary request/receipt/Store sizing path. Only history that can be removed
+  reports compaction_required; an oversized empty-history minimum refuses the
+  configuration. Neither probe becomes a durable run or an operator prompt.
+  Runtime restart preserves the latest configuration and earlier run captures.
+  Lost commit replies re-present exact proposal bytes before acknowledgement;
+  owner crashes before/after linearization retain one version and the original
+  disposition. A proved stale-owner non-commit requires a fresh logical ID under
+  ADR 0006. Live configuration/admission checks pass 31 tests in 2.5 seconds;
+  configuration, interaction, quiescence and journal-ownership regressions pass
+  114 in 19.1 seconds with four prescribed long-bound exclusions. A mistaken
+  input-test filename matched no file; the actual input algebra then passes all
+  11 tests in 5.8 seconds. The earlier 88-test configuration/input/interaction
+  run passes assertions in 18.5 seconds but emits Task.Supervisor
+  shutdown_error/noproc diagnostics for Task.Supervised children. That separate
+  manager/child cleanup investigation remains open under T16; the OwnerGroup
+  fix does not establish its resolution. The supported floor pair passes the
+  same 31 live configuration/admission tests in 2.4 seconds. Its cold dependency
+  compilation emits existing TOML charlist deprecations; this is a focused test
+  result, not a warning-free floor closure check. Current-pair project compilation
+  and formatting pass; documentation ordering covers 979 entries.
+  Host catalog/route preparation, the
+  prepared daemon route, future checkpoint projection and maintenance quiescence
+  remain pending, as do public /3-/4 contracts and real-provider conformance.
 - 2026-10-01: a new orderly-shutdown regression using production bytes from
   `887b2141800416b2ddb5959030a07d9c05123d1b` fails after completed model work:
   9 of its 32 shutdowns report OwnerGroup shutdown_error/noproc. An empty-work
@@ -571,7 +601,9 @@ Part of the [evidence index](README.md).
 - [x] Prepare atomic configuration admission/replay with exact command identity, single-copy instructions, retained earlier run captures and public event allowlists.
 - [x] Gate prepared configuration admission/replay on captured terminal-tool-history capability, preserving empty-completion and cross-run semantics.
 - [x] Gate ordinary configured provider intent on terminal-history capability and retain the unavailable v2 preparation-failure pair without fabricated observations.
-- [ ] Join prepared candidates to settled configure admission, exact history preflight, atomic commit and replay.
+- [x] Join prepared ordinary candidates to settled owner admission, exact retained-history preflight, atomic commit and replay.
+- [x] Prove configuration restart, commit-unknown re-presentation and owner crashes before/after linearization through the live runtime.
+- [ ] Join host resolution and prepared daemon routing; extend configuration preflight to committed checkpoints and maintenance quiescence.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
 - [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
@@ -682,7 +714,8 @@ Part of the [evidence index](README.md).
 - [ ] Run required selected real-provider, Node, daemon, long-bound and cross-UID lanes.
 - [ ] Run changed process-boundary cases thirty times under the prescribed pinned Linux load.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
-- [x] Investigate and fix supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain failing-before and process-lifetime evidence independently of passing assertions.
+- [x] Investigate and fix OwnerGroup supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain failing-before and process-lifetime evidence independently of passing assertions.
+- [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 ## T17 — Assemble and test the closure candidate
 - [ ] Provision both supported toolchains, pinned Node, provider bindings and the legacy Ollama witness.
 - [ ] Provision Linux cross-UID support, descriptor limits, retained evidence storage and attendance.
@@ -729,7 +762,7 @@ before a provider demonstration.
 | Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 and unavailable terminal-history preparation failures implemented; other causes, maintenance/headroom and wire projections pending |
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
-| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure whole-candidate preparation and atomic admission/replay implemented; owner history preflight, host resolution, maintenance quiescence and live configure pending |
+| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
 | Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
