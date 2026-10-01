@@ -29,7 +29,7 @@ its last `Closed` row identifies the last closed product baseline.
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
-M7's next decision also includes external re-audit and acceptance of the labelled
+M7's next decision also includes review and acceptance of the labelled
 [vision tool amendment](../vision.md#concept-vision-tools) and
 [continuation amendment](../vision.md#concept-vision-model-boundary), under the
 [section 13.4 scope decision](../developer/agent-context-map.md#disposition-m7-continuation-vision-amendment-2026-09-30).

@@ -6,7 +6,7 @@ Technical depth: [Serial read-only child sessions](0046-child-session-tool-techn
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field and their normalized command identity for newly authored bounds, preserving historical digests and ordinary follow-up inheritance; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment. Extends [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) with runtime-private read-only effect-intent/terminal and creation-provenance queries, including a Store read callback, without granting activation or mutation authority. Also adds a shared pure genesis resolver and a host-private live create variant accepting its validated complete payload; helper recovery cannot invoke that variant. Amends [ADR 0016](0016-configured-cancellation-observation.md#concept) to permit exact retained v2/v3 genesis in historical lookup and the live exact-genesis create variant; committed cleanup values and observation bounds remain unchanged.
+- **Supersedes:** [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) relative-only, first-staging deadline for an explicitly supplied absolute ceiling; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) and [ADR 0017](0017-durable-context-admission-budget.md#concept) closed prompt/follow-up bounds for that optional field and their normalized command identity for newly authored bounds, preserving historical digests and ordinary follow-up inheritance; [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) unconditional defer admission for a host-selected immutable refusal mode. Extends [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) with explicit per-create tool selection, preserving its session-local mapping and append-only registry. ADR 0044 owns the shared genesis amendment. Extends [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) with runtime-private read-only effect-intent/terminal and creation-provenance queries, including a Store read callback and a complete paged enumeration of committed create mappings by derived ordinal, without granting activation or mutation authority. Also adds a shared pure genesis resolver and a host-private live create variant accepting its validated complete payload; helper recovery cannot invoke that variant. Amends [ADR 0016](0016-configured-cancellation-observation.md#concept) to permit exact retained v2/v3 genesis in historical lookup and the live exact-genesis create variant; committed cleanup values and observation bounds remain unchanged.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept) and [ADR 0049](0049-explicit-host-configuration.md#concept)
 - **Prerequisite for:** M7 outcome 7
 
@@ -44,7 +44,8 @@ child evidence and a separate per-parent-run delegation allowance. Reservation
 precedes child creation. Parent and delegation counters stay distinct; their
 combined reported usage is visible. Token thresholds stop subsequent work and
 are not hard provider billing ceilings. An uncertain usage result cannot release
-reserved budget. Child count also bounds repeated low-token calls.
+reserved budget. Child count also bounds repeated low-token calls. The ledger's
+byte cap can refuse a child before the configured child count is reached.
 
 A generic committed absolute-deadline ceiling, available to any bounded run,
 enforces the child cutoff no later than its parent job's cutoff. Core gains
@@ -63,11 +64,15 @@ parent operation to stop it; when that owner is unavailable, use host restart
 and stop-only recovery. Its owning operation controls mutation and cleanup,
 including after settlement. Child cleanup can finish after the parent's
 observation window; the parent then remains unknown even after a clean child stop.
+The host settles that child once its terminal and cleanup evidence is
+conclusive: it charges the usage retained, refunds only tokens proven unused and
+frees the parent's helper slot, while the parent call stays unknown.
 
 The router classifies every forwarded local or helper job. Cancelling a known
 local job leaves helper admission open. Its bounded active-job registry reclaims
 capacity as jobs settle; ordinary sequential work cannot exhaust a lifetime
-registration quota. A cancel without classification fences that exact job ID
+registration quota. A full registry refuses a further concurrent job, local or
+helper, before any effect. A cancel without classification fences that exact job ID
 against delayed launch and reports uncertainty. Only exhaustion of the separate
 bounded cancellation-tombstone table closes helper admission across the host
 until full restart. Durable helper bindings route historical receipts after
@@ -86,32 +91,40 @@ New command identities bind the caller's explicit limits, so reusing an ID
 with different limits refuses. Repeating the original command keeps its first
 result even if host defaults changed. Historical command identities retain
 their original meaning. A queued follow-up may add an absolute cutoff, while
-its ordinary limits still inherit from the active run.
+its ordinary limits still inherit from the active run. A follow-up that supplies
+none inherits no absolute cutoff from the run it follows.
 
 This proposal depends on acceptance of the narrow M7 amendment to both vision
 files. It explicitly permits this opt-in host helper while retaining the bans
 on a core scheduler, parallel children within one parent session and writable helpers.
 
-A committed refusal before child work starts consumes no delegation allowance
-and requires no ledger reservation. Restart joins that terminal fact to the
-intent; it cannot treat the refused call as lost work or fence its parent. A
-call whose refusal was not yet recorded when the host stopped is charged
-conservatively; if that exceeds the allowance, the parent keeps working without
-further helpers and the call stays unknown.
+A committed refusal before the host attempts a reservation consumes no
+delegation allowance and requires no ledger record. When several refusal
+conditions hold at once, the host returns the first in one fixed order. Once a reservation is
+attempted, its child-count charge stands even if no child is created. Restart
+joins a committed refusal to its intent; it cannot treat the refused call as
+lost work or fence its parent. A task call with neither a recorded refusal nor a
+retained reservation is charged one child-count slot conservatively at the next
+host start. That covers a call
+whose refusal was not yet recorded when the host stopped, and a call cancelled
+before reservation whose refusal core recorded as unknown. If that charge would
+exceed the allowance or the ledger's byte cap, the parent keeps working, the call stays unknown and that parent
+session starts no further helper in any later run or after any restart; a new
+run's separate allowance does not lift this and M7 provides no release.
 
 Every durable host start classifies retained helper history before it admits
 work, even when new delegation is disabled, so an old
 helper is never adopted as ordinary work. That scan has a fixed 60-second bound
 per start and keeps its progress: a long history finishes over later starts, or
 in the background of a resident host. Two cases finish only under a resident
-host: a root whose listing alone exceeds one bound, and a session with more
+host: a root whose enumeration and saved-entry validation together exceed one
+bound, and a session with more
 records than one start can read behind a call whose outcome the scan has not yet
 reached. Until the scan finishes the durable host admits no
-session work and reports a count of what remains; reading existing sessions and
-the ephemeral profile, which has no helpers, stay available. One unreadable
-session history keeps the durable host closed until the root is restored from
-backup. A parent whose retained
-calls exceed its allowance keeps working but can start no further helper.
+session work and reports how many sessions it has covered and how many it has
+enumerated; reading existing sessions and the ephemeral profile, which has no
+helpers, stay available. One unreadable session history, named in the refusal,
+keeps the durable host closed until the root is restored from backup.
 
 <a id="concept-adr-0046-consequences"></a>
 ### Observable Consequences
@@ -132,8 +145,8 @@ The generic deadline addition joins ADR 0044's coordinated new-generation-only
 wire contract. Updated clients retain the existing foreground and daemon
 authority rules; old negotiation refuses before session work.
 
-The ledger is new host-owned persistent state and has its own versioned reader
-and backup procedure. Core child sessions remain ordinary sessions. Removing
+The ledger is new host-owned persistent state; it has its own versioned reader
+and is covered by the whole-root backup procedure. Core child sessions remain ordinary sessions. Removing
 the adapter does not make an unresolved delegated operation safe to repeat.
 M7 readers refuse unsupported host state before dispatch. Exact M6 fixtures
 determine older-reader behavior; a new host directory cannot fence an old

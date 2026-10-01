@@ -264,3 +264,8 @@ The [round 7 report](../evidence/M7-external-review-7.md) supersedes round 6's
 readiness conclusion with four findings; its
 [disposition](../evidence/M7-round-7-disposition.md) records their repair.
 Proposed status is unchanged.
+
+The [round 8 report](../evidence/M7-external-review-8.md) found one remaining
+Concept wording mismatch. Its [disposition](../evidence/M7-round-8-disposition.md)
+records that repair and a final internal readiness review of every pair.
+Proposed status is unchanged.

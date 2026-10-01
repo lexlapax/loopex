@@ -51,7 +51,15 @@ ends the episode and its triggering run with `context_preparation_failed`, cause
 is fabricated. Preparation for later prefixes of the same episode is bounded
 only by the run's committed deadline. The owner reads the
 clock when it proposes the episode-admission record, for this cutoff and for a
-standalone episode's absolute cutoff; command admission reads none. If ADR
+standalone episode's absolute cutoff; command admission reads none. If that
+clock value is outside the unsigned 64-bit domain or either addition overflows,
+no episode is admitted and no provider call is made: a run-owned trigger ends
+its run with `context_preparation_failed`, cause
+`maintenance_deadline_unrepresentable`, and a standalone command commits, with
+no episode record or episode terminal, its completed result
+`{disposition: "failed", checkpoint_id: null, failure, usage, cleanup: "confirmed"}`
+with that cause, every usage counter zero, and `context.compaction_finished`
+carrying the episode identity derived from the command ID. If ADR
 0013's deadline addition itself fails at that first maintenance staging, the run
 ends with the existing four-key `deadline_staging_failed_v1` and
 `deadline_preflight_failed` terminal pair, unchanged in shape; its validator
@@ -77,15 +85,19 @@ the same run in original order. Contiguous unconsumed inputs left by a terminal 
 pending operation or interaction form an input-only unit. Failed or cancelled
 runs without an assistant reply must not strand those inputs. No unfinished
 group is eligible. Protect current-run prompt/steer and every unfinished group.
-Initially also keep the newest complete assistant group. Measure that minimum
+Initially also keep the newest complete assistant group; when that group belongs
+to the current run it is already protected. Measure that minimum
 tail plus fixed instructions, metadata and prior checkpoint against the applicable
 ordinary hard limits or ADR 0044 initial targets at `q=0`, without optional
 resources. Release terminal-run units from that minimum tail oldest-first, including the
 newest group and every later input-only unit, until the minimum fits and the
 retained tail is rendering-eligible. Explicit command origin releases all such
 terminal-run units even when the current model fits, to prepare for a smaller
-model. A released unit includes its preceding inputs. Only current-run inputs,
-unfinished groups and open exchanges are irreducible. This applies to automatic
+model. A released unit includes its preceding inputs. Current-run inputs, every
+current-run group that follows them, unfinished groups and open exchanges are
+irreducible: a unit containing a current-run input is ineligible, so coverage
+never passes the current run's first input. Compaction during a run can
+therefore cover only history from before that run. This applies to automatic
 and explicit compaction, including failed, cancelled and bound runs. Recompute
 after every release; if truly protected content cannot fit, refuse by the
 relevant bound. Release makes a unit eligible; it promises no arbitrary future
@@ -185,7 +197,9 @@ staging limits and any initial thinking reserve fit; new maintenance refuses `ma
 model. A host may explicitly select the same model. Invalid supplied selections,
 unsupported thinking-off mappings or unavailable configured routes refuse
 composition startup before owned runtime/session effects; direct core startup
-rejects invalid resolved data. Missing instructions retain their distinct
+rejects only malformed resolved data and the window/output floors above. A
+well-formed map lacking any of the three required settings starts, and each new
+episode refuses `maintenance_reasoning_unsupported` before intent. Missing instructions retain their distinct
 refusal. Startup and `/status` warn when a continuation-required conversation has no
 maintenance model. The remedy is a host restart with an explicit admitted
 summarizer; a request which needs maintenance cannot continue merely because
@@ -217,7 +231,9 @@ captured model's admitted provider route and renderer revision, without fallback
 unavailable; they do not authorize a new episode. No durable fact changes.
 Restoring the captured route/renderer and restarting resumes the same episode;
 a corrupt capture needs an explicitly governed repair, not current defaults.
-A known settled summary may finish its checkpoint without a new provider call.
+A missing captured route or renderer does not block a known settled summary: it
+needs no provider call and finishes its checkpoint, subject to the pending
+progress check and the abort/deadline precedence below.
 New episodes use the current runtime selection. `session.configure` changes
 ordinary configuration only. Active maintenance charges the parent run's existing
 calls/turns, token and deadline budgets; standalone bounds remain 4/60,000/32,768.
@@ -250,7 +266,7 @@ blocks without shared state. Commit episode identity and the closed capture
 `{version, rendered_bytes, digest}` before summary staging. Missing or corrupt
 captured recovery data refuses; a current host value cannot repair it silently.
 
-`version` is nonempty ASCII, at most 64 bytes; `body` is nonempty valid UTF-8,
+`version` matches ADR 0042's `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`; `body` is nonempty valid UTF-8,
 at most 2,048 bytes. Render
 exactly `version + ": " + body`; retain those bytes and their computed SHA-256
 digest in maintenance configuration. Apply the session's selected strict
@@ -329,8 +345,9 @@ excerpted messages. Maintenance instructions use ADR 0042's `host_instructions`
 variant bound to the captured maintenance configuration. Preserve v2 replay;
 preserve ADR 0025's v3 resource receipts too. These new variants require v4
 validation and are not accepted under either old revision. Maintenance performs
-no optional resource intake. Its `project_resource` member is exactly
-`{disposition: "not_evaluated_maintenance", detail: null}`. If an admitted
+no optional resource intake. Its `project_resource` member keeps ADR 0017's
+exact four-key outer shape, `class` and `receipt_revision` unchanged, with
+`disposition: "not_evaluated_maintenance"` and `detail: null`. If an admitted
 manifest requires ADR 0025's fixed resource header, retain it with
 `not_evaluated` and empty block rows. These successful-request dispositions are
 permitted only for revision-4 maintenance; ordinary requests and v2/v3 replay
@@ -378,9 +395,13 @@ maintenance requires that version and `completion: natural`. A native
 `max_tokens` stop, its normalized `length` equivalent (`completion: limit`),
 or unknown completion, even with parseable JSON, fails as
 `maintenance_summary_incomplete`; malformed, extra-key or oversized output fails
-as `maintenance_summary_invalid`. An adapter reply that core cannot read at all,
-including ADR 0044's eight-key case, keeps ADR 0018's unreadable-answer
-settlement and, for a run-owned episode, its run terminal
+as `maintenance_summary_invalid`. Completion is checked first: a readable reply
+whose completion is not `natural` fails `maintenance_summary_incomplete`
+whatever its tool calls or content; only a `natural` reply can fail
+`maintenance_summary_invalid`. An adapter reply that core cannot read at all,
+including ADR 0044's eight-key case, keeps ADR 0018's unreadable-answer result
+and accounting inside the maintenance settlement kind and, for a run-owned
+episode, its run terminal
 (`unreadable_model_answer`); a standalone episode has no run terminal. The episode's closed
 failure union has no such member and records it as `model_call_failed`. A
 well-formed nine-key v2 reply is readable: it carries `completion: unknown` and
@@ -451,7 +472,8 @@ are all null, never fabricated zero observations. Its `project_disposition` is
 admission or maintenance evaluation. Captured configuration/budgets
 and any derived targets remain required. For nonnumeric preparation failure,
 record cost is null. Standalone compact
-uses its episode record instead and emits no invented context-refusal run record.
+uses its episode record instead, or its completed command result alone when no
+episode was admitted, and emits no invented context-refusal run record.
 
 The new `failure` is one of these exact closed objects:
 
@@ -490,11 +512,13 @@ The refusal immediately precedes the run terminal, with no intervening record.
 Without an episode, commit only the latter two. A run-owned episode ended by
 cancellation, a parent bound, provider failure or deadline-staging failure
 commits its episode terminal as the first row of the transaction that contains
-the existing run terminal. Every existing consecutive pair, ADR 0018's
-settlement then terminal and ADR 0017's `deadline_staging_failed_v1` then
-terminal, stays adjacent and unchanged. This amends the "contains exactly"
+the existing run terminal. Every consecutive pair, a settlement then terminal
+(the maintenance settlement kind when the ending call is a summary call, ADR
+0018's otherwise) and ADR 0017's `deadline_staging_failed_v1` then terminal,
+stays adjacent. This amends the "contains exactly"
 cardinality of those ADR 0017 and ADR 0018 transactions by one leading row, for
-a run-owned episode only. The episode terminal installs a transient
+a run-owned episode only. An episode terminal committed as the leading row of
+any run-terminal transaction, including the refusal transaction above, installs a transient
 episode-pending-terminal marker and applies no effect; its failure and usage are
 validated and applied together with the run terminal that completes the same
 transaction. Reaching the durable head, or any row outside that transaction,
@@ -572,8 +596,8 @@ with exactly `{episode_id, command_id, result}`, where result is the closed
 five-member object above, for checkpointed, unchanged and failed alike. The new
 session snapshot has `last_compact`, null or that same completed payload;
 reattachment therefore discovers completion even when no checkpoint was made.
-The event is committed with the episode terminal and command result before
-publication, never inferred from progress. Run-owned episode identity stays in
+The event is committed with the command result, and with the episode terminal
+when an episode was admitted, before publication, never inferred from progress. Run-owned episode identity stays in
 its owning record and existing run outcome.
 
 `run.finished`, compact completion and snapshot failure views carry this exact
@@ -609,13 +633,21 @@ including any unsummarized middle and the protected tail. No summary text become
 **Commit and recovery.** Derive a distinct maintenance operation ID from episode
 ID and summary ordinal; allowed retries retain that ID and cannot collide with
 ordinary run/turn identities. Reuse ADR 0018 permits, dispatch classification and
-accounting with explicit `compaction` purpose. Successful settlement retains
+accounting with explicit `compaction` purpose. Maintenance request, attempt and
+settlement records are new kinds that carry `episode_id` and summary ordinal in
+place of `run_id`/`turn_id`, plus that purpose; a run-owned episode additionally
+binds its run through the episode record. ADR 0018's existing kinds are not
+written for maintenance. The maintenance settlement carries ADR 0044's v3 reply,
+result and accounting members, and the maintenance request record stages
+`loopex.model_request.v2` bytes. Successful settlement retains
 bounded summary bytes in `checkpoint_pending`; it neither appends a normal
 assistant answer nor completes the parent run. Validate pending progress and
 the applicable post-substitution limits first, as above. Only then commit the checkpoint, publish
 `context.compacted`, then return to the original staging identity if bounds
 permit. A reply after committed abort/deadline is retained as evidence only and
-cannot create a checkpoint. Retain checkpoint tx ID,
+cannot create a checkpoint. An abort committed, or a deadline observed elapsed,
+while `checkpoint_pending` likewise wins: the pending summary stays settlement
+evidence and no checkpoint is committed. Retain checkpoint tx ID,
 expected version and mutation digest. A `commit_unknown` fences mutation and
 publication until resolution. A known settled summary may finish its checkpoint
 without another provider call. Ambiguous attempts follow ADR 0018 and stop the
@@ -648,8 +680,10 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   results can release that group and resume after compaction; include cancelled
   and bound outcomes, maximal prior checkpoint and both automatic/explicit paths.
   Follow that group with several large terminal input-only runs and prove
-  oldest-first release eventually permits staging. Current-run inputs/open
-  exchanges remain protected. Exact sizing of maximal
+  oldest-first release eventually permits staging. Current-run inputs, completed
+  current-run groups at a later staging and open exchanges remain protected; a
+  later-staging overflow with no pre-run range refuses by the numeric bound
+  without a summary call. Exact sizing of maximal
   summary, largest demonstrated profile, both headers and retained tail must
   establish the fixture's pinned input ceiling before its provider attempt.
 - Explicit compact covers a sole terminal group that fits the old window but
@@ -690,9 +724,12 @@ Concept: [Observable consequences](0043-context-compaction-checkpoint.md#concept
   Owner loss or slow traversal past the fixed pre-staging cutoff ends episode
   and run with `compaction_preparation_deadline` and no fabricated bound; an
   unrepresentable first maintenance deadline keeps the run's existing terminal
-  and records `maintenance_deadline_unrepresentable` in the episode. Non-refusal
-  run-owned endings commit the episode terminal first and leave each existing
-  consecutive pair adjacent; a nine-key v2 summary reply fails as incomplete and
+  and records `maintenance_deadline_unrepresentable` in the episode. An
+  out-of-domain or overflowing clock at episode admission admits no episode and
+  makes no call: the run ends `context_preparation_failed` with that cause, and
+  a standalone command completes `failed` with zero usage. Non-refusal
+  run-owned endings commit the episode terminal first and leave each consecutive
+  pair adjacent, including the maintenance settlement then run terminal; a nine-key v2 summary reply fails as incomplete and
   an unreadable one keeps the run's unreadable-answer terminal.
   A one-turn run whose progressing first summary still needs another prefix
   retains that partial checkpoint, then ends with the parent's exact max_turns

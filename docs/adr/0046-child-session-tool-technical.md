@@ -250,7 +250,16 @@ refusal decided before that operation's reserve append is attempted returns
 `router_unavailable`, `router_registration_capacity`, `job_binding_conflict`,
 `parent_cutoff_passed`, `cancelled_before_registration`,
 `cancelled_before_reservation`, `helper_admission_closed`,
-`helper_index_unavailable` and `helper_classification_incomplete`. A role absent
+`helper_index_unavailable`, `helper_classification_incomplete` and
+`invalid_tool_arguments`. Core's schema subset checks only member presence and
+type, so the adapter enforces the argument table itself, at the
+`invalid_tool_arguments` position in the order below and before any binding,
+catalog, slot or allowance check: an undeclared member, or a `description` or
+`prompt` that is empty, not valid UTF-8 or over its bound, is
+`invalid_tool_arguments`. A `role` failing the pattern is `unknown_role` at that
+reason's position, after `delegation_binding_unavailable`. Job, grant, fence and identity validation failures
+keep the existing executor-contract refusal reasons and are outside this adapter
+list. A role absent
 from the retained enabled catalog is `unknown_role`, whether it was never
 defined or was disabled. Missing or corrupt binding or catalog data is
 `delegation_binding_unavailable`; an unbound or closed router is
@@ -260,7 +269,15 @@ another operation's unresolved ledger commit, or an unresolved `initialize`
 commit, is `ledger_fenced`. Different arguments under a retained operation
 identity are never tagged. `job_binding_conflict` is tagged only when no ledger frame
 exists for the registered job's operation; otherwise the answer is the untagged
-unresolved error. After a reserve append is attempted, or while a reserve commit
+unresolved error. When several conditions hold, the adapter returns the first in
+this order: `router_unavailable`, `helper_admission_closed`,
+`cancelled_before_registration`, `job_binding_conflict`,
+`router_registration_capacity`, `helper_index_unavailable`,
+`helper_classification_incomplete`, `invalid_tool_arguments`,
+`delegation_binding_unavailable`, `unknown_role`, `ledger_fenced`,
+`helper_slot_occupied`, `parent_cutoff_passed`, `delegation_count_exhausted`,
+`delegation_tokens_exhausted`, `ledger_capacity`. `cancelled_before_reservation`
+applies whenever its cancel wins before the reserve append. After a reserve append is attempted, or while a reserve commit
 is unresolved, the adapter returns only a bound receipt or an untagged unresolved
 error; it never returns a tagged refusal for an operation whose ledger may hold
 a reservation.
@@ -389,7 +406,7 @@ call unknown, and restart then applies the conservative missing-reservation rule
 below. An attempted or unresolved reserve uses the stop rule instead.
 Derive the cancellation callback's absolute monotonic observation deadline once
 on entry for helper cancellation from the registered parent job's `cleanup_grace_ms` and
-`Executor.cancellation_bounds/1`, minus a fixed 250-ms reply margin. Core begins
+its `Executor.cancellation_bounds/1` `executor_observe_ms`, minus a fixed 250-ms reply margin. Core begins
 its observation earlier; this margin permits bounded handoff delay, not a
 scheduling guarantee. Local cancellation forwards immediately on a dedicated
 path, never queued behind ledger or child-stop work. Local forwarding is a
@@ -399,7 +416,15 @@ remaining deadline; an answer that misses core's window remains unconfirmed.
 Do not use the current runtime grace or renew the deadline between child waits.
 The child may have a longer committed grace. Its cleanup can therefore finish
 after the parent's observation window; return unconfirmed and preserve the
-parent's unknown outcome without a refund or later terminal rewrite.
+parent's unknown outcome without a speculative refund or later terminal rewrite.
+The write-once settlement is deferred until that child's terminal and cleanup
+evidence is conclusive; it then charges retained usage, refunds only
+conclusively unused tokens and releases the slot, while the parent call stays
+unknown. After answering, the adapter owner keeps observing that operation's
+cleanup without holding admission, and performs the settlement when that
+observation reports conclusive terminal and cleanup evidence. It also re-reads
+that evidence, and settles if conclusive, before each later slot check for that
+parent and at startup reconciliation.
 
 A cancel before registration has no bound digest and cannot create a durable
 stop. First consult the validated helper job index and then a conclusive
@@ -628,7 +653,13 @@ A session whose scan answers `invalid_history`,
 `history_unavailable` or `session_absent` is not covered: the host stops
 slicing, stays closed and adds that session's ID to the refusal. Restoring the
 root from backup is the exit; M7 provides no per-session quarantine. This too is
-a recorded limitation of the all-closed choice.
+a recorded limitation of the all-closed choice. A runtime-page answer of
+`store_unavailable` or `unexpected`, or `runtime_unavailable` from either query,
+leaves coverage incomplete: the host stays closed with the same code and names
+no session, and a resident host retries in its next slice. `enumerated` is the
+number of creating mappings returned so far in this start; `covered` is the
+number of those sessions whose captured prefix reached `next_cursor: nil` in
+this start or whose coverage entry validated through the captured head.
 
 Before opening admission, the host completely enumerates committed creating
 mappings with the runtime-page selector, then scans each enumerated session's
@@ -825,7 +856,9 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   and provenance fixtures cross both toolchain pairs and validate retained create
   digests through Store's own transaction recipe. Child frames contain
   object references and remain within the JSON frame cap.
-- Every closed pre-effect refusal reason returns the tagged tuple; exhausted
+- Every closed pre-effect refusal reason returns the tagged tuple, including
+  invalid task arguments, and simultaneous conditions return the first in the
+  fixed order; exhausted
   allowance, unknown role, occupied slot and core's cancelled-before-dispatch
   terminal survive restart without count/token charge or parent recovery
   fencing. An intent with no terminal on a parent already at its count keeps

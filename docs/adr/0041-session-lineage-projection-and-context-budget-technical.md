@@ -94,13 +94,14 @@ version prefix, advertised name or a guessed schema field. A legacy exact table
 entry without this capability follows the inline branch below. Changing the table
 requires a new generation/admitted selection, never a replay-time reinterpretation.
 
-**Legacy inline compatibility.** For a session whose frozen read generation
-does not support `artifact_use`, preserve the existing inline result shape and
+**Legacy inline compatibility.** For a session whose committed
+`tool_selection.artifact_read` is null, whether its frozen read generation is a
+legacy entry or no `loopex.read` is selected, preserve the existing inline result shape and
 the full committed `result.content`, with the normalized cross-run call identity
 and original outcome. This is a compatibility exception to the 2,048-byte
 excerpt cap, not permission to fetch or expand a retained artifact. It applies
-to receipts produced under those frozen old definitions, including later runs
-after upgrade; no timestamp or new tool-set migration determines eligibility.
+to every executor receipt of such a session, whichever generation produced it,
+including later runs after upgrade; no timestamp or new tool-set migration determines eligibility.
 Only bytes already in the receipt are available. Existing truncation or spill
 notices remain explicit; this rule does not recover their omitted output or
 claim that an old tool gained artifact retrieval.
@@ -115,9 +116,12 @@ artifact-retrievable excerpt still requires a supporting frozen read generation;
 otherwise `artifact_read_unavailable` precedes preparation writes. Host inspection
 remains available. Original receipts and previously staged requests never change.
 
-For output from new M7 generations too large for the projection, use the existing
-verified artifact spill path before receipt commitment. Measure the complete encoded projection
-including its reference notice; crossing that bound triggers retention even
+In a session whose `artifact_read` is non-null, for output from new M7
+generations too large for the projection, use the existing verified artifact
+spill path before receipt commitment; in a session whose `artifact_read` is null
+those generations spill only at their existing capture ceiling. In the non-null
+case, measure the complete encoded projection including its reference notice;
+crossing the projection bound triggers retention even
 when output remains below the tool's capture/output ceiling. New M7
 grep/find/ls generations need artifact allowances sufficient for their retained
 capture ceilings; their old one-byte artifact budget cannot implement this
@@ -152,11 +156,12 @@ encoded result remains at most 2,048 bytes. A shorter source saturates at its
 full length. Zero emits an empty excerpt with explicit omission when source
 content exists; it never omits the result or its required metadata. Binary
 descriptions, user/assistant/question content, call identities/generations,
-outcomes, legacy compatibility inline content, explicit artifact-range results
+outcomes, legacy compatibility inline content, inline executor results at or
+below the cap that have no usable reference, explicit artifact-range results
 and frozen native prefixes are fixed.
 An excerpt is eligible only with an already usable committed artifact reference.
-Allocation grants no extra retention/preparation work: inline sources use the
-bounded preparation episode below before they can become eligible.
+Allocation grants no extra retention/preparation work: inline sources above the
+cap use the bounded preparation episode below before they can become eligible.
 These fixed-field rules govern ordinary request allocation. ADR 0043 separately
 permits marked excerpts of an eligible old unit for maintenance input, including
 user/assistant/question content and metadata. It preserves original facts and
@@ -205,8 +210,11 @@ or artifact-content reads occur as preparation side effects. Already retained
 references are reused and do not consume another source allowance.
 
 Staging and preparation failures use ADR 0043's version-2 closed failure union.
-Use `artifact_read_unavailable` for a required retrieval capability absent from
-selection, `artifact_metadata_unrepresentable` for an individually impossible
+Use `artifact_read_unavailable` only when excerpt projection or reference
+preparation is entered for a selection whose `artifact_read` is null. Ordinary
+projection selects the inline branch first, so this is the refusal for a
+committed prepared-reference or excerpt-form fact that the reconstructed
+selection cannot retrieve. Use `artifact_metadata_unrepresentable` for an individually impossible
 reference envelope, and `context_projection_invalid` for missing/conflicting
 canonical facts or normalized-ID collision. Preparation count, source-byte and
 fixed-episode-deadline exhaustion use the corresponding `artifact_preparation_*`
@@ -237,7 +245,8 @@ ordinary host policy evaluates the requested use/range and the executor validate
 its normal grant. Cross-session sharing is outside this branch.
 
 The supported schema subset describes member types; the owner additionally
-enforces both closed argument branches, exclusivity, UTF-8 and range bounds
+enforces both closed argument branches, exclusivity, UTF-8, the unsigned-64-bit
+offset, the length bound and an offset no greater than the resolved object size
 before policy or effect intent. Unknown members, both branches, missing range
 members and a supplied `resolved_artifact` produce the existing
 `invalid_tool_arguments` tool-call disposition. Policy and deferred interaction
@@ -279,7 +288,10 @@ compatibility exception. Length is
 an upper bound: choose the largest UTF-8-safe returned range no longer than the
 requested length that fits this larger encoded cap after metadata. A requested
 start inside a codepoint refuses; the end may shorten with explicit next offset.
-Offset equal to object size returns empty EOF; offset beyond size refuses. A
+Offset equal to object size returns empty EOF. The owner refuses an offset
+beyond the resolved reference's object size as `invalid_tool_arguments` before
+policy; codepoint alignment, content type and representability are executor
+results after allow. A
 binary/non-UTF-8 range gives a bounded unsupported-content result. Retrieval
 results reference the original object/range and never create artifacts of
 excerpts or report the source as a newly retained receipt artifact. Require
@@ -345,7 +357,8 @@ Concept: [Observable consequences](0041-session-lineage-projection-and-context-b
   no omitted result, extra preparation allowance or shortened explicit range read.
 - Replay validates capabilities with the host registry unavailable or changed.
   Coexisting read generations resolve by ID/version. Both-branch, extra-member,
-  injected-resolution, membership and range errors fail identically before
+  injected-resolution, membership, offset-type, length-bound and
+  offset-beyond-size errors fail identically before
   policy, including under a deferring policy; allowed jobs alone
   carry owner resolution and bind it in their digest.
 - Wrong-session/orphan/forged uses, denied policy, injected resolution, missing

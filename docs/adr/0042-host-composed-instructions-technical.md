@@ -12,7 +12,7 @@ Creation and atomic `configure` accept an `instructions` map with exactly:
 
 | Member | Bound |
 | --- | --- |
-| `version` | Nonempty ASCII identifier, at most 64 bytes |
+| `version` | Nonempty, matching `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` |
 | `base` | Nonempty UTF-8, at most 32 KiB |
 | `environment` | UTF-8, at most 4 KiB, empty allowed |
 | `appendix` | UTF-8, at most 16 KiB, empty allowed |
@@ -28,6 +28,10 @@ The full model-request record still must fit ADR 0017's byte bound.
 ADR 0043's refusal revision 2 validates the captured configurable ceiling;
 historical v1 failures still require exactly 1,000. A host override is explicit
 configuration and never silently applied to meet the reference target.
+Ephemeral `start_session/1` and `run/2` accept the same `instructions` map and
+positive `system_class_tokens` as startup options under ADR 0044's combined
+closed inventory; omission keeps the fallback text and the 1,000 ceiling, and
+neither is a per-call option.
 
 M7 uses fresh context-provider receipt revision 4. Revision 3 already belongs to
 ADR 0025's resource-pack receipt. Retain ADR 0017's sixteen-key outer shape when

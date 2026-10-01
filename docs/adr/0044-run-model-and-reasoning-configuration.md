@@ -37,12 +37,17 @@ ephemeral path keeps ADR 0039's non-streaming contract and must preserve the
 same complete native data before returning a reply. Versioned replies also
 classify completion as natural, limit-stopped or unknown. Maintenance accepts
 only a naturally completed reply; valid-looking truncated JSON cannot create
-a checkpoint. Validated reply usage is still charged.
+a checkpoint. Validated reply usage is still charged. On a mode that requires
+continuation, a reply that stops at the reply limit, or with any stop other than
+a tool request or a natural end, is a failed call under the existing
+conservative accounting; it is never delivered as a truncated answer.
 
 The maintainer selected verified public reasoning summaries. When the exact
 provider/model mode establishes that returned text is a user-facing summary,
 the adapter may project that text through existing transient reasoning progress.
-Otherwise it hides the reasoning text. Native blocks, signatures and redacted
+Otherwise it hides the reasoning text. A reply whose reported model differs
+from the response identity its registered row pins fails that call; it is not answered with the
+summary merely hidden. Native blocks, signatures and redacted
 data remain private. Summary text can occur in both the private continuation
 and the public projection; that overlap does not make the whole block public.
 This narrowly qualifies ADR 0011's exclusion of continuation material while
@@ -53,7 +58,7 @@ Configuration becomes a durable session fact. Creation and settled-only
 `configure` commit an exact model identity, reasoning, instruction envelope and
 context/reply limits with one version. It also retains the host-resolved
 capability and provider-mapping descriptor as bounded gating data. Core checks
-its closed shape, declared limits and generic continuation and thinking-disabled flags; adapters alone
+its closed shape, declared limits and generic continuation, thinking-disabled and terminal-tool-history flags; adapters alone
 interpret thinking modes and translate native provider controls. A configuration
 records the mapping rather than consulting a mutable catalog during replay. A run captures that version at admission
 and keeps it through restart. No configuration change occurs inside a run or
@@ -100,11 +105,15 @@ current Claude model.
 
 The maintainer selected ordinary availability at M7 closure. After per-cell
 deterministic conformance, the tested implementation bytes register all nine
-selected model/level cells for ordinary host resolution. Their counted live
+selected model/level cells for ordinary host resolution. One further row is
+registered in the same bytes: provider B's thinking-off summarizer, whose exact
+model is pinned before any dispatch and whose counted witness is the
+cross-provider maintenance case. The nine cells' counted live
 continuation, post-terminal and summary witnesses must pass before closure. The
-post-terminal witness proves the provider accepts the canonical request and that
-thinking resumes on the following exchange;
-there is no candidate-only resolver or source registration after testing. A
+post-terminal witness proves the provider accepts the canonical request and, on
+each cell that requires continuation, that thinking resumes on the following
+exchange; the two Haiku cells without thinking prove that both requests stay
+without it. There is no candidate-only resolver or source registration after testing. A
 failed witness blocks closure under the fixed disposition procedure. It grants
 no calibration run, omitted cell or failed-case retry.
 Before a new thinking exchange, leave half the complete request-record capacity
@@ -169,11 +178,14 @@ original meanings. Private continuation is retained in recovery state, never
 in public configuration snapshots. A Model adapter must now return every
 version-2 reply member, including a nil response identity; an embedder's adapter
 that omits that formerly optional member has its replies refused as unreadable
-until it is updated. A model with no registered row is usable at `default`
+until it is updated. A model with a registered row accepts only its registered
+levels; any other level, including `default`, refuses. A model with no registered row is usable at `default`
 only, without private continuation; on an Anthropic route, a reply that carries
-thinking blocks fails that call and is never silently stripped. After a bound or cancelled tool run, such a
-session refuses the next prompt with `canonical_history_rendering_unsupported`
-until that group is explicitly compacted or a registered model is configured.
+thinking blocks fails that call and is never silently stripped. After a tool run
+that ends without a final assistant reply, whether by a bound, cancellation or
+failure, a session on such a model refuses the next prompt with `canonical_history_rendering_unsupported`
+until that group is explicitly compacted or a model whose registered mapping
+supports that history is configured.
 The reference default becomes the dated model identity, and its old alias
 resolves to it.
 The maintainer selected updated wire clients only. M7's foreground server serves

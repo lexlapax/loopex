@@ -9,7 +9,7 @@ Technical depth: [Host-composed instructions](0042-host-composed-instructions-te
 - **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) only the fixed source of system text; [ADR 0017](0017-durable-context-admission-budget.md#concept)'s fixed system-class token ceiling, now a host value with the existing 1,000 default, and its closed receipt revision for explicit instruction provenance
 - **Extends:** [ADR 0025](0025-resource-packs-and-skill-admission.md#concept)'s receipt revision with the same instruction provenance; preserves its resource admission, header, source-reference and budget contracts
 - **Amends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with `instructions` and `system_class_tokens` for ephemeral `start_session/1` and `run/2`; defaults, buffered transport and cleanup remain
-- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for settled updates and [ADR 0043](0043-context-compaction-checkpoint.md#concept) for refusal revision 2
+- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for settled updates, [ADR 0043](0043-context-compaction-checkpoint.md#concept) for refusal revision 2, and [ADR 0046](0046-child-session-tool.md#concept) and [ADR 0049](0049-explicit-host-configuration.md#concept) for the role facts it renders
 - **Prerequisite for:** M7 outcomes 2 and 7
 
 <a id="concept-adr-0042-decision"></a>
@@ -37,7 +37,7 @@ them only through ADR 0044's atomic settled `configure` command. An active run
 retains its configuration; restart never rereads a file to reconstruct it.
 Version the receipt so each instruction block is bound to that captured source;
 old receipt bytes retain their original validation contract.
-A host may explicitly raise the system-class ceiling within the context budget.
+A host may explicitly set the system-class ceiling to any positive value within the context budget.
 The strict admission rule remains observed tokens less than the ceiling.
 
 <a id="concept-adr-0042-consequences"></a>

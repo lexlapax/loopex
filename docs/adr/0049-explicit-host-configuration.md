@@ -17,14 +17,17 @@ Technical depth: [Explicit host configuration and conversation command](0049-exp
 Technical depth: [Contract](0049-explicit-host-configuration-technical.md#technical-adr-0049-decision).
 
 M7 adds a versioned file selected explicitly by `--config FILE`, with CLI
-overrides and inspectable effective values. Only the reference host reads it.
+overrides and inspectable effective values. File inspection shows what a new
+session would use and never a session's committed values. Chat reports its
+effective values and origins once at startup on stderr, best-effort, with
+committed values on resume. Only the reference host reads the file.
 Embedding callers pass equivalent explicit options. There is no automatic
 home/project discovery, hot reload, interpolation or config writer.
 
 `loopex chat` owns one foreground durable runtime and uses the public session
 facade for conversation, answers, steering, follow-up, configuration and
 compaction. Existing one-shot and daemon commands retain their grammar; M7
-adds trace startup controls to runtime-owning commands. A connected client
+adds trace startup controls to chat, ask and daemon startup only. A connected client
 never gains runtime trace authority. Remote conversational-terminal attachment
 and installed lifecycle management remain successor work.
 
@@ -45,6 +48,8 @@ read once as exact bounded host bytes. Project resources still require their
 separate admission. Existing sessions retain committed ordinary settings and
 their frozen role catalog; file edits to those values affect new sessions. Explicit between-run
 configuration is the only way to change admitted model or instruction settings.
+A settled legacy session with no prior model request resumes only with an
+explicit `--model` flag; a file value never supplies it.
 Resume also keeps the session's committed cleanup period. A changed file value
 is a default for new sessions; a conflicting explicit cleanup flag refuses
 through ADR 0016's prepared-recovery path before work can start.
@@ -68,8 +73,8 @@ flags do not promise a total host-memory bound. Chat is a text transcript; piped
 mode also emits bounded versioned @loopex control lines for admissions, questions,
 barriers, status, errors and closing. Barrier and closing lines name run outcomes
 only; a compaction result appears in the transcript, status and exit code.
-While an admission is unresolved the owner holds internal results and admits no
-other command; an unresolvable admission stays reported as unknown, after which
+While an admission is unresolved the owner holds internal results and timer
+transitions and admits no other command; an unresolvable admission stays reported as unknown, after which
 interactive chat accepts only exit. Validation accepts a credential-free
 provider binding and names the commands it cannot run. Exit succeeds only when every admitted operation
 succeeded and cleanup is confirmed. Every refusal discovered after resume

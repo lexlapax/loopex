@@ -41,8 +41,9 @@ cannot create nested questions. No second policy evaluation follows a model-tool
 answer; policy-defer interactions retain their existing reevaluation. An answer
 never grants a later effect.
 
-Persist expiry as `min(created_at_ms + 600000, run_deadline_at_ms,
-optional caller_deadline_at_ms)`. No provider invocation is in flight while
+Persist expiry as `min(created_at_ms + 600000, run_deadline_at_ms)`, where the
+run deadline is the effective deadline including any ADR 0046 `deadline_at_ms`
+ceiling. No caller wait timeout enters this value. No provider invocation is in flight while
 waiting. For `producer=model_tool`, one transaction settles interaction disposition,
 original tool terminal result, response command identity/digest where present,
 and the next run action. Terminal fields are producer, interaction/run/turn/call

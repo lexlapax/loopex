@@ -141,13 +141,16 @@ registered row therefore resolves `default` to one literal generic descriptor:
 `thinking: {mode: omitted}`. That renderer is the ordinary canonical ReqLLM
 rendering with no private blocks, for every provider route; on an Anthropic
 route the adapter still classifies native reply blocks before conversion, solely
-to apply the refusal below. Every other level refuses before commitment. Such a
-session never gains private continuation: on the Anthropic native grammar, a
+to apply the refusal below. Every other level refuses before commitment. A
+model with any registered row resolves only its registered levels; an unlisted
+level, including `default`, refuses and never falls back to the generic
+descriptor. A session on the generic descriptor never gains private
+continuation: on the Anthropic native grammar, a
 reply carrying a thinking or redacted-thinking block under
 `continuation_required: false` fails that attempt through the bounded
 started-call error path instead of dropping the block; this holds for registered
 rows too. Because `canonical_terminal_tool_history` is false, the post-terminal
-gate below applies to such a session. `default` omits the override;
+gate below applies to a generic-descriptor session. `default` omits the override;
 it does not claim that the provider disables thinking. Manual low/medium/high
 map to 1,024/2,048/4,096 thinking tokens. Host resolution and adapter preflight
 require `max_tokens > budget_tokens` and reject a conflict before commitment;
@@ -259,10 +262,12 @@ An admitted OpenRouter route may therefore host an Anthropic model; this proves
 route switching without claiming cross-vendor model diversity. The always-on
 conversation model need not disable thinking. That provider-B summarizer is one
 additional registered row beyond the nine cells. Phase 0 pins its exact
-`provider:model`, mapping and renderer revisions and its native thinking-off
-encoding in vectors before integration, with `thinking_disabled: true` and
-`continuation_required: false`; `m7.cross-provider-maintenance` is its counted
-witness.
+`provider:model`, mapping and renderer revisions, its literal expected native
+response-model string and its native thinking-off encoding in vectors before
+integration, with `thinking_disabled: true`, `continuation_required: false` and
+`canonical_terminal_tool_history: false`. Its mapping fails a reply whose
+response model differs from that pinned string, as below.
+`m7.cross-provider-maintenance` is its counted witness.
 
 Inspect the final request after dependency normalization, not only Loopex's
 input options, including final headers and transport controls. A dependency-
@@ -299,8 +304,10 @@ verified provider summary. Keep that classification in the versioned adapter
 mapping, not a caller-authored permission flag or a new core provider taxonomy.
 Apply it before converting native events, emitting progress or incrementing
 the public delta counter. For streaming, verify the response identity and
-supported event kind before its first eligible fragment. Revision 1 requires
-the native response model to equal the row's literal model identity and permits
+supported event kind before its first eligible fragment. Revision 1 of both
+Claude mappings requires, on every registered row including rows with no public
+summary, the native response model to equal the row's literal model identity;
+the generic descriptor carries no such check. Revision 1 permits
 only a native `thinking_delta` inside its validated thinking block as summary
 text; signatures and redacted-thinking deltas are ineligible. An unverified mode,
 changed response identity or unexpected event cannot inherit another mapping's
@@ -485,11 +492,13 @@ from v3, retaining its other ten fields exactly. `model_attempt_settled_v3`
 keeps the twelve outer fields and accepts that reply variant. ADR 0021 already
 owns v2; never reinterpret v2 records as carrying v3 replies. Preserve its
 compact `accounting_evidence` member and closed relations under the new kind.
-M7 writes `model_attempt_settled_v3` for every newly committed settlement:
-ordinary, maintenance, error-only, nil-continuation, unreadable and validated
-reply compaction. Historical v1/v2 kinds are read-only under their original validators, including
+M7 writes `model_attempt_settled_v3` for every newly committed ordinary
+settlement, including error-only, nil-continuation, unreadable and validated
+reply compaction. A maintenance settlement is ADR 0043's separate maintenance
+settlement kind; it carries the same v3 reply, result and accounting members
+under `episode_id` and summary ordinal. Historical v1/v2 kinds are read-only under their original validators, including
 when an older request later receives a new v3 settlement. This explicitly amends
-ADR 0021's v2-only writer clause. Within each session the first v3 settlement is
+ADR 0021's v2-only writer clause. Within each session the first v3 settlement or maintenance settlement is
 a monotonic cutover: no later newly appended v1/v2 settlement is valid. Historical
 earlier versions remain readable; recovery validates that ordering.
 An exact nine-member v2 adapter reply is still admissible when the staged
@@ -824,7 +833,7 @@ integration; no old client receives unknown shapes under unchanged negotiation.
 Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md#concept-adr-0044-consequences).
 
 - Atomic creation/configure, strict validation, version capture and idempotency.
-- New v3 settlement writers cover ordinary/maintenance, successful nil/non-nil
+- New v3 settlement writers cover ordinary settlements and ADR 0043's maintenance settlement kind, successful nil/non-nil
   continuation, model-call error, unreadable and validated-compaction results.
   Exact legacy v2 adapter replies succeed only without required continuation;
   mixed/extra-key shapes refuse. Historical settlement readers stay unchanged.

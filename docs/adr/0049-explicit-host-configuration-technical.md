@@ -84,8 +84,14 @@ The chat overrides are `--model`, `--reasoning`, `--compaction-model`, `--max-st
 `--output text`, `--no-helpers` and the trace flags below. Provider selection
 is part of exact `--model provider:model`; there is no redundant `--provider`.
 Saved roles and allowance declarations are authored in the file, not flags.
-Inspection commands accept the same overrides to show exactly what chat would
-use. `--no-helpers` may narrow a new session's file configuration; it cannot
+Inspection commands accept the same overrides to show exactly what a new chat
+session would use. `config show` takes no session, reads no store and reports no
+`committed` origin; chat's effective startup report and `/status` show committed
+values on resume. Chat emits the value/origin report defined under precedence
+once at startup through its bounded stderr writer, before reading input and, on
+resume, after preparation and before activation, as its effective startup
+report. Like other stderr diagnostics it is best-effort under a stalled reader
+and never gates startup. `--no-helpers` may narrow a new session's file configuration; it cannot
 change an existing session's committed tool generation on resume.
 
 On resume, file defaults do not reconfigure. Use committed model, reasoning,
@@ -102,13 +108,17 @@ declaration; resumed runs reuse their counters. File edits never substitute
 these values, and changing the declaration requires a new parent session. A
 conflicting `--no-helpers` on a helper-enabled resumed session refuses before
 activation; a matching disable on an already helper-disabled session is harmless.
-Effective inspection reports these values with committed origin. Explicit conflicting flags
+Chat's effective startup report shows these values with `committed` origin; of these values `/status` shows only those that are members of its closed record. Explicit conflicting flags
 for those fields refuse and direct the operator to `/configure` for mutable
 settings; immutable tool/catalog changes require a new session. Only
 max_turns, deadline_ms and token_budget for a new run come from validated
 invocation configuration; in-flight bounds stay committed. A conflicting
 `chat --resume S --max-tokens 8000` therefore refuses before dispatch and
 directs the operator to settled `/configure`; it is not a run-bound override.
+A legacy settled session with no committed configuration and no retained
+selection evidence takes ADR 0044's explicit host selection from an explicit
+`--model` flag only; without it resume refuses through the abandonment path
+below. File values never supply that migration.
 Require matching workspace and ADR 0024 policy identity for pending interactions,
 and available routes for admitted work. Core has no session-wide policy identity.
 A settled session has no core session-wide policy identity, so this proposal
@@ -121,7 +131,7 @@ core replay default or a matching identity claim. Trace/output are host-local op
 Cleanup grace retains ADR 0016's separate immutable contract. File/default
 `session.cleanup_grace_ms` applies only to new sessions. Resume recovers the
 committed value before scheduling and uses it for the owner, configured
-interrupt/cancellation bounds and effective inspection with `committed` origin.
+interrupt/cancellation bounds and chat's effective report with `committed` origin.
 An omitted or matching `--cleanup-grace-ms` preserves it. A conflicting explicit
 flag follows the existing prepared-owner abandonment and refusal path without
 activating recovered work; failed abandonment retains the existing unconfirmed
@@ -131,9 +141,11 @@ the same abandonment path and unconfirmed-failure rule; "before activation" neve
 Neither `/configure` nor a new run changes this value.
 
 `--compaction-model` overrides the file's `maintenance.model` for new episodes,
-including on resume; it cannot redirect an admitted episode. Show configured
-selection or `unconfigured`, its origin and any distinct active episode model
-in effective/status output without resolving credentials. No flag invents a
+including on resume; it cannot redirect an admitted episode. Show the configured
+selection or `unconfigured` in `config show`, chat's effective report and
+`/status`, and its origin in `config show` and chat's effective report only;
+chat's effective report and `/status` also show any distinct active episode
+model. None of them resolves credentials. No flag invents a
 default model or adds a provider binding. Composition validates the selected
 model's admitted route and verified thinking-off mapping before startup.
 
@@ -277,7 +289,8 @@ Another unknown/fenced result leaves it fenced. Owner loss or deadline leaves
 uncertainty; it does not prove non-admission. No competing mutation is permitted.
 While that admission proposal is pending, the owner defers every other internal
 proposal in arrival order: results returned by model and executor workers, and
-the journal proposals of its run and cleanup timers. It applies them after
+the journal proposals of every owner timer, including run deadline, interaction
+expiry, maintenance and cleanup. It applies them after
 resolution. The resolution tick and the resolver deadline are not deferred.
 Command admissions are never queued: they keep the existing fenced
 `commit_unknown` reply. At the deadline an unresolved proposal stays fenced and
@@ -327,7 +340,7 @@ objects, never host strings. Trace/runtime teardown must also be joined. When
 no run exists, or the resolved command admitted no run of its own, every row
 uses the session's foreground run and outcome under the run-only rule above.
 
-| Resolution by the captured deadline | Final records after the initial input | wait fields and closing cleanup |
+| Resolution by the captured deadline or a second interrupt, whichever is first | Final records after the initial input | wait fields and closing cleanup |
 | --- | --- | --- |
 | Admitted work remains active | Abort once, then wait, closing | If committed terminal and cleanup confirmed: settled, its committed run_id/outcome, interaction_id and command_id null; cleanup confirmed. Otherwise use the cleanup-unknown branch below |
 | Admitted work already terminal | wait, closing | settled only with that committed outcome and confirmed cleanup; run_id is its committed ID, interaction_id/command_id null; otherwise cleanup unknown |
@@ -351,8 +364,9 @@ No second durable conversation state lives in the terminal.
 **Tracing.** `--trace`/`--no-trace`, `--trace-level calls|returns|arguments`,
 repeatable `--trace-module`, `--trace-max-entry-bytes`,
 `--trace-max-entries-per-second`, `--trace-max-queue-entries` map to ADR 0030.
-Expose them on chat, ask and daemon startup only when that command owns the
-runtime. Existing non-owning commands reject them. Absent modules use ADR 0030's
+Expose them on chat, ask and daemon startup only. Every other existing command,
+including offline `run`, `resume` and `cancel` and every non-owning command,
+rejects them. Absent modules use ADR 0030's
 existing `:loopex` and `:loopex_protocol` application-selector defaults. No
 arbitrary module atoms; reject unsupported
 selectors. File/CLI modules contain at most 64 strings of at most 128 bytes,
@@ -416,14 +430,19 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
 - Unknown admission resolving to active work then bounded abort, conclusive
   refusal/non-admission with and without earlier work, unresolved-at-deadline,
   and cleanup lacking a terminal fact have exact control-record vectors, as do
-  an unknown steer whose worker result arrives before resolution, a command
-  refused during the pending window, and wait/closing after compact and
-  configure with and without a foreground run. No
+  an unknown steer whose worker result arrives before resolution, and
+  wait/closing after compact and configure with and without a foreground run. No
   active run can become a synthetic settled barrier or stale commit_unknown.
 - Public-facade conversation tests for each command state, TTY and pipe ordering,
   barriers, dynamically identified answers/declines, EOF, input/output bounds,
   marker spoofing, output stalls, fail-fast pipe errors,
   interrupts, owner transaction re-presentation and observational command disposition and old-command compatibility.
+  A second command submitted at the facade during the pending window receives
+  the fenced `commit_unknown` reply, is never queued, and its own ID observes
+  `pending`; the interactive host refuses it locally without submitting.
+- A legacy settled session with no prior request resumes with an explicit
+  `--model`, refuses and abandons its prepared owner without one, and never takes
+  a file model; offline `run`, `resume` and `cancel` reject every trace flag.
 - Helper-enabled file resume of an old non-task session stays disabled; a task
   selection without its expected binding refuses. Fixture validation reopens through the same pinned wrapper; pending
   interactions enforce their retained policy identity.
