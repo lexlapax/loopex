@@ -193,7 +193,7 @@ defmodule Loopex.Runtime.SessionState do
           resources: map() | nil,
           run_resources: map(),
           charged: map(),
-          provider_settlement_version: 1 | 2,
+          provider_settlement_version: 1 | 2 | 3,
           interactions: map(),
           open_interaction: binary() | nil,
           expected_events: [map()]
@@ -2370,6 +2370,7 @@ defmodule Loopex.Runtime.SessionState do
               "model_attempt_opened_v1",
               "model_attempt_settled_v1",
               "model_attempt_settled_v2",
+              "model_attempt_settled_v3",
               "model_termination_admitted_v1",
               "effect_intent_committed",
               "executor_receipt_committed",
@@ -3105,15 +3106,20 @@ defmodule Loopex.Runtime.SessionState do
   # conversation, and ending together. `retry` and `continue` settlements are
   # complete in one row because neither ends the run.
   defp apply_internal_record(state, %{kind: kind} = record)
-       when kind in ["model_attempt_settled_v1", "model_attempt_settled_v2"] do
+       when kind in [
+              "model_attempt_settled_v1",
+              "model_attempt_settled_v2",
+              "model_attempt_settled_v3"
+            ] do
     with :ok <- ProviderAttempt.validate_settled(record),
          :ok <- settlement_version_order(state, kind),
          run_id = record["run_id"],
          %{stage: "model_attempt_open", request: request} = work <-
            Map.get(state.pending_work, run_id),
          true <- attempt_identity_matches?(record, run_id, work, request),
+         :ok <- settlement_request_agrees?(state, record, run_id, request),
          true <- settlement_termination_agrees?(state, run_id, work, record) do
-      version = if kind == "model_attempt_settled_v2", do: 2, else: 1
+      version = settlement_version(kind)
 
       apply_attempt_settlement(
         %{state | provider_settlement_version: version},
@@ -4297,10 +4303,38 @@ defmodule Loopex.Runtime.SessionState do
       Map.get(work, :model_termination) != "deadline"
   end
 
-  defp settlement_version_order(%{provider_settlement_version: 2}, "model_attempt_settled_v1"),
-    do: {:error, :provider_settlement_version_downgrade}
+  # Concept: recovered replies use the configuration captured for their run.
+  # Technical depth: v3 capsules bind the committed request and that run's
+  # immutable continuation requirement, rather than a later session setting.
+  defp settlement_request_agrees?(
+         state,
+         %{kind: "model_attempt_settled_v3"} = record,
+         run_id,
+         request
+       ) do
+    required =
+      case run_configuration(state, run_id) do
+        nil -> false
+        configuration -> configuration["provider_mapping"]["continuation_required"]
+      end
 
-  defp settlement_version_order(_state, _kind), do: :ok
+    ProviderAttempt.validate_settled(record, request, required)
+  end
+
+  defp settlement_request_agrees?(_, _, _, _), do: :ok
+
+  defp settlement_version("model_attempt_settled_v1"), do: 1
+  defp settlement_version("model_attempt_settled_v2"), do: 2
+  defp settlement_version("model_attempt_settled_v3"), do: 3
+
+  # Concept: committing a new settlement generation is a one-way session cutover.
+  # Technical depth: retries and error-only v3 settlements advance the same
+  # generation marker; v1/v2 remain readable only before that first v3 row.
+  defp settlement_version_order(%{provider_settlement_version: current}, kind) do
+    if settlement_version(kind) < current,
+      do: {:error, :provider_settlement_version_downgrade},
+      else: :ok
+  end
 
   defp apply_attempt_settlement(state, run_id, work, %{"next" => "retry"} = record) do
     next_work =

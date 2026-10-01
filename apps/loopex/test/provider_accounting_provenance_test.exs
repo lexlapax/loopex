@@ -325,6 +325,89 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
            }
   end
 
+  test "v3 settlement replay preserves canonical answer and accounting with its terminal pair",
+       c do
+    {:ok, proposal} =
+      SessionState.propose_model_attempt_settled(
+        c.state,
+        c.work.run_id,
+        {:reply, raw_reply(c, 7, 5)}
+      )
+
+    promoted = %{proposal | records: Enum.map(proposal.records, &v3_record/1)}
+    assert {:ok, replayed} = replay_proposal(c, promoted)
+    assert replayed.provider_settlement_version == 3
+
+    assert SessionState.elements(replayed, c.work.run_id) ==
+             SessionState.elements(proposal.next, c.work.run_id)
+
+    assert SessionState.accounting(replayed, c.work.run_id) ==
+             SessionState.accounting(proposal.next, c.work.run_id)
+
+    assert {:error, _} = replay_proposal(c, %{promoted | records: [hd(promoted.records)]})
+
+    [settlement, terminal] = promoted.records
+
+    assert {:error, _} =
+             replay_proposal(c, %{
+               promoted
+               | records: [
+                   %{settlement | "result" => proposal.records |> hd() |> Map.fetch!("result")},
+                   terminal
+                 ]
+             })
+  end
+
+  test "v3 cutover admits older prefixes but refuses every later v1 or v2 settlement", c do
+    {:ok, first} =
+      SessionState.propose_model_attempt_settled(c.state, c.work.run_id, :not_dispatched)
+
+    {:ok, opened} = SessionState.propose_model_attempt_open(first.next, c.work.run_id)
+
+    {:ok, final} =
+      SessionState.propose_model_attempt_settled(
+        opened.next,
+        c.work.run_id,
+        {:reply, raw_reply(c, 7, 5)}
+      )
+
+    for prefix <- [
+          first.records,
+          Enum.map(first.records, &legacy_record/1),
+          Enum.map(first.records, &v3_record/1)
+        ] do
+      promoted = %{
+        final
+        | records: prefix ++ opened.records ++ Enum.map(final.records, &v3_record/1)
+      }
+
+      assert {:ok, replayed} = replay_proposal(c, promoted)
+      assert replayed.provider_settlement_version == 3
+    end
+
+    for tail <- [final.records, Enum.map(final.records, &legacy_record/1)] do
+      downgraded = %{
+        final
+        | records: Enum.map(first.records, &v3_record/1) ++ opened.records ++ tail
+      }
+
+      assert {:error, :provider_settlement_version_downgrade} = replay_proposal(c, downgraded)
+    end
+  end
+
+  defp v3_record(%{:kind => @v2, "result" => %{"kind" => "reply", "reply" => reply}} = record),
+    do: %{
+      record
+      | :kind => "model_attempt_settled_v3",
+        "result" => %{
+          "kind" => "reply",
+          "reply" => Map.merge(reply, %{"completion" => "unknown", "continuation" => nil})
+        }
+    }
+
+  defp v3_record(%{kind: @v2} = record), do: %{record | kind: "model_attempt_settled_v3"}
+  defp v3_record(record), do: record
+
   defp raw_reply(c, input, output) do
     %{
       text: "",

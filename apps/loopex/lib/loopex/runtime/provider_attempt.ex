@@ -15,7 +15,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
   Fixed by
   [ADR 0018](../../../../docs/adr/0018-provider-attempt-authority-and-recovery.md#concept)
   and its versioned accounting provenance in
-  [ADR 0021](../../../../docs/adr/0021-compacted-provider-accounting-provenance.md#concept).
+  [ADR 0021](../../../../docs/adr/0021-compacted-provider-accounting-provenance.md#concept),
+  with M7's reply/continuation generation in
+  [ADR 0044](../../../../docs/adr/0044-run-model-and-reasoning-configuration.md#concept).
 
   ## Technical depth
 
@@ -34,6 +36,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
 
   @opened_kind "model_attempt_opened_v1"
   @settled_kind "model_attempt_settled_v2"
+  @settled_v3_kind "model_attempt_settled_v3"
   @legacy_settled_kind "model_attempt_settled_v1"
   @termination_kind "model_termination_admitted_v1"
 
@@ -295,7 +298,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_settled(map()) :: :ok | {:error, term()}
   def validate_settled(record) when is_map(record) do
-    with kind when kind in [@legacy_settled_kind, @settled_kind] <-
+    with kind when kind in [@legacy_settled_kind, @settled_kind, @settled_v3_kind] <-
            Map.get(record, :kind, Map.get(record, "kind")),
          :ok <- exact_keys(record, @settled_keys),
          :ok <- validate_identity(record),
@@ -309,6 +312,44 @@ defmodule Loopex.Runtime.ProviderAttempt do
   end
 
   def validate_settled(_record), do: {:error, :invalid_attempt_settlement}
+
+  @doc """
+  ## Concept
+
+  Bind a retained v3 settlement to its owning request and captured mapping.
+
+  ## Technical depth
+
+  Structural record validation cannot infer continuation requirements or model
+  identity from a digest. The serial owner supplies that already committed
+  context. Error-only settlements retain no reply; successful replies require
+  the same capsule relation as live admission, including evidence-only replies.
+  """
+  @spec validate_settled(term(), map(), boolean()) :: :ok | {:error, term()}
+  def validate_settled(record, request, required)
+      when is_map(record) and is_boolean(required) do
+    with @settled_v3_kind <- Map.get(record, :kind, Map.get(record, "kind")),
+         :ok <- validate_settled(record),
+         true <- record["staged_request_digest"] == request.staged_request_digest do
+      case record["result"] do
+        %{"kind" => "reply", "reply" => reply} ->
+          validate_reply_capsule(
+            reply,
+            request,
+            reply["completion"],
+            reply["continuation"],
+            required
+          )
+
+        %{"kind" => "error"} ->
+          :ok
+      end
+    else
+      _ -> {:error, :invalid_attempt_settlement}
+    end
+  end
+
+  def validate_settled(_, _, _), do: {:error, :invalid_attempt_settlement}
 
   @doc """
   ## Concept
@@ -396,6 +437,86 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
+  Admit an exact M7 callback and retain its canonical v3 reply as one whole value.
+
+  ## Technical depth
+
+  The owner supplies continuation_required from its captured mapping, never from
+  adapter data. Nine-field v2 callbacks become nil continuation and unknown
+  completion only when continuation is not required. Eleven-field v3 callbacks
+  require all fields and preserve their declared completion. A required capsule
+  must bind the staged model, consume the canonical text/calls and declare natural
+  completion with the matching open/closed relation. The entire raw callback and
+  capsule are admitted before normalized usage may supply accounting evidence.
+  The two-argument projection retains the historical reply generation's shape.
+  """
+  @spec canonical_reply(term(), map(), boolean()) :: {:ok, map()} | {:error, term()}
+  def canonical_reply(reply, request, continuation_required)
+      when is_map(reply) and not is_struct(reply) and is_boolean(continuation_required) do
+    with :ok <- admitted_raw_reply(reply),
+         {:ok, encoded} <- stringify(reply),
+         {:ok, completion, capsule} <- callback_v3_fields(encoded, continuation_required),
+         {:ok, projected} <-
+           canonical_reply(Map.drop(encoded, ~w(completion continuation)), request),
+         :ok <-
+           validate_reply_capsule(projected, request, completion, capsule, continuation_required) do
+      {:ok, Map.merge(projected, %{"completion" => completion, "continuation" => capsule})}
+    else
+      _ -> {:error, :unreadable_model_answer}
+    end
+  end
+
+  def canonical_reply(_, _, _), do: {:error, :unreadable_model_answer}
+
+  defp callback_v3_fields(encoded, continuation_required) do
+    keys = Map.keys(encoded) |> Enum.sort()
+
+    cond do
+      keys == Enum.sort(@callback_keys) and not continuation_required ->
+        {:ok, "unknown", nil}
+
+      keys == Enum.sort(@callback_keys ++ ~w(completion continuation)) and
+          encoded["completion"] in ~w(natural limit unknown) ->
+        {:ok, encoded["completion"], encoded["continuation"]}
+
+      true ->
+        {:error, :unreadable_model_answer}
+    end
+  end
+
+  defp validate_reply_capsule(_reply, _request, _completion, nil, false), do: :ok
+
+  defp validate_reply_capsule(reply, request, "natural", capsule, true) when is_map(capsule) do
+    if capsule["model"] == request.model,
+      do: validate_capsule_contents(reply, capsule),
+      else: {:error, :unreadable_model_answer}
+  end
+
+  defp validate_reply_capsule(_, _, _, _, _), do: {:error, :unreadable_model_answer}
+
+  defp validate_capsule_contents(reply, capsule) do
+    with {:ok, _blocks} <-
+           Loopex.Model.ContentReferences.expand(
+             capsule,
+             reply["text"],
+             Enum.map(reply["tool_calls"], & &1["arguments"])
+           ),
+         native_ids <-
+           capsule["content"]
+           |> Enum.filter(&(&1["kind"] == "tool_use_ref"))
+           |> Enum.map(& &1["native_id"]),
+         canonical_ids <- Enum.map(reply["tool_calls"], & &1["id"]),
+         true <- native_ids == canonical_ids,
+         true <- length(canonical_ids) == length(Enum.uniq(canonical_ids)) do
+      :ok
+    else
+      _ -> {:error, :unreadable_model_answer}
+    end
+  end
+
+  @doc """
+  ## Concept
+
   The exact normalized usage of one reply: either a complete reported pair or a
   named reason it is unreported.
 
@@ -474,8 +595,30 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
-  defp validate_result(%{"kind" => "reply", "reply" => reply} = result, _kind)
-       when map_size(result) == 2 and is_map(reply) and map_size(reply) == 8 do
+  defp validate_result(%{"kind" => "reply", "reply" => reply} = result, @settled_v3_kind)
+       when map_size(result) == 2 and is_map(reply) and map_size(reply) == 10 do
+    with :ok <- exact_keys(reply, @reply_keys ++ ~w(completion continuation)),
+         :ok <-
+           validate_result(%{result | "reply" => Map.take(reply, @reply_keys)}, @settled_kind),
+         true <- reply["completion"] in ~w(natural limit unknown) do
+      case {reply["completion"], reply["continuation"]} do
+        {_, nil} ->
+          :ok
+
+        {"natural", capsule} when is_map(capsule) ->
+          validate_capsule_contents(reply, capsule)
+
+        _ ->
+          {:error, :invalid_attempt_settlement}
+      end
+    else
+      _ -> {:error, :invalid_attempt_settlement}
+    end
+  end
+
+  defp validate_result(%{"kind" => "reply", "reply" => reply} = result, kind)
+       when kind in [@legacy_settled_kind, @settled_kind] and map_size(result) == 2 and
+              is_map(reply) and map_size(reply) == 8 do
     with :ok <- exact_keys(reply, @reply_keys),
          {:ok, _identity} <- reply_identity(Map.get(reply, "identity")),
          {:ok, _calls} <- reply_tool_calls(Map.get(reply, "tool_calls")),
@@ -509,9 +652,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
            "category" => "unreadable_model_answer",
            "accounting_evidence" => evidence
          } = result,
-         @settled_kind
+         kind
        )
-       when map_size(result) == 3,
+       when kind in [@settled_kind, @settled_v3_kind] and map_size(result) == 3,
        do: validate_accounting_evidence(evidence)
 
   defp validate_result(_result, _kind), do: {:error, :invalid_attempt_settlement}

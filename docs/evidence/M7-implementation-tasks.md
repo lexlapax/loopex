@@ -63,6 +63,8 @@ Part of the [evidence index](README.md).
   retained-history sizing, atomic commit, restart and commit-boundary fault proofs.
 - Done: implement shared bounded content-reference expansion and pure exact native
   block capture, preserving text slices, ordered arguments and both JSON ceilings.
+- Done: prepare strict M7 callback projection and source-bound v3 settlement
+  readers, including monotonic cutover and unchanged historical reply shapes.
 - Next: complete host resolution, maintenance quiescence and checkpoint-aware
   configuration preflight; join native capture to versioned replies/settlements,
   source-bound request envelopes and the transport bridge; complete question
@@ -76,6 +78,30 @@ Part of the [evidence index](README.md).
 
 ## Development observations
 
+- 2026-10-01: ProviderAttempt's M7 projection admits exact nine-field v2 or
+  eleven-field v3 callbacks and returns the ten-field canonical v3 shape.
+  Missing provider_response_id, mixed/extra fields, missing required capsules,
+  non-natural continuation completion and malformed/oversized capsules refuse
+  before the caller receives accounting evidence. V2 normalizes to explicit
+  nil continuation/unknown completion only when the captured mapping permits it.
+  Capsule model, ordered native IDs, complete text and argument consumption bind
+  the owning staged request. The historical two-argument projection and v1/v2
+  settlement schemas retain their existing meanings. The v3 settlement decoder
+  accepts the exact new reply/error shapes; recovery checks its captured run
+  mapping and request, retains paired terminals and rejects all v1/v2 rows after
+  the first v3 settlement, including a retry or error-only cutover.
+  Focused projection/replay checks pass 17 tests in 0.6 seconds on current and
+  floor toolchains. Provider authority/accounting/ceiling/configuration/codec
+  regressions pass 120 tests in 25.8 seconds; the retained complete output is
+  `/private/tmp/loopex-m7-v3-reply-readers.log`, SHA-256
+  `6b1cc4ec4bcf32122d7d32bdee11b514070a97e0f123e6aabeb868e335973a91`.
+  Deliberately unproved provider-cleanup faults remain visible in that output;
+  passing assertions do not resolve the separate Task.Supervisor T16 follow-up.
+  This prepares readers before emission. The live writer still uses v2 and the
+  historical callback projection; migrate it and every live fixture together
+  before claiming complete v3 settlement or callback integration. Source-bound
+  request envelopes, native transport, continuation accounting and ordinary
+  reasoning registration remain pending.
 - 2026-10-01: shared ContentReferences expansion implements the closed literal,
   text_ref and tool_use_ref union against canonical text and ordered arguments.
   Success requires complete UTF-8 text consumption, each call index exactly once,
@@ -635,6 +661,7 @@ Part of the [evidence index](README.md).
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
 - [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
+- [x] Prepare exact v2/v3 callback projection, source-bound v3 settlement readers and monotonic historical-prefix recovery before writer migration.
 - [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
 - [x] Implement pure exact native-array capture and reconstruction through the shared expander, with closed fields and stop/call relations.
 - [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
@@ -793,7 +820,7 @@ before a provider demonstration.
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
-| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Shared capsule expansion and pure native block capture implemented; complete v3 reply/settlement integration and accounting pending |
+| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers implemented; live writer/fixture migration, request envelopes and continuation accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
