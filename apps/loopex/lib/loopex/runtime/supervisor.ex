@@ -71,10 +71,7 @@ defmodule Loopex.Runtime.Supervisor do
         start: {Control, :start_link, [[root: root] ++ options]}
       },
       Supervisor.child_spec({Task.Supervisor, []}, id: @workers_id),
-      Supervisor.child_spec(
-        {DynamicSupervisor, strategy: :one_for_one},
-        id: @owner_groups_id
-      ),
+      {Loopex.Runtime.OwnerGroups, []},
       Supervisor.child_spec(
         {DynamicSupervisor, strategy: :one_for_one},
         id: @sessions_id

@@ -8,18 +8,6 @@ defmodule Loopex.Runtime.OwnerGroup do
   def start_link(options) when is_list(options), do: GenServer.start_link(__MODULE__, options)
 
   @doc false
-  @spec child_spec(keyword()) :: Supervisor.child_spec()
-  def child_spec(options) do
-    %{
-      id: {__MODULE__, Keyword.fetch!(options, :generation)},
-      start: {__MODULE__, :start_link, [options]},
-      restart: :temporary,
-      shutdown: :infinity,
-      type: :worker
-    }
-  end
-
-  @doc false
   @spec workers(pid()) :: {:ok, pid()} | {:error, :owner_group_unavailable}
   def workers(group) when is_pid(group) do
     try do

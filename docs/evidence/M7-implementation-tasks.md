@@ -57,6 +57,8 @@ Part of the [evidence index](README.md).
   treats empty assistant completions as absent and gates configuration replay.
 - Done: configured ordinary staging checks terminal-history capability before
   request intent, committing an unavailable v2 preparation refusal and terminal.
+- Done: reproduce and fix false OwnerGroup shutdown_error/noproc reports while
+  preserving parallel shutdown, owner-worker barriers and actual fault reporting.
 - Next: join configuration preparation to settled owner admission, retained-history
   preflight and atomic commit; complete question projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
@@ -68,6 +70,27 @@ Part of the [evidence index](README.md).
 
 ## Development observations
 
+- 2026-10-01: a new orderly-shutdown regression using production bytes from
+  `887b2141800416b2ddb5959030a07d9c05123d1b` fails after completed model work:
+  9 of its 32 shutdowns report OwnerGroup shutdown_error/noproc. An empty-work
+  probe had passed, so it was replaced with the actual completed-work trigger.
+  The runtime-local OwnerGroups manager now uses Erlang's simple_one_for_one
+  supervisor, whose parallel dynamic-child termination recovers the linked EXIT
+  reason when a late monitor reports noproc. Control keeps pid-based temporary
+  groups and the same predecessor-worker barrier; no error filter is added.
+  The regression passes after the fix, and deterministic held-worker tests prove
+  parallel group shutdown and continued reporting of real worker-supervisor
+  faults. Configured runtime/quiesce/provider lifetime checks pass 48 tests in
+  7.3 seconds; final owner-group/provider-attempt/agent-loop checks pass 173 in
+  46.6 seconds. Ephemeral cleanup/lifecycle checks pass 25 in 15.1 seconds.
+  Floor Elixir 1.18.5/OTP 27.3.4 owner-group/configured checks pass 18 in 2.0
+  seconds. The shared OTP-29 Hex archive could not load on the floor; isolated
+  Hex/rebar tooling under `/private/tmp/loopex-m7-floor-mix` enabled that run.
+  These local checks resolve the observed cleanup defect; they do not replace
+  M7's prescribed Linux load repetitions or the complete floor closure check.
+  Final current-pair shutdown/configured tests pass 18 cases in 2.2 seconds
+  with fault-log capture isolated from other test cases. Warning-free compilation
+  and documentation ordering pass with 979 covered entries.
 - 2026-10-01: configured ordinary staging now checks captured terminal-history
   capability before request construction or provider intent. Unsupported history
   retains an atomic unavailable v2 preparation-refusal/failed-terminal pair with
@@ -659,7 +682,7 @@ Part of the [evidence index](README.md).
 - [ ] Run required selected real-provider, Node, daemon, long-bound and cross-UID lanes.
 - [ ] Run changed process-boundary cases thirty times under the prescribed pinned Linux load.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
-- [ ] Investigate supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain truthful cleanup evidence independently of passing assertions.
+- [x] Investigate and fix supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain failing-before and process-lifetime evidence independently of passing assertions.
 ## T17 — Assemble and test the closure candidate
 - [ ] Provision both supported toolchains, pinned Node, provider bindings and the legacy Ollama witness.
 - [ ] Provision Linux cross-UID support, descriptor limits, retained evidence storage and attendance.

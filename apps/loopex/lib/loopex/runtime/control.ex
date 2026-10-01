@@ -2646,10 +2646,8 @@ defmodule Loopex.Runtime.Control do
             nil
         end
 
-      owner_group_options = [generation: generation]
-
       with {:ok, owner_group} <-
-             DynamicSupervisor.start_child(owner_groups, {OwnerGroup, owner_group_options}),
+             :supervisor.start_child(owner_groups, [[]]),
            {:ok, owner_workers} <- OwnerGroup.workers(owner_group) do
         options = [
           control: self(),
@@ -2702,7 +2700,7 @@ defmodule Loopex.Runtime.Control do
 
               {:error, reason} ->
                 _ = DynamicSupervisor.terminate_child(session_supervisor, coordinator)
-                _ = DynamicSupervisor.terminate_child(owner_groups, owner_group)
+                _ = :supervisor.terminate_child(owner_groups, owner_group)
 
                 unavailable_owner(
                   state,
@@ -2715,7 +2713,7 @@ defmodule Loopex.Runtime.Control do
             end
 
           {:error, reason} ->
-            _ = DynamicSupervisor.terminate_child(owner_groups, owner_group)
+            _ = :supervisor.terminate_child(owner_groups, owner_group)
 
             unavailable_owner(
               state,

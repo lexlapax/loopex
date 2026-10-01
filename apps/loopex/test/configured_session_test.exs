@@ -47,6 +47,37 @@ defmodule Loopex.ConfiguredSessionTest do
   alias LoopexProtocol.ToolDefinition
   alias LoopexProtocol.Canonical
 
+  test "orderly runtime shutdown joins owner groups without shutdown errors" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        for index <- 1..32 do
+          fixture = start(script: [%{text: "done", calls: []}])
+
+          assert {:ok, session} =
+                   Runtime.create_session_with_genesis(
+                     fixture.runtime,
+                     "shutdown-#{index}",
+                     %{},
+                     genesis(fixture.definitions)
+                   )
+
+          assert {:ok, attachment} =
+                   Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+          prompt(attachment, "prompt", "go")
+
+          assert {:ok, children} = Runtime.children(fixture.runtime)
+          [{_, group, :worker, _}] = Supervisor.which_children(children.owner_groups)
+          assert {:ok, workers} = Loopex.Runtime.OwnerGroup.workers(group)
+          assert :ok = Loopex.stop(fixture.runtime)
+          refute Process.alive?(group)
+          refute Process.alive?(workers)
+        end
+      end)
+
+    refute log =~ "shutdown_error", log
+  end
+
   test "the admitted question generation never dispatches an executor effect" do
     for {policy, reason} <- [
           {Loopex.ConfiguredSessionDeferringPolicy, "policy_unavailable"}
