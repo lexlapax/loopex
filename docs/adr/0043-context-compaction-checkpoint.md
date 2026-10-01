@@ -6,7 +6,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Status:** Proposed
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
-- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure and closed refusal/failure shapes to allow bounded maintenance first and versioned preparation failures and its closed receipt source-reference union for maintenance and checkpoint provenance. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules. Also extends ADR 0011 abort handling to cancel active standalone maintenance without creating a run.
+- **Supersedes:** [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) raw-only projection and compaction deferral; [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) closed input set to add `compact`; [ADR 0017](0017-durable-context-admission-budget.md#concept) immediate required-context failure and closed refusal/failure shapes to allow bounded maintenance first and versioned preparation failures and its closed receipt source-reference union for maintenance and checkpoint provenance. Extends [ADR 0018](0018-provider-attempt-authority-and-recovery.md#concept) to maintenance operations, preserving its dispatch and two-attempt rules. Also amends ADR 0011's exhaustive admission/abort rules for standalone maintenance and adds discoverable completion. Extends [ADR 0013](0013-run-deadline-commitment-at-first-request-staging.md#concept) so the first run-owned maintenance request may commit the run deadline before an ordinary request.
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) and [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Also extends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with explicit maintenance instructions and model selection; its one-shot interface, credential audience and cleanup guarantees remain unchanged
 - **Maintenance resource receipts:** Narrowly amends [ADR 0017](0017-durable-context-admission-budget.md#concept) and [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) so a successful maintenance request can explicitly record that optional resource intake was skipped; ordinary admission and older receipt validation remain unchanged
@@ -38,7 +38,9 @@ The host supplies a versioned compaction instruction
 block describing the summary's goal, constraints, progress, decisions, next
 steps and critical context as an explicit runtime option. Each episode captures
 that block and the resolved summarizer configuration before work begins;
-recovery uses them even if the host's new startup configuration differs.
+recovery uses them even if the host's new startup configuration differs. A
+missing captured route or renderer makes the session unavailable without mutation;
+restoring it and restarting resumes the same episode.
 Missing model or instructions permit ordinary work but refuse new maintenance
 before any provider call; invalid supplied configuration refuses host startup. Core
 does not substitute the ordinary session instructions. The six sections guide
@@ -50,7 +52,9 @@ interaction overlaps it. ADR 0044's open thinking exchange also blocks
 compaction: its complete earlier prefix must remain unchanged. If that exchange
 cannot fit, stop truthfully; a later run can compact canonical history.
 
-Keep the current input and a recent complete tail verbatim. Each checkpoint
+Keep the current input verbatim and prefer a recent complete tail for automatic
+size preparation. Explicit compact releases eligible terminal-run tail units;
+failed/cancelled input-only units follow the same oldest-first release rule. Each checkpoint
 covers whole eligible groups, including settled input-only runs. Prefer complete
 source. When the oldest eligible group is too large, give the summarizer marked
 excerpts from its beginning and end, retaining the complete original. This also
@@ -74,8 +78,9 @@ token count and exact record size. Explicit repair of unsupported terminal
 rendering instead advances coverage past offending groups within hard limits
 until rendering passes; a small group may become a larger summary. Insufficient room for the minimum
 excerpt, invalid or incompletely generated summary, no progress or exhausted episode produces a named
-refusal. Useful checkpoints already committed remain; failed work cannot roll
-them back.
+refusal. Progress and applicable hard limits are checked on the pending summary before
+checkpoint commitment; a failed check cannot make an unusable summary durable.
+Useful checkpoints already committed remain; failed work cannot roll them back.
 
 Active maintenance consumes the run's call/turn, token and deadline budgets.
 In a helper session, that usage is part of the child's total and therefore its

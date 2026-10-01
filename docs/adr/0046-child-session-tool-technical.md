@@ -192,7 +192,8 @@ before those mutations resume. The ledger retains:
   runtime_configuration, initial_configuration, tool_selection,
   policy_defer_mode}` for v3; v2 accepts only version and runtime configuration.
   Values are already resolved startup data, including actual cleanup grace and
-  exact definitions; it performs no catalog, registry, Store or clock lookup.
+  exact definitions; tool_selection omits artifact_read, which the resolver derives
+  under ADR 0041; it performs no catalog, registry, Store or clock lookup.
   It constructs the payload then calls normalize/1, with the same result union.
   Control and composition share this resolver; no host copies its schema.
   The new host-private `Runtime.create_session_with_genesis/4` accepts runtime,
@@ -201,8 +202,9 @@ before those mutations resume. The ledger retains:
   conflicting genesis under one ID refuses. It checks duplicate identity first, validates options equality and the complete
   retained payload, and commits exactly that genesis without substituting current
   defaults. Fresh creation still validates registered generations and admitted
-  host configuration; failure changes no prior mapping. It returns the existing
-  create result union. This live-authorized variant is not exposed on the wire
+  host configuration; failure changes no prior mapping. It returns `{:ok, session_id}` on known creation, or the same
+  `{:error, reason}` union as create_session/3, including commit_unknown and
+  the existing conflict errors. Historical duplicates preserve their original result. This live-authorized variant is not exposed on the wire
   and is never called by helper recovery. Current startup defaults cannot
   reconstruct a different create input.
 
@@ -251,8 +253,8 @@ adds no separate persistent slot record or cross-log transaction. The exclusive
 owner serializes reservation and release, including between runs.
 Independent parent sessions have separate slots and may have live children at
 the same time. The owner must not hold admission while waiting for a child's
-provider work or cleanup. The existing incarnation-wide unknown-cancel fence
-and startup recovery gate still apply; concurrency does not bypass either.
+provider work or cleanup. The per-ID unknown-cancel tombstones, overflow-only helper fence and startup
+recovery gate below still apply; concurrency bypasses none of them.
 
 **Deadline.** Persist `min(parent_job.effective_job_deadline, admission_time + child_deadline_ms)`
 as the absolute cutoff before create. Extend the generic run-bound contract
@@ -339,18 +341,23 @@ remain in the validated durable helper index below. Capacity refuses a new
 concurrent registration with `{:error, {:refused_before_effect,
 :router_registration_capacity}}`; settlement reclaims capacity. This is not a
 lifetime-throughput limit. Existing cancellation and receipt reads remain usable.
-Recovery registers only unresolved jobs from validated intents before cancelling;
-settled historical jobs use the read index, without consuming active rows. An
+Recovery registers only unresolved helper jobs from the complete validated
+intent/terminal join below before cancelling. Predecessor local jobs are never
+re-registered: a conclusive Local receipt classifies them; otherwise use the
+unknown-ID cancellation path. Historical helper receipts use the read index
+without consuming active rows. An
 incomplete classification refuses affected activation, never guesses a route.
 
 Known local cancellation forwards unchanged to Local and does not close helper
 admission. Known helper cancellation uses only its durable operation stop.
 Derive the cancellation callback's absolute monotonic observation deadline once
-on entry from the registered parent job's `cleanup_grace_ms` and
+on entry for helper cancellation from the registered parent job's `cleanup_grace_ms` and
 `Executor.cancellation_bounds/1`, minus a fixed 250-ms reply margin. Core begins
 its observation earlier; this margin permits bounded handoff delay, not a
 scheduling guarantee. Local cancellation forwards immediately on a dedicated
-path, never queued behind ledger or child-stop work. Nested waits spend the
+path, never queued behind ledger or child-stop work. Local forwarding is a
+pass-through bounded by core's original observation window, without this helper
+reply margin or a second nested timeout. Nested helper waits spend the
 remaining deadline; an answer that misses core's window remains unconfirmed.
 Do not use the current runtime grace or renew the deadline between child waits.
 The child may have a longer committed grace. Its cleanup can therefore finish
@@ -358,10 +365,13 @@ after the parent's observation window; return unconfirmed and preserve the
 parent's unknown outcome without a refund or later terminal rewrite.
 
 A cancel before registration has no bound digest and cannot create a durable
-stop. First consult the validated helper job index. For a genuinely unknown ID,
+stop. First consult the validated helper job index and then a conclusive
+validated Local receipt, before allocating a tombstone. For a genuinely unknown ID,
 insert an incarnation-local tombstone for that exact ID before returning
 unconfirmed or forwarding to Local. Every later registration of that ID refuses
-launch. Tombstones are monotonic and capped separately at 4,096 entries and
+launch with `{:error, {:refused_before_effect, :cancelled_before_registration}}`.
+Tombstones are monotonic until that incarnation ends; none is evicted or cleared
+by a later unknown result. They are capped separately at 4,096 entries and
 8,388,608 encoded bytes. Only inability to retain a new tombstone closes the
 incarnation-wide `helper_admission_closed` flag; that fence prevents every later
 helper launch and requires full host restart. A late cancel of an evicted local
@@ -423,14 +433,23 @@ in braces below denote closed plain maps; tagged API results are tuples.
   immutable prefix through `Store.load_records/4`. Each call scans at most
   `limit` private records, advances past every scanned record, and returns
   `{:ok, {version: 1, runtime_id, session_id, through_version, scanned_through,
-  rows, next_cursor}}`, where each row is exactly `{journal_version, job}` and
-  `job` is the validated plain JobRequest projection of an
-  `effect_intent_committed` record. Exclude grants and owner-incarnation stamps.
-  Return all executor kinds; composition selects the retained task generation.
+  rows, next_cursor}}`. Rows are a closed union: `{kind: "intent", journal_version,
+  job}` for effect_intent_committed, with the validated plain JobRequest projection;
+  or `{kind: "terminal", journal_version, run_id, tool_call_id, disposition}`.
+  Terminal disposition is `refused_before_effect`, `receipt_committed` or
+  `outcome_unknown`. Derive it from validated reducer facts: a failed
+  tool_result_committed without an executor receipt proves pre-effect refusal;
+  a committed executor receipt proves receipt_committed; other terminal facts
+  without conclusive receipt remain outcome_unknown. Never infer it from reason
+  text, model output, a missing ledger or volatile executor state. Emit terminal
+  facts in journal order and join only by the exact run/tool-call identities to
+  the earlier intent. Conflicting or unsupported joins are invalid_history.
+  Exclude grants and owner-incarnation stamps. Return all executor kinds;
+  composition selects the retained task generation after complete coverage.
   Empty `rows` does not end a scan: only `next_cursor: nil` proves that the
   captured prefix is complete. Preserve Store's 65,536-byte per-record bound;
   at most 16 rows and 1,114,112 uncompressed plain ETF bytes, measured with
-  `:erlang.external_size/1` as the Store does, may leave one call. Charge the
+  `:erlang.external_size(value, [:deterministic])` as the Store does, may leave one call. Charge the
   complete response envelope; stop before the cap with a cursor advancing only
   past scanned records. A single unrepresentable row is invalid_history, never
   skipped or an apparent complete page.
@@ -458,7 +477,8 @@ in braces below denote closed plain maps; tagged API results are tuples.
   for Control loss; malformed selectors
   return `{:ok, :unexpected}`. Store unavailability/malformed output maps to
   `:store_unavailable`, never absence. This read callback extends ADR 0008 and
-  the Store conformance suites without changing retained transaction bytes.
+  the Store conformance suites without changing retained transaction bytes. A Store lacking this optional
+  callback yields store_unavailable, never absence or incomplete coverage.
   The runtime-page selector extends that same Store callback. Limit is 1–16;
   cursor is nil or exactly `{version: 1, runtime_id, through_create_ordinal,
   after_create_ordinal}`. The first call captures the committed creation high-water
@@ -486,8 +506,19 @@ in braces below denote closed plain maps; tagged API results are tuples.
   `{:error, :runtime_unavailable}`. Invalid supplied genesis returns unexpected;
   a different retained binding returns conflict. Keep `/3` and v2 history
   unchanged; parent/child binding recovery uses `/4`. This is the narrow
-  ADR 0016 amendment for retained cleanup configuration, not permission to
+  ADR 0016 amendment for exact-genesis live creation and historical lookup,
+  not permission to
   change an existing session's grace or to replay a historical create.
+
+A helper-disabled ephemeral host uses Local directly and has no durable helper
+history to classify. Durable hosts construct the router and complete the scan
+below even when new delegation is disabled, so an old helper cannot be adopted
+as ordinary work. A resumed parent with task uses its committed enabled binding
+under ADR 0049; file defaults cannot disable it. No file flag proves a root
+helper-free or skips classification. Retain measured
+startup duration, pages/records read and peak buffers for a large-history fixture,
+plus deadline exhaustion that refuses incomplete classification; no throughput
+or service-time promise is introduced.
 
 Before opening admission, the host completely enumerates committed creating
 mappings with the runtime-page selector, then scans each enumerated session's
@@ -509,6 +540,15 @@ in-flight create, defer mutation classification until the mapping is conclusive.
 A helper's provenance remains helper-owned after settlement or log loss.
 Unresolved evidence fences the affected parent/helper; it does not downgrade
 that session to ordinary or erase a separately established unrelated identity.
+
+**Expected operations.** Complete intent/terminal coverage excludes a task
+intent with a matching committed pre-effect refusal from expected delegation
+operations, child-ID classification and allowance reconstruction. Such a refusal
+consumed no slot, requires no ledger record, and cannot fence its parent after
+restart. Every other retained task intent remains expected; no terminal or an
+unknown terminal is never proof of refusal. Receipt evidence and ledger joins
+remain required for admitted work. Bounded paged/indexed construction joins
+terminal rows at the same captured cut without collecting an unbounded history.
 
 **Intent without retained reservation.** A missing run log, or an expected
 operation absent from a valid recovered log prefix, is not automatically proof
@@ -593,16 +633,24 @@ unconfirmed/unknown; no success or speculative usage refund conceals that gap.
 `retained_receipt/2` first routes by job ID through the helper index built from
 complete validated intent coverage joined to ledger operation/attempt bindings.
 Include every original attempt, including predecessor-incarnation jobs and
-recover_uncreated receipts; an active row is not required. The index is a derived
-read index over retained truth, with bounded paged construction and a bounded
+recover_uncreated receipts; an active row is not required. The index is a disposable, versioned derived cache over retained truth, with bounded paged construction and a bounded
 4,096-entry/8-MiB cache. The ledger owns `lookup_job(reference, job_id)`: it reads
 one derived entry keyed by SHA-256 of that ID under its private index directory,
 then validates the referenced source-intent and ledger frame/receipt. Entries
-contain original job binding, source reference, run-log identity and frame offset,
+are exactly `{version: 1, job, source_intent, run_log, frame_offset}`; job is the
+original binding, and frame_offset is null before the first operation frame,
+otherwise its validated offset. job is exactly the closed router-binding row
+above, never full canonical_request_bytes. The directory is job-index-v1 under
+the private delegation runtime directory. Entries contain no independent receipt facts,
 at most 65,536 JSON bytes; they are installed atomically under the exclusive host
 lease. They grant no authority and are not another journal. Rebuild the complete
 index from validated intent/ledger coverage at startup; live registration updates
 it before exposing work, and receipt binding updates it before publication.
+An index-write failure before reservation returns refused_before_effect with
+`helper_index_unavailable`; after possible work it returns effect_unresolved
+and fences that operation until rebuild. It cannot suppress a committed receipt
+or report absence. Discarding the cache is safe only while admission is closed;
+rebuild from authoritative coverage before reopening.
 Eviction preserves that point lookup. Missing/corrupt index or source coverage
 means unresolved until rebuild, never absence or fallback to a local route. It carries no launch authority or independent
 truth writer. Local receipt lookup is used only for a proven local route, or
@@ -624,14 +672,22 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
 
 - Executor conformance and local-tool byte equivalence through the router.
   More than 4,096 sequential ordinary jobs reclaim active capacity; delayed
-  local cancels do not fence unrelated helpers. Pre-registration cancel blocks
+  local cancels do not fence unrelated helpers. Routed Local cancellation at
+  its boundary matches direct cancellation with no helper-margin timeout. Pre-registration cancel blocks
   that ID, tombstone overflow fences helpers, and concurrent helper stops do not
   delay local cancel forwarding. Predecessor and recovered-no-child receipts
   route without active registration and retain their original binding.
   Exact resolved genesis is available before prepare; changed startup grace
   cannot alter live exact-genesis creation or historical lookup. Cross-toolchain
-  ledger objects validate without re-encoding equality; child frames contain
+  ledger objects validate without re-encoding equality; exact-genesis /4 create
+  and provenance fixtures cross both toolchain pairs and validate retained create
+  digests through Store's own transaction recipe. Child frames contain
   object references and remain within the JSON frame cap.
+- Pre-effect refusals for exhausted allowance, unknown role and occupied slot
+  survive restart without count/token charge or parent recovery fencing; admitted
+  missing-ledger work still takes conservative recovery. Empty intermediate pages
+  cannot hide later terminal facts. Derived-cache loss/write failures and both
+  helper-enabled and helper-disabled startup paths have bounded witnesses.
 - Fresh child context, role-catalog immutability across config edits/restart,
   cross-provider selection and rejection of unknown/disabled roles.
 - Per-session tool selection, immutable policy mode, allow/deny/defer, no

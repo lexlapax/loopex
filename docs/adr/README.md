@@ -237,7 +237,8 @@ questions, serial read-only helpers, explicit limits, provider custody and host
 configuration. ADRs 0044/0045/0046 now require the explicit narrow amendment to both
 vision files, authorized for drafting after external review and still pending
 acceptance. The revised pairs name their exact accepted-clause amendments.
-No proposal is accepted by this preparation; each blocks its dependent outcome.
+No proposal is accepted by this preparation. The coordinated nine-ADR and
+paired-vision packet blocks dependent M7 implementation until accepted.
 
 M7 round 3 also proposes versioned context refusal/failure projections, explicit
 ephemeral instruction/reasoning options and read-only helper recovery queries.
@@ -247,3 +248,8 @@ The [round 3 disposition](../evidence/M7-round-3-disposition.md) records repairs
 and limits. No ADR status changes in this preparation. The [round 4 report](../evidence/M7-external-review-4.md)
 supersedes that readiness assessment; its [disposition](../evidence/M7-round-4-disposition.md)
 repairs the remaining contracts and records the current internal review.
+
+The [round 5 report](../evidence/M7-external-review-5.md) supersedes round 4's
+readiness conclusion. Its [disposition](../evidence/M7-round-5-disposition.md)
+records all 50 findings and the selected outage/ordinary-thinking rules; these
+repairs preserve Proposed status and require external re-audit.

@@ -17,6 +17,10 @@ Concept: [Design decisions](m9-store-engine-successor.md#concept-plan-decisions)
 M8 closes first. It supplies the format marker, the reader boundary, and backup
 and restore that the migration starts from.
 
+Capacity configuration follows ADR 0036's versioned successor-schema or explicit
+ADR 0049 amendment path. Version-1 config keeps its closed members; migration
+must prove installed writer/reader behavior without a second resolver.
+
 <a id="technical-plan-evidence"></a>
 ### Evidence
 

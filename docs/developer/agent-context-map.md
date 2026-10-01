@@ -56,7 +56,7 @@ starting from the founding vision and moving to the implemented subsystems.
 | Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 | Planning, running and closing a milestone | [Milestone guide](milestones.md#concept) | [Milestone mechanics](milestones-technical.md#technical-depth) | The four steps, the closure packet with its two SHAs and five-path confinement, and the pre-tag release proofs. The [plans index](../plans/README.md) owns lifecycle state. |
 | Which checks a change must pass | [Verification guide](verification.md#concept) | [Verification mechanics](verification-technical.md#technical-depth) | The three stages, the selection table by changed boundary, the honesty rules and the measured speed plan. |
-| M7 coding-agent planning | [Open M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | ADRs 0041–0049 and the narrow vision amendment remain proposed. Read the [external review](../evidence/M7-external-review-1.md), [scope decisions](#disposition-m7-audit-scope-2026-09-30) and [thinking-continuation choice](#disposition-m7-thinking-continuation-2026-09-30) before dependent work. |
+| M7 coding-agent planning | [Open M7 plan](../plans/M7.md#concept) | [Contracts and proof](../plans/M7-technical.md#technical-depth) | ADRs 0041–0049 and the narrow vision amendment remain proposed. Read the [external review](../evidence/M7-external-review-1.md), [scope decisions](#disposition-m7-audit-scope-2026-09-30) and [thinking-continuation choice](#disposition-m7-thinking-continuation-2026-09-30), [authorized section 13.4 amendment](#disposition-m7-continuation-vision-amendment-2026-09-30) and [round 5 decisions](#disposition-m7-round5-outage-2026-09-30) before dependent work. |
 | Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
 | Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
 | Architecture as implemented | [Architecture](architecture.md#concept) | [Architecture invariants and mechanics](architecture-technical.md#technical-depth) | Applications and their dependency direction, the replaceable ports, the truth planes and the serial session owner, with the module enforcing each invariant. Descriptive; accepted ADRs remain the deciding authority. |
@@ -366,7 +366,7 @@ end of the file.
 | M5, from 2026-09-21 | [Plan pair and ADR 0031–0034 acceptance](#disposition-m5-acceptance-2026-09-21); [host application role](#disposition-m5-host-role-2026-09-22); [per-session progress routing](#disposition-m5-progress-routing-2026-09-22); [escript archive exclusion](#disposition-m5-escript-exclusion-2026-09-22); [no resident window](#disposition-m5-no-resident-window-2026-09-22); [residual proofs](#disposition-m5-residual-proofs-2026-09-22); [trace sessions load named modules](#disposition-m5-trace-loads-named-modules-2026-09-23); [closure-review decisions](#disposition-m5-closure-review-2026-09-23); [release-check attendance](#disposition-m5-driver-attendance-2026-09-23); [session-index loss](#disposition-m5-session-index-lost-2026-09-23); [non-blocking daemon components](#disposition-m5-nonblocking-components-2026-09-24); [executor cancellation and the risk packet](#disposition-m5-cleaned-implies-durable-2026-09-24) |
 | M6, from 2026-09-27 | [Plan pair and ADR 0039 acceptance](#disposition-m6-adr-0039-acceptance-2026-09-27); [implementation start](#disposition-m6-implementation-start-2026-09-27) |
 
-| M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); earlier choices remain recorded in the [Open plan](../plans/M7.md#concept) |
+| M7 planning, 2026-09-29 to 2026-09-30 | [External-audit scope decisions](#disposition-m7-audit-scope-2026-09-30); [round 5 outage](#disposition-m7-round5-outage-2026-09-30) and [ordinary thinking support](#disposition-m7-round5-thinking-support-2026-09-30); earlier choices remain recorded in the [Open plan](../plans/M7.md#concept) |
 
 Repository code cites three entries by anchor: `scripts/check-commit-messages.sh`
 names the [M3](#override-disposition-m3-commit-titles-2026-09-11) and
@@ -6348,3 +6348,39 @@ A missing required model action remains a failed strict demonstration. The
 The optional extra live capsule calibration was not selected; no additional
 provider call is authorized by this planning repair. All plan/ADR/vision bytes
 remain proposals pending external re-audit and exact-byte acceptance.
+
+
+<a id="disposition-m7-round5-outage-2026-09-30"></a>
+### M7 recorded provider-outage choice, 2026-09-30
+
+The maintainer selected A: add environment_failure for a fully recorded external
+provider/network failure after dispatch. An independent reviewer confirms the
+outage; retain the failed attempt and permit only its affected case on a new
+candidate, without an invented product correction. No same-SHA retry or model-miss
+exemption is authorized. Lost recording/attendance retains the earlier causal-fix
+rule. This changes the M7 acceptance procedure, not a PASS condition.
+The [plan verdict contract](../plans/M7-technical.md#technical-plan-evidence)
+and [round 5 disposition](../evidence/M7-round-5-disposition.md) carry the choice.
+
+<a id="disposition-m7-round5-thinking-support-2026-09-30"></a>
+### M7 ordinary thinking support choice, 2026-09-30
+
+The maintainer selected A: the chosen thinking mappings are ordinary M7 features
+at closure. Include registration in the tested implementation bytes after
+per-cell deterministic conformance; the counted live witnesses must pass before
+closure. No candidate-only resolver or post-test source registration is needed.
+The [ADR 0044 matrix](../adr/0044-run-model-and-reasoning-configuration-technical.md#technical-adr-0044-decision)
+assigns every cell its counted witness. The optional additional live capsule
+calibration remains unselected; this choice authorizes no extra calibration.
+
+<a id="disposition-m7-round5-rollback-proposal-2026-09-30"></a>
+### M7 proposed rollback check retarget, 2026-09-30
+
+Round 5 requires explicit disclosure of the proposed check change: M7 plan
+acceptance would retire v0.2.0-to-current-candidate, retain the frozen
+v0.2.0↔v0.3.0 historical proof and add v0.3.0↔M7 upgrade/restore proof. The frozen
+pair cannot detect candidate regressions; the new pair owns that obligation.
+This is part of the still-Open plan packet, not an accepted procedure override.
+Implementation updates the verification guide and preserves every historical
+assertion. The existing rollback and new m7-rollback lanes share the historical
+execution instead of duplicating it.

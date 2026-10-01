@@ -7,7 +7,8 @@ Technical depth: [Explicit host configuration and conversation command](0049-exp
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only its closed ephemeral startup-option set, adding an opt-in owner-managed trace configuration; credential audience and cleanup guarantees remain unchanged
-- **Depends on:** [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0047](0047-reference-host-run-defaults.md#concept) and [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
+- **Depends on:** [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0043](0043-context-compaction-checkpoint.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), [ADR 0045](0045-model-originated-questions.md#concept), [ADR 0046](0046-child-session-tool.md#concept), [ADR 0047](0047-reference-host-run-defaults.md#concept) and [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
+- **Also amends:** [ADR 0016](0016-configured-cancellation-observation.md#concept) prepared-recovery admission so every post-preparation refusal abandons its owner before reporting; its immutable cleanup contract remains. Extends the session facade with observational command disposition and owner-driven resolution of an identical unknown admission transaction, preserving Store fencing.
 - **Prerequisite for:** M7 outcomes 6 and 7
 
 <a id="concept-adr-0049-decision"></a>
@@ -63,8 +64,13 @@ Tracing uses ADR 0030's runtime-scoped API, existing redaction and ceilings.
 The host reports effective scope/limits and emitted/dropped counts through a
 stderr writer with bounded pending output, separately from result output.
 The diagnostic sink mailbox keeps ADR 0030's best-effort backpressure; these
-flags do not promise a total host-memory bound. Chat has text output only; existing `ask --output
-json` retains its defined format and carries no diagnostics on stdout. No raw debug mode or
+flags do not promise a total host-memory bound. Chat is a text transcript; piped
+mode also emits bounded versioned @loopex control lines for admissions, questions,
+barriers, status and closing. Exit succeeds only when every admitted operation
+succeeded and cleanup is confirmed. Every refusal discovered after resume
+preparation abandons the owner; unknown admission is observed through its
+coordinator resolver, without command resubmission or fabricated success.
+Existing `ask --output json` retains its defined format and carries no diagnostics on stdout. No raw debug mode or
 VM-global tracing is added.
 Ephemeral startup and one-shot composition accept the same opt-in trace
 configuration. Their private owner starts and stops tracing with its runtime

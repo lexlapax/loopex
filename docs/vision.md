@@ -551,8 +551,9 @@ vectors; trust uses negative tests; claimed integrations and packages use their
 real paths. Fakes do not replace evidence for a claimed provider, store,
 isolation boundary, or package.
 
-The proposed M7 tool-budget amendment counts question and helper definitions in
-the reference prompt measurement and requires separate interaction and helper
+The proposed M7 tool-budget amendment counts every advertised workspace,
+question and helper definition plus rendered host/environment facts, including
+workspace paths, in the reference prompt measurement, and requires separate interaction and helper
 fault evidence. It does not waive the under-1,000-token reference target.
 
 Minimalism is enforced through concrete exclusions and accepted-plan budgets,

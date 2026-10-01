@@ -125,9 +125,9 @@ interrupt/cancellation bounds and effective inspection with `committed` origin.
 An omitted or matching `--cleanup-grace-ms` preserves it. A conflicting explicit
 flag follows the existing prepared-owner abandonment and refusal path without
 activating recovered work; failed abandonment retains the existing unconfirmed
-conflict result. Every conflicting resume flag detected after preparation,
-including model/reply/tool/helper flags, uses the same abandonment path and
-unconfirmed-failure rule; "before activation" never means leaking a prepared owner.
+conflict result. Every refusal detected after preparation, including conflicting
+flags, workspace/pending-policy mismatch, missing binding and missing route, uses
+the same abandonment path and unconfirmed-failure rule; "before activation" never means leaking a prepared owner.
 Neither `/configure` nor a new run changes this value.
 
 `--compaction-model` overrides the file's `maintenance.model` for new episodes,
@@ -255,9 +255,31 @@ Pipe syntax/state refusal stops further input and exits nonzero after cleanup.
 Interactive local refusal leaves the conversation usable. Admission
 `commit_unknown` emits `input` disposition `unknown` with the original command ID;
 it never claims refusal or absence of a committed run. Stop further pipe input,
-capture the ordinary host shutdown deadline from the committed interrupt/cleanup
-bounds. Observe coordinator rediscovery/resolution for at most the cleanup grace,
-shortened by remaining shutdown/output time; never resend the command. If it
+capture one monotonic shutdown deadline, now + ADR 0016's
+`Executor.cancellation_bounds(committed_cleanup_grace_ms).cli_backstop_ms`,
+shortened by any already-running shutdown/output deadline. Observe through the
+new host-facing `Loopex.command_disposition(attachment, command_id)` facade over
+`Runtime.command_disposition/2`; never resubmit the authored command.
+This is an M7 implementation obligation. The serial coordinator retains the
+original unknown proposal/transaction and starts a 100-ms resolution timer,
+bounded by one first-unknown + cli_backstop_ms deadline. Each tick re-presents
+only that byte-identical OwnerLane transaction, with its original ID, expected
+version and digest; it never rebuilds admission, refreshes defaults or allocates
+another command. Conclusive commit applies the original proposal and publishes
+its original facts once; conclusive not_committed clears that pending proposal.
+Another unknown/fenced result leaves it fenced. Owner loss or deadline leaves
+uncertainty; it does not prove non-admission. No competing mutation is permitted.
+The observation API reads this owner state and committed command facts without
+mutating, activating or dispatching. Its closed result is
+`{:ok, {state, disposition, code, run_id}}` or `{:error, :owner_unavailable}`.
+State is committed/not_committed/pending; committed carries the original
+admitted/refused disposition, stable code and its committed run ID or null.
+Not_committed has disposition null, code admission_not_committed and run_id null,
+only after the exact Store transaction returns a conclusive non-commit. Pending
+has disposition null, code commit_unknown and run_id null. Absence from a command
+index or timeout cannot produce not_committed. Owner recreation without the
+original unresolved preimage cannot fabricate this state or clear the fence.
+The API is local host observation; no new remote command or effect authority. If it
 resolves to admitted active work, request normal abort and perform cleanup within
 the remaining shutdown bound before emitting a wait barrier. If it resolves to
 a committed refusal or conclusive non-admission, report the stable refusal/error
@@ -276,6 +298,26 @@ codes describe observation, not a fabricated public run outcome. Other barriers
 set command ID to null. This host command status does not invent a public run outcome. An interactive
 host also fences further mutations until ordinary resolution. No blind command
 retry, synthetic settled barrier or success exit follows unknown admission.
+
+For all branches, retain the initial `input(unknown)` once. The automatic final
+barrier uses that input_sequence; it creates no second command acknowledgement.
+Resolve admission before admitting shutdown mutations, even when an earlier run
+is active. The final records are pinned below; ordinary terminal outcomes are
+objects, never host strings. Trace/runtime teardown must also be joined.
+
+| Resolution by the captured deadline | Final records after the initial input | wait fields and closing cleanup |
+| --- | --- | --- |
+| Admitted work remains active | Abort once, then wait, closing | If committed terminal and cleanup confirmed: settled, its committed run_id/outcome, interaction_id and command_id null; cleanup confirmed. Otherwise use the cleanup-unknown branch below |
+| Admitted work already terminal | wait, closing | settled only with that committed outcome and confirmed cleanup; run_id is its committed ID, interaction_id/command_id null; otherwise cleanup unknown |
+| Committed refusal | error with the original stable refusal code, then wait, closing | Clean any earlier foreground work first; settled with its terminal ID/outcome, or both null only when no operation was admitted; confirmed only after complete teardown |
+| Conclusive not_committed | error with admission_not_committed, then wait, closing | Same earlier-work cleanup and fields as committed refusal |
+| Admission or subsequent cleanup admission still unknown | wait, closing | uncertain, outcome commit_unknown, exact unresolved command_id; run_id is a separately known committed foreground ID or null, interaction_id null; cleanup unknown |
+| Admission known, but no terminal/cleanup proof | wait, closing | uncertain, outcome cleanup_unknown, known foreground run_id or null, interaction_id/command_id null; cleanup unknown |
+
+Every closing exit_code is nonzero. If a later abort commit is unknown, its
+command ID replaces the resolved original ID in the uncertainty barrier; an
+unknown admission always takes precedence over a transient idle/question view.
+No final settled branch may conceal failed earlier foreground work.
 
 All model-facing input obeys existing prompt/steer/follow-up limits. Chat exit is zero only when every admitted run/maintenance operation in that
 invocation completed successfully and cleanup is conclusive. Any failed,
@@ -356,7 +398,7 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
 - Public-facade conversation tests for each command state, TTY and pipe ordering,
   barriers, dynamically identified answers/declines, EOF, input/output bounds,
   marker spoofing, output stalls, fail-fast pipe errors,
-  interrupts, idempotent resubmission and old-command compatibility.
+  interrupts, owner transaction re-presentation and observational command disposition and old-command compatibility.
 - Helper-enabled file resume of an old non-task session stays disabled; a task
   selection without its expected binding refuses. Fixture validation reopens through the same pinned wrapper; pending
   interactions enforce their retained policy identity.

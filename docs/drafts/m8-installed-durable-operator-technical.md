@@ -36,6 +36,10 @@ Configuration/discovery and launch have one integration owner. Store readiness
 and packaging use non-overlapping ownership and separate worktrees. Rejoin at
 one installed workflow before adding failure matrices; documentation follows the
 same accepted grammar. No second configuration resolver or durable session owner.
+The M9 capacity option needs a versioned successor to ADR 0049's closed schema
+or its explicit amendment; installed discovery/writers must refuse that future
+member under version 1 and migrate through the same resolver. M8 adds no capacity
+member merely because it manages files.
 Helper concurrency inherits the delivered M7 boundary: one active helper per
 parent conversation, with independent parents permitted to overlap. Installation
 adds no runtime-wide slot, parallel children within a parent or writable helper.

@@ -3103,6 +3103,12 @@ Concept: [Risks and countermeasures](vision.md#concept-vision-risks)
 | Package/app structure becomes its own framework | One repo/version through 0.x; split only on observed boundary and ADR. |
 | Name collides after launch | Complete clearance before first public release while rename cost is low. |
 
+**Proposed M7 section 13.4 risk note.** The provider-native-data countermeasure
+above remains governing until acceptance. The paired proposal narrows its opaque
+sidecar description to the bounded provider-neutral envelope and host-resolved
+gating descriptor; adapters still own native interpretation. Its compatibility,
+privacy and rollback obligations are those in section 13.4, not a second design.
+
 <a id="technical-vision-founding-decisions"></a>
 ## 26. Current founding decisions
 

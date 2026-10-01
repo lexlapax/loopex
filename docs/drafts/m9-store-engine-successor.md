@@ -42,7 +42,10 @@ Technical depth: [Evidence](m9-store-engine-successor-technical.md#technical-pla
 Technical depth: [Evidence](m9-store-engine-successor-technical.md#technical-plan-evidence).
 
 **Scope.** The adapter, the migration command, the capacity refusal, the
-operator documentation and the release lanes for them.
+operator documentation and the release lanes for them. Capacity configuration
+uses a versioned successor to ADR 0049's closed schema or an explicit amendment.
+M7's host delegation ledger remains outside Store and unchanged in place during
+engine migration; complete backup/restore includes it and its child sessions.
 
 **Non-goals.**
 

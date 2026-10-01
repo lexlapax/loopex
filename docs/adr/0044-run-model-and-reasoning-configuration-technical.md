@@ -111,14 +111,16 @@ or provider mapping. Ordinary `configure` never mutates the runtime selection.
 omits it. Existing committed request bytes and provider attempts remain immutable.
 The ReqLLM adapter maps only verified model/level combinations. Retain a closed
 `provider_mapping` with `mapping_revision` and `renderer_revision` strings of
-at most 128 bytes each, Booleans `continuation_required` and
-`canonical_terminal_tool_history`, and a `thinking` selection. The host resolves
+at most 128 bytes each, Booleans `continuation_required`,
+`canonical_terminal_tool_history` and `thinking_disabled`, and a `thinking`
+selection. Host resolution validates thinking_disabled against the native
+variant/default; core gates maintenance on that Boolean without reading modes. The host resolves
 these facts from the verified exact mapping, including provider-default behavior.
 Core uses them without interpreting the provider's thinking mode; a reasoning
 label alone cannot establish either fact. `canonical_terminal_tool_history` is
-true only when that exact mapping/renderer has verified the post-terminal
-canonical rendering below; ordinary unverified support is false. The explicit
-candidate-conformance bootstrap below is the sole test-host exception.
+true only when deterministic conformance proves that exact mapping/renderer
+shape; its counted live closure witness must then prove actual provider support.
+There is no candidate-only resolver or alternate core representation.
 The closed `thinking` variants are
 `{mode: omitted}`, `{mode: disabled}`, `{mode: manual, budget_tokens: positive_integer}`
 and `{mode: adaptive, effort: low | medium | high, display: summarized}`.
@@ -131,8 +133,9 @@ No arbitrary provider-option bag is admitted. Include this mapping in the
 sampling. Unknown capability permits `default` only and cannot enable a
 continuation-required mode without conformance. `default` omits the override;
 it does not claim that the provider disables thinking. Manual low/medium/high
-map to 1,024/2,048/4,096 thinking tokens. Require `max_tokens > budget_tokens`
-and reject a conflicting configuration before commitment. Do not enlarge the
+map to 1,024/2,048/4,096 thinking tokens. Host resolution and adapter preflight
+require `max_tokens > budget_tokens` and reject a conflict before commitment;
+core validates declared output limits without inspecting a manual-mode variant. Do not enlarge the
 reply limit. Verify the actual outgoing request: dependency translation may
 neither raise committed `max_tokens` nor enable an unadmitted mode. Pin the
 supported exact model, mapping and renderer in vectors before integration.
@@ -158,9 +161,11 @@ below; these conformance rows use that exact identity.
 
 Mapping revisions are `loopex.anthropic.haiku45.v1` and
 `loopex.anthropic.fable51.v1` respectively. These also propose `canonical_terminal_tool_history: true` for every dispatchable
-row in this table; the refused Fable none row has no mapping. Deterministic conformance must prove the declared shape before candidate
-conformance use. The counted real post-terminal cases must prove true before
-ordinary support admission. A failed positive
+row in this table; thinking_disabled is true only for Haiku none and false for
+every other dispatchable row. The refused Fable none row has no mapping.
+Deterministic conformance must pass per cell before implementation integration.
+The tested implementation bytes register these rows for ordinary resolution;
+closure is conditional on their counted live witnesses. A failed positive
 case cannot silently change the value to false or omit its required behavior.
 These define the summary classification used below; there is no independently authored disclosure bit.
 Haiku manual low/medium/high classify supported native thinking text as a
@@ -174,16 +179,39 @@ capsule and record bounds. A syntactically valid reply allowance promises no
 number of thinking/tool rounds. With the unchanged 4,096 ordinary reply default,
 manual `high` refuses. An explicit larger allowance, such as 8,192, uses existing
 configuration and must pass all bounds; dependency code cannot grant the increase.
-The trusted conformance host may resolve these fixed candidate descriptors
-solely for their already-declared counted real cases after deterministic
-conformance. It uses the real adapter/session path, unchanged bounds and policy,
-and explicitly labels the row unverified in its retained case record. This is
-host-local test composition, not a public flag, new core field, credential or
-authority bypass. A successful retained owning witness gates ordinary support
-registration/advertisement; failure follows the fixed disposition rule. This
-bootstrap is part of the first counted case and authorizes no extra calibration
-or failed-case reroll. Ordinary host resolution still refuses unverified rows.
+The maintainer selected ordinary availability at M7 closure. All nine dispatchable
+cells below have status `ordinary` in the tested implementation bytes, after
+per-cell deterministic conformance. Ordinary chat, ephemeral startup, configure
+and resume use the same resolver; no test override, status member or later
+registration edit is required. Live proof is an acceptance obligation on that
+candidate, not a runtime gate whose first success changes source or durable data.
+A failed or incomplete owning witness blocks closure and support claims; it
+cannot downgrade the descriptor, omit a cell or allocate a calibration/reroll.
 
+| Model / level | Continuation witness | Post-terminal witness | Summary witness |
+| --- | --- | --- | --- |
+| Haiku default | m7.baseline.durable (nil capsule) | m7.thinking-bound.haiku.default | m7.baseline.durable (no reasoning disclosure) |
+| Haiku none | m7.provider-switch.haiku.none (nil capsule) | m7.thinking-bound.haiku.none | m7.maintenance.haiku.none (natural, no thinking) |
+| Haiku low | m7.thinking-rounds.haiku.low | m7.thinking-bound.haiku.low | m7.thinking-rounds.haiku.low |
+| Haiku medium | m7.thinking-rounds.haiku.medium | m7.thinking-bound.haiku.medium | m7.thinking-rounds.haiku.medium |
+| Haiku high | m7.thinking-rounds.haiku.high | m7.thinking-bound.haiku.high | m7.thinking-rounds.haiku.high |
+| Fable default | m7.thinking-rounds.fable.default | m7.thinking-bound.fable.default | m7.thinking-rounds.fable.default (no disclosure) |
+| Fable low | m7.thinking-rounds.fable.low | m7.thinking-bound.fable.low | m7.thinking-rounds.fable.low |
+| Fable medium | m7.thinking-rounds.fable.medium | m7.thinking-bound.fable.medium | m7.thinking-rounds.fable.medium |
+| Fable high | m7.thinking-rounds.fable.high | m7.thinking-bound.fable.high | m7.thinking-rounds.fable.high |
+
+These are fixed subcase keys of their named owning cases, not CLI selectors or
+replacement attempts. `m7.maintenance.haiku.none` is the existing Haiku summary
+subcase of m7.long. Each thinking-rounds subcase proves two actual continuation
+requests and its prescribed disclosure/no-disclosure. Each bound subcase proves
+canonical post-terminal rendering on that cell. The separate thinking-cancel
+case pins one admitted thinking cell and proves cancellation; it does not
+replace the nine bound witnesses. The phase-0 manifest enumerates every subcase,
+its exact prompts, limits, attendance, oracle and retained execution slot before
+any dispatch. Manual high pins a permitted reply allowance above 4,096. No paid
+call beyond this counted matrix is authorized. Additional mappings, including
+unknown defaults that require continuation, still require their own conformance
+and a proposed counted witness before ordinary registration.
 Haiku's manual mode does not claim interleaved thinking support. No new beta
 headers, `between_tools`, extra effort levels or raw provider-option bags are
 introduced. The Haiku thinking-off row supplies one maintenance conformance
@@ -199,6 +227,14 @@ Inspect the final request after dependency normalization, not only Loopex's
 input options, including final headers and transport controls. A dependency-
 injected interleaved-thinking beta header or an unadmitted display/body override
 refuses before HTTP launch; preserve required authentication/routing headers.
+The pinned Anthropic header-name allowlist is accept, content-type, content-length,
+host, user-agent, connection, authorization, x-api-key, anthropic-version and
+anthropic-beta, case-insensitive. Route-only headers must be explicitly pinned
+in ADR 0048's trusted route capture; they cannot come from model/config extras.
+The only admitted beta value here is tools-2024-05-16, emitted only when tools
+are present; interleaved-thinking and any additional beta token refuse.
+Validate values against the captured endpoint/authentication/control settings,
+without retaining or reporting selected credential values.
 The invocation wrapper validates the complete normalized request, not just its
 JSON body. In pinned ReqLLM, `reasoning_effort: none` removes the option;
 it does not send `thinking.type: disabled`. Default omission likewise must not
@@ -221,7 +257,11 @@ the native response model to equal the row's literal model identity and permits
 only a native `thinking_delta` inside its validated thinking block as summary
 text; signatures and redacted-thinking deltas are ineligible. An unverified mode,
 changed response identity or unexpected event cannot inherit another mapping's
-summary classification. Malformed native streams retain the failure rules below.
+summary classification. A response-model mismatch fails the whole attempt
+through the bounded started-call error path before any summary/canonical reply
+can settle; it is not merely a suppressed-summary success. Exact aliases need
+an admitted literal mapping revision, never an inferred fallback. Malformed
+native streams retain the failure rules below.
 
 Only provider-declared summary text is eligible for `reasoning_delta`. A field
 named `thinking`, a converted `:thinking` chunk, a missing signature or an
@@ -262,9 +302,13 @@ the same top-level semantic members and digest coverage, admitting `continuation
 as nil or the envelope below. Old v1 bytes remain immutable. An adapter reply
 uses `bounded_adapter_reply_v3`, the exact nine fields of ADR 0018's v2 plus `completion` and `continuation`.
 `completion` is exactly `natural`, `limit` or `unknown`, validated from the final
-native stop reason: ordinary end-turn/tool-use are natural, max-token/length
-are limit, and absent/unrecognized reasons are unknown. Adapters retain no raw
-stop strings. Maintenance requires natural; other reply rules remain unchanged.
+native stop reason. In the pinned Anthropic grammar, end_turn, tool_use and
+stop_sequence map to natural; max_tokens maps to limit; model_context_window_exceeded,
+refusal, pause_turn, absent and unrecognized reasons map to unknown. Normalized
+non-Anthropic length/max-token reasons map to limit only in their own exact
+admitted mapping; each provider-B maintenance row pins its literal stop table
+and natural-completion vector before admission. Adapters retain no raw stop
+strings. Maintenance requires natural. Relations are closed below.
 `continuation` is nil or this closed capsule:
 
 ```text
@@ -322,8 +366,20 @@ order are not preserved wire bytes. Reject unknown blocks, incomplete streaming
 signatures or a mismatch with the canonical reply's text/calls/arguments before
 any tool intent or policy evaluation. `tool_use` stop with complete matching
 calls means open; genuine `end_turn` with no unresolved calls means closed.
-`max_tokens`, unfamiliar stop reasons and incomplete responses fail rather than
-masquerading as a completed exchange. An admitted mapping with
+The accepted relations are:
+
+| Mapping / final native stop | Tool calls | Completion and capsule |
+| --- | --- | --- |
+| continuation_required false, complete native reply | Existing canonical call validation | nil capsule; natural/limit/unknown according to the exact stop table |
+| continuation_required true, tool_use | One or more complete matching calls | natural, open capsule |
+| continuation_required true, end_turn | No calls | natural, closed capsule |
+| continuation_required true, every other stop or incomplete native reply | No tool authority | No successful adapter reply; bounded started-call error, existing conservative accounting |
+
+A complete native limit-stopped thinking reply therefore follows the adapter's
+started-call model_call_failed path, even if its text is parseable. Core rejects
+an externally supplied v3 that contradicts these declared relations as
+unreadable_model_answer before tools; it never invents a closed exchange.
+Unsupported/incomplete blocks use the same started-call failure path. An admitted mapping with
 `continuation_required: true` requires a capsule for each successfully decoded
 reply; false requires nil. An omitted required
 capsule is an unreadable answer, not permission to continue without thinking.
@@ -387,7 +443,11 @@ a monotonic cutover: no later newly appended v1/v2 settlement is valid. Historic
 earlier versions remain readable; recovery validates that ordering.
 An exact nine-member v2 adapter reply is still admissible when the staged
 request requires no continuation, including eligible legacy requests, but not maintenance. V2 requires all nine
-keys, including `provider_response_id` even when nil; an eight-key reply refuses.
+keys, including `provider_response_id` even when nil; an eight-key reply is
+prevalidation unreadable_model_answer with accounting_evidence none. This
+explicitly amends the Model-port type that currently makes that key optional.
+Migrate every in-tree fake/fixture to exact v2 or v3 keys and add a negative
+eight-key vector; discriminate versions by exact key sets, never optional fields.
 Validate v2, then add `continuation: nil` and `completion: unknown`. A request
 requiring continuation or maintenance completeness rejects v2. V3 adapter replies
 have exactly eleven members and their canonical projections ten; extra keys and mixed shapes
@@ -489,12 +549,19 @@ It explicitly preserves the required normalization otherwise performed by
 is the transport handoff: all subsequent errors, exceptions and incomplete
 responses are `dispatched_or_unknown`, regardless of dependency error tags.
 At the wrapper's request-building boundary, install and validate the exact
-native body after dependency normalization and before HTTP launch. Ordinary
+native body after dependency normalization and before HTTP launch. The final
+validator must run after both pinned request mutation hooks, application-env
+:finch_request_adapter and opts[:on_finch_request]. On this invocation, disable
+external versions of those hooks and install only the invocation-owned validating
+transport join; a later unvalidated rewrite refuses. Rejection uses the fixed
+literal :invalid_provider_request, never a body/headers/exception detail that
+dependency inspect/logging could disclose. Ordinary
 context conversion may not reorder native arrays, replace malformed arguments
 with an empty object or alter admitted controls. Preserve route/authentication
 and transport ownership. The buffered caller captures native response content
 before lossy ReqLLM response conversion and applies the same exact native request
-rendering through its existing OneShotHTTP1 path.
+rendering through its existing OneShotHTTP1 path, validating the final normalized
+headers/body/controls immediately before OneShotHTTP1 issues the HTTP request.
 Return completed capture over a bounded private path correlated to that same
 invocation. Never return native blocks or signatures through ordinary chunk
 metadata, dependency telemetry, progress or raw exception terms. The buffered
@@ -526,8 +593,11 @@ and continues on a parser error return, so that return alone cannot enforce
 this rule. Validate before lossy SSE event conversion too. Test final parser
 flush as well as ordinary input; neither may turn a previous failure or
 incomplete event into successful completion. The wrapper implements every
-provider/parser callback probed by the pinned StreamServer; conformance records
-that exact callback inventory and exercises each path, including final flush.
+provider/parser callback probed by the pinned streaming path, including
+ReqLLM.Streaming and StreamServer; conformance records that exact inventory.
+Pin the protocol state as ServerSentEvents.Parser and its SSE.flush/1 final
+flush separately; an
+unhandled/non-Parser state cannot silently no-op into success.
 
 For the pinned native event grammar, require one message start, unique ordered
 block indices, type-correct deltas for an open block, matching block stops and
@@ -602,7 +672,9 @@ is promised.
 
 For post-terminal canonical rendering, emit retained assistant text/tool calls
 without old private blocks. Omit an empty assistant text block, while preserving
-nonempty text and calls in their canonical order. Render each following ordered
+nonempty text and calls in their canonical order. If neither remains, omit that
+empty assistant message; it creates no empty native content array or fabricated
+completion. Render each following ordered
 tool-result group and adjacent admitted user text, including the new prompt,
 in one native user content array: all results first, then text in canonical
 order. Do not emit a separate adjacent user message for that text. Do not fabricate an assistant
@@ -788,7 +860,7 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
   context charges, including combined large excerpts and duplicate request
   representations. Measure a useful multi-round fixture with the final generic
   node overhead and revision-4 receipt; earlier prototype sizes are not proof.
-  Before candidate conformance use of an exact mapping, complete deterministic
+  Before ordinary registration of an exact mapping in the tested candidate, complete deterministic
   native request/response and bound conformance. Its owning real-provider cases retain compact/expanded capsule
   sizes, block counts and owning settlement sizes. Synthetic signatures prove
   mechanics only; a live sample promises no future response size. A real bound

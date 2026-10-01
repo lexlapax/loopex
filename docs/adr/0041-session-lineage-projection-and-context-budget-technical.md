@@ -68,11 +68,12 @@ history, they may enter ADR 0043's marked maintenance-source excerpt. That
 exception changes neither the original answer nor its ordinary projection.
 
 **Artifact capability identity.** The reference host registers the exact M7
-`loopex.read` implementation-generation identity and tool-definition digest as
-artifact-capable. The revision-1 capability table is a literal constant in core,
+`loopex.read` identity whose artifact capability is fixed by core. The revision-1
+capability table is the literal `Loopex.Runtime.ArtifactReadCapabilities` module,
 independent of host registries, files and runtime defaults. It contains exact
 supported triples and a null-capability entry for each supported legacy triple.
-Registered reference definitions must match it. The projection integration owner
+Core creation/registration validation and the reference executor loader reject
+a reference definition whose exact version/digest does not match that table. The projection integration owner
 pins the new `loopex.read` version and definition digest, legacy triples and byte
 vectors in phase 0, before phase 1 can create an M7 session.
 Capture the resolution in ADR 0044's closed `tool_selection.artifact_read`
@@ -80,8 +81,9 @@ member, not an unspecified extra genesis field. It is null, or exactly
 `{revision: "loopex.artifact_read.v1", tool_id, tool_version, definition_digest}`.
 The triple must name the selected `loopex.read` generation, if any, and match
 the exact artifact-capable literal entry. Other IDs, including a tool merely
-named `read`, gain no capability. Core derives the binding from retained exact
-definitions at create and rejects an internal supplied mismatch. Public callers
+named `read`, gain no capability. SessionGenesis.resolve/2 takes tool selection without `artifact_read` and derives
+it from the exact definitions. SessionGenesis.normalize/1 takes complete genesis
+and compares the supplied binding against that derivation; a mismatch refuses. Public callers
 cannot supply `tool_selection` or `artifact_read`. Replay uses the same immutable
 literal table, without consulting the host registry. Legacy v2 selection
 reconstruction uses its retained exact definitions and the same literal legacy
@@ -119,7 +121,9 @@ including its reference notice; crossing that bound triggers retention even
 when output remains below the tool's capture/output ceiling. New M7
 grep/find/ls generations need artifact allowances sufficient for their retained
 capture ceilings; their old one-byte artifact budget cannot implement this
-path. Freeze and validate those new definitions before session creation.
+path. The phase-0 projection integration owner pins those versions/digests and
+sets each artifact allowance at least to its retained capture ceiling, proving
+that exact maximum through spill and replay before session creation.
 Do not lower capture limits merely to avoid retaining the promised source.
 Preserve the original terminal outcome,
 receipt and diagnostics. Retention failure cannot claim a retrievable reference;
@@ -216,11 +220,14 @@ only the independent 60,000-ms preparation cutoff produces
 `artifact_preparation_deadline`. Recovery cannot change its origin.
 
 **Explicit read range.** A new generation of `read` accepts either its existing
-workspace `path` inputs or `artifact_use`, nonnegative byte `offset` and positive
+workspace `path` inputs or `artifact_use`, unsigned-64-bit byte `offset` and positive
 `length <= 4,096`; the alternatives are exclusive. `artifact_use` is the existing
 `use:<sha256>` identity. The owner resolves it only from committed receipt or
 prepared-reference facts of this session in the same artifact-store namespace.
-Unknown, orphan, other-session and forged uses refuse. Possession is no grant;
+Resolve committed membership after argument-shape validation and before policy
+or effect intent. Unknown, orphan, other-session and forged uses all produce
+`invalid_tool_arguments` with the same bounded failed disposition; no policy
+question or existence-specific code is emitted. Possession is no grant;
 ordinary host policy evaluates the requested use/range and the executor validates
 its normal grant. Cross-session sharing is outside this branch.
 
@@ -230,7 +237,7 @@ before policy or effect intent. Unknown members, both branches, missing range
 members and a supplied `resolved_artifact` produce the existing
 `invalid_tool_arguments` tool-call disposition. Policy and deferred interaction
 identity use only the validated original model arguments. After allow, the owner
-adds executor-only
+attaches the already-resolved executor-only
 `resolved_artifact` to the new read generation's validated arguments. It contains `reference` as the frozen full reference and `source` with
 `record_kind`, `journal_version`, `record_digest`, `run_id`, `operation_id`,
 `attempt` and `tool_call_id`. All are bounded plain existing identity types. Model-supplied copies
@@ -239,13 +246,26 @@ canonical job digest binds this member and the requested range. No top-level
 executor protocol field is added. The executor validates the model-argument
 projection, grant/digest, object/use consistency and provenance against the job's
 session identity. Executor lookup selects by exact `(tool_id, tool_version)`,
-then checks the digest; the first definition with that ID is insufficient. Its
+and the loader-established immutable table match guarantees the definition
+digest. No digest is claimed to be a separate job/grant field. An unmatched
+version refuses; the first definition with that ID is insufficient. Its
 argument validator enforces the same closed model branches plus the required
 owner-only resolution on the artifact branch. The path branch forbids resolution.
 Legacy generations keep their own validators. The owner proves committed membership; a digest alone does
 not prove journal inclusion. Recovery reuses the journaled resolution.
 
-Use one job-owned verified transfer window per read and close it on every path.
+This explicitly extends ADR 0028 with one job-owned verified transfer window
+per read. The validated job replaces attachment ownership; no public attachment
+may use it. It shares the existing four-live-transfers-per-runtime ceiling with
+attachment transfers. Reuse the 64-MiB object, 60-second open, 128-MiB open-work,
+five-second read and ten-minute lifetime ceilings, each shortened by the job
+deadline/cancellation. Reuse the 1-GiB cumulative allowance and minimum 1-MiB
+open debit for this job, reserving before storage and charging actual reads,
+snapshot writes and emitted bytes once even on failure. One job cannot reopen
+or reset that allowance. Independent range jobs may each verify the full object;
+this bounded cost is disclosed and run/tool limits still apply. No integrity
+cache or unchecked range shortcut is introduced. Close the descriptor/snapshot
+on every job path; the executor owns these effects, not core.
 Return actual offset, byte count, next offset and EOF, without exposing transfer
 handles. This explicit retrieval has an 8,192-byte complete encoded JSON result
 cap, including the normalized call identity, outcome and object/range metadata.
@@ -320,12 +340,15 @@ Concept: [Observable consequences](0041-session-lineage-projection-and-context-b
   no omitted result, extra preparation allowance or shortened explicit range read.
 - Replay validates capabilities with the host registry unavailable or changed.
   Coexisting read generations resolve by ID/version. Both-branch, extra-member,
-  injected-resolution and range errors fail before policy; allowed jobs alone
+  injected-resolution, membership and range errors fail identically before
+  policy, including under a deferring policy; allowed jobs alone
   carry owner resolution and bind it in their digest.
 - Wrong-session/orphan/forged uses, denied policy, injected resolution, missing
   artifacts and digest/range corruption refuse without widening authority.
 - Retention/preparation/staging fault cuts and commit_unknown fencing; cancelled
   or failed range retrieval closes its transfer and preserves receipt truth.
+  Mixed attachment/job transfer capacity, verification work, deadline and
+  cumulative job-work edges reuse ADR 0028 conformance.
 - Legacy inline/spilled results preserve original receipts and staged bytes.
   An old read generation reuses exact inline content above 2 KiB when the full
   request fits; test fit/overflow edges, later old-generation receipts, restart

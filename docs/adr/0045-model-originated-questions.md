@@ -7,6 +7,7 @@ Technical depth: [Model-originated questions](0045-model-originated-questions-te
 - **Date:** 2026-09-30
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0024](0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) only policy-defer-only production and choice-only kind; [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) only executor dispatch for every allowed tool; [ADR 0039](0039-ephemeral-embedded-profile.md#concept) only refusal of host-answered model questions within one ephemeral call and its closed startup-option set for explicit question activation
+- **Depends on:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) for the coordinated ephemeral option and wire unions
 - **Prerequisite for:** M7 outcomes 5 and 6
 
 <a id="concept-adr-0045-decision"></a>

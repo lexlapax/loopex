@@ -10,13 +10,15 @@ Concept: [Purpose](M7.md#concept-plan-purpose).
 
 Concept: [Design decisions](M7.md#concept-plan-decisions).
 
-M6 is Closed. Nine ADRs and the labelled narrow amendment to both vision files
-are proposed with this candidate. The vision tool-budget amendment is a
-prerequisite for questions and helpers; its authorized section 13.4 continuation
-amendment is a prerequisite for outcomes 4 and 7. Each decision and its transitive
-Depends-on predecessors are accepted before dependent implementation. Mutually
-dependent pairs may be accepted together as one exact-byte packet:
-
+M6 is Closed. ADRs 0041–0049 and both labelled vision amendments form one
+coordinated exact-byte acceptance packet. No partially accepted subset authorizes
+implementation of these joins, regardless of abbreviated Depends-on headers.
+The tool-budget amendment gates questions/helpers; section 13.4 gates the shared
+configuration, projection and maintenance contracts. Both amendments are
+prerequisites for the whole packet and its nine outcome/proof obligations. Both
+amendments and all nine ADR pairs are accepted together before dependent M7
+implementation. The table identifies each decision's direct join, not separate
+implementation authority:
 | Decision | Accepted before |
 | --- | --- |
 | [ADR 0041](../adr/0041-session-lineage-projection-and-context-budget.md#concept) | Outcome 1's projection change |
@@ -34,15 +36,16 @@ Accepted decisions that constrain the work:
 | Decision | Constraint on M7 |
 | --- | --- |
 | [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) | Staged bytes are committed with intent and digest-bound. A prompt to a settled session projects the whole retained lineage; ADR 0041 amends tool-result projection, ADR 0042 system-text ownership, ADR 0043 raw-only projection/compaction deferral, and ADR 0044 session-fixed model/empty continuation |
-| [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure, ADR 0044 qualifies continuation exclusion only for verified summary text in existing reasoning progress, and ADR 0046 adds the explicit deadline ceiling and versions authored-bound command identity |
-| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, receipt source provenance, session configuration placement and charged continuation; ADR 0046 extends the closed prompt/follow-up bounds |
-| [ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | Existing relative deadline remains; ADR 0046 explicitly permits an earlier committed absolute cutoff, including before first staging |
-| [ADR 0008](../adr/0008-owner-succession-recovery-and-runtime-placement.md#concept) | ADR 0046 adds bounded runtime-private history/provenance reads and a read-only Store callback; no activation or mutation authority |
-| [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain; ADR 0046 adds exact retained-genesis lookup without current-default substitution |
-| [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; ADR 0044 versions the closed reply/settlement shapes for private continuation; two attempts per logical operation and no ambiguous redispatch remain |
-| [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 introduces v3 and cannot promote an invalid continuation reply to reported usage |
+| [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) | Existing ordering remains; ADRs 0043/0044 add compact/configure, ADR 0044 qualifies continuation exclusion only for verified summary text in existing reasoning progress, and ADR 0043 amends standalone-maintenance admission/abort and completion, ADR 0046 adds the explicit deadline ceiling and versions authored-bound command identity |
+| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | Exact record/depth/cardinality limits remain; ADRs 0041–0044 amend host defaults, system ceiling, compaction-before-failure, receipt source provenance, scoped refusal v2, session configuration placement and charged continuation; ADR 0046 extends the closed prompt/follow-up bounds |
+| [ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | ADR 0043 makes pre-first-ordinary maintenance staging commit the run deadline; the declared relative duration remains. ADR 0046 explicitly permits an earlier committed absolute cutoff, including before first staging |
+| [ADR 0008](../adr/0008-owner-succession-recovery-and-runtime-placement.md#concept) | ADR 0046 adds bounded runtime-private intent/terminal and provenance reads with a read-only Store callback, a pure genesis resolver and an explicitly live-authorized exact-genesis create variant; observations grant no activation or mutation authority |
+| [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | ADR 0044 adds one shared v3 genesis; mandatory cleanup and known-version decoding remain; ADR 0046 adds exact-genesis live creation and retained-genesis lookup without current-default substitution; ADR 0049 requires abandonment for every post-preparation refusal |
+| [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | ADR 0043 extends permits/settlement/accounting to maintenance; ADR 0044 versions the closed reply/settlement shapes for completion/private continuation and makes all nine v2 Model-port keys mandatory; two attempts per logical operation and no ambiguous redispatch remain |
+| [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept) | Its settlement v2 and validated accounting provenance remain readable; ADR 0044 explicitly amends the v2-only writer rule with a monotonic v3-only cutover and cannot promote invalid continuation to reported usage |
 | [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) and [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) | ADR 0044 replaces the served generation set and metadata-only digest with the coordinated M7 contracts below; exact negotiation, framing, session authority and connection lifecycle remain |
 | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) | ADR 0041 adds read ranges/resolved arguments, ADR 0045 interaction dispatch, ADR 0046 explicit per-create selection; exact generations, grants and reserved namespace remain |
+| [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) | ADR 0041 extends attachment-owned transfers to job-owned range reads, sharing runtime capacity and reusing finite verification/work/deadline ceilings |
 | [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | ADR 0045 adds model producer/text/decline; ADR 0046 adds immutable defer refusal; interactions grant nothing |
 | [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | ADRs 0042–0044 use fresh receipt revision 4 for instruction/compaction provenance and continuation accounting; maintenance explicitly skips optional intake. Ordinary resource admission/costs and old v2/v3 validation remain |
 | [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept) | Credential audience/cleanup preserved; ADRs 0042/0044 add explicit initial instructions, system ceiling and reasoning under ADR 0044's combined closed option inventory; ADR 0043 adds explicit maintenance instructions and model at startup; ADR 0045 adds bounded one-call answers; ADR 0048 adds explicit provider references and amends durable single-source wording; ADR 0049 adds owner-managed trace startup |
@@ -121,7 +124,7 @@ writer-epoch rules still apply after successful negotiation.
 | `session.follow_up` | Optional closed `bounds` accepts only `deadline_at_ms`. Retain that authored ceiling through queue promotion; omission supplies no inherited absolute ceiling. Ordinary turn/token/relative limits retain ADRs 0013/0017's inheritance from the active run. Reject attempts to override them; steer cannot supply bounds. |
 | `session.respond_interaction` | Keep the correlated `interaction_id` and command identity. `answer` has exactly one branch: `{choice_id}`, `{text}` or `{disposition: declined}`. Text/decline are model-question-only under ADR 0045; policy-defer retains its choice branch. |
 | Configuration records | `session.configured`, inspection and attachment snapshots use an explicit allowlist: committed configuration version, exact model/reasoning, effective reply/context/system limits and instruction version/digest. Exclude raw instruction bytes, model capability/provider mapping envelopes, host binding maps, credential references, capability handles and private native continuation. An unresolved legacy configuration is explicit, never a fabricated default. |
-| Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest, owner-computed `source_excerpted` flag, exact summarizer model/thinking-off setting, usage and owning configuration/maintenance identity. Checkpoint snapshots and rendered summary provenance retain the flag, including inherited omissions. Active-maintenance inspection/snapshots expose captured model identity and bounds, excluding provider mappings, instruction bytes, permits, routes and private recovery records. `context.compaction_progress` remains transient. |
+| Compaction records | Durable `context.compacted` identifies the checkpoint, covered range/integrity digest, owner-computed `source_excerpted` flag, exact summarizer model/thinking-off setting, usage and owning configuration/maintenance identity. Checkpoint snapshots and rendered summary provenance retain the flag, including inherited omissions. Active-maintenance inspection/snapshots expose captured model identity and bounds, excluding provider mappings, instruction bytes, permits, routes and private recovery records. `context.compaction_progress` remains transient. Standalone context.compaction_finished and last_compact snapshot carry the exact completed episode/command result, including unchanged and failed without checkpoint. |
 | Interaction records | Pending and terminal projections preserve producer, kind, stable choices, original run/turn/call identity, expiry and answer/decline/expiry disposition. Attach snapshot and replay agree at the same cursor, including a question already pending when attachment begins. |
 | Run/bound records | Preserve the effective absolute deadline and ordinary bound/terminal outcome through committed run views, while keeping relative and absolute limits distinct. Encode new ordinary bound members as canonical positive decimal strings: `max_turns`/`token_budget` retain their current positive-integer domains, `deadline_ms` its positive uint64 domain. `deadline_at_ms` uses ADR 0046's positive JSON safe-integer domain. Apply the same conversion on output; never round through JavaScript numbers or silently impose uint64 on turns/tokens. |
 | Context refusal/failure | ADR 0043 owns private refusal revision 2, its closed numeric/nonnumeric failure union and measured/unavailable projections; new wire event/snapshot/compact-result schemas include it with uint64 values as exact decimal strings. Old revision 1 retains its five-key shape and fixed system limit. |
@@ -442,7 +445,8 @@ not fixtures or successful proof today.
 **Case verdict and prior failures.** The fixed manifest declares each case's
 required model actions and objective oracle before execution. The runner records
 a mechanical result first: `pass`, `required_action_absent`, `assertion_failed`,
-`evidence_incomplete_pre_dispatch` or `evidence_incomplete_post_dispatch`, with
+`evidence_incomplete_pre_dispatch`, `evidence_incomplete_post_dispatch` or
+`provider_environment_failure`, with
 failed assertion IDs and committed boundary facts. A named independent reviewer
 then assigns the cause verdict below; the runner cannot decide whether a product
 defect caused a model miss. A complete pass can be provisionally mechanical, but
@@ -454,6 +458,16 @@ closure still requires review:
 | `product_failure` | A product, fixture or harness path fails a required assertion, including a legal capacity/refusal that prevents a required positive case; record the causal evidence. This label does not assert a code defect |
 | `model_nonconformance` | Valid committed input and complete boundary evidence show the model omitted a prescribed action or violated the fixed task oracle, with no causal product/fixture/harness failure or missing evidence |
 | `evidence_unavailable` | Missing evidence, prerequisites, attendance or unconfirmed fixture cleanup prevents a verdict about the required behavior |
+| `environment_failure` | Complete retained boundary evidence establishes an external provider/network outage after dispatch, with no causal product/fixture/harness fault or model miss; an independent reviewer confirms the diagnosis and cleanup |
+
+Environment failure is not PASS and supplies no positive behavior proof. The
+maintainer selected A on 2026-09-30: retain the failed attempt and its reviewed
+outage evidence, then permit only that affected case again on a new candidate
+under the normal matrix rules, without requiring an invented product correction.
+The new candidate records this diagnosis/authorization; a fresh SHA alone is not
+a route. No same-SHA retry, model-miss exemption or missing-evidence substitution
+is allowed. Invalid credentials/routes, local harness faults and unconfirmed
+cleanup cannot be relabelled external outages.
 
 The reviewer distinguishes a missing model action from invalid inputs, product
 refusals and recording/attendance loss. A refusal that follows its contract can
@@ -470,12 +484,16 @@ new SHA. `product_failure` needs a substantive causal correction to the affected
 fixture or harness and review, while preserving required assertions. A legal
 refusal with no such correction routes to a named scope amendment, not an
 accepted limitation. Pre-dispatch missing prerequisites may be repaired on the
-same SHA only after retained proof that no model call started; no attempt was
-consumed. Post-dispatch evidence loss is evidence_unavailable, never a model
+same SHA only after retained proof that no model call started anywhere in that
+case; its index state is not_dispatched and no attempt was consumed. Resume the
+same logical matrix through the index below; never revisit completed cases. Post-dispatch evidence loss is evidence_unavailable, never a model
 miss. The maintainer selected A on 2026-09-30: retain the incomplete attempt,
 require an independently reviewed causal fix to the recording/attendance path,
 and run the affected checks on a new candidate. Source/configuration changes
-must address that cause while preserving the case's assertions. A new SHA alone,
+must address that cause while preserving the case's assertions. A committed
+runner or attendance-procedure repair qualifies only when independent review
+shows it would have prevented the loss; an unrelated runbook edit does not.
+Absent such a fix, use disposition menu item 3 below. A new SHA alone,
 a repaired environment alone or newly available attendance cannot authorize a
 post-dispatch replacement on the same unchanged case. This is no same-SHA retry
 exception. Record the diagnosis, correction and review before another attempt.
@@ -519,7 +537,14 @@ An attended case, including a shared coding task, runs only in the full matrix
 with a named human operator. `--only` accepts lane IDs: `m7-provider` and `m7-rollback` are eligible pre-merge
 lanes; `m7-operator` refuses. Case IDs identify manifest rows, not CLI selectors. Such evidence does
 not replace any required full-matrix execution or authorize a failed case reroll.
-The full runner visits each manifest case once, preventing duplicate dispatch.
+The full runner visits each manifest case once per logical matrix, preventing
+duplicate dispatch. `--resume-matrix MATRIX_ID --attempts-index FILE` resumes
+that same matrix only after a pre-dispatch stop: validate candidate, pins,
+manifest and retained completed-case digests, reuse those results and start only
+not_dispatched cases. It never resumes a consumed incomplete case or recreates
+an attempt. The resumed invocation has a fresh retained command log joined to
+the same matrix ID; no completed fast/release lane runs again. This is one
+logical closure matrix, not a second full check or a new attendance exemption.
 It runs a contiguous attended block through executable wrappers attached to the
 operator's `/dev/tty`, with the existing PTY capture preserving human input and
 exact IDs. Do not run those wrappers as hidden System.cmd children expecting
@@ -527,7 +552,16 @@ unattended stdin. Each manifest case pins finite run, standalone-maintenance,
 question/attendance and cleanup ceilings; the block ceiling is their sum plus
 its pinned setup allowance, and the runner reports elapsed steps live. These
 explicit case budgets never silently inflate a failed check's timeout; automatic
-PTY answers never establish M7 attendance. V10 collection/external execution,
+PTY answers never establish M7 attendance. A ceiling breach is assertion_failed
+and product_failure unless missing evidence prevents classification; stop the
+matrix and mark every later zero-dispatch case not_dispatched. Print the summed
+finite block ceiling before starting. Phase 0 pins per-case numbers within
+60,000-ms standalone maintenance, 120,000-ms question/tool holds, 600,000-ms
+individual run and committed cleanup bounds; case totals sum their fixed run/
+subcase counts plus a 60,000-ms setup allowance. None may be adjusted during a run.
+Before any paid M7 dispatch, complete fresh-source/build, both rollback pairs,
+node_client, long_bound and the required legacy unattended lanes in fixed order.
+Retain failures before entering the attended block; resume never repeats them. V10 collection/external execution,
 V11 tracing, V12 configuration and V13 artifact/restore steps are actions inside
 that same full invocation, with their slots and cleanup joined before success.
 
@@ -547,7 +581,8 @@ that same full invocation, with their slots and cleanup joined before success.
 | `m7.thinking-bound` / `m7.thinking-cancel` | `m7-provider`, V7.7 subcases | Prescribed bound/cancel after committed tool results; later prompt on same model preserves canonical grouping/facts without old native state; provider acceptance and truthful cleanup |
 | `m7.policy-denial` | `m7-operator`, V9.1 | Required denied call commits its policy result; no effect intent/receipt or workspace change occurs |
 | `m7.daemon-detach` | `m7-provider`, V9.4 | Client detach/reattach while the prescribed run is active preserves run identity and does not cancel it; final oracle and cleanup pass |
-| `m7.rollback` | `m7-rollback`, V13 | Both historical/new archive pairs, old-reader observations and credential-free restored baseline satisfy their fixed oracles |
+| `m7.restore` | `m7-operator`, V13.1 and V13.4–6 | Attended backup/access prevention/restore/manifest inspection joins m7.rollback's exact retained execution; no new provider call or rollback rerun |
+| `m7.rollback` | `m7-rollback`, V13.2–3 and credential-free producer for attended inspection | Both historical/new archive pairs, old-reader observations and credential-free restored baseline satisfy their fixed oracles |
 | `m7.external` | `m7-operator`, V10 external execution | Pre-dispatch pin, pinned repository acceptance commands and allowed diff |
 
 The manifest also pins provider-backed baseline cases `m7.baseline.ask` and
@@ -579,19 +614,77 @@ Each case starts from its pinned initial workspace/state or the exact retained
 state of its prescribed predecessor; the manifest declares which. It cannot
 silently reuse a workspace already repaired by another case. Independent
 oracle reruns verify the existing task workspace without calling the model or
-starting another task attempt. Every paid M7 case execution, including
-pre-merge --only work, registers candidate/case/attempt and the fixed specification
-digest in an append-only retained attempts index before first dispatch. Fresh
-execution paths use exclusive creation. Record started/completed/cause state and
-retained-output digests; interruption leaves a consumed unresolved entry. Before
-candidate commitment, reconcile that complete index into predeclared prior rows.
-After declaring a closure candidate, no extra paid --only M7 execution is allowed:
-the full matrix owns its new attempts and fills existing slots. Known prior
-failures cannot be omitted because they occurred outside the full matrix.
-Repeated selection, missing evidence or failure
-cannot allocate a replacement attempt to manufacture a pass; the failure and
-candidate rules above still govern.
+starting another task attempt. Every full-matrix case, including credential-free
+cases, and every paid M7 pre-merge --only execution must use
+`--attempts-index FILE`, an absolute retained path outside repository/workspaces.
+Phase 0 pins one campaign ID and index genesis digest in the committed manifest;
+all machines use that campaign's complete index. A fresh unrelated index cannot
+hide an earlier attempt. One designated campaign writer holds an exclusive local
+file lock. Local locks do not establish exclusion between machines. The trusted
+runner procedure therefore records a writer identity and ownership epoch in
+closed ownership events, separate from genesis and case events. Initial
+designation follows genesis before any case record. Before dispatch,
+the local runner checks that it is the latest designated writer and has no
+retained relinquishment marker.
 
+A handoff first quiesces the old runner with no unresolved append or active case,
+appends and fsyncs relinquishment naming the destination and preceding head/count,
+and retains a local revocation marker checked by every later invocation there.
+Only then release the old lock and transfer the complete index and referenced
+evidence. The transferred head includes that relinquishment event. The destination
+verifies this head, quiescence evidence and source revocation before appending its acceptance of the next epoch and
+becoming the sole writer. Interrupted or uncertain handoff blocks dispatch on
+both hosts until the same handoff is resolved; it does not create another owner
+or campaign. No stale copy is a valid evidence source. This is a retained
+single-writer procedure over trusted hosts, not distributed fencing by a local
+file lock. Phase 0 pins its control-event shapes, safe recovery procedure and
+two-host handoff/split-writer refusal tests. No new service is required.
+The scaffold records the known head/count before candidate commitment. Preflight
+requires a valid chain extending that exact head, including every subsequent
+attempt; missing history or a mismatch refuses dispatch.
+
+The index is append-only compact sorted-key JSONL, one at-most-65,536-byte record
+per line. Its closed envelope is `{version: 1, campaign_id, sequence,
+previous_digest, body, digest}`. Sequence increases from 1; previous_digest is
+null only for genesis. Digest is SHA-256 of the exact compact JSON encoding of
+the other five members, without LF. Body is a closed versioned event union:
+genesis binds only the campaign ID and codec version, avoiding a manifest/genesis
+digest cycle; case events bind the current manifest digest, candidate SHA,
+case/subcase key, fixed specification digest, attempt ID or null, state,
+mechanical result/verdict or null, and bounded retained evidence/diagnosis/
+disposition references and digests or null. Phase 0 pins its full literal schema,
+relations and vectors. Unknown members, duplicates, forks, truncated complete
+records or state regressions refuse. A trailing incomplete append is unresolved,
+never absence; recover exclusively before proceeding. fsync each append before
+acknowledgement or dispatch. No credential values enter this index.
+
+Case state is not_dispatched, started, completed, reviewed or
+authorized_next_candidate. Register started and the fresh execution path/attempt
+identity before the first model call in a paid case, or before the first actual
+check/case execution in a credential-free case. Possible execution without
+completed evidence consumes either kind of case. Not_dispatched requires
+attempt_id null and proof that no model call began anywhere in a paid case, or
+that no check/case execution began in a credential-free one. Only allocation/
+prerequisite failures before that boundary leave this state. Credential-free
+started failures retain the existing prohibition on repeating failed unchanged
+bytes; absence of a model call cannot make them resumable. A completed result can be reviewed and dispositioned by appended
+records, never overwritten. References join every command log to one logical
+matrix ID. Resume consumes only not_dispatched rows, retaining all completed
+results and prior attendance. It cannot replace a started unresolved attempt.
+Before candidate commitment, reconcile the complete index into predeclared prior
+rows. Every candidate scaffold has Pending index path, campaign/genesis digest,
+head digest/count and logical-matrix invocation-log references; its closure child
+fills those values from the extended chain without adding rows/headings.
+
+A selected lane with an unresolved prior case failure refuses before any model
+call and reports evidence unavailable for the merge; it neither skips that case
+nor dispatches it again. Case/causal disposition must authorize a new candidate
+first. The tested implementation SHA's In-review register transition declares
+the closure candidate. After that commit no extra paid --only M7 execution is
+allowed; the full logical matrix owns its new attempts and existing slots.
+Known pre-merge failures on any machine remain visible. Repeated selection,
+missing evidence or failure cannot allocate a replacement attempt to manufacture
+a pass. The failure/candidate rules above still govern.
 The maintainer selected agent-run fixture tests and independent harness reruns.
 Add a fixture-host policy adapter supplied by trusted validation-harness
 composition to the real CLI path, with exact approved invocations and a pinned
@@ -599,8 +692,11 @@ manifest. This bypasses no policy decision and exposes no new production config
 profile or caller-supplied policy module. The planned trusted entry point is
 `scripts/m7-fixture-chat.exs`: validate the ordinary explicit file and closed
 policy profile first, then inject the fixed fixture policy through host
-composition and invoke the same CLI conversation driver. Only the harness owns
-this injection; neither a config field nor a model argument names a module.
+composition and invoke the same CLI conversation driver. Trusted overrides are limited to the pinned fixture
+policy and V7.7's conformance-tested pre-transport Model-port cancellation gate.
+The latter proves cancellation before that transport, not in-flight HTTP
+cancellation; existing real-provider cancellation lanes keep that obligation.
+Only the harness owns these overrides; neither a config field nor a model argument names a module.
 The planned internal `LoopexCli.Chat.run/2` join accepts resolved conversation
 options and trusted host composition overrides; the ordinary `main/1` path
 supplies none. It is not a public/configurable policy-module option. Effective
@@ -711,7 +807,10 @@ waive an unexpected-question failure or claim the model can be forced not to ask
    admits that exact runner invocation through its fixture policy. An independent
    observer attachment captures committed events and joins the case's exact
    session/run/operation plus steer/follow-up command IDs before FIFO release;
-   terminal input or progress alone cannot open it. Operator timing against a
+   terminal input or progress alone cannot open it. Use the existing read-only
+Loopex.attach/2 subscription via committed session events and its snapshot,
+with event sequence/catch-up validation; it is not a progress subscriber or a
+second truth writer. Operator timing against a
    fast provider is not the acceptance oracle.
 2. Steer the active objective and observe its admission/disposition.
 3. Queue a follow-up while the run remains active.
@@ -806,7 +905,12 @@ waive an unexpected-question failure or claim the model can be forced not to ask
    real-provider cases. Each performs its prescribed terminal cut after committed
    tool results, then submits a new prompt on the same admitted thinking model.
    Require accepted canonical message grouping, correct fixture facts and no
-   resurrected native state. Controlled cuts are actions within each fixed case,
+   resurrected native state. Assert from bounded native-capture classification
+   that the later reply used native thinking for each continuation-required cell.
+   For Haiku default and none, require the registered nil-continuation,
+   no-native-thinking behavior instead. Each cell must match its exact admitted
+   mapping. No private blocks enter the evidence.
+   Controlled cuts are actions within each fixed case,
    not replacement attempts; missing required model actions still fail. The bound
    case pins a one-turn limit so the first complete tool group commits before
    bound termination. For cancellation, a trusted conformance-tested Model-port
@@ -840,10 +944,13 @@ waive an unexpected-question failure or claim the model can be forced not to ask
    A child may finish cleanup after the parent's observation window; the parent
    remains unknown. Stop helpers through their parent, never direct child abort;
    if unavailable, restart the host for stop-only recovery. Inspect late local
-   cancellation, registry exhaustion/restart and cross-parent ledger-fence tests.
+   cancellation, active-row reclamation, per-ID tombstones/overflow restart and cross-parent
+   ledger-fence tests.
 6. Exhaust a small delegation allowance across serial children; verify that
    another child refuses while the parent's remaining budget stays distinct.
    Inspect parent, helper and combined usage, then restart and verify no reset.
+   The refused call consumed no child count/tokens and requires no ledger row;
+   its committed pre-effect refusal must keep the parent activatable after restart.
 7. Reject an unknown/disabled role. Edit a role file, reopen the parent and
    verify its retained catalog and every delegation declaration field still
    govern. Edit child and aggregate limits and try conflicting `--no-helpers`;
@@ -852,13 +959,23 @@ waive an unexpected-question failure or claim the model can be forced not to ask
 #### V9. Refuse, interrupt and recover
 
 1. Trigger a policy-denied effect and verify no effect occurred.
-2. Interrupt a foreground task and inspect its cancellation/cleanup result.
+2. Start m7.interrupt with V4's exact pinned FIFO runner and fixture policy.
+   The observer joins the committed effect intent before interruption; release
+   only through cancellation/confirmed cleanup. Interrupt the held foreground
+   task and inspect its cancellation/cleanup result.
    For a helper, cancellation goes through the parent. A late confirmed child
    stop does not rewrite the parent's expired observation as confirmed cleanup.
 3. Recover a disposable durable session after controlled process loss and
    inspect the committed outcome before submitting more work.
-4. Detach a daemon client, reattach and verify that client absence alone did
-   not cancel the daemon-owned run.
+4. Start m7.daemon-detach through the same trusted policy-injection composition
+   join as the fixture chat wrapper, in its daemon host. Hold V4's pinned FIFO
+   invocation while the driver records its connection closure and successful
+   reattach response. Join those host observations to the independent observer's
+   committed cursor and same-run active snapshot before release. Detach and
+   reattach are connection facts, not committed session events; the session
+   observer proves that the original run stays active across the join. Verify absence
+   alone did not cancel the run. Hold expiry fails; a fast model cannot erase
+   the precondition, and no fake reply supplies the oracle.
 5. When recovery reports an unknown effect, preserve the root for inspection.
    Do not demonstrate recovery by blindly repeating the request.
 
@@ -866,8 +983,8 @@ waive an unexpected-question failure or claim the model can be forced not to ask
 
 1. Collect the authoritative fixture attempts from their owning scenarios;
    do not execute them again for this step or to fill a missing evidence slot.
-   Choose the external repository/task during testing; record base SHA, allowed
-   paths and objective checks before the attempt. Create its disposable checkout,
+   Inspect the external repository/task pin chosen during testing before the
+   full invocation; it already records base SHA, allowed paths and objective checks. Create its disposable checkout,
    execute the task and retain the original results and diff.
 2. Verify the collected objective check results and allowed diffs against the
    fixed manifest. Run the external task's pinned acceptance commands and
@@ -938,7 +1055,14 @@ versioned two-pair grammar, rather than passing v0.3.0 into the old-only guard.
 Its worker paths explicitly select the driver extraction for each pair. Retain
 all driver/build/executable/toolchain digests and preflight those builds before
 credentialed cases.
-The lane preserves every historical assertion and adds the new pair. Prevent
+The lane preserves every historical assertion and adds the new pair. Plan
+acceptance explicitly retires the old v0.2.0-to-current-candidate pairing: the
+frozen v0.2.0↔v0.3.0 pair proves historical compatibility, and v0.3.0↔M7 proves
+the new upgrade/rollback boundary. It no longer claims that candidate changes
+are read by v0.2.0. Record this change in what the check proves in the context
+map and update the verification guide with the implementation. The existing
+rollback selector keeps its historical pair; m7-rollback owns the added pair
+and joins the historical execution rather than running it twice. Prevent
 old access by exact executable/build digest and launch configuration, not VERSION,
 which may be identical. `m7.rollback` owns this credential-free release lane;
 V13 inspects its retained results and performs the attended restore steps.
@@ -1004,8 +1128,11 @@ and specification bytes, never actual post-run identities. The runner writes
 actual attempt/session/run/child identities, outcomes, operator identity and
 verdict to fresh retained execution records outside the repository; each record
 binds its case ID and manifest digest. The scaffold predeclares one Pending row
-per manifest step/subcase key. The integration owner implements `mix loopex.m7_evidence`, invoked by the
-existing fast check once an M7 manifest/scaffold exists. It requires those key
+per manifest step/subcase key, including V11.1.flag/file, V11.2.flag/file and
+V11.5.flag/file/json joined to their trace execution records. The integration owner implements `mix loopex.m7_evidence`, invoked by the
+existing fast check unconditionally before its --docs early exit, and by
+release preflight. Require the canonical M7 manifest/scaffold paths after M7
+implementation lands; absence or renaming fails rather than silently skipping. It requires those key
 sets, exact case ownership, profile sets, oracle IDs and lane/classification
 mappings to agree before any provider demonstration. This is a task inside the
 existing check, not a third check command. Filling scaffold values uses
@@ -1060,6 +1187,9 @@ candidate before its closure matrix. Its predeclared Pending slots cover:
 The release command gains explicit `--pins FILE` input for the immutable A/B
 and external-task pin object (or uses committed pins). Validate its closed shape,
 path and digest before starting the matrix; it carries references, not credentials.
+External-task selection may use credential-free inspection or local prerequisite
+checks, but no unpinned paid model trial is authorized; every model attempt
+belongs to its pinned counted case and complete attempts index.
 The complete matrix execution log records the digest before its first dispatch,
 then each case records its relevant pin digest. An external task chosen later
 requires selection before the full invocation, not halfway through it.
@@ -1080,7 +1210,7 @@ supply that pin when selection occurs before candidate commitment. Extend the
 existing release runner, selectors, wrapper/redaction tests and the existing
 PTY helper for the changed chat workflow. The current runner's fixed eleven
 cases and one credential are implementation work, not evidence that new lanes
-already run. Required new selectors cover coding tasks, piped/attended chat,
+already run. The three fixed M7 lanes cover coding tasks, piped/attended chat,
 thinking/tool continuation, A→B→A, conversation A/summarizer B, parent A/helper B
 and M7 upgrade/rollback. Credentialed lanes declare
 separate A/B references and redact all selected values; other lanes require no
@@ -1093,7 +1223,7 @@ attempt. Names are host-only evidence, not public configuration or credential
 values. The runner records their digest/identity with each case and passes the
 complete selected-name set to its redactor and PTY driver and
 self-tests with every canary, including non-default names. Redaction cannot
-remain a fixed four-name list. The new selectors are required in the full
+remain a fixed four-name list. The new lanes are required in the full
 closure release matrix; `--only` selects pre-merge evidence, not an exemption
 from closure. `m7.cross-provider-maintenance`, distinct from `m7.long`, pins an
 always-on conversation model and an explicit thinking-off summarizer, including their exact mappings. A switching
@@ -1103,12 +1233,12 @@ ADR 0044's initial Claude matrix pins `anthropic:claude-haiku-4-5-20251001`
 for manual/default and thinking-off maintenance cases, and
 `anthropic:claude-fable-5-1` for the always-on adaptive conversation case.
 Their exact outgoing mode, display and reply-limit vectors precede integration;
-catalog presence alone proves no support. After deterministic conformance,
-the trusted test host uses a proposed descriptor solely in its already-declared
-counted live cases and labels it unverified in the retained case record. Their
-success gates ordinary support admission under ADR 0044; failure keeps the
-fixed disposition and attempt accounting. No extra calibration or reroll is
-authorized. The release manifest retains these mapping/renderer revisions
+catalog presence alone proves no support. After per-cell deterministic conformance, the tested bytes register all nine
+ADR 0044 cells for ordinary host resolution. Their fixed per-cell witness keys
+belong to the existing counted cases and must all pass on that candidate before
+closure. The manifest lists every key, explicit limit and owning execution slot;
+no later registration edit, candidate-only override or extra calibration is
+allowed. Failure keeps the fixed disposition and attempt accounting. The release manifest retains these mapping/renderer revisions
 with each selected case. This does not choose the
 separate hosted provider B or replace its required pre-attempt identity pin.
 
@@ -1134,6 +1264,9 @@ prototypes and that fresh adversarial pass. The subsequent [round 3 assessment](
 `a4c9061e` supersedes that readiness conclusion. The [round 4 assessment](../evidence/M7-external-review-4.md)
 of `018c271c` supersedes round 3's repaired readiness conclusion. Its 55 findings
 and renewed internal review are tracked in the [round 4 disposition](../evidence/M7-round-4-disposition.md).
+The [round 5 assessment](../evidence/M7-external-review-5.md) of a2ce04c2
+supersedes round 4's readiness conclusion. Its 50 findings, both maintainer
+choices and renewed internal review are tracked in the [round 5 disposition](../evidence/M7-round-5-disposition.md).
 The repaired packet proceeds to external audit only after that review and
 clean-candidate documentation validation. This is review of planned contracts, not product evidence or
 formal independent acceptance review.
@@ -1202,7 +1335,8 @@ tool selection; executor router binding before recovery dispatch; parent-binding
 and catalog recovery, `Runtime.effect_intents/4`, `Runtime.creation_provenance/2`,
 `Runtime.lookup_create_result/4`, the read-only Store provenance callback with complete runtime paging and
 shared pure `SessionGenesis.resolve/2` / `normalize/1` and exact-genesis live
-create variant, with their conformance; both protocol servers and payload-schema digests; the
+create variant, with their conformance; the owner unknown-admission transaction resolver and
+observational command_disposition facade; both protocol servers and payload-schema digests; the
 trusted fixture-chat wrapper and composition policy injection, preserving the
 CLI's closed production policy registry; release selectors/credential redaction;
 and the existing attended PTY driver. Each rejoins with conformance or negative
@@ -1231,7 +1365,8 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   estimator revision, context-provider receipt revision 4, versioned refusal/failure
   projections and private/public projection,
   question producer/text/decline records,
-  host role/allowance ledger including monotonic stop records, read-only Store creation_provenance/3 callback and derived
+  host role/allowance ledger including monotonic stop records and its disposable
+  version-1 derived job-index directory, read-only Store creation_provenance/3 callback and derived
   stable runtime-create ordinals, generic absolute deadline ceiling on prompt/follow-up,
   request and normalized-command revisions, events, snapshots and negotiated
   protocol generation. Each has versioned vectors and an explicit unsupported-reader
