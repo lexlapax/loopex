@@ -37,7 +37,9 @@ Part of the [evidence index](README.md).
   flag/environment/file selection and harmless literal defaults.
 - Done: bounded model-limit capture from the verified pinned packaged catalog,
   preserving unknown limits and the one accepted literal Haiku alias.
-- Next: model-capability and prompt-file preparation, effective inspection and command entry wiring, then live
+- Done: shared pure initial-configuration resolution derives context ceilings
+  and their origins, validating captured instructions and all selected schemas.
+- Next: prompt-file and mapping preparation, effective inspection and command entry wiring, then live
   chat/configuration composition and non-nil continuation costs in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
@@ -270,6 +272,19 @@ Part of the [evidence index](README.md).
   malformed specifications. Provider dispatch and whole-profile admission remain
   pending; no provider call or full integration result is claimed.
 
+- 2026-10-01: `SessionConfiguration.resolve/4` prepares a complete initial
+  configuration from closed explicit host selections, captured capabilities,
+  provider mapping and all selected definitions. Known windows subtract the
+  reply reserve once; unknown windows retain 8,192 input tokens independently
+  of reserve. Explicit ceilings remain explicit even when equal to defaults.
+  The existing complete validator enforces output/window limits, the strict
+  combined instruction/tool-schema cost and bounded retained metadata. The v3
+  suite passes 20 tests in 0.1 seconds, including six resolution cases and exact
+  genesis rejoin. Warning-free compilation, formatting and compiled documentation
+  ordering pass with 963 covered entries. Reference-host preparation/inspection
+  and live chat remain pending; this is focused development evidence, not a full
+  integration result.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -317,6 +332,7 @@ Part of the [evidence index](README.md).
 - [x] Share the v2 resolver/decoder between creation and replay; pin unchanged transaction bytes and exact normalized byte boundaries.
 - [x] Extend that same resolver/decoder with v3 configuration, immutable tool selection and literal artifact-read derivation.
 - [x] Validate closed captured configuration, combined metadata byte limits, budget origins and complete system-class tool costs; retain v3 settings through pure replay.
+- [x] Resolve complete initial configurations through that validator, deriving known/unknown context budgets and retaining explicit/default origins.
 - [x] Integrate v3 creation and configuration-aware live owner staging, including frozen request/receipt identities.
 - [x] Support exact-genesis creation, finding duplicates before expanding changed defaults.
 - [ ] Implement the closed configuration-file schema and command-line grammar.

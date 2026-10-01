@@ -118,6 +118,120 @@ defmodule Loopex.Runtime.SessionGenesisV3Test do
     assert {:ok, _} = SessionGenesis.resolve(%{}, input([fixture.legacy, other]))
   end
 
+  test "initial resolution derives known budgets and rejoins exact v3 genesis", fixture do
+    expected = known_configuration()
+    declaration = declaration(expected)
+    assert {:ok, ^expected} = resolve(declaration, expected, [fixture.range])
+    assert {:ok, genesis} = SessionGenesis.resolve(%{}, input([fixture.range], expected))
+    assert genesis["initial_configuration"] == expected
+
+    changed = Map.put(declaration, "max_tokens", 512)
+    assert {:ok, resolved} = resolve(changed, expected, [fixture.range])
+    assert resolved["context_token_budget"] == 7_680
+    assert resolved["budget_origins"]["context_token_budget"] == "model_window"
+  end
+
+  test "initial resolution keeps the unknown window fallback independent of reserve" do
+    expected = configuration()
+
+    for reserve <- [1, 1_024, 8_192, 9_000] do
+      assert {:ok, resolved} = resolve(Map.put(declaration(expected), "max_tokens", reserve))
+      assert resolved["context_token_budget"] == 8_192
+      assert resolved["budget_origins"]["context_token_budget"] == "unknown_window"
+    end
+
+    assert {:ok, explicit} =
+             resolve(Map.put(declaration(expected), "context_token_budget", 10_000))
+
+    assert explicit["context_token_budget"] == 10_000
+    assert explicit["budget_origins"]["context_token_budget"] == "explicit"
+  end
+
+  test "explicit ceilings retain their origin even when equal to defaults" do
+    expected = configuration()
+
+    assert {:ok, resolved} =
+             resolve(
+               Map.merge(declaration(expected), %{
+                 "context_token_budget" => 8_192,
+                 "system_class_tokens" => 1_000
+               })
+             )
+
+    assert resolved["budget_origins"] == %{
+             "context_token_budget" => "explicit",
+             "system_class_tokens" => "explicit"
+           }
+  end
+
+  test "resolution refuses invalid limits and explicit ceilings without changing input" do
+    expected = known_configuration()
+    declaration = declaration(expected)
+
+    for {input, metadata} <- [
+          {Map.put(declaration, "max_tokens", 1_025), expected},
+          {Map.put(declaration, "max_tokens", 0), expected},
+          {Map.put(declaration, "max_tokens", "1024"), expected},
+          {Map.put(declaration, "max_tokens", 18_446_744_073_709_551_616), expected},
+          {Map.put(declaration, "context_token_budget", 7_169), expected},
+          {Map.put(declaration, "context_token_budget", nil), expected},
+          {Map.put(declaration, "system_class_tokens", nil), expected},
+          {declaration, put_in(expected, ["model_capabilities", "context_window"], 1_024)},
+          {declaration, put_in(expected, ["model_capabilities", "context_window"], "8192")},
+          {declaration, put_in(expected, ["model_capabilities", "output_limit"], 1_023)}
+        ] do
+      assert resolve(input, metadata) == {:error, :invalid_session_configuration}
+    end
+
+    assert declaration == declaration(expected)
+
+    assert {:ok, explicit} =
+             resolve(Map.put(declaration, "context_token_budget", 7_167), expected)
+
+    assert explicit["budget_origins"]["context_token_budget"] == "explicit"
+  end
+
+  test "resolution requires closed explicit host selections and captured metadata" do
+    expected = configuration()
+    declaration = declaration(expected)
+
+    for invalid <-
+          Enum.map(Map.keys(declaration), &Map.delete(declaration, &1)) ++
+            [nil, [], self(), Map.put(declaration, "budget_origins", %{}), expected] do
+      assert resolve(invalid) == {:error, :invalid_session_configuration}
+    end
+
+    for {capabilities, mapping} <- [
+          {nil, expected["provider_mapping"]},
+          {expected["model_capabilities"], nil},
+          {put_in(expected["model_capabilities"], ["model"], "other"),
+           expected["provider_mapping"]},
+          {expected["model_capabilities"], Map.put(expected["provider_mapping"], "extra", true)}
+        ] do
+      assert SessionConfiguration.resolve(declaration, capabilities, mapping, []) ==
+               {:error, :invalid_session_configuration}
+    end
+  end
+
+  test "resolution measures captured instructions plus the complete selected schemas", fixture do
+    expected = configuration()
+    {:ok, text} = Instructions.render(expected["instructions"])
+    base_cost = Bounds.estimate(Canonical.encode(%{"role" => "system", "content" => text}))
+    tool_cost = Bounds.estimate(Canonical.encode(ToolDefinition.model_facing(fixture.range)))
+    ceiling = base_cost + tool_cost
+    declaration = Map.put(declaration(expected), "system_class_tokens", ceiling)
+
+    assert {:ok, _} = resolve(declaration, expected, [])
+
+    assert resolve(declaration, expected, [fixture.range]) ==
+             {:error, :invalid_session_configuration}
+
+    assert {:ok, _} =
+             resolve(Map.put(declaration, "system_class_tokens", ceiling + 1), expected, [
+               fixture.range
+             ])
+  end
+
   test "configuration has a closed mandatory shape and captured instructions" do
     valid = configuration()
     assert SessionConfiguration.validate(valid, []) == :ok
@@ -331,6 +445,19 @@ defmodule Loopex.Runtime.SessionGenesisV3Test do
       assert SessionGenesis.normalize(payload) == expected
       assert SessionGenesis.resolve(options, input([fixture.range])) == expected
     end
+  end
+
+  defp declaration(configuration) do
+    Map.take(configuration, ~w(model reasoning configuration_version instructions max_tokens))
+  end
+
+  defp resolve(declaration, metadata \\ configuration(), definitions \\ []) do
+    SessionConfiguration.resolve(
+      declaration,
+      metadata["model_capabilities"],
+      metadata["provider_mapping"],
+      definitions
+    )
   end
 
   defp configuration do
