@@ -7,8 +7,8 @@ defmodule LoopexComposition.Ephemeral.Preflight do
 
   ## Technical depth
 
-  The order is option grammar, workspace, named skills, provider selection,
-  host-global guards, shared application bootstrap, guarded ReqLLM start,
+  The order is option grammar, workspace, named skills, provider selection and
+  explicit route/maintenance admission, host-global guards, shared application bootstrap, guarded ReqLLM start,
   provider-registry identity and explicit address. No step reads a provider
   credential or starts a session. Every dependency refusal is reduced to its
   closed composition reason at this boundary.
@@ -24,6 +24,13 @@ defmodule LoopexComposition.Ephemeral.Preflight do
          {:ok, cwd} <- workspace(selected.cwd),
          {:ok, skills} <- skills(selected.skills, cwd),
          {:ok, model} <- composition(Guards.model(selected.model)),
+         {:ok, bindings} <- bindings(selected.provider_bindings, model),
+         {:ok, _reference} <- Loopex.LLM.ReqLLM.HostBindings.select(selected.model, bindings),
+         {:ok, maintenance} <-
+           LoopexComposition.ProviderBindings.resolve_maintenance_model(
+             selected.maintenance_model,
+             bindings
+           ),
          :ok <- composition(Guards.pre_start()),
          :ok <- Bootstrap.start(),
          :ok <- req_llm(selected.req_llm),
@@ -34,9 +41,22 @@ defmodule LoopexComposition.Ephemeral.Preflight do
        |> Map.put(:cwd, cwd)
        |> Map.put(:skills, skills)
        |> Map.put(:provider, model)
+       |> Map.put(:maintenance_model, maintenance)
+       |> Map.put(:provider_base_url, selected.base_url)
        |> Map.put(:base_url, base_url)}
     end
   end
+
+  defp bindings(nil, model) do
+    credential =
+      if is_nil(model.credential_variable),
+        do: %{"none" => true},
+        else: %{"env" => model.credential_variable}
+
+    {:ok, %{Atom.to_string(model.provider) => %{"credential" => credential}}}
+  end
+
+  defp bindings(selected, _model), do: {:ok, selected}
 
   defp workspace(nil) do
     case File.cwd() do

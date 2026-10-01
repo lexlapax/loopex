@@ -14,7 +14,9 @@ defmodule LoopexComposition.Ephemeral.Options do
     :context_token_budget,
     :timeout,
     :base_url,
-    :maintenance_instructions
+    :maintenance_instructions,
+    :provider_bindings,
+    :maintenance_model
   ]
   @uint64_max 18_446_744_073_709_551_615
 
@@ -72,6 +74,16 @@ defmodule LoopexComposition.Ephemeral.Options do
   defp default(:context_token_budget, _), do: {:ok, 8192}
   defp default(:timeout, normalized), do: {:ok, min(normalized.deadline_ms + 30_000, @uint64_max)}
   defp default(:maintenance_instructions, _), do: {:ok, nil}
+  defp default(key, _) when key in [:provider_bindings, :maintenance_model], do: {:ok, nil}
+
+  defp validate(:provider_bindings, value) do
+    with {:ok, _} <- LoopexComposition.ProviderBindings.validate(value), do: {:ok, value}
+  end
+
+  defp validate(:maintenance_model, nil), do: {:ok, nil}
+
+  defp validate(:maintenance_model, value),
+    do: accept(:maintenance_model, value, LoopexComposition.ProviderBindings.valid_model?(value))
 
   defp validate(:maintenance_instructions, value) do
     with {:ok, _capture} <- Loopex.Runtime.MaintenanceConfiguration.capture_instructions(value),

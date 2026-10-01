@@ -52,7 +52,9 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
                 context_token_budget: 8192,
                 timeout: 630_000,
                 base_url: nil,
-                maintenance_instructions: nil
+                maintenance_instructions: nil,
+                provider_bindings: nil,
+                maintenance_model: nil
               }}
   end
 

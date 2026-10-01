@@ -27,8 +27,10 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
   def complete(request, options) do
     with {:managed, starter} <- ProviderLifetime.starter(),
          {:ok, config} <- options(options),
-         {:ok, prepared} <- InProcess.preflight(request, config.base_url),
-         true <- prepared.credential_variable == config.credential_variable,
+         {:ok, prepared} <- InProcess.preflight(request, config.base_url, config.bindings),
+         true <-
+           not is_nil(config.bindings) or
+             prepared.credential_variable == config.credential_variable,
          {:ok, fingerprint} <-
            Route.fingerprint(prepared.provider, prepared.surface, prepared.base_url),
          deadline <-
@@ -55,7 +57,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
            true <- is_atom(module) and is_pid(owner) and is_reference(generation),
            true <- is_reference(cell) and Keyword.get(options, :session_cell) == cell,
            {:ok, base_url} <- Keyword.fetch(options, :base_url),
-           {:ok, variable} <- Keyword.fetch(options, :credential_variable),
+           {:ok, bindings, variable} <- credential_options(options),
            {:ok, trace} <- Keyword.fetch(options, :trace_capability) do
         config = %{
           module: module,
@@ -63,6 +65,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
           cell: cell,
           base_url: base_url,
           credential_variable: variable,
+          bindings: bindings,
           trace: trace
         }
 
@@ -72,6 +75,19 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Callback do
       end
     else
       :error
+    end
+  end
+
+  defp credential_options(options) do
+    case Keyword.fetch(options, :provider_bindings) do
+      :error ->
+        with {:ok, variable} <- Keyword.fetch(options, :credential_variable),
+             do: {:ok, nil, variable}
+
+      {:ok, bindings} ->
+        with false <- Keyword.has_key?(options, :credential_variable),
+             {:ok, _} <- Loopex.LLM.ReqLLM.HostBindings.validate(bindings),
+             do: {:ok, bindings, nil}
     end
   end
 

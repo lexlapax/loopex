@@ -93,6 +93,8 @@ Part of the [evidence index](README.md).
 - Done: validate maintenance instructions before durable/ephemeral owned effects
   and forward them through every durable constructor and ephemeral SessionOwner
   into the real runtime and coordinator.
+- Done: join explicit ephemeral provider bindings to committed-model dispatch,
+  caller-only credential resolution and separately resolved maintenance startup.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -108,6 +110,51 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: Ephemeral startup accepts explicit provider bindings and a separate
+  maintenance model. It validates every reference, requires the ordinary and
+  summarizer routes, and forwards the resolved maintenance map privately.
+  Omission retains legacy single-route behavior; a supplied map adds no routes.
+  The adapter now owns the one shared reference validator used by composition
+  and dispatch. Each committed request selects its own provider reference before
+  admission, while only the sensitive caller reads the value. Mixed legacy and
+  explicit callback options refuse. Route tables do not enter caller input;
+  it receives only the selected reference. Tests cover native TLS calls using
+  alternating synthetic keys, a missing selected key despite a populated
+  default, credential-free calls, unknown/missing routes, reserved names,
+  resolved maintenance startup, public-view exclusion and repeated embedded
+  turns through the complete callback and cleanup path.
+  The initial focused invocation incorrectly combined applications in one VM.
+  Adapter tests passed 22 in 9.9 seconds, but ReqLLM startup state from that
+  suite caused 13 composition `req_llm_dotenv_enabled` refusals. The repository's
+  required one-application-per-VM execution removes that test-runner
+  contamination without changing or relaxing a guard. In a separate current VM,
+  all 61 composition cases pass in 23.2 seconds. Separate floor VMs pass the
+  same 22 adapter cases in 9.5 seconds and 61 composition cases in 23.7 seconds.
+  Retained outputs:
+  - Initial mixed run, including the adapter pass and composition failure:
+    `/private/tmp/loopex-m7-ephemeral-bindings-current.log`, SHA-256
+    `bd99b9315da0dad6c1f825073d614d2dc7b381edc034ffb13fcb91039923f79e`.
+  - Current composition:
+    `/private/tmp/loopex-m7-ephemeral-bindings-composition-current.log`, SHA-256
+    `28b6ee5e2be832912e47441c1b611027b5f4c59bd6604724906ff55838cf6f2e`.
+  - Floor adapter: `/private/tmp/loopex-m7-ephemeral-bindings-adapter-floor.log`,
+    SHA-256 `d3039116192773abf7b213a18683176a2a50f51c9aa39501cd3c5c72ebb2c439`.
+  - Floor composition:
+    `/private/tmp/loopex-m7-ephemeral-bindings-composition-floor.log`, SHA-256
+    `ab47e9c1402ca3a95c6632cc584287331647f103fe21582839b96245245165fc`.
+  Additional managed-callback cases prove mixed legacy/explicit options and a
+  missing selected route refuse before admission or child startup. The 17-case
+  callback file passes both pairs in 4.4 seconds each:
+  - `/private/tmp/loopex-m7-ephemeral-bindings-callback-current.log`, SHA-256
+    `212fbd31f233e78e45918fd87219a71be4c0cb4db57539ed2b149847a58a9a88`.
+  - `/private/tmp/loopex-m7-ephemeral-bindings-callback-floor.log`, SHA-256
+    `f7e073859841d404b6c879a5d17458642e4f7ab445f7be3a4c0037f86dc9d412`.
+  Compilation, formatting, documentation ordering across 1,022 covered entries,
+  dependency direction and status checks pass.
+  Durable custody, daemon routing, host configure/resume and maintenance episode
+  dispatch remain pending. These local synthetic calls are not counted paid
+  provider attempts or live closure witnesses.
 
 - 2026-10-01: All three durable constructors and ephemeral startup now accept
   explicit `maintenance_instructions`, validate them before owned effects and
@@ -1152,6 +1199,7 @@ Part of the [evidence index](README.md).
 - [ ] Inject faults at every binding, reserve, create, prompt, stop, settlement, receipt and cache boundary.
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
 ## T12 — Complete ephemeral support
+- [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
 - [ ] Forward accepted instruction, model, reasoning, provider-binding, maintenance, question and trace options.
 - [ ] Preserve reusable embedded sessions and buffered transport.
 - [ ] Keep questions opt-in and preserve old tool selections.
@@ -1262,7 +1310,7 @@ before a provider demonstration.
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Core startup capture and durable/ephemeral instruction forwarding implemented; model routing, episode capture, checkpoint and compaction pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
-| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Pure shared reference/exclusion validation implemented; custody and startup/dispatch integration pending |
+| Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Shared reference/exclusion validation and ephemeral startup/dispatch implemented; durable custody, daemon and helper integration pending |
 | Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths, trusted trace selectors, flag parser, new-session precedence/origins and initial capability/instruction admission implemented; complete role/maintenance preparation, command entry and redacted inspection pending |
 | Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
 | Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |

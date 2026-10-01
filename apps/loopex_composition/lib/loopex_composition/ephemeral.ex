@@ -40,6 +40,11 @@ defmodule LoopexComposition.Ephemeral do
   startup map. It is validated before allocating an owner and forwarded for
   Core's exact capture. Missing or nil stays unconfigured; per-call overrides
   are refused.
+  Optional `:provider_bindings` admits only its named provider routes; omission
+  retains the legacy single-route defaults. References stay private and values
+  are resolved only by each invocation's sensitive caller. Optional
+  `:maintenance_model` is a separately selected provider:model string with an
+  admitted thinking-off mapping. Missing or nil remains unconfigured.
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, reason()}
   def start_session(options) do

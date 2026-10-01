@@ -100,6 +100,48 @@ defmodule LoopexComposition.Ephemeral.PreflightTest do
              )
   end
 
+  test "explicit routes admit the ordinary and maintenance models without resolving values" do
+    routes = %{
+      "openai" => %{"credential" => %{"env" => "M7_UNUSED_FIRST_REFERENCE"}},
+      "anthropic" => %{"credential" => %{"env" => "M7_UNUSED_SECOND_REFERENCE"}}
+    }
+
+    options = [
+      policy: Policy,
+      cwd: File.cwd!(),
+      model: "openai:gpt-4o-mini",
+      provider_bindings: routes,
+      maintenance_model: "anthropic:claude-haiku-4-5"
+    ]
+
+    assert {:ok, selection} = Preflight.prepare(options)
+    assert selection.provider_bindings == routes
+    assert selection.maintenance_model["model"] == "anthropic:claude-haiku-4-5-20251001"
+    assert selection.maintenance_model["reasoning"] == "none"
+    assert selection.provider_base_url == nil
+
+    assert {:error, :provider_route_unavailable} =
+             Preflight.prepare(
+               Keyword.put(options, :provider_bindings, Map.delete(routes, "openai"))
+             )
+
+    assert {:error, :provider_route_unavailable} =
+             Preflight.prepare(
+               Keyword.put(options, :provider_bindings, Map.delete(routes, "anthropic"))
+             )
+
+    assert {:error, :provider_route_unavailable} =
+             Preflight.prepare(Keyword.delete(options, :provider_bindings))
+
+    assert {:error, :maintenance_reasoning_unsupported} =
+             Preflight.prepare(
+               Keyword.put(options, :maintenance_model, "anthropic:claude-fable-5-1")
+             )
+
+    assert {:error, {:invalid_provider_bindings, "/providers"}} =
+             Preflight.prepare(Keyword.put(options, :provider_bindings, nil))
+  end
+
   defp restore_env(name, nil), do: System.delete_env(name)
   defp restore_env(name, value), do: System.put_env(name, value)
 end

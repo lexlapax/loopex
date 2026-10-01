@@ -54,6 +54,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
              Ephemeral.start_session(
                policy: Policy,
                model: "ollama:llama3.2",
+               provider_bindings: %{"ollama" => %{"credential" => %{"none" => true}}},
                base_url: "http://127.0.0.1:#{port}/v1",
                cwd: root,
                tools: :none,

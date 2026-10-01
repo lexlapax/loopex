@@ -224,7 +224,24 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
 
   test "the real runtime and core facade complete startup without a model call", %{tmp: tmp} do
     block = %{"version" => "ephemeral.v1", "body" => "Retain exact host summary bytes 猫\n"}
-    configuration = configuration(tmp, %{}) |> Map.put(:maintenance_instructions, block)
+
+    bindings = %{
+      "ollama" => %{"credential" => %{"none" => true}},
+      "anthropic" => %{"credential" => %{"env" => "M7_STARTUP_REFERENCE_ONLY"}}
+    }
+
+    assert {:ok, maintenance} =
+             LoopexComposition.ProviderBindings.resolve_maintenance_model(
+               "anthropic:claude-haiku-4-5",
+               bindings
+             )
+
+    configuration =
+      configuration(tmp, %{})
+      |> Map.put(:maintenance_instructions, block)
+      |> Map.put(:maintenance_model, maintenance)
+      |> Map.put(:provider_bindings, bindings)
+
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     {:ok, activation} = OwnerActivation.start(supervisor)
     owner = OwnerActivation.owner(activation)
@@ -238,8 +255,13 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     assert :sys.get_state(children.control).maintenance_instructions == captured
     [{_, coordinator, _, _}] = DynamicSupervisor.which_children(children.sessions)
     assert :sys.get_state(coordinator).maintenance_instructions == captured
+    assert :sys.get_state(coordinator).maintenance_model == maintenance
+    model_options = :sys.get_state(coordinator).model.options
+    assert model_options[:provider_bindings] == bindings
+    refute Keyword.has_key?(model_options, :credential_variable)
     assert {:ok, public} = Runtime.configuration(runtime)
     refute :erlang.term_to_binary(public) =~ block["body"]
+    refute :erlang.term_to_binary(public) =~ "M7_STARTUP_REFERENCE_ONLY"
     Process.exit(supervisor, :shutdown)
   end
 

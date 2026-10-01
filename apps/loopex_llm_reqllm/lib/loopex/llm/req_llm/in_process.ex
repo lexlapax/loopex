@@ -40,9 +40,10 @@ defmodule Loopex.LLM.ReqLLM.InProcess do
   def complete(_request, _options, _progress), do: @failed
 
   @doc false
-  def preflight(request, base_url) do
+  def preflight(request, base_url, bindings \\ nil) do
     with :ok <- Model.validate_request(request),
          {:ok, model} <- Guards.model(request.model),
+         {:ok, variable} <- credential_reference(request.model, model, bindings),
          :ok <- Guards.call(model.provider),
          :ok <- native_preflight(request, model.provider),
          {:ok, address} <- Route.base_url(model.provider, base_url),
@@ -58,7 +59,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess do
          tools: tools,
          provider: model.provider,
          model_id: model.model_id,
-         credential_variable: model.credential_variable,
+         credential_variable: variable,
          base_url: address,
          surface: surface,
          identity: %{
@@ -75,6 +76,11 @@ defmodule Loopex.LLM.ReqLLM.InProcess do
   catch
     _class, _reason -> @failed
   end
+
+  defp credential_reference(_model, selected, nil), do: {:ok, selected.credential_variable}
+
+  defp credential_reference(model, _selected, bindings),
+    do: Loopex.LLM.ReqLLM.HostBindings.select(model, bindings)
 
   defp native_preflight(request, :anthropic) do
     with false <- Code.ensure_loaded?(ReqLLM.Test.Fixtures),

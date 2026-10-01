@@ -2822,16 +2822,25 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
     trace = Map.fetch!(startup.registered, :trace_handle)
 
+    route_options =
+      case Map.get(config, :provider_bindings) do
+        nil ->
+          [base_url: config.base_url, credential_variable: config.provider.credential_variable]
+
+        bindings ->
+          [base_url: Map.get(config, :provider_base_url), provider_bindings: bindings]
+      end
+
     model = %{
       module: Loopex.LLM.ReqLLM.InProcess,
       model: config.model,
-      options: [
-        base_url: config.base_url,
-        credential_variable: config.provider.credential_variable,
-        trace_capability: trace,
-        session_admission: SessionAdmission.handle(self(), startup.generation, state.cell),
-        session_cell: state.cell
-      ]
+      options:
+        route_options ++
+          [
+            trace_capability: trace,
+            session_admission: SessionAdmission.handle(self(), startup.generation, state.cell),
+            session_cell: state.cell
+          ]
     }
 
     [
@@ -2855,6 +2864,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       sampling: %{"max_tokens" => config.max_tokens},
       context_token_budget: config.context_token_budget,
       maintenance_instructions: Map.get(config, :maintenance_instructions),
+      maintenance_model: Map.get(config, :maintenance_model),
       resource_manifest: config.skills.manifest,
       cleanup_grace_ms: state.cleanup_grace_ms
     ]

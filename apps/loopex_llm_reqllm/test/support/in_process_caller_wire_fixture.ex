@@ -95,7 +95,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
         deadline: System.system_time(:millisecond) + 10_000
       )
 
-    assert {:ok, prepared} = InProcess.preflight(request, base)
+    assert {:ok, prepared} =
+             InProcess.preflight(request, base, Keyword.get(options, :provider_bindings))
+
     call_ref = make_ref()
     input_ref = make_ref()
     cell = :atomics.new(2, signed: false)
@@ -372,6 +374,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
       native_cells(runtime, trusted)
       selected_key_bounds(runtime, trusted)
       selected_key_rotation(runtime, trusted)
+      explicit_bindings(runtime, trusted)
       selected_key_echo(runtime, trusted)
       IO.puts("IN_PROCESS_CALLER_WIRE_PROBE_PASSED")
     after
@@ -409,6 +412,53 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
       assert selected == "synthetic-caller-credential"
       stop(call)
     end
+  end
+
+  defp explicit_bindings(runtime, trusted) do
+    routes = %{
+      "openai" => %{"credential" => %{"env" => "M7_WIRE_FIRST_KEY"}},
+      "anthropic" => %{"credential" => %{"env" => "M7_WIRE_SECOND_KEY"}}
+    }
+
+    System.put_env("M7_WIRE_FIRST_KEY", "synthetic-first-key")
+    System.put_env("M7_WIRE_SECOND_KEY", "synthetic-second-key")
+    System.put_env("OPENAI_API_KEY", "synthetic-default-must-not-win")
+    System.put_env("ANTHROPIC_API_KEY", "synthetic-default-must-not-win")
+
+    for {model, kind, selected} <- [
+          {"openai:gpt-4", :chat, "synthetic-first-key"},
+          {"anthropic:fixture", :anthropic, "synthetic-second-key"},
+          {"openai:gpt-4", :chat, "synthetic-first-key"}
+        ] do
+      call =
+        start(runtime, model, wire(kind, "routed answer"),
+          tls: trusted,
+          provider_bindings: routes
+        )
+
+      {result, call} = call |> begin() |> result()
+      assert {:ok, %{text: "routed answer"}} = result
+      assert [written] = call.writes
+
+      assert (written.headers["x-api-key"] ||
+                String.replace_prefix(written.headers["authorization"], "Bearer ", "")) ==
+               selected
+
+      stop(call)
+    end
+
+    call =
+      start(runtime, "openai:gpt-4", wire(:chat, "unreachable"),
+        tls: trusted,
+        provider_bindings: routes
+      )
+
+    System.delete_env("M7_WIRE_FIRST_KEY")
+    {result, call} = call |> begin() |> result()
+    assert {:error, {:not_dispatched, "model_call_failed"}} = result
+    assert call.writes == []
+    stop(call)
+    assert System.get_env("M7_WIRE_SECOND_KEY") == "synthetic-second-key"
   end
 
   defp native_cells(runtime, trusted) do

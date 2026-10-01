@@ -219,6 +219,34 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
              InProcess.preflight(request("openai:gpt-4o-mini"), "http://api.openai.com/v1")
   end
 
+  test "explicit bindings choose only the committed provider and reject every invalid reference" do
+    routes = %{
+      "openai" => %{"credential" => %{"env" => "M7_FIRST_REFERENCE"}},
+      "anthropic" => %{"credential" => %{"env" => "M7_SECOND_REFERENCE"}},
+      "ollama" => %{"credential" => %{"none" => true}}
+    }
+
+    for {model, variable} <- [
+          {"openai:gpt-4o-mini", "M7_FIRST_REFERENCE"},
+          {"anthropic:claude-sonnet-4-5", "M7_SECOND_REFERENCE"},
+          {"ollama:small", nil},
+          {"openai:gpt-4o-mini", "M7_FIRST_REFERENCE"}
+        ] do
+      assert {:ok, prepared} = InProcess.preflight(request(model), nil, routes)
+      assert prepared.credential_variable == variable
+      refute Map.has_key?(prepared, :provider_bindings)
+    end
+
+    for bad <- [
+          Map.delete(routes, "openai"),
+          %{},
+          put_in(routes, ["anthropic", "credential", "env"], "HOME")
+        ] do
+      assert {:error, {:not_dispatched, "model_call_failed"}} =
+               InProcess.preflight(request("openai:gpt-4o-mini"), nil, bad)
+    end
+  end
+
   test "preflight normalizes the explicit address and refuses host Req defaults" do
     assert {:ok, prepared} =
              InProcess.preflight(request("ollama:small"), "http://LOCALHOST:11434/v1///")
@@ -334,6 +362,25 @@ defmodule Loopex.LLM.ReqLLM.InProcessModelTest do
 
     assert {:error, {:not_dispatched, "model_call_failed"}} = result
     refute_receive :starter_invoked, 30
+
+    for options <- [
+          Keyword.put(callback_options(), :provider_bindings, %{
+            "ollama" => %{"credential" => %{"none" => true}}
+          }),
+          callback_options()
+          |> Keyword.delete(:credential_variable)
+          |> Keyword.put(:provider_bindings, %{
+            "openai" => %{"credential" => %{"env" => "M7_UNUSED"}}
+          })
+        ] do
+      assert {:error, {:not_dispatched, "model_call_failed"}} =
+               ProviderLifetime.scoped(fn _, _ -> flunk("registrar entered") end, starter, fn ->
+                 InProcess.complete(request("ollama:small"), options, fn _ -> :ok end)
+               end)
+
+      refute_receive {:admission_seen, _, _, _}, 30
+      refute_receive :starter_invoked, 30
+    end
   end
 
   test "a proved no-child start cancels the pending call without registration" do
