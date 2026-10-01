@@ -19,6 +19,8 @@ Part of the [evidence index](README.md).
   2,638 tests at `2d804649ca82ce87b58511bc0739c93e700c7559`.
 - Done: pinned artifact-read generation vectors and pure capability binding;
   instruction capture/render validation preserves exact legacy staging bytes.
+- Done: shared v3 genesis normalization/resolution and pure replay retain closed
+  configuration, exact tools, artifact-read binding and policy-defer mode.
 - Running: T00 contract/fixture inventory and T01 boundary verification; next
   integration slice is T03 host instructions with T04 persisted configuration.
   Host instruction/configuration binding and non-nil continuation costs remain
@@ -105,6 +107,23 @@ Part of the [evidence index](README.md).
   passes with 936 covered entries. Host configuration, complete system costs and
   configuration-bound receipt provenance remain pending.
 
+- 2026-10-01: the shared decoder now admits v3's complete closed genesis and
+  derives its artifact capability from the selected generation. Name bindings
+  must bijectively match retained tool definitions. Pure replay retains initial
+  configuration, selection and policy-defer mode; v2 keeps its original bytes
+  and no inferred selection/configuration. The configuration validator checks
+  captured instructions, declared model/output limits, known/unknown/explicit
+  input-budget origins, bounded capability metadata and closed provider mapping.
+  The generic default descriptor cannot enable another reasoning level.
+  System admission counts exact message and model-facing tool-schema costs.
+  Decoder/instruction/capability tests pass 32 cases in 0.09 seconds;
+  decoder/runtime/conversation/context tests pass 153 cases in 25.3 seconds.
+  A corrected metadata-boundary fixture measures its actual canonical preimage;
+  tightened generic-mapping and replay tests pass 21 cases in 0.1 seconds.
+  Compiled documentation ordering passes with 938 covered entries. Live v3
+  creation, provider mapping conformance, frozen run/configuration binding and
+  configuration-aware request/receipt staging remain pending.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
@@ -148,7 +167,9 @@ Part of the [evidence index](README.md).
 ## T04 — Implement configuration, genesis and provider routing
 - [ ] Implement the shared pure genesis resolver and validator.
 - [x] Share the v2 resolver/decoder between creation and replay; pin unchanged transaction bytes and exact normalized byte boundaries.
-- [ ] Extend that same resolver/decoder with v3 configuration, immutable tool selection and literal artifact-read derivation.
+- [x] Extend that same resolver/decoder with v3 configuration, immutable tool selection and literal artifact-read derivation.
+- [x] Validate closed captured configuration, combined metadata byte limits, budget origins and complete system-class tool costs; retain v3 settings through pure replay.
+- [ ] Integrate v3 creation and configuration-aware live owner staging, including frozen request/receipt identities.
 - [ ] Support exact-genesis creation, finding duplicates before expanding changed defaults.
 - [ ] Implement the closed configuration-file schema and command-line grammar.
 - [ ] Implement file/flag precedence, validation and effective-value display.

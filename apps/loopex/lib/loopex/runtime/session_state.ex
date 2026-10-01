@@ -36,6 +36,11 @@ defmodule Loopex.Runtime.SessionState do
   holds each run's declared bounds exactly as they were committed at admission
   or promotion, and `charged` accumulates that run's token charge with the
   source that produced it.
+
+  `configuration`, `tool_selection` and `policy_defer_mode` retain v3 genesis
+  truth. V2 keeps nil configuration/selection and its historical admit mode;
+  resolving its tool history or explicitly migrating a settled empty session
+  belongs to the live recovery boundary, not this pure decoder.
   """
   @context_receipt_keys Enum.sort(~w(
                           blocks context_record_byte_ceiling context_token_budget
@@ -163,6 +168,9 @@ defmodule Loopex.Runtime.SessionState do
           owner_incarnation_id: binary() | nil,
           owner_transaction_id: binary() | nil,
           journal_version: non_neg_integer(),
+          configuration: map() | nil,
+          tool_selection: map() | nil,
+          policy_defer_mode: binary(),
           event_sequence: non_neg_integer(),
           active_run_id: binary() | nil,
           commands: map(),
@@ -189,6 +197,9 @@ defmodule Loopex.Runtime.SessionState do
             owner_incarnation_id: nil,
             owner_transaction_id: nil,
             journal_version: 0,
+            configuration: nil,
+            tool_selection: nil,
+            policy_defer_mode: "admit",
             event_sequence: 0,
             active_run_id: nil,
             commands: %{},
@@ -1979,25 +1990,32 @@ defmodule Loopex.Runtime.SessionState do
   # Concept: the session's cleanup period is reconstructed from the record that
   # committed it, never supplied by whatever process happens to be recovering.
   #
-  # Technical depth: ADR 0016 replaces ADR 0009's `session_genesis` with
-  # `session_genesis_v2`, whose outer and runtime-configuration key sets are both
-  # closed. This reducer refuses the legacy kind outright, so no decoder can
-  # upgrade old bytes by supplying a default, and refuses an unknown key, an
-  # empty configuration, or a value outside the positive unsigned 64-bit domain
-  # rather than recovering a session whose committed period nobody can name.
+  # Technical depth: the shared decoder admits closed v2/v3 genesis. V3 retains
+  # its full configuration and tools; v2 has no invented configuration or tool
+  # selection. Missing cleanup and the older unversioned kind still refuse.
   defp replay_admitted_record(
          %{journal_version: 0} = state,
          %{
            journal_version: 1,
            owner_epoch: 0,
            owner_incarnation_id: nil,
-           payload: %{kind: "session_genesis_v2"} = payload
+           payload: %{kind: kind} = payload
          }
-       ) do
+       )
+       when kind in ["session_genesis_v2", "session_genesis_v3"] do
     case SessionGenesis.normalize(payload) do
       {:ok, genesis} ->
         grace = genesis["runtime_configuration"]["cleanup_grace_ms"]
-        {:ok, %{state | journal_version: 1, cleanup_grace_ms: grace}}
+
+        {:ok,
+         %{
+           state
+           | journal_version: 1,
+             cleanup_grace_ms: grace,
+             configuration: genesis["initial_configuration"],
+             tool_selection: genesis["tool_selection"],
+             policy_defer_mode: Map.get(genesis, "policy_defer_mode", "admit")
+         }}
 
       {:error, _reason} ->
         {:error, :invalid_session_genesis}
