@@ -100,6 +100,8 @@ Part of the [evidence index](README.md).
 - Done: admit closed durable token-route maps and select exactly one token from
   the committed request before provider-process startup, retaining the existing
   private credential bootstrap and cleanup path.
+- Done: shared explicit durable binding loading and version-2 plane construction;
+  borrowing hosts retain custody while issuing fresh trace capabilities.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -115,6 +117,29 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: CredentialPlane's explicit-binding branch and CredentialHost.open/1
+  now share one loader. It validates all references before environment access,
+  refuses local durable routes, loads sorted unique credential names once and
+  deletes an unselected legacy variable without reading it. Shared names reuse
+  custody; separately named credentials retain distinct tokens. Partial missing
+  credentials, constructor refusals, constructor exceptions and capability-start
+  failure join every returned child's termination before refusing. Constructor
+  failures expose a fixed class. Successful processes stay linked to the opener.
+  Borrowed version-2 planes retain their exact routes, registry and exclusion
+  set with a fresh trace capability, and do not reread reintroduced environment
+  values. Trace-counted synthetic tests and existing legacy tests pass nine
+  cases on current in 0.5 seconds and on the floor in 0.4 seconds. The invalid
+  input test explicitly observes attempted starts outside the starter callback,
+  so the loader's exception reduction cannot swallow a failed assertion.
+  Complete outputs:
+  - `/private/tmp/loopex-m7-durable-bindings-verified-current.log`, SHA-256
+    `fc5c1a8e3743fc77130b0a70fed3f45244062ca5199a52e1be777e3777c16b54`.
+  - `/private/tmp/loopex-m7-durable-bindings-floor.log`, SHA-256
+    `77c022c6a39dae254ae90ddc7e75af2f8b7aa4a7b5ea9cce876a5b9bb556c466`.
+  Composition still refuses these new planes. Runtime acceptance, launch-name
+  exclusions, daemon ownership and selected-model startup must join together
+  before the host entrypoints expose multi-provider durable execution.
 
 - 2026-10-01: The durable adapter accepts the explicit provider-routes branch
   alongside the separate legacy single-token branch. It rejects mixed branches,
@@ -1115,6 +1140,7 @@ Part of the [evidence index](README.md).
 - [ ] Allow maintenance settings to change new episodes while preserving already admitted episodes.
 - [ ] Implement named provider and credential bindings through the existing custody boundaries.
 - [x] Admit the durable adapter's closed token-route branch and select the committed provider before child startup; prove selected private bootstrap and unbound-route refusal.
+- [x] Share explicit durable credential loading between direct and borrowing plane constructors, with complete-name validation, deduplicated reads, joined partial-start cleanup and fresh borrowed trace capabilities.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
 - [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.

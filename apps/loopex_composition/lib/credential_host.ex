@@ -29,9 +29,14 @@ defmodule LoopexComposition.CredentialHost do
   require Logger
 
   @enforce_keys [:registry, :token]
-  defstruct [:registry, :token]
+  defstruct [:registry, :token, :provider_routes, :excluded_env_names]
 
-  @opaque t :: %__MODULE__{registry: term(), token: term()}
+  @opaque t :: %__MODULE__{
+            registry: term(),
+            token: term(),
+            provider_routes: map() | nil,
+            excluded_env_names: [binary()] | nil
+          }
 
   @max_credential_bytes 65_536
   @release_wait_ms 5_000
@@ -60,6 +65,34 @@ defmodule LoopexComposition.CredentialHost do
       {:error, :provider_credential_required}
     end
   end
+
+  @doc """
+  ## Concept
+
+  Load explicit durable provider references once for a borrowing host.
+
+  ## Technical depth
+
+  The shared loader validates the entire map before environment access,
+  deduplicates credential slots and joins partial-start cleanup. Successful
+  registry and custody processes remain linked to this host. Each later plane
+  borrows these exact routes with a fresh runtime-specific trace capability.
+  """
+  @spec open(map()) :: {:ok, t()} | {:error, term()}
+  def open(bindings) do
+    with {:ok, loaded} <-
+           LoopexComposition.CredentialPlane.load_bindings(bindings, &start_binding/2) do
+      {:ok,
+       %__MODULE__{
+         registry: loaded.registry,
+         token: nil,
+         provider_routes: loaded.provider_routes,
+         excluded_env_names: loaded.excluded_env_names
+       }}
+    end
+  end
+
+  defp start_binding(module, options), do: module.start_link(options)
 
   # A partial start stops what it started, so no orphaned custody keeps the
   # credential for the rest of the host's life.
@@ -123,12 +156,14 @@ defmodule LoopexComposition.CredentialHost do
 
   ## Technical depth
 
-  The returned map carries `:capability`, `:capability_pid` and the three
-  opaque `:model_options`; the composition binds the capability to the
-  runtime it starts.
+  The legacy map carries `:capability`, `:capability_pid` and the three
+  opaque `:model_options`. Explicit bindings produce version 2, retaining the
+  same routes, registry and exclusion set while creating a fresh capability.
+  Neither branch resolves credentials again. Composition binds the capability
+  to the runtime it starts.
   """
   @spec plane(t()) :: {:ok, map()} | {:error, term()}
-  def plane(%__MODULE__{registry: registry, token: token}) do
+  def plane(%__MODULE__{registry: registry, token: token} = host) do
     case Capability.start_link([]) do
       {:ok, capability_pid} ->
         try do
@@ -136,16 +171,23 @@ defmodule LoopexComposition.CredentialHost do
             {:ok, capability} ->
               Logger.debug("reference host composition capability started")
 
-              {:ok,
-               %{
-                 capability: capability,
-                 capability_pid: capability_pid,
-                 model_options: [
-                   credential_token: token,
-                   credential_registry: registry,
-                   tracing_capability: capability
-                 ]
-               }}
+              plane =
+                if is_nil(host.provider_routes),
+                  do: %{
+                    capability: capability,
+                    capability_pid: capability_pid,
+                    model_options: [
+                      credential_token: token,
+                      credential_registry: registry,
+                      tracing_capability: capability
+                    ]
+                  },
+                  else:
+                    host
+                    |> LoopexComposition.CredentialPlane.binding_plane(capability)
+                    |> Map.put(:capability_pid, capability_pid)
+
+              {:ok, plane}
 
             failure ->
               release_plane(%{capability_pid: capability_pid})
