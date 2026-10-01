@@ -122,8 +122,10 @@ Part of the [evidence index](README.md).
 - Done: foreground app-server programmatic provider options, with whole-map and
   selected-route preflight, fixed missing-credential refusal and real two-route
   startup/EOF cleanup. Host and policy witnesses pass on both toolchains.
-- Next: join the existing configuration parser and resolver to chat command
-  dispatch and the first complete conversation workflow.
+- Done: bounded chat line reading and explicit command parsing, with no read
+  beyond a wait line, exact answer decoding and malformed-input refusal.
+- Next: join configuration preparation and ChatInput to the runtime-owning chat
+  driver, bounded output and first complete conversation workflow.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -139,6 +141,30 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: ChatInput reads one LF/CRLF line at a time with a 65,536-byte
+  pre-terminator ceiling. It consumes no next-command byte after a wait line.
+  EOF fragments, bare CR, NUL, malformed UTF-8 and failed IO refuse. Explicit
+  command parsing preserves prompt text, decodes question/choice wire IDs and
+  JSON answer strings once, and rejects duplicate configure members. The driver
+  still owns admission, input sequence/command IDs, barriers and cancellation;
+  this is not yet a callable chat workflow. Nine focused cases pass on both
+  toolchains in 0.2 seconds each.
+  The initial floor run exposed a test cleanup race. Removing a link did not
+  solve StringIO's owner monitor; the final fixture uses its callback bracket
+  to close before owner exit. Failed outputs are retained, not counted as passes.
+  - Initial current pass: `/private/tmp/loopex-m7-chat-input-current.log`, SHA-256
+    `8c616b29c29ae70b2fe461c309b19ae779d2f1dad32dd04a2270f4a9fc87f1de`.
+  - Initial floor failure: `/private/tmp/loopex-m7-chat-input-floor.log`, SHA-256
+    `3bb0887f4258ac64795d4946859dd8fdabdc21bcd87e9df2630fc0054316aa3c`.
+  - Unlink-only failures: `/private/tmp/loopex-m7-chat-input-fixed-current.log`,
+    SHA-256 `af21dc060b326ac3fde279185552adc2dd7d0bf66fce6bb0cff15cf0da5d316d`;
+    `/private/tmp/loopex-m7-chat-input-fixed-floor.log`, SHA-256
+    `97fa074cf840d90d143ffeccc9fdbe1577c637f083015678ea4cb484eed6cdab`.
+  - Final current pass: `/private/tmp/loopex-m7-chat-input-bracket-current.log`,
+    SHA-256 `00bce9e55ed81ad771df87996509b3ab072c9b36f014d99209957eeaaee579b3`.
+  - Final floor pass: `/private/tmp/loopex-m7-chat-input-bracket-floor.log`, SHA-256
+    `40921e3c6f10662b016634983f2d4fdee133d2c53de3163d934bc3fa73fc5ea5`.
 
 - 2026-10-01: The exact offline-binding integration candidate
   `cf7e875f61e86538867d54135a7c136e235e3ff1` passes the full fast check in a
@@ -1475,6 +1501,7 @@ Part of the [evidence index](README.md).
 - [x] Pin the shared closed answer schema/union and independent Elixir/Node payload vectors.
 - [ ] Join that answer schema and decoder to the complete M7 /3-/4 contracts and both authorized mutation paths.
 ## T10 — Complete chat controls, pipes and tracing
+- [x] Implement bounded single-line framing and explicit chat-action parsing, with wait-line backpressure, exact JSON answers and malformed-input refusal on both toolchains; driver admission remains pending.
 - [ ] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.
 - [ ] Implement the exact pipe grammar and closed control records.
 - [ ] Enforce record limits, bounded input admission, the 256-KiB output queue and control-drain deadline.
