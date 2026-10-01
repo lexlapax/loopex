@@ -27,16 +27,16 @@ Accepted [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept)
 constrains outcome 8; use its existing exact limits and refusal contract.
 
 The store engine decision (ADR 0036) and typed policy inputs (ADR 0035) are not
-M8 prerequisites and are deliberately not linked here. No typed policy input,
-new credential source or publication enters through these prerequisites.
-Installed version selection and any public-name clearance remain separate
-decisions.
+M8 prerequisites and are deliberately not linked here; the first follows from
+proposal P2. No typed policy input, new credential source or publication
+enters through these prerequisites. Public-name clearance remains a separate
+decision.
 
 **Before acceptance.** These are planning obligations, not product proof:
 
 1. Reconcile all four Proposed pairs with the closed M7 baseline and fill
    every cell they mark as fixed at acceptance.
-2. Record the maintainer's selections for proposals P1 to P6 and choices C1 to
+2. Record the maintainer's selections for proposals P1 to P8 and choices C1 to
    C3 in the Concept plan.
 3. Name the exact prior build, the supported record versions and the
    restoration tool for outcome 7.
@@ -84,11 +84,14 @@ draft did not carry. Each is fixed by its owning ADR before acceptance.
 | M7 fact | M8 obligation | Owner |
 | --- | --- | --- |
 | `loopex chat` owns a foreground durable runtime; attachment is successor work | Outcome 5 maps every conversation action onto the daemon generation and the controller lease | ADR 0050 |
-| The daemon keeps its existing startup grammar and reads no configuration file | The service reads ADR 0049's file at startup; a client still names no host value | ADR 0050 |
+| The daemon keeps its existing startup grammar, apart from new trace controls, and reads no configuration file | The service reads ADR 0049's file at startup; a client still names no host value; the daemon's existing environment inputs and legacy credential get explicit rules | ADR 0050 |
+| The foreground conversation aborts active work on quit, end of input and interrupt | Attached, the same three detach and the run continues, as existing daemon commands do on a signal | ADR 0050 |
+| The daemon asks about a workspace `AGENTS.md` before it listens, and no flag admits project resources non-interactively | A start on demand does not prompt and leaves them unadmitted, and readiness says so | ADR 0037 |
+| The daemon activates at most 64 sessions per lifetime | Unchanged; the refusal is shown to the operator and documented for a long-running service | ADR 0050 |
 | Trace controls exist on chat, ask and daemon startup only; a client gains no trace authority | Lifecycle commands that start the service carry the daemon's trace controls; attached chat rejects them | ADR 0037 |
-| Durable admission stays closed until helper-history classification completes, bounded at 60,000 ms per start and resumable | Readiness reports "serving", "classifying" with its two counts, or "closed" with the named session; start-on-demand does not report ready early | ADR 0037 |
-| One unreadable session history closes the durable host until the root is restored from backup | Backup and restore exist; the diagnostic command names the session | ADR 0051 |
-| The host ledger, role snapshots and child sessions live under the host root; the job index and helper coverage entries are derived caches | The backup inventory includes the first group and excludes rebuildable caches, which are rebuilt after restore | ADR 0051 |
+| Durable admission stays closed until helper-history classification completes, bounded at 60,000 ms per start and resumable | Readiness reports "serving", "classifying" with its two counts, "closed" with the named session, or "unavailable" with a code and no session; start-on-demand does not report ready early | ADR 0037 |
+| One unreadable session history closes the durable host until the root is restored from backup | Backup and restore exist; the service's readiness report names the session | ADR 0051 |
+| Durable state under the root includes sessions, runtime control, artifacts, executor receipts, continuation and recovery state, catalogs, the daemon's session index and the host ledger | The backup archives everything under the root except named process-lifetime files; derived entries are revalidated at the next start by their existing rules | ADR 0051 |
 | New record kinds: checkpoints, maintenance request, attempt and settlement records, version-3 settlements with a monotonic cutover, questions, immutable selections | The reader boundary and the upgrade matrix name each kind; no older build is assumed to refuse them | ADR 0051 |
 | Foreground and daemon protocol generations are new and serve updated clients only | The Node client lane and the attached command use the delivered daemon generation | ADR 0050 |
 | `config show` and chat's startup report give value origins from a closed set: `flag`, `env`, `file#pointer`, `default` and `committed` | A discovered file reuses the `file#pointer` origin; inspection also states which file was selected and why, without adding an origin member | ADR 0037 |
@@ -104,9 +107,9 @@ Concept: [Verification](M8.md#concept-plan-verification).
 | --- | --- | --- |
 | 1 | Exact manifest and external checksum; provider companion identity verified before launch; native linkage confined to the allowed base set; install from the retained archive on a clean host of each platform; a simulated quarantined download on macOS | Yes |
 | 2 | Explicit-file and discovered-file equivalence; default-home selection; per-value origins; unknown schema and unknown member refusal; atomic-write fault cuts leave prior bytes; stale-lock refusal; no credential value read during inspection | No |
-| 3 | Marker commit ordering; missing-marker record-capability checks; refusal of an unknown format or unsupported record before any write; complete closed-root backup including the host ledger, role snapshots and child sessions; restore digest verification; refusal of a live root and of a nonempty target; caches rebuilt after restore | No, except the restore step of 6 and 7 |
-| 4 | Concurrent start converges under existing placement ownership; readiness distinguishes serving, classifying and closed; stop drains within the existing bound; the diagnostic command reports references, marker, placement and the named unreadable session without resolving credentials; on-demand start refuses by name when a configured reference is absent | No |
-| 5 | Every conversation action through a real daemon on terminal and piped input; detach leaves the run active and its identity unchanged; reconnect delivers the snapshot, contiguous events and a pending question; a killed client's lease expires and a second terminal takes over; a stale writer epoch is refused; attached chat refuses every host and trace flag; the foreground conversation refuses a root a service holds | Attended reconnect case |
+| 3 | Marker commit ordering; missing-marker record-capability checks; refusal of an unknown format or unsupported record before any write; closed-root backup whose manifest matches the whole root minus the excluded list; restore digest verification; refusal of a live root and of a nonempty target; a restored root started with no index-preparation step | No, except the restore step of 6 and 7 |
+| 4 | Concurrent start converges under existing placement ownership; readiness distinguishes serving, classifying, closed and unavailable; stop drains within the existing bound; the diagnostic command reports references, marker and placement without resolving credentials or scanning history; on-demand start refuses by name when a configured reference is absent, never prompts, and reports unadmitted project resources | No |
+| 5 | Every conversation action through a real daemon on terminal and piped input; quit, end of input and each signal detach with the run active and its identity unchanged; reconnect delivers the snapshot, contiguous events and a pending question; a killed client's lease lapses and a second terminal acquires control; a stale writer epoch is refused; a second conversation is refused while control is held; attached chat refuses every host and trace flag; the foreground conversation refuses a root a service holds | Attended reconnect case |
 | 6 | Installed real-provider workflow on each supported platform with complete output and archive evidence; an identified operator follows the runbook | Yes, attended |
 | 7 | The prior build and the candidate against M6, M7 and candidate roots; unsupported reopening refused before writes where the reader can refuse; the pre-upgrade backup restored by the candidate's tool into an empty root and opened by the prior build with its facts intact | Yes |
 | 8 | Extend `transfer_bound_test.exs`: one connection across several attachments shares its count and allowance, another connection stays independent; cumulative work beyond 1 GiB refuses; the daemon Node lane passes; operator and developer pages remove only the now-proved divergence | Daemon Node lane |
@@ -129,7 +132,7 @@ Concept: [Rollout](M8.md#concept-plan-rollout).
 | Daemon protocol | The delivered M7 generation. Any method the attached conversation needs and that generation lacks is a named addition with vectors, settled in ADR 0050 before acceptance |
 | Foreground protocol and embedded API | Delivered M7 contract, unchanged |
 | Configuration | M7's versioned schema and resolver; discovery, writers and daemon-startup loading added by ADRs 0037 and 0050 |
-| Existing commands | `run`, `resume`, `attach`, `sessions` and the foreground `chat` keep their grammar and exit semantics |
+| Existing commands | The foreground `chat` keeps its grammar and exit semantics. `run`, `resume`, `attach` and `sessions` keep theirs against a running service; under P8, `run` and `resume` additionally start the service on demand when they use the home's socket |
 | Installed archive | New experimental packaging contract under ADR 0038 |
 
 <a id="technical-plan-migration"></a>
@@ -165,9 +168,9 @@ here. Engine migration and interrupted import are M9 work.
 Concept: [Scope](M8.md#concept-plan-scope).
 
 ADR 0038 owns the platform-specific OTP archive, bundled ERTS, relative
-provider companion lookup and manifest. A release label is selected at M8
-acceptance and then used consistently in `VERSION`, the build layout and the
-artifacts. M6's released `0.3.0` is not repurposed, and no label is assumed to
+provider companion lookup and manifest. The maintainer selects the release
+label before acceptance, as choice C1, and it is then used consistently in
+`VERSION`, the build layout and the artifacts. M6's released `0.3.0` is not repurposed, and no label is assumed to
 be free after M7. No dependency framework, configuration library or service
 layer is implied. Any native dependency is owned by its adapter and included
 in the pinned build and linkage proof. Service-manager units, distribution

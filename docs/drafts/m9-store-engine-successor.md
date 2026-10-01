@@ -62,6 +62,8 @@ engine migration; complete backup/restore includes it and its child sessions.
 Technical depth: [Prerequisites](m9-store-engine-successor-technical.md#technical-plan-prerequisites).
 
 [ADR 0036](../adr/0036-daemon-grade-store-engine-and-migration.md#concept) is the governing
-decision. Its measured selection experiment runs as M9 is prepared. The pair is
-accepted with M9, once its engine cell is filled from the experiment record,
-and M9 implements the engine, migration and capacity refusal it names.
+decision. Under the Open M8 plan's proposal P2, which the maintainer has not
+yet selected, its measured selection experiment runs as M9 is prepared and the
+pair is accepted with M9, once its engine cell is filled from the experiment
+record. M9 implements the engine, migration and capacity refusal it names. The
+earlier framing had M8 run the experiment and accept the pair.

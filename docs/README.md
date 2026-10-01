@@ -20,7 +20,7 @@ is the index of what exists.
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
 | [evidence/](evidence/README.md) | Retained check-run and demonstration evidence, named by the revision it was taken at. |
-| [drafts/](drafts/README.md) | Draft milestone plan pairs (M9, M10) not yet in the register; each moves into `plans/` when the maintainer opens it. |
+| [drafts/](drafts/README.md) | Draft milestone plan pairs (M9, M10) not yet in the register; each moves into `plans/` when its predecessor closes or the maintainer opens it earlier. |
 | [archive/](archive/README.md) | Non-normative historical inputs, retained for provenance. |
 
 Every directory under `docs/` carries a `README.md` describing its contents and

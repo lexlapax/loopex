@@ -22,8 +22,12 @@ Technical depth: [Selection procedure, migration contract and candidate evidence
 
 Technical depth: [Selection procedure](0036-daemon-grade-store-engine-and-migration-technical.md#technical-adr-0036-decision).
 
-**Scope split, 2026-09-30.** This record first proposed the store engine and
-the installed release's readiness work together. The readiness work is now
+**Scope split, proposed 2026-09-30.** This is proposal P2 of the Open
+[M8 plan](../plans/M8.md#concept), an author proposal until the maintainer
+selects it; this record's earlier framing had M8 accept it with the engine
+chosen. This record first proposed the store engine and
+the installed release's readiness work together. Under the proposal the
+readiness work is
 Proposed [ADR 0051](0051-store-readiness-marker-backup-and-restore.md#concept),
 so that backup and restore do not wait on the engine experiment. This record
 keeps the engine selection, the migration and the capacity refusal. Where the

@@ -45,8 +45,11 @@ holds the instruction. M8 is a planning lookahead on its own branch: it carries
 no implementation authority, and the capsule's request to disposition its four
 Proposed ADRs is satisfied only after they are reconciled with the closed M7
 baseline. The status contract admits an Open successor only beside an Accepted
-predecessor, so the `m8` branch keeps M7's row at Accepted and rejoins `main`
-under that rule.
+predecessor, so the `m8` branch keeps M7's row at Accepted. Once `main` moves
+M7 to In progress, an Open M8 row is no longer representable there: `m8` then
+stays an unmerged planning branch until M7 closes, when M8 becomes the sole
+Open candidate after the Closed history. It can rejoin `main` earlier only
+while M7's row still reads Accepted.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the
 exact seed-bootstrap sentinel shown above. After that, its milestone name is

@@ -115,6 +115,12 @@ or `/usr/local/opt/openssl*`; on Linux, inside a container of the minimum
 base with no OpenSSL package), asserted by the lane before it starts, from an
 empty temporary home:
 
+The Open [M8 plan](../plans/M8.md#concept) widens this workflow: its outcome 6
+adds an attached conversation with detach and reconnect, and a backup and
+restore, and its proposal P8 names which commands start the service on demand.
+The steps below predate that plan and are reconciled with it before
+acceptance.
+
 1. Verify the archive against its checksum file; extract as a quarantined
    download would be; `scripts/release/assert-linkage.sh` over the extraction
    exits `0`; `bin/loopex version --verify` exits `0`.

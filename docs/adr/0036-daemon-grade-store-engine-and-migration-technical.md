@@ -105,8 +105,10 @@ a marker. Retain exact old binaries to test their real behavior. Never claim an
 old binary emits a new refusal class or honors a marker it never understood.
 
 **Backup and restore.** ADR 0051 defines `loopex store backup` and `loopex
-store restore`, their archive and their refusals. Migration retires its source
-under an archive name that restore command accepts. Rollback is `restore` of
+store restore`, their archive and their refusals. Migration's retired source
+must be restorable by that command, which accepts only a manifest-bearing
+archive; step 4's retirement therefore writes or accompanies an ADR 0051
+archive, in a form fixed before acceptance. Rollback is `restore` of
 the pre-migration backup under the previous release, and the engine
 milestone's plan proves it.
 
@@ -139,7 +141,8 @@ do not apply; no extension state exists.
 
 **Open before acceptance.** The engine cell and the retained experiment record
 it cites, produced as the store successor milestone is prepared and not as M8
-evidence; the adapter application's name; the exact capacity ceiling the
+evidence; the form in which migration retires its source so that ADR 0051's
+restore accepts it; the adapter application's name; the exact capacity ceiling the
 definite refusal enforces and how the operator configures it, which ADR 0049's
 successor schema version or an explicit ADR 0049 amendment carries once this
 pair names the key. The closed version-1 schema is never extended in place.

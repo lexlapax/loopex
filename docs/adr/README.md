@@ -220,8 +220,9 @@ the running service and makes the service read ADR 0049's configuration file at
 startup. 0051 takes the format marker, reader boundary, backup and restore out
 of 0036, so the installed release's readiness work does not wait on the engine
 experiment; 0036 keeps the engine selection, migration and capacity refusal for
-the M9 draft. M8's prerequisites are 0037, 0038, 0050 and 0051. None can be
-accepted before M7 closes.
+the M9 draft. That split is the M8 plan's proposal P2, an author proposal
+until the maintainer selects it. As proposed, M8's prerequisites are 0037,
+0038, 0050 and 0051. None can be accepted before M7 closes.
 
 0039 is the accepted M6 prerequisite, accepted with the M6 plan pair on
 2026-09-27. It adds an ephemeral composition profile beside the durable one,

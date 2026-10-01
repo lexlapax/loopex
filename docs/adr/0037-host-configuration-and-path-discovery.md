@@ -8,7 +8,7 @@ Technical depth: [Installed host configuration and path discovery](0037-host-con
 - **Decision owner:** Maintainer
 - **Supersedes:** [ADR 0003](0003-extension-contract-boundary.md#concept) only its ban on any Loopex application reading a user home, narrowed to the installed reference host
 - **Depends on:** [ADR 0049](0049-explicit-host-configuration.md#concept), conditional on its acceptance and delivered M7 baseline
-- **Prerequisite for:** M8 installed-operator discovery and configuration-management work; not an M7 prerequisite
+- **Prerequisite for:** M8 outcomes 2 and 4: installed discovery, configuration management, service lifecycle and readiness; not an M7 prerequisite
 
 <a id="concept-adr-0037-decision"></a>
 ### Context and Decision
@@ -21,15 +21,26 @@ installed successor reuses that reader and schema, then adds a documented
 configuration writers and lifecycle diagnostics. Core and reusable composition
 still receive explicit values and never discover home directories.
 
-Lifecycle commands start, stop and report on the service, and a command that
-asks for the service may start it on demand. The service reads the home's
-configuration file at startup under
+Lifecycle commands start, stop and report on the service. The conversation,
+`run` and `resume` start it on demand when they use the home's socket;
+`attach` and `sessions` never start one. Starts that race converge on one
+service. The service reads the home's configuration file at startup under
 [ADR 0050](0050-daemon-attached-conversation.md#concept). A service started on
 demand inherits the environment of the command that starts it. That command
 first checks that each configured credential reference is present, never
 reading a value, and refuses by name without starting anything when one is
-absent. Readiness is reported as it is: serving, still classifying helper
-history, or closed with the session whose history could not be read.
+absent.
+
+A start on demand never prompts. Today the daemon asks whether to admit a
+workspace's project resources before it listens; started on demand it leaves
+them unadmitted and says so in its readiness report, and the operator admits
+them by starting the service explicitly.
+
+Readiness is reported as it is: serving; still classifying helper history;
+closed, with the session whose history could not be read; or unavailable,
+with a code and no session, which the service retries. A command that starts
+the service waits a bounded time for it to serve and otherwise reports the
+state it found.
 
 This proposal no longer introduces another role/provider schema or fixes a
 session's model at process launch. ADRs 0044/0048/0049 govern committed selection,

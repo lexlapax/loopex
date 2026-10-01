@@ -16,7 +16,8 @@ Concept: [Design decisions](m9-store-engine-successor.md#concept-plan-decisions)
 
 M8 closes first. Under ADR 0051 it supplies the format marker, the reader
 boundary, and backup and restore that the migration starts from. The selection
-experiment is M9 preparation, not M8 evidence.
+experiment is M9 preparation, not M8 evidence. Both statements follow the M8
+plan's proposal P2 and revert with it.
 
 Capacity configuration follows ADR 0036's versioned successor-schema or explicit
 ADR 0049 amendment path. Version-1 config keeps its closed members; migration
