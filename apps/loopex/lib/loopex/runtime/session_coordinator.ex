@@ -3060,6 +3060,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Resolve project trust once and reuse its result. Both required-only
   # measurements precede optional-inclusive admission and resource content reads.
   defp stage_candidate(state, staging) do
+    case SessionState.frozen_context(state.durable, staging.run_id) do
+      nil -> stage_fresh_candidate(state, staging)
+      frozen -> stage_frozen_candidate(state, staging, frozen)
+    end
+  end
+
+  defp stage_frozen_candidate(state, staging, frozen) do
+    with {:ok, candidate} <-
+           model_candidate(state, staging, frozen.selected, frozen.project, frozen.resources) do
+      SessionState.propose_model_request(state.durable, staging.run_id, candidate.request,
+        applied_steer: staging.steer && staging.steer.command_id,
+        context_receipt: candidate.receipt
+      )
+    end
+  end
+
+  defp stage_fresh_candidate(state, staging) do
     initial = ResourceContext.initial_header(staging.resources)
     {blocks, receipt} = project_blocks(state)
 
@@ -3245,10 +3262,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
            [%{"role" => "system", "content" => system_block(state, staging.run_id)}] ++
              Enum.map(blocks, &%{"role" => "user", "content" => &1}) ++
              Enum.map(entries, &elem(&1, 1)),
+         messages = messages ++ steer_message(staging.steer),
+         {:ok, continuation} <-
+           SessionState.model_continuation(
+             state.durable,
+             staging.run_id,
+             messages,
+             staging.steer && staging.steer.command_id
+           ),
          {:ok, request} <-
            Model.request(
              request_model(state, staging.run_id),
-             messages ++ steer_message(staging.steer),
+             messages,
+             continuation: continuation,
              tools: request_tools(state, staging.run_id),
              sampling: request_sampling(state, staging),
              deadline: staging.deadline
@@ -3415,7 +3441,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # Technical depth: `Enum.zip/2` truncates silently. A projection/source
     # disagreement is therefore refused before commit instead of producing a
     # receipt that simply omits the tail of the request it claims to describe.
-    if length(request.messages) == length(message_sources) do
+    with true <- length(request.messages) == length(message_sources),
+         {:ok, continuation_cost} <-
+           Loopex.Model.Continuation.cost(request.continuation, request.model, request.messages) do
       message_blocks =
         request.messages
         |> Enum.zip(message_sources)
@@ -3430,7 +3458,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         %{
           "provider_identity" => "loopex.context.reference",
           "provider_revision" => 4,
-          "continuation_cost" => nil,
+          "continuation_cost" => continuation_cost,
           "transformer_identity" => nil,
           "transformer_revision" => nil,
           "selector_identity" => nil,
@@ -3441,7 +3469,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
           "totals" => totals,
           "project_resource" => project_receipt,
           "context_token_budget" => context_token_budget,
-          "provider_estimated_tokens" => totals["token_cost"],
+          "provider_estimated_tokens" =>
+            totals["token_cost"] +
+              if(continuation_cost, do: continuation_cost["token_cost"], else: 0),
           "context_record_byte_ceiling" => Store.max_item_bytes(),
           "record_byte_cost" => 0,
           "ordered_descriptor_digest" => ordered_descriptor_digest(blocks)
@@ -3450,7 +3480,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:ok,
        if(resource_header, do: Map.put(receipt, "resource_packs", resource_header), else: receipt)}
     else
-      {:error, :context_receipt_source_mismatch}
+      false -> {:error, :context_receipt_source_mismatch}
+      {:error, reason} -> {:error, reason}
     end
   end
 

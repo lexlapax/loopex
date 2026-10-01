@@ -233,7 +233,7 @@ defmodule Loopex.Runtime.SessionState do
             resources: nil,
             run_resources: %{},
             charged: %{},
-            # ADR 0021 permits one v1 prefix, then v2 exclusively. This is
+            # ADRs 0021/0044 permit monotonic v1, v2, then v3 cutovers. This is
             # reconstructed from settled rows, never from runtime configuration.
             provider_settlement_version: 1,
             # The cleanup period this session declares, which ADR 0009 makes a
@@ -725,6 +725,157 @@ defmodule Loopex.Runtime.SessionState do
   @spec run_configuration(t(), binary() | nil) :: map() | nil
   def run_configuration(%__MODULE__{} = state, run_id),
     do: Map.get(state.run_configurations, run_id)
+
+  @doc """
+  ## Concept
+
+  Build the next continuation from this run's committed open exchange.
+
+  ## Technical depth
+
+  Source identities and full settlement digests come from recovered records.
+  Message positions come from lineage source references, never content search.
+  Every source binds the captured model/configuration and exact canonical text,
+  arguments and results. The first request and every post-terminal run use nil.
+  """
+  @spec model_continuation(t(), binary(), [map()], binary() | nil) ::
+          {:ok, map() | nil} | {:error, :context_projection_invalid}
+  def model_continuation(state, run_id, messages, applied_steer) do
+    case get_in(state.pending_work, [run_id, :continuation_exchange]) do
+      nil -> {:ok, nil}
+      exchange -> build_continuation(state, run_id, messages, applied_steer, exchange)
+    end
+  end
+
+  defp build_continuation(state, run_id, messages, applied_steer, exchange) do
+    configuration = run_configuration(state, run_id)
+
+    with true <- is_map(configuration),
+         {:ok, entries} <- Conversation.lineage_entries(lineage_elements(state, run_id)),
+         {:ok, steer} <- projected_steer(state, run_id, applied_steer),
+         expected = Enum.map(entries, &elem(&1, 1)) ++ steer,
+         offset = length(messages) - length(expected),
+         true <- offset >= 1 and Enum.drop(messages, offset) == expected,
+         true <-
+           Enum.take(messages, length(exchange.base_request.messages)) ==
+             exchange.base_request.messages,
+         true <- exchange.base_request.model == configuration["model"],
+         true <- length(exchange.sources) in 1..32,
+         positions =
+           Map.new(Enum.with_index(entries, offset), fn {{source, message}, index} ->
+             {source, {message, index}}
+           end),
+         {:ok, sources} <- continuation_entries(exchange.sources, positions, []) do
+      first = hd(exchange.sources).record
+
+      envelope = %{
+        "format" => "loopex.anthropic.content_refs.v1",
+        "provider" => "anthropic",
+        "model" => configuration["model"],
+        "configuration_version" => configuration["configuration_version"],
+        "exchange_id" => first["operation_id"],
+        "base_request_digest" => exchange.base_request.staged_request_digest,
+        "entries" => sources
+      }
+
+      case Loopex.Model.Continuation.expand(envelope, configuration["model"], messages) do
+        {:ok, _} -> {:ok, envelope}
+        _ -> {:error, :context_projection_invalid}
+      end
+    else
+      _ -> {:error, :context_projection_invalid}
+    end
+  end
+
+  defp continuation_entries([], _positions, entries), do: {:ok, Enum.reverse(entries)}
+
+  defp continuation_entries([%{record: record, turn_number: turn} | rest], positions, entries) do
+    run = record["run_id"]
+    reference = %{"kind" => "session_assistant", "run_id" => run, "turn" => turn}
+    reply = record["result"]["reply"]
+
+    with {assistant, index} <- positions[reference],
+         true <- assistant["content"] == reply["text"],
+         true <- length(assistant["tool_calls"]) == length(reply["tool_calls"]),
+         {:ok, calls} <-
+           continuation_calls(
+             reply["tool_calls"],
+             assistant["tool_calls"],
+             positions,
+             run,
+             turn,
+             []
+           ) do
+      entry = %{
+        "source" =>
+          record
+          |> Map.take(~w(run_id turn_id operation_id attempt))
+          |> Map.put("settlement_digest", Canonical.digest(record)),
+        "assistant_message_index" => index,
+        "calls" => calls,
+        "capsule" => reply["continuation"]
+      }
+
+      continuation_entries(rest, positions, [entry | entries])
+    else
+      _ -> {:error, :context_projection_invalid}
+    end
+  end
+
+  defp continuation_calls([], [], _positions, _run, _turn, calls), do: {:ok, Enum.reverse(calls)}
+
+  defp continuation_calls([native | rest], [canonical | calls], positions, run, turn, bindings) do
+    reference = %{
+      "kind" => "session_tool_result",
+      "run_id" => run,
+      "turn" => turn,
+      "call_id" => native["id"]
+    }
+
+    with true <- native["arguments"] == canonical["arguments"],
+         {result, index} <- positions[reference],
+         true <- result["tool_call_id"] == canonical["tool_call_id"] do
+      binding = %{
+        "canonical_call_id" => canonical["tool_call_id"],
+        "native_id" => native["id"],
+        "result_message_index" => index
+      }
+
+      continuation_calls(rest, calls, positions, run, turn, [binding | bindings])
+    else
+      _ -> {:error, :context_projection_invalid}
+    end
+  end
+
+  defp continuation_calls(_, _, _, _, _, _), do: {:error, :context_projection_invalid}
+
+  @doc false
+  @spec frozen_context(t(), binary()) :: map() | nil
+  def frozen_context(state, run_id) do
+    case get_in(state.pending_work, [run_id, :continuation_exchange]) do
+      nil ->
+        nil
+
+      %{base_request: request, base_receipt: receipt} ->
+        selected =
+          request.messages
+          |> Enum.zip(receipt["blocks"])
+          |> Enum.flat_map(fn {message, block} ->
+            if block["provenance_class"] in ["project_resource", "resource_pack"],
+              do: [
+                {message["content"],
+                 Map.take(block, ~w(source_reference provenance_class trust_class))}
+              ],
+              else: []
+          end)
+
+        %{
+          selected: selected,
+          project: receipt["project_resource"],
+          resources: receipt["resource_packs"]
+        }
+    end
+  end
 
   @doc """
   ## Concept
@@ -1346,13 +1497,13 @@ defmodule Loopex.Runtime.SessionState do
   # `canonical_reply/3`; the run's captured mapping fixes its continuation
   # requirement. Malformed or refused input retains explicit `none`.
   defp attempt_result(work, {:reply, raw}, termination, required) do
-    case ProviderAttempt.canonical_reply(raw, work.request, required) do
-      {:ok, reply} ->
-        result = %{"kind" => "reply", "reply" => reply}
-        conversation = if termination, do: "evidence_only", else: "canonical"
+    with {:ok, reply} <- ProviderAttempt.canonical_reply(raw, work.request, required),
+         :ok <- Loopex.Model.Continuation.validate_reply_ids(work.request, reply) do
+      result = %{"kind" => "reply", "reply" => reply}
+      conversation = if termination, do: "evidence_only", else: "canonical"
 
-        {result, conversation, reply["usage"]}
-
+      {result, conversation, reply["usage"]}
+    else
       {:error, _reason} ->
         {unreadable_result(%{"kind" => "none"}), "none", nil}
     end
@@ -2985,6 +3136,9 @@ defmodule Loopex.Runtime.SessionState do
            Map.get(state.pending_work, run_id),
          :ok <- Loopex.Model.validate_request(request),
          :ok <- validate_request_configuration(state, record, request, run_id),
+         {:ok, continuation} <-
+           model_continuation(state, run_id, request.messages, applied_steer),
+         true <- request.continuation == continuation,
          turn_number = next_turn_number(work),
          true <- turn_id == stable_id("turn", run_id, turn_number),
          true <- operation_id == model_operation_id(run_id, turn_number),
@@ -3000,6 +3154,7 @@ defmodule Loopex.Runtime.SessionState do
             turn_id: turn_id,
             turn_number: turn_number,
             request: request,
+            context_receipt: record["context_receipt"],
             applied_steer: applied_steer
           }
         })
@@ -3034,6 +3189,9 @@ defmodule Loopex.Runtime.SessionState do
            Map.get(state.pending_work, run_id),
          :ok <- Loopex.Model.validate_request(request),
          :ok <- validate_request_configuration(state, record, request, run_id),
+         {:ok, continuation} <-
+           model_continuation(state, run_id, request.messages, applied_steer),
+         true <- request.continuation == continuation,
          turn_number = next_turn_number(work),
          true <- turn_id == stable_id("turn", run_id, turn_number),
          true <- operation_id == model_operation_id(run_id, turn_number),
@@ -3049,6 +3207,7 @@ defmodule Loopex.Runtime.SessionState do
             turn_id: turn_id,
             turn_number: turn_number,
             request: request,
+            context_receipt: record["context_receipt"],
             applied_steer: applied_steer
           }
         })
@@ -4203,6 +4362,7 @@ defmodule Loopex.Runtime.SessionState do
           turn_id: staged.turn_id,
           turn_number: staged.turn_number,
           request: request,
+          request_context_receipt: staged.context_receipt,
           model_attempt: 1,
           model_termination: nil,
           pending_calls: []
@@ -4314,7 +4474,20 @@ defmodule Loopex.Runtime.SessionState do
          run_id,
          request
        ) do
-    ProviderAttempt.validate_settled(record, request, continuation_required?(state, run_id))
+    with :ok <-
+           ProviderAttempt.validate_settled(
+             record,
+             request,
+             continuation_required?(state, run_id)
+           ) do
+      case record["result"] do
+        %{"kind" => "reply", "reply" => reply} ->
+          Loopex.Model.Continuation.validate_reply_ids(request, reply)
+
+        _ ->
+          :ok
+      end
+    end
   end
 
   defp settlement_request_agrees?(_, _, _, _), do: :ok
@@ -4430,7 +4603,7 @@ defmodule Loopex.Runtime.SessionState do
             next =
               state
               |> append_element(run_id, assistant)
-              |> put_pending(run_id, next_work)
+              |> put_pending(run_id, retain_continuation(next_work, record, reply))
 
             {:ok, next, [assistant_event(state.session_id, run_id, work.turn_id, reply["text"])]}
 
@@ -4443,6 +4616,26 @@ defmodule Loopex.Runtime.SessionState do
         {:ok, put_pending(state, run_id, next_work), []}
     end
   end
+
+  # Concept: only a canonical committed open reply extends native reuse.
+  # Technical depth: sources retain their complete settlement, while the first
+  # request/receipt freezes the prefix. Terminal removal of pending work drops
+  # reuse; closed and evidence-only replies never start a later exchange.
+  defp retain_continuation(work, %{kind: "model_attempt_settled_v3"} = record, %{
+         "continuation" => %{"status" => "open"}
+       }) do
+    exchange =
+      Map.get(work, :continuation_exchange, %{
+        base_request: work.request,
+        base_receipt: work.request_context_receipt,
+        sources: []
+      })
+
+    source = %{record: record, turn_number: work.turn_number}
+    Map.put(work, :continuation_exchange, %{exchange | sources: exchange.sources ++ [source]})
+  end
+
+  defp retain_continuation(work, _record, _reply), do: Map.delete(work, :continuation_exchange)
 
   defp settled_calls(reply) do
     Enum.map(reply["tool_calls"], fn call ->
@@ -6349,10 +6542,14 @@ defmodule Loopex.Runtime.SessionState do
   defp receipt_estimator(_receipt), do: Bounds.estimator()
 
   defp validate_receipt_generation(
-         %{"provider_revision" => 4, "continuation_cost" => nil},
-         %{canonicalization_version: "loopex.model_request.v2", continuation: nil}
-       ),
-       do: :ok
+         %{"provider_revision" => 4, "continuation_cost" => cost},
+         %{canonicalization_version: "loopex.model_request.v2"} = request
+       ) do
+    case Loopex.Model.Continuation.cost(request.continuation, request.model, request.messages) do
+      {:ok, ^cost} -> :ok
+      _ -> {:error, :invalid_context_receipt}
+    end
+  end
 
   defp validate_receipt_generation(
          %{"provider_revision" => revision},
@@ -6434,19 +6631,23 @@ defmodule Loopex.Runtime.SessionState do
   #
   # Technical depth: recomputed from the reconstructed descriptor list, so a
   # receipt whose own arithmetic is self-consistent but describes a different
-  # list is still refused. `provider_estimated_tokens` is the outer token total
-  # and never an independently retained number.
+  # list is still refused. `provider_estimated_tokens` adds the independently
+  # verified continuation cost without changing the provenance totals.
   defp validate_receipt_totals(receipt, blocks) do
     totals = expected_context_totals(blocks)
 
     if Map.get(receipt, "totals") == totals and
-         Map.get(receipt, "provider_estimated_tokens") == totals["token_cost"] and
+         Map.get(receipt, "provider_estimated_tokens") ==
+           totals["token_cost"] + continuation_tokens(receipt) and
          Map.get(receipt, "ordered_descriptor_digest") == ordered_descriptor_digest(blocks) do
       :ok
     else
       {:error, :invalid_context_receipt}
     end
   end
+
+  defp continuation_tokens(%{"continuation_cost" => %{"token_cost" => tokens}}), do: tokens
+  defp continuation_tokens(_receipt), do: 0
 
   defp expected_context_blocks(request, sources) do
     tools = Enum.map(request.tools, &ToolDefinition.model_facing/1)
@@ -6634,7 +6835,8 @@ defmodule Loopex.Runtime.SessionState do
     totals = expected_resource_context_totals(blocks)
 
     if receipt["totals"] == totals and
-         receipt["provider_estimated_tokens"] == totals["token_cost"] and
+         receipt["provider_estimated_tokens"] ==
+           totals["token_cost"] + continuation_tokens(receipt) and
          receipt["ordered_descriptor_digest"] == ordered_descriptor_digest(blocks) do
       :ok
     else
@@ -6797,11 +6999,49 @@ defmodule Loopex.Runtime.SessionState do
         :ok
 
       configuration ->
-        SessionConfiguration.preflight_history(
-          configuration,
-          lineage_elements(state, run_id),
-          Enum.reject(state.run_order, &(&1 == run_id))
-        )
+        with :ok <-
+               SessionConfiguration.preflight_history(
+                 configuration,
+                 lineage_elements(state, run_id),
+                 Enum.reject(state.run_order, &(&1 == run_id))
+               ) do
+          preflight_continuation(state, run_id)
+        end
+    end
+  end
+
+  # Concept: an unexpandable frozen exchange fails before request construction.
+  # Technical depth: rebuild from retained sources only, so replay proves the
+  # same unavailable projection without a provider, project file or catalog.
+  # Numeric admission remains a separate measurement of a complete projection.
+  defp preflight_continuation(state, run_id) do
+    case get_in(state.pending_work, [run_id, :continuation_exchange]) do
+      nil ->
+        :ok
+
+      %{base_request: request, base_receipt: receipt} ->
+        prefix =
+          request.messages
+          |> Enum.zip(receipt["blocks"])
+          |> Enum.take_while(fn {_message, block} -> block["provenance_class"] != "session" end)
+          |> Enum.map(&elem(&1, 0))
+
+        steer = pending_steer(state, run_id)
+        applied = steer && steer.command_id
+
+        with {:ok, entries} <- Conversation.lineage_entries(lineage_elements(state, run_id)),
+             {:ok, suffix} <- projected_steer(state, run_id, applied),
+             {:ok, _} <-
+               model_continuation(
+                 state,
+                 run_id,
+                 prefix ++ Enum.map(entries, &elem(&1, 1)) ++ suffix,
+                 applied
+               ) do
+          :ok
+        else
+          _ -> {:error, :context_projection_invalid}
+        end
     end
   end
 

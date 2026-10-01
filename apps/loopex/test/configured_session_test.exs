@@ -205,6 +205,358 @@ defmodule Loopex.ConfiguredSessionTest do
     end
   end
 
+  test "open exchanges retain source-bound envelopes and independently measured costs" do
+    fixture =
+      start(
+        script: [
+          open_turn("first"),
+          open_turn("second"),
+          %{
+            text: "done",
+            reply_overrides: %{completion: "natural", continuation: closed_capsule("done")}
+          },
+          %{
+            text: "next",
+            reply_overrides: %{completion: "natural", continuation: closed_capsule("next")}
+          }
+        ]
+      )
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions, continuation_configuration())
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    prompt(attachment, "first-prompt", "work")
+    [first, second, third] = AgentLoopTestModel.dispatched(fixture.model)
+    assert first.continuation == nil
+    assert Enum.take(second.messages, length(first.messages)) == first.messages
+    assert Enum.take(third.messages, length(second.messages)) == second.messages
+    assert length(second.continuation["entries"]) == 1
+    assert length(third.continuation["entries"]) == 2
+    assert hd(third.continuation["entries"]) == hd(second.continuation["entries"])
+    records = Fixture.records(fixture, session)
+
+    settlements =
+      for row <- records, row.payload.kind == "model_attempt_settled_v3", do: row.payload
+
+    staged = for row <- records, row.payload.kind == "model_request_committed_v2", do: row.payload
+
+    for {request, row} <- Enum.zip([second, third], tl(staged)) do
+      assert request.continuation["base_request_digest"] == first.staged_request_digest
+      assert request.continuation["exchange_id"] == hd(settlements)["operation_id"]
+
+      for {entry, settlement} <- Enum.zip(request.continuation["entries"], settlements) do
+        assert entry["source"] ==
+                 Map.put(
+                   Map.take(settlement, ~w(run_id turn_id operation_id attempt)),
+                   "settlement_digest",
+                   Canonical.digest(settlement)
+                 )
+
+        assert entry["capsule"] == settlement["result"]["reply"]["continuation"]
+        [binding] = entry["calls"]
+        assert binding["native_id"] == hd(settlement["result"]["reply"]["tool_calls"])["id"]
+        refute binding["native_id"] == binding["canonical_call_id"]
+
+        assert Enum.at(request.messages, binding["result_message_index"])["tool_call_id"] ==
+                 binding["canonical_call_id"]
+      end
+
+      assert {:ok, expanded} =
+               Loopex.Model.Continuation.expand(
+                 request.continuation,
+                 request.model,
+                 request.messages
+               )
+
+      bytes = Canonical.encode(expanded)
+
+      cost = %{
+        "content_digest" => Canonical.digest_bytes(bytes),
+        "byte_cost" => byte_size(bytes),
+        "token_cost" => div(byte_size(bytes) + 2, 3)
+      }
+
+      receipt = row["context_receipt"]
+      assert receipt["continuation_cost"] == cost
+
+      assert receipt["provider_estimated_tokens"] ==
+               receipt["totals"]["token_cost"] + cost["token_cost"]
+
+      assert receipt["totals"]["token_cost"] ==
+               Enum.sum(Enum.map(receipt["blocks"], & &1["token_cost"]))
+    end
+
+    assert {:ok, _} = SessionState.recover(session, records, Fixture.events(fixture, session))
+
+    for changed <- [
+          put_in(second.continuation, ["base_request_digest"], String.duplicate("b", 64)),
+          Map.put(second.continuation, "configuration_version", 2),
+          update_in(second.continuation, ["entries"], fn [entry] ->
+            [put_in(entry, ["source", "settlement_digest"], String.duplicate("c", 64))]
+          end)
+        ] do
+      assert {:ok, request} =
+               Loopex.Model.request(second.model, second.messages,
+                 tools: second.tools,
+                 sampling: second.sampling,
+                 deadline: second.deadline,
+                 continuation: changed
+               )
+
+      substituted =
+        Enum.map(records, fn row ->
+          if row.payload.kind == "model_request_committed_v2" and
+               row.payload["staged_request_digest"] == second.staged_request_digest do
+            row
+            |> put_in([:payload, "request", "continuation"], changed)
+            |> put_in(
+              [:payload, "request", "canonical_request_bytes"],
+              request.canonical_request_bytes
+            )
+            |> put_in(
+              [:payload, "request", "staged_request_digest"],
+              request.staged_request_digest
+            )
+            |> put_in([:payload, "staged_request_digest"], request.staged_request_digest)
+          else
+            row
+          end
+        end)
+
+      assert {:error, :invalid_model_request_transition} =
+               SessionState.recover(session, substituted, Fixture.events(fixture, session))
+    end
+
+    for member <- ~w(content_digest byte_cost token_cost) do
+      substituted =
+        Enum.map(records, fn row ->
+          if row.payload.kind == "model_request_committed_v2" and
+               row.payload["staged_request_digest"] == second.staged_request_digest do
+            update_in(row, [:payload, "context_receipt", "continuation_cost", member], fn value ->
+              if is_binary(value), do: String.duplicate("f", 64), else: value + 1
+            end)
+          else
+            row
+          end
+        end)
+
+      assert {:error, :invalid_model_request_transition} =
+               SessionState.recover(session, substituted, Fixture.events(fixture, session))
+    end
+
+    prompt(attachment, "next-prompt", "more")
+    assert List.last(AgentLoopTestModel.dispatched(fixture.model)).continuation == nil
+    assert length(Agent.get(fixture.executor, & &1.jobs)) == 2
+  end
+
+  test "native identity collision refuses a later reply before another tool intent" do
+    fixture = start(script: [open_turn("same"), open_turn("same")])
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions, continuation_configuration())
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(
+               attachment,
+               %{type: :prompt, command_id: "prompt", content: "work"}
+             )
+
+    events = finish(attachment)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "failed"
+    assert length(Agent.get(fixture.executor, & &1.jobs)) == 1
+
+    settlements =
+      for row <- Fixture.records(fixture, session),
+          row.payload.kind == "model_attempt_settled_v3",
+          do: row.payload
+
+    assert List.last(settlements)["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
+           }
+
+    assert {:ok, _} = SessionState.recover(session, Fixture.records(fixture, session), events)
+  end
+
+  test "owner recovery reuses frozen project content without the original host manifest" do
+    content = "Retain this project guidance during the exchange."
+
+    project = %{
+      workspace: %{workspace_ref: "workspace-ref", repository_origin: nil, revision: nil},
+      entries: [
+        %{
+          label: "AGENTS.md",
+          content: content,
+          byte_size: byte_size(content),
+          content_digest: Canonical.digest_bytes(content),
+          contained: true
+        }
+      ]
+    }
+
+    {:ok, digest, _} = Loopex.ProjectResource.digest(project)
+
+    decision = %{
+      manifest_digest: digest,
+      workspace_ref: "workspace-ref",
+      trust_scope: "project_resource",
+      decision_source: "host_supplied",
+      issued_at: "2026-09-10T00:00:00Z",
+      expires_at: nil,
+      revocation_state: "active"
+    }
+
+    fixture =
+      start(script: [open_turn("write")], project_manifest: project, project_decision: decision)
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions, continuation_configuration())
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    hold_record_commit(fixture, "executor_receipt_committed", :after)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(
+               attachment,
+               %{type: :prompt, command_id: "prompt", content: "work"}
+             )
+
+    {waiter, _} = await_record_commit(fixture, session, "executor_receipt_committed", :after)
+    [first] = AgentLoopTestModel.dispatched(fixture.model)
+    assert Enum.any?(first.messages, &String.contains?(&1["content"], content))
+    {:ok, children} = Runtime.Supervisor.children(fixture.runtime.supervisor)
+    [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
+    monitor = Process.monitor(owner)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 5_000
+    assert :ok = Loopex.stop(fixture.runtime)
+
+    restarted =
+      start(
+        store: fixture.store,
+        script: [
+          %{
+            text: "done",
+            reply_overrides: %{completion: "natural", continuation: closed_capsule("done")}
+          }
+        ]
+      )
+
+    assert {:ok, ^session} =
+             Loopex.resume_session(restarted.runtime, session, command_id: "successor")
+
+    Loopex.M1RuntimeTestStore.release(waiter)
+    assert {:ok, successor} = Loopex.attach(restarted.runtime, session, after_event_sequence: 0)
+    assert Enum.find(finish(successor), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    [second] = AgentLoopTestModel.dispatched(restarted.model)
+    assert Enum.take(second.messages, length(first.messages)) == first.messages
+    assert second.continuation["base_request_digest"] == first.staged_request_digest
+    assert Agent.get(restarted.executor, & &1.jobs) == []
+
+    rows =
+      for row <- Fixture.records(restarted, session),
+          row.payload.kind == "model_request_committed_v2",
+          do: row.payload
+
+    assert Enum.at(rows, 1)["context_receipt"]["project_resource"] ==
+             hd(rows)["context_receipt"]["project_resource"]
+
+    assert {:ok, _} =
+             SessionState.recover(
+               session,
+               Fixture.records(restarted, session),
+               Fixture.events(restarted, session)
+             )
+  end
+
+  test "aggregate continuation overflow records an unavailable projection before another attempt" do
+    turns =
+      for id <- ["first", "second"] do
+        update_in(open_turn(id), [:reply_overrides, :continuation, "content"], fn nodes ->
+          [
+            %{"kind" => "literal", "value" => %{"private" => String.duplicate("x", 9_000)}}
+            | nodes
+          ]
+        end)
+      end
+
+    fixture = start(script: turns)
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions, continuation_configuration())
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(
+               attachment,
+               %{type: :prompt, command_id: "prompt", content: "work"}
+             )
+
+    events = finish(attachment)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "failed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+
+    [refusal] =
+      for row <- Fixture.records(fixture, session),
+          row.payload.kind == "context_admission_refused_v2",
+          do: row.payload
+
+    assert refusal["projection_state"] == "unavailable"
+    assert refusal["failure"]["cause"] == "context_projection_invalid"
+    assert refusal["provider_estimated_tokens"] == nil
+    assert {:ok, _} = SessionState.recover(session, Fixture.records(fixture, session), events)
+  end
+
+  defp open_turn(id) do
+    capsule =
+      closed_capsule("working")
+      |> Map.put("status", "open")
+      |> Map.update!(
+        "content",
+        &(&1 ++
+            [
+              %{
+                "kind" => "tool_use_ref",
+                "call_index" => 0,
+                "native_id" => id,
+                "template" => %{"type" => "tool_use", "id" => id, "name" => "write"},
+                "field" => "input"
+              }
+            ])
+      )
+
+    %{
+      text: "working",
+      calls: [%{id: id, name: "write", arguments: %{"path" => id}}],
+      reply_overrides: %{completion: "natural", continuation: capsule}
+    }
+  end
+
   defp continuation_configuration do
     configuration()
     |> put_in(["model_capabilities", "reasoning_levels"], ["default"])

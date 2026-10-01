@@ -36,7 +36,8 @@ defmodule Loopex.Model do
   job digests by construction, while two attempts of one model call produce one
   staged digest.
 
-  Ordinary canonical requests carry nil continuation. New requests use
+  Ordinary requests begin an exchange with nil continuation. Later requests
+  may carry a source-bound content-reference envelope under ADR 0044. New requests use
   `loopex.model_request.v2`; retained v1 requests remain readable with their
   original bytes and digest. The continuation member stays inside the ordered
   semantic projection in both generations.
@@ -108,7 +109,7 @@ defmodule Loopex.Model do
           required(:tools) => [map()],
           required(:sampling) => %{binary() => term()},
           required(:deadline) => integer(),
-          required(:continuation) => nil,
+          required(:continuation) => map() | nil,
           required(:canonical_request_bytes) => binary(),
           required(:staged_request_digest) => binary()
         }
@@ -243,7 +244,7 @@ defmodule Loopex.Model do
       tools: Keyword.get(options, :tools, []),
       sampling: Keyword.get(options, :sampling),
       deadline: Keyword.get(options, :deadline),
-      continuation: nil
+      continuation: Keyword.get(options, :continuation)
     }
 
     with :ok <- validate_semantics(semantic),
@@ -388,7 +389,7 @@ defmodule Loopex.Model do
          tools: tools,
          sampling: %{"max_tokens" => max_tokens} = sampling,
          deadline: deadline,
-         continuation: nil
+         continuation: continuation
        })
        when version in @readable_versions and
               is_binary(model) and byte_size(model) > 0 and byte_size(model) <= 512 and
@@ -397,10 +398,23 @@ defmodule Loopex.Model do
               is_integer(max_tokens) and max_tokens > 0 and max_tokens <= 1_000_000 and
               is_integer(deadline) do
     cond do
-      not Enum.all?(tools, &ToolDefinition.valid?/1) -> {:error, :invalid_model_request}
-      not plain?(messages) -> {:error, :invalid_model_request}
-      not plain?(sampling) -> {:error, :invalid_model_request}
-      true -> :ok
+      not Enum.all?(tools, &ToolDefinition.valid?/1) ->
+        {:error, :invalid_model_request}
+
+      not plain?(messages) ->
+        {:error, :invalid_model_request}
+
+      not plain?(sampling) ->
+        {:error, :invalid_model_request}
+
+      version == "loopex.model_request.v1" and not is_nil(continuation) ->
+        {:error, :invalid_model_request}
+
+      true ->
+        case Loopex.Model.Continuation.expand(continuation, model, messages) do
+          {:ok, _} -> :ok
+          {:error, _} -> {:error, :invalid_model_request}
+        end
     end
   end
 

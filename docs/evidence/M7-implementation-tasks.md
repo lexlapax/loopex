@@ -67,18 +67,56 @@ Part of the [evidence index](README.md).
   readers, including monotonic cutover and unchanged historical reply shapes.
 - Done: emit v3 for every new ordinary settlement, migrate exact callback
   fixtures and preserve conservative accounting and historical reader schemas.
+- Done: source-bound ordinary continuation envelopes, full expanded costs,
+  frozen project content through owner recovery, native-ID collision refusal,
+  and independently replayed aggregate-overflow preparation failures.
+- Decision pending: ADR 0043's required-only refusal counts cannot describe an
+  oversized ADR 0044 frozen request containing project/resource blocks. The
+  proposed v2 amendment adds explicit counts for those classes. Do not implement
+  the dependent refusal schema without the maintainer's decision.
 - Next: complete host resolution, maintenance quiescence and checkpoint-aware
-  configuration preflight; join native capture to source-bound request envelopes
-  and the transport bridge; complete question
+  configuration preflight; join native capture and request envelopes to
+  the transport bridge; complete question
   projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
   continue prompt-file and mapping
   preparation, effective inspection and command entry wiring, then live
-  chat/configuration composition and non-nil continuation costs in T04/T06/T08.
+  chat/configuration composition and maintenance accounting in T04/T06/T08.
 - Remaining: all unchecked tasks below. Closure, main integration and release
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: ordinary open exchanges now stage the closed ADR 0044 envelope
+  from committed full settlement records and canonical lineage source positions.
+  The shared expander checks both complete-envelope JSON limits, entry/block
+  limits, ordered call/result mappings and native/canonical ID collisions.
+  Revision-four receipts charge Canonical.encode(E(request)) independently of
+  ordinary descriptor totals; replay derives source identities and all cost
+  fields instead of accepting self-consistent replacements. V1 requests remain
+  nil-only. A three-turn scripted exchange proves stable prefixes, exact source
+  digests and capsules, extended mappings, cost arithmetic and next-prompt nil
+  continuation. Collision refusal occurs before another tool intent. An owner
+  killed after executor receipt commit resumes on a new runtime without its
+  original project manifest, preserving the frozen content and avoiding a
+  repeated effect. Unexpandable aggregate content produces a replay-verifiable
+  unavailable preparation failure before another provider attempt.
+  The current affected core run passes 249 tests in 48.6 seconds; the supported
+  floor passes 34 continuation/configured-owner tests in 3.1 seconds. Adapter
+  mapping/native-content checks pass 20 tests in 3.0 seconds. Warning-free
+  compilation, formatting, dependency direction, documentation ordering and
+  repository status pass. Retained outputs:
+  - `/private/tmp/loopex-m7-continuation-owner-core.log`, SHA-256
+    `6c35be6163ae7cd21e3f6a48f033d49d49ca6be0e9414720ac0a48cdc1f1a680`.
+  - `/private/tmp/loopex-m7-continuation-owner-floor.log`, SHA-256
+    `1e87297ced677377735df67c4b9f5f0fa3ffbd78487de570a0b8030b6c04163a`.
+  - `/private/tmp/loopex-m7-continuation-owner-adapter.log`, SHA-256
+    `b8909e8a86828918051719331a8df758d56371606a5da5cd9050be5a75ea240f`.
+  These are model-port proofs. Native transport, registered thinking cells,
+  resource-pack restart vectors, maintenance accounting/headroom and full
+  real-provider evidence remain open. The measured size-refusal path for a
+  frozen request with optional-provenance blocks awaits the schema decision
+  above; no substitute failure or fabricated count has been introduced.
 
 - 2026-10-01: every new ordinary settlement now writes model_attempt_settled_v3,
   including retries, transport errors, unreadable callbacks and validated reply
@@ -711,6 +749,11 @@ Part of the [evidence index](README.md).
 - [x] Emit v3 for every new ordinary settlement, migrate exact callback fixtures, and prove whole-record accounting, required-capsule admission and historical schemas through live recovery.
 - [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
 - [x] Implement pure exact native-array capture and reconstruction through the shared expander, with closed fields and stop/call relations.
+- [x] Build and validate bounded aggregate request envelopes from full committed settlements and lineage positions, including source/configuration replay checks.
+- [x] Charge the complete expanded ordinary envelope in revision-four receipts and independently verify every retained cost field.
+- [x] Preserve frozen project input through owner recovery, reject native-ID collisions before tools, and retain replayable aggregate-overflow preparation failures.
+- [ ] Resolve and implement the numeric refusal schema for frozen project/resource input; prove its exact bounds and replay.
+- [ ] Prove frozen resource-pack input and steer ordering across continuation/restart boundaries.
 - [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
 - [ ] Implement continuation accounting, reserves and compaction headroom targets.
 - [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
@@ -861,13 +904,13 @@ before a provider demonstration.
 | Tool-output preparation | ADR 0041 | Immutable receipt plus versioned prepared-reference/preparation-state facts and exact source digests | SessionState; SessionCoordinator; ArtifactStore; local executor | Pending |
 | Artifact read capability | ADR 0041 | loopex.artifact_read.v1 binding from literal tool-generation table; resolved executor arguments | ToolDefinition; SessionGenesis; local read tool; SessionCoordinator | Pending |
 | Instruction envelope | ADR 0042 | Closed version/base/environment/appendix map, exact rendered bytes/digest | SessionGenesis; configuration reducer; host composition | Pending |
-| Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Nil-continuation and owning-instruction bindings implemented; maintenance/continuation bindings pending |
+| Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Ordinary nil/non-nil continuation costs and source/configuration bindings implemented; maintenance bindings pending |
 | Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 and unavailable terminal-history preparation failures implemented; other causes, maintenance/headroom and wire projections pending |
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
-| Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 nil-continuation writer/read compatibility implemented; expansion pending |
-| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; native adapter emission, request envelopes and continuation accounting pending |
+| Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound continuation staging, bounded shared expansion and v1 nil-only compatibility implemented; native rendering pending |
+| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; native adapter emission and maintenance accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
