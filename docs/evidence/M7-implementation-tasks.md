@@ -109,6 +109,8 @@ Part of the [evidence index](README.md).
 - Done: direct and borrowed version-2 durable startup validates complete planes,
   selected routes and maintenance models before owned effects, then forwards
   immutable exclusions to Store, executor and provider launches.
+- Done: consolidate constructor preflight in DurableOptions, restoring the
+  reference composition to 154 effective lines under its unchanged 180-line gate.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -124,6 +126,27 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: The complete fast check on
+  `53a60e346e3523c09b0e95fbfda3877146dd15ba` failed only the reference
+  composition's existing size assertion: 198 effective lines exceeded 180.
+  All ten other application suites passed. The composition suite passed its
+  other 385 tests; this run is retained as failed evidence, not a pass.
+  Complete output: `/private/tmp/loopex-m7-53a60e34-fast-check.log`, SHA-256
+  `395b7c5c7f84187b3e18f2afe94f242dcb6e8018fc072d143c4df3dd222904cd`.
+  The repair moves the existing required-input and launch-option validation
+  into DurableOptions, which already owns model, bounds, sampling, active-tool
+  and maintenance validation. All three constructors use its complete preflight;
+  order, error values, first-duplicate behavior and effect boundaries are unchanged.
+  Composition retains startup wiring and now has 154 effective lines. The test
+  and its 180-line ceiling are unchanged. Focused constructor, precedence,
+  failure-cleanup and binding-startup tests pass 33 cases on each toolchain:
+  current in 10.4 seconds and floor in 9.7 seconds. These focused results prove
+  the repair; they do not relabel the failed integration candidate as green.
+  - `/private/tmp/loopex-m7-validation-owner-current.log`, SHA-256
+    `d7657b9baed490a6333658daec63397791138a542c085c5e27a315875f45b513`.
+  - `/private/tmp/loopex-m7-validation-owner-floor.log`, SHA-256
+    `93054405c4f2ce2742cc8fcfbfb9fe31f88d91ccdbfbd84ab3b35598399c71c2`.
 
 - 2026-10-01: Durable composition now admits direct explicit bindings and
   borrowed version-2 planes. Preflight checks complete plane/model-option shapes,
@@ -1430,6 +1453,7 @@ Part of the [evidence index](README.md).
 - [ ] Restore workspace state separately from runtime state.
 - [ ] Join automated rollback artifacts to attended restore inspection without rerunning the case.
 ## T16 — Complete integration and regression checks
+- [x] Restore the reference composition size gate by consolidating preflight in the existing DurableOptions owner; preserve validation precedence and constructor behavior on both toolchains.
 - [x] Move M7 to In progress when product work begins.
 - [x] Encode the historical interaction positive control with its reader's v2 settlement format while retaining refusal of new interaction records.
 - [x] Route configuration model validation through composition and preserve the command-surface dependency scan.

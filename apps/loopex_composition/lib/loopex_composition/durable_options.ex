@@ -2,7 +2,7 @@ defmodule LoopexComposition.DurableOptions do
   @moduledoc """
   ## Concept
 
-  Validates optional durable profile choices shared by its three constructors.
+  Validates and resolves durable profile inputs shared by its three constructors.
 
   ## Technical depth
 
@@ -12,6 +12,63 @@ defmodule LoopexComposition.DurableOptions do
   @coding ~w(loopex.read loopex.write loopex.edit loopex.bash)
   @tools @coding ++ ~w(loopex.grep loopex.find loopex.ls)
   @uint64 18_446_744_073_709_551_615
+
+  @required_options [:state_root, :workspace, :runtime_id]
+
+  @doc false
+  def prepare(options) do
+    with {:ok, policy} <- policy(Keyword.get(options, :policy)),
+         {:ok, [root, workspace, id]} <- required(options, @required_options),
+         :ok <- boolean(options, :recover_stale_writer),
+         :ok <- boolean(options, :artifact_transfers),
+         :ok <- provider_launch(options),
+         :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
+         :ok <- LoopexComposition.WorkspaceIdentity.validate_manifest(options, workspace),
+         {:ok, options} <- resolve(options),
+         do: {:ok, {options, root, workspace, id, policy}}
+  end
+
+  # An assertion about the world is refused unless it was actually made, rather
+  # than read as truthy: only `true` and `false` say anything here.
+  defp boolean(options, key) do
+    if is_boolean(Keyword.get(options, key, false)),
+      do: :ok,
+      else: {:error, {:invalid_composition_option, key}}
+  end
+
+  defp policy(module) when is_atom(module) and not is_nil(module), do: {:ok, module}
+  defp policy(_absent), do: {:error, :host_policy_required}
+
+  defp provider_launch(options) do
+    launch = Keyword.get(options, :provider_launch, [])
+
+    reserved = [
+      :credential_token,
+      :credential_registry,
+      :tracing_capability,
+      :provider_routes,
+      :excluded_env_names
+    ]
+
+    if Keyword.keyword?(launch) and
+         Enum.all?(reserved, &(not Keyword.has_key?(launch, &1))) do
+      :ok
+    else
+      {:error, {:invalid_composition_option, :provider_launch}}
+    end
+  end
+
+  defp required(options, keys) do
+    Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, values} ->
+      case Keyword.fetch(options, key) do
+        {:ok, value} when is_binary(value) and byte_size(value) > 0 ->
+          {:cont, {:ok, values ++ [value]}}
+
+        _other ->
+          {:halt, {:error, {:invalid_composition_option, key}}}
+      end
+    end)
+  end
 
   @doc false
   def validate(options) do

@@ -97,7 +97,7 @@ defmodule LoopexComposition do
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) when is_list(options) do
-    with {:ok, configuration} <- validate(options),
+    with {:ok, configuration} <- DurableOptions.prepare(options),
          do: RuntimeOwner.start(configuration, &compose/1, owner_seams())
   end
 
@@ -121,7 +121,7 @@ defmodule LoopexComposition do
           result | {:error, term()}
         when result: term()
   def with_runtime(options, function) when is_list(options) and is_function(function, 1) do
-    with {:ok, configuration} <- validate(options),
+    with {:ok, configuration} <- DurableOptions.prepare(options),
          do: RuntimeOwner.with_runtime(configuration, function, &compose/1, owner_seams())
   end
 
@@ -144,7 +144,8 @@ defmodule LoopexComposition do
   the edges started, as `LoopexComposition.Edges` describes.
   """
   @spec start_edges(keyword(), keyword()) :: {:ok, map()} | {:error, term(), map()}
-  def start_edges(options, cycle \\ []), do: Edges.start(options, cycle, &validate/1, &compose/1)
+  def start_edges(options, cycle \\ []),
+    do: Edges.start(options, cycle, &DurableOptions.prepare/1, &compose/1)
 
   @doc """
   ## Concept
@@ -160,62 +161,6 @@ defmodule LoopexComposition do
   def artifacts(state_root) do
     with {:ok, handle} <- Artifacts.open(Path.join(state_root, "artifacts")),
          do: {:ok, %{module: Artifacts, handle: handle}}
-  end
-
-  @required_options [:state_root, :workspace, :runtime_id]
-
-  defp validate(options) do
-    with {:ok, policy} <- policy(Keyword.get(options, :policy)),
-         {:ok, [root, workspace, id]} <- required(options, @required_options),
-         :ok <- boolean(options, :recover_stale_writer),
-         :ok <- boolean(options, :artifact_transfers),
-         :ok <- provider_launch(options),
-         :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
-         :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
-         {:ok, options} <- DurableOptions.resolve(options),
-         do: {:ok, {options, root, workspace, id, policy}}
-  end
-
-  # An assertion about the world is refused unless it was actually made, rather
-  # than read as truthy: only `true` and `false` say anything here.
-  defp boolean(options, key) do
-    if is_boolean(Keyword.get(options, key, false)),
-      do: :ok,
-      else: {:error, {:invalid_composition_option, key}}
-  end
-
-  defp policy(module) when is_atom(module) and not is_nil(module), do: {:ok, module}
-  defp policy(_absent), do: {:error, :host_policy_required}
-
-  defp provider_launch(options) do
-    launch = Keyword.get(options, :provider_launch, [])
-
-    reserved = [
-      :credential_token,
-      :credential_registry,
-      :tracing_capability,
-      :provider_routes,
-      :excluded_env_names
-    ]
-
-    if Keyword.keyword?(launch) and
-         Enum.all?(reserved, &(not Keyword.has_key?(launch, &1))) do
-      :ok
-    else
-      {:error, {:invalid_composition_option, :provider_launch}}
-    end
-  end
-
-  defp required(options, keys) do
-    Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, values} ->
-      case Keyword.fetch(options, key) do
-        {:ok, value} when is_binary(value) and byte_size(value) > 0 ->
-          {:cont, {:ok, values ++ [value]}}
-
-        _other ->
-          {:halt, {:error, {:invalid_composition_option, key}}}
-      end
-    end)
   end
 
   defp owner_seams,
