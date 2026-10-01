@@ -244,7 +244,7 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
     :ok =
       :telemetry.attach_many(
         tag,
-        [[:req_llm, :request, :start], [:req_llm, :request, :stop]],
+        [[:req_llm, :request, :start], [:req_llm, :request, :stop], [:finch, :send, :start]],
         &__MODULE__.telemetry_event/4,
         self()
       )
@@ -260,6 +260,10 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
 
     {_server, base} = server([encode(events())])
     assert {:ok, _} = NativeTransport.complete(prepared(base), @key, fn _ -> :ok end)
+
+    assert_receive {:sdk_telemetry, [:finch, :send, :start], %{request: finch}}
+    assert {:stream, body} = finch.body
+    refute :erlang.term_to_binary(body) =~ "claude-fable-5-1"
 
     for kind <- [:start, :stop] do
       assert_receive {:sdk_telemetry, [:req_llm, :request, ^kind], metadata}

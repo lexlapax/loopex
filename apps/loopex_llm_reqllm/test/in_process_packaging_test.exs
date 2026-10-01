@@ -372,6 +372,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
       model: String.replace_prefix(model, "anthropic:", ""),
       content: [%{type: "text", text: "packaged answer"}],
       stop_reason: "end_turn",
+      stop_sequence: nil,
       usage: %{input_tokens: 12, output_tokens: 3}
     })
   end

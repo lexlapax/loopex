@@ -585,6 +585,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       "model" => "fixture",
       "content" => [%{"type" => "text", "text" => content}],
       "stop_reason" => "end_turn",
+      "stop_sequence" => nil,
       "usage" => %{"input_tokens" => 1, "output_tokens" => 2}
     })
   end

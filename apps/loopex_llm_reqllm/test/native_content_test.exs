@@ -3,6 +3,101 @@ defmodule Loopex.LLM.ReqLLM.NativeContentTest do
   alias Loopex.LLM.ReqLLM.NativeContent
   alias Loopex.Model.ContentReferences
 
+  test "buffered and streamed native replies preserve the same ordered content and usage" do
+    alias Loopex.LLM.ReqLLM.NativeStream
+    id = String.replace_prefix(model(), "anthropic:", "")
+
+    content = [
+      %{"type" => "thinking", "thinking" => "private 猫", "signature" => "sig+/="},
+      %{"type" => "text", "text" => "é"},
+      %{"type" => "redacted_thinking", "data" => "opaque+/="},
+      %{"type" => "text", "text" => "tail"}
+    ]
+
+    native = %{
+      "id" => "message",
+      "type" => "message",
+      "role" => "assistant",
+      "model" => id,
+      "content" => content,
+      "stop_reason" => "end_turn",
+      "stop_sequence" => nil,
+      "usage" => %{"input_tokens" => 7, "output_tokens" => 11}
+    }
+
+    assert {:ok, buffered} = NativeContent.response(model(), true, id, Jason.encode!(native))
+    start = %{native | "content" => [], "stop_reason" => nil, "usage" => %{"input_tokens" => 7}}
+
+    events =
+      [%{"type" => "message_start", "message" => start}] ++
+        Enum.flat_map(Enum.with_index(content), fn {block, index} ->
+          [
+            %{"type" => "content_block_start", "index" => index, "content_block" => block},
+            %{"type" => "content_block_stop", "index" => index}
+          ]
+        end) ++
+        [
+          %{
+            "type" => "message_delta",
+            "delta" => %{"stop_reason" => "end_turn", "stop_sequence" => nil},
+            "usage" => %{"output_tokens" => 11}
+          },
+          %{"type" => "message_stop"}
+        ]
+
+    state =
+      Enum.reduce(events, NativeStream.new(id), fn event, state ->
+        assert {:ok, next} = NativeStream.feed(state, event)
+        next
+      end)
+
+    assert {:ok, streamed} = NativeStream.finish(state)
+
+    assert {:ok, captured} =
+             NativeContent.capture(model(), streamed.stop_reason, streamed.content)
+
+    assert Map.put(captured, :usage, streamed.usage) == buffered
+    assert {:ok, ^content} = ContentReferences.expand(buffered.continuation, buffered.text, [])
+
+    for invalid <- [
+          Map.delete(native, "stop_reason"),
+          Map.put(native, "model", "wrong"),
+          Map.put(native, "role", "user"),
+          Map.put(native, "extra", true)
+        ] do
+      assert {:error, :invalid_native_content} =
+               NativeContent.response(model(), true, id, Jason.encode!(invalid))
+    end
+
+    assert {:error, :invalid_native_content} =
+             NativeContent.response(model(), true, id, "{truncated")
+
+    assert {:error, :invalid_native_content} =
+             NativeContent.response(model(), true, id, String.duplicate(" ", 8_388_609))
+
+    for usage <- [
+          %{},
+          %{"input_tokens" => -1, "output_tokens" => "7"},
+          %{"input_tokens" => 18_446_744_073_709_551_616}
+        ] do
+      assert {:ok, reply} =
+               NativeContent.response(
+                 model(),
+                 true,
+                 id,
+                 Jason.encode!(%{native | "usage" => usage})
+               )
+
+      assert Map.get(reply.usage, :input_tokens) == nil
+      assert Map.get(reply.usage, :output_tokens) == nil
+    end
+
+    echoed = %{native | "usage" => %{"input_tokens" => "selected-key", "output_tokens" => 11}}
+
+    assert {:error, :invalid_native_content} =
+             NativeContent.response(model(), true, id, Jason.encode!(echoed), "selected-key")
+  end
+
   test "complete native arrays round trip with exact strings, order, IDs and parsed arguments" do
     content = [
       %{"type" => "thinking", "thinking" => "summary\n猫", "signature" => "signature+/="},

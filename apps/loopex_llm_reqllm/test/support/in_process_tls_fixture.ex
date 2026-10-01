@@ -109,7 +109,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
           ] do
         fixture = start(trusted, "localhost", provider, surface, endpoint)
 
-        assert {_, %Req.Response{body: "tls response", status: 200}} =
+        expected_body = response_body(provider)
+
+        assert {_, %Req.Response{body: ^expected_body, status: 200}} =
                  OneShotHTTP1.run(fixture.request)
 
         assert_receive {:tls_write, server, headers}, 2_000
@@ -431,7 +433,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
 
     {:ok, {_, port}} = :ssl.sockname(listener)
     test = self()
-    server = spawn(fn -> accept(listener, test) end)
+    server = spawn(fn -> accept(listener, test, provider) end)
     start_request(listener, port, server, hostname, provider, surface, endpoint)
   end
 
@@ -458,6 +460,41 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
         finch_private: %{loopex_one_shot: {owner, tag, fingerprint}}
       }
     }
+
+    request =
+      if provider == :anthropic do
+        {:ok, captured} =
+          Loopex.Model.request(
+            "anthropic:fixture",
+            [%{"role" => "user", "content" => "hello"}],
+            sampling: %{"max_tokens" => 64},
+            deadline: System.system_time(:millisecond) + 10_000
+          )
+
+        Process.put(
+          {Loopex.LLM.ReqLLM.InProcess, :native_request, tag},
+          %{request: captured, credential: "fixture-secret-only"}
+        )
+
+        %{
+          request
+          | headers:
+              Req.Fields.new([
+                {"authorization", "Bearer fixture-secret-only"},
+                {"accept", "application/json"},
+                {"content-type", "application/json"},
+                {"anthropic-version", "2023-06-01"}
+              ]),
+            body:
+              Jason.encode!(%{
+                "model" => "fixture",
+                "max_tokens" => 64,
+                "messages" => captured.messages
+              })
+        }
+      else
+        request
+      end
 
     %{
       owner: owner,
@@ -495,28 +532,44 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
     [{1, worker, :worker, [Finch.HTTP1.Pool]}] = Supervisor.which_children(supervisor)
     send(test, {:tls_owner_ready, self(), root, supervisor, worker, key})
 
+    teardown =
+      receive do
+        {:loopex_one_shot_claim, caller, reference, ^tag, _fingerprint, _route, _surface} ->
+          assert Registry.lookup(Req.Finch, key) == [{worker, Finch.HTTP1.Pool}]
+
+          assert Registry.lookup(Req.Finch.SupervisorRegistry, key) ==
+                   [{supervisor, {Finch.HTTP1.Pool, 1, expected}}]
+
+          assert Supervisor.which_children(supervisor) == [
+                   {1, worker, :worker, [Finch.HTTP1.Pool]}
+                 ]
+
+          send(caller, {:loopex_one_shot_grant, reference, tag, worker})
+          :claimed
+
+        {:loopex_one_shot_teardown, caller, reference, ^tag} ->
+          {caller, reference}
+      end
+
+    {caller, reference} =
+      case teardown do
+        :claimed ->
+          receive do
+            {:loopex_one_shot_teardown, caller, reference, ^tag} -> {caller, reference}
+          end
+
+        pending ->
+          pending
+      end
+
+    :ok = Supervisor.stop(root, :normal)
+    await_removed(key, System.monotonic_time(:millisecond) + 1_000)
+    refute Process.alive?(worker)
+    refute Process.alive?(supervisor)
+    send(caller, {:loopex_one_shot_torn_down, reference, tag})
+
     receive do
-      {:loopex_one_shot_claim, caller, reference, ^tag, _fingerprint, _route, _surface} ->
-        assert Registry.lookup(Req.Finch, key) == [{worker, Finch.HTTP1.Pool}]
-
-        assert Registry.lookup(Req.Finch.SupervisorRegistry, key) ==
-                 [{supervisor, {Finch.HTTP1.Pool, 1, expected}}]
-
-        assert Supervisor.which_children(supervisor) == [{1, worker, :worker, [Finch.HTTP1.Pool]}]
-        send(caller, {:loopex_one_shot_grant, reference, tag, worker})
-    end
-
-    receive do
-      {:loopex_one_shot_teardown, caller, reference, ^tag} ->
-        :ok = Supervisor.stop(root, :normal)
-        await_removed(key, System.monotonic_time(:millisecond) + 1_000)
-        refute Process.alive?(worker)
-        refute Process.alive?(supervisor)
-        send(caller, {:loopex_one_shot_torn_down, reference, tag})
-
-        receive do
-          :stop -> :ok
-        end
+      :stop -> :ok
     end
   end
 
@@ -541,23 +594,41 @@ defmodule Loopex.LLM.ReqLLM.InProcessTLSFixture do
   end
 
   defp stop(fixture) do
+    Process.delete({Loopex.LLM.ReqLLM.InProcess, :native_request, fixture.tag})
+    Process.delete({Loopex.LLM.ReqLLM.InProcess, :native_response, fixture.tag})
     :ssl.close(fixture.listener)
     Process.exit(fixture.server, :kill)
     send(fixture.owner, :stop)
   end
 
-  defp accept(listener, test) do
+  defp response_body(:anthropic),
+    do:
+      Jason.encode!(%{
+        "id" => "tls-message",
+        "type" => "message",
+        "role" => "assistant",
+        "model" => "fixture",
+        "content" => [%{"type" => "text", "text" => "tls response"}],
+        "stop_reason" => "end_turn",
+        "stop_sequence" => nil,
+        "usage" => %{"input_tokens" => 1, "output_tokens" => 2}
+      })
+
+  defp response_body(_), do: "tls response"
+
+  defp accept(listener, test, provider) do
     case :ssl.transport_accept(listener, 5_000) do
       {:ok, socket} ->
         case :ssl.handshake(socket, 5_000) do
           {:ok, socket} ->
             headers = read_headers(socket, "")
             send(test, {:tls_write, self(), headers})
+            body = response_body(provider)
 
             :ok =
               :ssl.send(
                 socket,
-                "HTTP/1.1 200 OK\r\ncontent-length: 12\r\nx-request-id: fixture-id\r\nrequest-id: fixture-id\r\n\r\ntls response"
+                "HTTP/1.1 200 OK\r\ncontent-length: #{byte_size(body)}\r\nx-request-id: fixture-id\r\nrequest-id: fixture-id\r\n\r\n#{body}"
               )
 
             assert {:error, :closed} = :ssl.recv(socket, 0, 5_000)

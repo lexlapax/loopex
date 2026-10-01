@@ -149,21 +149,101 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
   content-length only for this renderer's own body change. No caller hook or
   arbitrary header bag participates in constructing the sealed request.
   """
-  def install(request, %Finch.Request{body: body} = built, endpoint, credential)
-      when is_binary(body) do
+  def install(request, built, endpoint, credential),
+    do: install_native(request, built, endpoint, credential, true)
+
+  @doc """
+  ## Concept
+
+  Install the same captured native request at the one-shot buffered boundary.
+
+  ## Technical depth
+
+  The caller has already validated Req's final transport controls. Only the body
+  and an existing correct content-length may change here. Authentication and the
+  complete header set are checked against the independently captured endpoint
+  and credential; only this path admits identity accept-encoding.
+  """
+  def install_buffered(request, %Req.Request{} = built, endpoint, credential) do
+    headers = for {name, values} <- built.headers, value <- values, do: {name, value}
+    body = IO.iodata_to_binary(built.body)
+    finch = Finch.build(built.method, URI.to_string(built.url), headers, body)
+
+    with {:ok, installed, _guard} <-
+           install_native(request, finch, endpoint, credential, false) do
+      headers =
+        Map.new(installed.headers, fn {name, value} -> {String.downcase(name), [value]} end)
+
+      {:ok, %{built | body: installed.body, headers: headers}}
+    end
+  rescue
+    _ -> @invalid
+  end
+
+  def install_buffered(_, _, _, _), do: @invalid
+
+  @doc """
+  ## Concept
+
+  Keep sealed native request bytes out of Finch's request telemetry.
+
+  ## Technical depth
+
+  Both transports retain the body in their invocation owner. The read callback
+  captures only that owner's private handle and consumes the body once. Finch
+  sees a body stream and the exact content-length, so the wire bytes and framing
+  remain unchanged. This does not hide data from trusted host code executing in
+  the transport process or confer authority on the callback.
+  """
+  def private_body(%Finch.Request{body: body} = request, read)
+      when is_binary(body) and is_function(read, 0) do
+    headers =
+      Enum.reject(request.headers, fn {name, _} -> String.downcase(name) == "content-length" end)
+
+    stream =
+      Stream.resource(
+        fn -> :ready end,
+        fn
+          :ready ->
+            case read.() do
+              bytes when is_binary(bytes) -> {[bytes], :done}
+              _ -> raise "invalid native request body"
+            end
+
+          :done ->
+            {:halt, :done}
+        end,
+        fn _ -> :ok end
+      )
+
+    %{
+      request
+      | headers: headers ++ [{"content-length", Integer.to_string(byte_size(body))}],
+        body: {:stream, stream}
+    }
+  end
+
+  defp install_native(
+         request,
+         %Finch.Request{body: body} = built,
+         endpoint,
+         credential,
+         streaming
+       )
+       when is_binary(body) do
     with {:ok, decoded} <- Jason.decode(body),
-         {:ok, native} <- render(request, decoded, true),
+         {:ok, native} <- render(request, decoded, streaming),
          encoded = Jason.encode!(native),
          {:ok, headers} <- resized_headers(built.headers, byte_size(body), byte_size(encoded)),
          expected = %{built | body: encoded, headers: headers},
-         {:ok, guard} <- guard(expected, endpoint, credential, request.tools != []) do
+         {:ok, guard} <- seal(expected, endpoint, credential, request.tools != [], streaming) do
       {:ok, expected, guard}
     else
       _ -> @invalid
     end
   end
 
-  def install(_, _, _, _), do: @invalid
+  defp install_native(_, _, _, _, _), do: @invalid
 
   defp resized_headers(headers, before_size, after_size) when is_list(headers) do
     expected_length = Integer.to_string(before_size)
@@ -205,26 +285,30 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
   an exception whose inspected arguments could disclose headers or body. The
   endpoint is the independently captured route, not read back from this request.
   """
-  def guard(%Finch.Request{} = expected, %URI{} = endpoint, credential, tools?)
-      when is_binary(credential) and is_boolean(tools?) do
+  def guard(expected, endpoint, credential, tools?),
+    do: seal(expected, endpoint, credential, tools?, true)
+
+  defp seal(%Finch.Request{} = expected, %URI{} = endpoint, credential, tools?, streaming)
+       when is_binary(credential) and is_boolean(tools?) do
     with true <- expected.method == "POST" and is_binary(expected.body),
          true <- expected.scheme in [:http, :https],
          true <- Atom.to_string(expected.scheme) == endpoint.scheme,
          true <- expected.host == endpoint.host and expected.port == endpoint.port,
          true <- expected.path == endpoint.path and expected.query == endpoint.query,
          true <- is_nil(expected.unix_socket),
-         :ok <- headers(expected, endpoint, credential, tools?) do
+         :ok <- headers(expected, endpoint, credential, tools?, streaming) do
       {:ok, fn candidate -> if candidate == expected, do: candidate, else: @invalid end}
     else
       _ -> @invalid
     end
   end
 
-  def guard(_, _, _, _), do: @invalid
+  defp seal(_, _, _, _, _), do: @invalid
 
-  defp headers(request, endpoint, credential, tools?) do
+  defp headers(request, endpoint, credential, tools?, streaming) do
     allowed =
-      ~w(accept content-type content-length host user-agent connection authorization x-api-key anthropic-version anthropic-beta)
+      ~w(accept content-type content-length host user-agent connection authorization x-api-key anthropic-version anthropic-beta) ++
+        if(streaming, do: [], else: ["accept-encoding"])
 
     with true <- is_list(request.headers),
          true <-
@@ -239,7 +323,9 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
          pairs = Enum.map(request.headers, fn {name, value} -> {String.downcase(name), value} end),
          headers = Map.new(pairs),
          true <- map_size(headers) == length(pairs),
-         true <- headers["accept"] == "text/event-stream",
+         true <-
+           headers["accept"] == if(streaming, do: "text/event-stream", else: "application/json"),
+         true <- headers["accept-encoding"] in [nil, "identity"],
          true <- headers["content-type"] == "application/json",
          true <- headers["anthropic-version"] == "2023-06-01",
          true <- headers["content-length"] in [nil, Integer.to_string(byte_size(request.body))],

@@ -80,13 +80,15 @@ Part of the [evidence index](README.md).
 - Done: repair the historical interaction control, complete CLI/daemon native
   fixtures, retain Core accounting witnesses over actual provider transports,
   and route config model validation through composition.
+- Done: join buffered native capture and request rendering to OneShotHTTP1,
+  screen captured private values for the selected key, and keep native request
+  bytes out of Finch metadata through one-use invocation-owned body streams.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
   the dependent refusal schema without the maintainer's decision.
-- Next: complete host resolution, maintenance quiescence and checkpoint-aware
-  configuration preflight; join native capture and request envelopes to
-  the buffered OneShotHTTP1 path; complete question
+- Next: complete deterministic cell registration, host resolution, maintenance
+  quiescence and checkpoint-aware configuration preflight; complete question
   projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
   continue prompt-file and mapping
@@ -96,6 +98,64 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: the buffered Anthropic path now validates its captured cell before
+  credential lookup, installs exact native messages/controls at OneShotHTTP1's
+  final encoded-request boundary and captures the raw response before SDK
+  conversion. The existing invocation tag correlates caller-local request and
+  response entries; the cleanup owner still receives only its closed route
+  proof. Capture requires a complete native envelope, literal registered model,
+  bounded native content and the same stop/call relationship as streaming.
+  Supported usage counters remain unknown when missing or malformed. The caller
+  returns completion/capsule fields with zero progress deltas and screens every
+  newly retained private value for the selected credential. SDK payload capture
+  is disabled per call, and raw SDK fixture capture refuses before dispatch.
+  Local verified TLS exercises all nine literal cells, open and closed capsules,
+  Unicode/text/tool ordering, exact controls/limits, malformed/native-limit/model
+  refusals and selected-key echoes in thinking, signatures and redacted blocks.
+  Final review also retained raw usage until selected-key screening, so reducing
+  a malformed counter to unknown cannot erase a credential echo. The pure and
+  actual-TLS regressions for this final correction pass 14 tests in 6.1 seconds
+  on the current pair and 14 in 5.8 seconds on the floor pair.
+  Ordinary reasoning registration and the live thinking witnesses remain open.
+  Finch's own events retain the outgoing request object, independently of SDK
+  payload settings. Both native paths now supply a one-use body stream whose
+  callback retains only the invocation handle. The streaming capture owns its
+  bytes until the first read and clears them on failure; the buffered caller
+  consumes its body entry once and removes it on every transport exit. Exact
+  content-length preserves the existing wire bytes and framing. Tests inspect
+  actual Finch events and serialized callback terms, prove exact transmission
+  and refuse a second read. Existing host-owned header observability is unchanged;
+  this supplies no secrecy from trusted code executing in the transport process.
+  Buffered memory remains bounded by the existing 8,388,608-byte raw collector,
+  its transient joined binary and decoded response, the already admitted outgoing
+  request, and the 16,384-byte compact/expanded native-content limits. The private
+  capture adds only the admitted canonical text/calls/capsule and supported usage;
+  it retains no response event log. Caller cleanup removes its capture entries.
+  A low-level TLS fixture originally sent an empty Anthropic body without an
+  invocation context; its pre-claim refusal exposed a fixture owner waiting only
+  for a claim. The fixture now supplies valid native request/response bytes and
+  acknowledges teardown before or after claim. The failed 73/74 run is retained
+  as failed; its orphaned child was identified and terminated. The repaired exact
+  case passes in 2.0 seconds. Floor conformance passes all 74 cases in 18.3 seconds;
+  current worker/backpressure/accounting regressions pass 25 in 95.1 seconds and
+  host credential-exclusion workflows pass two in 10.8 seconds. All 21 current
+  one-shot cases pass in 9.4 seconds after the shared fixture repair. Retained
+  outputs:
+  - `/private/tmp/loopex-m7-buffered-native-key-screen-current.log`, SHA-256
+    `dbc4266a0f718c93052c25286410bc57a70d5263be04d08ea63fc27f9b0b13dc`.
+  - `/private/tmp/loopex-m7-buffered-native-key-screen-floor.log`, SHA-256
+    `29f8d2032ffe579a30b16f4e4c008b34950907f0d1431a6f0ff76ab4e4889c81`.
+  - `/private/tmp/loopex-m7-buffered-native-conformance.log`, SHA-256
+    `c996c82672c7d86119eea71131a33437c1e5711da97252f7d58a193d8a1321d9`.
+  - `/private/tmp/loopex-m7-buffered-native-floor.log`, SHA-256
+    `768d72ec8df13705931747cfc28a30f23c0cd1ce7c2295e09d25bd7ea195a9b6`.
+  - `/private/tmp/loopex-m7-buffered-native-one-shot-repaired.log`, SHA-256
+    `667ad7ad2b339197d15380752c6b4c3fe06b82a512200341f46e22e9b332a2fc`.
+  - `/private/tmp/loopex-m7-private-body-worker-regressions.log`, SHA-256
+    `c25bf126d4dbfc2f0e8631267f35f99eb75af7ff7cb6f223be578f9ee5696743`.
+  - `/private/tmp/loopex-m7-buffered-native-host-exclusion.log`, SHA-256
+    `bb0f287c520bb094a339f2b9a12636a4a62fe63fafe6a5201d47dc0fb7edf147`.
 
 - 2026-10-01: the full fast check of
   `ca63492e008c001046aba0dde159d2818253850e` failed 27 tests across core,
@@ -913,14 +973,16 @@ Part of the [evidence index](README.md).
 - [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
 - [ ] Implement continuation accounting, reserves and compaction headroom targets.
 - [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
-- [ ] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
+- [x] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
 - [x] Implement bounded native event assembly and pinned SSE parse/flush validation with permanent failure, exact content reconstruction and cumulative usage evidence.
 - [x] Render captured native requests and seal the final Finch request; prove exact tools, controls and ceilings against the pinned builder and hook order.
 - [x] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
 - [x] Join native capture and request sealing to the durable worker, with strict reply fields and an owned, monitored drain.
 - [x] Prove local HTTP framing, private/public projection, blocked-drain failure, owner death and telemetry exclusion.
 - [x] Share full-generation canonical call rendering and refuse malformed argument repair across ordinary and native request paths.
-- [ ] Test the bridge against a local HTTP server before integrating live-provider proofs.
+- [x] Join buffered native capture/rendering to OneShotHTTP1 with invocation-correlated private state, complete native identity/usage checks and selected-key screening.
+- [x] Keep native request bytes out of Finch metadata through bounded one-use body streams without changing wire framing or response delivery.
+- [x] Test the bridge against a local HTTP server before integrating live-provider proofs.
 - [ ] Test model switching, crashes, cancellation, malformed replies, overflow, usage accounting and privacy.
 - [ ] Complete the seven thinking-round subcases, nine bound subcases and cancellation witness, including their prescribed subsequent prompts.
 ## T09 — Implement model-originated questions

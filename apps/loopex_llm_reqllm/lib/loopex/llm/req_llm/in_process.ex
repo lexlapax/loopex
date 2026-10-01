@@ -44,6 +44,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess do
     with :ok <- Model.validate_request(request),
          {:ok, model} <- Guards.model(request.model),
          :ok <- Guards.call(model.provider),
+         :ok <- native_preflight(request, model.provider),
          {:ok, address} <- Route.base_url(model.provider, base_url),
          {:ok, context} <- Mapping.context_of(request),
          {:ok, tools} <- Mapping.provider_tools(Model.model_facing_tools(request)),
@@ -74,6 +75,17 @@ defmodule Loopex.LLM.ReqLLM.InProcess do
   catch
     _class, _reason -> @failed
   end
+
+  defp native_preflight(request, :anthropic) do
+    with false <- Code.ensure_loaded?(ReqLLM.Test.Fixtures),
+         {:ok, _} <- Loopex.LLM.ReqLLM.NativeRequest.profile(request) do
+      :ok
+    else
+      _ -> @failed
+    end
+  end
+
+  defp native_preflight(_, _), do: :ok
 
   defp probe_surface(:ollama, _model, _request, _tools, _address),
     do: {:ok, :ollama_chat_completions}
@@ -183,6 +195,11 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                 req_http_options: http_options
               ]
 
+              planning_options =
+                if prepared.provider == :anthropic,
+                  do: Keyword.put(planning_options, :telemetry, payloads: :none),
+                  else: planning_options
+
               planned =
                 case prepared.provider do
                   :ollama ->
@@ -211,7 +228,17 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                       else: [{:api_key, credential} | planning_options]
 
                   header_key = {@header_namespace, :response_headers, tag}
+                  native_request_key = {@header_namespace, :native_request, tag}
+                  native_response_key = {@header_namespace, :native_response, tag}
                   Process.delete(header_key)
+                  Process.delete(native_response_key)
+
+                  if prepared.provider == :anthropic do
+                    Process.put(native_request_key, %{
+                      request: prepared.request,
+                      credential: credential
+                    })
+                  end
 
                   try do
                     case ReqLLM.generate_text(inline_model, prepared.context, options) do
@@ -228,18 +255,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                             else: Map.put(metadata, :error, response.error)
 
                         with :ok <- Mapping.completed(metadata),
-                             {:ok, calls} <- Mapping.bounded_calls(response),
-                             text when is_binary(text) <- ReqLLM.Response.text(response) || "" do
-                          reply =
-                            Mapping.reply(
-                              prepared.request,
-                              prepared.identity,
-                              metadata,
-                              text,
-                              calls,
-                              0
-                            )
-
+                             {:ok, reply} <- mapped_reply(prepared, response, metadata, tag) do
                           # Concept: a selected key echoed in provider-controlled
                           # reply data cannot be published. Host-supplied request
                           # identity and canonical bytes are not a provider echo.
@@ -270,7 +286,14 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                           end
 
                           provider_fields =
-                            Map.take(reply, [:text, :tool_calls, :provider_response_id, :usage])
+                            Map.take(reply, [
+                              :text,
+                              :tool_calls,
+                              :provider_response_id,
+                              :usage,
+                              :completion,
+                              :continuation
+                            ])
 
                           if has_key.(has_key, provider_fields),
                             do: @unknown,
@@ -288,6 +311,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                     _class, _reason -> @unknown
                   after
                     Process.delete(header_key)
+                    Process.delete(native_request_key)
+                    Process.delete(native_response_key)
                   end
                 else
                   @not_dispatched
@@ -312,6 +337,39 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
 
       :down ->
         :ok
+    end
+  end
+
+  defp mapped_reply(%{provider: :anthropic} = prepared, _response, metadata, tag) do
+    case Process.get({@header_namespace, :native_response, tag}) do
+      %{
+        text: text,
+        tool_calls: calls,
+        completion: completion,
+        continuation: continuation,
+        usage: usage
+      } ->
+        reply =
+          Mapping.reply(
+            prepared.request,
+            prepared.identity,
+            %{metadata | usage: usage},
+            text,
+            calls,
+            0
+          )
+
+        {:ok, Map.merge(reply, %{completion: completion, continuation: continuation})}
+
+      _ ->
+        @unknown
+    end
+  end
+
+  defp mapped_reply(prepared, response, metadata, _tag) do
+    with {:ok, calls} <- Mapping.bounded_calls(response),
+         text when is_binary(text) <- ReqLLM.Response.text(response) || "" do
+      {:ok, Mapping.reply(prepared.request, prepared.identity, metadata, text, calls, 0)}
     end
   end
 

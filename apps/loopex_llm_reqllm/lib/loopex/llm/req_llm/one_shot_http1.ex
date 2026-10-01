@@ -23,6 +23,8 @@ defmodule Loopex.LLM.ReqLLM.OneShotHTTP1 do
   """
 
   alias Loopex.LLM.ReqLLM.InProcess.Route
+  alias Loopex.LLM.ReqLLM.{NativeContent, NativeRequest}
+  @caller Loopex.LLM.ReqLLM.InProcess
 
   @max_body 8_388_608
   @surface_atoms [:anthropic_messages, :openai_chat_completions, :openai_responses]
@@ -69,12 +71,12 @@ defmodule Loopex.LLM.ReqLLM.OneShotHTTP1 do
         monitor = Process.monitor(owner)
 
         try do
-          result = guarded_dispatch(request, owner, monitor, tag, fingerprint)
+          {sent, result} = guarded_dispatch(request, owner, monitor, tag, fingerprint)
 
           case if(result == :owner_down, do: :owner_down, else: teardown(owner, monitor, tag)) do
             :ok ->
               capture_header(result, fingerprint, tag)
-              {request, result}
+              {sent, capture_native(result, fingerprint, tag)}
 
             :owner_down ->
               {request, failed()}
@@ -90,17 +92,65 @@ defmodule Loopex.LLM.ReqLLM.OneShotHTTP1 do
 
   defp guarded_dispatch(request, owner, monitor, tag, fingerprint) do
     with {:ok, timeout} <- validate(request, tag, fingerprint),
-         {:ok, worker} <- claim(owner, monitor, tag, fingerprint, request) do
-      transport(request, worker, tag, timeout)
+         {:ok, rendered} <- native_request(request, fingerprint, tag),
+         {:ok, worker} <- claim(owner, monitor, tag, fingerprint, rendered) do
+      {rendered, transport(rendered, worker, tag, timeout)}
     else
-      :owner_down -> :owner_down
-      _refused -> refused()
+      :owner_down -> {request, :owner_down}
+      _refused -> {request, refused()}
     end
   rescue
-    _error -> failed()
+    _error -> {request, failed()}
   catch
-    _class, _reason -> failed()
+    _class, _reason -> {request, failed()}
   end
+
+  # Concept: native request and response state belongs to this sensitive caller.
+  # Technical depth: the existing one-use tag keys caller-local capture entries;
+  # the owner receives only the closed route proof. The caller installs and
+  # removes both entries around generate_text. SDK payload telemetry is disabled
+  # and Finch receives a private body handle; header observability retains the
+  # accepted host-owned transport scope.
+  defp native_request(request, %{provider: :anthropic} = fingerprint, tag) do
+    with %{request: captured, credential: credential} <-
+           Process.get({@caller, :native_request, tag}),
+         {:ok, _profile} <- NativeRequest.profile(captured) do
+      endpoint = %{URI.parse(fingerprint.base_url) | path: fingerprint.path, query: nil}
+      NativeRequest.install_buffered(captured, request, endpoint, credential)
+    else
+      _ -> :invalid
+    end
+  end
+
+  defp native_request(request, _, _), do: {:ok, request}
+
+  defp capture_native(
+         %Req.Response{status: status, body: body} = response,
+         %{provider: :anthropic},
+         tag
+       )
+       when status in 200..299 do
+    with %{request: request, credential: credential} <-
+           Process.get({@caller, :native_request, tag}),
+         {:ok, profile} <- NativeRequest.profile(request),
+         {:ok, captured} <-
+           NativeContent.response(
+             request.model,
+             profile.mapping["continuation_required"],
+             profile.response_model,
+             body,
+             credential
+           ) do
+      Process.put({@caller, :native_response, tag}, captured)
+      response
+    else
+      _ -> failed()
+    end
+  rescue
+    _ -> failed()
+  end
+
+  defp capture_native(response, _, _), do: response
 
   defp context(%Req.Request{options: options}) when is_map(options) do
     case options[:finch_private] do
@@ -223,27 +273,41 @@ defmodule Loopex.LLM.ReqLLM.OneShotHTTP1 do
       |> Req.Fields.get_list()
 
     finch = Finch.build(request.method, request.url, headers, request.body, pool_tag: tag)
+    body_key = {__MODULE__, :native_body, tag}
+
+    finch =
+      if Process.get({@caller, :native_request, tag}) do
+        Process.put(body_key, finch.body)
+        NativeRequest.private_body(finch, fn -> Process.delete(body_key) end)
+      else
+        finch
+      end
+
     accumulator = %{response: Req.Response.new(), chunks: [], bytes: 0, sentinel: nil}
 
-    case Finch.HTTP1.Pool.request(worker, finch, accumulator, &collect/2, Req.Finch,
-           pool_timeout: timeout,
-           receive_timeout: :infinity,
-           request_timeout: :infinity
-         ) do
-      {:ok, %{sentinel: nil} = acc} ->
-        %{acc.response | body: acc.chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+    try do
+      case Finch.HTTP1.Pool.request(worker, finch, accumulator, &collect/2, Req.Finch,
+             pool_timeout: timeout,
+             receive_timeout: :infinity,
+             request_timeout: :infinity
+           ) do
+        {:ok, %{sentinel: nil} = acc} ->
+          %{acc.response | body: acc.chunks |> Enum.reverse() |> IO.iodata_to_binary()}
 
-      {:ok, %{sentinel: sentinel}} ->
-        %Req.TransportError{reason: sentinel}
+        {:ok, %{sentinel: sentinel}} ->
+          %Req.TransportError{reason: sentinel}
 
-      {:error, _error, %{sentinel: nil}} ->
-        failed()
+        {:error, _error, %{sentinel: nil}} ->
+          failed()
 
-      {:error, _error, %{sentinel: sentinel}} ->
-        %Req.TransportError{reason: sentinel}
+        {:error, _error, %{sentinel: sentinel}} ->
+          %Req.TransportError{reason: sentinel}
 
-      _other ->
-        failed()
+        _other ->
+          failed()
+      end
+    after
+      Process.delete(body_key)
     end
   end
 

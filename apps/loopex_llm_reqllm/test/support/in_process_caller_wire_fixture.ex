@@ -89,7 +89,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
 
     {:ok, request} =
       Loopex.Model.request(model, messages,
-        sampling: %{"max_tokens" => 64},
+        sampling: Keyword.get(options, :sampling, %{"max_tokens" => 64}),
+        tools: Keyword.get(options, :tools, []),
+        continuation: Keyword.get(options, :continuation),
         deadline: System.system_time(:millisecond) + 10_000
       )
 
@@ -299,6 +301,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
         "model" => "fixture",
         "content" => [%{"type" => "text", "text" => text}],
         "stop_reason" => "end_turn",
+        "stop_sequence" => nil,
         "usage" => %{"input_tokens" => 1, "output_tokens" => 2}
       })
 
@@ -366,6 +369,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
 
     try do
       hosted_paths(runtime, trusted)
+      native_cells(runtime, trusted)
       selected_key_bounds(runtime, trusted)
       selected_key_rotation(runtime, trusted)
       selected_key_echo(runtime, trusted)
@@ -405,6 +409,243 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
       assert selected == "synthetic-caller-credential"
       stop(call)
     end
+  end
+
+  defp native_cells(runtime, trusted) do
+    prior = Application.fetch_env(:req_llm, :telemetry)
+    Application.put_env(:req_llm, :telemetry, payloads: :raw)
+    handler = make_ref()
+
+    :ok =
+      :telemetry.attach_many(
+        handler,
+        [[:req_llm, :request, :start], [:req_llm, :request, :stop], [:finch, :send, :start]],
+        &__MODULE__.native_telemetry/4,
+        self()
+      )
+
+    try do
+      native_cells_cases(runtime, trusted)
+      assert inspect_native_telemetry(0) >= 20
+    after
+      :telemetry.detach(handler)
+
+      case prior do
+        {:ok, value} -> Application.put_env(:req_llm, :telemetry, value)
+        :error -> Application.delete_env(:req_llm, :telemetry)
+      end
+    end
+  end
+
+  def native_telemetry(event, _, metadata, recipient),
+    do: send(recipient, {:native_telemetry, event, metadata})
+
+  defp inspect_native_telemetry(count) do
+    receive do
+      {:native_telemetry, [:finch, :send, :start], %{request: request}} ->
+        assert {:stream, body} = request.body
+        refute :erlang.term_to_binary(body) =~ "claude-fable-5-1"
+        inspect_native_telemetry(count)
+
+      {:native_telemetry, [:req_llm, :request, _], metadata} ->
+        refute Map.has_key?(metadata, :request_payload)
+        refute Map.has_key?(metadata, :response_payload)
+        serialized = :erlang.term_to_binary(metadata)
+
+        for secret <- ["private buffered thought", "buffered-signature+/=", "buffered-opaque+/="] do
+          refute serialized =~ secret
+        end
+
+        inspect_native_telemetry(count + 1)
+    after
+      0 -> count
+    end
+  end
+
+  defp native_cells_cases(runtime, trusted) do
+    System.put_env("ANTHROPIC_API_KEY", "synthetic-native-buffered-key")
+
+    for {id, levels} <- [
+          {"claude-haiku-4-5-20251001", ~w(default none low medium high)},
+          {"claude-fable-5-1", ~w(default low medium high)}
+        ],
+        level <- levels do
+      model = "anthropic:" <> id
+      sampling = native_sampling(id, level)
+      required = sampling["provider_mapping"]["continuation_required"]
+
+      private =
+        if required,
+          do: [
+            %{
+              "type" => "thinking",
+              "thinking" => "private buffered thought",
+              "signature" => "buffered-signature+/="
+            },
+            %{"type" => "redacted_thinking", "data" => "buffered-opaque+/="}
+          ],
+          else: []
+
+      content =
+        private ++
+          [
+            %{"type" => "text", "text" => "é猫"},
+            %{
+              "type" => "tool_use",
+              "id" => "native-tool",
+              "name" => "unregistered_name",
+              "input" => %{"path" => "猫.txt"}
+            },
+            %{"type" => "text", "text" => "tail"}
+          ]
+
+      native = native_response(id, content, "tool_use")
+      call = start(runtime, model, Jason.encode!(native), tls: trusted, sampling: sampling)
+      {result, call} = call |> begin() |> result()
+      assert {:ok, reply} = result
+      assert reply.text == "é猫tail"
+      assert reply.completion == "natural"
+      assert reply.delta_count == 0 and reply.streamed == false
+      assert reply.usage == %{input_tokens: 3, output_tokens: 5}
+      assert reply.provider_response_id == "fixture-id"
+
+      assert [%{id: "native-tool", name: "unregistered_name", arguments: %{"path" => "猫.txt"}}] =
+               reply.tool_calls
+
+      if required do
+        assert {:ok, ^content} =
+                 Loopex.Model.ContentReferences.expand(
+                   reply.continuation,
+                   reply.text,
+                   Enum.map(reply.tool_calls, & &1.arguments)
+                 )
+      else
+        assert reply.continuation == nil
+      end
+
+      assert [written] = call.writes
+      body = Jason.decode!(written.body)
+      assert body["model"] == id and body["max_tokens"] == 8192
+      refute Map.has_key?(body, "stream")
+      assert written.headers["accept-encoding"] == "identity"
+      refute Map.has_key?(written.headers, "anthropic-beta")
+
+      case sampling["provider_mapping"]["thinking"] do
+        %{"mode" => "omitted"} ->
+          refute Map.has_key?(body, "thinking")
+
+        %{"mode" => "disabled"} ->
+          assert body["thinking"] == %{"type" => "disabled"}
+
+        %{"mode" => "manual", "budget_tokens" => budget} ->
+          assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => budget}
+
+        %{"mode" => "adaptive", "effort" => effort} ->
+          assert body["thinking"] == %{"type" => "adaptive", "display" => "summarized"}
+          assert body["output_config"] == %{"effort" => effort}
+      end
+
+      stop(call)
+    end
+
+    id = "claude-fable-5-1"
+    sampling = native_sampling(id, "default")
+    ordinary = native_response(id, [%{"type" => "text", "text" => "safe"}], "end_turn")
+
+    call =
+      start(runtime, "anthropic:" <> id, Jason.encode!(%{ordinary | "usage" => %{}}),
+        tls: trusted,
+        sampling: sampling
+      )
+
+    {result, call} = call |> begin() |> result()
+
+    assert {:ok,
+            %{
+              text: "safe",
+              continuation: %{"status" => "closed"},
+              usage: %{input_tokens: nil, output_tokens: nil},
+              delta_count: 0
+            }} = result
+
+    stop(call)
+    key = "synthetic-native-buffered-key"
+
+    for invalid <- [
+          Map.put(ordinary, "model", "wrong-model"),
+          Map.put(ordinary, "stop_reason", "max_tokens"),
+          Map.put(ordinary, "usage", %{"input_tokens" => key, "output_tokens" => 5}),
+          Map.put(ordinary, "content", [%{"type" => "thinking", "thinking" => "unsigned"}]),
+          Map.put(ordinary, "content", [
+            %{"type" => "text", "text" => String.duplicate("x", 16_385)}
+          ]),
+          Map.put(ordinary, "content", [
+            %{"type" => "thinking", "thinking" => key, "signature" => "sig"}
+          ]),
+          Map.put(ordinary, "content", [
+            %{"type" => "thinking", "thinking" => "private", "signature" => key}
+          ]),
+          Map.put(ordinary, "content", [%{"type" => "redacted_thinking", "data" => key}])
+        ] do
+      call =
+        start(runtime, "anthropic:" <> id, Jason.encode!(invalid),
+          tls: trusted,
+          sampling: sampling
+        )
+
+      {result, call} = call |> begin() |> result()
+      assert result == {:error, {:dispatched_or_unknown, "model_call_failed"}}
+      assert_one_write(call)
+      stop(call)
+    end
+  end
+
+  defp native_response(id, content, stop),
+    do: %{
+      "id" => "buffered-native-message",
+      "type" => "message",
+      "role" => "assistant",
+      "model" => id,
+      "content" => content,
+      "stop_reason" => stop,
+      "stop_sequence" => nil,
+      "usage" => %{"input_tokens" => 3, "output_tokens" => 5}
+    }
+
+  defp native_sampling(id, level) do
+    haiku = id == "claude-haiku-4-5-20251001"
+
+    thinking =
+      cond do
+        level == "default" ->
+          %{"mode" => "omitted"}
+
+        level == "none" ->
+          %{"mode" => "disabled"}
+
+        haiku ->
+          %{
+            "mode" => "manual",
+            "budget_tokens" => %{"low" => 1024, "medium" => 2048, "high" => 4096}[level]
+          }
+
+        true ->
+          %{"mode" => "adaptive", "effort" => level, "display" => "summarized"}
+      end
+
+    %{
+      "max_tokens" => 8192,
+      "reasoning" => level,
+      "provider_mapping" => %{
+        "mapping_revision" =>
+          if(haiku, do: "loopex.anthropic.haiku45.v1", else: "loopex.anthropic.fable51.v1"),
+        "renderer_revision" => "loopex.anthropic.native.v1",
+        "continuation_required" => not haiku or level in ~w(low medium high),
+        "canonical_terminal_tool_history" => true,
+        "thinking_disabled" => level == "none",
+        "thinking" => thinking
+      }
+    }
   end
 
   defp selected_key_bounds(runtime, trusted) do

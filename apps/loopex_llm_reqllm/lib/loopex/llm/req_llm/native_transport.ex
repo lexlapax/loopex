@@ -300,6 +300,7 @@ defmodule Loopex.LLM.ReqLLM.NativeTransport do
        native: NativeStream.new(prepared.profile.response_model),
        parser: nil,
        guard: nil,
+       body: nil,
        failed: false,
        flushed: false,
        tool_index: 0,
@@ -355,13 +356,30 @@ defmodule Loopex.LLM.ReqLLM.NativeTransport do
   def handle_call({:guard, request}, _, %{guard: guard, failed: false} = state)
       when is_function(guard, 1) do
     case guard.(request) do
-      %Finch.Request{} = accepted -> {:reply, accepted, state}
-      _ -> {:reply, {:error, :invalid_provider_request}, fail(state)}
+      %Finch.Request{} = accepted ->
+        capture = self()
+        tag = state.tag
+
+        private =
+          NativeRequest.private_body(
+            accepted,
+            fn -> GenServer.call(capture, {:body, tag}, :infinity) end
+          )
+
+        {:reply, private, %{state | body: accepted.body, guard: nil}}
+
+      _ ->
+        {:reply, {:error, :invalid_provider_request}, fail(state)}
     end
   end
 
   def handle_call({:guard, _}, _, state),
     do: {:reply, {:error, :invalid_provider_request}, fail(state)}
+
+  def handle_call({:body, tag}, _, %{tag: tag, body: body, failed: false} = state)
+      when is_binary(body), do: {:reply, body, %{state | body: nil}}
+
+  def handle_call({:body, _}, _, state), do: {:reply, :invalid_native_body, fail(state)}
 
   def handle_call({:parse, bytes, parser}, _, %{failed: false} = state) do
     with true <- parser == state.parser,
@@ -402,7 +420,7 @@ defmodule Loopex.LLM.ReqLLM.NativeTransport do
 
   defp fail(state) do
     send(state.owner, {:native_failure, state.tag})
-    %{state | failed: true, native: NativeStream.new(nil), parser: nil, guard: nil}
+    %{state | failed: true, native: NativeStream.new(nil), parser: nil, guard: nil, body: nil}
   end
 
   # Concept: dependency queues receive only eligible bounded progress.

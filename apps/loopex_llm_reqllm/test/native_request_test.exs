@@ -103,6 +103,73 @@ defmodule Loopex.LLM.ReqLLM.NativeRequestTest do
     end
   end
 
+  test "buffered installation seals every cell and admits only its identity encoding header" do
+    for {model, level, thinking, required, _} <- cells() do
+      request = request(model, level, thinking, required)
+
+      headers =
+        finch_request().headers
+        |> List.keyreplace("accept", 0, {"accept", "application/json"})
+        |> Kernel.++([{"accept-encoding", "identity"}])
+        |> Map.new(fn {key, value} -> {key, [value]} end)
+
+      built = %Req.Request{
+        method: :post,
+        url: @endpoint,
+        headers: headers,
+        body: Jason.encode!(baseline(request, false))
+      }
+
+      assert {:ok, installed} =
+               NativeRequest.install_buffered(request, built, @endpoint, @credential)
+
+      assert {:ok, expected} = NativeRequest.render(request, baseline(request, false), false)
+      assert Jason.decode!(installed.body) == expected
+      assert installed.headers == headers
+
+      for bad <- [
+            %{built | method: :get},
+            %{built | url: URI.parse("https://other.invalid/v1/messages")},
+            %{
+              built
+              | body:
+                  Jason.encode!(
+                    Map.put(baseline(request, false), "thinking", %{"type" => "enabled"})
+                  )
+            },
+            %{built | headers: Map.put(headers, "accept-encoding", ["gzip"])},
+            %{built | headers: Map.put(headers, "accept", ["text/event-stream"])},
+            %{built | headers: Map.put(headers, "x-api-key", [@credential, @credential])},
+            %{built | headers: Map.put(headers, "content-length", ["1"])},
+            %{
+              built
+              | headers: Map.put(headers, "anthropic-beta", ["interleaved-thinking-2025-05-14"])
+            }
+          ] do
+        assert {:error, :invalid_provider_request} =
+                 NativeRequest.install_buffered(request, bad, @endpoint, @credential)
+      end
+    end
+  end
+
+  test "private request bodies expose only a one-use handle and send exact native bytes" do
+    {request, _} = continuation_request()
+    assert {:ok, native} = NativeRequest.render(request, baseline(request, false), false)
+    body = Jason.encode!(native)
+    assert body =~ "sig+/="
+    key = {__MODULE__, make_ref()}
+    Process.put(key, body)
+    finch = Finch.build(:post, @endpoint, [], body)
+    private = NativeRequest.private_body(finch, fn -> Process.delete(key) end)
+    assert {:stream, stream} = private.body
+    assert private.headers == [{"content-length", Integer.to_string(byte_size(body))}]
+    refute :erlang.term_to_binary(private) =~ "sig+/="
+    refute :erlang.term_to_binary(private) =~ "opaque+/="
+    assert Enum.to_list(stream) == [body]
+    assert Process.get(key) == nil
+    assert_raise RuntimeError, "invalid native request body", fn -> Enum.to_list(stream) end
+  end
+
   test "native arrays replace canonical assistants and map results without rewriting IDs or arguments" do
     {request, native} = continuation_request()
     assert {:ok, rendered} = NativeRequest.render(request, baseline(request, true), true)

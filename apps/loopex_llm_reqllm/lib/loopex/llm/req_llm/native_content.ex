@@ -22,6 +22,74 @@ defmodule Loopex.LLM.ReqLLM.NativeContent do
   @doc """
   ## Concept
 
+  Capture one complete buffered native response before SDK conversion.
+
+  ## Technical depth
+
+  The one-shot caller supplies the requirement and literal response-model binding
+  derived from its captured request. The raw body shares the transport's 8 MiB
+  ceiling; content then passes the same compact and expanded bounds as streaming.
+  Only supported usage counters survive, with malformed values left unreported.
+  When supplied, the selected key is screened against decoded content and raw
+  usage before that reduction; it is never retained in the result.
+  Nothing here publishes progress or returns the raw response envelope.
+  """
+  def response(model, required, expected_model, body, credential \\ nil)
+
+  def response(model, required, expected_model, body, credential)
+      when is_boolean(required) and is_binary(body) and byte_size(body) <= 8_388_608 and
+             (is_nil(credential) or (is_binary(credential) and byte_size(credential) in 1..65_536)) do
+    with {:ok, native} when is_map(native) <- Jason.decode(body),
+         true <-
+           Enum.sort(Map.keys(native)) ==
+             ~w(content id model role stop_reason stop_sequence type usage),
+         true <- native["type"] == "message" and native["role"] == "assistant",
+         true <- bounded_text?(native["id"], 256),
+         true <- bounded_text?(native["model"], 512),
+         true <- is_nil(expected_model) or native["model"] == expected_model,
+         true <- is_nil(native["stop_sequence"]) or bounded_text?(native["stop_sequence"], 256),
+         counters when is_map(counters) <- native["usage"],
+         {:ok, captured} <- project(model, required, native["stop_reason"], native["content"]),
+         false <- contains_key?([native["content"], counters], credential) do
+      usage =
+        for {key, source} <- [{:input_tokens, "input_tokens"}, {:output_tokens, "output_tokens"}],
+            Map.has_key?(counters, source),
+            into: %{} do
+          value = counters[source]
+          {key, if(is_integer(value) and value in 0..18_446_744_073_709_551_615, do: value)}
+        end
+
+      {:ok, Map.put(captured, :usage, usage)}
+    else
+      _ -> @invalid
+    end
+  end
+
+  def response(_, _, _, _, _), do: @invalid
+
+  # Concept: malformed usage cannot erase a selected-key echo by becoming unknown.
+  # Technical depth: screen decoded provider content and raw usage before reducing
+  # counters. Host-bound identity and envelope protocol literals are not echoes.
+  defp contains_key?(_, nil), do: false
+  defp contains_key?(value, key) when is_binary(value), do: :binary.match(value, key) != :nomatch
+
+  defp contains_key?(value, key) when is_list(value),
+    do: Enum.any?(value, &contains_key?(&1, key))
+
+  defp contains_key?(value, key) when is_map(value),
+    do:
+      Enum.any?(value, fn {name, member} ->
+        contains_key?(name, key) or contains_key?(member, key)
+      end)
+
+  defp contains_key?(_, _), do: false
+
+  defp bounded_text?(value, limit),
+    do: is_binary(value) and byte_size(value) in 1..limit and String.valid?(value)
+
+  @doc """
+  ## Concept
+
   Produce canonical content and one bounded private capsule from a complete reply.
 
   ## Technical depth
