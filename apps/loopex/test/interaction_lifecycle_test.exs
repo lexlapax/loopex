@@ -584,6 +584,7 @@ defmodule Loopex.InteractionLifecycleTest do
     assert requested["interaction_id"]
 
     reader = build_old_reader()
+    records = legacy_staged_history(records)
 
     # The positive control: history this reader's own version could have
     # written replays, so a refusal below is about the new record rather than
@@ -599,6 +600,75 @@ defmodule Loopex.InteractionLifecycleTest do
     assert refusal =~ "error"
     assert refusal =~ "invalid_private_history"
     assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed"))
+  end
+
+  # Concept: the historical reader's positive control uses its own request
+  # generation even as current runtime writers advance.
+  # Technical depth: explicitly encode v1 bytes and revision-2 receipts, updating
+  # their adjacent digest joins and measured record cost without changing replies
+  # or interaction facts. The actual historical reducer still decides admission.
+  defp legacy_staged_history(records) do
+    replacements =
+      for %{payload: %{"request" => request, kind: "model_request_committed"}} <- records,
+          into: %{} do
+        request = Map.put(request, "canonicalization_version", "loopex.model_request.v1")
+        fields = ~w(canonicalization_version model messages tools sampling deadline continuation)a
+
+        bytes =
+          LoopexProtocol.Canonical.encode(Enum.map(fields, &{&1, request[Atom.to_string(&1)]}))
+
+        {request["staged_request_digest"], {bytes, LoopexProtocol.Canonical.digest_bytes(bytes)}}
+      end
+
+    Enum.map(records, fn record ->
+      payload = legacy_digest_joins(record.payload, replacements)
+
+      payload =
+        if payload.kind == "model_request_committed" do
+          {bytes, digest} = Map.fetch!(replacements, record.payload["staged_request_digest"])
+
+          payload
+          |> put_in(["request", "canonicalization_version"], "loopex.model_request.v1")
+          |> put_in(["request", "canonical_request_bytes"], bytes)
+          |> put_in(["request", "staged_request_digest"], digest)
+          |> update_in(["context_receipt"], fn receipt ->
+            receipt
+            |> Map.delete("continuation_cost")
+            |> Map.put("provider_revision", 2)
+            |> Map.put("token_estimator", "loopex.context_bytes.v1")
+            |> Map.put("record_byte_cost", 0)
+          end)
+          |> legacy_record_cost()
+        else
+          payload
+        end
+
+      %{record | payload: payload}
+    end)
+  end
+
+  defp legacy_digest_joins(value, replacements) when is_binary(value) do
+    case Map.get(replacements, value) do
+      {_bytes, digest} -> digest
+      nil -> value
+    end
+  end
+
+  defp legacy_digest_joins(value, replacements) when is_map(value),
+    do: Map.new(value, fn {key, nested} -> {key, legacy_digest_joins(nested, replacements)} end)
+
+  defp legacy_digest_joins(value, replacements) when is_list(value),
+    do: Enum.map(value, &legacy_digest_joins(&1, replacements))
+
+  defp legacy_digest_joins(value, _replacements), do: value
+
+  defp legacy_record_cost(payload) do
+    assert {:ok, normalized, measured} = Loopex.Store.normalize_and_measure_item(:record, payload)
+
+    if normalized["context_receipt"]["record_byte_cost"] == measured,
+      do: normalized,
+      else:
+        legacy_record_cost(put_in(normalized, ["context_receipt", "record_byte_cost"], measured))
   end
 
   # Concept: a reader built from the milestone before interactions existed.

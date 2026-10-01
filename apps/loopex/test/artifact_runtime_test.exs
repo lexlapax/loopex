@@ -203,8 +203,14 @@ defmodule Loopex.ArtifactRuntimeTest do
              &(&1 == %{"role" => "user", "content" => "make output"})
            )
 
+    normalized_id =
+      "lx_" <>
+        (LoopexProtocol.Canonical.encode([tool_finished["run_id"], 1, "artifact-call"])
+         |> LoopexProtocol.Canonical.digest_bytes()
+         |> binary_part(0, 48))
+
     assert Enum.any?(second_request.messages, fn
-             %{"role" => "tool", "tool_call_id" => "artifact-call"} -> true
+             %{"role" => "tool", "tool_call_id" => ^normalized_id} -> true
              _other -> false
            end),
            "the committed tool result did not reach the next model request"

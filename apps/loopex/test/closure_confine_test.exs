@@ -6,6 +6,7 @@ defmodule Loopex.ClosureConfineTest do
   alias Mix.Tasks.Loopex.Closure.Confine
 
   @name "M6"
+  @m6_tested_revision "4088759467ce8a3b2e7ad14b1166ae3ee923b7f3"
 
   setup do
     root = Path.join(System.tmp_dir!(), "closure-confine-#{System.unique_integer([:positive])}")
@@ -302,11 +303,13 @@ defmodule Loopex.ClosureConfineTest do
   end
 
   test "indexed M6 evidence reserves only fillable Pending value cells" do
-    path = Path.expand("../../../docs/evidence/M6-closure-runs.md", __DIR__)
+    repository = Path.expand("../../..", __DIR__)
+
+    scaffold =
+      git!(repository, ["show", "#{@m6_tested_revision}:docs/evidence/M6-closure-runs.md"])
 
     pending_cells =
-      path
-      |> File.read!()
+      scaffold
       |> String.split("\n")
       |> Enum.filter(&String.starts_with?(&1, "|"))
       |> Enum.flat_map(fn line ->

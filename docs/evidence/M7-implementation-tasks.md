@@ -51,6 +51,19 @@ Part of the [evidence index](README.md).
   terminal facts before promoting follow-ups; an uncertain effect must remain
   explicit in later context and must not be redispatched.
 
+- 2026-10-01: candidate `34e840c64b865efd915ccbf2675db948d094bf0c` fast
+  check failed four tests: two raw-call-ID assertions, the interaction old-reader
+  positive control using newly staged v2 bytes, and a Pending-cell test reading
+  the filled M6 closure page. All other application suites passed. Full output:
+  `/private/tmp/loopex-m7-34e840c6-fast-check.log`,
+  `sha256:7769090f45a10180b644872fc8d865fa3c0c6983ba737cbe6c83972b33fdcec2`.
+- Corrected assertions verify normalized call/result joins. The actual M3
+  reader still evaluates both positive and negative interaction controls, using
+  explicitly encoded historical v1 staging and revision-2 receipts. The M6
+  scaffold test reads the exact tested candidate `4088759467ce8a3b2e7ad14b1166ae3ee923b7f3`.
+  Focused checks pass: core 35 tests in 23.6 seconds and composition 10 tests
+  in 10.2 seconds. No historical evidence or reader behavior was changed.
+
 ## T00 — Prepare the specifications and test fixtures
 - [ ] Inventory every affected record, API, tool generation, adapter and protocol.
 - [ ] Pin schema definitions, digests, compatibility vectors and provider mappings.

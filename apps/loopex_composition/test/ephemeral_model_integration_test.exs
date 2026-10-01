@@ -305,8 +305,13 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert_receive {:model_request, second_request}, 15_000
     messages = request_body(second_request)["messages"]
 
-    assert [%{"role" => "tool", "tool_call_id" => "call_loopex_1", "content" => content}] =
+    assert [%{"role" => "tool", "tool_call_id" => normalized_id, "content" => content}] =
              Enum.filter(messages, &(&1["role"] == "tool"))
+
+    assert normalized_id =~ ~r/\Alx_[0-9a-f]{48}\z/
+
+    assert [%{"tool_calls" => [%{"id" => ^normalized_id}]}] =
+             Enum.filter(messages, &(&1["role"] == "assistant"))
 
     assert content =~ "failed"
     assert content =~ "invalid_tool_arguments"
