@@ -228,6 +228,24 @@ defmodule LoopexComposition.DurableOptionsTest do
     end
   end
 
+  test "questions are registered only by explicit selection in every durable constructor" do
+    question = LoopexProtocol.ToolDefinition.question_definition()
+
+    for entry <- @entries, ids <- [["loopex.ask"], ["loopex.read", "loopex.ask"]] do
+      options = capture(entry, active_tools: ids)
+      assert options[:active_tools] == ids
+      assert Enum.filter(options[:tools], &(&1["tool_id"] == "loopex.ask")) == [question]
+      assert Enum.count(options[:tools]) == length(@ids) + 1
+    end
+
+    for entry <- @entries do
+      refute Enum.any?(capture(entry, [])[:tools], &(&1["tool_id"] == "loopex.ask"))
+
+      assert refusal(entry, active_tools: ["loopex.ask", "loopex.ask"]) ==
+               {:error, {:invalid_composition_option, :active_tools}}
+    end
+  end
+
   test "accepted model and numeric boundaries reach every real constructor" do
     for entry <- @entries do
       for model <- [

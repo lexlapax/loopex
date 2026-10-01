@@ -1,0 +1,213 @@
+defmodule LoopexCli.ChatConfigurationTest do
+  use ExUnit.Case, async: false
+  @moduletag capture_log: true
+
+  alias LoopexCli.ChatConfiguration
+  alias Loopex.Runtime
+  alias Loopex.Runtime.SessionGenesis
+  alias LoopexProtocol.ToolDefinition
+
+  setup do
+    root =
+      Path.join(System.tmp_dir!(), "chat-config-#{Base.encode16(:crypto.strong_rand_bytes(8))}")
+
+    File.mkdir_p!(Path.join(root, "workspace"))
+    file = Path.join(root, "chat.json")
+    File.write!(file, :json.encode(profile()))
+    on_exit(fn -> File.rm_rf!(root) end)
+    %{root: root, config_path: file, argv: ["chat", "--config", file]}
+  end
+
+  test "each chat profile freezes exactly its tools, including opt-in questions", fixture do
+    for {profile, expected} <- [
+          {"none", []},
+          {"coding", ~w(loopex.read loopex.write loopex.edit loopex.bash loopex.ask)},
+          {"read-only", ~w(loopex.read loopex.grep loopex.find loopex.ls loopex.ask)}
+        ] do
+      assert {:ok, prepared} = load(fixture, ["--tools", profile])
+      assert prepared.active_tools == expected
+      assert {:ok, normalized} = SessionGenesis.normalize(prepared.genesis)
+      assert normalized == prepared.genesis
+      definitions = prepared.genesis["tool_selection"]["definitions"]
+      assert Enum.sort(Enum.map(definitions, & &1["tool_id"])) == Enum.sort(expected)
+      assert map_size(prepared.genesis["tool_selection"]["names"]) == length(expected)
+
+      if profile != "none" do
+        assert Enum.find(definitions, &(&1["tool_id"] == "loopex.ask")) ==
+                 ToolDefinition.question_definition()
+      end
+
+      assert prepared.genesis["policy_defer_mode"] == "admit"
+      refute :erlang.term_to_binary(prepared.genesis) =~ "M7_CHAT_CONFIG_SLOT"
+      refute File.exists?(Path.join(fixture.root, "state"))
+    end
+  end
+
+  test "capture binds exact prompt bytes and canonical model without consuming a credential",
+       fixture do
+    prompt = Path.join(fixture.root, "prompt.txt")
+    File.write!(prompt, "Exact instructions 猫\n")
+    profile = put_in(profile(), ["session", "instructions"], %{"system_file" => "prompt.txt"})
+    File.write!(fixture.config_path, :json.encode(profile))
+    previous = System.get_env("M7_CHAT_CONFIG_SLOT")
+    System.put_env("M7_CHAT_CONFIG_SLOT", "capture-must-not-consume")
+
+    try do
+      assert {:ok, prepared} = load(fixture)
+      File.write!(prompt, "Changed after capture")
+      captured = prepared.genesis["initial_configuration"]
+      assert captured["model"] == "anthropic:claude-haiku-4-5-20251001"
+      assert captured["instructions"]["base"] == "Exact instructions 猫\n"
+      assert prepared.selection.configuration == captured
+      assert System.get_env("M7_CHAT_CONFIG_SLOT") == "capture-must-not-consume"
+      assert prepared.selection.origins["/session/model"] == "file#/session/model"
+      refute :erlang.term_to_binary(prepared.genesis) =~ "capture-must-not-consume"
+      refute File.exists?(Path.join(fixture.root, "state"))
+    after
+      restore("M7_CHAT_CONFIG_SLOT", previous)
+    end
+  end
+
+  test "missing paths and authored bounds refuse before startup and cannot be repaired later",
+       fixture do
+    File.write!(fixture.config_path, :json.encode(Map.delete(profile(), "paths")))
+    assert load(fixture) == {:error, {:missing_configuration_path, "/paths/workspace"}}
+
+    File.write!(fixture.config_path, :json.encode(put_in(profile(), ["session", "bounds"], %{})))
+    assert {:error, _} = load(fixture, ["--max-steps", "10"])
+    refute File.exists?(Path.join(fixture.root, "state"))
+  end
+
+  test "resume cannot replace retained configuration with a freshly prepared profile", fixture do
+    assert {:error, {:committed_profile_required, "/flags/resume"}} =
+             load(fixture, ["--resume", "retained-session"])
+
+    assert {:error, :invalid_chat_invocation} =
+             ChatConfiguration.load(
+               ["config", "validate", "--config", fixture.config_path],
+               fixture.root,
+               nil
+             )
+  end
+
+  test "the complete selected tool schema contributes to the admitted system ceiling", fixture do
+    assert {:ok, _} = load(fixture, ["--tools", "none", "--system-class-tokens", "200"])
+    assert {:error, _} = load(fixture, ["--tools", "coding", "--system-class-tokens", "200"])
+    refute File.exists?(Path.join(fixture.root, "state"))
+  end
+
+  test "durable chat refuses credential-free routes before creating state", fixture do
+    profile =
+      profile()
+      |> Map.put("providers", %{"ollama" => %{"credential" => %{"none" => true}}})
+      |> put_in(["session", "model"], "ollama:fixture")
+      |> put_in(["session", "context_token_budget"], 16000)
+
+    File.write!(fixture.config_path, :json.encode(profile))
+    assert {:ok, ^profile} = LoopexCli.ConfigSchema.validate(profile)
+    assert {:error, {:composition, :durable_model_unsupported}} = load(fixture)
+    refute File.exists?(Path.join(fixture.root, "state"))
+  end
+
+  test "enabled delegation remains refused until its retained binding is prepared", fixture do
+    profile =
+      profile()
+      |> Map.put("roles", %{
+        "reviewer" => %{
+          "model" => "anthropic:claude-haiku-4-5",
+          "instructions_file" => "not-read-yet.txt"
+        }
+      })
+      |> Map.put("delegation", %{
+        "enabled" => true,
+        "roles" => ["reviewer"],
+        "max_children" => 1,
+        "token_budget" => 10000,
+        "child_bounds" => %{"max_turns" => 1, "deadline_ms" => 1000, "token_budget" => 1000}
+      })
+
+    File.write!(fixture.config_path, :json.encode(profile))
+    assert {:error, :chat_delegation_unavailable} = load(fixture)
+    refute File.exists?(Path.join(fixture.root, "state"))
+  end
+
+  test "captured chat genesis creates a real durable session and survives runtime restart",
+       fixture do
+    assert {:ok, prepared} = load(fixture)
+    profile = prepared.selection.profile
+    previous = System.get_env("M7_CHAT_CONFIG_SLOT")
+    legacy = System.get_env("LOOPEX_PROVIDER_API_KEY")
+
+    options = [
+      runtime_id: "chat-configuration-test",
+      state_root: profile["paths"]["state_root"],
+      workspace: profile["paths"]["workspace"],
+      policy: LoopexCli.Policy.AllowAll,
+      provider_bindings: profile["providers"],
+      model: prepared.selection.configuration["model"],
+      active_tools: prepared.active_tools,
+      cleanup_grace_ms: profile["session"]["cleanup_grace_ms"],
+      recover_stale_writer: true
+    ]
+
+    try do
+      System.put_env("M7_CHAT_CONFIG_SLOT", "chat-creation-canary")
+
+      session =
+        LoopexComposition.with_runtime(options, fn runtime ->
+          assert {:ok, session} =
+                   Runtime.create_session_with_genesis(
+                     runtime,
+                     "chat-create",
+                     prepared.session_options,
+                     prepared.genesis
+                   )
+
+          assert retained_genesis(runtime, session) == prepared.genesis
+          session
+        end)
+
+      assert is_binary(session)
+      System.put_env("M7_CHAT_CONFIG_SLOT", "chat-restart-canary")
+
+      assert :resumed =
+               LoopexComposition.with_runtime(options, fn runtime ->
+                 assert {:ok, ^session} =
+                          Loopex.resume_session(runtime, session, command_id: "resume")
+
+                 assert retained_genesis(runtime, session) == prepared.genesis
+                 :resumed
+               end)
+    after
+      restore("M7_CHAT_CONFIG_SLOT", previous)
+      restore("LOOPEX_PROVIDER_API_KEY", legacy)
+    end
+  end
+
+  defp retained_genesis(runtime, session) do
+    {:ok, children} = Runtime.children(runtime)
+    store = :sys.get_state(children.control).store
+    {:ok, [genesis | _]} = Loopex.Store.load_records(store, session, 0, 100)
+    genesis.payload
+  end
+
+  defp load(fixture, flags \\ []),
+    do: ChatConfiguration.load(fixture.argv ++ flags, fixture.root, nil)
+
+  defp restore(name, nil), do: System.delete_env(name)
+  defp restore(name, value), do: System.put_env(name, value)
+
+  defp profile do
+    %{
+      "schema_version" => 1,
+      "providers" => %{"anthropic" => %{"credential" => %{"env" => "M7_CHAT_CONFIG_SLOT"}}},
+      "policy" => "allow-all",
+      "paths" => %{"workspace" => "workspace", "state_root" => "state"},
+      "session" => %{
+        "model" => "anthropic:claude-haiku-4-5",
+        "system_class_tokens" => 8000,
+        "bounds" => %{"max_turns" => 8, "deadline_ms" => 1000, "token_budget" => 10000}
+      }
+    }
+  end
+end

@@ -80,6 +80,9 @@ defmodule LoopexComposition do
   unique defined tool ids, including an empty list; omission keeps the four
   coding tools active. Default policy identity retains revision `"0.2.0"` for
   recovery compatibility; hosts may supply their own `:policy_identity`.
+  Explicit `"loopex.ask"` adds the fixed interaction definition. The session
+  owner handles its question through policy without an executor grant or job;
+  omission preserves the released tool registry and active selection.
 
   Optional `:maintenance_instructions` accepts the closed version/body map from
   ADR 0043. Validation precedes owned effects, and Core captures its exact bytes

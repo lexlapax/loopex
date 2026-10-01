@@ -10,7 +10,7 @@ defmodule LoopexComposition.DurableOptions do
   values. Empty active selections remove definitions for core inheritance.
   """
   @coding ~w(loopex.read loopex.write loopex.edit loopex.bash)
-  @tools @coding ++ ~w(loopex.grep loopex.find loopex.ls)
+  @tools @coding ++ ~w(loopex.grep loopex.find loopex.ls loopex.ask)
   @uint64 18_446_744_073_709_551_615
 
   @required_options [:state_root, :workspace, :runtime_id]
@@ -110,9 +110,18 @@ defmodule LoopexComposition.DurableOptions do
 
   @doc false
   def definitions(options) do
-    if Keyword.get(options, :active_tools, @coding) == [],
-      do: [],
-      else: Loopex.Executor.Local.CodingTools.definitions()
+    active = Keyword.get(options, :active_tools, @coding)
+
+    if active == [] do
+      []
+    else
+      questions =
+        if "loopex.ask" in active,
+          do: [LoopexProtocol.ToolDefinition.question_definition()],
+          else: []
+
+      Loopex.Executor.Local.CodingTools.definitions() ++ questions
+    end
   end
 
   @doc false

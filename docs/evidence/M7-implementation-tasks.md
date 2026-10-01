@@ -133,9 +133,10 @@ its entire stated outcome is proved.
   beyond a wait line, exact answer decoding and malformed-input refusal.
 - Next: join configuration preparation and ChatInput to the runtime-owning chat
   driver, bounded output and first complete conversation workflow.
-- Running: new-chat configuration preparation and explicit durable question-tool
-  wiring are local, uncommitted changes. Current-toolchain tests pass 31 CLI
-  configuration cases and 17 constructor cases; floor and structural checks remain.
+- Done: new-chat preparation captures exact v3 genesis from file/flag selection,
+  instructions and immutable tools. Explicit question selection reaches every
+  durable constructor. Configuration and constructor tests pass on both supported
+  toolchains, including real durable creation and restart. Chat dispatch is still open.
 - Decision pending: expose captured genesis through the existing Loopex creation
   facade, or keep that facade unchanged and route chat through composition to
   the accepted host-private exact-genesis operation. No dependent public API
@@ -155,6 +156,39 @@ its entire stated outcome is proved.
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: ChatConfiguration joins the existing explicit file/flag resolvers,
+  required paths, exact instruction capture, selected tool definitions and
+  shared genesis resolver without credential loading or runtime startup. Coding
+  and read-only profiles include the exact question generation; none is empty.
+  DurableOptions registers that interaction only when explicitly selected, leaving
+  omitted/default selections unchanged. The prepared genesis creates a real
+  local-Store session and survives runtime restart unchanged. The complete selected
+  definitions contribute to system-budget admission. Credential-free profiles
+  remain valid authored input but refuse durable chat; resume and enabled helper
+  preparation remain explicit unfinished paths, not silently narrowed profiles.
+  No chat command entry or new public creation API is enabled by this change.
+  CLI configuration/flag regressions pass 31 cases on current/floor in 4.0/4.2
+  seconds; all-constructor regressions pass 17 cases in 7.7/7.6 seconds.
+  - Current CLI: `/private/tmp/loopex-m7-chat-configuration-routes-current.log`,
+    SHA-256 `3ed2ab06dd2cd56512e400516e685aeb9b3fdf254dc279aaac35e0d210583e93`.
+  - Floor CLI: `/private/tmp/loopex-m7-chat-configuration-floor.log`, SHA-256
+    `99372e515de5f7f7cc5c74b7ad26768ddda2d374c09e54aac9e5540836d851dc`.
+  - Current constructors: `/private/tmp/loopex-m7-chat-tools-current.log`, SHA-256
+    `d524331052cab71427df4f5cde421cc9f02926144d8d336c63580f0386ab77a6`.
+  - Floor constructors: `/private/tmp/loopex-m7-chat-tools-floor.log`, SHA-256
+    `2007ae84eb151456e79c8aec9d96496f023975897941f51a30c37f486b76e4fd`.
+  - Initial run failed before test bodies because a fixture used ExUnit's reserved
+    file field: `/private/tmp/loopex-m7-chat-configuration-current.log`, SHA-256
+    `6eb804de7c5f0e9282c8b1aa5e697e37f62945593cd8ecca2f0d3410afaf9733`.
+    After correcting it, six cases passed in 2.3 seconds:
+    `/private/tmp/loopex-m7-chat-configuration-fixture-current.log`, SHA-256
+    `7e220900bae1c021504dadc2e4f9687258cd206b586d9e8ce56577a8bd90ddec`.
+    The first expanded 31-case run passed in 3.8 seconds, but its credential-free
+    test used an invalid binding shape. It was strengthened to require authored
+    schema acceptance and the exact durable-model refusal before the final runs:
+    `/private/tmp/loopex-m7-chat-configuration-final-current.log`, SHA-256
+    `ecbe9fef5322320dfbc3b2339aaa73b5ce6d170937a386f00670d165b21fd894`.
 
 - 2026-10-01: Restored reporting against the maintainer's original numbered
   checklist after clarification. It contains 20 tasks and 186 original items;
@@ -1491,6 +1525,10 @@ its entire stated outcome is proved.
 - [ ] Preserve existing ask, durable-run and embedded workflows.
 - [ ] Test startup refusal, admission failure, output and cleanup.
 - [ ] Later retain the required attended multi-prompt proof.
+
+### Added implementation subtasks
+
+- [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.
 
 ## T07 — Implement automatic and explicit compaction
 
