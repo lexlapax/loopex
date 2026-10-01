@@ -14,7 +14,7 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
 
   alias Loopex.Model
   alias Loopex.Model.Continuation
-  alias Loopex.LLM.ReqLLM.{Mapping, NativeContent}
+  alias Loopex.LLM.ReqLLM.{Mapping, ModelCapabilities, NativeContent}
   alias LoopexProtocol.ToolDefinition
 
   @invalid {:error, :invalid_provider_request}
@@ -50,22 +50,11 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
         {:ok, %{mapping: captured, response_model: nil, summary: false}}
 
       request.model in [@haiku, @fable] ->
-        with {:ok, thinking, required, summary} <- thinking(request.model, level),
-             expected = %{
-               "mapping_revision" =>
-                 if(request.model == @haiku,
-                   do: "loopex.anthropic.haiku45.v1",
-                   else: "loopex.anthropic.fable51.v1"
-                 ),
-               "renderer_revision" => "loopex.anthropic.native.v1",
-               "continuation_required" => required,
-               "canonical_terminal_tool_history" => true,
-               "thinking_disabled" => thinking == %{"mode" => "disabled"},
-               "thinking" => thinking
-             },
+        with {:ok, expected} <-
+               ModelCapabilities.mapping(request.model, level, Model.max_tokens(request)),
              true <- captured == expected,
-             true <- required or is_nil(request.continuation),
-             true <- Model.max_tokens(request) > Map.get(thinking, "budget_tokens", 0) do
+             true <- expected["continuation_required"] or is_nil(request.continuation) do
+          summary = expected["thinking"]["mode"] in ["manual", "adaptive"]
           {:ok, %{mapping: expected, response_model: model, summary: summary}}
         else
           _ -> @invalid
@@ -342,24 +331,6 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
       _ -> @invalid
     end
   end
-
-  defp thinking(@haiku, "default"), do: {:ok, %{"mode" => "omitted"}, false, false}
-  defp thinking(@haiku, "none"), do: {:ok, %{"mode" => "disabled"}, false, false}
-
-  defp thinking(@haiku, level) when level in ~w(low medium high),
-    do:
-      {:ok,
-       %{
-         "mode" => "manual",
-         "budget_tokens" => %{"low" => 1_024, "medium" => 2_048, "high" => 4_096}[level]
-       }, true, true}
-
-  defp thinking(@fable, "default"), do: {:ok, %{"mode" => "omitted"}, true, false}
-
-  defp thinking(@fable, level) when level in ~w(low medium high),
-    do: {:ok, %{"mode" => "adaptive", "effort" => level, "display" => "summarized"}, true, true}
-
-  defp thinking(_, _), do: @invalid
 
   defp controls(body, %{"mode" => "omitted"}), do: body
 

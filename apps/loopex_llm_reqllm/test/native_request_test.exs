@@ -285,27 +285,64 @@ defmodule Loopex.LLM.ReqLLM.NativeRequestTest do
           %{"role" => "user", "content" => "next prompt"}
         ]
 
-    {:ok, request} =
-      Model.request(original.model, messages,
-        tools: original.tools,
-        sampling: original.sampling,
-        deadline: original.deadline
-      )
+    for {model, level, thinking, required, _} <- cells() do
+      configured = request(model, level, thinking, required)
 
-    assert {:ok, body} = NativeRequest.render(request, baseline(request, true), true)
-    assert length(body["messages"]) == 3
+      {:ok, request} =
+        Model.request(model, messages,
+          tools: original.tools,
+          sampling: configured.sampling,
+          deadline: original.deadline
+        )
 
-    assert List.last(body["messages"]) == %{
-             "role" => "user",
-             "content" => [
-               %{
-                 "type" => "tool_result",
-                 "tool_use_id" => "canonical-call",
-                 "content" => "result"
-               },
-               %{"type" => "text", "text" => "next prompt"}
-             ]
-           }
+      assert {:ok, body} = NativeRequest.render(request, baseline(request, true), true)
+      assert length(body["messages"]) == 3
+
+      assert Enum.at(body["messages"], 1) == %{
+               "role" => "assistant",
+               "content" => [
+                 %{"type" => "text", "text" => "answeré"},
+                 %{
+                   "type" => "tool_use",
+                   "id" => "canonical-call",
+                   "name" => "ask",
+                   "input" => %{"question" => "猫?"}
+                 }
+               ]
+             }
+
+      assert List.last(body["messages"]) == %{
+               "role" => "user",
+               "content" => [
+                 %{
+                   "type" => "tool_result",
+                   "tool_use_id" => "canonical-call",
+                   "content" => "result"
+                 },
+                 %{"type" => "text", "text" => "next prompt"}
+               ]
+             }
+    end
+  end
+
+  test "every continuation-required cell expands its own exact ordered native array" do
+    for {model, level, thinking, true, _} <- cells() do
+      {request, native} = continuation_request(model, level, thinking)
+
+      for streaming <- [true, false] do
+        assert {:ok, rendered} =
+                 NativeRequest.render(request, baseline(request, streaming), streaming)
+
+        assert Enum.at(rendered["messages"], 1) == %{"role" => "assistant", "content" => native}
+
+        assert List.last(rendered["messages"]) == %{
+                 "role" => "user",
+                 "content" => [
+                   %{"type" => "tool_result", "tool_use_id" => "native:α", "content" => "result"}
+                 ]
+               }
+      end
+    end
   end
 
   test "the final invocation hook refuses global mutations without logging request material" do
@@ -585,8 +622,12 @@ defmodule Loopex.LLM.ReqLLM.NativeRequestTest do
              true, true}
   end
 
-  defp continuation_request do
-    initial = request(@fable, "default", %{"mode" => "omitted"}, true)
+  defp continuation_request(
+         model \\ @fable,
+         level \\ "default",
+         thinking \\ %{"mode" => "omitted"}
+       ) do
+    initial = request(model, level, thinking, true)
     tool = ToolDefinition.question_definition()
     {id, version, digest} = ToolDefinition.generation(tool)
     arguments = %{"question" => "猫?"}
@@ -598,7 +639,7 @@ defmodule Loopex.LLM.ReqLLM.NativeRequestTest do
       %{"type" => "redacted_thinking", "data" => "opaque+/="}
     ]
 
-    {:ok, reply} = NativeContent.capture(@fable, "tool_use", native)
+    {:ok, reply} = NativeContent.capture(model, "tool_use", native)
 
     messages =
       initial.messages ++
@@ -627,7 +668,7 @@ defmodule Loopex.LLM.ReqLLM.NativeRequestTest do
     envelope = %{
       "format" => "loopex.anthropic.content_refs.v1",
       "provider" => "anthropic",
-      "model" => @fable,
+      "model" => model,
       "configuration_version" => 1,
       "exchange_id" => "op",
       "base_request_digest" => initial.staged_request_digest,
@@ -654,7 +695,7 @@ defmodule Loopex.LLM.ReqLLM.NativeRequestTest do
     }
 
     {:ok, request} =
-      Model.request(@fable, messages,
+      Model.request(model, messages,
         tools: [tool],
         sampling: initial.sampling,
         deadline: initial.deadline,

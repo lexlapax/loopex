@@ -14,8 +14,10 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
   dependency snapshot already; no second catalog is retained here. Missing model
   rows or limits remain unknown. Only ADR 0044's literal Haiku alias is rewritten.
   The six-member plain record retains the source revision and canonical digest.
-  Its reasoning subset is empty until deterministic adapter conformance registers
-  mapping rows; neither a catalog reasoning label nor an alias enables a level.
+  Its reasoning subset contains only ADR 0044's nine literal cells proved by
+  deterministic native transport conformance. Catalog labels do not add cells.
+  The same literal mappings serve host resolution and final transport validation;
+  mapping validation alone never refreshes the catalog or changes captured data.
   """
 
   alias Loopex.LLM.ReqLLM.InProcess.Guards
@@ -24,6 +26,17 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
   @snapshot_id "b78cd916413017210f042b413c715d73180999b194545d1aa7e95a293e837c53"
   @alias %{"anthropic:claude-haiku-4-5" => "anthropic:claude-haiku-4-5-20251001"}
   @uint64 18_446_744_073_709_551_615
+  @haiku "anthropic:claude-haiku-4-5-20251001"
+  @fable "anthropic:claude-fable-5-1"
+  @levels %{@haiku => ~w(default none low medium high), @fable => ~w(default low medium high)}
+  @generic %{
+    "mapping_revision" => "loopex.unregistered.default.v1",
+    "renderer_revision" => "loopex.reqllm.canonical.v1",
+    "continuation_required" => false,
+    "canonical_terminal_tool_history" => false,
+    "thinking_disabled" => false,
+    "thinking" => %{"mode" => "omitted"}
+  }
 
   @doc """
   ## Concept
@@ -49,7 +62,7 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
         "model" => exact,
         "context_window" => limits["context_window"],
         "output_limit" => limits["output_limit"],
-        "reasoning_levels" => []
+        "reasoning_levels" => Map.get(@levels, exact, [])
       }
 
       {:ok,
@@ -67,6 +80,79 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
       {:error, _} = error -> error
     end
   end
+
+  @doc """
+  ## Concept
+
+  Resolve one verified literal model and reasoning level within the selected
+  reply allowance. Never enlarge that allowance or substitute another level.
+
+  ## Technical depth
+
+  Host preparation calls capture/1 first to resolve the sole admitted alias and
+  retain catalog limits. Transport preflight uses this pure table to verify its
+  already captured mapping without reading the catalog. Registered models admit
+  only their listed cells; unregistered models admit only the generic default.
+  Manual thinking budgets must be strictly smaller than max_tokens. Catalog
+  output and context limits remain whole-configuration admission obligations.
+  """
+  @spec mapping(term(), term(), term()) :: {:ok, map()} | {:error, :invalid_model_mapping}
+  def mapping(model, level, max_tokens)
+      when is_integer(max_tokens) and max_tokens in 1..@uint64 do
+    with {:ok, _} <- Guards.model(model) do
+      case Map.fetch(@levels, model) do
+        :error when level == "default" ->
+          {:ok, @generic}
+
+        {:ok, levels} ->
+          if level in levels do
+            {thinking, required} = thinking(model, level)
+
+            if max_tokens > Map.get(thinking, "budget_tokens", 0) do
+              {:ok,
+               %{
+                 "mapping_revision" =>
+                   if(model == @haiku,
+                     do: "loopex.anthropic.haiku45.v1",
+                     else: "loopex.anthropic.fable51.v1"
+                   ),
+                 "renderer_revision" => "loopex.anthropic.native.v1",
+                 "continuation_required" => required,
+                 "canonical_terminal_tool_history" => true,
+                 "thinking_disabled" => thinking == %{"mode" => "disabled"},
+                 "thinking" => thinking
+               }}
+            else
+              {:error, :invalid_model_mapping}
+            end
+          else
+            {:error, :invalid_model_mapping}
+          end
+
+        _ ->
+          {:error, :invalid_model_mapping}
+      end
+    else
+      _ -> {:error, :invalid_model_mapping}
+    end
+  end
+
+  def mapping(_, _, _), do: {:error, :invalid_model_mapping}
+
+  defp thinking(@haiku, "default"), do: {%{"mode" => "omitted"}, false}
+  defp thinking(@haiku, "none"), do: {%{"mode" => "disabled"}, false}
+
+  defp thinking(@haiku, level),
+    do:
+      {%{
+         "mode" => "manual",
+         "budget_tokens" => %{"low" => 1_024, "medium" => 2_048, "high" => 4_096}[level]
+       }, true}
+
+  defp thinking(@fable, "default"), do: {%{"mode" => "omitted"}, true}
+
+  defp thinking(@fable, level),
+    do: {%{"mode" => "adaptive", "effort" => level, "display" => "summarized"}, true}
 
   defp packaged do
     case LLMDB.Packaged.snapshot() do

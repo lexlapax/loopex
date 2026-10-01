@@ -83,11 +83,13 @@ Part of the [evidence index](README.md).
 - Done: join buffered native capture and request rendering to OneShotHTTP1,
   screen captured private values for the selected key, and keep native request
   bytes out of Finch metadata through one-use invocation-owned body streams.
+- Done: register all nine literal adapter cells after deterministic native
+  conformance; share exact mapping resolution with transport validation.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
   the dependent refusal schema without the maintainer's decision.
-- Next: complete deterministic cell registration, host resolution, maintenance
+- Next: complete host resolution, maintenance
   quiescence and checkpoint-aware configuration preflight; complete question
   projection/private-record vectors and the remaining M7
   configuration/maintenance/bound payloads before the coordinated /3-/4 switch;
@@ -98,6 +100,38 @@ Part of the [evidence index](README.md).
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: the full fast check passed on
+  `14275a2949567b885f3a91b4a47d3d042dd3e376`: all 11 application suites,
+  2,880 passed and 34 excluded, in 870 seconds. This proves the integrated
+  native bridge and the earlier fixture/config-routing repairs. Complete output:
+  `/private/tmp/loopex-m7-14275a29-fast-check.log`, SHA-256
+  `752e5ef2c8c5873d7740726e80f0b619ec72ef28443138644f6d6897a4cfd347`.
+- 2026-10-01: all nine literal cells now have streaming HTTP evidence for exact
+  controls, reply ceilings, literal response identity, public summary eligibility,
+  private block retention and open/closed capsules. Each cell's post-terminal
+  request groups retained tool results and the next prompt in one user array,
+  omits empty assistant completions and uses canonical tool IDs. All seven
+  continuation-required cells preserve their own expanded native arrays and
+  original IDs in both render modes. Per-cell streaming cases refuse foreign
+  identity, raw-content and block-count overflow, and complete-wrapper overflow
+  after otherwise successful bounded assembly. These added tests passed before
+  ordinary registration: 27 tests in 2.6 seconds. ModelCapabilities now exposes
+  precisely the accepted Haiku and Fable reasoning subsets and their literal
+  mappings. NativeRequest uses that same mapping function without a catalog
+  refresh. Manual budgets refuse at equality without increasing max_tokens;
+  Fable none and unknown non-default modes refuse. All nine resolved records
+  pass whole-configuration admission within the existing metadata envelope.
+  Seven focused files, including both transports and cleanup, pass 76 tests in
+  21.1 seconds on the current pair and 76 in 20.9 seconds on the floor pair.
+  This completes adapter registration; host startup/configure/resume integration,
+  the separate summarizer and counted live witnesses remain pending. Outputs:
+  - `/private/tmp/loopex-m7-nine-cell-conformance-current.log`, SHA-256
+    `4294a57180b6f94add28c1c244a08ddfe8debca9d2fdb44609f215a7b6741c70`.
+  - `/private/tmp/loopex-m7-registered-cells-current.log`, SHA-256
+    `83ef6f5dd3ff6f8fe578595e2164b33864327ba9b177551b2db123806d6858bc`.
+  - `/private/tmp/loopex-m7-registered-cells-floor.log`, SHA-256
+    `ce1554089a10df7ff77dda1c6c85783b642ca140ef82da34fc63662a7cbf0067`.
 
 - 2026-10-01: the buffered Anthropic path now validates its captured cell before
   credential lookup, installs exact native messages/controls at OneShotHTTP1's
@@ -959,7 +993,8 @@ Part of the [evidence index](README.md).
 - [x] Prove configuration restart, commit-unknown re-presentation and owner crashes before/after linearization through the live runtime.
 - [ ] Join host resolution and prepared daemon routing; extend configuration preflight to committed checkpoints and maintenance quiescence.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
-- [ ] Join registered reasoning subsets to completed deterministic mapping conformance and whole-profile preparation.
+- [x] Register all nine literal reasoning cells after deterministic native request/response, bound, disclosure and terminal-history conformance; share exact mappings with transport validation.
+- [ ] Join registered reasoning subsets and exact mapping resolution to whole-profile preparation.
 - [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
 - [x] Prepare exact v2/v3 callback projection, source-bound v3 settlement readers and monotonic historical-prefix recovery before writer migration.
 - [x] Emit v3 for every new ordinary settlement, migrate exact callback fixtures, and prove whole-record accounting, required-capsule admission and historical schemas through live recovery.
@@ -1135,9 +1170,9 @@ before a provider demonstration.
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
-| Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound staging, bounded expansion, v1 nil-only compatibility and streamed native rendering implemented; buffered join pending |
-| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable native adapter emission implemented; buffered emission and maintenance accounting pending |
-| Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Pending |
+| Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound staging, bounded expansion, v1 nil-only compatibility and streamed/buffered native rendering implemented |
+| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |
+| Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Nine ordinary adapter mappings registered with both native transports, per-cell streaming/bound/disclosure and canonical terminal-history conformance; host integration, separate summarizer and live witnesses pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |

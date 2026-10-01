@@ -12,6 +12,160 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
     :ok
   end
 
+  test "every literal cell streams exact native content and only its admitted summary" do
+    parent = self()
+
+    for {model, level, thinking, required, summary} <- cells() do
+      private =
+        if required,
+          do: [
+            %{"type" => "thinking", "thinking" => "summary 猫", "signature" => "cell-sig+/="},
+            %{"type" => "redacted_thinking", "data" => "cell-opaque+/="}
+          ],
+          else: []
+
+      content =
+        private ++
+          [
+            %{"type" => "text", "text" => "é猫"},
+            %{
+              "type" => "tool_use",
+              "id" => "native:α",
+              "name" => "unregistered_name",
+              "input" => %{"path" => "猫.txt"}
+            },
+            %{"type" => "text", "text" => "tail"}
+          ]
+
+      request = cell_request(model, level, thinking, required)
+      {server, base} = server([encode(cell_events(model, content, "tool_use"))])
+      cell = {model, level}
+
+      assert {:ok, captured} =
+               NativeTransport.complete(
+                 prepared_request(base, request),
+                 @key,
+                 &send(parent, {:cell_delta, cell, &1})
+               )
+
+      assert captured.native.content == content
+      assert captured.native.usage == %{input_tokens: 11, output_tokens: 4}
+      assert {:ok, reply} = NativeContent.project(model, required, "tool_use", content)
+      assert reply.text == "é猫tail"
+      assert reply.completion == "natural"
+
+      assert reply.tool_calls == [
+               %{id: "native:α", name: "unregistered_name", arguments: %{"path" => "猫.txt"}}
+             ]
+
+      if required do
+        assert {:ok, ^content} =
+                 Loopex.Model.ContentReferences.expand(
+                   reply.continuation,
+                   reply.text,
+                   Enum.map(reply.tool_calls, & &1.arguments)
+                 )
+      else
+        assert reply.continuation == nil
+      end
+
+      assert captured.delta_count == if(summary, do: 5, else: 4)
+
+      deltas =
+        for _ <- 1..captured.delta_count do
+          assert_receive {:cell_delta, ^cell, delta}
+          delta
+        end
+
+      assert Enum.filter(deltas, &(&1.kind == :reasoning_delta)) ==
+               if(summary,
+                 do: [%{kind: :reasoning_delta, content_index: 0, text: "summary 猫"}],
+                 else: []
+               )
+
+      refute :erlang.term_to_binary(deltas) =~ "cell-sig"
+      refute :erlang.term_to_binary(deltas) =~ "cell-opaque"
+      assert_receive {:request, ^server, _, outgoing}
+      assert outgoing["model"] == String.replace_prefix(model, "anthropic:", "")
+      assert outgoing["max_tokens"] == 8192
+      assert outgoing["stream"] == true
+      assert_controls(outgoing, thinking)
+      assert length(outgoing["messages"]) == 3
+
+      assert List.last(outgoing["messages"]) == %{
+               "role" => "user",
+               "content" => [
+                 %{"type" => "tool_result", "tool_use_id" => "prior-call", "content" => "result"},
+                 %{"type" => "text", "text" => "next"}
+               ]
+             }
+
+      terminal = private ++ [%{"type" => "text", "text" => "done"}]
+      {server, base} = server([encode(cell_events(model, terminal, "end_turn"))])
+
+      assert {:ok, captured} =
+               NativeTransport.complete(prepared_request(base, request), @key, fn _ -> :ok end)
+
+      assert {:ok, closed} =
+               NativeContent.project(
+                 model,
+                 required,
+                 captured.native.stop_reason,
+                 captured.native.content
+               )
+
+      assert closed.text == "done" and closed.tool_calls == []
+
+      if required do
+        assert closed.continuation["status"] == "closed"
+
+        assert {:ok, ^terminal} =
+                 Loopex.Model.ContentReferences.expand(closed.continuation, closed.text, [])
+      else
+        assert closed.continuation == nil
+      end
+
+      assert_receive {:request, ^server, _, _}
+    end
+  end
+
+  test "every literal streaming cell rejects foreign identity and both native content bounds" do
+    for {model, level, thinking, required, _summary} <- cells(),
+        {response_model, content} <- [
+          {"anthropic:wrong-model", [%{"type" => "text", "text" => "wrong identity"}]},
+          {model, [%{"type" => "text", "text" => String.duplicate("x", 16_385)}]},
+          {model, List.duplicate(%{"type" => "text", "text" => ""}, 129)}
+        ] do
+      request = cell_request(model, level, thinking, required)
+      {server, base} = server([encode(cell_events(response_model, content, "end_turn"))])
+
+      assert {:error, :invalid_native_stream, _} =
+               NativeTransport.complete(prepared_request(base, request), @key, fn _ -> :ok end)
+
+      assert_receive {:request, ^server, _, _}
+    end
+  end
+
+  test "every cell counts the complete expanded wrapper after bounded stream assembly" do
+    content = [%{"type" => "text", "text" => String.duplicate("x", 16_250)}]
+    assert byte_size(Jason.encode!(content)) < 16_384
+
+    for {model, level, thinking, required, _summary} <- cells() do
+      request = cell_request(model, level, thinking, required)
+      {server, base} = server([encode(cell_events(model, content, "end_turn"))])
+
+      assert {:ok, captured} =
+               NativeTransport.complete(prepared_request(base, request), @key, fn _ -> :ok end)
+
+      assert captured.native.content == content
+
+      assert {:error, :invalid_native_content} =
+               NativeContent.project(model, required, captured.native.stop_reason, content)
+
+      assert_receive {:request, ^server, _, _}
+    end
+  end
+
   test "real local HTTP captures complete native blocks and preserves outgoing limits" do
     body = encode(events())
     {server, base} = server([body])
@@ -380,6 +534,10 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
         deadline: 123
       )
 
+    prepared_request(base, request)
+  end
+
+  defp prepared_request(base, request) do
     {:ok, context} = Mapping.context_of(request)
     {:ok, provider_tools} = Mapping.provider_tools(Model.model_facing_tools(request))
 
@@ -396,6 +554,137 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
 
     prepared
   end
+
+  defp cells do
+    haiku = "anthropic:claude-haiku-4-5-20251001"
+
+    [
+      {haiku, "default", %{"mode" => "omitted"}, false, false},
+      {haiku, "none", %{"mode" => "disabled"}, false, false}
+    ] ++
+      for(
+        {level, budget} <- [{"low", 1024}, {"medium", 2048}, {"high", 4096}],
+        do: {haiku, level, %{"mode" => "manual", "budget_tokens" => budget}, true, true}
+      ) ++
+      [{@model, "default", %{"mode" => "omitted"}, true, false}] ++
+      for level <- ~w(low medium high),
+          do:
+            {@model, level, %{"mode" => "adaptive", "effort" => level, "display" => "summarized"},
+             true, true}
+  end
+
+  defp cell_request(model, level, thinking, required) do
+    mapping = %{
+      "mapping_revision" =>
+        if(model == @model,
+          do: "loopex.anthropic.fable51.v1",
+          else: "loopex.anthropic.haiku45.v1"
+        ),
+      "renderer_revision" => "loopex.anthropic.native.v1",
+      "continuation_required" => required,
+      "canonical_terminal_tool_history" => true,
+      "thinking_disabled" => level == "none",
+      "thinking" => thinking
+    }
+
+    tool = LoopexProtocol.ToolDefinition.question_definition()
+    {id, version, digest} = LoopexProtocol.ToolDefinition.generation(tool)
+
+    messages = [
+      %{"role" => "user", "content" => "go"},
+      %{
+        "role" => "assistant",
+        "content" => "prior",
+        "tool_calls" => [
+          %{
+            "tool_call_id" => "prior-call",
+            "tool_id" => id,
+            "tool_version" => version,
+            "definition_digest" => digest,
+            "arguments" => %{"question" => "猫?"}
+          }
+        ]
+      },
+      %{
+        "role" => "tool",
+        "tool_call_id" => "prior-call",
+        "content" => "result",
+        "outcome" => "completed"
+      },
+      %{"role" => "assistant", "content" => ""},
+      %{"role" => "user", "content" => "next"}
+    ]
+
+    {:ok, request} =
+      Model.request(model, messages,
+        tools: [tool],
+        sampling: %{"max_tokens" => 8192, "reasoning" => level, "provider_mapping" => mapping},
+        deadline: 123
+      )
+
+    request
+  end
+
+  defp assert_controls(body, %{"mode" => "omitted"}) do
+    refute Map.has_key?(body, "thinking")
+    refute Map.has_key?(body, "output_config")
+  end
+
+  defp assert_controls(body, %{"mode" => "disabled"}) do
+    assert body["thinking"] == %{"type" => "disabled"}
+    refute Map.has_key?(body, "output_config")
+  end
+
+  defp assert_controls(body, %{"mode" => "manual", "budget_tokens" => budget}) do
+    assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => budget}
+    refute Map.has_key?(body, "output_config")
+  end
+
+  defp assert_controls(body, %{"mode" => "adaptive", "effort" => level}) do
+    assert body["thinking"] == %{"type" => "adaptive", "display" => "summarized"}
+    assert body["output_config"] == %{"effort" => level}
+  end
+
+  defp cell_events(model, content, stop) do
+    start =
+      events()
+      |> hd()
+      |> put_in(["message", "model"], String.replace_prefix(model, "anthropic:", ""))
+
+    blocks =
+      content
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {block, index} ->
+        {initial, deltas} = block_events(block)
+
+        [%{"type" => "content_block_start", "index" => index, "content_block" => initial}] ++
+          Enum.map(deltas, &%{"type" => "content_block_delta", "index" => index, "delta" => &1}) ++
+          [%{"type" => "content_block_stop", "index" => index}]
+      end)
+
+    ending =
+      events() |> Enum.take(-2) |> List.update_at(0, &put_in(&1, ["delta", "stop_reason"], stop))
+
+    [start] ++ blocks ++ ending
+  end
+
+  defp block_events(%{"type" => "thinking"} = block),
+    do:
+      {%{block | "thinking" => "", "signature" => ""},
+       [
+         %{"type" => "thinking_delta", "thinking" => block["thinking"]},
+         %{"type" => "signature_delta", "signature" => block["signature"]}
+       ]}
+
+  defp block_events(%{"type" => "text"} = block),
+    do: {%{block | "text" => ""}, [%{"type" => "text_delta", "text" => block["text"]}]}
+
+  defp block_events(%{"type" => "tool_use"} = block),
+    do:
+      {%{block | "input" => %{}},
+       [%{"type" => "input_json_delta", "partial_json" => Jason.encode!(block["input"])}]}
+
+  defp block_events(%{"type" => "redacted_thinking"} = block), do: {block, []}
 
   defp events do
     [
