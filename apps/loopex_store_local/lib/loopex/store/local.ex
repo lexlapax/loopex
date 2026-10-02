@@ -131,6 +131,10 @@ defmodule Loopex.Store.Local do
   end
 
   @impl Store
+  def creation_provenance(reference, runtime, selector),
+    do: GenServer.call(reference, {:creation_provenance, runtime, selector}, @call_timeout)
+
+  @impl Store
   def ownership_head(reference, session_id, mutation_domain) do
     GenServer.call(reference, {:ownership_head, session_id, mutation_domain}, @call_timeout)
   end
@@ -221,6 +225,9 @@ defmodule Loopex.Store.Local do
   def handle_call({:runtime_command, command}, _from, state) do
     {:reply, State.runtime_command(state.store, command), state}
   end
+
+  def handle_call({:creation_provenance, runtime, selector}, _from, state),
+    do: {:reply, State.creation_provenance(state.store, runtime, selector), state}
 
   def handle_call({:ownership_head, session_id, _mutation_domain}, _from, state) do
     {:reply, State.ownership_head(state.store, session_id), state}

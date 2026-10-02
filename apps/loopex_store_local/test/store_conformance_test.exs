@@ -46,6 +46,10 @@ defmodule Loopex.Store.Local.ConformanceTest do
     Conformance.create_history_projection()
   end
 
+  test "creation provenance enumerates a captured cut and survives local reopen" do
+    Conformance.creation_provenance()
+  end
+
   test "the durable local store survives process death with consecutive store-stamped history" do
     Conformance.durable_restart()
   end

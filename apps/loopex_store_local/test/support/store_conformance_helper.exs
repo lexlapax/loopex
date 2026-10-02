@@ -1,3 +1,5 @@
+Code.require_file("../../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
+
 defmodule LoopexStoreLocalTest.FaultProbe do
   @moduledoc false
 
@@ -263,6 +265,189 @@ defmodule LoopexStoreLocalTest.Conformance do
 
       assert before == store_snapshot(context)
     end)
+  end
+
+  def creation_provenance do
+    each_store(fn context ->
+      runtime = unique("provenance-runtime")
+      page_selector = %{kind: :runtime_page, cursor: nil, limit: 2}
+
+      empty = %{
+        version: 1,
+        runtime_id: runtime,
+        through_create_ordinal: 0,
+        rows: [],
+        next_cursor: nil
+      }
+
+      assert {:page, ^empty} = Store.creation_provenance(context.store, runtime, page_selector)
+
+      assert :absent =
+               Store.creation_provenance(context.store, runtime, %{
+                 kind: :command,
+                 command_id: "absent"
+               })
+
+      creates =
+        for index <- 1..3 do
+          {:ok, transaction} =
+            Store.create_session(runtime, "create-#{index}", supported_genesis(index))
+
+          assert {:committed, _, receipt} = Store.transact(context.store, transaction)
+          {transaction, receipt.session_id}
+        end
+
+      {first, session} = hd(creates)
+
+      point = %{
+        version: 1,
+        runtime_id: runtime,
+        command_id: "create-1",
+        session_id: session,
+        genesis_version: 2,
+        canonical_create_digest: Base.encode16(first.canonical_mutation_digest, case: :lower)
+      }
+
+      assert {:historical, ^point} =
+               Store.creation_provenance(context.store, runtime, %{
+                 kind: :command,
+                 command_id: "create-1"
+               })
+
+      assert {:historical, ^point} =
+               Store.creation_provenance(context.store, runtime, %{
+                 kind: :session,
+                 session_id: session
+               })
+
+      assert :conflict =
+               Store.creation_provenance(context.store, "wrong-runtime", %{
+                 kind: :session,
+                 session_id: session
+               })
+
+      assert :absent =
+               Store.creation_provenance(context.store, runtime, %{
+                 kind: :session,
+                 session_id: "absent"
+               })
+
+      {:ok, changed} = Store.create_session(runtime, "create-1", supported_genesis(99))
+      assert {:not_committed, :tx_id_conflict} = Store.transact(context.store, changed)
+
+      before_reads = store_snapshot(context)
+      assert {:page, captured} = Store.creation_provenance(context.store, runtime, page_selector)
+      assert Enum.map(captured.rows, & &1.create_ordinal) == [1, 2]
+      assert captured.through_create_ordinal == 3
+      assert captured.next_cursor.after_create_ordinal == 2
+      assert before_reads == store_snapshot(context)
+
+      command = Map.put(owner_command(runtime, "resume", session), :attempt_generation, 1)
+
+      {:ok, advance} =
+        Store.advance_owner(session, @domain, "resume-owner", 0, 1, "owner", command)
+
+      {:ok, stage} = Store.stage_owner_attempt(command, 0, "resume-stage", advance)
+      assert {:committed, _, _} = Store.transact(context.store, stage)
+
+      assert :conflict =
+               Store.creation_provenance(context.store, runtime, %{
+                 kind: :command,
+                 command_id: "resume"
+               })
+
+      # Known create re-presentation consumes no new ordinal; another runtime
+      # and a subsequent create cannot change the first captured cut.
+      assert {:committed, _, _} = Store.transact(context.store, first)
+      {:ok, other} = Store.create_session("another-runtime", "create-1", supported_genesis(1))
+      assert {:committed, _, _} = Store.transact(context.store, other)
+      {:ok, concurrent} = Store.create_session(runtime, "create-4", supported_genesis(4))
+      assert {:committed, _, _} = Store.transact(context.store, concurrent)
+
+      assert {:page, tail} =
+               Store.creation_provenance(context.store, runtime, %{
+                 page_selector
+                 | cursor: captured.next_cursor
+               })
+
+      assert tail.through_create_ordinal == 3
+      assert Enum.map(tail.rows, & &1.command_id) == ["create-3"]
+      assert Enum.map(tail.rows, & &1.create_ordinal) == [3]
+      assert is_nil(tail.next_cursor)
+
+      assert {:page, current} =
+               Store.creation_provenance(context.store, runtime, %{page_selector | limit: 16})
+
+      assert current.through_create_ordinal == 4
+      assert Enum.map(current.rows, & &1.create_ordinal) == [1, 2, 3, 4]
+      assert is_nil(current.next_cursor)
+
+      future = %{
+        version: 1,
+        runtime_id: runtime,
+        through_create_ordinal: 5,
+        after_create_ordinal: 4
+      }
+
+      assert :unexpected =
+               Store.creation_provenance(context.store, runtime, %{page_selector | cursor: future})
+
+      cached = :sys.get_state(context.pid).store
+
+      for damaged <- [
+            Map.delete(cached, :creation_rows),
+            %{cached | creation_rows: Map.delete(cached.creation_rows, {runtime, 2})},
+            %{cached | session_creations: Map.delete(cached.session_creations, session)},
+            %{cached | create_ordinals: Map.delete(cached.create_ordinals, runtime)},
+            %{cached | create_ordinals: Map.put(cached.create_ordinals, runtime, 5)}
+          ] do
+        assert :unavailable =
+                 Loopex.Store.Local.State.creation_provenance(damaged, runtime, page_selector)
+      end
+
+      {:ok, unsupported} = Store.create_session("unsupported", "create", genesis("legacy"))
+      assert {:committed, _, _} = Store.transact(context.store, unsupported)
+
+      assert :unavailable =
+               Store.creation_provenance(context.store, "unsupported", %{
+                 kind: :command,
+                 command_id: "create"
+               })
+
+      assert :unavailable = Store.creation_provenance(context.store, "unsupported", page_selector)
+      before_reopen = store_snapshot(context)
+
+      if context.kind == :local do
+        stop(context.pid)
+        reopened = restart_local(context)
+
+        assert {:page, ^current} =
+                 Store.creation_provenance(reopened.store, runtime, %{page_selector | limit: 16})
+
+        assert {:historical, ^point} =
+                 Store.creation_provenance(reopened.store, runtime, %{
+                   kind: :command,
+                   command_id: "create-1"
+                 })
+
+        assert before_reopen == store_snapshot(reopened)
+        stop(reopened.pid)
+      else
+        assert before_reopen == store_snapshot(context)
+      end
+    end)
+  end
+
+  defp supported_genesis(index) do
+    if rem(index, 2) == 1 do
+      %{
+        "options" => %{"index" => index},
+        "runtime_configuration" => %{"cleanup_grace_ms" => 5_000},
+        kind: "session_genesis_v2"
+      }
+    else
+      Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.put("options", %{"index" => index})
+    end
   end
 
   def replay_audit do

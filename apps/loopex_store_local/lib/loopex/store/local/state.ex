@@ -2,6 +2,8 @@ defmodule Loopex.Store.Local.State do
   @moduledoc false
 
   alias Loopex.Store
+  alias Loopex.Runtime.SessionGenesis
+  alias Loopex.Store.CreationProvenance
   alias Loopex.Store.Transitions
 
   @schema_version 1
@@ -11,6 +13,9 @@ defmodule Loopex.Store.Local.State do
     %{
       next_session_number: 1,
       runtime_commands: %{},
+      create_ordinals: %{},
+      creation_rows: %{},
+      session_creations: %{},
       orphan_resolutions: %{},
       sessions: %{}
     }
@@ -113,6 +118,138 @@ defmodule Loopex.Store.Local.State do
       command.canonical_command_digest == binding.canonical_mutation_digest
   end
 
+  # Concept: creation history is complete committed history, never discovery.
+  # Technical depth: these indexes are rebuilt by the ordinary create transition
+  # during log replay. Their entries never enter frames or session genesis.
+  @doc false
+  def creation_provenance(state, runtime, selector) do
+    if CreationProvenance.valid_selector?(runtime, selector) and
+         complete_creation_index?(state, runtime) do
+      creation_query(state, runtime, selector)
+    else
+      :unavailable
+    end
+  end
+
+  defp creation_query(state, runtime, %{kind: :command, command_id: command}) do
+    case fetch_nested(state.runtime_commands, runtime, command) do
+      :absent ->
+        :absent
+
+      {:ok, %{binding: %{type: :create_session}, session_id: session}} ->
+        creation_query(state, runtime, %{kind: :session, session_id: session})
+
+      {:ok, _} ->
+        :conflict
+    end
+  end
+
+  defp creation_query(state, runtime, %{kind: :session, session_id: session}) do
+    case Map.fetch(state.sessions, session) do
+      :error ->
+        :absent
+
+      {:ok, %{runtime_id: other}} when other != runtime ->
+        :conflict
+
+      {:ok, _} ->
+        with {:ok, {^runtime, ordinal}} <- Map.fetch(state.session_creations, session),
+             {:ok, row} <- Map.fetch(state.creation_rows, {runtime, ordinal}),
+             true <- row != :unavailable and row.session_id == session do
+          {:historical, Map.delete(row, :create_ordinal)}
+        else
+          _ -> :unavailable
+        end
+    end
+  end
+
+  defp creation_query(state, runtime, %{kind: :runtime_page, cursor: cursor, limit: limit}) do
+    current = Map.get(state.create_ordinals, runtime, 0)
+    through = if cursor, do: cursor.through_create_ordinal, else: current
+    after_ordinal = if cursor, do: cursor.after_create_ordinal, else: 0
+
+    if through > current do
+      :conflict
+    else
+      last = min(after_ordinal + limit, through)
+
+      rows =
+        if last == after_ordinal,
+          do: [],
+          else:
+            Enum.map(
+              (after_ordinal + 1)..last,
+              &Map.get(state.creation_rows, {runtime, &1}, :unavailable)
+            )
+
+      page = %{
+        version: 1,
+        runtime_id: runtime,
+        through_create_ordinal: through,
+        rows: rows,
+        next_cursor: CreationProvenance.cursor(runtime, through, last)
+      }
+
+      CreationProvenance.normalize(
+        runtime,
+        %{kind: :runtime_page, cursor: cursor, limit: limit},
+        {:page, page}
+      )
+    end
+  end
+
+  defp complete_creation_index?(state, runtime) do
+    is_map(state[:create_ordinals]) and is_map(state[:creation_rows]) and
+      is_map(state[:session_creations]) and
+      map_size(state.creation_rows) == map_size(state.sessions) and
+      map_size(state.session_creations) == map_size(state.sessions) and
+      is_integer(Map.get(state.create_ordinals, runtime, 0)) and
+      Map.get(state.create_ordinals, runtime, 0) >= 0 and
+      creation_endpoints?(state, runtime, Map.get(state.create_ordinals, runtime, 0))
+  end
+
+  defp creation_endpoints?(state, runtime, 0),
+    do: not Map.has_key?(state.creation_rows, {runtime, 1})
+
+  defp creation_endpoints?(state, runtime, through),
+    do:
+      Map.has_key?(state.creation_rows, {runtime, 1}) and
+        Map.has_key?(state.creation_rows, {runtime, through})
+
+  defp retain_creation_index(state, transaction, session) do
+    runtime = transaction.runtime_id
+    ordinal = Map.get(state.create_ordinals, runtime, 0) + 1
+    row = creation_row(transaction, session, ordinal)
+
+    %{
+      state
+      | create_ordinals: Map.put(state.create_ordinals, runtime, ordinal),
+        creation_rows: Map.put(state.creation_rows, {runtime, ordinal}, row),
+        session_creations: Map.put(state.session_creations, session, {runtime, ordinal})
+    }
+  end
+
+  defp creation_row(transaction, session, ordinal) do
+    with {:ok, genesis} <- SessionGenesis.normalize(transaction.genesis),
+         {:ok, verified} <-
+           Store.create_session(transaction.runtime_id, transaction.command_id, genesis),
+         true <- verified.canonical_record_bytes == transaction.canonical_record_bytes,
+         true <- verified.canonical_mutation_digest == transaction.canonical_mutation_digest do
+      %{
+        version: 1,
+        runtime_id: transaction.runtime_id,
+        command_id: transaction.command_id,
+        session_id: session,
+        genesis_version: if(genesis.kind == "session_genesis_v2", do: 2, else: 3),
+        canonical_create_digest:
+          Base.encode16(transaction.canonical_mutation_digest, case: :lower),
+        create_ordinal: ordinal
+      }
+    else
+      _ -> :unavailable
+    end
+  end
+
   @spec load_records(map(), binary(), non_neg_integer(), pos_integer()) ::
           {:ok, [Store.private_record()]}
   def load_records(state, session_id, after_version, limit) do
@@ -199,12 +336,14 @@ defmodule Loopex.Store.Local.State do
         Map.put(retained, :session_id, session_id)
       )
 
-    next = %{
-      state
-      | next_session_number: session_number + 1,
-        runtime_commands: runtime_commands,
-        sessions: Map.put(state.sessions, session_id, session)
-    }
+    next =
+      %{
+        state
+        | next_session_number: session_number + 1,
+          runtime_commands: runtime_commands,
+          sessions: Map.put(state.sessions, session_id, session)
+      }
+      |> retain_creation_index(transaction, session_id)
 
     frame = frame(:runtime_control_create_session, transaction, resolution, [genesis], [])
     {:new, next, frame, {:committed, transaction.command_id, receipt}}

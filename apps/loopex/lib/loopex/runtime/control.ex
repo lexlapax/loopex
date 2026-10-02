@@ -602,6 +602,20 @@ defmodule Loopex.Runtime.Control do
     {:reply, reply, state}
   end
 
+  def handle_call({:creation_provenance, token, selector}, _from, state) do
+    reply =
+      if token == state.token do
+        case Store.creation_provenance(state.store, state.runtime_id, selector) do
+          :unavailable -> {:ok, :store_unavailable}
+          observation -> {:ok, observation}
+        end
+      else
+        {:error, :runtime_unavailable}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call({:resume_session, token, session_id, command_id, mode}, from, state) do
     if token == state.token and is_nil(state.quiescing) and valid_identifier?(session_id) and
          valid_identifier?(command_id) do

@@ -67,6 +67,35 @@ defmodule LoopexComposition.ExactCreateHistoryTest do
         assert DynamicSupervisor.which_children(supervisor) == []
         before = if @adapter == Local, do: File.read!(path), else: :sys.get_state(store)
 
+        {:ok, transaction} = Store.create_session("m7-exact-history", "create", genesis)
+
+        projection = %{
+          version: 1,
+          runtime_id: "m7-exact-history",
+          command_id: "create",
+          session_id: session,
+          genesis_version: version,
+          canonical_create_digest:
+            Base.encode16(transaction.canonical_mutation_digest, case: :lower)
+        }
+
+        assert {:ok, {:historical, ^projection}} =
+                 Runtime.creation_provenance(successor, %{kind: :command, command_id: "create"})
+
+        assert {:ok, {:historical, ^projection}} =
+                 Runtime.creation_provenance(successor, %{kind: :session, session_id: session})
+
+        assert {:ok, {:page, page}} =
+                 Runtime.creation_provenance(successor, %{
+                   kind: :runtime_page,
+                   cursor: nil,
+                   limit: 16
+                 })
+
+        assert page.rows == [Map.put(projection, :create_ordinal, 1)]
+        assert page.through_create_ordinal == 1
+        assert is_nil(page.next_cursor)
+
         assert {:ok, {:historical, ^session}} =
                  Runtime.lookup_create_result(successor, "create", original_options, genesis)
 

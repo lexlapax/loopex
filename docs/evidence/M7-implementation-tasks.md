@@ -91,6 +91,60 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: ADR 0046's accepted optional creation-provenance callback is implemented
+  through Runtime, Store and both shipped adapters. Closed command/session
+  point queries and runtime pages carry supported genesis versions and exact
+  canonical create digests. Per-runtime ordinals and reverse indexes derive
+  from committed create transactions in replay order; no frame, genesis or
+  retained transaction bytes change. Pages preserve one captured high-water cut
+  while later creates occur, and only nil next_cursor proves complete coverage.
+  Invalid selectors/cursors, missing callbacks, unsupported genesis, incomplete
+  indexes and malformed outputs retain their distinct refusal/unavailability
+  meanings. No query activates a coordinator or mutates either Store.
+  Boundary validation checks scalar bounds before encoding, visits at most
+  sixteen rows and refuses duplicate command/session identities. The duplicate
+  regression first failed against the incomplete decoder:
+  `/private/tmp/loopex-m7-creation-provenance-duplicate-regression-20261002.log`,
+  SHA-256 `4304a19851c14e8fcb31d13c25620f6030b8972a4b317edfe77a32dce12e924b`.
+  Final focused proofs pass on both pairs: 38 Core history/genesis/boundary
+  tests in 0.4 seconds each, all 91 Store tests in 11.1 seconds current and
+  10.8 seconds floor, and three actual Store/runtime composition cases in 0.3
+  seconds each. The final added conflicting-create witness passes the complete
+  eight-case reusable conformance file in 2.2 seconds current and 1.9 seconds
+  floor. Outputs:
+  `/private/tmp/loopex-m7-creation-provenance-core-current-verified-20261002.log`,
+  SHA-256 `f723cab415152f02d2c2a22e4a5410908a08a9eb59bdab3106c4b9a2118ce264`;
+  `/private/tmp/loopex-m7-creation-provenance-core-floor-20261002.log`, SHA-256
+  `c43eb1e6545648f4c2bf8d5ca49e1c25c1e4fa293446a2ebeddd5ad4adcc0ce3`;
+  `/private/tmp/loopex-m7-creation-provenance-store-app-current-final-20261002.log`,
+  SHA-256 `0b0f8cb941f911fdc1774fdb61df84c165c3fc6d25f8b0a78a7910ffbbae5841`;
+  `/private/tmp/loopex-m7-creation-provenance-store-app-floor-final-20261002.log`,
+  SHA-256 `9237738d1558f9c2ee4ac54f817394d6927cca7e75e9768198d24d7a67d5abef`;
+  `/private/tmp/loopex-m7-creation-provenance-composition-current-20261002.log`,
+  SHA-256 `6aa5e3fdd36cb2af5220ed2c7e36f796410d8afd951d8b0983eb46c574a65129`;
+  `/private/tmp/loopex-m7-creation-provenance-composition-floor-20261002.log`,
+  SHA-256 `b845158444aff7df9dd1dc062914eecbbad6e7b71a0af562c87fed34268007b1`.
+  Final conformance outputs:
+  `/private/tmp/loopex-m7-creation-provenance-conformance-current-final-20261002.log`,
+  SHA-256 `214ecc787bd39599af890e44f39d533d83ad0c7e090f4c8d3f53ba171c733dfb`;
+  `/private/tmp/loopex-m7-creation-provenance-conformance-floor-final-20261002.log`,
+  SHA-256 `25fb740ce2703b580e5f4951e34656e217cd55f1495a307fc1f7807302f09209`.
+  One added T11 prerequisite is complete. Original counts remain 28 done / 158
+  remaining; added counts are 101 done / 12 remaining. Helper ownership,
+  effect-intent queries and startup classification remain open. Run the full
+  fast check once on this new committed provenance candidate, retaining its
+  exact SHA and complete output. The four pending maintainer decisions are
+  unchanged; no diagnostic timeout proposal was applied.
+- Passed: the full fast check ran once on clean exact implementation SHA
+  `ee7bb3e4039a1929ec8b92b276c3cdde64371257`. All eleven application suites
+  passed: 3,153 tests, 34 existing exclusions, 898 seconds. Complete output:
+  `/private/tmp/loopex-m7-ee7bb3e4-fast-check.log`, SHA-256
+  `bc1651e5d20cbd9ff60f17c7d29581b29c2bbdc1098679ca2b596e2f9b658271`.
+  The check is terminal; do not poll its old handle or rerun the unchanged
+  candidate. It includes exact-history lookup and question-record vectors but
+  predates the provenance callback above. The earlier diagnostic timing failure
+  remains retained failed evidence and its proposed bound change remains
+  unanswered, unapplied and open under T16.
 - Done: ADR 0046's accepted host-private `Runtime.lookup_create_result/4`
   normalizes complete retained v2/v3 genesis and matching original options,
   constructs the exact transaction purely and reads its existing Store binding.
@@ -2945,6 +2999,7 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [x] Implement accepted exact-genesis read-only create-result lookup; preserve the legacy query, refuse sentinel substitution before exact creation, and prove changed defaults, absent current registrations, distinct uncertainty and actual local log reopen through both shipped Stores on both supported pairs.
+- [x] Implement accepted bounded creation-provenance point/page queries and optional Store callback with replay-derived per-runtime ordinals; prove complete captured cuts, later creates, exact/changed repetitions, unsupported history, damaged indexes, closed/duplicate-safe decoding, unavailable callbacks, no activation/writes and local log reopen on both supported pairs.
 
 ## T12 — Complete ephemeral support
 

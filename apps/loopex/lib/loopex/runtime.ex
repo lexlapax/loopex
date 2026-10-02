@@ -313,6 +313,36 @@ defmodule Loopex.Runtime do
   def lookup_create_result(_runtime, _command_id, _session_options, _genesis),
     do: {:error, :runtime_unavailable}
 
+  @doc """
+  ## Concept
+
+  Reads committed creating-command provenance or enumerates a captured runtime
+  creation cut without activating a session or granting mutation authority.
+
+  ## Technical depth
+
+  ADR 0046 accepts exactly command, session and runtime-page selectors. Pages
+  contain at most sixteen ordered rows and retain their first high-water ordinal
+  through concurrent creates; only a nil next cursor proves complete coverage.
+  Unsupported Store callbacks and malformed output remain `:store_unavailable`.
+  Invalid selectors/cursors are `:unexpected`; Control loss is runtime failure.
+  Historical projections include only version, scoped command/session IDs,
+  genesis version and canonical create digest, plus ordinal on page rows.
+  """
+  @spec creation_provenance(t(), map()) ::
+          {:ok,
+           {:historical, map()}
+           | {:page, map()}
+           | :absent
+           | :conflict
+           | :store_unavailable
+           | :unexpected}
+          | {:error, :runtime_unavailable}
+  def creation_provenance(%__MODULE__{} = runtime, selector),
+    do: control_call(runtime, {:creation_provenance, runtime.token, selector})
+
+  def creation_provenance(_, _), do: {:error, :runtime_unavailable}
+
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do

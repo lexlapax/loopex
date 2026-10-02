@@ -35,6 +35,7 @@ defmodule Loopex.Store do
   """
 
   alias Loopex.Instrumentation
+  alias Loopex.Store.CreationProvenance
   alias Loopex.Store.Transitions
 
   @max_identifier_bytes 256
@@ -392,6 +393,27 @@ defmodule Loopex.Store do
               | {:error, :runtime_command_conflict}
               | {:open, map()}
               | {:completed, map()}
+
+  @doc """
+  ## Concept
+
+  Reads committed creation provenance by command, session or captured runtime
+  page. These observations grant no session or mutation authority.
+
+  ## Technical depth
+
+  ADR 0046's optional callback returns the closed version-1 historical
+  projection, or a contiguous page of at most sixteen rows. Ordinals are derived
+  from authoritative create transactions in replay order. A first page captures
+  its high-water ordinal; subsequent pages preserve that cut through concurrent
+  creates. Cross-kind or wrong-runtime point queries conflict. Unsupported
+  genesis or incomplete indexes are unavailable, never absent or complete.
+  A conflicting page cursor is invalid. Retained transaction bytes are unchanged.
+  """
+  @callback creation_provenance(reference :: term(), runtime_id :: id(), selector :: map()) ::
+              {:historical, map()} | {:page, map()} | :absent | :conflict | :unavailable
+
+  @optional_callbacks creation_provenance: 3
 
   @doc """
   ## Concept
@@ -1069,6 +1091,40 @@ defmodule Loopex.Store do
   end
 
   def runtime_command(%__MODULE__{}, _command), do: {:error, :runtime_command_conflict}
+
+  @doc """
+  ## Concept
+
+  Obtains bounded creation history from a capable Store without writing or
+  treating a missing implementation as empty history.
+
+  ## Technical depth
+
+  Selectors, scope, closed fields, contiguous ordinals, watermark and completion
+  cursor are checked before the result reaches runtime control. Scalar bounds
+  precede encoding, and page validation visits at most sixteen rows. Missing
+  callback, adapter failure or malformed output returns `:unavailable`.
+  Invalid selectors and conflicting page cursors return `:unexpected`.
+  """
+  @spec creation_provenance(t(), id(), map()) ::
+          {:historical, map()} | {:page, map()} | :absent | :conflict | :unavailable | :unexpected
+  def creation_provenance(%__MODULE__{adapter: adapter, reference: reference}, runtime, selector) do
+    if CreationProvenance.valid_selector?(runtime, selector) do
+      if function_exported?(adapter, :creation_provenance, 3) do
+        span([:store, :creation_provenance], %{runtime_id: runtime}, fn ->
+          adapter_call(
+            fn -> adapter.creation_provenance(reference, runtime, selector) end,
+            :unavailable
+          )
+          |> then(&CreationProvenance.normalize(runtime, selector, &1))
+        end)
+      else
+        :unavailable
+      end
+    else
+      :unexpected
+    end
+  end
 
   @doc """
   ## Concept
