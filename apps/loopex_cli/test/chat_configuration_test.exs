@@ -91,6 +91,32 @@ defmodule LoopexCli.ChatConfigurationTest do
     refute File.exists?(Path.join(fixture.root, "state"))
   end
 
+  test "each authored run bound is required even when every matching flag is supplied", fixture do
+    flags = ["--max-steps", "20", "--deadline-ms", "2000", "--token-budget", "20000"]
+
+    for field <- ~w(max_turns deadline_ms token_budget) do
+      invalid = update_in(profile(), ["session", "bounds"], &Map.delete(&1, field))
+      File.write!(fixture.config_path, :json.encode(invalid))
+      assert load(fixture, flags) == {:error, {:missing_member, "/session/bounds/" <> field}}
+      refute File.exists?(Path.join(fixture.root, "state"))
+    end
+
+    File.write!(fixture.config_path, :json.encode(profile()))
+    assert {:ok, prepared} = load(fixture, flags)
+
+    assert prepared.selection.profile["session"]["bounds"] == %{
+             "max_turns" => 20,
+             "deadline_ms" => 2_000,
+             "token_budget" => 20_000
+           }
+
+    for field <- ~w(max_turns deadline_ms token_budget) do
+      assert prepared.selection.origins["/session/bounds/" <> field] == "flag"
+    end
+
+    refute File.exists?(Path.join(fixture.root, "state"))
+  end
+
   test "resume cannot replace retained configuration with a freshly prepared profile", fixture do
     assert {:error, {:committed_profile_required, "/flags/resume"}} =
              load(fixture, ["--resume", "retained-session"])

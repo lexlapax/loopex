@@ -91,6 +91,18 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: original T04's authored conversation-bounds requirement is complete.
+  Removing any one of max_turns, deadline_ms or token_budget refuses with its
+  exact file pointer even when all three matching flags are supplied. A valid
+  complete file admits the overrides with flag origins. The full preparation
+  path creates no state directory in either case. Configuration/schema/selection
+  verification passes 40 tests on each supported pair, 4.6 seconds current and
+  4.7 seconds floor. This closes only that original item; chat dispatch, effective
+  inspection and remaining whole-profile integration stay open.
+  Current output: `/private/tmp/loopex-m7-file-bounds-current.log`, SHA-256
+  `37b4a6df8a3d04c7516cef7d81f04bfe33fbc9287ba95850e1c4889f65d3b19d`.
+  Floor output: `/private/tmp/loopex-m7-file-bounds-floor.log`, SHA-256
+  `f105edfb7686fc28918d318b39ec9bbaa10577cbe0445325c3a3eee2dbc27498`.
 - Done: T07 admits maintenance replies through the existing whole-callback
   provider boundary, retains their exact canonical usage, and checks natural
   completion before calls or output. Nine-key v2 replies fail as incomplete;
@@ -160,7 +172,7 @@ did not resolve them. No paid provider calls were made during this check.
   conversation witness remains a separate release obligation.
 - Done: T02 exact-generation capability checks now guard runtime admission,
   registry loading and the local executor's compiled tool inventory. Original
-  checklist completion is 25/186 items and 1/20 top-level tasks.
+  checklist completion is 26/186 items and 1/20 top-level tasks.
 - Done: T02 attachment-budget baseline audit distinguishes existing attachment
   limitations from the required job-owned bounds. Snapshot creation failure now
   closes its source descriptor before returning; both toolchains prove the repair.
@@ -2220,7 +2232,7 @@ or check was relaxed.
 - [x] Support exact-genesis creation, finding duplicates before expanding changed defaults.
 - [ ] Implement the closed configuration-file schema and command-line grammar.
 - [ ] Implement file/flag precedence, validation and effective-value display.
-- [ ] Require explicit conversation bounds in the file, including when flags override them.
+- [x] Require explicit conversation bounds in the file, including when flags override them.
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
 - [ ] Allow maintenance settings to change new episodes while preserving already admitted episodes.
 - [ ] Implement named provider and credential bindings through the existing custody boundaries.
