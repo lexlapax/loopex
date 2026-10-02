@@ -99,6 +99,61 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: `loopex config validate` and `loopex config show --effective` now run
+  through the actual CLI entry before runtime/application/custody startup. They
+  validate the selected authored file before overrides, read exact selected
+  instructions, resolve every saved role with independent child model budgets,
+  measure complete parent tool/system/genesis cost and report escaped effective
+  values with origins. Credential references expose only form/validity and
+  unavailable commands, never slot names or values. Exact decimal quantities,
+  Unicode/control-character paths, canonical model aliases, maintenance absence
+  and fixed child deadlines are retained. The positive trace control proves the
+  credential/runtime/provider witness is active; actual cold-VM command entry
+  proves Unicode text even when the initial IO device uses Latin-1. Inspection
+  starts no session, state root, trace or provider call. Its role-catalog digest
+  is an instruction-cost preview, not a retained helper binding. The fixed
+  `loopex.task` definition and argument validator are shared pure metadata;
+  ordinary tool registration and execution remain unchanged.
+  Final CLI selection passed 158 tests on each pair, 61.0 measured seconds each:
+  - `/private/tmp/loopex-m7-inspection-current-final-v2.log`, SHA-256
+    `5fac4fe8658f354ef7d883e2aba8547a808487882663c3acb4cf406e68cc2d59`.
+  - `/private/tmp/loopex-m7-inspection-floor-final-v2.log`, SHA-256
+    `ab06446a0262fec654f739f42a97b26cbc9d6507eccb1161f5adfd9e45916680`.
+  Helper boundary tests passed two cases on each pair, 1.1/0.7 measured seconds:
+  - `/private/tmp/loopex-m7-inspection-tool-current-v1.log`, SHA-256
+    `e261049debd001f6fef0d424224a9eb3bd1bd0d3382093b61ad63283f36eaa37`.
+  - `/private/tmp/loopex-m7-inspection-tool-floor-v1.log`, SHA-256
+    `66b6f3b48f4f9192a5007ce128fe3e00735dcb01fa1f7043eb76eb1099693c67`.
+  Formatting, warning-free compilation, compiled docs, dependency direction,
+  status and diff gates passed in 15.5 measured seconds before the usage-fixture
+  and evidence-only updates. Complete output
+  `/private/tmp/loopex-m7-inspection-gates-v1.log`, SHA-256
+  `b6a0a407684e4d1b47865cec9751a1de79d2738f141085214fca212acb9b2578`.
+  Failed predecessor runs are retained. V1 had eight reserved ExUnit `file`
+  context collisions; V2 exposed incorrect fixture credential-free syntax,
+  undersized fixture system budgets and expected refusal classes; V3 exposed
+  Unicode corruption at binary IO, fixed by the text-output boundary. The
+  first broad runs failed the exact existing usage expectation because the new
+  `config` command was absent; the literal now includes it without weakening
+  assertions. No production default, check, timeout or model grammar changed.
+  Retained failed outputs and SHA-256:
+  - `/private/tmp/loopex-m7-inspection-current-v1.log`,
+    `a85d31b6d1a4ef135d2a2864283616a87026a7b6fbf454a46b803efe95a808f7`.
+  - `/private/tmp/loopex-m7-inspection-current-v2.log`,
+    `72a20f649017d0e75826fe211987176f99d842ce0622e95dfff4b9925246259f`.
+  - `/private/tmp/loopex-m7-inspection-current-v3.log`,
+    `41bc1fd1d3c483d330f3def1e4755d5e0a01794868f02dcf9743000419afe280`.
+  - `/private/tmp/loopex-m7-inspection-current-final.log`,
+    `9c5d9b30655ece7ed8725f06e1f2b009c565e49dfa715e863b180668f91ea782`.
+  - `/private/tmp/loopex-m7-inspection-floor-final.log`,
+    `29232518467097b44c4c89a05348775c20c66c2b0c54ae5b11c13315d1a1e649`.
+  Two original T04 items and one added item each in T04/T11 close. Original
+  tally is 51 done / 135 todo; added tally is 151 done / 10 todo. The three new
+  startup decisions remain unanswered; dependent contracts remain unimplemented.
+  Public chat startup, helper execution and live maintenance remain open. The
+  goal remains active. A full fast check for this integration candidate has not
+  run yet; the earlier 203cccee proof is not attributed to these later bytes.
+
 - Done: the standalone compaction-result payload now has a closed descriptive
   schema, 119 literal vectors and an independent stdlib-only Node consumer.
   They cover every accepted failure cause, ordinary/maintenance numeric scope,
@@ -4926,7 +4981,7 @@ or check was relaxed.
 
 - [x] Implement the shared pure genesis resolver and validator.
 - [x] Support exact-genesis creation, finding duplicates before expanding changed defaults.
-- [ ] Implement the closed configuration-file schema and command-line grammar.
+- [x] Implement the closed configuration-file schema and command-line grammar.
 - [ ] Implement file/flag precedence, validation and effective-value display.
 - [x] Require explicit conversation bounds in the file, including when flags override them.
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
@@ -4934,7 +4989,7 @@ or check was relaxed.
 - [ ] Implement named provider and credential bindings through the existing custody boundaries.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
-- [ ] Prove configuration inspection reads no credentials and starts no runtime or provider call.
+- [x] Prove configuration inspection reads no credentials and starts no runtime or provider call.
 
 ### Added implementation subtasks
 
@@ -4962,6 +5017,8 @@ or check was relaxed.
 - [x] Extend the offline CLI credential cache and shared startup to borrow explicit routes, refuse rebinding and scope discovery/placement exclusions; verify existing recovery workflows on both toolchains.
 - [x] Forward explicit foreground-server provider/model/maintenance options with preflight refusal and real subprocess startup/EOF cleanup on both toolchains.
 - [ ] Finish provider bindings and captured exclusions through chat, daemon-command and remaining ask/helper entrypoints, including discovery and helper preparation.
+
+- [x] Join config validate/show to the actual command entry, resolving every saved role and whole parent genesis before a redacted effective report; prove aliases, exact quantities, origins, child costs, cold credential-free startup and Unicode output on both supported toolchains. Public chat startup and committed-resume reporting remain open.
 
 ## T05 — Update records, protocols and independent clients
 
@@ -5174,6 +5231,8 @@ or check was relaxed.
 - [x] Decode bounded private effect-intent and terminal projections using existing reducer codecs; prove actual dispatched jobs and owner-created records, closed fields, canonical bytes/digests, scope, receipt-versus-core-refusal disposition, null-call unknowns, historical deadlines and malformed/oversized refusals on both supported pairs. The following subtask implements paging; startup classification remains open.
 
 - [x] Implement accepted bounded stateless effect-intent pages and resume-token verification through Runtime Control; prove captured cuts, literal empty-history tokens, both real Stores and reopen, v3 question histories, distinct refusals, no writes/activation and joined reader cleanup on both supported toolchains.
+
+- [x] Define the fixed opt-in helper generation and closed UTF-8 argument limits shared by inspection and later registration; prove immutable read-only declarations and unchanged ordinary tool registration on both supported toolchains. The helper is not registered or executable yet.
 
 ## T12 — Complete ephemeral support
 

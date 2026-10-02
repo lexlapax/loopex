@@ -1151,7 +1151,7 @@ defmodule LoopexCliTest do
 
     assert String.starts_with?(
              no_command,
-             "choose one command: run, ask, -p, sessions, resume, attach, cancel, artifact, skill, or daemon\n\n"
+             "choose one command: run, ask, -p, config, sessions, resume, attach, cancel, artifact, skill, or daemon\n\n"
            )
 
     # Naming both leaves the caller unable to say which they meant, and it is

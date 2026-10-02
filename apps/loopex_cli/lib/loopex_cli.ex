@@ -55,7 +55,7 @@ defmodule LoopexCli do
     # Concept: ask admits and emits exact bytes, including non-ASCII UTF-8.
     # Technical depth: the escript boots in Latin-1 mode before OTP can read
     # ahead. Keep that mode for IO.binread/binwrite's byte-preserving requests.
-    if ask_binary_stdio() != :ok do
+    if stdio_encoding(:latin1) != :ok do
       LoopexCli.AskResult.diagnostic(:command_failed) |> halt_ask()
     end
 
@@ -77,6 +77,17 @@ defmodule LoopexCli do
     LoopexCli.Daemon.main(arguments)
   end
 
+  def main(["config" | _] = argv) do
+    # Concept: inspection preserves ambient credential references and starts no
+    # runtime, provider or legacy credential host.
+    # Technical depth: classify this command before legacy application startup
+    # and credential discard. No input is read; Unicode output preserves the
+    # selected paths while JSON escaping keeps each setting on one line.
+    if stdio_encoding(:unicode) == :ok,
+      do: halt(dispatch(argv)),
+      else: halt({:error, "configuration_report_unavailable"})
+  end
+
   def main(argv) do
     start_legacy_application_or_halt()
     unless composes_offline?(argv), do: LoopexComposition.CredentialHost.discard()
@@ -85,9 +96,9 @@ defmodule LoopexCli do
     halt(result)
   end
 
-  defp ask_binary_stdio do
-    with :ok <- :io.setopts(:standard_io, encoding: :latin1),
-         :ok <- :io.setopts(:standard_error, encoding: :latin1) do
+  defp stdio_encoding(encoding) do
+    with :ok <- :io.setopts(:standard_io, encoding: encoding),
+         :ok <- :io.setopts(:standard_error, encoding: encoding) do
       :ok
     else
       _ -> :error
@@ -159,6 +170,9 @@ defmodule LoopexCli do
   def dispatch(["run" | rest], options),
     do: offline_or_live("run", rest, options, &run(&1, options))
 
+  def dispatch(["config" | _] = argv, _options),
+    do: LoopexCli.ConfigInspection.run(argv, File.cwd!(), System.get_env("LOOPEX_HOME"))
+
   def dispatch(["sessions" | rest], options),
     do: offline_or_live("sessions", rest, options, &sessions/1)
 
@@ -175,7 +189,7 @@ defmodule LoopexCli do
   def dispatch([], _options),
     do:
       {:error,
-       "choose one command: run, ask, -p, sessions, resume, attach, cancel, artifact, skill, or daemon\n\n" <>
+       "choose one command: run, ask, -p, config, sessions, resume, attach, cancel, artifact, skill, or daemon\n\n" <>
          usage()}
 
   def dispatch([unknown | _rest], _options),
@@ -1809,6 +1823,8 @@ defmodule LoopexCli do
       loopex run --policy allow-all "describe the change"
       loopex ask --policy allow-all "one question"
       loopex -p --policy allow-all --output json "one question"
+      loopex config validate --config FILE
+      loopex config show --config FILE --effective
       loopex run --policy allow-all --steer "actually, do it this way"
       loopex run --policy allow-all --follow-up "then do this next"
       loopex run --policy allow-all --cleanup-grace-ms 8000 "describe the change"

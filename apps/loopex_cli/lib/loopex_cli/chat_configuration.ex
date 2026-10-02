@@ -422,7 +422,11 @@ defmodule LoopexCli.ChatConfiguration do
 
   defp delegation(_), do: :ok
 
-  defp selected_definitions(active) do
+  @doc false
+  def active_tools(profile), do: Map.fetch!(@profiles, profile)
+
+  @doc false
+  def selected_definitions(active) do
     # Concept: new configured sessions capture the artifact-capable read generation.
     # Technical depth: select the literal version before genesis derives its
     # capability; retained sessions keep their captured definitions on resume.
@@ -442,7 +446,8 @@ defmodule LoopexCli.ChatConfiguration do
     )
   end
 
-  defp genesis(selection, definitions) do
+  @doc false
+  def genesis(selection, definitions) do
     names =
       Map.new(definitions, fn definition ->
         {id, version, digest} = ToolDefinition.generation(definition)

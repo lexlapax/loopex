@@ -41,6 +41,25 @@ Constraints:
 Tools, host policy and artifacts: [Tools and policy](tools-and-policy.md#concept).
 Developer detail: [Agent loop and tools](../developer/agent-loop-and-tools.md#concept).
 
+<a id="concept-sessions-configuration-inspection"></a>
+## Inspecting an explicit configuration
+
+Use `loopex config validate` to check a selected configuration, or
+`loopex config show --effective` to see its effective settings and their origins.
+Both commands read the selected configuration and instruction files, resolve
+model metadata and check the selected tools and saved role limits. They read no
+provider credentials, create no state directory and start no runtime or provider
+call. File-derived tracing settings may be inspected without starting tracing.
+
+Inspection shows paths and model identities, with credential-reference names
+and instruction contents withheld. A credential-free route remains valid for
+inspection and is identified as unavailable to chat. A successful inspection
+validates configuration; it does not create a retained helper binding or start
+the conversational command, whose M7 integration remains in progress.
+
+Technical depth:
+[Inspection commands, file example and report](#technical-sessions-configuration-inspection).
+
 <a id="operator-sessions-running"></a>
 ## Running a Task
 
@@ -349,6 +368,67 @@ skill cannot do is set out in
 Developer companions:
 [Agent loop and tools](../developer/agent-loop-and-tools.md#technical-depth) and
 [Compatibility surfaces](../developer/compatibility-surfaces.md#technical-depth).
+
+<a id="technical-sessions-configuration-inspection"></a>
+### Configuration inspection commands
+
+Concept: [Inspecting an explicit configuration](#concept-sessions-configuration-inspection).
+
+Save a UTF-8 JSON file explicitly, for example `profile.json`:
+
+```json
+{
+  "schema_version": 1,
+  "paths": {"workspace": ".", "state_root": "./loopex-state"},
+  "providers": {"anthropic": {"credential": {"env": "MY_PROVIDER_KEY"}}},
+  "policy": "refuse-all",
+  "session": {
+    "model": "anthropic:claude-haiku-4-5",
+    "system_class_tokens": 8000,
+    "bounds": {"max_turns": 8, "deadline_ms": 60000, "token_budget": 32768}
+  }
+}
+```
+
+The provider variable need not exist for these commands. Run:
+
+```text
+loopex config validate --config profile.json
+loopex config show --config profile.json --effective
+loopex config show --config profile.json --effective --reasoning none --max-steps 12
+```
+
+Validation exits `0` and prints `Configuration valid.` only after the authored
+file, overrides, selected instruction files, model mappings, complete parent
+genesis and saved role configurations pass. Credential-free bindings use
+`{"credential":{"none":true}}` only for providers that admit that form. They
+also print the configured provider and the unavailable `chat` command. A refusal
+exits `1`, naming a stable class and JSON pointer without the offending value.
+No report is printed before successful preparation.
+
+Effective output has one setting per line, sorted by JSON pointer. Each line
+contains a JSON-escaped value and an origin in brackets. Quantities retain exact
+decimal strings, including large turn and token budgets. Array indices preserve
+the selected order. Model aliases resolve to their canonical identities, and
+the absent summarizer reads `unconfigured`. A provider row reports only its
+identity, reference form, validity and unavailable commands; a policy identity
+row reports the selected reference-host registry provenance. Captured instruction
+contents, capabilities and provider mappings are excluded.
+
+File paths resolve against the file's directory. Override paths resolve against
+the invocation directory. Precedence is explicit flag, `LOOPEX_HOME` for state
+root only, file, then the documented defaults. Origins are `flag`, `env`,
+`file#pointer` or `default`; inspection never reports `committed` because it
+opens no session. Required authored run bounds must exist even when every
+matching flag is supplied. Both inspection commands accept the chat grammar's
+non-trace overrides, including repeated skill directories and `--no-helpers`.
+`show` requires `--effective`. Session/resume and trace flags refuse.
+
+Each saved role's file and model are checked with the child reply, context and
+system ceilings, independently of the parent model. Enabled role names and
+the fixed helper declaration contribute to the parent's exact instruction/tool
+cost. The child deadline remains at most 600,000 ms. Inspection creates no
+catalog file, allowance ledger, provider work or parent binding.
 
 <a id="operator-sessions-grammar"></a>
 ### Commands
