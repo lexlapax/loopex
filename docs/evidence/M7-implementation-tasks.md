@@ -45,6 +45,10 @@ they do not mean the original task is complete. This follows the maintainer's
   inventory. The legacy active read stays pinned to 1.0.0; both are registered.
   Durable composition always owns the shared job transfer process, including
   empty current tool selections. Public attachment access remains explicit.
+- Done: the pure T02 receipt-content formatter proves the largest UTF-8 prefix
+  within the complete 2,048-byte tool message, including double escaping and
+  reference metadata. Source ranges bind the original receipt bytes. Staging,
+  replay, frozen-prefix handling and aggregate allocation are not yet joined.
 - Done: T02 resolves committed-receipt artifact membership before policy and
   binds approved ranges to their exact source in the journaled job. Prepared
   references remain open. The receipt-owned range workflow is now proved with
@@ -1541,8 +1545,34 @@ second-prompt witness and milestone closure checks remain open.
 
 - [x] Join receipt-owned ranges through the real session owner, local journal, executor and artifact store; prove restart with an empty registry, immutable object retrieval after workspace changes, and exact range projection into later prompts. Include the required artifact-object source label in the encoded cap.
 - [x] Wire the reference host's captured M7 tool selection to read 1.1.0 and provide its job transfer owner even when the public attachment transfer family is disabled.
+- [x] Implement pure receipt-content excerpt formatting with the complete 2,048-byte message cap, maximal UTF-8 prefixes, fixed binary descriptions, source digest/ranges and named metadata refusal; verify both supported toolchains.
+- [ ] Join excerpt formatting to ordinary staging and independently validated replay with retained projection provenance, unchanged historical requests and frozen native prefixes; allocate the shared raw-prefix allowance against both required header variants.
 
 ### Verification evidence
+
+The pure ToolResultExcerpt formatter accepts an existing full artifact reference
+and a raw-prefix allowance from zero through 2,048. It measures both JSON layers
+with the actual call identity and preserves the terminal outcome. The notice
+labels receipt-content offsets separately from object identity. The returned
+source range hashes the original content once after prefix selection. Invalid
+UTF-8 uses a fixed description; metadata that cannot fit returns
+`artifact_metadata_unrepresentable`. No artifact write or read occurs.
+
+Seven formatter cases cover exact metadata, zero allowance, source saturation,
+all five terminal outcomes, binary content, invalid input and metadata overflow.
+The maximality cases independently try the next complete codepoint across ASCII,
+multibyte and heavily escaped sources at ten allowances. Together with the
+existing conversation suite, 22 tests pass in 0.09 seconds on current and 0.1
+seconds on floor. This completes an added formatting subtask only. The original
+bounded-excerpt item remains open until preparation, staging and replay use it.
+
+- Current: `/private/tmp/loopex-m7-excerpt-formatter-final-current.log`,
+  SHA-256 `3adefc2f08d96bc8d54d1f1ca62f74fc3aa7fdc2044f121931877301818a05cb`.
+- Floor: `/private/tmp/loopex-m7-excerpt-formatter-final-floor.log`,
+  SHA-256 `948ed307d916c6d9ec6a0e4e310c68f8e4899b0982eae87437fced96e1e273a8`.
+- Structural checks pass: `/private/tmp/loopex-m7-excerpt-formatter-structure.log`,
+  SHA-256 `aca28af75467bb93edec4b7b67341791f89fbba9b41900f82af60a7bfe61a515`.
+  These focused checks do not replace the pending full integration-candidate run.
 
 Configured chat now selects the exact read 1.1.0 definition from composition's
 inventory before deriving and retaining its artifact capability. Nonempty durable
