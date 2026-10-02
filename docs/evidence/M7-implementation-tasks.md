@@ -91,6 +91,20 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the provider-child supervisor-loss fixture now obtains a child
+  acknowledgement after sending its monitor signal and before killing the
+  supervisor. This establishes the monitor before a termination propagated by
+  another sender; the exact child/ref/killed assertion and all original receive
+  bounds remain unchanged. Both complete cases pass in 0.04 seconds on each
+  toolchain. Complete outputs:
+  `/private/tmp/loopex-m7-provider-monitor-current-20261002.log`, SHA-256
+  `eb28ccb572cac7d83e0ee64d49d8fb0797622343fa4b4cac401a9774f2d2267b`;
+  `/private/tmp/loopex-m7-provider-monitor-floor-20261002.log`, SHA-256
+  `8fa6bcdb11ead59f1d3dca667e707d8b49dbbd48416d78999e8c0ad7f8189992`.
+  The failed 44a716df integration output remains retained. A new integration
+  candidate is required before claiming the full check passes.
+  Original: 32 done / 154 remaining. Added: 115 done / 11 remaining.
+
 - Done: the maintainer-selected contextual Policy port accepts an exact
   `%{module: adapter, context: private_context}` reference and invokes optional
   `decide/2`; bare modules preserve `decide/1`. Invalid references and missing
@@ -3530,7 +3544,7 @@ or check was relaxed.
 - [x] Remove the spawned-host startup scheduling assumption from the abrupt chat-writer-loss fixture; retain unchanged receive timeouts and prove both exact writer and linked IO-worker killed DOWNs on both toolchains.
 - [x] Order diagnostic shutdown through its private supervisor before collecting writer/supervisor joins; prove a failing-before suspended-supervisor fault and unchanged delivery accounting, grace, existing loss/deadline assertions, ephemeral trace and real CLI signal/JSON behavior on both supported toolchains.
 - [x] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
-- [ ] Repair the provider-child supervisor-loss fixture's monitor/fault ordering; preserve exact killed termination and original assertion bounds, retaining the failed committed integration output and both-toolchain proof.
+- [x] Repair the provider-child supervisor-loss fixture's monitor/fault ordering; preserve exact killed termination and original assertion bounds, retaining the failed committed integration output and both-toolchain proof.
 - [ ] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.

@@ -79,11 +79,21 @@ defmodule Loopex.Runtime.ProviderLifetimeTest do
     {:ok, child} =
       ProviderLifetime.start_child(starter, fn ->
         send(parent, {:provider_child_started, self()})
+
+        receive do
+          :monitor_installed -> send(parent, {:provider_child_monitored, self()})
+        end
+
         Process.sleep(:infinity)
       end)
 
     assert_receive {:provider_child_started, ^child}
     monitor = Process.monitor(child)
+    # Concept: Observe the child's actual termination reason after the fault.
+    # Technical depth: The acknowledgement follows this caller's monitor signal;
+    # a kill propagated by a different process cannot overtake monitor setup.
+    send(child, :monitor_installed)
+    assert_receive {:provider_child_monitored, ^child}
     Process.exit(workers, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^child, :killed}
   end
