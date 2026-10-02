@@ -26,6 +26,9 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Restart handoff — 2026-10-01
 
+Historical snapshot. Resume from Current work below and the checkbox reporter;
+this handoff describes its own earlier revision.
+
 The maintainer requested a pause for restart. Work remains on `m7`; no merge,
 closure, tag or release is authorized. No delegated agents are running. The
 full check process has finished; do not restart or poll its former session.
@@ -95,6 +98,106 @@ questions under Current work remain unanswered; the history-correction approval
 did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
+
+- Done: the approved T02 early-spill context is implemented inside the existing
+  digest/grant-bound JobRequest artifact policy. The closed revision-1 context
+  captures the exact read binding or explicit nil and the Conversation
+  run/turn-number/raw-call identity. Core reconstructs it independently during
+  replay; substituted binding/identity and a search-generation downgrade refuse.
+  No registry is needed after restart. Legacy jobs without this member keep
+  their exact policy bytes and spill behavior, including retained read 1.1 jobs.
+  Fresh search 1.1 jobs require context before effects. M7 chat captures the new
+  generations; previous read/search defaults remain pinned to 1.0.
+
+  New grep/find/ls 1.1 definitions change only version and artifact allowance
+  (16,384 bytes, matching their unchanged capture ceiling). Their six old/new
+  literal canonical-byte and digest vectors are in
+  `apps/loopex/priv/vectors/search_projection.v1.json`. New digests are grep
+  `b090c9a957fc7dc1f5aa6462465a473502c714e379a4aabcbec38d08ad1aaf0b`, find
+  `4084b9a750df07ac0db537ffe6d5f72b82a44d18e329e68a82eb288a1e8eb45d`, ls
+  `16f673afb8b7577ab6a8f69ec50eca12f38e42d1dc09f68fc00f0466bf508ba8`.
+  The read 1.1 literal remains unchanged. For a non-nil frozen binding, the hand
+  measures the full escaped JSON tool message and retains all captured bytes
+  above 2,048 bytes before its receipt. Exact 2,048/2,049-byte boundaries and
+  escaping below the raw capture limit are proved. Null capability and legacy
+  jobs keep inline results; explicit ranges keep their existing bounded path.
+  Retention reuses verified Core ArtifactStore.put and the five provenance
+  labels. Dishonest answers expose no reference and preserve the effect outcome.
+
+  The first real cancellation test exposed an unaddressable spill worker:
+  cancel returned unconfirmed while the store was blocked. M7 retention now
+  uses the existing job-alias guardian and joins its exact worker and guardian
+  within the captured cancellation episode before settling/answering. Legacy
+  routing stays unchanged. The fixed run cutoff also kills and joins the blocked
+  worker before the truthful completed receipt without a reference. No timeout
+  or assertion was weakened. Each new search reaches its original output bound
+  through real Core/local executor/Store, retains every captured byte, survives
+  empty-registry restart with an unchanged receipt and projects receipt-content
+  provenance. An exact 16,384-byte read is retained and projected within the
+  complete-message cap. Repeated exact dispatch reuses the receipt without
+  another effect or artifact write. Existing range cases forbid fallback fetch.
+
+  Focused outputs below all use warnings as errors. Final Core: 37 current cases
+  in 3.1 seconds and 37 floor cases in 3.1 seconds. Executor current: 57 retention
+  and conformance cases in 13.7 seconds; floor broader selection: 91 cases in
+  44.8 seconds, followed by 12 final retention/vector cases in 1.4 seconds after
+  adding the fixed-cutoff witness. Real composition: 17 current cases in 3.9
+  seconds and 17 floor cases in 3.7 seconds. CLI selection/driver: 31 current
+  cases in 15.0 seconds and 31 floor cases in 14.5 seconds. The current broader
+  filesystem selection also passed 45 cases in 27.3 seconds, while explicitly
+  reporting Darwin's raw-invalid-name witness unavailable; Linux proof remains
+  required and no original aggregate test item closes on that unavailable case.
+
+  /private/tmp/loopex-m7-early-spill-core-current-v4.log, SHA-256
+  `4c7ec0dbcc9050aa92cd8047437ef693135160effef1ca1709b20e3b8a5a2f65`.
+  /private/tmp/loopex-m7-early-spill-core-floor-v2.log, SHA-256
+  `c86e9b98c8012f3305cab024a9a1283da9deb725e3e302119995acb118f731e2`.
+  /private/tmp/loopex-m7-early-spill-executor-current-v5.log, SHA-256
+  `30344fb0a31ac8aae3a370e3d0bc4b41874addd83dae38688c576f8b67e45aba`.
+  /private/tmp/loopex-m7-early-spill-executor-floor-v1.log, SHA-256
+  `19326462cac6cf5fc3daf5d8c70957022ee758157ba764fa202e8b86797420ef`.
+  /private/tmp/loopex-m7-early-spill-executor-floor-v2.log, SHA-256
+  `8af29785165d97862223516d99955006a809b7f0291347fbfd7b60401d4d1614`.
+  /private/tmp/loopex-m7-early-spill-composition-current-v2.log, SHA-256
+  `8df6806297402c8e8e4450e727d233d1a2e1317e17efcea508e87ba09bb14993`.
+  /private/tmp/loopex-m7-early-spill-composition-floor-v1.log, SHA-256
+  `b66f9f55a5543bbbee2be86c20db53587c8e7134a19baf06f0eadbbc32ac8c42`.
+  /private/tmp/loopex-m7-early-spill-cli-current-v2.log, SHA-256
+  `cf9ec501e30505137d332bd1427c4a5b222381b4500619f88f0e7ab8b19be746`.
+  /private/tmp/loopex-m7-early-spill-cli-floor-v1.log, SHA-256
+  `05dce9f76337fca8ff25f3523dc1bb57927f61183b579b73e0400dab21a93b6a`.
+  /private/tmp/loopex-m7-early-spill-executor-current-v4.log, SHA-256
+  `66e6d948111b5c5101eca8408934d4757e4ecbd2f9834411286f0fe392169918`.
+
+  Failed drafts remain evidence. Executor current v2 reported 15/16 passed and
+  exposed the real missing cancellation route, fixed above. Composition v1
+  reported 15/17 passed: the initial 200-entry fixture did not fill ls/find output;
+  300 entries now exercise the original bound without changing the assertion.
+  Core v1 reported 9/10 passed because two calls in one reply were mistakenly
+  expected in two turns; the fixture now expects the actual single turn.
+  /private/tmp/loopex-m7-early-spill-executor-current-v2.log, SHA-256
+  `c4f23ef61d3df6a2e2443589be71d98af9489f518594b45eae34e6397746f215`.
+  /private/tmp/loopex-m7-early-spill-composition-current-v1.log, SHA-256
+  `44aaf196f427320a3c22aea29c9c86da69bc2f810198c5de77011998f540740a`.
+  /private/tmp/loopex-m7-early-spill-core-current-v1.log, SHA-256
+  `920db59ab72f1f4e23e63461fa2ba9e86b88f0b299780c82119574d8968fba93`.
+  Compilation v1 lacked sandbox TCP permission; v2 exposed ungrouped spill
+  clauses; executor v1 had a fixture helper named binding/0 conflicting with
+  Kernel. These attempts are not passes. The first CLI invocation incorrectly
+  ran from the umbrella: only its actual CLI file set executed, with unavailable
+  paths in other applications; evidence above uses the owning-directory run.
+  The two early Core invocations named a nonexistent executor file and therefore
+  prove only the ten actual artifact-admission cases, not executor conformance.
+
+  Compilation, formatting, documentation ordering, dependency direction, status
+  and diff gates pass. Complete output:
+  `/private/tmp/loopex-m7-early-spill-final-gates-v3.log`, SHA-256
+  `f0b428e62621733c67a5972fc325cafecd8512f458b7435e031c3516d12bf874`.
+  The early-spill added subtask is complete. Original tally remains 44 done / 142
+  todo; added tally is 136 done / 9 todo. Bounded preparation's combined remaining
+  subtask, long-cutoff/Linux witnesses, independent clients, compatibility and
+  milestone closure remain open. Run the full current fast check once on this
+  committed integration candidate; focused proof does not replace it.
 
 - Done: candidate `35519cc9c532a84c2fd8256bd9a3caf7d6e34621` passed its one
   full current-pair fast check in 1,386 seconds from a clean separate checkout.
@@ -3652,7 +3755,7 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Implement pure receipt-content excerpt formatting with the complete 2,048-byte message cap, maximal UTF-8 prefixes, fixed binary descriptions, source digest/ranges and named metadata refusal; verify both supported toolchains.
 - [x] Join excerpt formatting to ordinary staging and independently validated replay with retained projection provenance, unchanged historical requests and frozen native prefixes; allocate the shared raw-prefix allowance against both required header variants.
 - [ ] Complete bounded reference-preparation episodes and prepared-reference membership, then make above-cap inline sources eligible; join the accepted earlier spill rule and pin the remaining new tool generations.
-- [ ] Resolve the early-spill projection context contract, bind it to exact jobs, pin remaining read/search generations and prove full capture/spill/replay behavior without altering legacy jobs.
+- [x] Resolve the early-spill projection context contract, bind it to exact jobs, pin remaining read/search generations and prove full capture/spill/replay behavior without altering legacy jobs.
 
 ### Verification evidence
 

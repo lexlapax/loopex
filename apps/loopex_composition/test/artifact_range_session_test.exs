@@ -24,9 +24,16 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
           prompt = Enum.find(Enum.reverse(request.messages), &(&1["role"] == "user"))
           {:ok, arguments} = Frame.decode(prompt["content"], 8_192)
 
-          if arguments == %{"finish" => true},
-            do: [],
-            else: [%{id: "read-#{index}", name: "read", arguments: arguments}]
+          case arguments do
+            %{"finish" => true} ->
+              []
+
+            %{"tool" => name, "arguments" => selected} ->
+              [%{id: "read-#{index}", name: name, arguments: selected}]
+
+            _read ->
+              [%{id: "read-#{index}", name: "read", arguments: arguments}]
+          end
         else
           []
         end
@@ -43,6 +50,112 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
          canonical_request_bytes: request.canonical_request_bytes,
          staged_request_digest: request.staged_request_digest
        }}
+    end
+  end
+
+  for {id, arguments} <- [
+        {"loopex.ls", %{}},
+        {"loopex.find", %{"pattern" => "**"}},
+        {"loopex.grep", %{"pattern" => "needle"}}
+      ] do
+    test "#{id} early spill retains full captured output through real Store restart" do
+      id = unquote(id)
+      arguments = unquote(Macro.escape(arguments))
+      fixture = fixture("1.1.0", true, id)
+
+      for number <- 1..300,
+          do:
+            File.write!(
+              Path.join(fixture.workspace, "entry-#{number}-" <> String.duplicate("n", 64)),
+              "needle\n"
+            )
+
+      {:ok, selected} = Loopex.Executor.Local.ReadOnlyTools.arguments(id, arguments)
+
+      {:completed, captured} =
+        Loopex.Executor.Local.ReadOnlyTools.execute(fixture.workspace, selected, 16_384)
+
+      assert byte_size(captured) > 16_000 and byte_size(captured) <= 16_384
+
+      assert {:ok, attachment} =
+               Loopex.attach(fixture.runtime, fixture.session, after_event_sequence: 0)
+
+      events =
+        run(attachment, "search", %{
+          "tool" => String.replace_prefix(id, "loopex.", ""),
+          "arguments" => arguments
+        })
+
+      assert List.last(events)["outcome"] == "completed", inspect(events, limit: :infinity)
+      [reference] = Enum.find(events, &(&1.kind == "tool.finished"))["artifacts"]
+      assert reference["size"] == byte_size(captured)
+      assert {:ok, records} = Store.load_records(fixture.store, fixture.session, 0, 1_000)
+      [source] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
+      [intent] = Enum.filter(records, &(&1.payload.kind == "effect_intent_committed_v2"))
+      job = intent.payload["job"]
+      assert job["tool_id"] == id and job["tool_version"] == "1.1.0"
+      assert job["artifact_policy"]["projection"]["artifact_read"]["tool_version"] == "1.1.0"
+
+      assert source.payload["receipt"]["canonical_request_digest"] ==
+               job["canonical_request_digest"]
+
+      artifact = Map.new(reference, fn {key, value} -> {String.to_existing_atom(key), value} end)
+
+      assert {:ok, ^captured} =
+               Loopex.ArtifactStore.fetch(
+                 %{
+                   module: Artifacts,
+                   handle: %{root: fixture.artifact_root, transfers: fixture.transfers}
+                 },
+                 artifact
+               )
+
+      {runtime, store, attachment} =
+        restart(
+          fixture.runtime,
+          fixture.path,
+          fixture.executor_options,
+          fixture.observer,
+          fixture.session,
+          fixture.workspace
+        )
+
+      assert List.last(run(attachment, "finish", %{"finish" => true}))["outcome"] == "completed"
+      assert {:ok, retained} = Store.load_records(store, fixture.session, 0, 1_000)
+      assert source in retained
+      assert intent in retained
+      assert Enum.count(retained, &(&1.payload.kind == "executor_receipt_committed_v2")) == 1
+      assert {:ok, public} = Store.load_events(store, fixture.session, 0, 1_000)
+      assert {:ok, _recovered} = SessionState.recover(fixture.session, retained, public)
+      requests = Agent.get(fixture.observer, & &1)
+      assert length(requests) == 3
+      assert_excerpt_provenance(fixture.session, retained, public, requests, source.payload)
+
+      fields =
+        Map.new(Loopex.Executor.job_fields(), fn key -> {key, job[Atom.to_string(key)]} end)
+
+      assert {:ok, changed} =
+               Loopex.Executor.job(%{
+                 fields
+                 | tool_version: "1.0.0",
+                   artifact_policy: %{"retain" => true}
+               })
+
+      substituted =
+        Map.new(Map.from_struct(changed), fn {key, value} -> {Atom.to_string(key), value} end)
+
+      altered =
+        Enum.map(retained, fn row ->
+          if row.journal_version == intent.journal_version,
+            do: put_in(row, [:payload, "job"], substituted),
+            else: row
+        end)
+
+      assert {:error, :invalid_effect_intent_transition} =
+               SessionState.recover(fixture.session, altered, public)
+
+      assert :sys.get_state(fixture.transfers).jobs == %{}
+      assert :ok = Loopex.stop(runtime)
     end
   end
 
@@ -102,7 +215,7 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     end
   end
 
-  defp fixture(version, captured \\ true) do
+  defp fixture(version, captured \\ true, search \\ nil) do
     root =
       Path.join(System.tmp_dir!(), "loopex-range-session-#{System.unique_integer([:positive])}")
 
@@ -136,7 +249,18 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
         &(&1["tool_id"] == "loopex.read" and &1["tool_version"] == version)
       )
 
-    runtime = runtime(store, executor, observer, [definition])
+    definitions =
+      if is_nil(search),
+        do: [definition],
+        else: [
+          definition,
+          Enum.find(
+            CodingTools.generations(),
+            &(&1["tool_id"] == search and &1["tool_version"] == "1.1.0")
+          )
+        ]
+
+    runtime = runtime(store, executor, observer, definitions)
 
     created =
       if captured do
@@ -144,7 +268,7 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
           runtime,
           "create",
           %{},
-          Loopex.ConfiguredGenesisFixture.genesis([definition])
+          Loopex.ConfiguredGenesisFixture.genesis(definitions)
         )
       else
         Loopex.create_session(runtime, %{}, command_id: "create")

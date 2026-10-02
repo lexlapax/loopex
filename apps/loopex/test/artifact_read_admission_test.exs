@@ -71,6 +71,18 @@ defmodule Loopex.ArtifactReadAdmissionTest do
     assert_receive {:policy, %{tool_call_id: "read", arguments: ^args}}
 
     [write, read] = AgentLoopTestExecutor.jobs(fixture.executor)
+    assert write.artifact_policy == %{"retain" => true}
+
+    assert read.artifact_policy ==
+             Loopex.Executor.JobRequest.artifact_policy(
+               "loopex.read",
+               "1.1.0",
+               Loopex.ConfiguredGenesisFixture.genesis(context.definitions)["tool_selection"][
+                 "artifact_read"
+               ],
+               Loopex.Conversation.normalized_call_id(read.run_id, 1, read.tool_call_id)
+             )
+
     assert Map.delete(read.validated_arguments, "resolved_artifact") == args
     records = Fixture.records(fixture, session)
     source = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
@@ -95,6 +107,31 @@ defmodule Loopex.ArtifactReadAdmissionTest do
              SessionState.recover(session, records, Fixture.events(fixture, session))
 
     assert recovered.artifact_sources[context.reference.use_locator] == expected
+
+    for replacement <- [
+          put_in(read.artifact_policy, ["projection", "artifact_read"], nil),
+          put_in(
+            read.artifact_policy,
+            ["projection", "normalized_call_id"],
+            "lx_" <> String.duplicate("0", 48)
+          )
+        ] do
+      assert {:ok, substituted} =
+               Loopex.Executor.job(%{Map.from_struct(read) | artifact_policy: replacement})
+
+      assert :ok = Loopex.Executor.validate_job(substituted)
+
+      changed =
+        Enum.map(records, fn row ->
+          if row.payload.kind == "effect_intent_committed_v2" and
+               row.payload["job"]["tool_call_id"] == "read",
+             do: put_in(row, [:payload, "job"], plain(Map.from_struct(substituted))),
+             else: row
+        end)
+
+      assert {:error, :invalid_effect_intent_transition} =
+               SessionState.recover(session, changed, Fixture.events(fixture, session))
+    end
 
     # A new self-consistent job digest cannot legitimize a substituted source.
     altered_arguments =
@@ -420,6 +457,16 @@ defmodule Loopex.ArtifactReadAdmissionTest do
     assert [job] = AgentLoopTestExecutor.jobs(restarted.executor)
     assert job.validated_arguments["resolved_artifact"]["reference"] == plain(context.reference)
     assert job.validated_arguments["offset"] == 8_192
+
+    assert job.artifact_policy["projection"] == %{
+             "revision" => 1,
+             "artifact_read" =>
+               Loopex.ConfiguredGenesisFixture.genesis(context.definitions)["tool_selection"][
+                 "artifact_read"
+               ],
+             "normalized_call_id" =>
+               Loopex.Conversation.normalized_call_id(job.run_id, 1, job.tool_call_id)
+           }
 
     assert {:ok, recovered} =
              SessionState.recover(

@@ -128,10 +128,10 @@ defmodule LoopexComposition.DurableOptions do
   def runtime_options(options) do
     # Concept: admitting a newer generation does not rewrite legacy selection.
     # Technical depth: Core already accepts exact ID/version selections. Pin the
-    # legacy read default while captured v3 genesis can choose the admitted 1.1.0.
+    # legacy read/search defaults while captured v3 genesis selects M7 1.1.0.
     active =
       Enum.map(Keyword.get(options, :active_tools, @coding), fn
-        "loopex.read" -> {"loopex.read", "1.0.0"}
+        id when id in ~w(loopex.read loopex.grep loopex.find loopex.ls) -> {id, "1.0.0"}
         id -> id
       end)
 

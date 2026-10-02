@@ -816,7 +816,8 @@ defmodule Loopex.Executor do
         executor_epoch >= 0 and is_integer(deadline) and deadline > 0 and
         is_integer(fencing_token) and fencing_token >= 0 and bounded_binary?(effect_class) and
         bounded_binary?(idempotency) and plain?(capabilities) and plain?(arguments) and
-        plain?(budgets) and plain?(artifact_policy) and plain?(output_policy) and
+        plain?(budgets) and plain?(artifact_policy) and
+        JobRequest.valid_projection_policy?(artifact_policy) and plain?(output_policy) and
         is_integer(cleanup_grace_ms) and cleanup_grace_ms >= 1 and
         cleanup_grace_ms <= @max_cleanup_grace_ms
 

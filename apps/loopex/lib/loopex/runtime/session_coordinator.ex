@@ -7933,7 +7933,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       },
       idempotency_class: Map.fetch!(definition, "idempotency_class"),
       fencing_token: executor.fencing_token,
-      artifact_policy: %{"retain" => true},
+      artifact_policy: job_artifact_policy(state, work, call, definition),
       output_policy: %{"capture" => true},
       # Concept: the period the hand will clean up under is a fact of the
       # request, dispatched with it rather than configured beside it.
@@ -7946,6 +7946,32 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # configured process still dispatches its own committed value.
       cleanup_grace_ms: state.durable.cleanup_grace_ms
     })
+  end
+
+  defp job_artifact_policy(state, work, call, definition) do
+    if Loopex.Executor.JobRequest.projection_generation?(
+         definition["tool_id"],
+         definition["tool_version"]
+       ) do
+      binding =
+        case state.durable.tool_selection do
+          %{"artifact_read" => captured} ->
+            captured
+
+          nil ->
+            {:ok, captured} = Loopex.Runtime.ArtifactReadCapabilities.resolve(work.request.tools)
+            captured
+        end
+
+      Loopex.Executor.JobRequest.artifact_policy(
+        definition["tool_id"],
+        definition["tool_version"],
+        binding,
+        Conversation.normalized_call_id(work.run_id, work.turn_number, call.tool_call_id)
+      )
+    else
+      %{"retain" => true}
+    end
   end
 
   # Concept: a result belongs to a run only while that run is still owed one.

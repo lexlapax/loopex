@@ -3627,6 +3627,33 @@ defmodule Loopex.Runtime.SessionState do
 
   defp artifact_job_matches?(_state, _work, _call, _job), do: true
 
+  # Concept: recovered output policy belongs to the original session and turn.
+  # Technical depth: recompute from retained definitions and lineage rather than
+  # accepting a self-consistent substituted job digest. Read 1.1 jobs committed
+  # before projection context existed keep their exact legacy policy and meaning.
+  defp projection_job_matches?(work, %{generation: {id, version, _digest}} = call, job) do
+    if is_map(job.artifact_policy) and Map.has_key?(job.artifact_policy, "projection") do
+      with {:ok, binding} <-
+             Loopex.Runtime.ArtifactReadCapabilities.resolve(work.request.tools) do
+        expected =
+          Loopex.Executor.JobRequest.artifact_policy(
+            id,
+            version,
+            binding,
+            Conversation.normalized_call_id(work.run_id, work.turn_number, call.tool_call_id)
+          )
+
+        job.tool_id == id and job.tool_version == version and job.artifact_policy == expected
+      else
+        _invalid -> false
+      end
+    else
+      not (id in ~w(loopex.grep loopex.find loopex.ls) and version == "1.1.0")
+    end
+  end
+
+  defp projection_job_matches?(_work, _call, _job), do: false
+
   defp internal_transaction_id(state, logical_tx_id) do
     stable_id(
       "internal",
@@ -3875,6 +3902,7 @@ defmodule Loopex.Runtime.SessionState do
          true <- job.run_id == run_id and job.turn_id == turn_id,
          true <- job.tool_call_id == call.tool_call_id,
          true <- artifact_job_matches?(state, work, call, job),
+         true <- projection_job_matches?(work, call, job),
          true <- is_map(grant) do
       # Concept: calls run in the order the model asked for them.
       #

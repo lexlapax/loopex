@@ -46,6 +46,13 @@ defmodule LoopexCli.ChatConfigurationTest do
 
         assert Enum.find(definitions, &(&1["tool_id"] == "loopex.read"))["tool_version"] ==
                  "1.1.0"
+
+        for definition <- definitions,
+            definition["tool_id"] in ~w(loopex.grep loopex.find loopex.ls) do
+          assert definition["tool_version"] == "1.1.0"
+          assert definition["budgets"]["output_bytes"] == 16_384
+          assert definition["budgets"]["artifact_bytes"] == 16_384
+        end
       else
         assert is_nil(prepared.genesis["tool_selection"]["artifact_read"])
       end

@@ -577,7 +577,7 @@ defmodule Loopex.Conversation do
         identity = {run, turn, id}
 
         if valid_generation and not Map.has_key?(identities, identity) do
-          normalized = "lx_" <> binary_part(Canonical.digest([run, turn, id]), 0, 48)
+          normalized = normalized_call_id(run, turn, id)
           {:cont, {:ok, Map.put(identities, identity, normalized)}}
         else
           {:halt, {:error, :context_projection_invalid}}
@@ -587,6 +587,11 @@ defmodule Loopex.Conversation do
         {:halt, {:error, :context_projection_invalid}}
     end)
   end
+
+  @doc false
+  @spec normalized_call_id(binary(), pos_integer(), binary()) :: binary()
+  def normalized_call_id(run, turn_number, raw_call_id),
+    do: "lx_" <> binary_part(Canonical.digest([run, turn_number, raw_call_id]), 0, 48)
 
   defp normalize_call_ids(
          %{"kind" => "session_assistant", "run_id" => run, "turn" => turn},

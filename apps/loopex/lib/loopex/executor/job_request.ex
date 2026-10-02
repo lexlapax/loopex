@@ -20,6 +20,15 @@ defmodule Loopex.Executor.JobRequest do
   to a monotonic instant: ADR 0016 keeps the two clock domains separate, and an
   executor derives its own private monotonic action deadline from the remaining
   wall duration at handoff.
+
+  M7 read/search jobs carry a closed `artifact_policy.projection` map with
+  `revision: 1`, the frozen `artifact_read` binding (or explicit nil), and
+  `normalized_call_id: "lx_<48 lowercase hex>"`. The existing outer field order
+  and protocol version stay fixed, and the digest binds the complete nested
+  policy. This context controls result framing and retention, never authority.
+  Replay reconstructs it from retained definitions and run/turn/call lineage.
+  Search 1.1.0 requires the context before effects. Already committed jobs
+  without it, including read 1.1.0, retain their exact bytes and spill semantics.
   """
 
   # Concept: the ordered semantic projection the digest binds.
@@ -101,4 +110,50 @@ defmodule Loopex.Executor.JobRequest do
   """
   @spec derived_fields() :: [atom()]
   def derived_fields, do: @derived_fields
+
+  # Concept: output retention uses the session's frozen retrieval capability.
+  # Technical depth: this context is inside the existing digest-bound policy.
+  # It carries framing data, never a grant. Older jobs have no projection member.
+  @doc false
+  @spec projection_generation?(binary(), binary()) :: boolean()
+  def projection_generation?("loopex.read", "1.1.0"), do: true
+
+  def projection_generation?(id, "1.1.0") when id in ~w(loopex.grep loopex.find loopex.ls),
+    do: true
+
+  def projection_generation?(_, _), do: false
+
+  @doc false
+  @spec artifact_policy(binary(), binary(), term(), binary()) :: map()
+  def artifact_policy(id, version, binding, call_id) do
+    if projection_generation?(id, version) do
+      %{
+        "retain" => true,
+        "projection" => %{
+          "revision" => 1,
+          "artifact_read" => binding,
+          "normalized_call_id" => call_id
+        }
+      }
+    else
+      %{"retain" => true}
+    end
+  end
+
+  @doc false
+  @spec valid_projection_policy?(term()) :: boolean()
+  def valid_projection_policy?(%{"projection" => context} = policy) do
+    case context do
+      %{"revision" => 1, "artifact_read" => binding, "normalized_call_id" => id}
+      when map_size(context) == 3 and is_binary(id) ->
+        map_size(policy) == 2 and policy["retain"] == true and
+          Regex.match?(~r/\Alx_[0-9a-f]{48}\z/, id) and
+          binding in Map.values(Loopex.Runtime.ArtifactReadCapabilities.table())
+
+      _invalid ->
+        false
+    end
+  end
+
+  def valid_projection_policy?(_legacy), do: true
 end

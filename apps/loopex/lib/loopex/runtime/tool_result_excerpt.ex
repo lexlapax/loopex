@@ -27,6 +27,12 @@ defmodule Loopex.Runtime.ToolResultExcerpt do
   @outcomes ~w(completed failed denied cancelled outcome_unknown)
 
   @doc false
+  @spec encoded_size(map()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def encoded_size(message) do
+    with {:ok, bytes} <- json(message), do: {:ok, byte_size(bytes)}
+  end
+
+  @doc false
   @spec encode(map(), map(), non_neg_integer()) :: {:ok, map()} | {:error, atom()}
   def encode(message, reference, allowance \\ @ceiling)
 

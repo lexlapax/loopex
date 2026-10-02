@@ -237,6 +237,15 @@ defmodule Loopex.Executor.Local.CodingTools do
     "tool_version" => "1.1.0"
   }
 
+  # Concept: M7 search output can be retrieved from its complete captured bytes.
+  # Technical depth: new immutable generations raise only the artifact allowance
+  # to the existing capture ceiling; old definitions remain exact for dispatch.
+  @projection_search (for definition <- @search_definitions do
+                        definition
+                        |> Map.put("tool_version", "1.1.0")
+                        |> put_in(["budgets", "artifact_bytes"], 16_384)
+                      end)
+
   @doc """
   ## Concept
 
@@ -253,7 +262,7 @@ defmodule Loopex.Executor.Local.CodingTools do
 
   @doc false
   @spec generations() :: [map()]
-  def generations, do: definitions() ++ [@range_read]
+  def generations, do: definitions() ++ [@range_read] ++ @projection_search
 
   @doc """
   ## Concept

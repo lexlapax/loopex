@@ -159,7 +159,8 @@ defmodule LoopexCli.ChatConfiguration do
     DurableOptions.definitions(active_tools: active)
     |> Enum.filter(fn definition ->
       definition["tool_id"] in active and
-        (definition["tool_id"] != "loopex.read" or definition["tool_version"] == "1.1.0")
+        (definition["tool_id"] not in ~w(loopex.read loopex.grep loopex.find loopex.ls) or
+           definition["tool_version"] == "1.1.0")
     end)
   end
 

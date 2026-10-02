@@ -2211,6 +2211,7 @@ defmodule Loopex.Executor.Local do
            }),
          true <- job.executor_identity == state.identity,
          true <- job.origin_executor_epoch == state.epoch,
+         :ok <- validate_projection_context(job),
          {:ok, arguments} <- validate_job_arguments(tool, job),
          :ok <- Loopex.Executor.Local.ReadOnlyTools.validate_path(lease.path, arguments) do
       {:ok, tool, lease_pid, lease.path, arguments}
@@ -3008,6 +3009,17 @@ defmodule Loopex.Executor.Local do
   end
 
   defp validate_job_arguments(tool, job), do: validate_arguments(tool, job.validated_arguments)
+
+  defp validate_projection_context(job) do
+    required =
+      job.tool_id in ~w(loopex.grep loopex.find loopex.ls) and job.tool_version == "1.1.0"
+
+    if Loopex.Executor.JobRequest.valid_projection_policy?(job.artifact_policy) and
+         (not required or
+            (is_map(job.artifact_policy) and Map.has_key?(job.artifact_policy, "projection"))),
+       do: :ok,
+       else: {:error, :invalid_projection_context}
+  end
 
   defp validate_arguments(%{id: @write_tool}, arguments),
     do: write_arguments(arguments, 0)
@@ -5634,14 +5646,49 @@ defmodule Loopex.Executor.Local do
   defp spill({outcome, output}, state, job, lease, limits),
     do: spill({outcome, output, :complete}, state, job, lease, limits)
 
-  defp spill({outcome, output, :complete}, _state, _job, _lease, _limits),
-    do: {outcome, output, []}
+  defp spill({outcome, output, :complete}, state, job, lease, limits) do
+    if early_spill?(job, outcome, output) do
+      retain_truncated(outcome, output, "", state, job, lease, limits.output)
+    else
+      {outcome, output, []}
+    end
+  end
 
   defp spill({outcome, _kept, {:truncated, full}}, state, job, lease, limits),
     do: spill_truncated(outcome, full, "", state, job, lease, limits)
 
   defp spill({outcome, _kept, {:truncated, full, diagnostic}}, state, job, lease, limits),
     do: spill_truncated(outcome, full, diagnostic, state, job, lease, limits)
+
+  # Concept: retention happens before the immutable receipt when framing is large.
+  # Technical depth: measure the actual complete JSON tool message, including
+  # escaping and normalized identity. Explicit ranges never acquire another
+  # artifact. Invalid UTF-8 is retained for the existing binary excerpt formatter.
+  defp early_spill?(job, outcome, output) do
+    case job.artifact_policy do
+      %{"projection" => %{"artifact_read" => binding, "normalized_call_id" => id}}
+      when not is_nil(binding) ->
+        eligible =
+          Loopex.Executor.JobRequest.projection_generation?(job.tool_id, job.tool_version) and
+            not Map.has_key?(job.validated_arguments, "resolved_artifact")
+
+        message = %{
+          "role" => "tool",
+          "tool_call_id" => id,
+          "outcome" => Atom.to_string(outcome),
+          "content" => output
+        }
+
+        eligible and
+          case Loopex.Runtime.ToolResultExcerpt.encoded_size(message) do
+            {:ok, bytes} -> bytes > 2_048
+            {:error, _invalid_utf8} -> true
+          end
+
+      _legacy_or_unavailable ->
+        false
+    end
+  end
 
   defp spill_truncated(outcome, full, diagnostic, state, job, lease, limits) do
     retain_truncated(outcome, full, diagnostic, state, job, lease, limits.output)
@@ -5675,7 +5722,7 @@ defmodule Loopex.Executor.Local do
 
     {deadline, bound_cause} = retention_deadline(job)
 
-    case retain_under_lease(state.artifacts, full, metadata, lease, deadline) do
+    case retain_under_lease(state.artifacts, full, metadata, lease, deadline, job) do
       {:ok, reference} ->
         {outcome, bounded_artifact_notice(full, diagnostic, limit, reference), [reference]}
 
@@ -5722,6 +5769,15 @@ defmodule Loopex.Executor.Local do
            "\n[loopex: the workspace lease was lost while this job's output was being" <>
              " retained, and the retention was abandoned. Whether the effect landed in" <>
              " the workspace this job was authorised against is unproven.]"
+         ), []}
+
+      :retention_cancelled ->
+        {outcome,
+         bounded_truncation_with_extra(
+           full,
+           diagnostic,
+           limit,
+           "\n[loopex: output retention was cancelled; nothing beyond it was retained.]"
          ), []}
 
       {:unconfirmed, reason} ->
@@ -5801,12 +5857,22 @@ defmodule Loopex.Executor.Local do
   # milliseconds left spilled into a store that delayed four seconds and returned
   # after about four seconds, reporting `completed`. Both are alternatives of the
   # one wait now.
-  defp retain_under_lease(store, bytes, metadata, {_monitor, lease_pid}, deadline) do
-    bounded_guardian_until(
+  defp retain_under_lease(store, bytes, metadata, {_monitor, lease_pid}, deadline, job) do
+    # Concept: an M7 output-retention worker remains addressable by its job.
+    # Technical depth: the existing guardian joins effect and guardian DOWN
+    # within the captured cancellation episode before the caller settles and
+    # answers. Legacy jobs retain their existing routing and spill semantics.
+    cancel_job =
+      if Loopex.Executor.JobRequest.projection_generation?(job.tool_id, job.tool_version) and
+           is_map(job.artifact_policy) and Map.has_key?(job.artifact_policy, "projection"),
+         do: job.job_id
+
+    bounded_guardian_with_remaining(
       fn -> Loopex.ArtifactStore.put(store, bytes, metadata) end,
-      deadline,
+      fn -> deadline - cleanup_now_ms() end,
       lease_pid,
-      nil
+      nil,
+      cancel_job
     )
     |> artifact_retention_result()
   end
@@ -5818,6 +5884,7 @@ defmodule Loopex.Executor.Local do
   @doc false
   @spec artifact_retention_result(
           {:done, term()}
+          | {:cancelled, boolean()}
           | {:stopped, term()}
           | {:guardian_stopped, term(), boolean()}
           | {:abandoned, :workspace_lease_lost | :bound_reached, boolean(), term()}
@@ -5827,8 +5894,15 @@ defmodule Loopex.Executor.Local do
           | {:unconfirmed, term()}
           | :workspace_lease_lost
           | :retention_bound_reached
+          | :retention_cancelled
   def artifact_retention_result(result) do
     case result do
+      {:cancelled, true} ->
+        :retention_cancelled
+
+      {:cancelled, false} ->
+        {:unconfirmed, :retention_cancellation_worker_unconfirmed}
+
       {:done, result} ->
         result
 
