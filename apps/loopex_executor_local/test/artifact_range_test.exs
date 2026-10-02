@@ -13,6 +13,7 @@ defmodule Loopex.Executor.Local.ArtifactRangeTest do
 
     assert result == %{
              "artifact" => reference,
+             "excerpt_source" => "artifact_object",
              "offset" => 2,
              "byte_count" => 4,
              "next_offset" => 6,

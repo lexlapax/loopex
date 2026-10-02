@@ -26,15 +26,15 @@ they do not mean the original task is complete. This follows the maintainer's
   conversation witness remains a separate release obligation.
 - Done: T02 exact-generation capability checks now guard runtime admission,
   registry loading and the local executor's compiled tool inventory. Original
-  checklist completion is 23/186 items and 1/20 top-level tasks.
+  checklist completion is 24/186 items and 1/20 top-level tasks.
 - Done: T02 attachment-budget baseline audit distinguishes existing attachment
   limitations from the required job-owned bounds. Snapshot creation failure now
   closes its source descriptor before returning; both toolchains prove the repair.
 - Done: T02 pure range-result encoding selects the largest UTF-8 prefix within
   the complete 8,192-byte conversation-message limit, including double escaping,
   normalized call identity and metadata. Local storage and executor integration
-  now pass real range tests; prepared references and owner-workflow integration
-  remain open.
+  now pass real range tests. The real session-owner path preserves receipt-owned
+  ranges across restart; prepared references and excerpt projection remain open.
 - Decision recorded: on 2026-10-01 the maintainer selected the separate optional
   `ArtifactStore.read_job_range(handle, validated_job)` callback for job reads.
   The local callback now verifies real objects with shared transfer capacity,
@@ -43,8 +43,8 @@ they do not mean the original task is complete. This follows the maintainer's
   through restart. Existing attachment callbacks remain compatible.
 - Done: T02 resolves committed-receipt artifact membership before policy and
   binds approved ranges to their exact source in the journaled job. Prepared
-  references and the composed session-owner workflow remain open, so original
-  counts are unchanged.
+  references remain open. The receipt-owned range workflow is now proved with
+  the real local journal, executor and artifact store across restart.
 - Done: reproduce cross-run conversation loss with the real session-owner path
   and a scripted model in `apps/loopex/test/agent_loop_test.exs`.
 - Done: run-scoped result joins, replayed admission order, revision-1 normalized
@@ -1518,7 +1518,7 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Implement capability checks from the exact frozen tool definitions and literal capability table.
 - [ ] Keep replay independent of current host-registry availability.
 - [ ] Validate artifact ownership and arguments in the session owner before policy admission; add resolved executor data after approval.
-- [ ] Implement 4-KiB range reads, encoded-result limits, offsets, progress and EOF.
+- [x] Implement 4-KiB range reads, encoded-result limits, offsets, progress and EOF.
 - [ ] Add bounded preparation, aggregate excerpt allocation and job-owned transfer accounting.
 - [ ] Preserve legacy inline behavior where the complete request fits.
 - [ ] Test escaping, Unicode, forged references, cross-session access, digest mismatch, exhaustion, cancellation and recovery.
@@ -1535,7 +1535,60 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Implement the maintainer-selected optional job-range callback in the local store, including canonical job validation, closed resolved data, stored provenance, shared capacity, whole-object verification, work reservation, deadline watchdog and descriptor cleanup.
 - [x] Join the job-range callback to exact 1.1.0 executor dispatch, unsupported-adapter refusal, range encoding and settlement; prove repeated dispatch does not reopen a completed job and exercise cancellation through the real executor.
 
+- [x] Join receipt-owned ranges through the real session owner, local journal, executor and artifact store; prove restart with an empty registry, immutable object retrieval after workspace changes, and exact range projection into later prompts. Include the required artifact-object source label in the encoded cap.
+- [ ] Wire the reference host's captured M7 tool selection to read 1.1.0 and provide its job transfer owner even when the public attachment transfer family is disabled.
+
 ### Verification evidence
+
+The full receipt-owned range path now runs through a real session coordinator,
+local journal, local executor and local artifact store. A scripted model reads a
+32-KiB workspace file, the host obtains its committed public use reference, and
+a later prompt requests 4,096 bytes at offset 20,000, beyond the original inline
+prefix. Two witnesses restart the runtime, journal and executor either before
+retrieval or after it. Both resume with an empty host registry and a changed
+workspace file. The original object supplies the exact bytes, the job binds the
+preceding receipt's digest/version, replay restores the same membership, and the
+next ordinary prompt preserves the complete range message. No retrieval result
+adds a new artifact.
+
+Review against ADR 0041 found the explicit range encoder omitted its required
+`excerpt_source: artifact_object` member. The member is now part of the encoded
+result and its complete-message measurement. Existing maximality, escaping,
+UTF-8, progress, first/final/empty and refusal tests pass with it. This closes the
+original 4-KiB range-read item; prepared references, excerpt allocation and
+reference-host startup selection remain open.
+
+Twelve composition cases pass in 1.8 seconds on the current toolchain and 1.9
+seconds on the floor; seven encoder cases pass in 0.1 seconds on each. The
+application suites run in separate VMs.
+
+- Current composition: `/private/tmp/loopex-m7-range-session-current.log`,
+  SHA-256 `362131df6ef32f23cf147ae80b5768b3e1bd357d5df13c266c9039b2bac31390`.
+- Floor composition: `/private/tmp/loopex-m7-range-session-floor.log`,
+  SHA-256 `e43bb91971b298c8a04d437cffeca0b3f3d3f259cdb556c058d218e2ee6da642`.
+- Current encoder: `/private/tmp/loopex-m7-range-source-current.log`,
+  SHA-256 `c2ff6bc5e22a9c4bd4367e3b69fb64555fe6a214aaec4d936eb54412f8865188`.
+- Floor encoder: `/private/tmp/loopex-m7-range-source-floor.log`,
+  SHA-256 `3b591d3939b94e7839747c51f7617d07ec081f97a8c435d549627a81b7b8238d`.
+
+The initial fixture supplied a framed newline to the strict payload decoder;
+the prompt now contains only the JSON payload. A later exploratory third range
+completed its executor job but its following model request correctly refused
+at 8,327 estimated tokens against the unchanged 8,192-token limit. The earlier
+large result is still inline: this is evidence of unfinished excerpt projection,
+not a reason to raise the limit. The restart witnesses isolate retrieval and
+history preservation with a terminal follow-up instead; the longer workflow
+remains an obligation of excerpt/compaction integration.
+
+- Initial framing failure: `/private/tmp/loopex-m7-range-session-first.log`,
+  SHA-256 `405dd2ddfaf54130aff345431f1e1e60ce8fae415bb13ce5fc033f14ac645a21`.
+- Decoded failure evidence: `/private/tmp/loopex-m7-range-session-diagnostic.log`,
+  SHA-256 `c1e65d65d0ec82e3a16310d075cc66567adfa73f1b1885a90ba05df806a9a1ba`.
+- Third-range failure: `/private/tmp/loopex-m7-range-session-framing.log`,
+  SHA-256 `21a9f10cff8ed6fcc057e3ed602678e09ffb707efc27e38fe60410d6a13ac676`.
+- Retained numeric refusal: `/private/tmp/loopex-m7-range-session-restart-diagnostic.log`,
+  SHA-256 `cda6055347159ac112f7ef96f0edde9b4b4467880287a87eefeb4ede91b19224`.
+
 
 The local executor now serves the pinned read 1.1.0 definition alongside 1.0.0,
 selects dispatch and retained-receipt readers by both ID and version, and keeps

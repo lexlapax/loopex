@@ -8,8 +8,11 @@ defmodule Loopex.Executor.Local.ArtifactRange do
 
   ## Technical depth
 
-  This pure encoder receives a verified window from an admitted job. It neither
-  reads storage nor proves artifact ownership or integrity. The window contains
+  The reader invokes the optional job-range storage callback from the executor's
+  disposable I/O process. Missing callbacks refuse without a whole-object fetch.
+  The pure encoder receives that verified window; it does not establish artifact
+  ownership or integrity. `excerpt_source: artifact_object` identifies offsets
+  into the verified object rather than the original receipt text. The window contains
   exactly the requested bytes, shortened only at object EOF. A partial trailing
   codepoint may be omitted before EOF; malformed UTF-8, including a start inside
   a codepoint, refuses. The largest complete prefix fitting the entire encoded
@@ -93,6 +96,7 @@ defmodule Loopex.Executor.Local.ArtifactRange do
 
       record = %{
         "artifact" => reference,
+        "excerpt_source" => "artifact_object",
         "offset" => offset
       }
 
