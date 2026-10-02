@@ -103,8 +103,11 @@ defmodule LoopexCli.ChatDriver do
 
   Unknown cleanup forces a nonzero exit. Output failure also forces nonzero;
   successful delivery is separate from the supplied runtime cleanup proof.
+  The host may supply a minimum nonzero exit after its signal handler has
+  serialized the final decision; that cannot erase an earlier failure.
   """
-  def close(driver, cleanup), do: GenServer.call(driver, {:close, cleanup}, :infinity)
+  def close(driver, cleanup, minimum_exit_code \\ 0),
+    do: GenServer.call(driver, {:close, cleanup, minimum_exit_code}, :infinity)
 
   @doc """
   ## Concept
@@ -204,10 +207,15 @@ defmodule LoopexCli.ChatDriver do
     {:noreply, state |> startup_caller(:run, from) |> start_attachments()}
   end
 
-  def handle_call({:close, cleanup}, {caller, _}, %{owner: caller, finished: true} = state)
-      when cleanup in [:confirmed, :unknown] do
+  def handle_call(
+        {:close, cleanup, minimum_exit_code},
+        {caller, _},
+        %{owner: caller, finished: true} = state
+      )
+      when cleanup in [:confirmed, :unknown] and minimum_exit_code in [0, 1] do
     cleanup = if state.local_cleanup == :unknown, do: :unknown, else: cleanup
-    code = if cleanup == :confirmed, do: state.exit_code, else: max(state.exit_code, 1)
+    code = max(state.exit_code, minimum_exit_code)
+    code = if cleanup == :confirmed, do: code, else: max(code, 1)
 
     result =
       emit(state, :closing, %{exit_code: code, cleanup: cleanup, last_outcome: state.last_outcome})

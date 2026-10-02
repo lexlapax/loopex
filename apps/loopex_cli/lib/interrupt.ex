@@ -145,12 +145,52 @@ defmodule LoopexCli.Interrupt do
   @spec install_ask(pid(), reference()) :: {:ok, pid()} | {:error, atom()}
   def install_ask(main_pid, reference)
       when main_pid == self() and is_reference(reference) do
+    install_command_handler(main_pid, reference, %{
+      grace_ms: @grace_ms,
+      ask: %{main_pid: main_pid, ref: reference, phase: :idle}
+    })
+  end
+
+  def install_ask(_, _), do: {:error, :interrupt_handler_unavailable}
+
+  @doc """
+  ## Concept
+
+  Route process signals to the existing chat driver before session activation.
+
+  ## Technical depth
+
+  The installing host remains responsible for outer cleanup and final output.
+  The exact manager and reference identify this installation. Every signal
+  notifies the same driver, which owns admission fencing and its captured
+  cancellation cutoff. The handler submits no competing abort. A second
+  signal allows the driver to return unknown cleanup and emit its closing
+  record; the process backstop still bounds a stalled host. Installation uses
+  the same monitored, bounded installer and atomic manager claim as ask.
+  """
+  def install_chat(driver, reference, cleanup_grace_ms)
+      when is_pid(driver) and is_reference(reference) do
+    case Loopex.Executor.cancellation_bounds(cleanup_grace_ms) do
+      {:ok, bounds} ->
+        install_command_handler(self(), reference, %{
+          grace_ms: bounds.cli_backstop_ms,
+          chat: %{owner: self(), driver: driver, ref: reference, phase: :idle}
+        })
+
+      _ ->
+        {:error, :interrupt_handler_unavailable}
+    end
+  end
+
+  def install_chat(_, _, _), do: {:error, :interrupt_handler_unavailable}
+
+  defp install_command_handler(main_pid, reference, fields) do
     case Process.whereis(:erl_signal_server) do
       manager when is_pid(manager) ->
         token = make_ref()
 
         {installer, monitor} =
-          spawn_monitor(fn -> ask_installer(main_pid, manager, reference, token) end)
+          spawn_monitor(fn -> command_installer(main_pid, manager, reference, token, fields) end)
 
         result =
           receive do
@@ -183,8 +223,6 @@ defmodule LoopexCli.Interrupt do
     end
   end
 
-  def install_ask(_, _), do: {:error, :interrupt_handler_unavailable}
-
   @doc """
   ## Concept
 
@@ -198,8 +236,32 @@ defmodule LoopexCli.Interrupt do
   @spec finish_ask(pid(), reference()) ::
           {:ok, :ordinary | :interrupted} | {:error, :interrupt_handler_unavailable}
   def finish_ask(manager, reference) when is_pid(manager) and is_reference(reference) do
+    finish_command_handler(manager, reference, :finish_ask)
+  end
+
+  def finish_ask(_, _), do: {:error, :interrupt_handler_unavailable}
+
+  @doc """
+  ## Concept
+
+  Retire this chat signal route after cleanup and before final output.
+
+  ## Technical depth
+
+  The exact manager serializes finish against signal callbacks and restores
+  OTP's default handler. A stale reference cannot remove another installation.
+  Losing the manager or handler is an unavailable cleanup observation.
+  The host passes an interrupted decision as a minimum nonzero exit to the
+  driver close call, including when input finished before the signal arrived.
+  """
+  def finish_chat(manager, reference) when is_pid(manager) and is_reference(reference),
+    do: finish_command_handler(manager, reference, :finish_chat)
+
+  def finish_chat(_, _), do: {:error, :interrupt_handler_unavailable}
+
+  defp finish_command_handler(manager, reference, operation) do
     if Process.whereis(:erl_signal_server) == manager do
-      case :gen_event.call(manager, __MODULE__, {:finish_ask, reference}, @observation_ms) do
+      case :gen_event.call(manager, __MODULE__, {operation, reference}, @observation_ms) do
         {:ok, decision} = result when decision in [:ordinary, :interrupted] ->
           if Process.whereis(:erl_signal_server) == manager, do: result, else: unavailable_ask()
 
@@ -212,8 +274,6 @@ defmodule LoopexCli.Interrupt do
   catch
     :exit, _ -> {:error, :interrupt_handler_unavailable}
   end
-
-  def finish_ask(_, _), do: {:error, :interrupt_handler_unavailable}
 
   defp unavailable_ask, do: {:error, :interrupt_handler_unavailable}
 
@@ -238,6 +298,26 @@ defmodule LoopexCli.Interrupt do
   end
 
   def ask_live(_, _), do: false
+
+  @doc """
+  ## Concept
+
+  Check that this chat route still owns process signal delivery.
+
+  ## Technical depth
+
+  Require both the registered manager identity and its exact live handler
+  reference. The 100-ms observation is bounded even if the manager is stalled.
+  """
+  def chat_live(manager, reference) when is_pid(manager) and is_reference(reference) do
+    Process.whereis(:erl_signal_server) == manager and
+      :gen_event.call(manager, __MODULE__, {:chat_live, reference}, @manager_probe_ms) == :ok and
+      Process.whereis(:erl_signal_server) == manager
+  catch
+    :exit, _ -> false
+  end
+
+  def chat_live(_, _), do: false
 
   @doc """
   ## Concept
@@ -904,13 +984,13 @@ defmodule LoopexCli.Interrupt do
   # queued gen_event swap can still run after its caller dies. The installer
   # waits for an exact admit/cancel decision and retries cancellation while its
   # original manager remains alive. The handler also monitors the main PID.
-  defp ask_installer(main_pid, manager, reference, token) do
+  defp command_installer(main_pid, manager, reference, token, fields) do
     main_monitor = Process.monitor(main_pid)
     manager_monitor = Process.monitor(manager)
 
     result =
       try do
-        ask_install_on(manager, main_pid, reference)
+        command_install_on(manager, main_pid, reference, fields)
       catch
         :exit, _ -> {:error, :interrupt_handler_unavailable}
       end
@@ -923,10 +1003,10 @@ defmodule LoopexCli.Interrupt do
           :ok
 
         {^main_pid, ^token, :cancel} ->
-          cancel_ask_until_removed(manager, reference)
+          cancel_command_until_removed(manager, reference, fields)
 
         {:DOWN, ^main_monitor, :process, ^main_pid, _} ->
-          cancel_ask_until_removed(manager, reference)
+          cancel_command_until_removed(manager, reference, fields)
 
         {:DOWN, ^manager_monitor, :process, ^manager, _} ->
           :ok
@@ -934,13 +1014,14 @@ defmodule LoopexCli.Interrupt do
     end
   end
 
-  defp ask_install_on(manager, main_pid, reference) do
-    state = %{
-      attachment: nil,
-      terminal: main_pid,
-      grace_ms: @grace_ms,
-      ask: %{main_pid: main_pid, ref: reference, phase: :idle}
-    }
+  defp command_install_on(manager, main_pid, reference, fields) do
+    state =
+      %{
+        attachment: nil,
+        terminal: main_pid,
+        grace_ms: @grace_ms
+      }
+      |> Map.merge(fields)
 
     with {:ok, handlers} <- observe_handlers(manager),
          true <- ask_handlers_supported?(handlers),
@@ -951,7 +1032,7 @@ defmodule LoopexCli.Interrupt do
           {:ok, manager}
 
         {:error, :interrupt_handler_unavailable} = refusal ->
-          cancel_ask_until_removed(manager, reference)
+          cancel_command_until_removed(manager, reference, fields)
           refusal
       end
     else
@@ -960,7 +1041,7 @@ defmodule LoopexCli.Interrupt do
   end
 
   # OTP's tty handler owns SIGCONT and SIGWINCH and ignores the three signals
-  # owned by ask. Preserve it during the default-handler swap; refuse any other
+  # owned by ask and chat. Preserve it during the default-handler swap; refuse any other
   # handler present at the installation observation.
   defp ask_handlers_supported?(handlers) do
     Enum.sort(handlers) in [
@@ -1008,23 +1089,26 @@ defmodule LoopexCli.Interrupt do
     defp ask_install_observed(_manager, _main_pid, _reference), do: :ok
   end
 
-  defp cancel_ask_until_removed(manager, reference) do
-    case :gen_event.call(manager, __MODULE__, {:cancel_ask, reference}, @observation_ms) do
+  defp cancel_command_until_removed(manager, reference, fields) do
+    operation = if Map.has_key?(fields, :chat), do: :cancel_chat, else: :cancel_ask
+
+    case :gen_event.call(manager, __MODULE__, {operation, reference}, @observation_ms) do
       :ok -> :ok
       {:error, :ask_not_installed} -> :ok
+      {:error, :chat_not_installed} -> :ok
       {:error, :bad_module} -> :ok
-      _ -> cancel_ask_again(manager, reference)
+      _ -> cancel_command_again(manager, reference, fields)
     end
   catch
     :exit, reason ->
       if Process.alive?(manager) and reason != {:bad_module, __MODULE__},
-        do: cancel_ask_again(manager, reference),
+        do: cancel_command_again(manager, reference, fields),
         else: :ok
   end
 
-  defp cancel_ask_again(manager, reference) do
+  defp cancel_command_again(manager, reference, fields) do
     Process.sleep(20)
-    cancel_ask_until_removed(manager, reference)
+    cancel_command_until_removed(manager, reference, fields)
   end
 
   # Concept: installation claims one handler in the exact manager that owns
@@ -1193,10 +1277,23 @@ defmodule LoopexCli.Interrupt do
               nil
           end
 
+        chat =
+          case Map.get(state, :chat) do
+            %{owner: owner, driver: driver} = selected when is_pid(owner) and is_pid(driver) ->
+              selected
+              |> Map.put(:owner_monitor, Process.monitor(owner))
+              |> Map.put(:driver_monitor, Process.monitor(driver))
+              |> Map.put(:driver_status, :live)
+
+            _ ->
+              nil
+          end
+
         {:ok,
-         %{abort: nil, backstop: nil, activation: nil, holder: nil, ask: ask}
+         %{abort: nil, backstop: nil, activation: nil, holder: nil, ask: ask, chat: chat}
          |> Map.merge(state)
          |> Map.put(:ask, ask)
+         |> Map.put(:chat, chat)
          |> Map.put(:claim, claim)}
 
       _incumbent ->
@@ -1227,6 +1324,16 @@ defmodule LoopexCli.Interrupt do
       holder when is_pid(holder) -> release(holder)
       _none -> :ok
     end
+
+    case Map.get(state, :chat) do
+      %{owner_monitor: owner, driver_monitor: driver} ->
+        Process.demonitor(owner, [:flush])
+        Process.demonitor(driver, [:flush])
+        disarm(Map.get(state, :backstop))
+
+      _ ->
+        :ok
+    end
   end
 
   def terminate(_reason, _state), do: :ok
@@ -1253,7 +1360,21 @@ defmodule LoopexCli.Interrupt do
   # the signal server: a write to a stderr nobody is draining would otherwise
   # stall delivery of every later signal, which is the same reason the admission
   # itself is not performed here.
+  # Concept: chat cancellation belongs to its driver through final output.
+  # Technical depth: this callback never submits an abort or spends a resume
+  # capability. Later signals notify the same driver under the first process
+  # backstop. A normally closed driver leaves the host's finish decision live.
   @impl :gen_event
+  def handle_event(signal, %{chat: %{driver: driver} = chat} = state) when signal in @signals do
+    backstop = state.backstop || spawn(fn -> backstop(chat.owner, state.grace_ms) end)
+
+    if is_pid(driver),
+      do: LoopexCli.ChatDriver.interrupt(driver),
+      else: send(chat.owner, {self(), chat.ref, :chat_interrupt})
+
+    {:ok, %{state | chat: %{chat | phase: :stopping}, backstop: backstop}}
+  end
+
   def handle_event(signal, %{ask: %{phase: :stopping}} = _state) when signal in @signals,
     do: halt_owning_nothing()
 
@@ -1324,6 +1445,29 @@ defmodule LoopexCli.Interrupt do
 
   def handle_call({:ask_live, _other}, state), do: {:ok, {:error, :ask_not_installed}, state}
 
+  def handle_call(
+        {:chat_live, reference},
+        %{chat: %{ref: reference, driver_status: status}} = state
+      )
+      when status in [:live, :closed],
+      do: {:ok, :ok, state}
+
+  def handle_call({:finish_chat, reference}, %{chat: %{ref: reference} = chat} = state) do
+    result =
+      if chat.driver_status == :lost,
+        do: {:error, :interrupt_handler_unavailable},
+        else: {:ok, if(chat.phase == :idle, do: :ordinary, else: :interrupted)}
+
+    {:swap_handler, result, :chat_finished, state, :erl_signal_handler, []}
+  end
+
+  def handle_call({:cancel_chat, reference}, %{chat: %{ref: reference}} = state),
+    do: {:swap_handler, :ok, :chat_cancelled, state, :erl_signal_handler, []}
+
+  def handle_call({operation, _other}, state)
+      when operation in [:chat_live, :finish_chat, :cancel_chat],
+      do: {:ok, {:error, :chat_not_installed}, state}
+
   # Concept: a failed owner handoff leaves the interrupt path live but advertises
   # no process as a capability holder.
   #
@@ -1353,6 +1497,21 @@ defmodule LoopexCli.Interrupt do
   # identity frozen and the backstop armed, because a timeout is not a verdict
   # about whether the abort committed.
   @impl :gen_event
+  def handle_info(
+        {:DOWN, monitor, :process, owner, _},
+        %{chat: %{owner: owner, owner_monitor: monitor}} = state
+      ),
+      do: {:swap_handler, :chat_owner_down, state, :erl_signal_handler, []}
+
+  def handle_info(
+        {:DOWN, monitor, :process, driver, reason},
+        %{chat: %{driver: driver, driver_monitor: monitor} = chat} = state
+      ) do
+    status = if reason == :normal, do: :closed, else: :lost
+    if status == :lost, do: send(chat.owner, {self(), chat.ref, :chat_driver_down})
+    {:ok, %{state | chat: %{chat | driver: nil, driver_status: status}}}
+  end
+
   def handle_info(
         {:DOWN, monitor, :process, main_pid, _reason},
         %{ask: %{main_pid: main_pid, monitor: monitor}} = state

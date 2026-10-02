@@ -1,0 +1,82 @@
+defmodule LoopexCli.ChatOSSignalDriver do
+  @moduledoc false
+  alias LoopexCli.{ChatDriver, Interrupt}
+  alias Loopex.AgentLoopFixture, as: Fixture
+
+  def main do
+    {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1},
+      String.to_integer(System.fetch_env!("LOOPEX_CHAT_SIGNAL_PORT")),
+      [:binary, active: false, packet: 4], 5000)
+    send_control(socket, {:pid, System.pid()})
+    scenario = System.fetch_env!("LOOPEX_CHAT_SIGNAL_SCENARIO")
+    fixture = Fixture.start(script: [], tools: [])
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, input} = StringIO.open("one\n/wait\n", encoding: :latin1)
+    parent = self()
+
+    facade = fn module, function, args ->
+      case {function, args, scenario} do
+        {:command, [_, %{type: :prompt}], "double"} ->
+          send_control(socket, :admission_blocked)
+          receive do: (:release -> apply(module, function, args))
+        {:command, [_, %{type: :abort}], "double"} ->
+          send_control(socket, :competing_abort)
+          apply(module, function, args)
+        _ -> apply(module, function, args)
+      end
+    end
+
+    {input, input_owner} =
+      if scenario == "double" do
+        {input, nil}
+      else
+        device = spawn(fn ->
+          receive do
+            {:io_request, _, _, _} ->
+              send_control(socket, :input_blocked)
+              receive do: (:stop -> :ok)
+          end
+        end)
+        {device, device}
+      end
+
+    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, output,
+      cleanup_grace_ms: 5000, facade: facade)
+    {:ok, _} = ChatDriver.prepare(driver)
+    ref = make_ref()
+    {:ok, manager} = Interrupt.install_chat(driver, ref, 5000)
+    send_control(socket, :ready)
+    watcher = spawn_monitor(fn -> watch_stop(socket, driver, parent, System.monotonic_time(:millisecond) + 10_000) end)
+    result = ChatDriver.run(driver)
+    {watcher_pid, monitor} = watcher
+    receive do
+      {:DOWN, ^monitor, :process, ^watcher_pid, :normal} -> :ok
+    after 1000 -> raise "signal watcher did not join"
+    end
+    :ok = Loopex.stop(fixture.runtime)
+    finish = Interrupt.finish_chat(manager, ref)
+    minimum_exit = if finish == {:ok, :ordinary}, do: 0, else: 1
+    code = ChatDriver.close(driver, :confirmed, minimum_exit)
+    {_, transcript} = StringIO.contents(output)
+    jobs = Agent.get(fixture.executor, & &1.jobs)
+    models = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    if input_owner, do: Process.exit(input_owner, :kill)
+    send_control(socket, {:result, result, code, finish, transcript, jobs == [], models == []})
+    :gen_tcp.close(socket)
+    System.halt(code)
+  end
+
+  defp watch_stop(socket, driver, parent, cutoff) do
+    if :sys.get_state(driver).stopping do
+      send_control(socket, :stopping)
+    else
+      if not Process.alive?(parent) or System.monotonic_time(:millisecond) >= cutoff,
+        do: raise("driver stop was not observed")
+      Process.sleep(10)
+      watch_stop(socket, driver, parent, cutoff)
+    end
+  end
+
+  defp send_control(socket, value), do: :gen_tcp.send(socket, :erlang.term_to_binary(value))
+end

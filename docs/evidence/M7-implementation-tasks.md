@@ -99,6 +99,61 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: a private chat mode in the existing interrupt handler routes every
+  process signal to the same driver, preserving its original admission fence
+  and one cancellation cutoff. It submits no separate abort and keeps the
+  process backstop from the first interrupt. The second signal lets the driver
+  report unknown cleanup through its closing record. Installation shares ask's
+  bounded monitored installer and atomic manager claim. Wrong references,
+  foreign handlers, late queued installation, host loss, driver loss, handler
+  loss and manager replacement retain their explicit refusal/cleanup results.
+  Normal driver close leaves the exact host finish decision observable.
+  The host finishes the signal route after outer cleanup and before final
+  output, passing an interrupted/unavailable decision as a minimum nonzero
+  closing exit. That minimum cannot erase an earlier failure or unknown cleanup.
+
+  The complete chat signal, actual-OS-signal, ask interrupt, startup, driver
+  and resume-configuration files pass 62 cases current in 20.7 seconds and
+  60 floor in 19.9 seconds, warnings as errors. The two-case difference is
+  the existing current-OTP tty-handler fixtures, conditional on that module.
+  Five separate child VMs prove real TERM/HUP/QUIT and launcher INT while stdin
+  is blocked, plus two actual signals during a blocked prompt admission. The
+  last case proves no competing abort, no model/executor dispatch and the
+  unknown-admission closing bytes. Current
+  `/private/tmp/loopex-m7-chat-signals-current-v5.log`, SHA-256
+  `eeba7c70543efd28b6e67d37e3ee0f12f10910283e825252514b6ead5cf234ae`;
+  floor `/private/tmp/loopex-m7-chat-signals-floor-v2.log`, SHA-256
+  `6bcf4e13ff4971f7d998a9a9722c717d5e88f6006064bb08c048eb81573e1398`.
+  The complete legacy prepared-recovery contract additionally passes 56 cases
+  current in 25.1 seconds; its floor run with the earlier chat files passes
+  115 cases in 43.5 seconds. Current
+  `/private/tmp/loopex-m7-chat-signals-prepared-current-v1.log`, SHA-256
+  `0af492026a6189f04a5f87cd2aeb03550a3f1ad3c8890e2043e0d4278438c5be`;
+  floor `/private/tmp/loopex-m7-chat-signals-floor-v1.log`, SHA-256
+  `a22e53d037249e64cff1fb52df1e3650540559a0e75d3cbf66266cfcb752adc1`.
+  Compile, format, documentation, dependency and status gates pass.
+
+  Two drafts remain failed evidence. The first used an incorrect test name
+  for Core's actual `resume_activation_fenced` refusal; the unchanged exact
+  Core refusal is now asserted. Output
+  `/private/tmp/loopex-m7-chat-signals-current-v1.log`, SHA-256
+  `29ce11acb1f48d3cc583c044b95cd4796058292f0547c4def38082ae9125d170`.
+  The second tried to obtain disk object code for dynamically compiled test
+  fixtures; setup failed before either OS case. Child VMs now require the
+  actual helper sources in their temporary homes. Output
+  `/private/tmp/loopex-m7-chat-signals-current-v2.log`, SHA-256
+  `32ff782f5c001c6ef99d3b01e429b1627f3eaadf739932abb28e18024a118c08`.
+  No bound, assertion, signal guarantee or required check was weakened.
+
+  This closes one added T10 subtask and no original aggregate. Public command
+  composition, prepared capability handoff/activation ordering, workspace and
+  pending-policy checks, available admitted-work routes, effective startup
+  display, tracing/status/maintenance and helper/legacy resume remain open.
+  Run the full fast check once on this clean committed integration candidate
+  in the existing detached verification checkout, retaining exact SHA and
+  complete output. The c7d855f7 pass predates resume/startup/signal source and
+  cannot prove this candidate. Do not repeat c7d855f7 or the failed parent.
+
 - Done: chat startup can now open both facade attachment holders and read the
   public session status without consuming stdin or granting event reads. Run
   reuses those exact holders after the host completes its checks. The creating
@@ -4692,6 +4747,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Route installed process signals through the existing chat driver without competing aborts; retain exact installer/manager/reference ownership, late-install retirement, host/driver loss and truthful late-interrupt closing exits, proving actual OS signals in separate VMs and legacy prepared recovery on both toolchains. Public host composition and prepared activation handoff remain pending.
+
 - [x] Stage driver attachment/status readiness without input or event reads; reuse exact holders for run, validate captured cleanup grace before startup, preserve one cutoff through early/blocked/second interruption and actor loss, and prove actual prepared recovery on both toolchains. Installed signal routing and outer host startup remain pending.
 
 - [x] Resolve the concrete terminal-only chat outcome schema through the maintainer decision; retain the accepted run-only/null/uncertainty meanings and existing ask/event bytes, then implement the shared codec, closed terminal wait/closing constructors and independent vectors. Status and driver integration remain in the original checklist.
@@ -4832,6 +4889,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Run the full fast check once on the clean committed resume/startup/signal integration candidate; retain its exact SHA, complete output and final result without reusing the earlier repair-only proof.
 
 - [x] Confirm diagnostic writer dispatch through same-sender owner status before the existing blocked-device receive; retain the failed committed integration observation and prove unchanged pressure/accounting/receive/cleanup assertions on both supported pairs.
 - [x] Pin the complete approved read/search generation registry in composition tests while proving legacy selections for all 128 tool subsets and optional question registration on both supported pairs; retain the failed integration parent.
