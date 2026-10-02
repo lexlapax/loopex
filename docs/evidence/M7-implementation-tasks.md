@@ -91,6 +91,26 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T07's source-v2 encoder streams canonical messages into exact counts
+  and SHA-256 without collecting the whole projected list or serialized unit.
+  It retains at most a 16,384-byte complete candidate and two 4,099-byte end
+  buffers, checks cancellation/deadline between bounded chunks, and emits the
+  fixed quota candidates with UTF-8-safe disjoint fragments and an omitted
+  middle. Envelope framing, prior checkpoint and fragment escaping spend the
+  source cap. Closed message/call shapes exclude private fields; admitted float
+  and large integer arguments survive. Selection and full request preflight
+  remain the owner's future integration work; this encoder dispatches nothing.
+  Nine source cases plus grouping, lineage and real recovery regressions pass:
+  67 tests on each supported toolchain, 3.6 seconds each.
+  Current output: `/private/tmp/loopex-m7-compaction-source-current-final.log`,
+  SHA-256 `e87685df34a4c096685e290cda1fd594688891b288c93cba2a313a24acd3d00c`.
+  Floor output: `/private/tmp/loopex-m7-compaction-source-floor-final.log`, SHA-256
+  `af3f93ede4ae60f9d1dab1dacdf2cd721b7ddac75030811a08e37eec8c9c326f`.
+  The initial run failed one test because its NUL vector did not cause the
+  intended second-escaping overflow. A quote/backslash vector now does; no
+  quota assertion was relaxed. Initial output:
+  `/private/tmp/loopex-m7-compaction-source-current-first.log`, SHA-256
+  `875db77fd37fe51d9119e3b14e2f522878a1328a0af321c2f2af08dcbe45b2a8`.
 - Done: T07 now derives indivisible assistant/result groups with preceding
   same-run inputs and trailing input-only units. Current work, unfinished groups,
   pending interactions and every unit containing a frozen native-prefix source
@@ -2268,6 +2288,7 @@ or check was relaxed.
 - [x] Validate and forward explicit maintenance instructions through all durable constructors and ephemeral startup before owned effects, preserving per-call refusal.
 - [x] Resolve the separately configured host summarizer and prove its fixed-budget thinking-off native request and natural completion through both transports.
 - [x] Build replay-derived indivisible compaction units with same-run inputs, terminal trailing inputs, current/unfinished protection and frozen native-prefix source protection; prove idle release and exact grouping after real journal recovery.
+- [x] Stream exact source-v2 complete/excerpt encodings with bounded candidate/end buffers, full-list digest/count, fixed UTF-8-safe quota order, prior checkpoint reuse and traversal cancellation/deadline checks; pin independent byte, cap and numeric vectors.
 
 ## T08 — Implement model selection and private thinking continuation
 
