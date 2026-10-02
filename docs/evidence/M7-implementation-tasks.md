@@ -99,6 +99,30 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Running: the full current-pair fast check has started once on exact
+  `15bcaf73b6877cf30581a842ae775a2482da1604` in the existing detached
+  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex` checkout. Complete output
+  is accumulating at `/private/tmp/loopex-m7-15bcaf73-fast-check.log`; the header
+  records the candidate and toolchain, and the wrapper appends its final exit
+  and measured duration. No result or digest is claimed while it runs. Resume
+  by observing this run and its retained final wrapper line, not launching the
+  same candidate again. The T16 integration row remains pending until the run
+  ends. Primary m7 contains the committed resume/startup/signal implementation
+  and focused evidence; this later handoff record is not tested source proof.
+  No other shell check or agent remains running, and no decision is waiting.
+
+  Next product work is the public chat host join. Preserve capability-held
+  checks and explicit abandonment on every post-preparation refusal. Join
+  workspace, pending-policy and admitted-work route checks before activation;
+  install the signal route without bypassing the driver's admission fence;
+  serialize the prepared capability handoff/activation with cancellation.
+  Keep trace and diagnostic ownership through outer cleanup. Finish the exact
+  signal route after that cleanup and before driver close, carrying an
+  interrupted/unavailable decision as its minimum nonzero exit. Public
+  startup/effective display, status/maintenance and helper/legacy obligations
+  are still open. The goal remains active, with no milestone closure, merge,
+  tag, release or publication authorized by this checkpoint.
+
 - Done: a private chat mode in the existing interrupt handler routes every
   process signal to the same driver, preserving its original admission fence
   and one cancellation cutoff. It submits no separate abort and keeps the
