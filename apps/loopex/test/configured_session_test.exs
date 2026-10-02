@@ -578,6 +578,208 @@ defmodule Loopex.ConfiguredSessionTest do
              )
   end
 
+  for boundary <- [:live, :restart] do
+    test "frozen resource input precedes a single queued steer across #{boundary} continuation" do
+      boundary = unquote(boundary)
+      skill = "Retain this exact skill 猫\n"
+      notes = "Supporting facts stay frozen.\n"
+      steer = "Use the supporting facts in the next turn."
+
+      resources = %{
+        version: "loopex.resource_pack/1",
+        workspace_ref: "workspace-ref",
+        revision: nil,
+        packs: [
+          %{
+            source_id: "project",
+            origin: nil,
+            commit: nil,
+            tree_digest: nil,
+            name: "frozen-guide",
+            description: "Frozen guide",
+            manual_only: true,
+            files:
+              for {label, content} <- [{"SKILL.md", skill}, {"notes.txt", notes}] do
+                %{
+                  label: label,
+                  content: content,
+                  size: byte_size(content),
+                  digest: Canonical.digest_bytes(content),
+                  contained: true
+                }
+              end
+          }
+        ]
+      }
+
+      final = %{
+        text: "done",
+        reply_overrides: %{completion: "natural", continuation: closed_capsule("done")}
+      }
+
+      script =
+        if boundary == :live,
+          do: [open_turn("frozen-call"), final],
+          else: [open_turn("frozen-call")]
+
+      fixture = start(script: script, resource_manifest: resources, tool_progress_gate: self())
+
+      assert {:ok, session} =
+               Loopex.create_session(fixture.runtime, %{},
+                 command_id: "create",
+                 genesis: genesis(fixture.definitions, continuation_configuration())
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      {:ok, digest, normalized} = Loopex.ResourcePack.digest(resources)
+      [pack] = normalized["packs"]
+
+      decision = %{
+        manifest_digest: digest,
+        workspace_ref: "workspace-ref",
+        trust_scope: "project_skills",
+        decision_source: "host_supplied",
+        issued_at: "2026-10-02T00:00:00Z",
+        expires_at: nil,
+        revocation_state: "active"
+      }
+
+      assert {:accepted, "admit"} =
+               Loopex.command(attachment, %{
+                 type: :admit_resources,
+                 command_id: "admit",
+                 manifest_digest: digest,
+                 decision: decision
+               })
+
+      assert {:accepted, "activate"} =
+               Loopex.command(attachment, %{
+                 type: :activate_skill,
+                 command_id: "activate",
+                 manifest_digest: digest,
+                 source_id: "project",
+                 name: "frozen-guide",
+                 pack_digest: Loopex.ResourcePack.pack_digest(pack),
+                 supporting_labels: ["notes.txt"]
+               })
+
+      if boundary == :restart,
+        do: hold_record_commit(fixture, "executor_receipt_committed", :after)
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(
+                 attachment,
+                 %{type: :prompt, command_id: "prompt", content: "work"}
+               )
+
+      assert_receive {:tool_progress_emitted, _call, worker}, 5_000
+      [first] = AgentLoopTestModel.dispatched(fixture.model)
+      assert Enum.any?(first.messages, &(&1["content"] == skill))
+      assert Enum.any?(first.messages, &(&1["content"] == notes))
+      refute Enum.any?(first.messages, &(&1["content"] == steer))
+      {:ok, status} = Loopex.session_status(fixture.runtime, session)
+      run_id = status.active_run_id
+
+      assert {:accepted, "steer"} =
+               Loopex.command(
+                 attachment,
+                 %{type: :steer, command_id: "steer", run_id: run_id, content: steer}
+               )
+
+      send(worker, :release)
+
+      {completed_fixture, second} =
+        if boundary == :restart do
+          {waiter, _} =
+            await_record_commit(fixture, session, "executor_receipt_committed", :after)
+
+          {:ok, children} = Runtime.Supervisor.children(fixture.runtime.supervisor)
+          [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
+          monitor = Process.monitor(owner)
+          Process.exit(owner, :kill)
+          assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 5_000
+          assert :ok = Loopex.stop(fixture.runtime)
+
+          # Concept: restart must use retained input, without a host catalog.
+          # Technical depth: the successor shares only the durable Store; it has
+          # no resource manifest and must not redispatch the committed receipt.
+          successor = start(store: fixture.store, script: [final])
+
+          assert {:ok, ^session} =
+                   Loopex.resume_session(successor.runtime, session, command_id: "successor")
+
+          Loopex.M1RuntimeTestStore.release(waiter)
+
+          assert {:ok, successor_attachment} =
+                   Loopex.attach(successor.runtime, session, after_event_sequence: 0)
+
+          assert Enum.find(finish(successor_attachment), &(&1.kind == "run.finished"))["outcome"] ==
+                   "completed"
+
+          [next] = AgentLoopTestModel.dispatched(successor.model)
+          assert Agent.get(successor.executor, & &1.jobs) == []
+          {successor, next}
+        else
+          assert Enum.find(finish(attachment), &(&1.kind == "run.finished"))["outcome"] ==
+                   "completed"
+
+          [^first, next] = AgentLoopTestModel.dispatched(fixture.model)
+          {fixture, next}
+        end
+
+      prefix_count = length(first.messages)
+      assert Enum.take(second.messages, prefix_count) == first.messages
+
+      assert Enum.map(Enum.drop(second.messages, prefix_count), & &1["role"]) == [
+               "assistant",
+               "tool",
+               "user"
+             ]
+
+      assert List.last(second.messages) == %{"role" => "user", "content" => steer}
+      assert Enum.count(second.messages, &(&1["content"] == steer)) == 1
+      assert second.continuation["base_request_digest"] == first.staged_request_digest
+      [entry] = second.continuation["entries"]
+      assert entry["assistant_message_index"] == prefix_count
+      [call] = entry["calls"]
+      assert call["native_id"] == "frozen-call"
+      assert call["result_message_index"] == prefix_count + 1
+
+      assert Enum.at(second.messages, call["result_message_index"])["tool_call_id"] ==
+               call["canonical_call_id"]
+
+      assert {:ok, _} =
+               Loopex.Model.Continuation.expand(
+                 second.continuation,
+                 second.model,
+                 second.messages
+               )
+
+      records = Fixture.records(completed_fixture, session)
+
+      requests =
+        for row <- records,
+            row.payload.kind == "model_request_committed_resources_v2",
+            do: row.payload
+
+      assert length(requests) == 2
+      assert hd(requests)["context_receipt"]["resource_packs"] != nil
+
+      assert List.last(requests)["context_receipt"]["resource_packs"] ==
+               hd(requests)["context_receipt"]["resource_packs"]
+
+      assert hd(requests)["applied_steer"] == nil
+      assert List.last(requests)["applied_steer"] == "steer"
+      assert length(Agent.get(fixture.executor, & &1.jobs)) == 1
+
+      assert {:ok, _} =
+               SessionState.recover(session, records, Fixture.events(completed_fixture, session))
+
+      assert {:ok, %{active_run_id: nil}} =
+               Loopex.session_status(completed_fixture.runtime, session)
+    end
+  end
+
   test "numeric refusal counts the exact frozen optional descriptor prefix" do
     body = "Frozen guidance 猫\n"
 

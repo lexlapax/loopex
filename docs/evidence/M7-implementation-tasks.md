@@ -91,6 +91,39 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T08's frozen resource-pack/steer continuation proof covers both live
+  continuation and a real owner kill/restart after the executor receipt has
+  committed. An admitted skill and selected supporting file appear as exact
+  bytes in the first request. The executor's existing progress gate holds the
+  tool while steer admission commits; the next request preserves the entire
+  first prefix and appends assistant, required tool result, then exactly one
+  steer. Continuation positions retain the native call ID and original base
+  request digest. Both resource receipt headers match exactly, the first staged
+  request has no applied steer and the second names the admitted steer. The
+  successor receives only the same Store, no original resource manifest, and
+  dispatches no duplicate executor job. Pure replay validates the complete
+  retained private/public history. No runtime code changed.
+  Both complete configured-session suites pass 34 cases, in 6.8 seconds current
+  and 6.6 seconds floor. Complete outputs:
+  `/private/tmp/loopex-m7-frozen-resource-steer-current-v3-20261002.log`, SHA-256
+  `00dcf4d95494f2589d738d1c9a81afe7f6819c91e08c0282d4f01db6733eec56`;
+  `/private/tmp/loopex-m7-frozen-resource-steer-floor-v3-20261002.log`, SHA-256
+  `d49147774c411fd5a920aec2c8e56dc14c9919ce01b7a05920b320616e8606c7`.
+  This completes one added T08 subtask, no original item. Original: 42 done /
+  144 remaining. Added: 128 done / 10 remaining.
+  Two failed drafts remain retained: the first used a nonexistent one-argument
+  status facade; the second inspected the ordinary rather than resource-specific
+  staging record kind. Both were corrected to the actual existing contracts,
+  preserving every prefix, position, receipt and restart assertion.
+  Current first draft `/private/tmp/loopex-m7-frozen-resource-steer-current-20261002.log`,
+  SHA-256 `ca7e473c6e163099ca4009ce62e68abee614d9a07e65c9340c414598756d7e95`;
+  floor first draft `/private/tmp/loopex-m7-frozen-resource-steer-floor-20261002.log`,
+  SHA-256 `469f0a49eb85e8d46192752df5aff30c72862d27f76db9970ab1a0b4b9979aaf`;
+  current second draft `/private/tmp/loopex-m7-frozen-resource-steer-current-v2-20261002.log`,
+  SHA-256 `d6f22bfefa7b3b958ff038cc7b7c8e7405ec6848bfd99b25046d7f8f7ca73271`;
+  floor second draft `/private/tmp/loopex-m7-frozen-resource-steer-floor-v2-20261002.log`,
+  SHA-256 `939664f39f0ffd7dd9313d5bad25e1595c2010f240fd3ef694370c382cd6180b`.
+
 - Done: the full fast check passed once on exact
   `385cf8cf84a4603f797191b823a84dd409a0b1ec` in 906 seconds, including
   composition's diagnostic dispatch fixture. All eleven application suites
@@ -3785,7 +3818,7 @@ or check was relaxed.
 - [x] Charge the complete expanded ordinary envelope in revision-four receipts and independently verify every retained cost field.
 - [x] Preserve frozen project input through owner recovery, reject native-ID collisions before tools, and retain replayable aggregate-overflow preparation failures.
 - [x] Resolve and implement the numeric refusal schema for frozen project/resource input; prove its exact bounds and replay.
-- [ ] Prove frozen resource-pack input and steer ordering across continuation/restart boundaries.
+- [x] Prove frozen resource-pack input and steer ordering across continuation/restart boundaries, with exact required-result ordering, retained receipt equality, single steer consumption and no redispatch after actual owner loss.
 - [x] Implement bounded native event assembly and pinned SSE parse/flush validation with permanent failure, exact content reconstruction and cumulative usage evidence.
 - [x] Render captured native requests and seal the final Finch request; prove exact tools, controls and ceilings against the pinned builder and hook order.
 - [x] Join native capture and request sealing to the durable worker, with strict reply fields and an owned, monitored drain.
