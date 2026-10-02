@@ -1778,6 +1778,134 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  @doc """
+  ## Concept
+
+  Projects a retained executor intent or tool terminal into private recovery
+  evidence without returning the grant or granting dispatch authority.
+
+  ## Technical depth
+
+  ADR 0046's stateless history scan uses the same job, grant and receipt decoders
+  as replay. The complete input and the projected row retain the Store item
+  ceiling. Closed shapes, canonical job bytes/digest and exact session/run
+  bindings are checked before projection. A receipt is a committed receipt even
+  when its outcome is unknown; only core's failed/cancelled tool-result facts
+  prove pre-effect refusal. Other tool-result outcomes remain unknown. This
+  per-record decoder does not replay transitions or join records across pages;
+  composition must join terminal rows to earlier intents by exact identities.
+  Non-effect record kinds are outside this decoder.
+  """
+  @spec effect_history_projection(binary(), term()) :: {:ok, map()} | {:error, :invalid_history}
+  def effect_history_projection(session_id, payload) do
+    with true <- is_binary(session_id) and byte_size(session_id) in 1..256,
+         {:ok, ^payload, bytes} <- Store.normalize_and_measure_item(:record, payload),
+         true <- bytes <= 65_536,
+         {:ok, projection} <- project_effect_history(session_id, payload),
+         true <- :erlang.external_size(projection, [:deterministic]) <= 65_536 do
+      {:ok, projection}
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  rescue
+    _invalid -> {:error, :invalid_history}
+  end
+
+  defp project_effect_history(session_id, %{kind: "effect_intent_committed"} = record) do
+    job_fields = Loopex.Executor.job_fields() ++ Loopex.Executor.JobRequest.derived_fields()
+    grant_fields = Loopex.Executor.required_grant_bindings() ++ [:issued_by, :policy_context]
+
+    with true <- closed_history_map?(record, [:kind, "run_id", "job", "grant"]),
+         true <- closed_history_map?(record["job"], Enum.map(job_fields, &Atom.to_string/1)),
+         true <- closed_history_map?(record["grant"], Enum.map(grant_fields, &Atom.to_string/1)),
+         {:ok, job} <- decode_job(record["job"]),
+         :ok <- Loopex.Executor.validate_job(job),
+         true <- job.session_id == session_id and job.run_id == record["run_id"],
+         {:ok, _grant} <- decode_grant(record["grant"]) do
+      {:ok, %{kind: "intent", job: Map.from_struct(job)}}
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  end
+
+  defp project_effect_history(session_id, %{kind: "executor_receipt_committed"} = record) do
+    required = Enum.map(@receipt_required_fields, &Atom.to_string/1)
+    optional = Enum.map(@receipt_optional_fields, &Atom.to_string/1)
+
+    with true <-
+           closed_history_map?(record, [:kind, "run_id", "receipt"], ["reconciliation_query_id"]),
+         true <-
+           not Map.has_key?(record, "reconciliation_query_id") or
+             history_identity?(record["reconciliation_query_id"]),
+         true <- closed_history_map?(record["receipt"], required, optional),
+         {:ok, receipt} <- decode_receipt(record["receipt"]),
+         true <- receipt.session_id == session_id and receipt.run_id == record["run_id"],
+         true <- valid_history_receipt_identity?(receipt) do
+      {:ok, history_terminal(receipt.run_id, receipt.tool_call_id, "receipt_committed")}
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  end
+
+  defp project_effect_history(_session_id, %{kind: "tool_result_committed"} = record) do
+    with true <-
+           closed_history_map?(record, [:kind, "run_id", "tool_call_id", "outcome", "reason"]),
+         true <- history_identity?(record["run_id"]) and history_identity?(record["tool_call_id"]),
+         true <- is_nil(record["reason"]) or is_binary(record["reason"]),
+         {:ok, _outcome} <- decode_receipt_outcome(record["outcome"]) do
+      disposition =
+        if record["outcome"] in ["failed", "cancelled"],
+          do: "refused_before_effect",
+          else: "outcome_unknown"
+
+      {:ok, history_terminal(record["run_id"], record["tool_call_id"], disposition)}
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  end
+
+  defp project_effect_history(_session_id, %{kind: "outcome_unknown_committed"} = record) do
+    if closed_history_map?(record, [:kind, "run_id", "reconciliation_ref"]) and
+         history_identity?(record["run_id"]) and history_identity?(record["reconciliation_ref"]) do
+      {:ok, history_terminal(record["run_id"], nil, "outcome_unknown")}
+    else
+      {:error, :invalid_history}
+    end
+  end
+
+  defp project_effect_history(_session_id, _record), do: {:error, :invalid_history}
+
+  defp history_terminal(run_id, tool_call_id, disposition),
+    do: %{kind: "terminal", run_id: run_id, tool_call_id: tool_call_id, disposition: disposition}
+
+  defp closed_history_map?(map, required, optional \\ []) do
+    is_map(map) and not is_struct(map) and Enum.all?(required, &Map.has_key?(map, &1)) and
+      Map.keys(map) -- (required ++ optional) == []
+  end
+
+  defp valid_history_receipt_identity?(receipt) do
+    identifiers = [
+      :job_id,
+      :operation_id,
+      :session_id,
+      :run_id,
+      :turn_id,
+      :tool_call_id,
+      :executor_identity,
+      :tool_id,
+      :tool_version
+    ]
+
+    counters = [:session_epoch_at_dispatch, :executor_epoch, :fencing_token]
+
+    receipt.protocol_version == 1 and Enum.all?(identifiers, &history_identity?(receipt[&1])) and
+      is_integer(receipt.attempt) and receipt.attempt > 0 and
+      Enum.all?(counters, &(is_integer(receipt[&1]) and receipt[&1] >= 0)) and
+      resource_digest?(receipt.canonical_request_digest)
+  end
+
+  defp history_identity?(value), do: is_binary(value) and byte_size(value) in 1..8_192
+
   @doc false
   @spec propose_executor_fact(t(), binary(), map()) :: {:ok, proposal()} | {:error, term()}
   def propose_executor_fact(%__MODULE__{} = state, run_id, receipt)

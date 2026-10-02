@@ -91,6 +91,57 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T11's private effect-fact projection reuses the reducer's job, grant
+  and receipt decoders, checks closed complete records and nested projections,
+  validates canonical job bytes/digest and exact session/run bindings, and
+  excludes grants and owner stamps from returned evidence. Committed receipts
+  retain `receipt_committed` for every supported receipt outcome; core failed
+  and cancelled tool-result facts project `refused_before_effect`, other tool
+  terminal outcomes project `outcome_unknown`, and run-level unknown facts
+  carry a null call identity. Reason text cannot select a disposition. Captured
+  past deadlines remain readable; impossible deadline bounds refuse. Full
+  input and projected-row sizes retain 65,536-byte bounds. Actual owner-created
+  intent/receipt records and the dispatched executor job are the positive
+  witness; malformed, expanded, wrong-scope, forged and oversized facts refuse.
+  The first development test returned before run completion and failed all
+  five cases; it also exposed a redundant type assertion. Output:
+  `/private/tmp/loopex-m7-effect-projection-current-initial-20261002.log`, SHA-256
+  `a7943c5b649aaa8b7145fdeff2003f0982945f5ccae8536be5abaa09988aa640`.
+  The corrected wait then passed four cases and caught an incorrect test
+  assumption that a captured deadline of 1 must refuse. The existing port
+  accepts that historical positive instant within a declared wall ceiling;
+  the final test preserves it and refuses 0 or a deadline beyond the run bound.
+  Development output:
+  `/private/tmp/loopex-m7-effect-projection-current-final-20261002.log`, SHA-256
+  `34615f783e00d4b7f1ba6a90402fbb3f91c8699202e6d7839ba407fcce6c6681`.
+  Final projection/question/create-history files pass 14 tests in 1.1 seconds
+  on each pair. Complete projection/agent-loop files pass 113 tests in
+  25.3 seconds current and 25.2 seconds floor. Outputs:
+  `/private/tmp/loopex-m7-effect-projection-current-verified-20261002.log`, SHA-256
+  `392f9dd49a967cced01c8847d9083d497d44924eb3eb8959227c13a254cecb57`;
+  `/private/tmp/loopex-m7-effect-projection-floor-20261002.log`, SHA-256
+  `99c6abea2a8636b4dcb4fbe41e5feae5068ac83eae895bf298bf22498be4126a`;
+  `/private/tmp/loopex-m7-effect-projection-agent-loop-current-20261002.log`, SHA-256
+  `ba83fab1d656e70bd3bf7daf8b2b345463e079be47d7ea38a650bcd9531158f1`;
+  `/private/tmp/loopex-m7-effect-projection-agent-loop-floor-20261002.log`, SHA-256
+  `377fe98b50065aa5fd48f70d19487036263e79037fb1992e4ba2846c30cf0eff`.
+  Compile, formatting, compiled documentation, dependency and status gates pass.
+  One added prerequisite is complete; original T11's query item stays open.
+  The public paging query, prefix-token verification and startup classification
+  are not implemented by this per-record decoder. Original counts remain
+  28 done / 158 remaining; added counts are 102 done / 12 remaining. The four
+  unanswered maintainer decisions remain pending; no proposed timeout change
+  has been applied.
+- Passed: the full fast check ran once on clean implementation SHA
+  `ba07394e45a85ec640e3879e18212d6a68616626`. All eleven application suites
+  passed: 3,159 tests, 34 existing exclusions, 897 seconds. Complete output:
+  `/private/tmp/loopex-m7-ba07394e-fast-check.log`, SHA-256
+  `e9d0573527bab06859b8fe11bd2d74c120dcc57496a4d55f4eefd0b3fa9c2e8f`.
+  This includes the provenance callback and both shipped Store proofs. The run
+  is terminal; do not restart or poll it. The earlier diagnostic timing failure
+  remains retained failed evidence and its proposed bound change remains
+  unanswered, unapplied and open under T16. Original counts remain 28 done /
+  158 remaining; added counts remain 101 done / 12 remaining.
 - Done: ADR 0046's accepted optional creation-provenance callback is implemented
   through Runtime, Store and both shipped adapters. Closed command/session
   point queries and runtime pages carry supported genesis versions and exact
@@ -131,9 +182,9 @@ did not resolve them. No paid provider calls were made during this check.
   SHA-256 `25fb740ce2703b580e5f4951e34656e217cd55f1495a307fc1f7807302f09209`.
   One added T11 prerequisite is complete. Original counts remain 28 done / 158
   remaining; added counts are 101 done / 12 remaining. Helper ownership,
-  effect-intent queries and startup classification remain open. Run the full
-  fast check once on this new committed provenance candidate, retaining its
-  exact SHA and complete output. The four pending maintainer decisions are
+  effect-intent queries and startup classification remain open. The full
+  fast check has passed on this provenance candidate as recorded above.
+  The four pending maintainer decisions are
   unchanged; no diagnostic timeout proposal was applied.
 - Passed: the full fast check ran once on clean exact implementation SHA
   `ee7bb3e4039a1929ec8b92b276c3cdde64371257`. All eleven application suites
@@ -3000,6 +3051,7 @@ or check was relaxed.
 
 - [x] Implement accepted exact-genesis read-only create-result lookup; preserve the legacy query, refuse sentinel substitution before exact creation, and prove changed defaults, absent current registrations, distinct uncertainty and actual local log reopen through both shipped Stores on both supported pairs.
 - [x] Implement accepted bounded creation-provenance point/page queries and optional Store callback with replay-derived per-runtime ordinals; prove complete captured cuts, later creates, exact/changed repetitions, unsupported history, damaged indexes, closed/duplicate-safe decoding, unavailable callbacks, no activation/writes and local log reopen on both supported pairs.
+- [x] Decode bounded private effect-intent and terminal projections using existing reducer codecs; prove actual dispatched jobs and owner-created records, closed fields, canonical bytes/digests, scope, receipt-versus-core-refusal disposition, null-call unknowns, historical deadlines and malformed/oversized refusals on both supported pairs. Stateless paging and startup classification remain open.
 
 ## T12 — Complete ephemeral support
 
