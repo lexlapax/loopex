@@ -4978,6 +4978,10 @@ or check was relaxed.
 - [ ] Verify private thinking, credentials and host-only data never enter public projections.
 - [ ] Run the required independent-client workflows.
 
+### Added implementation subtasks
+
+- [x] Pin the accepted standalone compact-result schema and literal vectors, and implement an independent Node consumer; prove every closed failure branch, arbitrary exact usage, threshold/accounting relations, opaque checkpoint boundaries and unchanged legacy schema identities on both supported toolchains. Coordinated generation-3/4 contracts and live maintenance remain open.
+
 ## T06 — Build the first complete chat workflow
 
 ### Original checklist
@@ -4991,9 +4995,6 @@ or check was relaxed.
 - [ ] Later retain the required attended multi-prompt proof.
 
 ### Added implementation subtasks
-
-- [x] Pin the accepted standalone compact-result schema and literal vectors, and implement an independent Node consumer; prove every closed failure branch, arbitrary exact usage, threshold/accounting relations, opaque checkpoint boundaries and unchanged legacy schema identities on both supported toolchains. Coordinated generation-3/4 contracts and live maintenance remain open.
-
 
 - [ ] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
 - [ ] Resolve and implement new-chat physical workspace binding and the explicit legacy-unbound resume decision; prove retained identity conflicts, physical replacement, unchanged historical bytes and actual settled/unresolved migration.
