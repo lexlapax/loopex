@@ -45,6 +45,13 @@ defmodule LoopexComposition.Ephemeral do
   are resolved only by each invocation's sensitive caller. Optional
   `:maintenance_model` is a separately selected provider:model string with an
   admitted thinking-off mapping. Missing or nil remains unconfigured.
+  Optional `:trace` uses the closed binary-keyed host trace map. Omission or a
+  disabled selection creates no diagnostic actors. An enabled selection installs
+  the owner-managed stderr consumer and starts tracing after capability binding,
+  before the facade can dispatch work. It stays active across prompts and ends
+  with the session. Startup refusal unwinds the owned composition; unproved
+  diagnostic teardown prevents a successful cleanup acknowledgement. Per-call
+  trace changes, callbacks, sinks and runtime references are refused.
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, reason()}
   def start_session(options) do

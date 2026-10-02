@@ -25,6 +25,7 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
   alias Loopex.Store
   alias Loopex.Store.Memory
   alias Loopex.Trace.Capability
+  alias LoopexComposition.DiagnosticConsumer
   alias LoopexComposition.Ephemeral.{RuntimeHolder, TempRoot}
 
   @child_phases [
@@ -34,6 +35,7 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
     :executor,
     :trace_capability,
     :trace_handle,
+    :diagnostics,
     :runtime_holder
   ]
   @next %{
@@ -43,7 +45,8 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
     workspace_lease: :executor,
     executor: :trace_capability,
     trace_capability: :trace_handle,
-    trace_handle: :runtime_holder,
+    trace_handle: :diagnostics,
+    diagnostics: :runtime_holder,
     runtime_holder: :holding
   }
 
@@ -211,6 +214,19 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
     case bind_trace(trace, state.runtime) do
       :ok ->
         send(state.owner, {:phase_result, self(), state.ref, :trace_bind, :ok})
+        next = %{state | phase: :trace_start}
+        ready(next)
+        {:noreply, next}
+
+      error ->
+        fail_phase(state, :trace_bind, error)
+    end
+  end
+
+  defp execute(:trace_start, _payload, state) do
+    case start_trace(state) do
+      :ok ->
+        send(state.owner, {:phase_result, self(), state.ref, :trace_start, :ok})
 
         prepared = %{
           root: state.owned_root,
@@ -223,9 +239,10 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
           executor: Map.fetch!(state.children, :executor),
           trace_capability: %{
             pid: Map.fetch!(state.children, :trace_capability),
-            handle: trace
+            handle: Map.fetch!(state.children, :trace_handle)
           },
           runtime_holder: Map.fetch!(state.children, :runtime_holder),
+          diagnostics: Map.fetch!(state.children, :diagnostics),
           runtime: state.runtime
         }
 
@@ -233,7 +250,7 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
         {:noreply, %{state | phase: :await_commit}}
 
       error ->
-        fail_phase(state, :trace_bind, error)
+        fail_phase(state, :trace_start, error)
     end
   end
 
@@ -306,6 +323,37 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
     Supervisor.start_child(state.supervisor, spec)
   end
 
+  # Concept: trace delivery belongs to the session owner and may end before the
+  # rest of its tree. A successful close must not restart the drain.
+  # Technical depth: the temporary child captures the registered owner and its
+  # committed cleanup grace. The IO device is fixed host stderr in production.
+  defp child(:diagnostics, grace, state) do
+    if match?(%{enabled: true}, Map.get(state.configuration, :trace)) do
+      spec =
+        Supervisor.child_spec(
+          {DiagnosticConsumer, {state.owner, diagnostic_device(), grace}},
+          restart: :temporary
+        )
+
+      Supervisor.start_child(state.supervisor, spec)
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp start_trace(state) do
+    case Map.get(state.configuration, :trace) do
+      %{enabled: true, configuration: configuration} ->
+        case trace_start(state.runtime, configuration) do
+          {:ok, _status} -> :ok
+          error -> error
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
   defp start_child(supervisor, module, options) do
     spec =
       Supervisor.child_spec({module, options},
@@ -365,6 +413,12 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
       if is_function(seams[:trace_bind], 2),
         do: Process.put({__MODULE__, :trace_bind}, seams.trace_bind)
 
+      if is_function(seams[:trace_start], 2),
+        do: Process.put({__MODULE__, :trace_start}, seams.trace_start)
+
+      if is_pid(seams[:diagnostic_device]),
+        do: Process.put({__MODULE__, :diagnostic_device}, seams.diagnostic_device)
+
       if is_function(seams[:store_new], 2),
         do: Process.put({__MODULE__, :store_new}, seams.store_new)
 
@@ -384,6 +438,11 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
 
     defp bind_trace(handle, runtime),
       do: Process.get({__MODULE__, :trace_bind}, &Capability.bind/2).(handle, runtime)
+
+    defp trace_start(runtime, configuration),
+      do: Process.get({__MODULE__, :trace_start}, &Loopex.trace/2).(runtime, configuration)
+
+    defp diagnostic_device, do: Process.get({__MODULE__, :diagnostic_device}, :stderr)
 
     defp make_store_handle(module, pid),
       do: Process.get({__MODULE__, :store_new}, &Store.new/2).(module, pid)
@@ -405,6 +464,8 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
     defp install_test_seams(_seams), do: :ok
     defp runtime_holder_test_seams, do: %{}
     defp bind_trace(handle, runtime), do: Capability.bind(handle, runtime)
+    defp trace_start(runtime, configuration), do: Loopex.trace(runtime, configuration)
+    defp diagnostic_device, do: :stderr
     defp make_store_handle(module, pid), do: Store.new(module, pid)
     defp obtain_trace_handle(pid), do: Capability.handle(pid)
     defp candidate_ready_gate(_state), do: :ok

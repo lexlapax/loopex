@@ -54,8 +54,32 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
                 base_url: nil,
                 maintenance_instructions: nil,
                 provider_bindings: nil,
-                maintenance_model: nil
+                maintenance_model: nil,
+                trace: nil
               }}
+  end
+
+  test "trace is a closed startup map, validated even when disabled" do
+    assert {:ok, selected} = Options.parse(policy: Policy, trace: %{"enabled" => true})
+    assert selected.trace.enabled
+    assert selected.trace.configuration.sink == :diagnostics
+
+    assert {:ok, selected} = Options.parse(policy: Policy, trace: %{})
+    refute selected.trace.enabled
+
+    for invalid <- [
+          nil,
+          true,
+          self(),
+          %{enabled: true},
+          %{"sink" => self()},
+          %{"enabled" => false, "max_entry_bytes" => 4097},
+          %{"modules" => ["NotCompiled.Module"]}
+        ] do
+      assert Options.parse(policy: Policy, trace: invalid) == {:error, {:invalid_option, :trace}}
+    end
+
+    assert Options.ask_options([trace: %{}], 1_000) == {:error, {:invalid_option, :unknown_key}}
   end
 
   test "values validate in fixed order independent of keyword order" do

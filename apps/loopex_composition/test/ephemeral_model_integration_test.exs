@@ -101,6 +101,58 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert request =~ "POST /v1/chat/completions HTTP/1.1"
   end
 
+  test "public trace startup survives real model turns and ends with session cleanup" do
+    root =
+      Path.join(System.tmp_dir!(), "loopex-model-trace-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    port = start_server(["first traced answer", "second traced answer"])
+
+    stderr =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        assert {:ok, session} =
+                 Ephemeral.start_session(
+                   policy: Policy,
+                   model: "ollama:llama3.2",
+                   provider_bindings: %{"ollama" => %{"credential" => %{"none" => true}}},
+                   base_url: "http://127.0.0.1:#{port}/v1",
+                   cwd: root,
+                   tools: :none,
+                   max_tokens: 128,
+                   timeout: 15_000,
+                   trace: %{"enabled" => true, "modules" => ["Loopex.Runtime.Control"]}
+                 )
+
+        owner = elem(session, 1)
+        startup = :sys.get_state(owner).startup
+        runtime = startup.registered.runtime
+
+        assert {:ok, %{outcome: :completed, text: "first traced answer"}} =
+                 Ephemeral.ask(session, "first traced prompt")
+
+        assert_receive {:model_request, first}, 15_000
+        assert first =~ "POST /v1/chat/completions HTTP/1.1"
+        assert {:ok, trace} = Loopex.trace_status(runtime)
+        assert trace.modules == [Loopex.Runtime.Control]
+
+        assert {:ok, %{outcome: :completed, text: "second traced answer"}} =
+                 Ephemeral.ask(session, "second traced prompt")
+
+        assert_receive {:model_request, second}, 15_000
+        assert second =~ "POST /v1/chat/completions HTTP/1.1"
+        assert {:ok, _} = Loopex.trace_status(runtime)
+        assert :ok = Ephemeral.stop_session(session)
+        refute Process.alive?(startup.registered.diagnostics)
+        refute Process.alive?(startup.registered.diagnostic_supervisor)
+        refute Process.alive?(runtime.supervisor)
+        refute File.exists?(startup.owned_root.path)
+      end)
+
+    assert stderr =~ "trace_call"
+    assert stderr =~ "Loopex.Runtime.Control"
+  end
+
   test "one session executes an admitted read-only tool and continues the model turn" do
     root = Path.join(System.tmp_dir!(), "loopex-tool-#{System.unique_integer([:positive])}")
     File.mkdir!(root)

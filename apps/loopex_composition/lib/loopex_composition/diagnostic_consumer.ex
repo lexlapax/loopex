@@ -57,7 +57,8 @@ defmodule LoopexComposition.DiagnosticConsumer do
   # Technical depth: this inspection is owner-only and is never a durable or
   # public session projection. A shutdown registration seals dispatch first.
   @doc false
-  def owned_processes(consumer), do: GenServer.call(consumer, :owned_processes)
+  def owned_processes(consumer, timeout \\ 5_000),
+    do: GenServer.call(consumer, :owned_processes, timeout)
 
   # Concept: the owner can keep handling its shutdown timer while writers end.
   # Technical depth: admission is bounded by the existing deadline. The result

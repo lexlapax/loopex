@@ -16,7 +16,8 @@ defmodule LoopexComposition.Ephemeral.Options do
     :base_url,
     :maintenance_instructions,
     :provider_bindings,
-    :maintenance_model
+    :maintenance_model,
+    :trace
   ]
   @uint64_max 18_446_744_073_709_551_615
 
@@ -75,6 +76,14 @@ defmodule LoopexComposition.Ephemeral.Options do
   defp default(:timeout, normalized), do: {:ok, min(normalized.deadline_ms + 30_000, @uint64_max)}
   defp default(:maintenance_instructions, _), do: {:ok, nil}
   defp default(key, _) when key in [:provider_bindings, :maintenance_model], do: {:ok, nil}
+  defp default(:trace, _), do: {:ok, nil}
+
+  defp validate(:trace, value) do
+    case LoopexComposition.TraceConfiguration.validate(value) do
+      {:ok, normalized} -> {:ok, normalized}
+      _ -> invalid(:trace)
+    end
+  end
 
   defp validate(:provider_bindings, value) do
     with {:ok, _} <- LoopexComposition.ProviderBindings.validate(value), do: {:ok, value}

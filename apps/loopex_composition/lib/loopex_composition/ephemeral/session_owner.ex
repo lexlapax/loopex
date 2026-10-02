@@ -26,6 +26,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   alias Loopex.Attachment
   alias Loopex.ResourcePack
   alias LoopexComposition.SessionAdmission
+  alias LoopexComposition.DiagnosticConsumer
   alias LoopexComposition.Ephemeral.{FacadeClient, ModelCensus, SessionRoot, TempRoot}
 
   @startup_ms 5_000
@@ -53,9 +54,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     :executor,
     :trace_capability,
     :trace_handle,
+    :diagnostics,
     :runtime_holder,
     :runtime,
-    :trace_bind
+    :trace_bind,
+    :trace_start
   ]
   @coding ~w(loopex.read loopex.write loopex.edit loopex.bash)
   @read_only ~w(loopex.read loopex.grep loopex.find loopex.ls)
@@ -408,6 +411,17 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       true ->
         {:noreply, handle_model_message(state, {:DOWN, monitor, :process, pid, reason})}
     end
+  end
+
+  def handle_info(
+        {:diagnostic_consumer_closed, consumer, reference, result},
+        %{
+          phase: :aborting,
+          abort: %{stage: :diagnostics, diagnostic_close: {consumer, reference}} = abort
+        } = state
+      ) do
+    proved = match?({:ok, _}, result) and fresh?(abort.deadline)
+    {:noreply, start_runtime_stop(%{state | abort: %{abort | diagnostic_proved: proved}})}
   end
 
   def handle_info(
@@ -2678,7 +2692,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     end
   end
 
-  defp accept_phase_result(state, :trace_bind, :ok), do: advance(state, :prepared, %{})
+  defp accept_phase_result(state, :trace_bind, :ok), do: advance(state, :trace_start, %{})
+  defp accept_phase_result(state, :trace_start, :ok), do: advance(state, :prepared, %{})
 
   defp accept_phase_result(state, :candidate_prepare, {:error, :temporary_root_unusable}),
     do: fail_start(state, :temporary_root_unusable, :known)
@@ -2779,6 +2794,45 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     end
   end
 
+  defp register_result(startup, :diagnostics, nil) do
+    if match?(%{enabled: true}, Map.get(startup.configuration, :trace)),
+      do: :error,
+      else: {:ok, %{startup | registered: Map.put(startup.registered, :diagnostics, nil)}}
+  end
+
+  # Concept: both diagnostic actors are owned before the runtime can deliver.
+  # Technical depth: only this owner may inspect the drain. Registration shares
+  # the startup deadline, records exact local PIDs, and acknowledges no writer
+  # at this stage because runtime diagnostics have not been connected yet.
+  defp register_result(startup, :diagnostics, consumer) when is_pid(consumer) do
+    with true <- match?(%{enabled: true}, Map.get(startup.configuration, :trace)),
+         {:ok, [^consumer, supervisor]} <-
+           DiagnosticConsumer.owned_processes(consumer, remaining(startup.deadline)),
+         true <- is_pid(supervisor) and supervisor != consumer,
+         true <-
+           Enum.all?([consumer, supervisor], fn pid ->
+             node(pid) == node() and Process.alive?(pid) and
+               not Map.has_key?(startup.process_monitors, pid)
+           end) do
+      monitors = Map.new([consumer, supervisor], &{&1, Process.monitor(&1)})
+
+      {:ok,
+       %{
+         startup
+         | registered:
+             Map.merge(startup.registered, %{
+               diagnostics: consumer,
+               diagnostic_supervisor: supervisor
+             }),
+           process_monitors: Map.merge(startup.process_monitors, monitors)
+       }}
+    else
+      _ -> :error
+    end
+  catch
+    :exit, _ -> :error
+  end
+
   defp register_result(_startup, _phase, _value), do: :error
 
   defp next_phase(:private_supervisor), do: :memory_store
@@ -2787,7 +2841,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp next_phase(:workspace_lease), do: :executor
   defp next_phase(:executor), do: :trace_capability
   defp next_phase(:trace_capability), do: :trace_handle
-  defp next_phase(:trace_handle), do: :runtime_holder
+  defp next_phase(:trace_handle), do: :diagnostics
+  defp next_phase(:diagnostics), do: :runtime_holder
   defp next_phase(:runtime_holder), do: :runtime
   defp next_phase(:runtime), do: :trace_bind
 
@@ -2806,6 +2861,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   defp phase_payload(state, :runtime), do: runtime_options(state)
+  defp phase_payload(state, :diagnostics), do: state.cleanup_grace_ms
   defp phase_payload(_state, _phase), do: nil
 
   defp runtime_options(state) do
@@ -2866,7 +2922,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       maintenance_instructions: Map.get(config, :maintenance_instructions),
       maintenance_model: Map.get(config, :maintenance_model),
       resource_manifest: config.skills.manifest,
-      cleanup_grace_ms: state.cleanup_grace_ms
+      cleanup_grace_ms: state.cleanup_grace_ms,
+      diagnostics_to: Map.get(startup.registered, :diagnostics)
     ]
   end
 
@@ -2882,6 +2939,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       Map.get(prepared, :trace_capability) ==
         %{pid: registered.trace_capability, handle: registered.trace_handle} and
       Map.get(prepared, :runtime_holder) == registered.runtime_holder and
+      Map.get(prepared, :diagnostics) == registered.diagnostics and
       Map.get(prepared, :runtime) == registered.runtime
   end
 
@@ -2906,8 +2964,10 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     do: :trace_capability_start_failed
 
   defp failure_cause(:runtime_holder), do: :dependency_start_failed
+  defp failure_cause(:diagnostics), do: :dependency_start_failed
   defp failure_cause(:runtime), do: :runtime_start_failed
   defp failure_cause(:trace_bind), do: :trace_capability_bind_failed
+  defp failure_cause(:trace_start), do: :trace_start_failed
 
   defp timeout_cause(%{facade: %{operation: operation}}), do: facade_failure(operation)
   defp timeout_cause(%{expected: phase}) when phase in @phase_order, do: failure_cause(phase)
@@ -2969,6 +3029,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
           group_proved: false,
           group_failed: false,
           runtime_proved: false,
+          diagnostic_proved: not is_pid(Map.get(startup.registered, :diagnostics)),
+          diagnostic_close: nil,
           subtree_failed: false,
           root_failed: false,
           root_proved: false,
@@ -3009,21 +3071,69 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
 
     cond do
       abort.group_proved ->
-        start_runtime_stop(state)
+        start_diagnostic_close(state)
 
       not is_pid(executor) and startup.expected == :executor and startup.granted ->
-        start_runtime_stop(%{state | abort: %{abort | group_failed: true}})
+        start_diagnostic_close(%{state | abort: %{abort | group_failed: true}})
 
       not is_pid(executor) ->
-        start_runtime_stop(%{state | abort: %{abort | group_proved: true}})
+        start_diagnostic_close(%{state | abort: %{abort | group_proved: true}})
 
       MapSet.member?(abort.down, executor) or not Process.alive?(executor) ->
-        start_runtime_stop(%{state | abort: %{abort | group_failed: true}})
+        start_diagnostic_close(%{state | abort: %{abort | group_failed: true}})
 
       true ->
         start_abort_worker(state, :process_groups, make_ref())
     end
   end
+
+  # Concept: diagnostic shutdown seals new delivery before capturing writers.
+  # Technical depth: the owner initiates its owner-only barrier and stays in the
+  # receive loop for the reference-bound completion and existing cleanup timer.
+  # Every captured PID also needs monitored DOWN before subtree proof. A failed
+  # or expired attempt is retained across stop retries and never renewed.
+  defp start_diagnostic_close(%{abort: abort} = state) do
+    consumer = Map.get(state.startup.registered, :diagnostics)
+
+    if not is_pid(consumer) or abort.diagnostic_close != nil do
+      start_runtime_stop(state)
+    else
+      reference = make_ref()
+      deadline = System.convert_time_unit(abort.deadline, :native, :millisecond)
+      next = put_in(state.abort.diagnostic_close, {consumer, reference})
+
+      case DiagnosticConsumer.begin_close(consumer, reference, deadline) do
+        {:ok, owned} ->
+          supervisor = Map.get(state.startup.registered, :diagnostic_supervisor)
+
+          if valid_diagnostic_capture?(owned, consumer, supervisor) do
+            monitors =
+              Enum.reduce(owned, state.startup.process_monitors, fn pid, monitors ->
+                if Map.has_key?(monitors, pid),
+                  do: monitors,
+                  else: Map.put(monitors, pid, Process.monitor(pid))
+              end)
+
+            next
+            |> put_in([:startup, :process_monitors], monitors)
+            |> put_in([:abort, :stage], :diagnostics)
+          else
+            start_runtime_stop(next)
+          end
+
+        _ ->
+          start_runtime_stop(next)
+      end
+    end
+  end
+
+  defp valid_diagnostic_capture?([consumer, supervisor | writer], consumer, supervisor)
+       when length(writer) <= 1 do
+    owned = [consumer, supervisor | writer]
+    Enum.uniq(owned) == owned and Enum.all?(owned, &(is_pid(&1) and node(&1) == node()))
+  end
+
+  defp valid_diagnostic_capture?(_, _, _), do: false
 
   # Concept: a dead runtime root is not proof that its dynamic children ended.
   # Technical depth: only an in-time successful Loopex.stop certifies teardown;
@@ -3057,6 +3167,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp after_subtree(%{abort: abort, startup: startup} = state) do
     cond do
       abort.unknown_start or abort.group_failed or abort.subtree_failed or
+        not abort.diagnostic_proved or
           (match?(%Runtime{}, Map.get(startup.registered, :runtime)) and
              not abort.runtime_proved) ->
         finish_abort(state)
@@ -3347,7 +3458,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     case worker.phase do
       :process_groups ->
         next = %{next | abort: %{next.abort | group_proved: success, group_failed: not success}}
-        start_runtime_stop(next)
+        start_diagnostic_close(next)
 
       :runtime_stop ->
         start_subtree_stop(%{next | abort: %{next.abort | runtime_proved: success}})
@@ -3381,7 +3492,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         phase in [:root_removal, :root_absence] ->
           %{abort | root_failed: true}
 
-        phase in [:runtime_stop, :subtree_stop, :await_subtree, :facade_reap] ->
+        phase in [:diagnostics, :runtime_stop, :subtree_stop, :await_subtree, :facade_reap] ->
           %{abort | subtree_failed: true}
 
         true ->
@@ -3409,6 +3520,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       |> maybe_pending(abort.group_failed, :process_groups)
       |> maybe_pending(
         abort.unknown_start or abort.subtree_failed or
+          not abort.diagnostic_proved or
           (match?(%Runtime{}, Map.get(startup.registered, :runtime)) and
              not abort.runtime_proved) or
           not model_settled?(state) or

@@ -91,23 +91,46 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
-- Running: T12 trace lifecycle integration has its private diagnostic actor
-  operations ready. Supervised startup can bind the intended host; owner-only
-  inspection supplies its private process identities. Asynchronous shutdown
-  seals dispatch before returning the drain, supervisor and active writer for
-  registration, then reports a reference-bound cleanup certificate under the
-  captured deadline. This permits the serial owner to keep handling its timer
-  while cleanup runs. It does not yet expose or accept the embedded trace option:
-  ephemeral Options, SessionRoot and SessionOwner remain unchanged.
-  Both pairs pass all 18 diagnostic/configuration tests in 0.6 seconds each,
-  including the new supervised-owner and asynchronous cleanup proofs.
-  Compilation, formatting and documentation ordering pass. Complete outputs:
-  `/private/tmp/loopex-m7-diagnostic-lifecycle-current.log`, SHA-256
-  `b7068ed29cb3e4fbae3dce037a1bee2e2b29960909382cc9a3760b586c7ba068`;
-  `/private/tmp/loopex-m7-diagnostic-lifecycle-floor.log`, SHA-256
-  `1f00ac570b8888f7a2c531208ff83e7100ba90b938a60299c7ef966e2284a8c2`.
-  No checklist item closes for this partial integration. Counts remain 28/158
-  original and 93/12 added.
+- Done: T12's optional ephemeral trace lifecycle is integrated. The closed trace
+  map validates before preflight effects. Enabled startup grants and registers
+  the diagnostic drain and its private writer supervisor before binding and
+  activating the runtime trace; absent/disabled startup retains the original
+  process inventory. A temporary diagnostic child can close normally without
+  restarting the private tree. Tracing persists across prompts. Teardown seals
+  delivery, captures and monitors an active writer, and requires the exact
+  asynchronous certificate plus every registered DOWN under the existing
+  deadline. Lost/expired diagnostic proof stays unproved on later stop retries.
+  Real runtime and local HTTP model tests cover activation ordering, requested
+  startup refusal, the original startup timeout, successive prompts, peer
+  isolation, stalled stderr and drain/writer/supervisor loss. No paid provider
+  calls were made. Original counts remain 28 done / 158 remaining; added counts
+  are now 94 done / 11 remaining. T12 added subtasks are 2 done / 0 remaining;
+  its ten original checklist items still require the remaining profile work.
+  Current-pair affected-file regression: 207 passed, one existing real-provider
+  exclusion, 145.3 seconds. The subsequently added public trace/local HTTP
+  model witness passes with its complete 11-test file in 10.6 seconds. Floor
+  pair runs the final complete affected files: 208 passed, one existing
+  real-provider exclusion, 146.1 seconds. Compilation, formatting, documentation
+  ordering and dependency direction pass. Complete immutable test outputs:
+  `/private/tmp/loopex-m7-ephemeral-trace-current-20261002.log`, SHA-256
+  `88c68b87765b7b3dd1882a207da544cac281ab750b864f07df6401a6f23b27fe`;
+  `/private/tmp/loopex-m7-ephemeral-trace-model-current-20261002.log`, SHA-256
+  `bfc60271f76e37f176d07f113c68573a88d9d37a94a9236e194bd5ad9a2606cf`;
+  `/private/tmp/loopex-m7-ephemeral-trace-floor-20261002.log`, SHA-256
+  `d1691fc3598d913ad6c5c861cdb5724988abc02b603747845e6232587e4d6709`.
+  Development failures remain retained: the first compile found a trace-handle
+  variable left outside its new phase's scope, corrected by fetching the exact
+  registered handle; the first new test run exposed incorrect test assumptions
+  about root/facade monitor counts, increasing trace counters and an owner that
+  already retired after automatic cleanup. The loss proof now kills the drain
+  during an observed active stop and proves an unconfirmed result across retry.
+  Failed outputs: `/private/tmp/loopex-m7-ephemeral-trace-baseline-20261002.log`,
+  SHA-256 `81c76b7379d051f56f45cee376554bff3bfb52f215011f108927ccdb74f863de`;
+  `/private/tmp/loopex-m7-ephemeral-trace-first-20261002.log`, SHA-256
+  `2697782ba841271f4a225dbfc4cd5500750aef6db2913318f2bcd1e9df103cef`.
+  No required check, timeout or cleanup proof was weakened. The next full fast
+  check must use the committed integration candidate; no full check has yet
+  covered these trace-integration bytes.
 - Done: trace selector resolution now lives in composition and both CLI
   configuration callers use that same compiled trusted-module inventory.
   A shared pure validator translates the accepted binary-keyed host trace map
@@ -2711,7 +2734,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Integrate the accepted optional trace map into ephemeral preflight, granted private-actor registration, post-capability-binding activation and bounded teardown; extend startup/loss fault proofs to the diagnostic drain, private writer supervisor and active IO worker, and preserve absent/disabled startup behavior.
+- [x] Integrate the accepted optional trace map into ephemeral preflight, granted private-actor registration, post-capability-binding activation and bounded teardown; extend startup/loss fault proofs to the diagnostic drain, private writer supervisor and active IO worker, and preserve absent/disabled startup behavior.
 
 - [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
 
