@@ -91,6 +91,31 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Running: the second full fast check is executing once from clean exact
+  candidate `1d384b803c3a7fe2c836c7c47cbefbbf0d4c30b5` in the managed
+  `m7-trace-check` checkout. Complete output is being retained at
+  `/private/tmp/loopex-m7-1d384b80-fast-check.log`; final exit and digest are
+  pending. The startup-protocol repair passed. Composition instead exposed a
+  diagnostic pressure-test scheduling race: after resuming a 6,000-message
+  mailbox, the test expected its newly scheduled IO worker to reach the fake
+  device within ExUnit's implicit 100 ms. No product latency guarantee supported
+  that pressure-dependent scheduling assumption. The repair establishes the
+  real blocked writer before suspension and flooding, preserving the original
+  100-ms receive timeout, all 6,000 queued messages, the mailbox observation,
+  exact 256 pending entries and one active writer. Counts include the primed
+  entry: 5,744 immediate drops, then 6,000 total drops and one unconfirmed write
+  after joined close. No timeout or capacity assertion is widened. The complete
+  diagnostic and root startup files pass together on both pairs, 20 tests in
+  2.2 seconds each. Outputs:
+  `/private/tmp/loopex-m7-diagnostic-pressure-pair-current-20261002.log`, SHA-256
+  `2b733524f4f689e44e14b03a1f5b6a8068a934428239e8e406f36167cb4c155f`;
+  `/private/tmp/loopex-m7-diagnostic-pressure-floor-20261002.log`, SHA-256
+  `a70a22885c250d0cad32050ada7f4d20c136563273faed3e0d9f1f7567080d2d`.
+  This completes one added T16 repair: original totals remain 28 done / 158
+  remaining; added totals are 96 done / 11 remaining. Wait for the second
+  check's terminal result, retain its complete immutable output and digest,
+  then run the new committed pressure-repair candidate once. Do not rerun the
+  unchanged failed candidate as a pass. No agents are running.
 - Done: the full fast check of exact candidate
   `a47022cfcfdcc5f62c72654705e90a7d91a6cebb` finished with exit 1.
   Ten application suites passed; composition had one failed startup-protocol
@@ -2836,6 +2861,7 @@ or check was relaxed.
 - [x] Repair the complete owned-process inventories in credential-plane and runtime-owner fault tests; include the transfer-owner crash and prove all eight children stop on both toolchains.
 - [x] Make the owner-group supervisor-report test establish and restore its Logger application lifetime; prove the original failure-report assertions from isolated Core on both toolchains.
 - [x] Update the direct SessionRoot startup protocol proof for granted diagnostics and trace activation; preserve exact acknowledgements, wrong-reference refusal and original time bounds on both toolchains.
+- [x] Establish an actual blocked diagnostic writer before mailbox pressure; preserve the 6,000-message observation, exact queue/writer/drop accounting and unchanged receive/cleanup timeouts on both toolchains.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
 

@@ -48,17 +48,18 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
   test "observed mailbox growth stays distinct from the proved explicit output bound" do
     device = device()
     {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+    send(consumer, {:loopex_diagnostic, %{"kind" => "ordinary"}})
+    assert_receive {:device_write, _, _}
     :ok = :sys.suspend(consumer)
     for _ <- 1..6_000, do: send(consumer, {:loopex_diagnostic, %{"kind" => "ordinary"}})
     assert {:message_queue_len, mailbox} = Process.info(consumer, :message_queue_len)
     assert mailbox >= 6_000
     :ok = :sys.resume(consumer)
-    assert_receive {:device_write, _, _}
     view = DiagnosticConsumer.status(consumer)
     assert view.pending == 256 and view.active
-    assert view.counts.diagnostic == %{emitted: 0, dropped: 5_743, unconfirmed: 0}
+    assert view.counts.diagnostic == %{emitted: 0, dropped: 5_744, unconfirmed: 0}
     assert {:ok, final} = DiagnosticConsumer.close(consumer, deadline())
-    assert final.counts.diagnostic == %{emitted: 0, dropped: 5_999, unconfirmed: 1}
+    assert final.counts.diagnostic == %{emitted: 0, dropped: 6_000, unconfirmed: 1}
   end
 
   test "a stalled writer holds one entry while the drain consumes and counts excess by kind" do
