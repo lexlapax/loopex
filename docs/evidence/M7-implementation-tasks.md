@@ -91,6 +91,52 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Integration check: exact 7d10f9f6941c105e3cd15ee21e03d4ba484f4f67
+  completed with exit 1. Preliminary gates and ten application suites passed;
+  composition passed 466 cases with one exclusion and failed the initial
+  diagnostic blocked-device receive described below. Its full suite lasted
+  208 seconds. Core passed 919 cases, ReqLLM 385, executor 268, CLI 455,
+  daemon 458, app server 98, protocol 78, reference client 20, local store 91
+  and telemetry 8. This is failed integration evidence, including the successful
+  responder cases. The earlier provider-launcher deadline flake and unrelated
+  Task.Supervisor diagnostic remain unresolved; this run does not erase them.
+  Complete output: `/private/tmp/loopex-m7-7d10f9f6-fast-check.log`, SHA-256
+  `504b349eebc0a9962d5b3f0a94bf2782698968246764bcb979af764803ec46e3`.
+
+- Done: T16's diagnostic pressure fixture confirms actual writer dispatch through
+  the existing owner-only status call before its unchanged implicit 100-ms
+  device receive. Same-sender ordering places that observation after diagnostic
+  rendering/registration. Pressure assertions, exact kind accounting, 1,000-ms
+  cleanup grace, existing waits and asynchronous execution remain unchanged.
+  Thirteen cases pass in 0.7 seconds on each supported pair.
+  `/private/tmp/loopex-m7-diagnostic-dispatch-current-20261002.log`, SHA-256
+  `ea6ad7aae7790d6e0c9a04286dd85ca5a5ceac8ac03c72dec8449bc9d403e976`;
+  `/private/tmp/loopex-m7-diagnostic-dispatch-floor-20261002.log`, SHA-256
+  `d51543a587eb5c4f0ccb43f2c8998189e6c8d25e4a9b9b536718b5b0a8349c0b`.
+  This follows the failed initial device wait in the committed 7d10f9f6 full
+  check. That candidate remains failed evidence; the new fixture bytes require
+  their own committed integration check. Original: 42 done / 144 remaining.
+  Added: 126 done / 12 remaining, including the pending T10 schema choice below.
+
+- Pending maintainer decision: T10's ADR 0049 reference to a public outcome
+  object has no shared terminal-only codec/schema. The proposed new chat object
+  is exactly `{outcome, details}`. Completed/cancelled details are exactly
+  `{cleanup_grace_ms}`; failed details `{reason, failure, cleanup_grace_ms}`
+  preserve the existing public reason/structured-failure alternatives;
+  bound_reached details are `{bound, observed, declared_limit, accounting_source,
+  cleanup_grace_ms}`; outcome_unknown details are `{reconciliation_ref,
+  cleanup_grace_ms}`. Quantities retain canonical decimal encodings and their
+  existing Core domains, including non-u64 ordinary turn/token bounds. The
+  reconciliation reference keeps opaque protocol identity encoding. There are
+  no text/tool/profile/identity duplicates or host cleanup facts inside the
+  terminal object. No_ending is excluded; null and the accepted uncertain-wait
+  host literals keep their meanings. Recommendation: pin this closed schema
+  through ADR 0049's amendment path, share its protocol codec and independent
+  vectors, and leave existing ask JSON/event bytes unchanged. Alternative:
+  nest the complete ask object, accepting duplication and its larger presentation
+  and profile coupling. Packet: `/private/tmp/loopex-m7-chat-outcome-decision.md`.
+  The async question is pending; no dependent codec/schema work is implemented.
+
 - Done: T12 one-call responder integration consumes the unary callback before
   startup, rejects disabled/non-unary/duplicate selections, and retains reusable
   startup and per-call grammar. One temporary private-supervisor child is
@@ -3753,6 +3799,9 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Resolve the concrete terminal-only chat outcome schema through the maintainer decision; retain the accepted run-only/null/uncertainty meanings and existing ask/event bytes, then implement the shared codec, closed control constructors and independent vectors.
+
+
 - [x] Implement bounded single-line framing and explicit chat-action parsing, with wait-line backpressure, exact JSON answers and malformed-input refusal on both toolchains; driver admission remains pending.
 - [x] Implement the bounded independently draining output writer and escaped transcript lines; prove progress eviction, control deadlines and joined worker cleanup on both toolchains. Closed records and driver integration remain pending.
 - [x] Expose attachment-based command observation with a closed result, replay-derived admitted/refused facts, stable structured-refusal codes and committed run identity; preserve opaque IDs and prove missing/recreated identities remain pending without owner Store callbacks.
@@ -3886,6 +3935,9 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Confirm diagnostic writer dispatch through same-sender owner status before the existing blocked-device receive; retain the failed committed integration observation and prove unchanged pressure/accounting/receive/cleanup assertions on both supported pairs.
+
 
 - [x] Restore the reference composition size gate by consolidating preflight in the existing DurableOptions owner; preserve validation precedence and constructor behavior on both toolchains.
 - [x] Encode the historical interaction positive control with its reader's v2 settlement format while retaining refusal of new interaction records.

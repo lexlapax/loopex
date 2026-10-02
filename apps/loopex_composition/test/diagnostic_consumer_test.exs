@@ -66,6 +66,10 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
     device = device()
     {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
     send(consumer, {:loopex_diagnostic, %{"kind" => "trace_call", "function" => "first"}})
+    # Concept: pressure accounting starts with an actually dispatched writer.
+    # Technical depth: the same-sender status request follows the diagnostic and
+    # confirms rendering/registration before the unchanged device receive wait.
+    assert %{active: true, pending: 0, failure: nil} = DiagnosticConsumer.status(consumer)
     assert_receive {:device_write, worker, _}
 
     for i <- 1..128 do
