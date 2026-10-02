@@ -40,7 +40,9 @@ defmodule LoopexCli.ChatOutputTest do
     device = device()
     {:ok, writer} = ChatOutput.start_link(device)
     assert :ok = ChatOutput.write(writer, :progress, "active")
-    assert_receive {:device_write, worker, "active"}
+    assert_receive {:device_write, _peer, "active"}
+
+    worker = :sys.get_state(writer).current.pid
     assert :ok = ChatOutput.write(writer, :progress, String.duplicate("p", 200_000))
     required = String.duplicate("t", 80_000)
     assert :ok = ChatOutput.write(writer, :text, required)
@@ -48,7 +50,8 @@ defmodule LoopexCli.ChatOutputTest do
     assert :dropped = ChatOutput.write(writer, :progress, String.duplicate("p", 262_144))
     assert ChatOutput.status(writer).dropped == 2
     send(device, {:release, :ok})
-    assert_receive {:device_write, second, ^required}
+    assert_receive {:device_write, _peer, ^required}
+    second = :sys.get_state(writer).current.pid
     refute Process.alive?(worker)
     send(device, {:release, :ok})
     assert :ok = ChatOutput.finish(writer)
@@ -60,7 +63,9 @@ defmodule LoopexCli.ChatOutputTest do
     device = device()
     {:ok, writer} = ChatOutput.start_link(device)
     assert :ok = ChatOutput.write(writer, :text, String.duplicate("x", 250_000))
-    assert_receive {:device_write, worker, _}
+    assert_receive {:device_write, _peer, _}
+
+    worker = :sys.get_state(writer).current.pid
 
     assert {:error, :output_overflow} =
              ChatOutput.write(writer, :control, String.duplicate("c", 65_536))
@@ -88,7 +93,9 @@ defmodule LoopexCli.ChatOutputTest do
     device = device()
     {:ok, writer} = ChatOutput.start_link(device)
     assert :ok = ChatOutput.write(writer, :text, "blocked")
-    assert_receive {:device_write, worker, "blocked"}
+    assert_receive {:device_write, _peer, "blocked"}
+
+    worker = :sys.get_state(writer).current.pid
     started = System.monotonic_time(:millisecond)
     assert :ok = ChatOutput.write(writer, :control, "@loopex wait\n")
     assert ChatOutput.status(writer).failure == nil
@@ -111,7 +118,9 @@ defmodule LoopexCli.ChatOutputTest do
       device = device()
       {:ok, writer} = ChatOutput.start_link(device)
       assert :ok = ChatOutput.write(writer, :control, "@loopex input\n")
-      assert_receive {:device_write, worker, _}
+      assert_receive {:device_write, _peer, _}
+
+      worker = :sys.get_state(writer).current.pid
 
       case disposition do
         :broken -> send(device, {:release, {:error, :private_device_error}})
@@ -128,7 +137,9 @@ defmodule LoopexCli.ChatOutputTest do
     device = device()
     {:ok, writer} = ChatOutput.start_link(device)
     assert :ok = ChatOutput.write(writer, :text, "private-buffer-canary")
-    assert_receive {:device_write, worker, _}
+    assert_receive {:device_write, _peer, _}
+
+    worker = :sys.get_state(writer).current.pid
     refute inspect(:sys.get_status(writer)) =~ "private-buffer-canary"
     started = System.monotonic_time(:millisecond)
     assert {:error, :output_drain_timeout} = ChatOutput.finish(writer, started)
@@ -136,13 +147,18 @@ defmodule LoopexCli.ChatOutputTest do
     refute Process.alive?(worker)
   end
 
+  # Concept: prove death of the worker the output owner actually acquired.
+  # Technical depth: an IO request can carry a disposable relay peer. Capture
+  # the manager's linked worker before inducing failure, not that device peer.
   test "abrupt writer loss still kills its linked IO worker" do
     device = device()
     {:ok, writer} = ChatOutput.start_link(device)
     Process.unlink(writer)
     writer_monitor = Process.monitor(writer)
     assert :ok = ChatOutput.write(writer, :text, "blocked")
-    assert_receive {:device_write, worker, "blocked"}
+    assert_receive {:device_write, _peer, "blocked"}
+
+    worker = :sys.get_state(writer).current.pid
     worker_monitor = Process.monitor(worker)
     Process.exit(writer, :kill)
     assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :killed}
@@ -162,7 +178,9 @@ defmodule LoopexCli.ChatOutputTest do
       end)
 
     assert_receive {:writer, writer}
-    assert_receive {:device_write, worker, "blocked"}
+    assert_receive {:device_write, _peer, "blocked"}
+
+    worker = :sys.get_state(writer).current.pid
     assert ChatOutput.write(writer, :control, "forged") == {:error, :not_output_owner}
     writer_monitor = Process.monitor(writer)
     worker_monitor = Process.monitor(worker)

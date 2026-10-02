@@ -193,7 +193,6 @@ defmodule LoopexCli.ChatControl do
          state: :uncertain,
          interaction_id: nil,
          command_id: command,
-         run_id: nil,
          outcome: :commit_unknown
        })
        when is_binary(command), do: {:ok, "commit_unknown"}

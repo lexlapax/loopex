@@ -91,7 +91,73 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
-- Integration check: exact `6750f9220da572c97e309e488a228b7a05bc17c4`
+- Integration check: exact `5a21442a9a984b2338d33e3610f5bc68ab93c2dd`
+  passed the full current-pair fast check in 907 seconds. All eleven application
+  suites and preliminary gates passed. Complete output:
+  `/private/tmp/loopex-m7-5a21442a-fast-check.log`, SHA-256
+  `0470c967bf82851dcf108a047cb324f1d739e19d753e9121c2c82fdaf0348187`.
+  This proves the committed active-bound status and fixture warning repair;
+  it does not include the later chat driver. No floor closure matrix or release
+  check has run. The earlier provider deadline flake and Task.Supervisor
+  diagnostic remain unresolved observations.
+
+- Done: one added T06 subtask connects the prepared chat input/output/control
+  primitives to an already created live Core session. The private driver owns
+  separate command/event attachment workers, a single-line input worker and
+  the bounded output manager. One event grant and one pending command bound
+  retained messages. Input admission is printed before its caused output.
+  Wait drains through the owner's observed committed cursor before reporting
+  settled/question; it leaves subsequent pipe input unread while work is active.
+  Questions retain the actual opaque identity and exact whitespace-bearing
+  answer. Quit, EOF and host interrupt share one captured committed cleanup
+  backstop. Unknown admission is observed by exact ID without retry or a
+  competing abort; second interrupt stops waiting, reports unknown cleanup and
+  retains any outstanding worker monitors in the private driver. Confirmed
+  local results require every owned worker DOWN. The outer host must supply its
+  separate composition/credential cleanup proof before closing. Unconfirmed
+  local cleanup cannot be overwritten by a confirmed outer result.
+
+  The driver also distinguishes pipe syntax/state refusal, which stops input
+  and exits nonzero, from interactive refusal, which leaves the conversation
+  usable. Core events remain durable authority. Lost attachment holders and
+  broken output return fixed failures; formatting of process status excludes
+  private input and output. The accepted uncertainty branch now permits a known
+  foreground run alongside an unresolved command, as ADR 0049 already requires.
+  Startup/composition/trace/signal installation, public `chat` dispatch, status,
+  configure/compact joins, prepared resume, TTY presentation, built-command
+  restart and paid/attended proofs remain pending. No original item closes.
+  Original checklist remains 42 done / 144 remaining; added subtasks are now
+  130 done / 10 remaining. T01 and T09 remain the only complete original tasks.
+
+  Focused verification runs warnings as errors over all four chat transport
+  files: 45 cases, current 6.0 seconds and floor 5.7 seconds. Complete outputs:
+
+  - `/private/tmp/loopex-m7-chat-driver-current-v9.log`, SHA-256
+    `6aeb88c1f8f46462e0396e176b7900df4f0628e028dd228818b67de4943e9fe6`.
+  - `/private/tmp/loopex-m7-chat-driver-floor-v2.log`, SHA-256
+    `6d5404129d31c2eb96bac345ccc6ad70c2cfebee2cc006833920be0a9aff25c7`.
+
+  Failed drafts remain retained, not successful evidence. The first compile
+  caught an unreachable stopping-input clause, removed because caller admission
+  already excludes that state. The first fixture run caught an unused alias,
+  an initially inadequate caller-loss scenario and a system-message position
+  assumption. Later tests caught a lost command holder still waiting for its
+  cutoff and pipe syntax refusal reading the next line; both changed source
+  before verification. A final existing output-worker test exposed a disposable
+  IO relay peer mistaken for the linked worker. All such fixtures now capture
+  the manager-owned worker before inducing failure, preserving the actual
+  linked-worker death assertions and their original waits. That repairs the
+  already completed output ownership proof, with no new task-count credit.
+
+  | Failed draft | Complete output | SHA-256 |
+  | --- | --- | --- |
+  | Compile warning | `/private/tmp/loopex-m7-chat-driver-compile-v1.log` | `e26060acae99a175b781355ec9bed8a9e8cc744996a1245272182a5ee7e27205` |
+  | First fixtures | `/private/tmp/loopex-m7-chat-driver-current-v1.log` | `0b5f9c75aab5c1ba5af3784319c019af51b212550c6f48348645b42131134e4d` |
+  | Command-holder loss | `/private/tmp/loopex-m7-chat-driver-current-v6.log` | `f2fe4175ce71f1fa7d74233916162fe8596eefadf786c7ec998b7b90c5dc2584` |
+  | Pipe refusal | `/private/tmp/loopex-m7-chat-driver-current-v7.log` | `045d16a86e4e1c5639de5c1121155fb2891c20963ae48e2f8d5ab47a7cc18cc7` |
+  | IO peer mistaken for worker | `/private/tmp/loopex-m7-chat-driver-current-v8.log` | `dbbae42d9721a65ab7b3a8e203172d2b1895e224a0dd8ca097b251810f8dc51b` |
+
+- Prior integration failure: exact `6750f9220da572c97e309e488a228b7a05bc17c4`
   exited 1. Preliminary gates passed; all application test assertions passed,
   but Core's `--warnings-as-errors` lane refused two compiler type warnings in
   the new parameterized frozen-resource fixture. Core passed 922 cases with
@@ -3825,6 +3891,8 @@ or check was relaxed.
 - [ ] Later retain the required attended multi-prompt proof.
 
 ### Added implementation subtasks
+
+- [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
 
 - [x] Expose the accepted committed configuration allowlist and current active-run bounds through existing local session status; prove initial/configured/restarted values, unresolved legacy and settled nulls, private-data exclusion, arbitrary turn/token counts, the exact staged absolute cutoff and the unchanged historical wire allowlist on both supported toolchains. Authored absolute ceilings, new generation snapshots and live chat integration remain pending.
 - [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.

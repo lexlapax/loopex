@@ -261,6 +261,13 @@ defmodule LoopexCli.ChatControlTest do
           %{base | state: :question, run_id: "run", interaction_id: <<0, 255>>},
           %{base | state: :uncertain, run_id: "run", outcome: unknown},
           %{base | state: :uncertain, command_id: <<0, 255>>, outcome: :commit_unknown},
+          %{
+            base
+            | state: :uncertain,
+              run_id: <<255, 0>>,
+              command_id: <<0, 255>>,
+              outcome: :commit_unknown
+          },
           %{base | state: :uncertain, outcome: :cleanup_unknown},
           %{base | state: :uncertain, run_id: "run", outcome: :cleanup_unknown}
         ] do
@@ -312,7 +319,7 @@ defmodule LoopexCli.ChatControlTest do
           %{
             base
             | state: :uncertain,
-              run_id: "run",
+              interaction_id: "interaction",
               command_id: "command",
               outcome: :commit_unknown
           },
