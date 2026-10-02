@@ -325,6 +325,31 @@ defmodule Loopex.LLM.ReqLLM.NativeRequestTest do
     end
   end
 
+  test "checkpoint provenance stays exact user data through every native mapping and transport" do
+    content =
+      File.read!(Path.expand("../../../test/fixtures/m7/checkpoint-summary.json", __DIR__))
+
+    for {model, level, thinking, required, _} <- cells() do
+      original = request(model, level, thinking, required)
+      messages = [hd(original.messages), %{"role" => "user", "content" => content}]
+
+      assert {:ok, staged} =
+               Model.request(model, messages,
+                 sampling: original.sampling,
+                 deadline: original.deadline
+               )
+
+      for streaming <- [true, false] do
+        assert {:ok, body} = NativeRequest.render(staged, baseline(staged, streaming), streaming)
+        assert body["system"] == [%{"type" => "text", "text" => "captured instructions"}]
+
+        assert body["messages"] == [
+                 %{"role" => "user", "content" => [%{"type" => "text", "text" => content}]}
+               ]
+      end
+    end
+  end
+
   test "every continuation-required cell expands its own exact ordered native array" do
     for {model, level, thinking, true, _} <- cells() do
       {request, native} = continuation_request(model, level, thinking)

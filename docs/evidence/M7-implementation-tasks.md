@@ -91,6 +91,36 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T07's existing summary owner captures covered-record provenance from
+  trusted inputs, ORs the current source excerpt classification with inherited
+  omissions, and renders a closed checkpoint summary as one canonical user
+  message with its exact checkpoint source reference. Model output still admits
+  only summary/carry-forward and cannot author provenance. Source reuse and
+  rendering now share the same prior-data validator. An independently encoded
+  UTF-8 vector pins 325 bytes and SHA-256
+  `7517073f290d4df4edb21469e31b8a678dfbcd0fdc6c30075cf209a95aa6d2c2`.
+  All nine native mappings preserve those bytes as user text in both streaming
+  and buffered rendering. No instruction or tool result is fabricated.
+  Source/summary tests pass 30 cases in 0.4 seconds on each toolchain; native
+  request tests pass 15 in 1.9 seconds current and 1.8 seconds floor. Compile,
+  formatting, documentation, dependency and status gates pass. The initial new
+  test confused a source's current excerpt classification with an inherited
+  checkpoint flag; it failed 1 of 29 cases. The final test preserves the source's
+  existing meaning and exercises the new owner capture step instead.
+  Retained complete outputs:
+  `/private/tmp/loopex-m7-checkpoint-render-core-current-20261002.log`, SHA-256
+  `ded23bdfbe68735a4a69f4741b41d33b2482790f5eca40fbc4fd2e00b886e027`;
+  `/private/tmp/loopex-m7-checkpoint-render-core-current-final-20261002.log`, SHA-256
+  `b5f45d2321dd4ae9c08b89f879e2a3ffb32b9e9eba00ea19d648c486aff96627`;
+  `/private/tmp/loopex-m7-checkpoint-render-core-floor-20261002.log`, SHA-256
+  `059edd640412dd2b98136d903dcecf280a9b7b82e762375700f1ee96701208ad`;
+  `/private/tmp/loopex-m7-checkpoint-render-native-current-20261002.log`, SHA-256
+  `f4c30c30505269c912a0b3f33054747c17aa8fd4cd1c24daf1edd2f8f2d60084`;
+  `/private/tmp/loopex-m7-checkpoint-render-native-floor-20261002.log`, SHA-256
+  `7381ee807aa74ebe104237d793109c4053efdd74f209603ab12513fe96372ea2`.
+  This is pure content/provenance preparation and adapter rendering, not retained
+  checkpoint, episode admission, range-integrity, recovery or provider proof.
+  Original counts remain 30 done / 156 remaining. Added: 108 done / 11 remaining.
 - Done: the reference client's explicitly selected AllowAll policy no longer
   transfers a VM-lifetime notice table to init. The retained defect reproduces
   after a short-lived first decision caller exits: its table survives at init
@@ -3105,6 +3135,7 @@ or check was relaxed.
 - [x] Stream exact source-v2 complete/excerpt encodings with bounded candidate/end buffers, full-list digest/count, fixed UTF-8-safe quota order, prior checkpoint reuse and traversal cancellation/deadline checks; pin independent byte, cap and numeric vectors.
 - [x] Admit whole maintenance callbacks, retain canonical usage on incomplete/invalid summaries, require natural completion first, and share closed summary/carry-forward validation with prior checkpoint reuse; prove escaping, size, shape and callback-generation boundaries.
 - [x] Select bounded complete source prefixes through owner-supplied whole-request preflight, enforce the revision-3 small-prefix/next-unit rule without fallback, and prove whole-unit coverage, exact threshold, quota order and cancellation before later reads.
+- [x] Capture owner-computed checkpoint summary provenance with inherited omission, share strict prior-data admission and pin exact canonical user rendering/source identity plus all nine native mappings in both transport modes on both toolchains.
 
 ## T08 — Implement model selection and private thinking continuation
 

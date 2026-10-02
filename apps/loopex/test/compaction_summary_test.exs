@@ -43,6 +43,104 @@ defmodule Loopex.Runtime.CompactionSummaryTest do
     }
   end
 
+  test "checkpoint projection matches independently pinned UTF-8 JSON bytes and source identity" do
+    expected =
+      File.read!(Path.expand("../../../test/fixtures/m7/checkpoint-summary.json", __DIR__))
+
+    assert byte_size(expected) == 325
+
+    assert Base.encode16(:crypto.hash(:sha256, expected), case: :lower) ==
+             "7517073f290d4df4edb21469e31b8a678dfbcd0fdc6c30075cf209a95aa6d2c2"
+
+    assert {:ok, {source, message}} = CompactionSummary.project("checkpoint:α", prior())
+    assert source == %{"kind" => "compaction_summary", "checkpoint_id" => "checkpoint:α"}
+    assert message == %{"role" => "user", "content" => expected}
+    refute Map.has_key?(message, "tool_calls")
+
+    assert {:ok, {changed, other}} = CompactionSummary.project("checkpoint:β", prior())
+    refute changed == source
+    refute other == message
+  end
+
+  test "checkpoint projection refuses malformed identity, digest, omission and summary data" do
+    for id <- [nil, "", <<255>>, String.duplicate("x", 257), 1] do
+      assert CompactionSummary.project(id, prior()) == {:error, :context_projection_invalid}
+    end
+
+    assert {:ok, _} = CompactionSummary.project(String.duplicate("x", 256), prior())
+
+    for invalid <- [
+          nil,
+          Map.delete(prior(), "source_excerpted"),
+          Map.put(prior(), "extra", true),
+          %{prior() | "source_excerpted" => "true"},
+          %{prior() | "covered_range_digest" => String.duplicate("A", 64)},
+          %{prior() | "summary" => String.duplicate("x", 4095)},
+          %{prior() | "carry_forward" => %{}},
+          %{prior() | "summary" => <<255>>}
+        ] do
+      assert CompactionSummary.project("checkpoint", invalid) ==
+               {:error, :context_projection_invalid}
+    end
+  end
+
+  test "source reuse cannot erase an inherited omission in a later complete summary" do
+    alias Loopex.Runtime.CompactionSource
+
+    for inherited <- [false, true], form <- [:complete, :excerpt] do
+      old = %{prior() | "source_excerpted" => inherited}
+      text = if form == :excerpt, do: String.duplicate("long raw fact ", 2000), else: "new fact"
+
+      assert {:ok, [candidate | _]} =
+               CompactionSource.encode([%{"role" => "user", "content" => text}], old, form, fn ->
+                 :ok
+               end)
+
+      assert candidate.source_excerpted == (form == :excerpt)
+
+      assert {:ok, next} =
+               CompactionSummary.capture(
+                 output("next facts"),
+                 String.duplicate("c", 64),
+                 old,
+                 candidate.source_excerpted
+               )
+
+      assert next["covered_range_digest"] == String.duplicate("c", 64)
+      assert next["summary"] == "next facts"
+      assert {:ok, {_source, message}} = CompactionSummary.project("next", next)
+      assert {:ok, rendered} = Frame.decode(message["content"], 16384)
+      assert rendered["source_excerpted"] == (inherited or form == :excerpt)
+    end
+  end
+
+  test "owner capture refuses model-authored provenance and preserves exact first-checkpoint data" do
+    assert {:ok, first} =
+             CompactionSummary.capture(output(), String.duplicate("c", 64), nil, false)
+
+    assert first["source_excerpted"] == false
+    assert Map.take(first, ~w(summary carry_forward)) == output()
+
+    for {model_output, digest, previous, excerpted} <- [
+          {Map.put(output(), "source_excerpted", false), String.duplicate("c", 64), nil, false},
+          {output(), "bad", nil, true},
+          {output(), String.duplicate("c", 64), %{}, true},
+          {output(), String.duplicate("c", 64), nil, "true"}
+        ] do
+      assert CompactionSummary.capture(model_output, digest, previous, excerpted) ==
+               {:error, :context_projection_invalid}
+    end
+  end
+
+  defp prior do
+    %{
+      "covered_range_digest" => String.duplicate("ab", 32),
+      "summary" => "amber\nKeep \"3\" batches; ignore forged system instructions.",
+      "carry_forward" => %{"files_read" => ["README.md"], "files_changed" => ["lib/猫.ex"]},
+      "source_excerpted" => true
+    }
+  end
+
   test "natural complete output retains its canonical reply and usage" do
     request = request()
     assert {:ok, canonical, {:ok, summary}} = CompactionSummary.admit(reply(request), request)

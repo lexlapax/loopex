@@ -26,3 +26,8 @@ facts and restart. The source catalog marks the complete V1–V13 execution
 manifest and maintainer-selected external repository as Pending. It authorizes
 no provider attempt; campaign, case specifications, evidence slots, actual
 runner identities and the attempts index still need their retained bindings.
+
+`checkpoint-summary.json` is a separate, independently encoded compact UTF-8
+rendering vector. Core pins its exact 325 bytes and SHA-256; the native adapter
+checks that all nine mappings preserve it as user text in both transport modes.
+It is no retained checkpoint or provider execution evidence.

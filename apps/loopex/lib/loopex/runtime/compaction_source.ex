@@ -422,25 +422,7 @@ defmodule Loopex.Runtime.CompactionSource do
 
   defp valid_prior(nil), do: :ok
 
-  defp valid_prior(
-         %{
-           "covered_range_digest" => digest,
-           "summary" => summary,
-           "carry_forward" => carry,
-           "source_excerpted" => excerpted
-         } = prior
-       ) do
-    with true <- map_size(prior) == 4 and is_binary(digest) and byte_size(digest) == 64,
-         true <- Regex.match?(~r/\A[0-9a-f]{64}\z/, digest),
-         true <- is_boolean(excerpted),
-         :ok <- CompactionSummary.validate(%{"summary" => summary, "carry_forward" => carry}) do
-      :ok
-    else
-      _invalid -> {:error, :context_projection_invalid}
-    end
-  end
-
-  defp valid_prior(_), do: {:error, :context_projection_invalid}
+  defp valid_prior(prior), do: CompactionSummary.validate_prior(prior)
 
   defp json(value) do
     {:ok, framed} = Frame.encode(%{"v" => value})
