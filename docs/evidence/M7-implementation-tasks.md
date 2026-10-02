@@ -105,16 +105,26 @@ did not resolve them. No paid provider calls were made during this check.
   `/private/tmp/loopex-m7-chat-driver-bounds-floor.log`, SHA-256
   `8d58972290e378a7140fe255d84128fe9e546f27b53ba152d9e90fb3e4878d61`.
 
-- Pending maintainer choice: expose the existing prepared configure operation as
-  `Loopex.command_with_configuration(attachment, authored_command, resolved_candidate)`,
-  or explicitly authorize the reference host's direct private Runtime bridge.
-  The public method is recommended so capability metadata stays separate from
-  authored input while the CLI retains its public-facade-only boundary. The
-  earlier exact-genesis public creation approval did not select this signature.
-  No dependent public configure implementation has started. Concrete packet:
-  `/private/tmp/loopex-m7-configure-facade-decision.md`, SHA-256
-  `4f7cf31054776c3afb9cf52b159d25bb3f893a91a9666345618889cb1eb4f3e0`.
-  The two earlier event-identity and early-spill choices remain pending separately.
+- Done: the maintainer approved the public prepared configure method on
+  2026-10-02. `Loopex.command_with_configuration/3` forwards the separate
+  authored command and resolved candidate through the existing attachment
+  route to the sole serial owner. It performs no catalog or credential effects.
+  All eighteen live configure calls now use that facade, preserving admission,
+  changed-candidate duplicate replay, identity conflicts, unchanged refusals,
+  unknown commits and restart recovery. A malformed-boundary case proves no
+  journal mutation or model/executor work. Thirty-seven configured-session
+  cases pass with warnings as errors on both toolchains: current 6.8 seconds,
+  floor 6.6 seconds. Complete outputs:
+  `/private/tmp/loopex-m7-configure-facade-current.log`, SHA-256
+  `6456a0a68016ac5de608f056d4129d2717cac9ece652ba8ee8bd0026f2b3e099`;
+  `/private/tmp/loopex-m7-configure-facade-floor.log`, SHA-256
+  `244564569dce0a7744725f8a13ac4843935cc07bc09559e610906179cb61aa74`.
+  The approved packet is `/private/tmp/loopex-m7-configure-facade-decision.md`,
+  SHA-256 `4f7cf31054776c3afb9cf52b159d25bb3f893a91a9666345618889cb1eb4f3e0`.
+  This closes one added T04 subtask. Original checklist remains 42 done / 144
+  remaining; added subtasks are 131 done / 10 remaining. Host resolution,
+  daemon routing and maintenance/checkpoint joins remain open. The earlier
+  event-identity and early-spill choices remain pending separately.
 
 - Running: full fast check of exact
   `462c3ccad69ff245303d53e9af9dd6cd7beba29a` in the isolated check checkout,
@@ -3872,6 +3882,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Expose the approved public prepared configure facade with separate authored input and resolved candidate; prove live admission, replay, refusal, unknown commits, restart and malformed routing on both supported toolchains.
 - [x] Share the v2 resolver/decoder between creation and replay; pin unchanged transaction bytes and exact normalized byte boundaries.
 - [x] Extend that same resolver/decoder with v3 configuration, immutable tool selection and literal artifact-read derivation.
 - [x] Validate closed captured configuration, combined metadata byte limits, budget origins and complete system-class tool costs; retain v3 settings through pure replay.

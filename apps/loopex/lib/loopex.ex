@@ -171,6 +171,27 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Admits a host-prepared configuration change through the session reached by
+  this attachment. The trusted host resolves the candidate before submission.
+
+  ## Technical depth
+
+  The authored configure command carries its identity and requested changes.
+  The separate bounded candidate carries resolved capability metadata and
+  provider mapping; these do not become authored command input. The facade
+  performs no catalog or credential effects. The session's serial owner checks
+  readiness and exact retained-history capacity before atomic admission.
+  Duplicate commands retain their original disposition even if the host's
+  candidate has changed. Refusal and commit_unknown keep their existing meaning.
+  """
+  @spec command_with_configuration(Attachment.t(), map(), term()) ::
+          {:accepted, binary()} | {:error, term()}
+  def command_with_configuration(attachment, command, candidate),
+    do: Runtime.command_with_configuration(attachment, command, candidate)
+
+  @doc """
+  ## Concept
+
   Observe the disposition of an earlier command without submitting it again.
   Unknown admission remains unknown until this owner has conclusive evidence.
 
