@@ -73,7 +73,7 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
       message = Enum.find(request.messages, &(&1["role"] == "tool"))
       assert byte_size(message["content"]) > 2_048
       assert {:ok, records} = Store.load_records(fixture.store, fixture.session, 0, 1_000)
-      [receipt] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed"))
+      [receipt] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
       assert message["content"] == receipt.payload["receipt"]["output"]
       assert message["outcome"] == "completed"
       File.rm_rf!(fixture.artifact_root)
@@ -208,8 +208,8 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     assert IO.iodata_length(encoded_message) - 1 <= 8_192
 
     assert {:ok, records} = Store.load_records(store, session, 0, 1_000)
-    [source, result] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed"))
-    [_, range_intent] = Enum.filter(records, &(&1.payload.kind == "effect_intent_committed"))
+    [source, result] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
+    [_, range_intent] = Enum.filter(records, &(&1.payload.kind == "effect_intent_committed_v2"))
     resolved = range_intent.payload["job"]["validated_arguments"]["resolved_artifact"]
     assert resolved["reference"] == reference
     assert resolved["source"]["record_digest"] == Canonical.digest(source.payload)
@@ -233,7 +233,7 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     assert {:ok, events} = Store.load_events(store, session, 0, 1_000)
     assert {:ok, recovered} = SessionState.recover(session, records, events)
     assert recovered.artifact_sources[use] == resolved
-    assert Enum.count(records, &(&1.payload.kind == "executor_receipt_committed")) == 3
+    assert Enum.count(records, &(&1.payload.kind == "executor_receipt_committed_v2")) == 3
     assert recovered.lineage_projection_revision == 1
     assert_excerpt_provenance(session, records, events, requests, source.payload)
     assert :sys.get_state(transfers).jobs == %{}

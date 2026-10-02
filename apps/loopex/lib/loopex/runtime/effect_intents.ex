@@ -28,7 +28,7 @@ defmodule Loopex.Runtime.EffectIntents do
 
   @uint64_max 18_446_744_073_709_551_615
   @page_bytes 1_114_112
-  @effect_kinds ~w(effect_intent_committed executor_receipt_committed tool_result_committed outcome_unknown_committed)
+  @effect_kinds ~w(effect_intent_committed effect_intent_committed_v2 executor_receipt_committed executor_receipt_committed_v2 tool_result_committed tool_result_committed_v2 outcome_unknown_committed outcome_unknown_committed_v2)
   @command_keys ~w(command_id command_digest command_type admission)
   @prompt_keys @command_keys ++
                  ~w(run_id content max_turns token_budget deadline_ms context_token_budget)
@@ -71,7 +71,10 @@ defmodule Loopex.Runtime.EffectIntents do
        []},
     "model_question_response_admitted_v1" =>
       {@command_keys ++ ~w(interaction_id answer disposition responded_at), []},
-    "model_question_settled_v1" => {~w(interaction_id disposition answer settled_at), []}
+    "model_question_response_admitted_v2" =>
+      {@command_keys ++ ~w(interaction_id answer disposition responded_at), []},
+    "model_question_settled_v1" => {~w(interaction_id disposition answer settled_at), []},
+    "model_question_settled_v2" => {~w(interaction_id disposition answer settled_at), []}
   }
 
   @doc """
@@ -332,8 +335,10 @@ defmodule Loopex.Runtime.EffectIntents do
         "model_termination_admitted_v1" ->
           ProviderAttempt.validate_termination(payload) == :ok
 
-        "command_admitted" ->
-          command_shape?(payload)
+        kind when kind in ["command_admitted", "model_question_abort_admitted_v2"] ->
+          command_shape?(payload) and
+            (kind == "command_admitted" or
+               (payload["command_type"] == "abort" and payload["admission"] == "accepted"))
 
         _ ->
           case Map.fetch(@neutral_shapes, kind) do

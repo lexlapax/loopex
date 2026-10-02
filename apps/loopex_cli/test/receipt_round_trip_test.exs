@@ -57,7 +57,7 @@ defmodule LoopexCli.ReceiptRoundTripTest do
     receipt =
       stack.store
       |> Demonstration.records(session_id)
-      |> Enum.find(&(&1.payload.kind == "executor_receipt_committed"))
+      |> Enum.find(&(&1.payload.kind == "executor_receipt_committed_v2"))
       |> get_in([:payload, "receipt"])
 
     assert receipt["output"] == exact

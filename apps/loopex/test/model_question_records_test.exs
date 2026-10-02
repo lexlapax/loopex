@@ -67,6 +67,44 @@ defmodule Loopex.ModelQuestionRecordsTest do
       assert {:ok, state} = SessionState.recover(session, records, events)
       assert state.open_interaction == @vectors["interaction_id"]
 
+      {:ok, expiry} =
+        SessionState.propose_model_question_expiry(
+          state,
+          state.open_interaction,
+          pending["expires_at"]
+        )
+
+      [expiry_payload] = expiry.records
+      assert expiry_payload.kind == "model_question_settled_v2"
+
+      historical_expiry = %{
+        journal_version: state.journal_version + 1,
+        owner_epoch: state.owner_epoch,
+        owner_incarnation_id: state.owner_incarnation_id,
+        payload: %{expiry_payload | kind: "model_question_settled_v1"}
+      }
+
+      expiry_events =
+        expiry.events
+        |> Enum.with_index(state.event_sequence + 1)
+        |> Enum.map(fn {event, sequence} ->
+          event =
+            if event.kind == "tool.finished",
+              do: %{event | event_id: "event-to_132fc47d65b9d9567395417f292355"},
+              else: event
+
+          Map.put(event, :event_sequence, sequence)
+        end)
+
+      assert {:ok, historical_expired} =
+               SessionState.recover(
+                 session,
+                 records ++ [historical_expiry],
+                 events ++ expiry_events
+               )
+
+      assert historical_expired.open_interaction == nil
+
       assert pending == %{
                "producer" => "model_tool",
                "interaction_id" => @vectors["interaction_id"],
@@ -143,7 +181,7 @@ defmodule Loopex.ModelQuestionRecordsTest do
       events = Fixture.events(fixture, session)
 
       response_row =
-        Enum.find(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+        Enum.find(records, &(&1.payload.kind == "model_question_response_admitted_v2"))
 
       response = response_row.payload
 
@@ -156,12 +194,34 @@ defmodule Loopex.ModelQuestionRecordsTest do
                "answer" => vector["answer"],
                "disposition" => vector["disposition"],
                "responded_at" => response["responded_at"],
-               kind: "model_question_response_admitted_v1"
+               kind: "model_question_response_admitted_v2"
              }
 
       assert response["responded_at"] >= pending["created_at"]
       assert response["responded_at"] < pending["expires_at"]
       assert_closed_record(session, records, events, response_row)
+
+      historical_rows =
+        records
+        |> Enum.take_while(&(&1.journal_version <= response_row.journal_version))
+        |> List.update_at(
+          -1,
+          &put_in(&1, [:payload, :kind], "model_question_response_admitted_v1")
+        )
+
+      historical_events =
+        events
+        |> Enum.take_while(&(&1.event_sequence <= settled.event_sequence))
+        |> Enum.map(fn
+          %{kind: "tool.finished"} = event ->
+            %{event | event_id: "event-to_132fc47d65b9d9567395417f292355"}
+
+          event ->
+            event
+        end)
+
+      assert {:ok, _historical_response} =
+               SessionState.recover(session, historical_rows, historical_events)
 
       for {field, value} <- [
             {"command_type", "prompt"},

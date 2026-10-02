@@ -563,7 +563,7 @@ defmodule Loopex.CancellationTest do
     receipts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "executor_receipt_committed"))
+      |> Enum.filter(&(&1.payload[:kind] == "executor_receipt_committed_v2"))
 
     assert length(receipts) == 1
   end
@@ -649,7 +649,7 @@ defmodule Loopex.CancellationTest do
     receipts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "executor_receipt_committed"))
+      |> Enum.filter(&(&1.payload[:kind] == "executor_receipt_committed_v2"))
 
     assert length(receipts) == 1,
            "cleanup discarded the valid executor receipt queued behind its own result"
@@ -1422,7 +1422,7 @@ defmodule Loopex.CancellationTest do
 
     coordinator = coordinator_of(fixture.runtime)
     reference = Process.monitor(coordinator)
-    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed")
+    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed_v2")
 
     {:accepted, "abort-1"} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
 
@@ -1469,21 +1469,21 @@ defmodule Loopex.CancellationTest do
     # admitted, a dispatched call with no ending, and no run terminal.
     coordinator = coordinator_of(fixture.runtime)
     reference = Process.monitor(coordinator)
-    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed")
+    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed_v2")
 
     {:accepted, "abort-1"} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
     assert_receive {:DOWN, ^reference, :process, ^coordinator, _reason}, 30_000
 
     records = Fixture.records(fixture, session_id)
 
-    refute Enum.any?(records, &(&1.payload[:kind] == "tool_result_committed")),
+    refute Enum.any?(records, &(&1.payload[:kind] == "tool_result_committed_v2")),
            "the call was settled, so the successor has nothing left to settle"
 
     refute Enum.any?(records, &(&1.payload[:kind] == "run_terminal_committed")),
            "the run had already ended, so this case would prove the live path"
 
     # Now the successor's own attempt to settle that call is refused too.
-    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed")
+    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed_v2")
 
     assert {:ok, ^session_id} =
              Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
@@ -1493,7 +1493,7 @@ defmodule Loopex.CancellationTest do
     # finding. What is observed instead is that the refusal fired: the successor
     # presented the operation's fact, the Store answered no, and the armed
     # refusal was consumed by that presentation.
-    assert refusal_consumed?(fixture, "tool_result_committed"),
+    assert refusal_consumed?(fixture, "tool_result_committed_v2"),
            "the successor never tried to settle the call it inherited"
 
     refute fixture
@@ -1503,7 +1503,7 @@ defmodule Loopex.CancellationTest do
 
     refute fixture
            |> Fixture.records(session_id)
-           |> Enum.any?(&(&1.payload[:kind] == "tool_result_committed")),
+           |> Enum.any?(&(&1.payload[:kind] == "tool_result_committed_v2")),
            "the operation was settled after all, so the refusal proved nothing"
   end
 

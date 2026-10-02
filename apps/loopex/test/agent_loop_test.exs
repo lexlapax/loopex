@@ -1951,13 +1951,13 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "effect_intent_committed",
+        "effect_intent_committed_v2",
         self()
       )
 
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
 
-    assert_receive {:record_linearized, waiter, _store, "effect_intent_committed",
+    assert_receive {:record_linearized, waiter, _store, "effect_intent_committed_v2",
                     :session_journal_commit, {:committed, _tx_id, _receipt}},
                    2_000
 
@@ -4404,7 +4404,7 @@ defmodule Loopex.AgentLoopTest do
     # Technical depth: this is distinct from an executor returning
     # `receipt_not_retained` and from a malformed receipt. The executor returns a
     # fully valid receipt after emitting one accepted and two refused events;
-    # the Store alone refuses `executor_receipt_committed`. The stream must close
+    # the Store alone refuses `executor_receipt_committed_v2`. The stream must close
     # abandoned on the one item this runtime emitted. Mutating only the Store
     # error branch to close complete previously left every locked case green.
     executor = AgentLoopProgressExecutor.start(:one_valid_two_refused)
@@ -4416,7 +4416,7 @@ defmodule Loopex.AgentLoopTest do
         one_call_script(),
         progress_to: self(),
         before_prompt: fn store ->
-          :ok = M1RuntimeTestStore.refuse_next_record(store, "executor_receipt_committed")
+          :ok = M1RuntimeTestStore.refuse_next_record(store, "executor_receipt_committed_v2")
         end
       )
 
@@ -4433,7 +4433,7 @@ defmodule Loopex.AgentLoopTest do
 
     refute fixture.session_id
            |> then(&Fixture.records(fixture, &1))
-           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
+           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed_v2")),
            "the Store refusal did not reach the receipt transaction this case names"
   end
 
@@ -6649,7 +6649,7 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(fixture, fixture.session_id)
 
-    refute Enum.any?(records, &(&1.payload[:kind] == "outcome_unknown_committed")),
+    refute Enum.any?(records, &(&1.payload[:kind] == "outcome_unknown_committed_v2")),
            "the stale predecessor committed a terminal operation fact after handoff"
 
     {:ok, resumed} =
@@ -6720,7 +6720,7 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.any?(
              Fixture.records(fixture, fixture.session_id),
-             &(&1.payload[:kind] == "executor_receipt_committed")
+             &(&1.payload[:kind] == "executor_receipt_committed_v2")
            ),
            "the case reached Control before the executor receipt was durable"
 
@@ -6872,7 +6872,7 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(fixture, fixture.session_id)
 
-    assert Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed")),
+    assert Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed_v2")),
            "the delayed Store result did not retain the receipt this case depends on"
 
     refute Enum.any?(records, &(&1.payload[:kind] == "executor_progress_refused")),
@@ -7188,7 +7188,7 @@ defmodule Loopex.AgentLoopTest do
 
     refute answering.session_id
            |> then(&Fixture.records(answering, &1))
-           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
+           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed_v2")),
            "a receipt reporting a negative progress count reached the journal"
 
     tool_closures =
@@ -7297,7 +7297,7 @@ defmodule Loopex.AgentLoopTest do
 
     refute cleanup.session_id
            |> then(&Fixture.records(cleanup, &1))
-           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
+           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed_v2")),
            "cleanup committed a receipt whose progress count was malformed"
   end
 
@@ -7329,7 +7329,7 @@ defmodule Loopex.AgentLoopTest do
     projected_record =
       projected
       |> Fixture.records(projected.session_id)
-      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed"))
+      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed_v2"))
 
     projected_receipt = projected_record.payload["receipt"]
     refute Map.has_key?(projected_receipt, "provider_api_key")
@@ -7353,7 +7353,7 @@ defmodule Loopex.AgentLoopTest do
 
     refute unsupported
            |> Fixture.records(unsupported.session_id)
-           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed"))
+           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed_v2"))
 
     wrong_identities = [
       protocol_version: 2,
@@ -7394,7 +7394,7 @@ defmodule Loopex.AgentLoopTest do
 
       refute fixture
              |> Fixture.records(fixture.session_id)
-             |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
+             |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed_v2")),
              "a live receipt with wrong #{field} reached the journal"
     end
 
@@ -7485,7 +7485,7 @@ defmodule Loopex.AgentLoopTest do
     reconciled_record =
       recovered
       |> Fixture.records(recovered.session_id)
-      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed"))
+      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed_v2"))
 
     refute Map.has_key?(reconciled_record.payload["receipt"], "provider_api_key")
     refute inspect(reconciled_record) =~ "reconciliation-secret"
@@ -7521,7 +7521,7 @@ defmodule Loopex.AgentLoopTest do
     receipt =
       fixture
       |> Fixture.records(fixture.session_id)
-      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed"))
+      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed_v2"))
       |> get_in([:payload, "receipt"])
 
     assert receipt["outcome"] == "completed"
@@ -7589,7 +7589,7 @@ defmodule Loopex.AgentLoopTest do
 
       records = Fixture.records(fixture, fixture.session_id)
 
-      refute Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed")),
+      refute Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed_v2")),
              "a live receipt with malformed #{field} reached the journal"
 
       refute inspect(records) =~ secret,
@@ -7640,7 +7640,7 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(recovered, recovered.session_id)
 
-    refute Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed")),
+    refute Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed_v2")),
            "a malformed recovery receipt reached the journal"
 
     refute inspect(records) =~ secret,

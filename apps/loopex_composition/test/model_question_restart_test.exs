@@ -151,7 +151,7 @@ defmodule LoopexComposition.ModelQuestionRestartTest do
     {:ok, records} = Local.load_records(third_store, session, 0, 1_000)
     {:ok, events} = Local.load_events(third_store, session, 0, 1_000)
     assert Enum.filter(records, &(&1.payload.kind == "model_question_requested_v1")) == [pending]
-    assert Enum.count(records, &(&1.payload.kind == "model_question_response_admitted_v1")) == 1
+    assert Enum.count(records, &(&1.payload.kind == "model_question_response_admitted_v2")) == 1
     assert Enum.count(events, &(&1.kind == "interaction.answered")) == 1
     assert {:ok, recovered} = SessionState.recover(session, records, events)
     assert is_nil(recovered.open_interaction)

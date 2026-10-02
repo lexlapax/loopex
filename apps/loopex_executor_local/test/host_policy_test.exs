@@ -317,7 +317,10 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
 
     refute Enum.any?(Fixture.records(fixture, session_id), fn record ->
-             record.payload[:kind] in ["effect_intent_committed", "executor_receipt_committed"]
+             record.payload[:kind] in [
+               "effect_intent_committed_v2",
+               "executor_receipt_committed_v2"
+             ]
            end)
 
     assert Enum.any?(events, &(&1.kind == "tool.finished" and &1["outcome"] == "denied"))

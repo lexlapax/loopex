@@ -7897,8 +7897,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     Executor.job(%{
       protocol_version: 1,
-      job_id: stable_id("job", work.run_id, call.tool_call_id),
-      operation_id: stable_id("operation", work.run_id, call.tool_call_id),
+      # Concept: a repeated provider ID in another turn is a new effect.
+      # Technical depth: newly built identities bind turn/call inside the run.
+      # Recovery uses already journaled jobs unchanged, including legacy IDs.
+      job_id: stable_id("job", work.run_id, {work.turn_id, call.tool_call_id}),
+      operation_id: stable_id("operation", work.run_id, {work.turn_id, call.tool_call_id}),
       attempt: 1,
       session_id: state.session_id,
       run_id: work.run_id,

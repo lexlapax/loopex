@@ -20,8 +20,8 @@ defmodule Loopex.EffectHistoryProjectionTest do
     {session, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "implement")
     await_finished(attachment, System.monotonic_time(:millisecond) + 5_000)
     records = Fixture.records(fixture, session)
-    intent = Enum.find(records, &(&1.payload.kind == "effect_intent_committed"))
-    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))
+    intent = Enum.find(records, &(&1.payload.kind == "effect_intent_committed_v2"))
+    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
     assert intent
     assert receipt
     [fixture: fixture, session: session, intent: intent, receipt: receipt]
@@ -52,6 +52,18 @@ defmodule Loopex.EffectHistoryProjectionTest do
     before = Loopex.M1RuntimeTestStore.inspect_state(fixture.store)
     assert {:ok, _} = SessionState.effect_history_projection(session, intent.payload)
     assert before == Loopex.M1RuntimeTestStore.inspect_state(fixture.store)
+
+    assert SessionState.effect_history_projection(session, %{
+             intent.payload
+             | kind: "effect_intent_committed"
+           }) ==
+             SessionState.effect_history_projection(session, intent.payload)
+
+    assert SessionState.effect_history_projection(session, %{
+             receipt.payload
+             | kind: "executor_receipt_committed"
+           }) ==
+             SessionState.effect_history_projection(session, receipt.payload)
 
     for row <- [intent, receipt],
         do:
@@ -220,12 +232,18 @@ defmodule Loopex.EffectHistoryProjectionTest do
               disposition: "outcome_unknown"
             }} == SessionState.effect_history_projection(session, record)
 
+    assert SessionState.effect_history_projection(session, %{
+             record
+             | kind: "outcome_unknown_committed_v2"
+           }) ==
+             SessionState.effect_history_projection(session, record)
+
     assert_closed(session, record)
 
     for invalid <- [
           nil,
           %{},
-          %{record | kind: "outcome_unknown_committed_v2"},
+          %{record | kind: "outcome_unknown_committed_v3"},
           %{record | "reconciliation_ref" => ""},
           %{record | "run_id" => nil},
           Map.put(record, "tool_call_id", "call-1"),

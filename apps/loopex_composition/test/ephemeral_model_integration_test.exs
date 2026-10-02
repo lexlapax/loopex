@@ -406,7 +406,8 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     port =
       start_server([
         {:tool, "ask", %{"question" => "Which encoding?"}},
-        {:tool, "ls", %{"path" => "."}, "call_loopex_2"},
+        {:tool, "ls", %{"path" => "."}, "call_loopex_1"},
+        {:tool, "ls", %{"path" => "."}, "call_loopex_1"},
         "continued without waiting"
       ])
 
@@ -424,6 +425,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
 
     assert [
              %{tool_id: "loopex.ask", outcome: "denied"},
+             %{tool_id: "loopex.ls", outcome: "completed"},
              %{tool_id: "loopex.ls", outcome: "completed"}
            ] = tools
 
@@ -433,6 +435,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     [denied] = Enum.filter(request_body(second)["messages"], &(&1["role"] == "tool"))
     assert denied["content"] =~ "interaction_unsupported"
     assert_receive {:model_request, _third}, 15_000
+    assert_receive {:model_request, _fourth}, 15_000
   end
 
   for {arguments, response, expected} <- [
@@ -492,8 +495,8 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
       [tool] = Enum.filter(request_body(second)["messages"], &(&1["role"] == "tool"))
       assert tool["content"] =~ unquote(expected)
       assert {:ok, records} = Loopex.Store.load_records(store, session_id, 0, 256)
-      refute Enum.any?(records, &(&1.payload.kind == "effect_intent_committed"))
-      assert Enum.any?(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+      refute Enum.any?(records, &(&1.payload.kind == "effect_intent_committed_v2"))
+      assert Enum.any?(records, &(&1.payload.kind == "model_question_response_admitted_v2"))
       assert {:error, :invalid_interaction_answer} = Ephemeral.answer(session, id, :decline)
       assert {:ok, %{text: "next prompt survived"}} = Ephemeral.ask(session, "next")
       assert_receive {:model_request, _}, 15_000

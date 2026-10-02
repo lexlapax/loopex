@@ -566,10 +566,10 @@ defmodule LoopexCli.CodingTaskTest do
     # Counting only the latter made a healthy multi-tool run look incomplete as
     # soon as canonical replies truthfully retained every provider tool call.
     nondispatched_results =
-      Enum.filter(records, &(&1.payload.kind == "tool_result_committed"))
+      Enum.filter(records, &(&1.payload.kind == "tool_result_committed_v2"))
 
     executor_receipts =
-      Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed"))
+      Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
 
     GenServer.stop(adapter, :normal, 1_000)
 
@@ -581,7 +581,7 @@ defmodule LoopexCli.CodingTaskTest do
       denied: Enum.count(nondispatched_results, &(&1.payload["outcome"] == "denied")),
       refused: length(nondispatched_results),
       refusal_outcomes: Enum.map(nondispatched_results, & &1.payload["outcome"]),
-      effects: Enum.count(records, &(&1.payload.kind == "effect_intent_committed")),
+      effects: Enum.count(records, &(&1.payload.kind == "effect_intent_committed_v2")),
       executor_receipts: length(executor_receipts)
     }
   end

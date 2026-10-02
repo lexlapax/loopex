@@ -14,6 +14,13 @@ defmodule Loopex.Runtime.SessionState do
   commits one durable rejection instead of starting work. Proposed state is not
   authoritative until the Store receipt is admitted by runtime control's
   current-owner post-commit fence.
+
+  New tool-event record variants bind opaque IDs to session/run/turn/call.
+  The effect-intent, executor-receipt, tool-result and outcome-unknown families
+  use `_v2`; question response, expiry and question-cancelling abort variants
+  select the same recipe. Their payload members and public event members remain
+  unchanged. Historical kinds reproduce their original IDs exactly. No record
+  or retained event is rewritten, and unsupported variants refuse on replay.
   """
 
   @max_command_bytes 65_536
@@ -420,7 +427,10 @@ defmodule Loopex.Runtime.SessionState do
       is_integer(owner_epoch) and owner_epoch >= 0 and is_integer(journal_version) and
         journal_version >= 0 and Map.get(record, :owner_epoch) == owner_epoch and
         Map.get(record, :journal_version) == journal_version + 1 and
-        Map.get(payload, :kind, Map.get(payload, "kind")) == "command_admitted" and
+        Map.get(payload, :kind, Map.get(payload, "kind")) in [
+          "command_admitted",
+          "model_question_abort_admitted_v2"
+        ] and
         Map.get(payload, "command_id") == command_id and
         Map.get(payload, "command_digest") == digest and
         Map.get(payload, "command_type") == "abort"
@@ -1952,7 +1962,7 @@ defmodule Loopex.Runtime.SessionState do
       "run_id" => run_id,
       "job" => encode_plain(Map.from_struct(job)),
       "grant" => encode_plain(grant),
-      kind: "effect_intent_committed"
+      kind: "effect_intent_committed_v2"
     }
 
     # Concept: the durable record of what this runtime is about to do is measured
@@ -2010,7 +2020,8 @@ defmodule Loopex.Runtime.SessionState do
     _invalid -> {:error, :invalid_history}
   end
 
-  defp project_effect_history(session_id, %{kind: "effect_intent_committed"} = record) do
+  defp project_effect_history(session_id, %{kind: kind} = record)
+       when kind in ["effect_intent_committed", "effect_intent_committed_v2"] do
     job_fields = Loopex.Executor.job_fields() ++ Loopex.Executor.JobRequest.derived_fields()
     grant_fields = Loopex.Executor.required_grant_bindings() ++ [:issued_by, :policy_context]
 
@@ -2027,7 +2038,8 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp project_effect_history(session_id, %{kind: "executor_receipt_committed"} = record) do
+  defp project_effect_history(session_id, %{kind: kind} = record)
+       when kind in ["executor_receipt_committed", "executor_receipt_committed_v2"] do
     required = Enum.map(@receipt_required_fields, &Atom.to_string/1)
     optional = Enum.map(@receipt_optional_fields, &Atom.to_string/1)
 
@@ -2046,7 +2058,8 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp project_effect_history(_session_id, %{kind: "tool_result_committed"} = record) do
+  defp project_effect_history(_session_id, %{kind: kind} = record)
+       when kind in ["tool_result_committed", "tool_result_committed_v2"] do
     with true <-
            closed_history_map?(record, [:kind, "run_id", "tool_call_id", "outcome", "reason"]),
          true <- history_identity?(record["run_id"]) and history_identity?(record["tool_call_id"]),
@@ -2063,7 +2076,8 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp project_effect_history(_session_id, %{kind: "outcome_unknown_committed"} = record) do
+  defp project_effect_history(_session_id, %{kind: kind} = record)
+       when kind in ["outcome_unknown_committed", "outcome_unknown_committed_v2"] do
     if closed_history_map?(record, [:kind, "run_id", "reconciliation_ref"]) and
          history_identity?(record["run_id"]) and history_identity?(record["reconciliation_ref"]) do
       {:ok, history_terminal(record["run_id"], nil, "outcome_unknown")}
@@ -2114,7 +2128,7 @@ defmodule Loopex.Runtime.SessionState do
       record = %{
         "run_id" => run_id,
         "receipt" => encode_plain(receipt),
-        kind: "executor_receipt_committed"
+        kind: "executor_receipt_committed_v2"
       }
 
       internal_proposal(state, stable_id("executor-fact", run_id, receipt.job_id), record)
@@ -2134,7 +2148,7 @@ defmodule Loopex.Runtime.SessionState do
         "run_id" => run_id,
         "receipt" => encode_plain(receipt),
         "reconciliation_query_id" => query_id,
-        kind: "executor_receipt_committed"
+        kind: "executor_receipt_committed_v2"
       }
 
       # Concept: a solicited current-owner receipt is a new reconciliation
@@ -2184,10 +2198,11 @@ defmodule Loopex.Runtime.SessionState do
       "tool_call_id" => tool_call_id,
       "outcome" => Atom.to_string(outcome),
       "reason" => reason,
-      kind: "tool_result_committed"
+      kind: "tool_result_committed_v2"
     }
 
-    internal_proposal(state, stable_id("tool-result", run_id, tool_call_id), record)
+    turn_id = get_in(state.pending_work, [run_id, :turn_id])
+    internal_proposal(state, stable_id("tool-result-v2", run_id, {turn_id, tool_call_id}), record)
   end
 
   @doc false
@@ -2197,7 +2212,7 @@ defmodule Loopex.Runtime.SessionState do
     record = %{
       "run_id" => run_id,
       "reconciliation_ref" => reconciliation_ref,
-      kind: "outcome_unknown_committed"
+      kind: "outcome_unknown_committed_v2"
     }
 
     internal_proposal(state, stable_id("outcome-unknown", run_id, reconciliation_ref), record)
@@ -2297,7 +2312,7 @@ defmodule Loopex.Runtime.SessionState do
       "disposition" => "expired",
       "answer" => nil,
       "settled_at" => settled_at,
-      kind: "model_question_settled_v1"
+      kind: "model_question_settled_v2"
     })
   end
 
@@ -2574,7 +2589,11 @@ defmodule Loopex.Runtime.SessionState do
       "command_type" => "abort",
       "admission" => "accepted",
       "run_id" => run_id,
-      kind: "command_admitted"
+      kind:
+        if(match?(%{producer: "model_tool"}, open_interaction_record(state)),
+          do: "model_question_abort_admitted_v2",
+          else: "command_admitted"
+        )
     }
 
     {_patch, queue_events} = cancel_queues(state, run_id, record)
@@ -2704,7 +2723,7 @@ defmodule Loopex.Runtime.SessionState do
       "answer" => answer,
       "disposition" => disposition,
       "responded_at" => command.resolved_bounds.admitted_at,
-      kind: "model_question_response_admitted_v1"
+      kind: "model_question_response_admitted_v2"
     }
 
     with {:ok, next} <- apply_command_record(state, record) do
@@ -2932,9 +2951,11 @@ defmodule Loopex.Runtime.SessionState do
        )
        when kind in [
               "command_admitted",
+              "model_question_abort_admitted_v2",
               "prompt_admitted_v2",
               "prompt_admitted_v3",
               "model_question_response_admitted_v1",
+              "model_question_response_admitted_v2",
               "session_configuration_admitted_v1",
               "command_admission_refused_v1"
             ] do
@@ -2979,18 +3000,23 @@ defmodule Loopex.Runtime.SessionState do
               "model_attempt_settled_v3",
               "model_termination_admitted_v1",
               "effect_intent_committed",
+              "effect_intent_committed_v2",
               "executor_receipt_committed",
+              "executor_receipt_committed_v2",
               "tool_result_preparation_state_v1",
               "tool_result_reference_prepared",
               "tool_result_preparation_failed_v1",
               "outcome_unknown_committed",
+              "outcome_unknown_committed_v2",
               "run_terminal_committed",
               "tool_result_committed",
+              "tool_result_committed_v2",
               "interaction_requested_v1",
               "interaction_answer_admitted_v1",
               "interaction_resolved_v1",
               "model_question_requested_v1",
-              "model_question_settled_v1"
+              "model_question_settled_v1",
+              "model_question_settled_v2"
             ] do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
          incarnation == state.owner_incarnation_id and is_binary(incarnation) and
@@ -3072,8 +3098,20 @@ defmodule Loopex.Runtime.SessionState do
   defp admissible_command_kind?("command_admitted", record),
     do: not (record["command_type"] == "prompt" and record["admission"] == "accepted")
 
-  defp admissible_command_kind?("model_question_response_admitted_v1", record),
-    do: record["command_type"] == "interaction_answer" and record["admission"] == "accepted"
+  defp admissible_command_kind?("model_question_abort_admitted_v2", record),
+    do:
+      closed_history_map?(record, [
+        :kind,
+        "command_id",
+        "command_digest",
+        "command_type",
+        "admission",
+        "run_id"
+      ]) and record["command_type"] == "abort" and record["admission"] == "accepted"
+
+  defp admissible_command_kind?(kind, record)
+       when kind in ["model_question_response_admitted_v1", "model_question_response_admitted_v2"],
+       do: record["command_type"] == "interaction_answer" and record["admission"] == "accepted"
 
   defp admissible_command_kind?("session_configuration_admitted_v1", record),
     do: record["command_type"] == "configure"
@@ -3248,11 +3286,12 @@ defmodule Loopex.Runtime.SessionState do
   # policy resolution is owed and nothing more.
   defp command_effect(
          state,
-         %{kind: "model_question_response_admitted_v1"} = record,
+         %{kind: kind} = record,
          "interaction_answer",
          "accepted",
          command_id
-       ) do
+       )
+       when kind in ["model_question_response_admitted_v1", "model_question_response_admitted_v2"] do
     with true <- map_size(record) == 9 and record["disposition"] in ["answered", "declined"],
          :ok <- model_question_command_binding(record),
          {:ok, next, events} <- settle_model_question(state, record) do
@@ -3349,7 +3388,11 @@ defmodule Loopex.Runtime.SessionState do
     # more than it carries, and this is the one field carrying the
     # `outcome_unknown` precedence, so there is no honest weaker default: the
     # record names its outcome or it is refused like any other malformed abort.
-    with {:ok, ^active_run_id} <- record_binary(record, "run_id") do
+    with {:ok, ^active_run_id} <- record_binary(record, "run_id"),
+         true <-
+           record.kind != "model_question_abort_admitted_v2" or
+             (admissible_command_kind?(record.kind, record) and
+                match?(%{producer: "model_tool"}, open_interaction_record(state))) do
       # Concept: an abort cancels the queues as well as the run.
       #
       # Technical depth: a durably admitted abort resolves any queued steer and
@@ -3810,13 +3853,20 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "job" => job,
-         "grant" => grant,
-         kind: "effect_intent_committed"
-       }) do
-    with true <- is_nil(state.open_interaction),
+  defp apply_internal_record(
+         state,
+         %{
+           "run_id" => run_id,
+           "job" => job,
+           "grant" => grant,
+           kind: kind
+         } = record
+       )
+       when kind in ["effect_intent_committed", "effect_intent_committed_v2"] do
+    with true <-
+           kind == "effect_intent_committed" or
+             closed_history_map?(record, [:kind, "run_id", "job", "grant"]),
+         true <- is_nil(state.open_interaction),
          {:ok, job} <- decode_job(job),
          {:ok, grant} <- decode_grant(grant),
          %{stage: "effect_pending", pending_calls: [call | _rest], turn_id: turn_id} = work <-
@@ -3834,7 +3884,10 @@ defmodule Loopex.Runtime.SessionState do
       next_work =
         Map.merge(work, %{stage: "effect_dispatched", job: job, grant: grant, tool_call: call})
 
-      {:ok, put_pending(state, run_id, next_work), [tool_started_event(state.session_id, job)]}
+      revision = if kind == "effect_intent_committed_v2", do: 2, else: 1
+
+      {:ok, put_pending(state, run_id, next_work),
+       [tool_started_event(state.session_id, job, revision)]}
     else
       _other -> {:error, :invalid_effect_intent_transition}
     end
@@ -3845,10 +3898,14 @@ defmodule Loopex.Runtime.SessionState do
          %{
            "run_id" => run_id,
            "receipt" => receipt,
-           kind: "executor_receipt_committed"
+           kind: kind
          } = record
-       ) do
-    with {:ok, receipt} <- decode_receipt(receipt),
+       )
+       when kind in ["executor_receipt_committed", "executor_receipt_committed_v2"] do
+    with true <-
+           kind == "executor_receipt_committed" or
+             closed_history_map?(record, [:kind, "run_id", "receipt"], ["reconciliation_query_id"]),
+         {:ok, receipt} <- decode_receipt(receipt),
          %{stage: "effect_dispatched", job: job, tool_call: call} = work <-
            Map.get(state.pending_work, run_id),
          :ok <- receipt_matches_job(receipt, job),
@@ -3901,7 +3958,8 @@ defmodule Loopex.Runtime.SessionState do
            state.session_id,
            job,
            to_string(receipt.outcome),
-           receipt.artifacts
+           receipt.artifacts,
+           if(kind == "executor_receipt_committed_v2", do: 2, else: 1)
          )
        ]}
     else
@@ -4002,7 +4060,8 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{kind: "tool_result_committed"} = record) do
+  defp apply_internal_record(state, %{kind: kind} = record)
+       when kind in ["tool_result_committed", "tool_result_committed_v2"] do
     case open_interaction_record(state) do
       %{producer: "model_tool", tool_call_id: id} ->
         if id == record["tool_call_id"],
@@ -4154,15 +4213,28 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "reconciliation_ref" => reconciliation_ref,
-         kind: "outcome_unknown_committed"
-       }) do
-    with %{stage: "effect_dispatched", job: job} = work <- Map.get(state.pending_work, run_id),
+  defp apply_internal_record(
+         state,
+         %{
+           "run_id" => run_id,
+           "reconciliation_ref" => reconciliation_ref,
+           kind: kind
+         } = record
+       )
+       when kind in ["outcome_unknown_committed", "outcome_unknown_committed_v2"] do
+    with true <-
+           kind == "outcome_unknown_committed" or
+             closed_history_map?(record, [:kind, "run_id", "reconciliation_ref"]),
+         %{stage: "effect_dispatched", job: job} = work <- Map.get(state.pending_work, run_id),
          true <- is_binary(reconciliation_ref) and byte_size(reconciliation_ref) > 0 do
       events = [
-        tool_finished_event(state.session_id, job, "outcome_unknown"),
+        tool_finished_event(
+          state.session_id,
+          job,
+          "outcome_unknown",
+          [],
+          if(kind == "outcome_unknown_committed_v2", do: 2, else: 1)
+        ),
         run_finished_event(
           state.session_id,
           run_id,
@@ -4356,7 +4428,8 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{kind: "model_question_settled_v1"} = record) do
+  defp apply_internal_record(state, %{kind: kind} = record)
+       when kind in ["model_question_settled_v1", "model_question_settled_v2"] do
     if map_size(record) == 5 and record["disposition"] == "expired" and is_nil(record["answer"]),
       do: settle_model_question(state, record),
       else: {:error, :invalid_model_question_transition}
@@ -4364,14 +4437,21 @@ defmodule Loopex.Runtime.SessionState do
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
 
-  defp apply_tool_result_record(state, %{
-         "run_id" => run_id,
-         "tool_call_id" => tool_call_id,
-         "outcome" => outcome,
-         "reason" => reason,
-         kind: "tool_result_committed"
-       }) do
-    with %{stage: "effect_" <> _phase, pending_calls: [call | _rest]} = work <-
+  defp apply_tool_result_record(
+         state,
+         %{
+           "run_id" => run_id,
+           "tool_call_id" => tool_call_id,
+           "outcome" => outcome,
+           "reason" => reason,
+           kind: kind
+         } = record
+       )
+       when kind in ["tool_result_committed", "tool_result_committed_v2"] do
+    with true <-
+           kind == "tool_result_committed" or
+             closed_history_map?(record, [:kind, "run_id", "tool_call_id", "outcome", "reason"]),
+         %{stage: "effect_" <> _phase, pending_calls: [call | _rest]} = work <-
            Map.get(state.pending_work, run_id),
          true <- call.tool_call_id == tool_call_id,
          {:ok, terminal} <- decode_receipt_outcome(outcome),
@@ -4427,7 +4507,15 @@ defmodule Loopex.Runtime.SessionState do
           "outcome" => outcome,
           "reason" => reason,
           "artifacts" => [],
-          event_id: stable_id("event-tool-finished", state.session_id, tool_call_id),
+          event_id:
+            tool_event_id(
+              "event-tool-finished",
+              state.session_id,
+              run_id,
+              Map.get(work, :turn_id),
+              tool_call_id,
+              if(kind == "tool_result_committed_v2", do: 2, else: 1)
+            ),
           kind: "tool.finished"
         }
 
@@ -4494,7 +4582,16 @@ defmodule Loopex.Runtime.SessionState do
              "tool_call_id" => interaction.tool_call_id,
              "outcome" => outcome,
              "reason" => content,
-             kind: "tool_result_committed"
+             kind:
+               if(
+                 record.kind in [
+                   "model_question_response_admitted_v2",
+                   "model_question_settled_v2",
+                   "model_question_abort_admitted_v2"
+                 ],
+                 do: "tool_result_committed_v2",
+                 else: "tool_result_committed"
+               )
            }) do
       resolved = %{
         interaction
@@ -4921,7 +5018,8 @@ defmodule Loopex.Runtime.SessionState do
               "disposition" => "cancelled",
               "answer" => nil,
               "command_id" => record["command_id"],
-              "command_digest" => record["command_digest"]
+              "command_digest" => record["command_digest"],
+              kind: record.kind
             })
 
           {%{
@@ -6112,7 +6210,7 @@ defmodule Loopex.Runtime.SessionState do
   # it rendered as an empty name beside an opaque identifier, which tells an
   # operator nothing about what their agent is doing. The generation is public
   # information: it is already inside the staged request the model was shown.
-  defp tool_started_event(session_id, job) do
+  defp tool_started_event(session_id, job, revision) do
     %{
       "run_id" => job.run_id,
       "turn_id" => job.turn_id,
@@ -6120,7 +6218,15 @@ defmodule Loopex.Runtime.SessionState do
       "operation_id" => job.operation_id,
       "tool_id" => job.tool_id,
       "tool_version" => job.tool_version,
-      event_id: stable_id("event-tool-started", session_id, job.tool_call_id),
+      event_id:
+        tool_event_id(
+          "event-tool-started",
+          session_id,
+          job.run_id,
+          job.turn_id,
+          job.tool_call_id,
+          revision
+        ),
       kind: "tool.started"
     }
   end
@@ -6133,7 +6239,7 @@ defmodule Loopex.Runtime.SessionState do
   # and role beside the opaque locator so a reader knows what they are asking for
   # before they ask. A tool that spilled nothing carries an empty list rather
   # than an absent field, so a consumer never has to distinguish the two.
-  defp tool_finished_event(session_id, job, outcome, artifacts \\ []) do
+  defp tool_finished_event(session_id, job, outcome, artifacts, revision) do
     %{
       "run_id" => job.run_id,
       "turn_id" => job.turn_id,
@@ -6146,10 +6252,28 @@ defmodule Loopex.Runtime.SessionState do
       # "this producer omitted the key".
       "reason" => nil,
       "artifacts" => Enum.map(artifacts, &public_artifact/1),
-      event_id: stable_id("event-tool-finished", session_id, job.tool_call_id),
+      event_id:
+        tool_event_id(
+          "event-tool-finished",
+          session_id,
+          job.run_id,
+          job.turn_id,
+          job.tool_call_id,
+          revision
+        ),
       kind: "tool.finished"
     }
   end
+
+  # Concept: a provider may reuse its call ID in a later turn or run.
+  # Technical depth: new record variants bind the event to session/run/turn/call.
+  # Historical variants retain their original deterministic event IDs; replay
+  # selects the derivation from the retained kind, never a current default.
+  defp tool_event_id(namespace, session_id, run_id, turn_id, call_id, 2),
+    do: stable_id(namespace, session_id, {run_id, turn_id, call_id})
+
+  defp tool_event_id(namespace, session_id, _run_id, _turn_id, call_id, 1),
+    do: stable_id(namespace, session_id, call_id)
 
   # Concept: the public projection is the whole compact reference and none of the
   # private reason behind it.

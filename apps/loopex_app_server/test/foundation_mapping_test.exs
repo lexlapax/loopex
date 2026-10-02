@@ -461,8 +461,8 @@ defmodule Loopex.AppServer.FoundationMappingTest do
     # resolution between them.
     requested = Enum.find_index(kinds_after, &(&1 == "interaction_requested_v1"))
     resolved = Enum.find_index(kinds_after, &(&1 == "interaction_resolved_v1"))
-    intent = Enum.find_index(kinds_after, &(&1 == "effect_intent_committed"))
-    receipt = Enum.find_index(kinds_after, &(&1 == "executor_receipt_committed"))
+    intent = Enum.find_index(kinds_after, &(&1 == "effect_intent_committed_v2"))
+    receipt = Enum.find_index(kinds_after, &(&1 == "executor_receipt_committed_v2"))
 
     # The answer is admitted as an ordinary command, between the question and
     # its resolution, rather than as part of either.

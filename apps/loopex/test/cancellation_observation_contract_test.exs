@@ -226,7 +226,7 @@ defmodule Loopex.CancellationObservationContractTest do
              kind: "session_genesis_v2"
            }
 
-    receipt_record = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))
+    receipt_record = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
     assert receipt_record.payload["receipt"]["cleanup_grace_ms"] == grace
     assert receipt_record.payload["receipt"]["cleanup_confirmation"] == "confirmed"
 

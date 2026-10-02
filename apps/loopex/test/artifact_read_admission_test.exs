@@ -73,12 +73,12 @@ defmodule Loopex.ArtifactReadAdmissionTest do
     [write, read] = AgentLoopTestExecutor.jobs(fixture.executor)
     assert Map.delete(read.validated_arguments, "resolved_artifact") == args
     records = Fixture.records(fixture, session)
-    source = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))
+    source = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
 
     expected = %{
       "reference" => plain(context.reference),
       "source" => %{
-        "record_kind" => "executor_receipt_committed",
+        "record_kind" => "executor_receipt_committed_v2",
         "journal_version" => source.journal_version,
         "record_digest" => Canonical.digest(source.payload),
         "run_id" => write.run_id,
@@ -115,7 +115,7 @@ defmodule Loopex.ArtifactReadAdmissionTest do
 
     changed =
       Enum.map(records, fn row ->
-        if row.payload.kind == "effect_intent_committed" and
+        if row.payload.kind == "effect_intent_committed_v2" and
              row.payload["job"]["tool_call_id"] == "read",
            do: put_in(row, [:payload, "job"], plain(Map.from_struct(altered))),
            else: row
@@ -144,7 +144,7 @@ defmodule Loopex.ArtifactReadAdmissionTest do
     assert List.last(finish(attachment))["outcome"] == "bound_reached"
 
     records = Fixture.records(fixture, session)
-    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))
+    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
     events = Fixture.events(fixture, session)
     assert {:ok, recovered} = SessionState.recover(session, records, events)
     [run] = recovered.run_order
@@ -206,19 +206,19 @@ defmodule Loopex.ArtifactReadAdmissionTest do
       :ok =
         Loopex.M1RuntimeTestStore.hold_next_record_before_linearization(
           fixture.store,
-          "executor_receipt_committed",
+          "executor_receipt_committed_v2",
           self()
         )
 
       {session, attachment} = run(fixture, "create")
 
       assert_receive {:record_held_before_linearization, waiter, _store,
-                      "executor_receipt_committed", transaction},
+                      "executor_receipt_committed_v2", transaction},
                      5_000
 
       refute Enum.any?(
                Fixture.records(fixture, session),
-               &(&1.payload.kind == "executor_receipt_committed")
+               &(&1.payload.kind == "executor_receipt_committed_v2")
              )
 
       assert_receive {:policy, %{tool_call_id: "write"}}
@@ -237,7 +237,7 @@ defmodule Loopex.ArtifactReadAdmissionTest do
 
       assert Enum.count(
                records,
-               &(&1.payload.kind == "executor_receipt_committed" and
+               &(&1.payload.kind == "executor_receipt_committed_v2" and
                    &1.payload["receipt"]["tool_call_id"] == "write")
              ) == 1
 
@@ -261,7 +261,7 @@ defmodule Loopex.ArtifactReadAdmissionTest do
     assert Loopex.Runtime.ArtifactRead.resolve(definition, %{"path" => <<255>>}, %{}) ==
              {:error, :invalid_tool_arguments}
 
-    record = %{kind: "executor_receipt_committed"}
+    record = %{kind: "executor_receipt_committed_v2"}
     job = %{run_id: "run", operation_id: "operation", attempt: 1, tool_call_id: "call"}
     sources = Loopex.Runtime.ArtifactRead.retain(%{}, [context.reference], record, 2, job)
 

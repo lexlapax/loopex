@@ -423,7 +423,7 @@ defmodule Loopex.CommandDispositionTest do
     refute Enum.any?(
              Fixture.records(fixture, session),
              &(String.starts_with?(&1.payload.kind, "model_attempt_settled_") or
-                 &1.payload.kind == "effect_intent_committed")
+                 &1.payload.kind == "effect_intent_committed_v2")
            )
 
     assert Agent.get(fixture.executor, & &1.jobs) == []
@@ -634,7 +634,7 @@ defmodule Loopex.CommandDispositionTest do
 
     refute Enum.any?(
              Fixture.records(fixture, session),
-             &(&1.payload.kind == "executor_receipt_committed")
+             &(&1.payload.kind == "executor_receipt_committed_v2")
            )
 
     send(resolver, :release)
@@ -642,7 +642,7 @@ defmodule Loopex.CommandDispositionTest do
 
     assert Enum.count(
              Fixture.records(fixture, session),
-             &(&1.payload.kind == "executor_receipt_committed")
+             &(&1.payload.kind == "executor_receipt_committed_v2")
            ) == 1
 
     assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "tool.finished")) == 1

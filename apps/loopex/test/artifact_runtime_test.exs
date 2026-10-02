@@ -121,7 +121,7 @@ defmodule Loopex.ArtifactRuntimeTest do
     exact = Process.monitor(worker)
     records = Fixture.records(fixture, session)
     reservation = Enum.find(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
-    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))
+    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
     assert reservation.journal_version > receipt.journal_version
     assert reservation.payload["source_count"] == 1
     assert bytes == receipt.payload["receipt"]["output"]
@@ -881,7 +881,7 @@ defmodule Loopex.ArtifactRuntimeTest do
 
     receipt =
       all_records
-      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed"))
+      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed_v2"))
       |> get_in([:payload, "receipt"])
 
     assert receipt["artifacts"] == [public_reference]
@@ -987,7 +987,7 @@ defmodule Loopex.ArtifactRuntimeTest do
 
       records = Fixture.records(fixture, session_id)
 
-      refute Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed"))
+      refute Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed_v2"))
       refute inspect(records) =~ "must-not-inline"
       refute inspect(events) =~ "must-not-inline"
     end

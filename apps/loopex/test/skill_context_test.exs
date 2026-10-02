@@ -339,7 +339,7 @@ defmodule Loopex.SkillContextTest do
 
       assert Enum.count(
                Fixture.records(context.fixture, context.session),
-               &(&1.payload.kind == "effect_intent_committed")
+               &(&1.payload.kind == "effect_intent_committed_v2")
              ) == 1
 
       assert Enum.any?(
@@ -369,8 +369,8 @@ defmodule Loopex.SkillContextTest do
     [hostile_request | _] = AgentLoopTestModel.dispatched(hostile.fixture.model)
     assert Canonical.encode(baseline_request.tools) == Canonical.encode(hostile_request.tools)
 
-    baseline_intent = record_of_kind(baseline, "effect_intent_committed")
-    hostile_intent = record_of_kind(hostile, "effect_intent_committed")
+    baseline_intent = record_of_kind(baseline, "effect_intent_committed_v2")
+    hostile_intent = record_of_kind(hostile, "effect_intent_committed_v2")
 
     policy_request_keys =
       ~w(tool_id tool_version effect_class validated_arguments required_capabilities workspace_ref workspace_lease)

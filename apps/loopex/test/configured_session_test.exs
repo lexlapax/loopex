@@ -522,7 +522,7 @@ defmodule Loopex.ConfiguredSessionTest do
              )
 
     assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
-    hold_record_commit(fixture, "executor_receipt_committed", :after)
+    hold_record_commit(fixture, "executor_receipt_committed_v2", :after)
 
     assert {:accepted, "prompt"} =
              Loopex.command(
@@ -530,7 +530,7 @@ defmodule Loopex.ConfiguredSessionTest do
                %{type: :prompt, command_id: "prompt", content: "work"}
              )
 
-    {waiter, _} = await_record_commit(fixture, session, "executor_receipt_committed", :after)
+    {waiter, _} = await_record_commit(fixture, session, "executor_receipt_committed_v2", :after)
     [first] = AgentLoopTestModel.dispatched(fixture.model)
     assert Enum.any?(first.messages, &String.contains?(&1["content"], content))
     {:ok, children} = Runtime.Supervisor.children(fixture.runtime.supervisor)
@@ -668,7 +668,7 @@ defmodule Loopex.ConfiguredSessionTest do
              })
 
     if boundary == :restart,
-      do: hold_record_commit(fixture, "executor_receipt_committed", :after)
+      do: hold_record_commit(fixture, "executor_receipt_committed_v2", :after)
 
     assert {:accepted, "prompt"} =
              Loopex.command(
@@ -695,7 +695,7 @@ defmodule Loopex.ConfiguredSessionTest do
     {completed_fixture, second} =
       if boundary == :restart do
         {waiter, _} =
-          await_record_commit(fixture, session, "executor_receipt_committed", :after)
+          await_record_commit(fixture, session, "executor_receipt_committed_v2", :after)
 
         {:ok, children} = Runtime.Supervisor.children(fixture.runtime.supervisor)
         [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
@@ -1932,8 +1932,8 @@ defmodule Loopex.ConfiguredSessionTest do
                )
 
       records = Fixture.records(fixture, session)
-      response = Enum.find(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
-      assert Enum.count(records, &(&1.payload.kind == "model_question_response_admitted_v1")) == 1
+      response = Enum.find(records, &(&1.payload.kind == "model_question_response_admitted_v2"))
+      assert Enum.count(records, &(&1.payload.kind == "model_question_response_admitted_v2")) == 1
       assert response.payload["answer"] == answer
       assert terminal["command_id"] == response.payload["command_id"]
       assert terminal["command_digest"] == response.payload["command_digest"]
@@ -1948,8 +1948,8 @@ defmodule Loopex.ConfiguredSessionTest do
       refute Enum.any?(
                records,
                &(&1.payload.kind in [
-                   "effect_intent_committed",
-                   "executor_receipt_committed",
+                   "effect_intent_committed_v2",
+                   "executor_receipt_committed_v2",
                    "interaction_resolved_v1"
                  ])
              )
@@ -2019,7 +2019,7 @@ defmodule Loopex.ConfiguredSessionTest do
       records = Fixture.records(fixture, session)
 
       responses =
-        Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+        Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v2"))
 
       assert [response] = responses
       assert response.payload["answer"] == %{"text" => answer}
@@ -2100,8 +2100,8 @@ defmodule Loopex.ConfiguredSessionTest do
                answer: %{"text" => "too late"}
              })
 
-    assert Enum.count(records, &(&1.payload.kind == "model_question_settled_v1")) == 1
-    refute Enum.any?(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+    assert Enum.count(records, &(&1.payload.kind == "model_question_settled_v2")) == 1
+    refute Enum.any?(records, &(&1.payload.kind == "model_question_response_admitted_v2"))
   end
 
   test "commit unknown re-presents exact question and response bytes before publication" do
@@ -2147,7 +2147,7 @@ defmodule Loopex.ConfiguredSessionTest do
     question = await_question(attachment)
     assert question["interaction_id"] == pending_proposal["interaction_id"]
     assert question["expires_at"] == pending_proposal["expires_at"]
-    hold_record_commit(fixture, "model_question_response_admitted_v1", :before)
+    hold_record_commit(fixture, "model_question_response_admitted_v2", :before)
     parent = self()
 
     caller =
@@ -2160,7 +2160,7 @@ defmodule Loopex.ConfiguredSessionTest do
       end)
 
     {answer_waiter, answer_proposal} =
-      await_record_commit(fixture, session, "model_question_response_admitted_v1", :before)
+      await_record_commit(fixture, session, "model_question_response_admitted_v2", :before)
 
     refute_receive {:unknown_answer_result, ^caller, _}, 20
     refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "interaction.answered"))
@@ -2183,7 +2183,7 @@ defmodule Loopex.ConfiguredSessionTest do
     assert Enum.filter(records, &(&1.payload.kind == "model_question_requested_v1"))
            |> Enum.map(& &1.payload) == [pending_proposal]
 
-    assert Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+    assert Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v2"))
            |> Enum.map(& &1.payload) == [answer_proposal]
 
     assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "interaction.requested")) ==
@@ -2228,7 +2228,7 @@ defmodule Loopex.ConfiguredSessionTest do
       kind =
         if target == :pending,
           do: "model_question_requested_v1",
-          else: "model_question_response_admitted_v1"
+          else: "model_question_response_admitted_v2"
 
       if target == :pending, do: hold_record_commit(fixture, kind, phase)
 
@@ -2312,7 +2312,7 @@ defmodule Loopex.ConfiguredSessionTest do
       pending = Enum.filter(records, &(&1.payload.kind == "model_question_requested_v1"))
 
       responses =
-        Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+        Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v2"))
 
       assert length(pending) == 1
       assert length(responses) == 1
@@ -2414,6 +2414,29 @@ defmodule Loopex.ConfiguredSessionTest do
     assert cancelled["disposition"] == "cancelled"
     assert cancelled["command_id"] == "abort"
     assert is_binary(cancelled["command_digest"])
+
+    records = Fixture.records(fixture, session)
+    abort_row = Enum.find(records, &(&1.payload.kind == "model_question_abort_admitted_v2"))
+    assert abort_row
+
+    historical_abort =
+      records
+      |> Enum.take_while(&(&1.journal_version <= abort_row.journal_version))
+      |> List.update_at(-1, &put_in(&1, [:payload, :kind], "command_admitted"))
+
+    historical_events =
+      Fixture.events(fixture, session)
+      |> Enum.take_while(&(&1.event_sequence <= cancelled.event_sequence))
+      |> Enum.map(fn
+        %{kind: "tool.finished"} = event ->
+          %{event | event_id: "event-to_132fc47d65b9d9567395417f292355"}
+
+        event ->
+          event
+      end)
+
+    assert {:ok, _historical_cancelled} =
+             SessionState.recover(session, historical_abort, historical_events)
 
     assert {:ok, recovered} =
              SessionState.recover(

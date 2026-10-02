@@ -253,7 +253,7 @@ defmodule Loopex.InteractionLifecycleTest do
     records = Fixture.records(fixture, session_id)
     retained = Enum.filter(records, &(&1.payload.kind == "interaction_requested_v1"))
     assert length(retained) == 1
-    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed"))
+    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed_v2"))
     assert hd(retained).payload["interaction_id"] == requested["interaction_id"]
     assert hd(retained).payload["round"] == 0
 
@@ -330,7 +330,7 @@ defmodule Loopex.InteractionLifecycleTest do
     # The grant and the intent exist only after the allow, and the allow only
     # after the answer: asking the question minted nothing.
     records = Fixture.records(fixture, session_id)
-    intents = Enum.filter(records, &(&1.payload.kind == "effect_intent_committed"))
+    intents = Enum.filter(records, &(&1.payload.kind == "effect_intent_committed_v2"))
     assert length(intents) == 1
 
     resolution = Enum.find(records, &(&1.payload.kind == "interaction_resolved_v1"))
@@ -466,7 +466,7 @@ defmodule Loopex.InteractionLifecycleTest do
     creation = find_record(records, "interaction_requested_v1")
     admission = Enum.find(records, &(&1.payload["command_type"] == "interaction_answer"))
     resolution = find_record(records, "interaction_resolved_v1")
-    intent = find_record(records, "effect_intent_committed")
+    intent = find_record(records, "effect_intent_committed_v2")
 
     # The three cuts are journaled in order, and the effect intent is after all
     # of them: nothing was dispatched on the strength of a question, an answer,
@@ -599,7 +599,7 @@ defmodule Loopex.InteractionLifecycleTest do
     refusal = replay(reader, session_id, records, old_events)
     assert refusal =~ "error"
     assert refusal =~ "invalid_private_history"
-    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed"))
+    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed_v2"))
   end
 
   # Concept: the historical reader's positive control uses its own request
@@ -865,7 +865,7 @@ defmodule Loopex.InteractionLifecycleTest do
     assert tool_finished["reason"] == "policy_unavailable"
 
     records = Fixture.records(fixture, session_id)
-    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed"))
+    assert Enum.all?(records, &(&1.payload.kind != "effect_intent_committed_v2"))
     assert Enum.all?(Fixture.events(fixture, session_id), &(&1.kind != "tool.started"))
   end
 

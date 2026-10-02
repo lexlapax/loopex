@@ -826,7 +826,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
     tool_frame =
       Enum.find_index(frames, fn frame ->
-        Enum.any?(frame.records, &(&1.payload.kind == "executor_receipt_committed"))
+        Enum.any?(frame.records, &(&1.payload.kind == "executor_receipt_committed_v2"))
       end)
 
     assert is_integer(tool_frame), "the completed workflow did not retain its tool result"

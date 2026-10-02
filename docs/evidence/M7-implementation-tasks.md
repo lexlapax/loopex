@@ -96,6 +96,97 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Implementation candidate: the approved repeated-tool-ID fix now writes
+  `effect_intent_committed_v2`, `executor_receipt_committed_v2`,
+  `tool_result_committed_v2`, `outcome_unknown_committed_v2`,
+  `model_question_response_admitted_v2`, `model_question_settled_v2` and
+  `model_question_abort_admitted_v2`. Payload members remain unchanged. The
+  last kind applies only to an accepted abort cancelling an open model question;
+  other aborts retain `command_admitted`. New started/finished IDs hash the
+  deterministic ETF of `[namespace, session_id, {run_id, turn_id, raw_call_id}]`
+  with the existing opaque-ID prefix/truncation recipe. Historical variants use
+  their exact original raw-call recipe; replay selects from the retained kind.
+  Newly constructed job and operation IDs bind turn/call within the run; already
+  journaled jobs retain their exact old IDs and canonical bytes. This internal
+  allocation choice prevents a second actual effect from colliding in the executor
+  ledger. New non-receipt logical transaction IDs also bind turn/call, retaining the
+  existing owner/head binding and exact unresolved proposal re-presentation.
+  Effect-history scanning, drain-abort recognition and artifact provenance accept
+  the explicit new variants without reinterpreting old records or granting work.
+  Live Store fault seams and consumers now name the actual new writer kinds.
+  Older readers refuse these unsupported variants; real old-reader and rollback
+  witnesses remain T15 work, with no rewrite of retained history authorized.
+
+  Fifty focused current Core cases pass with warnings as errors in 7.2 seconds.
+  The final broader floor run passes all 277 total cases with its one existing
+  exclusion in 144.1 seconds, also with warnings as errors. These suites pin
+  literal new event IDs, repeated raw
+  IDs across turns/runs, denied-question/effect continuation, repeated refusals,
+  two answered questions reusing one raw ID, historical intent/receipt/refusal/
+  answer/expiry/abort IDs, closed shapes and future-kind refusal, plus existing
+  configuration/question unknown-commit and owner-loss proofs. Complete outputs:
+  `/private/tmp/loopex-m7-tool-identities-core-current-v7.log`, SHA-256
+  `0b5e913b4a71cfd5aee18f24fc4c15759315c83051d4c6b090e22150efb83506`;
+  `/private/tmp/loopex-m7-tool-identities-core-floor-v5.log`, SHA-256
+  `fc7763a7db369abb63b41ff66b568a49dc353bdf8d8d747d1ceaff4db81cb53f`.
+  Thirty-three composition cases passed on both pairs in 17.1 seconds before the
+  subsequent job-identity correction. The final composition results are retained
+  below. Both include
+  the original local-HTTP no-responder defect with the repeated provider ID
+  restored, actual question restart and artifact-source admission. Complete outputs:
+  `/private/tmp/loopex-m7-tool-identities-composition-current-v1.log`, SHA-256
+  `355069bd491139936963611c88e089652f1c2f2e97d96387a8fef850bca50ca8`;
+  `/private/tmp/loopex-m7-tool-identities-composition-floor-v1.log`, SHA-256
+  `bac99bd6551c6ae9bc3ac4ad11111eb1c1d1ded19063e86985732b7866783730`.
+  Thirteen current app-server mapping cases pass in 0.5 seconds, output
+  `/private/tmp/loopex-m7-tool-identities-app-server-current.log`, SHA-256
+  `37470e73fc314565c2cb1e47baa941ef29e22f96040c589af9c4124baccb437a`.
+
+  The HTTP regression now repeats the same raw ID for two actual `ls` effects
+  after the denied question. Before turn-bound job allocation, that executed case
+  returned `cleanup_unproved`; output `/private/tmp/loopex-m7-repeated-real-job-current-v2.log`,
+  SHA-256 `5299723b327ecabb5289f20b251ef36a4dc1e122bb36e184564a734292f0454e`.
+  The earlier v1 name-filter invocation executed zero tests and is unavailable
+  evidence, SHA-256 `b40fb6b464f6ae962d867aa9fe8c69fc3903276bd653140059a1ddd8b4b16a8c`.
+  The final current composition suite passes 33 cases in 17.7 seconds, complete
+  output `/private/tmp/loopex-m7-tool-identities-composition-current-v2.log`,
+  SHA-256 `5d9e433a5304c989555fd066a84de4b837e677dda5c9d044dd47d3b5af09ea22`.
+  The final floor suite passes 33 cases in 17.0 seconds; its complete output is
+  `/private/tmp/loopex-m7-tool-identities-composition-floor-v2.log`, SHA-256
+  `5ad481e540f2171af6eb7dfd622fa5371f9df6ddc936d637aca260fa46f20e57`.
+  Current CLI receipt/workflow/coding-evidence tests pass 12 cases with two
+  existing exclusions in 57.4 seconds, output
+  `/private/tmp/loopex-m7-tool-identities-cli-current.log`, SHA-256
+  `5f9347d6fab2b14cfc56d95e2a8e667e0475117dba69493a1ec69e9c76df9c94`.
+  Eleven floor executor host-policy cases pass in 5.7 seconds, output
+  `/private/tmp/loopex-m7-tool-identities-executor-floor.log`, SHA-256
+  `a29ec55cf6afb73f2c9161696eccccb391b6fc88fdd461b6e655c551c134c02e`.
+  These latter CLI/executor runs precede the final job-allocation correction;
+  the committed candidate's full current suite checks their final integrated bytes.
+  Final compilation, formatting, docs, dependency-direction, status and diff gates
+  pass, output `/private/tmp/loopex-m7-tool-identities-final-gates.log`, SHA-256
+  `eebc54f4531e448afe0c5034390b2162839713720b66aee3573a5bd8cb9e4066`.
+
+  Failed drafts remain evidence. Current Core v1 invoked from the umbrella and
+  is not credited. Current v2/floor v1 exposed the missing cancellation-parent
+  kind; the new question-abort variant fixed that production path. Current v4
+  and broader floor v3 exposed three synthetic historical-expiry fixtures adding
+  private owner stamps to public events; the fixture now carries only the actual
+  public event-sequence stamp. The broader floor run reported 276 total tests,
+  three failures and one existing exclusion in 144.1 seconds; it is failed
+  evidence, not a pass, and all three failed cases subsequently pass in the final
+  focused set. No assertion or time bound was weakened. Retained failed outputs
+  `/private/tmp/loopex-m7-tool-identities-core-current-v1.log`, SHA-256
+  `37679c37fabeaf8dd4d0110b37f8ddf0e703b4d5077ec3644748fe4a0ed40ce2`;
+  current v2 SHA-256 `b4954deeda8eb8ce2ca4ab7684694a7d68288f907b9620adee2e99789d56e830`;
+  current v4 SHA-256 `a3f1f390c898f93235168f45daacebee1e271c736a1783cece7237199da8f128`;
+  floor v1 SHA-256 `672001cd201a5b4f3d85689ebb53aea514bda6ea6c13968c3190d3e8ea90ae0f`;
+  floor v3 SHA-256 `394d6dce2760437c1f859a29ed86511c118355a14842b3927f6b2e1418b54771`,
+  under the same `<pair>-vN.log` naming. The full current integration check is
+  pending on the committed candidate. One added T12 item tracks that completion;
+  original tally remains 44 done / 142 remaining, added tally is 134 done / 11
+  remaining. The approved early-spill contract is next.
+
 - Done: the approved `Loopex.prepared_session_configuration/1` read routes through
   ResumeActivation to the serial owner's existing capability-holder/current-owner
   fence. It returns the exact four retained fields without activation, mutation
@@ -4304,6 +4395,8 @@ or check was relaxed.
 - [ ] Complete the attended ephemeral-question witness.
 
 ### Added implementation subtasks
+
+- [ ] Version tool-event identity records under the approved session/run/turn/call recipe; preserve exact historical IDs and unchanged public members, prove repeated raw IDs and question/effect continuation, and run the committed integration candidate's full check.
 
 - [x] Integrate one-call-only callback consumption, owner-registered temporary workers, fixed call/expiry/join cutoffs and single-reader continuation; prove serial exact joins, stale identities, ordinary abort, caller death and cleanup uncertainty through actual Core/local HTTP on both supported pairs.
 

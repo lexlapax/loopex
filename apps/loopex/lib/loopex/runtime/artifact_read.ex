@@ -63,7 +63,11 @@ defmodule Loopex.Runtime.ArtifactRead do
          } = source
        ) do
     map_size(source) == 7 and
-      kind in ["executor_receipt_committed", "tool_result_reference_prepared"] and
+      kind in [
+        "executor_receipt_committed",
+        "executor_receipt_committed_v2",
+        "tool_result_reference_prepared"
+      ] and
       is_integer(version) and version > 0 and is_integer(attempt) and attempt > 0 and
       is_binary(digest) and byte_size(digest) == 64 and digest =~ ~r/\A[0-9a-f]{64}\z/ and
       Enum.all?([run, operation, call], &(is_binary(&1) and &1 != ""))

@@ -453,8 +453,8 @@ defmodule Loopex.EffectIntentsQueryTest do
     Agent.update(reference, &%{&1 | records: records})
 
     for record <- records,
-        record.payload.kind in ~w(effect_intent_committed executor_receipt_committed) do
-      key = if record.payload.kind == "effect_intent_committed", do: "job", else: "receipt"
+        record.payload.kind in ~w(effect_intent_committed_v2 executor_receipt_committed_v2) do
+      key = if record.payload.kind == "effect_intent_committed_v2", do: "job", else: "receipt"
 
       changed =
         Enum.map(
