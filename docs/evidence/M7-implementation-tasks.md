@@ -91,6 +91,24 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: literal model-question vectors pin the argument/request ETF preimages,
+  digests, stable run/question identities and normalized response-command bytes
+  for text, choice and decline. The real-owner decoder proof retains actual
+  captured clocks and compares both complete record shapes. Replay refuses every
+  missing/nil member, extra members, same-cardinality substitutions, altered
+  identities, invalid instants and forged request/answer bindings whose digests
+  were recomputed consistently. All 34 tests in the complete question-record and
+  configured-session files pass on both supported pairs: 6.3 seconds current and
+  6.2 seconds floor. Complete outputs:
+  `/private/tmp/loopex-m7-question-records-current-20261002.log`, SHA-256
+  `1b1deee4652fde5bd9a16b07a7469c377034b9ecec2a767fc4291255db77df0d`;
+  `/private/tmp/loopex-m7-question-records-floor-20261002.log`, SHA-256
+  `ff7a5ea5692897753c1a26334dc2df505fd6a561fbaf99368404d1da1cf59c9b`.
+  This completes one added T09 decoder-proof subtask. Its broader public event
+  schema and coordinated /3-/4 joins remain open. Original counts stay 28 done /
+  158 remaining; added counts are 99 done / 12 remaining. The failed full check
+  below remains failed evidence, and the diagnostic timeout proposal is unapplied.
+  Next independent work is ADR 0046's accepted exact-genesis read-only lookup.
 - Pending maintainer decision: diagnostic loss must be proved against its
   intended bound. The new full fast check on exact implementation SHA
   `5bebb2272f78d9c48faec9a2be9f53e5c0f5f952` finished with exit 1. Ten suites
@@ -2839,6 +2857,7 @@ or check was relaxed.
 - [x] Prove live owner restart retains that identity and settles it once.
 - [x] Prove commit-unknown re-presentation retains exact pending and response bytes.
 - [x] Prove local-store process restart retains the pending question and final answer.
+- [x] Pin independent pending/response identity and digest preimages and reject all missing, extra, substituted and consistently rehashed malformed records through real-owner replay on both supported pairs.
 - [ ] Pin pending/response decoder vectors and public question event schemas.
 - [x] Pin the shared closed answer schema/union and independent Elixir/Node payload vectors.
 - [ ] Join that answer schema and decoder to the complete M7 /3-/4 contracts and both authorized mutation paths.
