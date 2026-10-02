@@ -91,6 +91,32 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T12's bounded callback component strips host/runtime fields from the
+  model-question DTO, reconstructs exact offered choice identities through the
+  existing Interaction validator, and waits for an exact owner/generation/reference
+  grant before invoking host code. The temporary supervised worker admits only
+  tagged text/choice or decline, preserves exact 8,192-byte UTF-8 answer bounds,
+  and converts raise/throw/exit or invalid replies to responder_failed without
+  private exception detail. Actual worker tests prove exact normal/killed DOWN
+  and blocked callback isolation. Six cases pass in 0.09 seconds current and
+  0.1 seconds floor; compilation, formatting, docs, dependency and status gates
+  pass. This is a callback component: run/2 option consumption, session-owner
+  registration, expiry/abort joins and cleanup precedence remain open. No public
+  responder support is claimed yet.
+  `/private/tmp/loopex-m7-responder-worker-current-verified-20261002.log`, SHA-256
+  `ae16b0a6c6f85149d73c73ffd6bad6ffb7b5a9b0bf8f9d6ae134be09a104a3fc`;
+  `/private/tmp/loopex-m7-responder-worker-floor-verified-20261002.log`, SHA-256
+  `0f60a85c2082d0d5eb4cdf121e657e439d4a53fec6f615353ecadb77e2f6ba43`;
+  `/private/tmp/loopex-m7-responder-worker-gates-20261002.log`, SHA-256
+  `efc92d5c182748e4da7e3d57573c923d25ec59180debeff9cdd73fbb4ebabb35`.
+  The draft fixture raced a linked supervisor's automatic termination with its
+  on-exit stop. ExUnit now owns and joins that supervisor. Failed outputs stay
+  retained at `/private/tmp/loopex-m7-responder-worker-current-20261002.log`,
+  SHA-256 `797fa920560b44ec8eb86729c11a66cb02fc7978ccf039841a84bdcc2795054f`,
+  and `/private/tmp/loopex-m7-responder-worker-floor-20261002.log`, SHA-256
+  `36133e46c67d9b112559693c251e47b5bf4aaee493d3f0837e4fc056be704fd9`.
+  Original: 38 done / 148 remaining. Added: 124 done / 11 remaining.
+
 - Integration check: exact e1f9d7ba59b3511fa07308cf6ea747909b75ff8b
   ran once and passed all 11 application suites and every preliminary gate in
   904 seconds. Complete output: `/private/tmp/loopex-m7-e1f9d7ba-fast-check.log`,
@@ -3742,6 +3768,8 @@ or check was relaxed.
 - [ ] Complete the attended ephemeral-question witness.
 
 ### Added implementation subtasks
+
+- [x] Implement the bounded model-question DTO and grant-gated temporary responder worker with exact answer validation, sanitized failures and supervisor-owned process joins; live one-call owner integration remains open.
 
 - [x] Integrate the accepted optional trace map into ephemeral preflight, granted private-actor registration, post-capability-binding activation and bounded teardown; extend startup/loss fault proofs to the diagnostic drain, private writer supervisor and active IO worker, and preserve absent/disabled startup behavior.
 
