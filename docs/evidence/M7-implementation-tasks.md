@@ -91,6 +91,23 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the full fast check passes once on unchanged integration candidate
+  `35ec8929274d7f355ed63a157d80fe6b32917763`, across all eleven applications:
+  3,077 tests passed with 34 existing exclusions, in 888 seconds. Complete
+  output: `/private/tmp/loopex-m7-35ec8929-fast-check.log`, SHA-256
+  `8efb7b585be8f7627f196dc2697974cbcfa9dca634b31af1a5149e2a235e3304`.
+  This proves the current integration, not the
+  unfinished M7 outcomes or its floor/release closure matrix. No suite repeats
+  on this candidate. The following evidence-only commit does not change source.
+- Next: implement ADR 0049's attachment-based command-disposition observation
+  and unknown-admission resolver. Preserve the original proposal and exact
+  OwnerLane transaction, use the fixed 100-ms ticks and first-unknown backstop,
+  defer internal results/timers in arrival order, and resolve before any
+  publication, dispatch or cleanup admission. Missing command-index entries or
+  owner loss must remain pending/unavailable, never fabricated non-admission.
+  The facade, Runtime and coordinator lack this API. This work can proceed
+  independently of the three pending contract decisions; the chat creation
+  bridge/facade choice was surfaced again during this verification.
 - Done: T07's bounded source selector scans complete eligible-unit prefixes,
   retains the largest passing complete maintenance-request preflight and uses
   serialized-message bytes for the 6,144-byte small-prefix threshold. A small
