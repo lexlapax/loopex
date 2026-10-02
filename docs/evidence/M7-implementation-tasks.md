@@ -91,6 +91,52 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Passed: full fast check once on clean fixture catalog SHA
+  `08beed1583474ed737df60ca7063b89a8a6afe90`: all eleven application suites,
+  3,185 passed, 34 existing exclusions, 890 seconds. Complete output:
+  `/private/tmp/loopex-m7-08beed15-fast-check.log`, SHA-256
+  `6e08ac03e4932869f8c6e640bb939afa16e3b7b6fa90eda627def0e1edbdb99b`.
+  This predates policy notice and checkpoint rendering changes.
+- Done: T07's canonical maintenance request constructor uses the explicitly
+  eligible thinking-off selection, verifies the exact frozen instruction capture
+  and retains the prepared source-v2 bytes as one user message. Tools are empty,
+  continuation nil and reply reserve exactly 1,024; ordinary sampling/resources
+  supply no defaults. Missing model/instructions and unsupported reasoning keep
+  distinct refusals; changed instruction bytes/version/digest, malformed source
+  text and oversized source refuse. Source ownership, complete admission,
+  episode persistence, provider permits/accounting and recovery remain open.
+  The existing registered Haiku summarizer local-HTTP witness now uses this Core
+  constructor and independently checks exact outgoing system/source bytes,
+  disabled thinking, reply reserve and natural completion without continuation.
+  Complete affected Core files pass 36 cases in 0.4 seconds on each pair.
+  Complete native transport file passes 14 tests in 2.7 seconds current and
+  3.1 seconds floor. Compile, formatting, documentation, dependency and status
+  gates pass. Complete final outputs:
+  `/private/tmp/loopex-m7-maintenance-request-current-final-20261002.log`, SHA-256
+  `41450e938990c40f37ebc3e5a9b530455c04779e5b6c1ae050fd9a704ff560e1`;
+  `/private/tmp/loopex-m7-maintenance-request-floor-20261002.log`, SHA-256
+  `64fee8aade3beaabd99a80e3e7ba7333c22769c57d700455ca5ef5bbe616ee54`;
+  `/private/tmp/loopex-m7-maintenance-request-transport-current-20261002.log`, SHA-256
+  `72de24ae03e3bfc32db8805fef64d8bfe175329e47c899b959d92e886752b00a`;
+  `/private/tmp/loopex-m7-maintenance-request-transport-floor-20261002.log`, SHA-256
+  `d0ae2cb6cd33f21896a9fd684bd1639e25528103435230710bf5ae5614cfac12`.
+- Checklist audit: T13's retained repair and review fixture definitions and
+  independent oracles fulfill those two original implementation items. Their
+  seed/oracle bytes were implemented in `8ae0c371`; the catalog, complete
+  inventory checks and seven deterministic tests on both pairs now pin and
+  verify them. The actual agent execution, approved test policy, helper/question
+  joins and provider evidence belong to the remaining items and stay open.
+  Original counts: 32 done / 154 remaining. Added: 109 done / 12 remaining.
+- Decision pending: T12's one-shot absent-responder denial needs per-call
+  admission state, while the released Policy port accepts only a module with
+  decide/1. Recommended: an immutable runtime model-question admission gate,
+  selected as deny by the wrapper without a responder, producing the existing
+  interaction_unsupported denial before opening a question. Alternative: amend
+  Policy to accept explicit per-runtime adapter context, with broader contract
+  and compatibility work. This is a new cross-application decision under AGENTS;
+  neither path is implemented. Asked 2026-10-02. The four earlier decisions
+  (exact-genesis bridge, preparation store, refusal counts, diagnostic-loss
+  assertion bound) remain unanswered; general continuation did not resolve them.
 - Done: T07's existing summary owner captures covered-record provenance from
   trusted inputs, ORs the current source excerpt classification with inherited
   omissions, and renders a closed checkpoint summary as one canonical user
@@ -3136,6 +3182,7 @@ or check was relaxed.
 - [x] Admit whole maintenance callbacks, retain canonical usage on incomplete/invalid summaries, require natural completion first, and share closed summary/carry-forward validation with prior checkpoint reuse; prove escaping, size, shape and callback-generation boundaries.
 - [x] Select bounded complete source prefixes through owner-supplied whole-request preflight, enforce the revision-3 small-prefix/next-unit rule without fallback, and prove whole-unit coverage, exact threshold, quota order and cancellation before later reads.
 - [x] Capture owner-computed checkpoint summary provenance with inherited omission, share strict prior-data admission and pin exact canonical user rendering/source identity plus all nine native mappings in both transport modes on both toolchains.
+- [x] Construct the accepted canonical thinking-off maintenance request from exact captured instructions and prepared source, with no tools/continuation and a fixed 1,024-token reserve; prove distinct configuration refusals, identity integrity and actual registered local-HTTP request bytes on both toolchains.
 
 ## T08 — Implement model selection and private thinking continuation
 
@@ -3285,14 +3332,15 @@ or check was relaxed.
 - [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
 
 - [x] Extend the existing ephemeral serial answer slot and pending projection for tagged model text/choice/decline, preserving legacy policy choices; prove maximum text, producer/kind refusal, unchanged pending observations, actual Core/HTTP continuation without executor intents and subsequent prompts on both toolchains. Public question opt-in and responder integration remain open.
+- [ ] Resolve the one-shot absent-responder admission boundary through the requested maintainer decision; implement the selected immutable runtime gate or contextual Policy amendment and prove denial before interaction admission without changing ordinary policy decisions.
 
 ## T13 — Complete coding fixtures and operator instructions
 
 ### Original checklist
 
-- [ ] Implement the repair fixture and its independent sum assertions.
+- [x] Implement the repair fixture and its independent sum assertions.
 - [ ] Implement the feature fixture requiring the nil-encoding question.
-- [ ] Implement the review fixture with the exact duplicate-fee finding and call chain.
+- [x] Implement the review fixture with the exact duplicate-fee finding and call chain.
 - [ ] Implement the long fixture preserving the required facts through compaction and restart.
 - [ ] Implement the trusted fixture wrapper and exact approved test-command policy.
 - [ ] Let the agent run approved tests; independently rerun immutable oracles and inspect allowed changes.

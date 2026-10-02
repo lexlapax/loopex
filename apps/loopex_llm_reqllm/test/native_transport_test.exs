@@ -16,11 +16,36 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
     model = "anthropic:claude-haiku-4-5-20251001"
     selected = cell_request(model, "none", %{"mode" => "disabled"}, false)
 
-    {:ok, request} =
-      Model.request(model, [%{"role" => "user", "content" => "summarize"}],
-        sampling: Map.put(selected.sampling, "max_tokens", 1024),
-        deadline: 123
-      )
+    assert {:ok, capabilities} = Loopex.LLM.ReqLLM.ModelCapabilities.capture(model)
+
+    selection = %{
+      "model" => model,
+      "reasoning" => "none",
+      "model_capabilities" => capabilities,
+      "provider_mapping" => selected.sampling["provider_mapping"]
+    }
+
+    assert {:ok, instructions} =
+             Loopex.Runtime.MaintenanceConfiguration.capture_instructions(%{
+               "version" => "summary.v1",
+               "body" => "Keep the exact early facts 猫"
+             })
+
+    assert {:ok, [source]} =
+             Loopex.Runtime.CompactionSource.encode(
+               [%{"role" => "user", "content" => "amber; three batches"}],
+               nil,
+               :complete,
+               fn -> :ok end
+             )
+
+    assert {:ok, request} =
+             Loopex.Runtime.MaintenanceConfiguration.request(
+               selection,
+               instructions,
+               source.bytes,
+               123
+             )
 
     content = [%{"type" => "text", "text" => "summary"}]
     {server, base} = server([encode(cell_events(model, content, "end_turn"))])
@@ -37,6 +62,15 @@ defmodule Loopex.LLM.ReqLLM.NativeTransportTest do
              )
 
     assert_receive {:request, ^server, _, body}
+
+    assert body["system"] == [
+             %{"type" => "text", "text" => "summary.v1: Keep the exact early facts 猫"}
+           ]
+
+    assert body["messages"] == [
+             %{"role" => "user", "content" => [%{"type" => "text", "text" => source.bytes}]}
+           ]
+
     assert body["max_tokens"] == 1024
     assert body["thinking"] == %{"type" => "disabled"}
     refute Map.has_key?(body, "output_config")

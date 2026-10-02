@@ -94,6 +94,59 @@ defmodule Loopex.Runtime.MaintenanceConfiguration do
 
   def validate_model(_), do: {:error, :maintenance_model_invalid}
 
+  # Concept: maintenance uses its own captured instructions and fixed reply
+  # allowance rather than inheriting ordinary tools, resources or sampling.
+  # Technical depth: the owner passes exact source-v2 bytes produced by its
+  # source selector and the episode's absolute cutoff. This constructor validates
+  # the captured instruction identity and thinking-off selection, then delegates
+  # canonical encoding to the existing Model boundary. Range ownership, source
+  # bindings, whole-request admission and journal commit remain owner obligations.
+  @doc false
+  @spec request(map() | nil, map() | nil, binary(), integer()) ::
+          {:ok, Loopex.Model.request()} | {:error, atom()}
+  def request(selection, instructions, source, deadline) do
+    with :ok <- eligible_model(selection),
+         :ok <- instruction_capture(instructions),
+         true <- is_binary(source) and byte_size(source) in 1..16_384 and String.valid?(source) do
+      Loopex.Model.request(
+        selection["model"],
+        [
+          %{"role" => "system", "content" => instructions["rendered_bytes"]},
+          %{"role" => "user", "content" => source}
+        ],
+        tools: [],
+        continuation: nil,
+        sampling: %{
+          "max_tokens" => 1_024,
+          "reasoning" => "none",
+          "provider_mapping" => selection["provider_mapping"]
+        },
+        deadline: deadline
+      )
+    else
+      false -> {:error, :context_projection_invalid}
+      error -> error
+    end
+  end
+
+  defp instruction_capture(nil), do: {:error, :maintenance_instructions_unconfigured}
+
+  defp instruction_capture(%{"version" => version, "rendered_bytes" => bytes} = capture)
+       when map_size(capture) == 3 and is_binary(version) and byte_size(version) in 1..64 and
+              is_binary(bytes) and byte_size(bytes) <= 2_114 do
+    prefix = version <> ": "
+
+    with true <- byte_size(bytes) > byte_size(prefix) and String.starts_with?(bytes, prefix),
+         body = binary_part(bytes, byte_size(prefix), byte_size(bytes) - byte_size(prefix)),
+         {:ok, ^capture} <- capture_instructions(%{"version" => version, "body" => body}) do
+      :ok
+    else
+      _ -> {:error, :maintenance_instructions_invalid}
+    end
+  end
+
+  defp instruction_capture(_), do: {:error, :maintenance_instructions_invalid}
+
   @doc """
   ## Concept
 

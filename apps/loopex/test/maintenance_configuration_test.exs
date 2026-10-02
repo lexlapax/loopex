@@ -88,6 +88,89 @@ defmodule Loopex.Runtime.MaintenanceConfigurationTest do
              )
   end
 
+  test "maintenance request uses only its frozen instructions and source with a fixed reply reserve" do
+    assert {:ok, instructions} =
+             MaintenanceConfiguration.capture_instructions(%{
+               "version" => "frozen.v1",
+               "body" => "Summarize exact facts 猫\n"
+             })
+
+    assert {:ok, [source]} =
+             Loopex.Runtime.CompactionSource.encode(
+               [%{"role" => "user", "content" => "untrusted fact, not a system instruction"}],
+               nil,
+               :complete,
+               fn -> :ok end
+             )
+
+    assert {:ok, request} =
+             MaintenanceConfiguration.request(model(), instructions, source.bytes, 1_000_000)
+
+    assert request.model == model()["model"]
+
+    assert request.messages == [
+             %{"role" => "system", "content" => "frozen.v1: Summarize exact facts 猫\n"},
+             %{"role" => "user", "content" => source.bytes}
+           ]
+
+    assert request.tools == []
+    assert request.continuation == nil
+
+    assert request.sampling == %{
+             "max_tokens" => 1024,
+             "reasoning" => "none",
+             "provider_mapping" => model()["provider_mapping"]
+           }
+
+    assert request.deadline == 1_000_000
+    assert request.canonicalization_version == "loopex.model_request.v2"
+    assert :ok = Loopex.Model.validate_request(request)
+  end
+
+  test "missing or corrupt maintenance captures and sources never inherit ordinary defaults" do
+    assert {:ok, instructions} =
+             MaintenanceConfiguration.capture_instructions(%{
+               "version" => "v1",
+               "body" => "private captured summary instructions"
+             })
+
+    source =
+      "{\"messages\":{\"kind\":\"complete\",\"value\":[{\"content\":\"fact\",\"role\":\"user\"}]},\"prior_checkpoint\":null,\"version\":\"loopex.compaction.source.v2\"}"
+
+    assert {:error, :maintenance_model_unconfigured} =
+             MaintenanceConfiguration.request(nil, instructions, source, 123)
+
+    assert {:error, :maintenance_instructions_unconfigured} =
+             MaintenanceConfiguration.request(model(), nil, source, 123)
+
+    assert {:error, :maintenance_reasoning_unsupported} =
+             MaintenanceConfiguration.request(
+               %{model() | "reasoning" => "default"},
+               instructions,
+               source,
+               123
+             )
+
+    for corrupt <- [
+          Map.put(instructions, "extra", true),
+          Map.delete(instructions, "digest"),
+          %{instructions | "version" => "different"},
+          %{instructions | "rendered_bytes" => "v1: changed"},
+          %{instructions | "digest" => String.duplicate("0", 64)}
+        ] do
+      assert {:error, :maintenance_instructions_invalid} =
+               MaintenanceConfiguration.request(model(), corrupt, source, 123)
+    end
+
+    for invalid <- [nil, "", <<255>>, String.duplicate("x", 16385)] do
+      assert {:error, :context_projection_invalid} =
+               MaintenanceConfiguration.request(model(), instructions, invalid, 123)
+    end
+
+    assert {:error, :invalid_model_request} =
+             MaintenanceConfiguration.request(model(), instructions, source, nil)
+  end
+
   test "two runtimes forward independent captured settings without putting them in session truth" do
     for {id, instructions, selection} <- [
           {"maintenance-a", %{"version" => "a.v1", "body" => "private-maintenance-a"}, model()},
