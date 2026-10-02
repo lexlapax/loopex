@@ -99,6 +99,56 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the full current-pair fast check passed once on exact repair candidate
+  `c7d855f778a6ef29a8787b5af4e2ef076100e05a` in 1,381 seconds. All eleven
+  application suites and repository gates passed, with their prescribed
+  exclusions unchanged. Complete output:
+  `/private/tmp/loopex-m7-c7d855f7-fast-check.log`, SHA-256
+  `1df2c7ae84f81f91e87719ec76b69524565a95b711af9c646ce2906993208334`.
+  The wrapper also retained exit 0 and the measured duration. This closes the
+  added integration-repair verification row. It does not include subsequent
+  resume preparation source at `e1832a376f705600623179ead1b4ab8b6aa6045e`.
+  The failed 41091199 parent remains failed evidence. No floor closure matrix,
+  release check, old-reader witness, paid provider trial or milestone closure
+  is claimed. Both primary and verification checkouts were clean after the
+  run; the verification checkout remains detached at c7d855f7.
+
+  T16's separate Task.Supervisor diagnostic remains open. A temporary probe
+  enables actual SASL supervisor reporting and runs 32 completed configured
+  sessions, then proves their owner groups, private supervisors and runtime
+  task supervisors gone. That current-pair probe passed in 0.5 seconds but did
+  not reproduce the retained diagnostic. A second case suspends a real private
+  Task.Supervisor, observes its queued stop, then proves its held worker's exact
+  normal DOWN before resuming and joining the supervisor. Its hypothesized
+  noproc diagnostic was absent on both supported pairs, so the two-case probe
+  exits 2 on each pair. This rejects that specific ordering hypothesis; it is
+  not a product fix or a successful aggregate verification. No source, report
+  filter, timeout or required check changed.
+  Probe `/private/tmp/loopex-m7-task-supervisor-reproduction_test.exs`, SHA-256
+  `4032f9d0c377aa9989a65381ad4f6d0712f9e3944cdf1f7e0771482a52f96d6d`.
+  Natural completed-work output:
+  `/private/tmp/loopex-m7-task-supervisor-reproduction-current-v4.log`, SHA-256
+  `705c767b9f4d7b93a25479c4a28646ad66b533b8da5dd35c1bfcd734a38d40d5`.
+  Rejected hypothesis outputs:
+  `/private/tmp/loopex-m7-task-supervisor-reproduction-current-v5.log`, SHA-256
+  `43796a3eec4ae16f5b80df0aafce6f7f0db54add4693b37e7db2c35f954d17d3`;
+  `/private/tmp/loopex-m7-task-supervisor-reproduction-floor-v1.log`, SHA-256
+  `383f5ef5490f95575e202e7c3c0c4f200386493cdb9ac128bb8dbce6eb726a9f`.
+  Earlier probe drafts failed before this observation: a nonstandard test name
+  and non-waiting event helper, a mixed-key pattern syntax error, then a wrong
+  empty-event response branch. Their v1-v3 logs are retained in /private/tmp;
+  none is diagnostic reproduction evidence.
+
+  Resume handoff: the goal stays active on m7. No agent or shell check remains
+  running, and no maintainer decision is waiting. Use the reporter for the
+  original/added T00-T19 denominators. Continue the public chat host join from
+  the existing driver and the separate new/resume configuration stages; preserve
+  capability-held checks and abandonment, install signal routing before
+  activation, retain output closing after outer cleanup, and finish effective
+  display/workspace/pending-policy/legacy/helper obligations. A full check of a
+  later clean integration candidate must include the new resume source; do not
+  attribute c7d855f7's result to its child or repeat the same tested bytes.
+
 - Done: the host configuration owner now has separate resume preflight and
   prepared-owner comparison stages. Preflight validates the authored file,
   flags, paths and credential-reference forms without reading prompt files,
@@ -4752,7 +4802,7 @@ or check was relaxed.
 - [x] Confirm diagnostic writer dispatch through same-sender owner status before the existing blocked-device receive; retain the failed committed integration observation and prove unchanged pressure/accounting/receive/cleanup assertions on both supported pairs.
 - [x] Pin the complete approved read/search generation registry in composition tests while proving legacy selections for all 128 tool subsets and optional question registration on both supported pairs; retain the failed integration parent.
 - [x] Establish chat writer/worker monitors at their targets before faults sent to other processes; preserve exact killed/normal reasons and original DOWN waits, retaining failed integration evidence and both-pair output/driver proof.
-- [ ] Run the full fast check once on the clean committed repair candidate after the failed 41091199 integration run; retain its exact SHA, complete output and final result.
+- [x] Run the full fast check once on the clean committed repair candidate after the failed 41091199 integration run; retain its exact SHA, complete output and final result.
 
 
 - [x] Restore the reference composition size gate by consolidating preflight in the existing DurableOptions owner; preserve validation precedence and constructor behavior on both toolchains.
