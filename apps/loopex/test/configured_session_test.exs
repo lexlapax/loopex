@@ -17,6 +17,13 @@ defmodule Loopex.ConfiguredSessionDeferringPolicy do
   end
 end
 
+defmodule Loopex.ConfiguredSessionDenyingPolicy do
+  @moduledoc false
+  @behaviour Loopex.Policy
+  @impl Loopex.Policy
+  def decide(_request), do: {:deny, :policy_denied}
+end
+
 defmodule Loopex.ConfiguredQuestionCountingPolicy do
   @moduledoc false
   @behaviour Loopex.Policy
@@ -1140,6 +1147,7 @@ defmodule Loopex.ConfiguredSessionTest do
 
   test "the admitted question generation never dispatches an executor effect" do
     for {policy, reason} <- [
+          {Loopex.ConfiguredSessionDenyingPolicy, "policy_denied"},
           {Loopex.ConfiguredSessionDeferringPolicy, "policy_unavailable"}
         ] do
       fixture =
@@ -1396,6 +1404,154 @@ defmodule Loopex.ConfiguredSessionTest do
                  ])
              )
     end
+  end
+
+  test "an answered question survives token and record-byte overflow without another dispatch" do
+    for {budget, prompt, answer, dimension, limit} <- [
+          {700, "implement", String.duplicate("a", 8_192), "context_tokens", 700},
+          {50_000, String.duplicate("p", 24_000), String.duplicate("a", 8_192),
+           "context_record_bytes", 65_536}
+        ] do
+      fixture =
+        start(
+          tools: [ToolDefinition.question_definition()],
+          script: [
+            %{
+              text: "question",
+              calls: [%{id: "ask-1", name: "ask", arguments: %{"question" => "Explain"}}]
+            },
+            %{text: "must not dispatch", calls: []}
+          ]
+        )
+
+      config =
+        configuration()
+        |> Map.put("context_token_budget", budget)
+        |> Map.put("system_class_tokens", min(5_000, budget - 1))
+        |> put_in(["budget_origins", "context_token_budget"], "explicit")
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create",
+                 %{},
+                 genesis(fixture.definitions, config)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "prompt",
+                 content: prompt
+               })
+
+      question = await_question(attachment)
+
+      command = %{
+        type: :interaction_answer,
+        command_id: "answer",
+        interaction_id: question["interaction_id"],
+        answer: %{"text" => answer}
+      }
+
+      assert {:accepted, "answer"} = Loopex.command(attachment, command)
+      events = finish(attachment)
+      terminal = Enum.find(events, &(&1.kind == "run.finished"))
+      assert terminal["outcome"] == "failed", "#{dimension}: #{inspect(terminal)}"
+      assert terminal["failure"]["version"] == 2
+      assert terminal["failure"]["dimension"] == dimension
+      assert terminal["failure"]["observed"] > limit
+      assert terminal["failure"]["limit"] == limit
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+      records = Fixture.records(fixture, session)
+
+      responses =
+        Enum.filter(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+
+      assert [response] = responses
+      assert response.payload["answer"] == %{"text" => answer}
+      assert {:accepted, "answer"} = Loopex.command(attachment, command)
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, records, Fixture.events(fixture, session))
+
+      assert is_nil(recovered.open_interaction)
+      assert recovered.interactions[question["interaction_id"]].status == "answered"
+
+      result =
+        Enum.find(
+          SessionState.elements(recovered, question["run_id"]),
+          &(&1.kind == :tool_result)
+        )
+
+      assert result.outcome == :completed
+      assert result.content == answer
+    end
+  end
+
+  test "a live question deadline settles once and rejects a late answer after recovery" do
+    fixture =
+      start(
+        bounds_deadline_ms: 2_000,
+        tools: [ToolDefinition.question_definition()],
+        script: [
+          %{
+            text: "question",
+            calls: [%{id: "ask-1", name: "ask", arguments: %{"question" => "Explain"}}]
+          },
+          %{text: "must not dispatch", calls: []}
+        ]
+      )
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+    question = await_question(attachment)
+    events = finish(attachment)
+    terminal = Enum.find(events, &(&1.kind == "run.finished"))
+    assert terminal["outcome"] == "bound_reached"
+    assert terminal["bound"] == "deadline"
+
+    settlements =
+      Enum.filter(events, &(&1.kind in ["interaction.expired", "interaction.cancelled"]))
+
+    assert [settlement] = settlements
+    assert settlement["interaction_id"] == question["interaction_id"]
+    assert settlement["producer"] == "model_tool"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+
+    records = Fixture.records(fixture, session)
+
+    assert {:ok, recovered} =
+             SessionState.recover(session, records, Fixture.events(fixture, session))
+
+    assert is_nil(recovered.open_interaction)
+    assert recovered.interactions[question["interaction_id"]].status == settlement["disposition"]
+
+    assert {:error, :interaction_resolved} =
+             Loopex.command(attachment, %{
+               type: :interaction_answer,
+               command_id: "late-answer",
+               interaction_id: question["interaction_id"],
+               answer: %{"text" => "too late"}
+             })
+
+    assert Enum.count(records, &(&1.payload.kind == "model_question_settled_v1")) == 1
+    refute Enum.any?(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
   end
 
   test "commit unknown re-presents exact question and response bytes before publication" do

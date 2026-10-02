@@ -91,6 +91,32 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: original T09's remaining runtime boundary tests are complete. Direct
+  denial and policy deferral create no question or executor effect. An exact
+  8,192-byte answer remains admitted, replayable and recoverable when the next
+  request exceeds either its 700-token input ceiling or the 65,536-byte Store
+  record ceiling; neither case dispatches another model call. A live two-second
+  deadline/question-expiry race commits one terminal settlement, preserves its
+  actual disposition through recovery and refuses a late answer. Together with
+  existing large-answer, duplicate/conflict, cancellation, expiry-boundary and
+  fault cases, both complete lifecycle files pass 51 tests on each supported
+  pair: 17.6 seconds current, 17.5 seconds floor. Public question event/record
+  vectors and the coordinated /3-/4 mutation paths remain open added subtasks.
+  Current output: `/private/tmp/loopex-m7-question-boundaries-current-final.log`,
+  SHA-256 `0ab48c6cd97ced22b132ae33f60d6bf8f78404478075d50c2ed1d30bd3d81c8f`.
+  Floor output: `/private/tmp/loopex-m7-question-boundaries-floor.log`, SHA-256
+  `06433ce1e0118081343dc77fd23304b40780038e7bbda61e8825ac1b5434c4e5`.
+  Initial vectors had an inconsistent system/input budget and treated the
+  ordinary deterministic term encoding as JSON. Corrected vectors use a valid
+  configuration and a 24,000-byte retained prompt; production admission,
+  assertions and limits remain intact. Initial failed output:
+  `/private/tmp/loopex-m7-question-boundaries-current-first.log`, SHA-256
+  `2f8953aee654e0eaf9c8ccf627cb660178c19640667dd794b8c9f580a12ff5d3`.
+  The undersized vector's failed complete lifecycle output:
+  `/private/tmp/loopex-m7-question-boundaries-current-verified.log`, SHA-256
+  `7bb3d6f654a4826eb33d9cca34a5f4d097cb6e62eda02bd7f90d05db8fb9b845`.
+  Its measured byte diagnostic: `/private/tmp/loopex-m7-question-byte-measure.log`,
+  SHA-256 `fe11c55459710866aa1a58269516e4cb461023aa5cf51464823ef419250550f5`.
 - Done: original T04's authored conversation-bounds requirement is complete.
   Removing any one of max_turns, deadline_ms or token_budget refuses with its
   exact file pointer even when all three matching flags are supplied. A valid
@@ -2375,7 +2401,7 @@ or check was relaxed.
 - [x] Implement producer identity, options, text answers, decline and expiry.
 - [x] Atomically settle the interaction, original tool result, response identity and next action.
 - [x] Preserve the existing policy-defer lifecycle.
-- [ ] Test denial, deferred policy, large answers, overflow, duplicate/stale responses, cancellation and expiry.
+- [x] Test denial, deferred policy, large answers, overflow, duplicate/stale responses, cancellation and expiry.
 - [x] Test crashes before and after pending-question and response commits.
 - [x] Prove recovery retains the actual pending question identity.
 
