@@ -78,17 +78,22 @@ defmodule Loopex.Runtime.LineageProjection do
           result = Map.fetch!(results, identity)
           call = Map.fetch!(calls, identity)
 
-          with {:ok, encoded} <- Frame.encode(message) do
-            fixed = Map.has_key?(frozen, source) or fixed_result?(call, binding)
-            retained = match?({:ok, _}, reference(result, sources))
+          fixed = Map.has_key?(frozen, source) or fixed_result?(call, binding)
+          retained = match?({:ok, _}, reference(result, sources))
 
-            if not fixed and not retained and IO.iodata_length(encoded) - 1 > 2_048 do
-              {:cont, {:ok, [%{source_reference: source, message: message} | candidates]}}
-            else
-              {:cont, {:ok, candidates}}
-            end
+          if fixed or retained do
+            {:cont, {:ok, candidates}}
           else
-            _ -> {:halt, {:error, :context_projection_invalid}}
+            with true <- String.valid?(message["content"]),
+                 {:ok, encoded} <- Frame.encode(message) do
+              if IO.iodata_length(encoded) - 1 > 2_048 do
+                {:cont, {:ok, [%{source_reference: source, message: message} | candidates]}}
+              else
+                {:cont, {:ok, candidates}}
+              end
+            else
+              _ -> {:halt, {:error, :context_projection_invalid}}
+            end
           end
 
         _, acc ->

@@ -105,6 +105,18 @@ defmodule Loopex.LineageProjectionTest do
     end
   end
 
+  test "binary receipt content with usable membership is already retained without text encoding" do
+    {elements, sources} = fixture()
+    binary = put_in(elements, [Access.at(2), :content], <<255, 0, 254>>)
+    assert {:ok, []} = LineageProjection.preparation_candidates(binary, @binding, sources, %{})
+
+    assert {:error, :context_projection_invalid} =
+             LineageProjection.preparation_candidates(binary, @binding, %{}, %{})
+
+    assert {:ok, _entries, %{"ranges" => [_]}} =
+             LineageProjection.project(binary, @binding, sources, %{}, 0)
+  end
+
   test "explicit artifact ranges stay exact even if a receipt also supplies a reference" do
     {elements, sources} = fixture()
 

@@ -91,6 +91,49 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T02's versioned preparation records now reserve one oldest-first
+  oversized inline source before IO and complete it under the same episode.
+  The closed tool_result_preparation_state_v1 payload binds staging/run/turn,
+  projection revision, fixed start/deadline/origin, reservation clock, count,
+  encoded source-record bytes, cursor and the original receipt fingerprint.
+  Version 1 of tool_result_reference_prepared binds that reservation, exact
+  original text digest/size, five-label provenance, completion clock and the
+  full reference. Independent canonical use reconstruction rejects borrowed
+  provenance. Completion advances the cursor without another charge; recovery
+  retains the exact reservation, counters and cutoff. Pending reservations
+  block staging both in proposal construction and journal replay. Projection
+  overlays a committed prepared reference on a transient element copy; original
+  receipts, conversation and previously staged bytes stay immutable. Prepared
+  references resolve through the existing session-owned artifact range boundary.
+  Core Store transactions prove ambiguous reservation/completion convergence;
+  the retained in-memory artifact adapter proves exact bytes/use metadata and
+  idempotent storage. Negative replay covers identity, counters, deadline,
+  schema, source digests/sizes and borrowed uses. Fixed cutoff/origin, exact
+  16-source/1,048,576-byte caps and binary-reference selection are covered.
+  This is a reducer/codec milestone: live workers, cancellation joins, retained
+  failure facts, public transfer-store wiring and early spill remain open.
+  All three complete focused files pass 27 cases in 1.5 seconds on both pairs;
+  warning-free compilation, formatting, docs, dependency and status gates pass.
+  Complete outputs:
+  `/private/tmp/loopex-m7-preparation-records-current-all-20261002.log`, SHA-256
+  `fedc2c4c7ac6dcaaf7b345d4a56a207d3d0eddb150b67698efc4ddf0de3e4226`;
+  `/private/tmp/loopex-m7-preparation-records-floor-all-20261002.log`, SHA-256
+  `aa3a11e88bd9261d312c80df81acaa724a9c0795806384f7ee78d973be5c0398`.
+  The initial fixture used an artifact-store reference shape for the journal
+  Store and failed before reservation; its retained output is
+  `/private/tmp/loopex-m7-preparation-records-current-initial-20261002.log`, SHA-256
+  `7b34966d0c66deb70576a485806658969c5998a92b615c407e230490ed70ca48`.
+  Correcting the fixture to the existing Store struct repairs that harness error.
+  Original: 33 done / 153 remaining. Added: 121 done / 10 remaining.
+- Integration check: exact d83423d8efc8ef365be4bfdae88b4b9bcb5ad1b3
+  candidate ran once and passed all 11 application suites and every preliminary
+  gate in 909 seconds. Its complete immutable output is
+  `/private/tmp/loopex-m7-d83423d8-fast-check.log`, SHA-256
+  `de829545c53dcc1f5131909865c766704d54fe01329d56d5cdcf5118326400ee`.
+  This verifies the refusal and denying-adapter inventory amendments together;
+  it does not cover later preparation-source/record changes, erase earlier
+  failed evidence, resolve the provider-cutoff flake, or authorize M7 closure.
+
 - Done: T02 now selects oversized inline preparation sources from the selected
   ordinary lineage, using each complete encoded tool message rather than raw
   content length. Receipt replay retains the original canonical record digest,
@@ -2821,6 +2864,8 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
 
 ### Added implementation subtasks
+
+- [x] Reserve versioned preparation source credit and fixed deadline, commit exact prepared references without recharging, prove replay/membership/immutable projection and forbid staging under an outstanding reservation. Live retention, failure facts and cancellation remain pending.
 
 - [x] Select oversized unfrozen inline sources using complete encoded message cost and reconstruct their exact receipt digest, record byte cost and five-label provenance through replay before durable preparation reservation.
 

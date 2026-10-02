@@ -103,6 +103,7 @@ defmodule Loopex.Runtime.SessionState do
   alias Loopex.Interaction
   alias Loopex.ResourcePack
   alias Loopex.Runtime.ContextAdmission
+  alias Loopex.Runtime.ArtifactPreparation
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionConfiguration
@@ -188,6 +189,8 @@ defmodule Loopex.Runtime.SessionState do
           conversation: map(),
           artifact_sources: map(),
           tool_result_sources: map(),
+          artifact_preparations: map(),
+          prepared_tool_results: map(),
           lineage_projection_revision: nil | 1,
           run_order: [binary()],
           bounds: map(),
@@ -227,6 +230,8 @@ defmodule Loopex.Runtime.SessionState do
             # Technical depth: this replay-derived index holds the original
             # record digest/cost and ADR 0015's five use labels, not output copies.
             tool_result_sources: %{},
+            artifact_preparations: %{},
+            prepared_tool_results: %{},
             lineage_projection_revision: nil,
             run_order: [],
             bounds: %{},
@@ -768,7 +773,7 @@ defmodule Loopex.Runtime.SessionState do
     binding = state.tool_selection && state.tool_selection["artifact_read"]
 
     Loopex.Runtime.LineageProjection.project(
-      elements || lineage_elements(state, run_id),
+      prepared_elements(state, elements || lineage_elements(state, run_id)),
       binding,
       state.artifact_sources,
       frozen_lineage(state, run_id),
@@ -789,7 +794,7 @@ defmodule Loopex.Runtime.SessionState do
 
     with {:ok, candidates} <-
            Loopex.Runtime.LineageProjection.preparation_candidates(
-             elements || lineage_elements(state, run_id),
+             prepared_elements(state, elements || lineage_elements(state, run_id)),
              binding,
              state.artifact_sources,
              frozen_lineage(state, run_id)
@@ -809,6 +814,108 @@ defmodule Loopex.Runtime.SessionState do
         error -> error
       end
     end
+  end
+
+  @doc false
+  @spec propose_preparation_reservation(t(), binary(), integer()) ::
+          :ready | {:reserved, map(), map()} | {:ok, proposal()} | {:error, atom()}
+  def propose_preparation_reservation(state, run_id, now) do
+    with {:ok, identity} <- preparation_identity(state, run_id),
+         {:ok, sources} <- preparation_sources(state, run_id) do
+      episode = state.artifact_preparations[identity["episode_id"]]
+
+      case {episode, sources} do
+        {%{"status" => "reserved"}, [source | _]} ->
+          {:reserved, source, episode}
+
+        {_, []} ->
+          :ready
+
+        {_, [source | _]} ->
+          with {:ok, record} <-
+                 ArtifactPreparation.reserve(
+                   episode,
+                   identity,
+                   source,
+                   now,
+                   state.deadlines[run_id]
+                 ) do
+            internal_proposal(state, identity["episode_id"] <> ":reserve", record)
+          end
+      end
+    end
+  end
+
+  @doc false
+  @spec propose_prepared_reference(t(), binary(), map(), integer()) ::
+          {:ok, proposal()} | {:error, atom()}
+  def propose_prepared_reference(state, run_id, reference, now) do
+    with {:ok, identity} <- preparation_identity(state, run_id),
+         {:ok, [source | _]} <- preparation_sources(state, run_id),
+         {:ok, record} <-
+           ArtifactPreparation.complete(
+             state.artifact_preparations[identity["episode_id"]],
+             source,
+             reference,
+             now
+           ) do
+      internal_proposal(state, identity["episode_id"] <> ":complete", record)
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :invalid_artifact_prepared_reference}
+    end
+  end
+
+  defp preparation_identity(state, run_id) do
+    case state.pending_work[run_id] do
+      %{stage: stage} = work
+      when stage in ["model_pending", "turn_settled"] and state.active_run_id == run_id and
+             is_nil(state.open_interaction) and is_nil(state.aborting) ->
+        turn_id = stable_id("turn", run_id, next_turn_number(work))
+
+        {:ok,
+         %{
+           "episode_id" => stable_id("artifact-preparation", run_id, turn_id),
+           "run_id" => run_id,
+           "turn_id" => turn_id
+         }}
+
+      _ ->
+        {:error, :invalid_artifact_preparation_transition}
+    end
+  end
+
+  # Concept: a prepared reference changes projection eligibility, not the receipt.
+  # Technical depth: only a transient element copy receives the replay-validated
+  # reference; the original conversation and previously staged prefix stay exact.
+  defp prepared_elements(state, elements) do
+    Enum.map(elements, fn
+      %{kind: :tool_result} = result ->
+        source = %{
+          "kind" => "session_tool_result",
+          "run_id" => result.run_id,
+          "turn" => result.turn_number,
+          "call_id" => result.tool_call_id
+        }
+
+        case Map.fetch(state.prepared_tool_results, source) do
+          {:ok, reference} ->
+            Map.put(result, :artifacts, [reference | Map.get(result, :artifacts, [])])
+
+          :error ->
+            result
+        end
+
+      element ->
+        element
+    end)
+  end
+
+  defp preparation_ready?(state, run_id) do
+    not Enum.any?(state.artifact_preparations, fn
+      {_, %{"status" => "reserved", "run_id" => ^run_id}} -> true
+      _ -> false
+    end)
   end
 
   # Concept: each open exchange keeps every message already sent to its provider.
@@ -1193,7 +1300,8 @@ defmodule Loopex.Runtime.SessionState do
     # separately would leave a window in which the bytes exist and the authority
     # does not, and a crash inside it would hand a successor a staged request
     # whose attempt nobody opened.
-    with {:ok, fixed} <- preflight_model_request(state, run_id, request, options),
+    with true <- preparation_ready?(state, run_id),
+         {:ok, fixed} <- preflight_model_request(state, run_id, request, options),
          {:ok, opened} <-
            ProviderAttempt.opened_record(%{
              run_id: run_id,
@@ -1208,6 +1316,9 @@ defmodule Loopex.Runtime.SessionState do
         [fixed, opened]
       )
     else
+      false ->
+        {:error, :artifact_preparation_pending}
+
       {:refused, refusal} ->
         {:refused, refusal}
 
@@ -2844,6 +2955,8 @@ defmodule Loopex.Runtime.SessionState do
               "model_termination_admitted_v1",
               "effect_intent_committed",
               "executor_receipt_committed",
+              "tool_result_preparation_state_v1",
+              "tool_result_reference_prepared",
               "outcome_unknown_committed",
               "run_terminal_committed",
               "tool_result_committed",
@@ -3479,7 +3592,8 @@ defmodule Loopex.Runtime.SessionState do
          } = record
        )
        when kind in ["model_request_committed", "model_request_committed_v2"] do
-    with true <- is_nil(Map.get(state.run_resources, run_id)),
+    with true <- preparation_ready?(state, run_id),
+         true <- is_nil(Map.get(state.run_resources, run_id)),
          {:ok, request} <- decode_request(request),
          %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
            Map.get(state.pending_work, run_id),
@@ -3541,7 +3655,8 @@ defmodule Loopex.Runtime.SessionState do
               "model_request_committed_resources_v1",
               "model_request_committed_resources_v2"
             ] do
-    with true <- not is_nil(Map.get(state.run_resources, run_id)),
+    with true <- preparation_ready?(state, run_id),
+         true <- not is_nil(Map.get(state.run_resources, run_id)),
          true <-
            map_size(record) ==
              if(kind == "model_request_committed_resources_v1",
@@ -3765,6 +3880,71 @@ defmodule Loopex.Runtime.SessionState do
        ]}
     else
       _other -> {:error, :invalid_executor_receipt_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{kind: "tool_result_preparation_state_v1"} = record) do
+    run_id = record["run_id"]
+
+    with {:ok, identity} <- preparation_identity(state, run_id),
+         {:ok, [source | _]} <- preparation_sources(state, run_id),
+         {:ok, episode} <-
+           ArtifactPreparation.replay_reservation(
+             state.artifact_preparations[identity["episode_id"]],
+             record,
+             identity,
+             source,
+             state.deadlines[run_id]
+           ) do
+      {:ok,
+       %{
+         state
+         | artifact_preparations:
+             Map.put(state.artifact_preparations, identity["episode_id"], episode)
+       }, []}
+    else
+      _ -> {:error, :invalid_artifact_preparation_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{kind: "tool_result_reference_prepared"} = record) do
+    run_id = record["run_id"]
+    reference = decode_artifact_reference(record["reference"])
+
+    with {:ok, identity} <- preparation_identity(state, run_id),
+         {:ok, [source | _]} <- preparation_sources(state, run_id),
+         {:ok, episode} <-
+           ArtifactPreparation.replay_completion(
+             state.artifact_preparations[identity["episode_id"]],
+             record,
+             source,
+             reference
+           ) do
+      job = %{
+        run_id: source.metadata["run_id"],
+        operation_id: source.metadata["operation_id"],
+        attempt: source.metadata["attempt"],
+        tool_call_id: source.metadata["tool_call_id"]
+      }
+
+      {:ok,
+       %{
+         state
+         | artifact_preparations:
+             Map.put(state.artifact_preparations, identity["episode_id"], episode),
+           prepared_tool_results:
+             Map.put(state.prepared_tool_results, source.source_reference, reference),
+           artifact_sources:
+             Loopex.Runtime.ArtifactRead.retain(
+               state.artifact_sources,
+               [reference],
+               record,
+               state.journal_version + 1,
+               job
+             )
+       }, []}
+    else
+      _ -> {:error, :invalid_artifact_preparation_transition}
     end
   end
 
