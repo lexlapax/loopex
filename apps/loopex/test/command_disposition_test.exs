@@ -232,7 +232,7 @@ defmodule Loopex.CommandDispositionTest do
     assert {:error, :owner_unavailable} = Loopex.command_disposition(attachment, "")
 
     assert {:error, :owner_unavailable} =
-             Loopex.command_disposition(attachment, String.duplicate("x", 257))
+             Loopex.command_disposition(attachment, String.duplicate("x", 65_537))
 
     assert {:accepted, "prompt"} = Loopex.command(attachment, prompt("prompt"))
     terminal = finish(attachment)
@@ -328,6 +328,46 @@ defmodule Loopex.CommandDispositionTest do
 
     assert {:accepted, "unknown"} = Loopex.command(attachment, prompt("unknown"))
     assert length(calls(fixture)) == 3
+  end
+
+  test "observation preserves opaque identities and unknown large command IDs" do
+    {fixture, _session, attachment} = fixture(script: [%{text: "done"}])
+    id = :binary.copy(<<255>>, 256)
+    assert {:accepted, ^id} = Loopex.command(attachment, prompt(id))
+    terminal = finish(attachment)
+    run = terminal["run_id"]
+
+    assert {:ok, {:committed, :admitted, :accepted, ^run}} =
+             Loopex.command_disposition(attachment, id)
+
+    assert {:ok, {:pending, nil, :commit_unknown, nil}} =
+             Loopex.command_disposition(attachment, :binary.copy(<<0>>, 65_536))
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "retained structured admission refusals expose their stable code through replay" do
+    {fixture, session, attachment} = fixture(script: [%{text: "must not dispatch"}])
+    command = %{type: :prompt, command_id: "oversized", content: String.duplicate("x", 65_536)}
+
+    assert {:error, {:command_admission_too_large, _, _, _, 65_536}} =
+             Loopex.command(attachment, command)
+
+    assert {:ok, {:committed, :refused, :command_admission_too_large, nil}} =
+             Loopex.command_disposition(attachment, "oversized")
+
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+
+    assert {:ok, recovered} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+
+    assert {:committed, :refused, :command_admission_too_large, nil} =
+             SessionState.command_disposition(recovered, "oversized")
   end
 
   test "a conclusive refusal clears the fence but missing identities remain pending" do
@@ -682,11 +722,12 @@ defmodule Loopex.CommandDispositionTest do
 
     {:ok, digest, _} = Loopex.ResourcePack.digest(manifest)
     {fixture, session, attachment} = fixture(script: [], resource_manifest: manifest)
-    arm(fixture, "resource", :hold_second)
+    command_id = "resource"
+    arm(fixture, command_id, :hold_second)
 
     command = %{
       type: :admit_resources,
-      command_id: "resource",
+      command_id: command_id,
       manifest_digest: digest,
       decision: %{
         manifest_digest: digest,
@@ -701,16 +742,16 @@ defmodule Loopex.CommandDispositionTest do
 
     assert {:error, :commit_unknown} = Loopex.command(attachment, command)
     assert_receive {:resolution_held, resolver, original}, 5_000
-    refute original.tx_id == "resource"
-    assert :sys.get_state(coordinator(fixture)).unknown_admission.command_id == "resource"
+    refute original.tx_id == command_id
+    assert :sys.get_state(coordinator(fixture)).unknown_admission.command_id == command_id
     send(resolver, :release)
 
     await(fn ->
-      Loopex.command_disposition(attachment, "resource") ==
+      Loopex.command_disposition(attachment, command_id) ==
         {:ok, {:committed, :admitted, :accepted, nil}}
     end)
 
-    assert {:accepted, "resource"} = Loopex.command(attachment, command)
+    assert {:accepted, ^command_id} = Loopex.command(attachment, command)
     assert length(calls(fixture)) == 2
     assert Enum.all?(calls(fixture), &(&1.transaction == original))
 

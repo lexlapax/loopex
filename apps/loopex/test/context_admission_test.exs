@@ -812,11 +812,8 @@ defmodule Loopex.ContextAdmissionTest do
 
       candidate = "#{command_type}_record"
 
-      assert {:error,
-              {:command_admission_too_large, "command_record_bytes", ^candidate, observed,
-               @record_limit}} = Loopex.command(attachment, command)
-
-      assert observed > @record_limit
+      assert {:error, :commit_unknown} = Loopex.command(attachment, command)
+      await_command_disposition(attachment, command.command_id)
 
       presentations =
         fixture.store
@@ -840,6 +837,9 @@ defmodule Loopex.ContextAdmissionTest do
         end)
 
       assert retained.payload["candidate"] == candidate
+      assert retained.payload["dimension"] == "command_record_bytes"
+      assert retained.payload["observed"] > @record_limit
+      assert retained.payload["limit"] == @record_limit
 
       [refusal | rest] = first.records
       changed_refusal = Map.update!(refusal, "observed", &(&1 + 1))
@@ -3088,6 +3088,21 @@ defmodule Loopex.ContextAdmissionTest do
 
   defp nested_value(0), do: "leaf"
   defp nested_value(depth), do: %{"next" => nested_value(depth - 1)}
+
+  defp await_command_disposition(attachment, command_id, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 5_000
+    observation = Loopex.command_disposition(attachment, command_id)
+
+    case observation do
+      {:ok, {:committed, :refused, :command_admission_too_large, nil}} ->
+        :ok
+
+      _pending ->
+        assert System.monotonic_time(:millisecond) < deadline, inspect(observation)
+        Process.sleep(5)
+        await_command_disposition(attachment, command_id, deadline)
+    end
+  end
 
   defp traced_transactions(store, acc \\ []) do
     receive do

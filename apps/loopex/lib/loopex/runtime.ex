@@ -33,6 +33,7 @@ defmodule Loopex.Runtime do
   alias Loopex.Store
 
   @max_identifier_bytes 256
+  @max_command_identity_bytes 65_536
   @max_attachment_capacity 65_536
 
   @typedoc """
@@ -441,7 +442,7 @@ defmodule Loopex.Runtime do
           {:ok, command_observation()} | {:error, :owner_unavailable}
   def command_disposition(%Attachment{} = attachment, command_id)
       when is_binary(command_id) and byte_size(command_id) > 0 and
-             byte_size(command_id) <= @max_identifier_bytes do
+             byte_size(command_id) <= @max_command_identity_bytes do
     with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
            Attachment.routing(attachment),
          {:ok, coordinator, owner} <-

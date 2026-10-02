@@ -805,16 +805,18 @@ defmodule Loopex.SessionLifecycleTest do
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
     :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
 
-    eventually_match(
-      fn ->
-        Loopex.command(attachment, %{
-          type: :prompt,
-          command_id: "faulted-command",
-          content: "commit"
-        })
-      end,
-      &(&1 == {:accepted, "faulted-command"})
-    )
+    assert Loopex.command(attachment, %{
+             type: :prompt,
+             command_id: "faulted-command",
+             content: "commit"
+           }) in [{:accepted, "faulted-command"}, {:error, :commit_unknown}]
+
+    eventually(fn ->
+      match?(
+        {:ok, {:committed, :admitted, :accepted, run_id}} when is_binary(run_id),
+        Loopex.command_disposition(attachment, "faulted-command")
+      )
+    end)
   end
 
   # Concept: replaying a create that already completed answers with the session

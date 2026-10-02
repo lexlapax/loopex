@@ -91,6 +91,33 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: observation boundary review preserves the existing opaque command
+  identity range and reports absent identities through 65,536 bytes as pending,
+  including IDs larger than the Store's 256-byte transaction-identity ceiling.
+  Current ordinary and resource admissions keep their existing narrower Store
+  and resource validators. A retained structured command-size refusal now
+  exposes its stable command_admission_too_large code, rather than pending.
+  The corresponding fault proof submits once, waits for observation, and still
+  checks exact refusal fields and transaction conflict binding. The lifecycle
+  fault matrix also submits the authored command once and observes resolution.
+  Both pairs pass all 39 observation/context-admission tests, 50.6 seconds
+  current and 50.5 seconds floor, plus all 14 lifecycle tests in 21.8 seconds
+  each. Outputs and SHA-256 digests:
+  `/private/tmp/loopex-m7-admission-observation-current-final.log`,
+  `739151f2418985767c27b16107d3d615e1200a416763526d8861a073c4d85816`;
+  `/private/tmp/loopex-m7-admission-observation-floor-final.log`,
+  `0dfdd58e620cb403124581e1da12b71bb5c48a5405e030ace4ed729bb9e5492d`;
+  `/private/tmp/loopex-m7-admission-lifecycle-current.log`,
+  `4754542fa1b4e4287ee58ac57447f0a719fb2a77eb75906ca6563c26ff781752`;
+  `/private/tmp/loopex-m7-admission-lifecycle-floor.log`,
+  `682153a00d9e06c8c506607b042d6e2e7d28fcb339752741c1f5ee198e9ac319`.
+  The earlier full fast check on
+  `96cff19fdd7ae8b712513cbea5f252ceb149f925` was deliberately stopped when
+  review found the observation-boundary defects. Its preliminary gates passed;
+  its suite did not complete. This is interrupted evidence, not PASS:
+  `/private/tmp/loopex-m7-96cff19f-fast-check.log`, SHA-256
+  `04a8aea1cca567ea4b02f7b5e5d35ea2e5eb7fff9bfe45523eb9f49fb052af2e`.
+  Run the full fast check once on this corrected committed candidate.
 - Done: the full fast check passes once on unchanged integration candidate
   `35ec8929274d7f355ed63a157d80fe6b32917763`, across all eleven applications:
   3,077 tests passed with 34 existing exclusions, in 888 seconds. Complete
@@ -431,6 +458,18 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Development observations
 
+- 2026-10-01: observation-boundary verification initially used a 257-byte
+  ordinary command ID, exceeding the existing Store transaction-ID ceiling,
+  and omitted one use of its fixture binding. The corrected vector admits an
+  opaque 256-byte ID and separately observes an unknown 65,536-byte ID; resource
+  validation keeps its existing 256-byte UTF-8 bound. Retained failed output:
+  `/private/tmp/loopex-m7-admission-identities-current.log`, SHA-256
+  `109984b559d536c9f58ede35acc687e9e1008e6a2993996d3c814922bfde55c9`.
+  The first context-admission regression expected the earlier synchronous
+  post-unknown refusal. It now observes the accepted timer resolution, while
+  retaining every exact-byte, limit, no-dispatch and conflicting-binding proof:
+  `/private/tmp/loopex-m7-admission-observation-current-verified.log`, SHA-256
+  `2491862e1c8840cac2247bd2282ffb37f89dca1df158249f39a4872116e20e7f`.
 - 2026-10-01: admission verification first exposed three test setup defects:
   missing steer run ID, missing model script and a Store fault matching later
   abort settlement rather than just the original admission transaction. The
@@ -2514,7 +2553,7 @@ or check was relaxed.
 
 - [x] Implement bounded single-line framing and explicit chat-action parsing, with wait-line backpressure, exact JSON answers and malformed-input refusal on both toolchains; driver admission remains pending.
 - [x] Implement the bounded independently draining output writer and escaped transcript lines; prove progress eviction, control deadlines and joined worker cleanup on both toolchains. Closed records and driver integration remain pending.
-- [x] Expose attachment-based command observation with a closed result, replay-derived admitted/refused facts and committed run identity; prove missing/recreated identities remain pending and observation performs no owner Store callbacks.
+- [x] Expose attachment-based command observation with a closed result, replay-derived admitted/refused facts, stable structured-refusal codes and committed run identity; preserve opaque IDs and prove missing/recreated identities remain pending without owner Store callbacks.
 - [x] Retain the original unknown proposal and exact OwnerLane transaction, return uncertainty immediately, and resolve only through owner-owned 100-ms worker ticks under one fixed first-unknown backstop; prove before/after persistence, exact bytes, non-commit and joined owner/deadline cleanup.
 - [x] Defer internal worker results and owner timers in arrival order while admission is unresolved; prove model/executor evidence, real run deadline ordering, abort cleanup before deferred scheduling and actual backstop release into the existing mutation fence on both toolchains.
 

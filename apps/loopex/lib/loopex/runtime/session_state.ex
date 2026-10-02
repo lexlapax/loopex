@@ -374,6 +374,13 @@ defmodule Loopex.Runtime.SessionState do
       %{reply: {:error, code}, run_id: run_id} when is_atom(code) ->
         {:committed, :refused, code, run_id}
 
+      %{
+        reply:
+          {:error, {:command_admission_too_large, _dimension, _candidate, _observed, _limit}},
+        run_id: run_id
+      } ->
+        {:committed, :refused, :command_admission_too_large, run_id}
+
       _absent ->
         {:pending, nil, :commit_unknown, nil}
     end
