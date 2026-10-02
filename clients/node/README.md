@@ -22,11 +22,14 @@ imports anything outside Node's own standard library.
 | `question-answer-vectors.mjs` | Independently check literal answer vectors and UTF-8/identity byte boundaries |
 | `terminal-outcome.mjs` | Decode chat's closed terminal run objects with exact BigInt counts and opaque references |
 | `terminal-outcome-vectors.mjs` | Independently check terminal outcome vectors and reference boundaries |
+| `compact-result.mjs` | Decode standalone compaction results with exact usage, closed failures and opaque checkpoints |
+| `compact-result-vectors.mjs` | Independently check compaction result vectors, accounting and checkpoint boundaries |
 
 Run the M7 answer payload checks with the pinned Node interpreter:
 
 ```bash
 node clients/node/question-answer-vectors.mjs apps/loopex_protocol/priv/vectors/question-answer.v1.json
+node clients/node/compact-result-vectors.mjs apps/loopex_protocol/priv/vectors/standalone-compact-result.v1.json
 ```
 
 This checks payloads only. The foreground and daemon clients still require

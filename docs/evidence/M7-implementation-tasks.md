@@ -99,6 +99,44 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the standalone compaction-result payload now has a closed descriptive
+  schema, 119 literal vectors and an independent stdlib-only Node consumer.
+  They cover every accepted failure cause, ordinary/maintenance numeric scope,
+  system equality versus other strict thresholds, headroom/hard-limit relations,
+  reserved-token refusal below the declared limit, arbitrary exact usage and
+  total accounting, partial checkpoints, cleanup branches, missing/extra/private
+  fields, canonical decimal refusal and opaque identity bytes. Both consumers
+  prove 65,536-byte checkpoints and refuse one-byte overflow. The complete schema
+  and vector bytes are SHA-256-pinned in the owning suite. Node retains quantities
+  as BigInt; neither implementation invents a run result or proves completion.
+  Generation-1/2 schema identities remain unchanged. The new consumer is selected
+  by the existing node_client release lane without adding a runner or dependency.
+  Final protocol/payload/legacy conformance passed 45 cases on each supported
+  pair, including the independent Node cases, in 0.6 measured seconds each.
+  Complete outputs and SHA-256 digests:
+  - `/private/tmp/loopex-m7-compact-vectors-current-final-v2.log`,
+    `d198f3e1d20f14bb23ad6db86ebfa5846de370155b3b601f34ee54719aca8e19`.
+  - `/private/tmp/loopex-m7-compact-vectors-floor-final-v2.log`,
+    `46bb050874a8e0cdd13ce1ee9976bd39768dc738f5347a24bd1bfed5ff31d7dc`.
+  Formatting, warning-free compilation, documentation ordering, dependencies,
+  status and diff gates passed in 15.2 measured seconds. Complete output
+  `/private/tmp/loopex-m7-compact-vectors-gates-final.log`, SHA-256
+  `0d2877ae5ba8afc8775c96326615ede95dc8ce9c12f5b8fb8b03defbb36f4bd8`.
+  The preceding gate failed because the saved proposal's literal angle-bracket
+  type placeholders were exposed as raw HTML. Their bytes are now inside a
+  visible fenced text block; the validator and decision content are unchanged.
+  Failed output `/private/tmp/loopex-m7-compact-vectors-gates.log`, SHA-256
+  `54d26bdfbaa51dfd8c476ef6f14b07fb60023af4ea30f8f2a359b1a091020acd`.
+  One added T05 subtask closes. Original tally remains 49 done / 137 todo;
+  added tally is 149 done / 10 todo. The three new startup questions have been
+  sent and remain unanswered. Their dependent contracts are unimplemented.
+  The earlier three approvals remain recorded below and have been implemented.
+  Public chat startup, coordinated generation-3/4 protocol integration and live
+  compaction remain open. No check or agent remains live at this checkpoint.
+  The full fast check of 203cccee predates these independent consumer artifacts;
+  it is not claimed as a full run of this later checkpoint. The goal is active.
+
+
 - Integration checkpoint: the full current-pair fast check passed once on
   `203ccceed42cf1a9005028e7e26e4a385776da3f`. All eleven application suites
   and repository gates passed in 1,388 reported seconds, with unchanged
@@ -108,7 +146,7 @@ did not resolve them. No paid provider calls were made during this check.
   Its terminal shell result was collected before hashing. The clean verification
   checkout remains detached at that implementation SHA; this documentation child
   is not the tested SHA. No check or agent remains live. Original tally is
-  49 done / 137 todo; added tally is 148 done / 10 todo after recording this
+  49 done / 137 todo; added tally is 149 done / 10 todo after recording this
   integration proof and three new startup decisions. The goal remains active.
   Floor full-check, release matrix, live maintenance, public entry/config
   inspection, helper integration and other original M7 outcomes remain open.
@@ -122,6 +160,7 @@ did not resolve them. No paid provider calls were made during this check.
   contracts, the legacy-workspace amendment and settings admission remain
   unimplemented until an explicit new decision. Independent work may continue.
 
+  ```text
   ## Concept
 
   Three startup choices are needed to finish the reference chat command. They are
@@ -274,6 +313,7 @@ did not resolve them. No paid provider calls were made during this check.
     fixed queue/entry/writer/cleanup contract.
   - docs/adr/0049-explicit-host-configuration-technical.md: retained resume checks,
     effective values/origins, bounded startup report and legacy model selection.
+  ```
 
 - Done: ordered private-driver `/status` now acknowledges its input before
   reading public session status and runtime trace counters through the command
@@ -4951,6 +4991,9 @@ or check was relaxed.
 - [ ] Later retain the required attended multi-prompt proof.
 
 ### Added implementation subtasks
+
+- [x] Pin the accepted standalone compact-result schema and literal vectors, and implement an independent Node consumer; prove every closed failure branch, arbitrary exact usage, threshold/accounting relations, opaque checkpoint boundaries and unchanged legacy schema identities on both supported toolchains. Coordinated generation-3/4 contracts and live maintenance remain open.
+
 
 - [ ] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
 - [ ] Resolve and implement new-chat physical workspace binding and the explicit legacy-unbound resume decision; prove retained identity conflicts, physical replacement, unchanged historical bytes and actual settled/unresolved migration.
