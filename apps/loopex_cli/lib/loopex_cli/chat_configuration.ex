@@ -21,6 +21,8 @@ defmodule LoopexCli.ChatConfiguration do
   alias LoopexCli.{ConfigFile, ConfigOptions, ConfigSelection, SessionInstructions}
   alias LoopexComposition.DurableOptions
   alias Loopex.Runtime.SessionGenesis
+  alias Loopex.Runtime.SessionConfiguration
+  alias LoopexComposition.ProviderBindings
   alias LoopexProtocol.ToolDefinition
 
   @profiles %{
@@ -74,6 +76,67 @@ defmodule LoopexCli.ChatConfiguration do
       {:ok, _other_command} -> {:error, :invalid_chat_invocation}
       {:error, _} = error -> error
     end
+  end
+
+  @doc """
+  ## Concept
+
+  Prepare an explicit conversation configuration change against the host's
+  last confirmed settings, using its admitted routes and immutable tools.
+
+  ## Technical depth
+
+  Validate the closed authored update before catalog resolution. Resolve model
+  aliases into the same canonical identity used at creation, then delegate
+  budget derivation and version advancement to Core's shared update validator.
+  The returned changes and candidate remain separate admission inputs. This
+  preparation reads no instruction file or credential and dispatches no work.
+  The caller retains the candidate only after confirmed admission; Core checks
+  it against committed settings and history before accepting it.
+  """
+  @spec update(term(), term()) :: {:ok, map(), map()} | {:error, term()}
+  def update(
+        %{
+          selection: %{configuration: current, profile: %{"providers" => bindings}},
+          genesis: %{"tool_selection" => %{"definitions" => definitions}}
+        },
+        changes
+      ) do
+    with :ok <- SessionConfiguration.validate_update(changes),
+         :ok <- SessionConfiguration.validate(current, definitions),
+         declaration <-
+           current
+           |> Map.take(~w(model reasoning configuration_version instructions max_tokens))
+           |> explicit_ceiling(current, "context_token_budget")
+           |> explicit_ceiling(current, "system_class_tokens")
+           |> Map.merge(changes),
+         {:ok, resolved} <-
+           ProviderBindings.resolve_configuration(declaration, bindings, definitions),
+         changes <- canonical_model(changes, resolved),
+         {:ok, candidate} <-
+           SessionConfiguration.update(
+             current,
+             changes,
+             resolved["model_capabilities"],
+             resolved["provider_mapping"],
+             definitions
+           ) do
+      {:ok, changes, candidate}
+    end
+  end
+
+  def update(_, _), do: {:error, :invalid_session_configuration}
+
+  defp explicit_ceiling(declaration, current, key) do
+    if current["budget_origins"][key] == "explicit",
+      do: Map.put(declaration, key, current[key]),
+      else: declaration
+  end
+
+  defp canonical_model(changes, resolved) do
+    if Map.has_key?(changes, "model"),
+      do: Map.put(changes, "model", resolved["model"]),
+      else: changes
   end
 
   defp required_paths(profile) do

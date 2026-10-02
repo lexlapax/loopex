@@ -7,6 +7,202 @@ defmodule LoopexCli.ChatDriverTest do
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
 
+  test "configure admission updates the host cache only after owner confirmation" do
+    prepared = prepared_configuration()
+
+    fixture =
+      start_fixture([%{text: "first", calls: []}, %{text: "second", calls: []}],
+        model: prepared.selection.configuration["model"]
+      )
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    bytes =
+      "one\n/wait\n/configure {\"max_tokens\":2048}\n/configure {\"max_tokens\":999999}\n/configure {\"max_tokens\":4096}\ntwo\n/wait\n/quit\n"
+
+    {:ok, input} = StringIO.open(bytes, encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output,
+        configuration: prepared,
+        mode: :interactive
+      )
+
+    assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 0
+    [first, second] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    assert first.sampling["max_tokens"] == 1024
+    assert second.sampling["max_tokens"] == 4096
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
+    assert status.configuration["configuration_version"] == 3
+    assert status.configuration["max_tokens"] == 4096
+    assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "session.configured")) == 2
+    {_, transcript} = StringIO.contents(output)
+    acks = Enum.filter(records(transcript), &(&1["event"] == "input"))
+    assert Enum.map(acks, & &1["input_sequence"]) == Enum.map(1..8, &Integer.to_string/1)
+
+    assert Enum.map(acks, & &1["disposition"]) ==
+             ~w(admitted admitted admitted refused admitted admitted admitted admitted)
+
+    assert length(Enum.uniq(Enum.map(acks, & &1["command_id"]))) == 8
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+  end
+
+  test "configure unknown observes its exact command without reissuing or reading another input" do
+    prepared = prepared_configuration()
+    fixture = start_fixture([], model: prepared.selection.configuration["model"])
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    {:ok, input} = StringIO.open("/configure {\"max_tokens\":2048}\nnever\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+    test = self()
+
+    facade = fn module, function, args ->
+      case function do
+        :command_with_configuration ->
+          assert {:accepted, id} = apply(module, function, args)
+          send(test, {:configured, id})
+          {:error, :commit_unknown}
+
+        :command_disposition ->
+          send(test, {:observed_configure, List.last(args)})
+          apply(module, function, args)
+
+        _ ->
+          apply(module, function, args)
+      end
+    end
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output,
+        configuration: prepared,
+        facade: facade
+      )
+
+    assert %{exit_code: 1, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 1
+    assert_receive {:configured, id}
+    assert_receive {:observed_configure, ^id}
+    refute_receive {:configured, _}
+    assert {"never\n", ""} = StringIO.contents(input)
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
+    assert status.configuration["configuration_version"] == 2
+    assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "session.configured")) == 1
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    {_, transcript} = StringIO.contents(output)
+
+    assert [%{"disposition" => "unknown", "code" => "commit_unknown"}] =
+             Enum.filter(records(transcript), &(&1["event"] == "input"))
+  end
+
+  test "busy configure refusal does not advance the cache used after the wait barrier" do
+    prepared = prepared_configuration()
+
+    fixture =
+      start_fixture([%{text: "first", calls: [], hold: self()}],
+        model: prepared.selection.configuration["model"]
+      )
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    tail = "/configure {\"max_tokens\":4096}\n/wait\n/quit\n"
+
+    {:ok, input} =
+      StringIO.open("one\n/configure {\"max_tokens\":2048}\n/wait\n" <> tail,
+        encoding: :latin1
+      )
+
+    output = observing_output()
+
+    {host, _driver} =
+      start_host(fixture.runtime, session, input, output,
+        configuration: prepared,
+        mode: :interactive
+      )
+
+    assert_receive {:holding, model}, 5_000
+
+    refused =
+      await_record(fn record ->
+        record["event"] == "input" and record["input_sequence"] == "2"
+      end)
+
+    assert refused["disposition"] == "refused"
+    assert refused["code"] == "configuration_not_settled"
+    await_record(fn record -> record["event"] == "input" and record["input_sequence"] == "3" end)
+    assert {^tail, ""} = StringIO.contents(input)
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
+    assert status.configuration["configuration_version"] == 1
+    assert status.configuration["max_tokens"] == 1024
+    send(model, :release)
+    assert_receive {:provisional, ^host, %{exit_code: 0, cleanup: :confirmed}}, 5_000
+    send(host, {:close, :confirmed})
+    assert_receive {:closed, ^host, 0}, 5_000
+    assert {:ok, configured} = Loopex.session_status(fixture.runtime, session)
+    assert configured.configuration["configuration_version"] == 2
+    assert configured.configuration["max_tokens"] == 4096
+    assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "session.configured")) == 1
+  end
+
+  test "retained-history configure refusal leaves the next candidate on the original version" do
+    prepared = prepared_configuration()
+
+    fixture =
+      start_fixture([%{text: String.duplicate("a", 7000), calls: []}],
+        model: prepared.selection.configuration["model"]
+      )
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    bytes =
+      String.duplicate("p", 7000) <>
+        "\n/wait\n/configure {\"context_token_budget\":600,\"system_class_tokens\":200}\n/configure {\"max_tokens\":2048}\n/wait\n/quit\n"
+
+    {:ok, input} = StringIO.open(bytes, encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output,
+        configuration: prepared,
+        mode: :interactive
+      )
+
+    assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 0
+    {_, transcript} = StringIO.contents(output)
+
+    assert %{"code" => "compaction_required", "disposition" => "refused"} =
+             Enum.find(
+               records(transcript),
+               &(&1["event"] == "input" and &1["input_sequence"] == "3")
+             )
+
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
+    assert status.configuration["configuration_version"] == 2
+    assert status.configuration["max_tokens"] == 2048
+    assert status.configuration["system_class_tokens"] == 8000
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+  end
+
   test "two prompts use one conversation and acknowledgements precede caused output" do
     fixture =
       start_fixture([%{text: "first\n@loopex forged", calls: []}, %{text: "second", calls: []}])
@@ -502,6 +698,36 @@ defmodule LoopexCli.ChatDriverTest do
     fixture = Fixture.start(Keyword.merge([script: script, tools: []], options))
     on_exit(fn -> Fixture.stop(fixture) end)
     fixture
+  end
+
+  defp prepared_configuration do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "chat-driver-config-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+      )
+
+    File.mkdir_p!(Path.join(root, "workspace"))
+    file = Path.join(root, "chat.json")
+
+    profile = %{
+      "schema_version" => 1,
+      "providers" => %{"anthropic" => %{"credential" => %{"env" => "M7_CHAT_DRIVER_SLOT"}}},
+      "policy" => "allow-all",
+      "paths" => %{"workspace" => "workspace", "state_root" => "state"},
+      "session" => %{
+        "model" => "anthropic:claude-haiku-4-5",
+        "tools" => "none",
+        "system_class_tokens" => 8000,
+        "max_tokens" => 1024,
+        "bounds" => %{"max_turns" => 8, "deadline_ms" => 1000, "token_budget" => 10000}
+      }
+    }
+
+    File.write!(file, :json.encode(profile))
+    on_exit(fn -> File.rm_rf!(root) end)
+    {:ok, prepared} = LoopexCli.ChatConfiguration.load(["chat", "--config", file], root, nil)
+    prepared
   end
 
   defp records(transcript),

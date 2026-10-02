@@ -86,7 +86,7 @@ defmodule Loopex.AgentLoopFixture do
         diagnostics_to: Keyword.get(options, :diagnostics_to),
         model: %{
           module: Loopex.AgentLoopTestModel,
-          model: "scripted:v1",
+          model: Keyword.get(options, :model, "scripted:v1"),
           options: [script: model_pid, max_tokens: Keyword.get(options, :max_tokens, 256)]
         },
         executor: %{

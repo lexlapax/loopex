@@ -91,6 +91,42 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: one added T08 subtask joins host configure preparation to the private
+  chat driver's command holder through the approved public facade. Closed
+  updates resolve only admitted provider routes and the immutable definitions;
+  canonical model aliases, explicit ceilings and derived budgets share the
+  existing creation/update validators. The holder advances its cache only on
+  the exact accepted command identity. Invalid preparation, busy-owner and
+  retained-history refusals leave it unchanged. Unknown admission observes its
+  exact identity, issues no second configure and leaves the next input unread.
+  Two real model requests prove the before/after reply allowance; the busy and
+  history cases prove a later valid update still advances exactly one version.
+  Sixty-three affected chat cases pass with warnings as errors on both pairs:
+  current 19.1 seconds, floor 18.9 seconds. Complete outputs:
+  `/private/tmp/loopex-m7-chat-configure-current-v3.log`, SHA-256
+  `78753de458f4cfcbf40e0019774d045204dee16ff0b2cde73b240f7a77d90a88`;
+  `/private/tmp/loopex-m7-chat-configure-floor-v3.log`, SHA-256
+  `f97d9b905597d9c4a58a42add3e01a1877933cdded58b62c93ecb5e880a87d28`.
+  Initial draft tests refused exact creation because the scripted runtime named
+  `scripted:v1` while genesis selected the canonical Anthropic model. The fixture
+  now accepts an explicit model and retains its original default; production
+  exact-selection validation is unchanged. Failed outputs remain retained:
+  current v1 SHA-256 `5a1c4cc0568177e277b347eb6f81b2b2898ff9b5f81cf0a97f5244892ed91908`;
+  floor v1 SHA-256 `3d947b30c26bee0202e6c66a4b2883c6a3bda252611be4a00ff4499b2e0d21bb`,
+  both under `/private/tmp/loopex-m7-chat-configure-<pair>-v1.log`.
+  The existing configured-session suite also passes 37 cases with warnings as
+  errors after the fixture change: current 6.7 seconds, floor 6.5 seconds.
+  Complete outputs `/private/tmp/loopex-m7-chat-configure-core-current.log`,
+  SHA-256 `3ca322515f601eebee4ba2823922349eddc805db66e27166beb7d2966b67abb2`,
+  and `/private/tmp/loopex-m7-chat-configure-core-floor.log`, SHA-256
+  `1736330c0130ca6659f21eeea049c15e9f96a42c3cefd33c77ddd550645a8b95`.
+  Compilation, formatting, documentation, dependency direction and status gates
+  pass; complete output `/private/tmp/loopex-m7-chat-configure-gates.log`, SHA-256
+  `97bc95dd43792fb6f4e76d10989b2af0bdc24822e79857b5f046c87860bf3327`.
+  Original checklist remains 42 done / 144 remaining; added subtasks are
+  132 done / 10 remaining. The public chat command, prepared recovery,
+  daemon configure, checkpoints and maintenance quiescence remain open.
+
 - Done: the private chat driver captures already validated invocation run bounds
   once and adds them only to fresh prompts. Queued follow-ups use Core's inherited
   ordinary limits; steer and answers receive no bound override. A real owner
@@ -126,13 +162,14 @@ did not resolve them. No paid provider calls were made during this check.
   daemon routing and maintenance/checkpoint joins remain open. The earlier
   event-identity and early-spill choices remain pending separately.
 
-- Running: full fast check of exact
-  `462c3ccad69ff245303d53e9af9dd6cd7beba29a` in the isolated check checkout,
-  output `/private/tmp/loopex-m7-462c3cca-fast-check.log`. The log is still
-  being written, so its final result and digest are pending. Do not rerun or
-  switch that checkout until the check finishes. This source includes the
-  driver and IO-owner fixture correction, but predates the invocation-bound
-  extension above.
+- Integration check: exact `462c3ccad69ff245303d53e9af9dd6cd7beba29a`
+  passed the full current-pair fast check in 907 seconds. All eleven application
+  suites and preliminary gates passed. Complete output:
+  `/private/tmp/loopex-m7-462c3cca-fast-check.log`, SHA-256
+  `2b2fd9514cdc5c68a341d535d6e51a7fa1db8dc2e6879c2adf7fc64e88e40380`.
+  This includes the driver and IO-owner fixture correction, but predates the
+  invocation-bound extension and public configure method. No floor closure
+  matrix or release check has run.
 
 - Integration check: exact `5a21442a9a984b2338d33e3610f5bc68ab93c2dd`
   passed the full current-pair fast check in 907 seconds. All eleven application
@@ -3994,6 +4031,7 @@ or check was relaxed.
 - [x] Gate ordinary configured provider intent on terminal-history capability and retain the unavailable v2 preparation-failure pair without fabricated observations.
 - [x] Join prepared ordinary candidates to settled owner admission, exact retained-history preflight, atomic commit and replay.
 - [x] Prove configuration restart, commit-unknown re-presentation and owner crashes before/after linearization through the live runtime.
+- [x] Join host configure resolution to the ordered chat driver through the public prepared facade; retain only confirmed candidates and prove busy/history refusal, exact unknown observation, canonical aliases and changed live model allowances on both toolchains.
 - [ ] Join host resolution and prepared daemon routing; extend configuration preflight to committed checkpoints and maintenance quiescence.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [x] Register all nine literal reasoning cells after deterministic native request/response, bound, disclosure and terminal-history conformance; share exact mappings with transport validation.

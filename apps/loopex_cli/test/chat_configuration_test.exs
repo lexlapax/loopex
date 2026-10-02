@@ -216,6 +216,63 @@ defmodule LoopexCli.ChatConfigurationTest do
              )
   end
 
+  test "configure preparation uses confirmed settings, canonical aliases and derived budgets",
+       fixture do
+    assert {:ok, prepared} = load(fixture)
+    initial = prepared.selection.configuration
+
+    assert {:ok, changes, candidate} =
+             ChatConfiguration.update(prepared, %{
+               "model" => "anthropic:claude-haiku-4-5",
+               "max_tokens" => 4096
+             })
+
+    assert changes == %{
+             "model" => "anthropic:claude-haiku-4-5-20251001",
+             "max_tokens" => 4096
+           }
+
+    assert candidate["configuration_version"] == 2
+    assert candidate["context_token_budget"] == 200_000 - 4096
+    assert candidate["budget_origins"]["context_token_budget"] == "model_window"
+    assert candidate["system_class_tokens"] == initial["system_class_tokens"]
+    assert candidate["instructions"] == initial["instructions"]
+    assert prepared.selection.configuration == initial
+    refute File.exists?(Path.join(fixture.root, "state"))
+
+    prepared = put_in(prepared, [:selection, :configuration], candidate)
+
+    assert {:ok, _, next} =
+             ChatConfiguration.update(prepared, %{"context_token_budget" => 16_000})
+
+    assert next["configuration_version"] == 3
+    assert next["context_token_budget"] == 16_000
+    assert next["budget_origins"]["context_token_budget"] == "explicit"
+  end
+
+  test "configure preparation refuses host metadata, missing routes and unsupported reasoning",
+       fixture do
+    assert {:ok, prepared} = load(fixture)
+
+    for changes <- [%{}, [], %{"model_capabilities" => %{}}, %{"maintenance_model" => "x"}] do
+      assert {:error, :invalid_configuration_update} = ChatConfiguration.update(prepared, changes)
+    end
+
+    assert {:error, :provider_route_unavailable} =
+             ChatConfiguration.update(prepared, %{"model" => "openai:gpt-4o"})
+
+    assert {:error, :invalid_model_mapping} =
+             ChatConfiguration.update(prepared, %{
+               "model" => "anthropic:claude-fable-5-1",
+               "reasoning" => "none"
+             })
+
+    assert {:error, :invalid_session_configuration} =
+             ChatConfiguration.update(nil, %{"max_tokens" => 2048})
+
+    refute File.exists?(Path.join(fixture.root, "state"))
+  end
+
   test "the complete selected tool schema contributes to the admitted system ceiling", fixture do
     assert {:ok, _} = load(fixture, ["--tools", "none", "--system-class-tokens", "200"])
     assert {:error, _} = load(fixture, ["--tools", "coding", "--system-class-tokens", "200"])

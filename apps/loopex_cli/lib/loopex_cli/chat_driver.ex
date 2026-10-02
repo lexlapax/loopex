@@ -49,7 +49,10 @@ defmodule LoopexCli.ChatDriver do
   ## Technical depth
 
   Devices are existing Latin-1 byte devices. Options select pipe or interactive refusal handling, already validated
-  invocation run bounds and the private facade test seam. Only fresh prompts
+  invocation run bounds, an optional prepared new-session configuration and
+  the private facade test seam. The command holder resolves configure changes
+  against its last confirmed candidate; refusal never updates that cache.
+  Only fresh prompts
   receive those bounds; follow-ups inherit their active run through Core. The creating caller is monitored even on a normal exit.
   """
   def start_link(runtime, session_id, input, output, options \\ []),
@@ -106,6 +109,7 @@ defmodule LoopexCli.ChatDriver do
       input: input,
       mode: Keyword.get(options, :mode, :pipe),
       default_bounds: Keyword.get(options, :bounds),
+      configuration: Keyword.get(options, :configuration),
       writer: writer,
       facade: facade,
       workers: %{},
@@ -344,6 +348,11 @@ defmodule LoopexCli.ChatDriver do
 
   defp command_loop(parent, ref, attachment, state) do
     receive do
+      {^parent, ^ref, :configure, command} ->
+        {result, prepared} = configure(attachment, command, state)
+        send(parent, {self(), ref, :reply, result})
+        command_loop(parent, ref, attachment, %{state | configuration: prepared})
+
       {^parent, ^ref, :command, command} ->
         send(
           parent,
@@ -368,6 +377,27 @@ defmodule LoopexCli.ChatDriver do
         )
 
         command_loop(parent, ref, attachment, state)
+    end
+  end
+
+  defp configure(attachment, command, state) do
+    with {:ok, changes, candidate} <-
+           LoopexCli.ChatConfiguration.update(state.configuration, command.changes) do
+      result =
+        state.facade.(Loopex, :command_with_configuration, [
+          attachment,
+          %{command | changes: changes},
+          candidate
+        ])
+
+      prepared =
+        if result == {:accepted, command.command_id},
+          do: put_in(state.configuration, [:selection, :configuration], candidate),
+          else: state.configuration
+
+      {result, prepared}
+    else
+      {:error, _} = result -> {result, state.configuration}
     end
   end
 
@@ -427,6 +457,15 @@ defmodule LoopexCli.ChatDriver do
 
       :abort ->
         admit(state, %{type: :abort, command_id: id})
+
+      {:configure, changes} ->
+        send_worker(
+          state,
+          :command,
+          {:configure, %{type: :configure, command_id: id, changes: changes}}
+        )
+
+        %{state | pending: {:admission, id}}
 
       {type, content} when type in [:prompt, :steer, :follow_up] ->
         command = %{type: type, content: content, command_id: id}
