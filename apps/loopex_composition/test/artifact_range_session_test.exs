@@ -215,6 +215,103 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     end
   end
 
+  test "a prepared legacy inline result becomes readable after empty-registry restart" do
+    fixture = fixture("1.1.0", true, "loopex.bash")
+    full = String.duplicate("quoted \"line\" 猫\n", 200)
+    assert byte_size(full) > 2_048 and byte_size(full) < 16_384
+    File.write!(Path.join(fixture.workspace, "source.txt"), full)
+
+    assert {:ok, attachment} =
+             Loopex.attach(fixture.runtime, fixture.session, after_event_sequence: 0)
+
+    events =
+      run(attachment, "inline", %{
+        "tool" => "bash",
+        "arguments" => %{"argv" => ["/bin/cat", "source.txt"]}
+      })
+
+    assert List.last(events)["outcome"] == "completed", inspect(events, limit: :infinity)
+    assert Enum.find(events, &(&1.kind == "tool.finished"))["artifacts"] == []
+    assert {:ok, records} = Store.load_records(fixture.store, fixture.session, 0, 1_000)
+    [receipt] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
+    [prepared] = Enum.filter(records, &(&1.payload.kind == "tool_result_reference_prepared"))
+    [reservation] = Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
+    [intent] = Enum.filter(records, &(&1.payload.kind == "effect_intent_committed_v2"))
+    assert receipt.payload["receipt"]["output"] == full
+    assert receipt.payload["receipt"]["artifacts"] == []
+    assert intent.payload["job"]["artifact_policy"] == %{"retain" => true}
+    assert reservation.payload["source_count"] == 1
+    assert prepared.payload["source"]["source_digest"] == Canonical.digest_bytes(full)
+    assert prepared.payload["source"]["source_byte_count"] == byte_size(full)
+    reference = prepared.payload["reference"]
+    assert reference["size"] == byte_size(full)
+    assert receipt.journal_version < reservation.journal_version
+    assert reservation.journal_version < prepared.journal_version
+    requests = Agent.get(fixture.observer, & &1)
+    assert length(requests) == 2
+    message = Enum.find(List.last(requests).messages, &(&1["role"] == "tool"))
+    assert {:ok, encoded} = Frame.encode(message)
+    assert IO.iodata_length(encoded) - 1 <= 2_048
+    assert {:ok, notice} = Frame.decode(message["content"], 2_048)
+    assert notice["use_locator"] == reference["use_locator"]
+    assert notice["excerpt_source"] == "receipt_content"
+
+    {runtime, store, attachment} =
+      restart(
+        fixture.runtime,
+        fixture.path,
+        fixture.executor_options,
+        fixture.observer,
+        fixture.session,
+        fixture.workspace
+      )
+
+    assert File.read!(Path.join(fixture.workspace, "source.txt")) == "changed workspace"
+
+    range_events =
+      run(attachment, "prepared-range", %{
+        "artifact_use" => reference["use_locator"],
+        "offset" => 0,
+        "length" => 4_096
+      })
+
+    assert List.last(range_events)["outcome"] == "completed",
+           inspect(range_events, limit: :infinity)
+
+    assert Enum.find(range_events, &(&1.kind == "tool.finished"))["artifacts"] == []
+    after_read = Agent.get(fixture.observer, &List.last(&1))
+    result = Enum.find(Enum.reverse(after_read.messages), &(&1["role"] == "tool"))
+    assert {:ok, range} = Frame.decode(result["content"], 8_192)
+    assert range["excerpt_source"] == "artifact_object"
+    assert range["artifact"] == reference
+    assert range["byte_count"] > 0 and range["byte_count"] <= 4_096
+    assert range["content"] == binary_part(full, 0, range["byte_count"])
+    assert range["next_offset"] == range["byte_count"]
+    assert {:ok, retained} = Store.load_records(store, fixture.session, 0, 1_000)
+    assert receipt in retained and prepared in retained and intent in retained
+    assert Enum.count(retained, &(&1.payload.kind == "tool_result_reference_prepared")) == 1
+    [_, read] = Enum.filter(retained, &(&1.payload.kind == "effect_intent_committed_v2"))
+
+    assert read.payload["job"]["validated_arguments"]["resolved_artifact"]["source"] == %{
+             "record_kind" => "tool_result_reference_prepared",
+             "record_digest" => Canonical.digest(prepared.payload),
+             "journal_version" => prepared.journal_version,
+             "run_id" => receipt.payload["receipt"]["run_id"],
+             "operation_id" => receipt.payload["receipt"]["operation_id"],
+             "attempt" => receipt.payload["receipt"]["attempt"],
+             "tool_call_id" => receipt.payload["receipt"]["tool_call_id"]
+           }
+
+    assert {:ok, public} = Store.load_events(store, fixture.session, 0, 1_000)
+    assert {:ok, recovered} = SessionState.recover(fixture.session, retained, public)
+
+    assert recovered.artifact_sources[reference["use_locator"]]["source"]["record_kind"] ==
+             "tool_result_reference_prepared"
+
+    assert :sys.get_state(fixture.transfers).jobs == %{}
+    assert :ok = Loopex.stop(runtime)
+  end
+
   defp fixture(version, captured \\ true, search \\ nil) do
     root =
       Path.join(System.tmp_dir!(), "loopex-range-session-#{System.unique_integer([:positive])}")
@@ -256,11 +353,12 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
           definition,
           Enum.find(
             CodingTools.generations(),
-            &(&1["tool_id"] == search and &1["tool_version"] == "1.1.0")
+            &(&1["tool_id"] == search and
+                &1["tool_version"] == if(search == "loopex.bash", do: "1.0.0", else: "1.1.0"))
           )
         ]
 
-    runtime = runtime(store, executor, observer, definitions)
+    runtime = runtime(store, executor, observer, definitions, artifacts)
 
     created =
       if captured do
@@ -414,20 +512,24 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     File.write!(Path.join(workspace, "source.txt"), "changed workspace")
     store = start_supervised!({Store, path: path})
     executor = start_supervised!({Executor, executor_options})
-    restarted = runtime(store, executor, observer, [])
+
+    restarted =
+      runtime(store, executor, observer, [], Keyword.fetch!(executor_options, :artifacts))
+
     assert {:ok, ^session} = Loopex.resume_session(restarted, session, command_id: "resume")
     assert {:ok, attachment} = Loopex.attach(restarted, session, after_event_sequence: 0)
     drain(attachment)
     {restarted, store, attachment}
   end
 
-  defp runtime(store_pid, executor, observer, definitions) do
+  defp runtime(store_pid, executor, observer, definitions, artifacts) do
     {:ok, store} = Loopex.Store.new(Store, store_pid)
 
     {:ok, runtime} =
       Loopex.start_link(
         runtime_id: "range-session",
         store: store,
+        artifact_store: artifacts,
         context_token_budget: 8_192,
         model: %{
           module: Model,

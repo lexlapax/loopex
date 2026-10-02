@@ -99,6 +99,88 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T02's remaining integration proof now reads a Core-prepared legacy
+  inline result through the real local executor, journal and public artifact
+  store after an empty-registry restart. The original bash 1.0 job has its exact
+  retain-only policy and immutable full inline receipt with no artifacts. Core
+  charges one source before put and commits one prepared reference before its
+  next bounded excerpt. A later read uses the original object after workspace
+  content changes and binds the exact prepared row's journal version/digest and
+  original run/operation/attempt/call provenance. It creates no recursive artifact.
+  Both toolchains pass 18 composition cases: 4.4 seconds current, 3.9 floor.
+  The first attempt truthfully failed preparation because the fixture configured
+  only the executor's store, not Core's public transfer store. The fixture now
+  composes that explicit accepted boundary at initial startup and restart; no
+  production fallback or new store is introduced.
+
+  One new long_bound case proves the real 60,000-ms preparation cutoff on each
+  supported pair, each finishing in 61.2 seconds. Its fixture blocks indefinitely
+  rather than expiring the ordinary five-second fixture gate. The retained
+  cutoff is exactly started_at_ms + 60,000 with origin preparation; the same
+  source count and cursor survive terminal replay. The exact worker is killed
+  and joined before the failed context_preparation_failed /
+  artifact_preparation_deadline terminal; no object, prepared-reference row or
+  further model dispatch appears. Existing test bounds remain unchanged. This
+  case is excluded from the fast suite and belongs to the existing Core
+  long_bound release lane; its focused run executes one case, with 17 ordinary
+  cases excluded. First current/floor drafts wrongly expected the origin label
+  episode and failed immediately; the assertion now pins the existing preparation
+  label. These failed drafts are not sixty-second evidence.
+
+  Ordinary preparation, admission and lineage tests pass 37 cases on each pair
+  in 3.1 seconds, excluding the new long-bound case. Existing T02 evidence above
+  also proves exact frozen capabilities, owner-before-policy membership/refusal,
+  shared excerpt allocation, bounded job-owned transfers, legacy inline behavior,
+  Unicode/escaping, forged/cross-session/digest failures, source/work/capacity
+  exhaustion, cancellation and uncertain commit/recovery. With the early-spill
+  proof and literal generations already committed, all nine original T02 items
+  and the last combined added T02 subtask are complete. This closes checklist
+  implementation work, not an M7 outcome, closure or release decision.
+
+  The repeated-ID tracking row under T16 is also complete. A new regression
+  holds an intent and receipt before linearization, injects committed-unknown
+  results, observes each exact transaction re-presentation before downstream
+  work and proves two actual effects reusing one raw call ID dispatch exactly
+  once each with distinct jobs/operations/public IDs. All six identity tests pass in 0.6 seconds current and 0.9 seconds floor. Together with the earlier historical
+  literal-ID vectors, question cancellation, recovery/fault suites and the
+  full candidate check on 35519cc9, this closes the duplicate T16 tracking row.
+
+  /private/tmp/loopex-m7-prepared-range-current-v2.log, SHA-256
+  `166762a40525531bb366e49bcf5d0a0ba4fadcf88ce61063573198841bd6e723`.
+  /private/tmp/loopex-m7-prepared-range-floor-v1.log, SHA-256
+  `17ac2abdc44a4d8272e30005029bd9dbf19db95f30695ffbde5beed4ebb83b87`.
+  /private/tmp/loopex-m7-preparation-episode-cutoff-current-v2.log, SHA-256
+  `9714c594654db58661dd2f8d3323f938622f7332266a0c4e1b2a10cd8ae1e714`.
+  /private/tmp/loopex-m7-preparation-episode-cutoff-floor-v2.log, SHA-256
+  `36136e639e32b7b1fcfd20dd4354480d29876df6ee656b7a59ec6c2177da1295`.
+  /private/tmp/loopex-m7-prepared-range-core-current-v1.log, SHA-256
+  `01d25dddcc622da906878bfcbabbf00c075524f6a4e85f2c52b83ba322e2021d`.
+  /private/tmp/loopex-m7-prepared-range-core-floor-v1.log, SHA-256
+  `ac635773e3c8f123601ec2604cafda60cc6049c5182d87231962eba9b76edcdc`.
+  /private/tmp/loopex-m7-tool-identities-unknown-current-v1.log, SHA-256
+  `1f07a5dd09eee8726fe71421bed4543ff80d2cdab18083c3fe277a06ca1e659e`.
+  /private/tmp/loopex-m7-tool-identities-unknown-floor-v1.log, SHA-256
+  `b12e750170b684c6d37dac45e0dff181c445dd2ba80cddfc6a994144311ceeb7`.
+  /private/tmp/loopex-m7-prepared-range-gates-v1.log, SHA-256
+  `3ac0ecf371fb4c92cf1aad148de23f3a573f266c1fa3bbcb9d9f8de31b1ff371`.
+
+  Retained failed fixtures:
+  /private/tmp/loopex-m7-prepared-range-current-v1.log, SHA-256
+  `d524c2354da60df388f780c61bd74130bac07f2320437d6868038189fe871827`.
+  /private/tmp/loopex-m7-preparation-episode-cutoff-current-v1.log, SHA-256
+  `ac4449fd3ecae4440034b6bb346ce58038b45c5df9030348ab108bc7e8e74f48`.
+  /private/tmp/loopex-m7-preparation-episode-cutoff-floor-v1.log, SHA-256
+  `8126576856261a6e476df159bf2339738ed9764bf0abd62dfd43402b25cc604d`.
+
+  Original tally: 49 done / 137 todo. Added tally: 138 done / 7 todo.
+  T01, T02 and T09 are the fully completed original top-level tasks. The full
+  current check on the preceding source candidate
+  410911990c021dcd6fcfde33a635c158834bacde is running separately, output
+  /private/tmp/loopex-m7-41091199-fast-check.log. Do not restart that run or claim
+  it includes the new test-only child. Public chat/resume entrypoint integration,
+  live compaction and wire contracts remain unfinished. No maintainer decision
+  is pending. No paid provider call or publication was made.
+
 - Done: the approved T02 early-spill context is implemented inside the existing
   digest/grant-bound JobRequest artifact policy. The closed revision-1 context
   captures the exact read binding or explicit nil and the Conversation
@@ -3721,14 +3803,14 @@ second-prompt witness and milestone closure checks remain open.
 
 ### Original checklist
 
-- [ ] Prepare bounded excerpts while retaining complete original results.
+- [x] Prepare bounded excerpts while retaining complete original results.
 - [x] Implement capability checks from the exact frozen tool definitions and literal capability table.
-- [ ] Keep replay independent of current host-registry availability.
-- [ ] Validate artifact ownership and arguments in the session owner before policy admission; add resolved executor data after approval.
+- [x] Keep replay independent of current host-registry availability.
+- [x] Validate artifact ownership and arguments in the session owner before policy admission; add resolved executor data after approval.
 - [x] Implement 4-KiB range reads, encoded-result limits, offsets, progress and EOF.
-- [ ] Add bounded preparation, aggregate excerpt allocation and job-owned transfer accounting.
+- [x] Add bounded preparation, aggregate excerpt allocation and job-owned transfer accounting.
 - [x] Preserve legacy inline behavior where the complete request fits.
-- [ ] Test escaping, Unicode, forged references, cross-session access, digest mismatch, exhaustion, cancellation and recovery.
+- [x] Test escaping, Unicode, forged references, cross-session access, digest mismatch, exhaustion, cancellation and recovery.
 - [x] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
 
 ### Added implementation subtasks
@@ -3754,7 +3836,7 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Wire the reference host's captured M7 tool selection to read 1.1.0 and provide its job transfer owner even when the public attachment transfer family is disabled.
 - [x] Implement pure receipt-content excerpt formatting with the complete 2,048-byte message cap, maximal UTF-8 prefixes, fixed binary descriptions, source digest/ranges and named metadata refusal; verify both supported toolchains.
 - [x] Join excerpt formatting to ordinary staging and independently validated replay with retained projection provenance, unchanged historical requests and frozen native prefixes; allocate the shared raw-prefix allowance against both required header variants.
-- [ ] Complete bounded reference-preparation episodes and prepared-reference membership, then make above-cap inline sources eligible; join the accepted earlier spill rule and pin the remaining new tool generations.
+- [x] Complete bounded reference-preparation episodes and prepared-reference membership, then make above-cap inline sources eligible; join the accepted earlier spill rule and pin the remaining new tool generations.
 - [x] Resolve the early-spill projection context contract, bind it to exact jobs, pin remaining read/search generations and prove full capture/spill/replay behavior without altering legacy jobs.
 
 ### Verification evidence
@@ -4609,7 +4691,7 @@ or check was relaxed.
 - [x] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
 - [x] Repair the provider-child supervisor-loss fixture's monitor/fault ordering; preserve exact killed termination and original assertion bounds, retaining the failed committed integration output and both-toolchain proof.
 - [ ] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
-- [ ] Resolve the repeated provider-call public-event identity decision; implement the accepted compatibility path and prove old replay, repeated calls, cancellation, reconciliation and mutation uncertainty without rewriting retained events.
+- [x] Resolve the repeated provider-call public-event identity decision; implement the accepted compatibility path and prove old replay, repeated calls, cancellation, reconciliation and mutation uncertainty without rewriting retained events.
 - [x] Adapt the composition authority inventory to the approved contextual question adapter; retain the failed no-callback assertion and verify absent/nil host refusal plus denied bare/contextual decisions for every shipped tool generation on both toolchains.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.
@@ -4663,8 +4745,8 @@ before a provider demonstration.
 | Boundary | Authority | Retained/new generation | Implementation owners | Status |
 | --- | --- | --- | --- | --- |
 | Conversation and result joins | ADR 0041 | Run/turn/call identity; admitted lineage order; revision-1 normalized IDs | Conversation; SessionState; SessionCoordinator | Implemented; broader boundary vectors remain |
-| Tool-output preparation | ADR 0041 | Immutable receipt plus versioned prepared-reference/preparation-state facts and exact source digests | SessionState; SessionCoordinator; ArtifactStore; local executor | Pending |
-| Artifact read capability | ADR 0041 | loopex.artifact_read.v1 binding from literal tool-generation table; resolved executor arguments | ToolDefinition; SessionGenesis; local read tool; SessionCoordinator | Pending |
+| Tool-output preparation | ADR 0041 | Immutable receipt plus versioned prepared-reference/preparation-state facts and exact source digests | SessionState; SessionCoordinator; ArtifactStore; local executor | Implemented; exact-source preparation, frozen job context, early spill, literal generations and real prepared-range restart proved on both pairs; one actual 60-second cutoff per pair retained above |
+| Artifact read capability | ADR 0041 | loopex.artifact_read.v1 binding from literal tool-generation table; resolved executor arguments | ToolDefinition; SessionGenesis; local read tool; SessionCoordinator | Implemented and proved through exact literal capabilities, owner membership, bounded job transfers and empty-registry restart |
 | Instruction envelope | ADR 0042 | Closed version/base/environment/appendix map, exact rendered bytes/digest | SessionGenesis; configuration reducer; host composition | Pending |
 | Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Ordinary nil/non-nil continuation costs and source/configuration bindings implemented; maintenance bindings pending |
 | Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 and unavailable terminal-history preparation failures implemented; other causes, maintenance/headroom and wire projections pending |

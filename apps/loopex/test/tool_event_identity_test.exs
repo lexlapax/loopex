@@ -115,6 +115,84 @@ defmodule Loopex.ToolEventIdentityTest do
     assert {:ok, _recovered} = recover(fixture, session)
   end
 
+  test "repeated IDs survive unknown intent and receipt commits without duplicate dispatch" do
+    {store, _journal} = Loopex.M1RuntimeTestStore.start_store()
+    :ok = Loopex.M1RuntimeTestStore.observe_representations(store, self())
+
+    :ok =
+      Loopex.M1RuntimeTestStore.hold_next_record_before_linearization(
+        store,
+        "effect_intent_committed_v2",
+        self()
+      )
+
+    fixture =
+      start(
+        store: store,
+        script: [
+          %{text: "one", calls: [call("write", %{"path" => "one"})]},
+          %{text: "two", calls: [call("write", %{"path" => "two"})]},
+          %{text: "done", calls: []}
+        ]
+      )
+
+    {session, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "first")
+
+    assert_receive {:record_held_before_linearization, waiter, ^store,
+                    "effect_intent_committed_v2", intent},
+                   1_000
+
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    :ok =
+      Loopex.M1RuntimeTestStore.hold_next_record_before_linearization(
+        store,
+        "executor_receipt_committed_v2",
+        self()
+      )
+
+    :ok =
+      Loopex.M1RuntimeTestStore.inject(
+        store,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    Loopex.M1RuntimeTestStore.release(waiter)
+    assert_receive {:transaction_represented, ^store, ^intent, {:committed, _, _}}, 1_000
+
+    assert_receive {:record_held_before_linearization, waiter, ^store,
+                    "executor_receipt_committed_v2", receipt},
+                   1_000
+
+    assert length(Loopex.AgentLoopTestExecutor.jobs(fixture.executor)) == 1
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    :ok =
+      Loopex.M1RuntimeTestStore.inject(
+        store,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    Loopex.M1RuntimeTestStore.release(waiter)
+    assert_receive {:transaction_represented, ^store, ^receipt, {:committed, _, _}}, 1_000
+    assert await_finished(attachment)["outcome"] == "completed"
+    jobs = Loopex.AgentLoopTestExecutor.jobs(fixture.executor)
+    assert Enum.map(jobs, & &1.tool_call_id) == ["same", "same"]
+    assert length(Enum.uniq(Enum.map(jobs, & &1.job_id))) == 2
+    assert length(Enum.uniq(Enum.map(jobs, & &1.operation_id))) == 2
+    events = Fixture.events(fixture, session)
+    assert Enum.count(events, &(&1.kind == "tool.started")) == 2
+    finished = Enum.filter(events, &(&1.kind == "tool.finished"))
+
+    assert Enum.map(finished, & &1.event_id) == [
+             "event-to_cefc2cbd4fc34f55ef0abfa5b41385",
+             "event-to_e813046189958f53e4e6ddd8666fa1"
+           ]
+
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 3
+    assert {:ok, _recovered} = recover(fixture, session)
+  end
+
   test "two answered model questions can reuse the same raw call ID" do
     fixture =
       start(

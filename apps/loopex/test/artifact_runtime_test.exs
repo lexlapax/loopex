@@ -36,12 +36,21 @@ defmodule Loopex.ArtifactRuntimeTest do
       if is_pid(settings.observer),
         do: send(settings.observer, {:artifact_put, self(), bytes, metadata})
 
-      if settings.gate do
-        receive do
-          :retain_source -> :ok
-        after
-          5_000 -> raise "artifact fixture gate was not released"
-        end
+      case settings.gate do
+        :hold ->
+          receive do
+            :retain_source -> :ok
+          end
+
+        true ->
+          receive do
+            :retain_source -> :ok
+          after
+            5_000 -> raise "artifact fixture gate was not released"
+          end
+
+        empty when empty in [nil, false] ->
+          :ok
       end
 
       case settings.failure do
@@ -359,6 +368,58 @@ defmodule Loopex.ArtifactRuntimeTest do
     refute Enum.any?(records, &(&1.payload.kind == "tool_result_reference_prepared"))
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
     assert {:ok, _replayed} = recover_preparation(fixture, session)
+  end
+
+  @tag :long_bound
+  @tag timeout: 90_000
+  test "the actual sixty-second episode cutoff joins retention without refreshing source credit" do
+    {:ok, artifact_pid} = RetainedArtifactStore.start(observer: self(), gate: :hold)
+    on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
+
+    {fixture, session, attachment} =
+      live_preparation_fixture(
+        artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
+      )
+
+    assert_receive {:artifact_put, worker, _bytes, _metadata}, 1_000
+    exact = Process.monitor(worker)
+
+    [reservation] =
+      Fixture.records(fixture, session)
+      |> Enum.filter(&(&1.payload.kind == "tool_result_preparation_state_v1"))
+
+    cutoff = reservation.payload["deadline_ms"]
+    assert cutoff == reservation.payload["started_at_ms"] + 60_000
+    assert reservation.payload["deadline_origin"] == "preparation"
+    assert reservation.payload["source_count"] == 1
+
+    fixture_until =
+      System.monotonic_time(:millisecond) +
+        max(cutoff - System.system_time(:millisecond), 0) + 5_000
+
+    finished = List.last(collect(attachment, fixture_until, 65_000, []))
+    assert finished["outcome"] == "failed"
+    assert finished["failure"]["category"] == "context_preparation_failed"
+    assert finished["failure"]["cause"] == "artifact_preparation_deadline"
+    refute Process.alive?(worker)
+    assert_receive {:DOWN, ^exact, :process, ^worker, :killed}, 0
+    assert Agent.get(artifact_pid, & &1.objects) == %{}
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    records = Fixture.records(fixture, session)
+
+    assert Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_state_v1")) == [
+             reservation
+           ]
+
+    [failure] = Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_failed_v1"))
+    assert failure.payload["cause"] == "artifact_preparation_deadline"
+    assert failure.payload["observed_at_ms"] >= cutoff
+    refute Enum.any?(records, &(&1.payload.kind == "tool_result_reference_prepared"))
+    assert {:ok, replayed} = recover_preparation(fixture, session)
+    [episode] = Map.values(replayed.artifact_preparations)
+    assert episode["deadline_ms"] == cutoff
+    assert episode["source_count"] == 1 and episode["cursor"] == 0
+    assert episode["status"] == "failed"
   end
 
   for failure <- [:raise, :throw, :exit] do
