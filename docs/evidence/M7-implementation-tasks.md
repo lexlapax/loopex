@@ -99,6 +99,38 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: chat startup can now open both facade attachment holders and read the
+  public session status without consuming stdin or granting event reads. Run
+  reuses those exact holders after the host completes its checks. The creating
+  caller alone may prepare or run. A validated captured cleanup grace applies
+  before the first status reply and must match the retained session grace.
+  Startup interruption never starts replacement actors; interruption during a
+  blocked status preserves one cutoff, then uses one ordinary abort. A second
+  interrupt or attachment loss preserves unknown cleanup and retained joins.
+  Startup refusal remains closable only after the outer cleanup decision.
+
+  The startup, driver and resume-configuration files pass 39 cases on both
+  supported pairs: 11.4 seconds current and 11.3 floor, warnings as errors.
+  This includes actual prepared recovery, no dispatch before activation, exact
+  attachment reuse, unchanged input/records on refusal, caller restrictions,
+  early/blocked/second interruption, peer loss and actual worker DOWN joins.
+  Current output `/private/tmp/loopex-m7-chat-startup-current-v3.log`, SHA-256
+  `c075eb16c334c8e70589aa00f64a9b8308121b1077056ff9cbe9c860be01af24`;
+  floor `/private/tmp/loopex-m7-chat-startup-floor-v1.log`, SHA-256
+  `8e70d3af47603be36b06d3e2586d6565cf6192d8577e42371c3b13d73071b822`.
+  The first draft incorrectly expected immediate monitor retirement after an
+  unknown return. Its test now joins exact remaining workers within its stated
+  1,000-ms fixture bound, preserving production uncertainty semantics.
+  `/private/tmp/loopex-m7-chat-startup-current-v1.log`, SHA-256
+  `9b2298f5e55e1489b309389abe250f7356dadfa74c2be1f66ceb5f9f153904ca`.
+  The second draft exposed linked startup exits for invalid cleanup grace;
+  validation now refuses before starting the driver or writer.
+  `/private/tmp/loopex-m7-chat-startup-current-v2.log`, SHA-256
+  `dee803a39de0786e9d73b57f78b277d45709ac7a1d57009ad9146b61a7679c66`.
+  No required bound, assertion or check was weakened. This closes one added T10
+  subtask, no original item. Public command startup, installed signals, trace,
+  status/maintenance, workspace/policy checks and helper/legacy resume remain.
+
 - Done: the full current-pair fast check passed once on exact repair candidate
   `c7d855f778a6ef29a8787b5af4e2ef076100e05a` in 1,381 seconds. All eleven
   application suites and repository gates passed, with their prescribed
@@ -4659,6 +4691,8 @@ or check was relaxed.
 - [ ] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
+
+- [x] Stage driver attachment/status readiness without input or event reads; reuse exact holders for run, validate captured cleanup grace before startup, preserve one cutoff through early/blocked/second interruption and actor loss, and prove actual prepared recovery on both toolchains. Installed signal routing and outer host startup remain pending.
 
 - [x] Resolve the concrete terminal-only chat outcome schema through the maintainer decision; retain the accepted run-only/null/uncertainty meanings and existing ask/event bytes, then implement the shared codec, closed terminal wait/closing constructors and independent vectors. Status and driver integration remain in the original checklist.
 

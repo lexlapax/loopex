@@ -50,13 +50,37 @@ defmodule LoopexCli.ChatDriver do
 
   Devices are existing Latin-1 byte devices. Options select pipe or interactive refusal handling, already validated
   invocation run bounds, an optional prepared new-session configuration and
-  the private facade test seam. The command holder resolves configure changes
+  the private facade test seam. A supplied cleanup grace must be validated and
+  match the session; it sizes cancellation before the first status reply.
+  The command holder resolves configure changes
   against its last confirmed candidate; refusal never updates that cache.
   Only fresh prompts
   receive those bounds; follow-ups inherit their active run through Core. The creating caller is monitored even on a normal exit.
   """
-  def start_link(runtime, session_id, input, output, options \\ []),
-    do: GenServer.start_link(__MODULE__, {self(), runtime, session_id, input, output, options})
+  def start_link(runtime, session_id, input, output, options \\ []) do
+    grace = Keyword.get(options, :cleanup_grace_ms)
+
+    if grace == nil or match?({:ok, _}, Loopex.Executor.cancellation_bounds(grace)) do
+      GenServer.start_link(__MODULE__, {self(), runtime, session_id, input, output, options})
+    else
+      {:error, :invalid_chat_cleanup_grace}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Open the chat attachments before the host activates a resumed session.
+
+  ## Technical depth
+
+  Only the creating caller may prepare. Readiness returns the public session
+  status without consuming input or granting event reads. The host can then
+  finish its checks and signal installation before run. A startup failure
+  returns an error containing the provisional cleanup result; close still
+  belongs after outer cleanup. Cancellation never restarts attachment workers.
+  """
+  def prepare(driver), do: GenServer.call(driver, :prepare, :infinity)
 
   @doc """
   ## Concept
@@ -98,6 +122,7 @@ defmodule LoopexCli.ChatDriver do
   @impl true
   def init({owner, runtime, session, input, output, options}) do
     Process.flag(:trap_exit, true)
+    grace = Keyword.get(options, :cleanup_grace_ms)
     {:ok, writer} = ChatOutput.start_link(output)
     facade = Keyword.get(options, :facade, &apply/3)
 
@@ -121,6 +146,8 @@ defmodule LoopexCli.ChatDriver do
       pending: nil,
       ready: MapSet.new(),
       from: nil,
+      prepare_from: nil,
+      startup: :idle,
       sequence: 0,
       cursor: 0,
       last_run: nil,
@@ -136,7 +163,7 @@ defmodule LoopexCli.ChatDriver do
       deadline: nil,
       cutoff_timer: nil,
       local_cleanup: :confirmed,
-      cleanup_grace_ms: nil,
+      cleanup_grace_ms: grace,
       timer: nil,
       finished: false,
       transport: nil,
@@ -147,11 +174,34 @@ defmodule LoopexCli.ChatDriver do
   end
 
   @impl true
+  def handle_call(
+        operation,
+        {caller, _} = from,
+        %{owner: caller, finished: false, stopping: true} = state
+      )
+      when operation in [:prepare, :run] do
+    {:noreply, state |> startup_caller(operation, from) |> maybe_finished()}
+  end
+
+  def handle_call(
+        :prepare,
+        {caller, _},
+        %{owner: caller, startup: :ready, finished: false} = state
+      ),
+      do: {:reply, {:ok, state.status}, state}
+
+  def handle_call(:prepare, {caller, _} = from, %{owner: caller, startup: :idle} = state),
+    do: {:noreply, state |> startup_caller(:prepare, from) |> start_attachments()}
+
+  def handle_call(
+        :run,
+        {caller, _} = from,
+        %{owner: caller, startup: :ready, from: nil, finished: false} = state
+      ),
+      do: {:noreply, %{state | from: from} |> read_input() |> grant_event()}
+
   def handle_call(:run, {caller, _} = from, %{owner: caller, from: nil, finished: false} = state) do
-    state = %{state | from: from}
-    state = spawn_owned(state, :command, fn parent, ref -> command_worker(parent, ref, state) end)
-    state = spawn_owned(state, :reader, fn parent, ref -> event_worker(parent, ref, state) end)
-    {:noreply, state}
+    {:noreply, state |> startup_caller(:run, from) |> start_attachments()}
   end
 
   def handle_call({:close, cleanup}, {caller, _}, %{owner: caller, finished: true} = state)
@@ -250,7 +300,7 @@ defmodule LoopexCli.ChatDriver do
 
       _ when monitor == state.owner_monitor and pid == state.owner ->
         if Process.alive?(state.writer), do: Process.exit(state.writer, :kill)
-        state = reap(%{state | from: nil, finished: true, closed: true})
+        state = reap(%{state | from: nil, prepare_from: nil, finished: true, closed: true})
         join_reply(state)
 
       _ ->
@@ -326,6 +376,15 @@ defmodule LoopexCli.ChatDriver do
     }
 
     Map.put(state, if(kind == :input, do: :input_worker, else: kind), pid)
+  end
+
+  defp startup_caller(state, :prepare, from), do: %{state | prepare_from: from}
+  defp startup_caller(state, :run, from), do: %{state | from: from}
+
+  defp start_attachments(state) do
+    state = %{state | startup: :starting}
+    state = spawn_owned(state, :command, fn parent, ref -> command_worker(parent, ref, state) end)
+    spawn_owned(state, :reader, fn parent, ref -> event_worker(parent, ref, state) end)
   end
 
   defp owned(state, pid, ref) do
@@ -509,11 +568,44 @@ defmodule LoopexCli.ChatDriver do
 
   defp command_reply(%{reaping: true} = state, _), do: state
 
-  defp command_reply(%{pending: :startup_status} = state, {:ok, status}),
+  defp command_reply(%{pending: :startup_status} = state, {:ok, status}) do
+    if state.cleanup_grace_ms != nil and state.cleanup_grace_ms != status.cleanup_grace_ms do
+      state
+      |> Map.put(:pending, nil)
+      |> Map.put(:transport, :chat_cleanup_grace_mismatch)
+      |> unknown_cleanup()
+      |> reap()
+      |> maybe_finished()
+    else
+      state = %{
+        state
+        | pending: nil,
+          status: status,
+          cleanup_grace_ms: status.cleanup_grace_ms,
+          startup: :ready
+      }
+
+      cond do
+        state.stopping ->
+          state |> abort_for_stop() |> grant_event()
+
+        state.prepare_from != nil ->
+          GenServer.reply(state.prepare_from, {:ok, status})
+          %{state | prepare_from: nil}
+
+        true ->
+          state |> read_input() |> grant_event()
+      end
+    end
+  end
+
+  defp command_reply(%{pending: :startup_status} = state, _),
     do:
-      %{state | pending: nil, status: status, cleanup_grace_ms: status.cleanup_grace_ms}
-      |> read_input()
-      |> grant_event()
+      state
+      |> Map.put(:transport, :session_unavailable)
+      |> unknown_cleanup()
+      |> reap()
+      |> maybe_finished()
 
   defp command_reply(%{pending: {:shutdown, id}} = state, {:accepted, id}),
     do: %{state | pending: nil} |> consume_event() |> ask_status()
@@ -771,18 +863,22 @@ defmodule LoopexCli.ChatDriver do
     %{state | stopping: true, reaping: true, pending: nil}
   end
 
-  defp maybe_finished(%{stopping: true, workers: workers, from: from, finished: false} = state)
-       when (map_size(workers) == 0 or state.give_up) and from != nil do
+  defp maybe_finished(%{stopping: true, workers: workers, finished: false} = state)
+       when (map_size(workers) == 0 or state.give_up) and
+              (state.from != nil or state.prepare_from != nil) do
     if state.cutoff_timer, do: Process.cancel_timer(state.cutoff_timer)
 
-    GenServer.reply(from, %{
+    result = %{
       exit_code: state.exit_code,
       last_outcome: state.last_outcome,
       cleanup: state.local_cleanup,
       transport: state.transport
-    })
+    }
 
-    %{state | finished: true, from: nil}
+    if state.from, do: GenServer.reply(state.from, result)
+    if state.prepare_from, do: GenServer.reply(state.prepare_from, {:error, result})
+
+    %{state | finished: true, from: nil, prepare_from: nil}
   end
 
   defp maybe_finished(state), do: state
