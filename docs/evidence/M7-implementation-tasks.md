@@ -91,6 +91,69 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Pending maintainer decision: diagnostic loss must be proved against its
+  intended bound. The new full fast check on exact implementation SHA
+  `5bebb2272f78d9c48faec9a2be9f53e5c0f5f952` finished with exit 1. Ten suites
+  passed, including CLI's 450 tests; composition failed one diagnostic-loss
+  case. Overall: 3,145 passed, one failed and 34 existing exclusions. Complete
+  immutable output: `/private/tmp/loopex-m7-5bebb227-fast-check.log`, SHA-256
+  `26df61e377b4c2e07c94523845d21db37a2376a467b86d0d9e3b1bd59845cf93`.
+  The blocked worker stopped, but the private Task.Supervisor DOWN exceeded the
+  test's implicit 100-ms wait. The fixture creates its consumer with 1,000-ms
+  cleanup grace. A reviewable proposal captures one deadline at fault injection
+  and requires worker, supervisor and consumer DOWNs before that same cutoff.
+  This changes the tested time bound and remains unapplied. AGENTS.md prohibits
+  inflating timeouts to make required checks pass; the explicit override was
+  requested with options to approve the captured-grace proof or retain the
+  original waits and investigate further. No response has been received.
+  Proposal: `/private/tmp/loopex-m7-diagnostic-loss-deadline.patch`, SHA-256
+  `2076f86b43c07390e93ce9e6e7b232d5e7c7d430dfc56fd254ee9cc416b4187f`.
+  Its complete diagnostic test file passes all 12 cases in 0.6 seconds on each
+  supported pair from a temporary file, without replacing repository tests or
+  the failed integration evidence. Outputs:
+  `/private/tmp/loopex-m7-diagnostic-loss-proposal-current-final-20261002.log`,
+  SHA-256 `2f61f9225f9753e794e52e42c855ae4773b185a6c7697e39e42a2e649f753372`;
+  `/private/tmp/loopex-m7-diagnostic-loss-proposal-floor-20261002.log`, SHA-256
+  `f4e4af0dc9ddb6ce340c0f29eb104dff7c59840531e743973d7474fe431468f6`.
+  The first temporary run used a filename outside test_load_filters and exited
+  1 for that warning after 12 assertions passed; it is not PASS evidence:
+  `/private/tmp/loopex-m7-diagnostic-loss-proposal-current-20261002.log`, SHA-256
+  `92feb851657b2bc97129336bb40543ee893fa7bf918b0b8caa781f41ff60b5a2`.
+  Renaming the temporary fixture to the configured *_test.exs convention fixed
+  the runner setup. Production and repository test bytes remain unchanged.
+  The exact proposed patch bytes are retained below as base64 for full resume
+  if temporary files are lost. Original counts stay 28 done / 158 remaining. Added counts are 98
+  done / 12 remaining after adding this pending T16 task. No agents or checks
+  are running; do not poll the finished check handle or repeat 5bebb227 unchanged.
+  Continue independent M7 work while this and the three earlier contract
+  decisions remain pending. T09 research located the private pending/response
+  readers and event projector in SessionState, with configured_session_test.exs
+  providing the existing real-owner recovery fixtures. The legacy
+  Interaction.from_record decoder remains policy-choice-only; model readers
+  rederive their retained request from committed call arguments. Public schema
+  work must join the coordinated new /3-/4 cutover, never alter /1-/2 in place.
+
+```base64
+LS0tIGEvYXBwcy9sb29wZXhfY29tcG9zaXRpb24vdGVzdC9kaWFnbm9zdGljX2NvbnN1bWVyX3Rl
+c3QuZXhzCisrKyBiL2FwcHMvbG9vcGV4X2NvbXBvc2l0aW9uL3Rlc3QvZGlhZ25vc3RpY19jb25z
+dW1lcl90ZXN0LmV4cwpAQCAtMjM4LDYgKzIzOCw4IEBACiAgICAgICBzdXBlcnZpc29yX3JlZiA9
+IFByb2Nlc3MubW9uaXRvcihzdXBlcnZpc29yKQogICAgICAgY29uc3VtZXJfcmVmID0gUHJvY2Vz
+cy5tb25pdG9yKGNvbnN1bWVyKQogCisgICAgICBjdXRvZmYgPSBTeXN0ZW0ubW9ub3RvbmljX3Rp
+bWUoOm1pbGxpc2Vjb25kKSArIDFfMDAwCisKICAgICAgIGNhc2UgZGlzcG9zaXRpb24gZG8KICAg
+ICAgICAgOm93bmVyIC0+CiAgICAgICAgICAgc2VuZChvd25lciwgOnN0b3ApCkBAIC0yNDcsOSAr
+MjQ5LDEyIEBACiAgICAgICAgICAgc2VuZChvd25lciwgOnN0b3ApCiAgICAgICBlbmQKIAotICAg
+ICAgYXNzZXJ0X3JlY2VpdmUgezpET1dOLCBed29ya2VyX3JlZiwgOnByb2Nlc3MsIF53b3JrZXIs
+IF99Ci0gICAgICBhc3NlcnRfcmVjZWl2ZSB7OkRPV04sIF5zdXBlcnZpc29yX3JlZiwgOnByb2Nl
+c3MsIF5zdXBlcnZpc29yLCBffQotICAgICAgYXNzZXJ0X3JlY2VpdmUgezpET1dOLCBeY29uc3Vt
+ZXJfcmVmLCA6cHJvY2VzcywgXmNvbnN1bWVyLCBffQorICAgICAgZm9yIHtwaWQsIG1vbml0b3J9
+IDwtIFt7d29ya2VyLCB3b3JrZXJfcmVmfSwge3N1cGVydmlzb3IsIHN1cGVydmlzb3JfcmVmfSwg
+e2NvbnN1bWVyLCBjb25zdW1lcl9yZWZ9XSBkbworICAgICAgICByZW1haW5pbmcgPSBtYXgoY3V0
+b2ZmIC0gU3lzdGVtLm1vbm90b25pY190aW1lKDptaWxsaXNlY29uZCksIDApCisgICAgICAgIGFz
+c2VydF9yZWNlaXZlIHs6RE9XTiwgXm1vbml0b3IsIDpwcm9jZXNzLCBecGlkLCBffSwgcmVtYWlu
+aW5nCisgICAgICBlbmQKKworICAgICAgYXNzZXJ0IFN5c3RlbS5tb25vdG9uaWNfdGltZSg6bWls
+bGlzZWNvbmQpIDw9IGN1dG9mZgogICAgIGVuZAogICBlbmQKIAo=
+```
+
 - Done: CLI `ask` and `-p` now accept the closed trace controls for both
   profiles. Invalid disabled selections refuse before workspace, application,
   signal or credential effects. Ephemeral ask forwards the startup map to its
@@ -2918,6 +2981,7 @@ or check was relaxed.
 - [x] Update the direct SessionRoot startup protocol proof for granted diagnostics and trace activation; preserve exact acknowledgements, wrong-reference refusal and original time bounds on both toolchains.
 - [x] Establish an actual blocked diagnostic writer before mailbox pressure; preserve the 6,000-message observation, exact queue/writer/drop accounting and unchanged receive/cleanup timeouts on both toolchains.
 - [x] Remove the spawned-host startup scheduling assumption from the abrupt chat-writer-loss fixture; retain unchanged receive timeouts and prove both exact writer and linked IO-worker killed DOWNs on both toolchains.
+- [ ] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
 
