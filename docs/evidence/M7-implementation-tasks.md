@@ -99,6 +99,23 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the full fast check passed once on exact current-pair integration
+  candidate `15bcaf73b6877cf30581a842ae775a2482da1604` in 935 seconds. All
+  eleven application suites and repository gates passed, with prescribed
+  exclusions unchanged. The complete retained output and wrapper exit 0 are
+  `/private/tmp/loopex-m7-15bcaf73-fast-check.log`, SHA-256
+  `144ed5d4bc6c20b8751a20ea69b6c32fda5ce208f5cbd65209997ce9bdcc5f40`.
+  This closes the added T16 resume/startup/signal integration row. That exact
+  commit includes resume configuration, staged startup and installed signals.
+  It predates guarded prepared installation at 2b1d7410, whose separate
+  focused proof is retained below. No closure matrix, release check, Linux
+  thirty-run process campaign or paid provider trial is claimed.
+  The verification process has exited; no shell check or agent remains live.
+  The detached verification checkout retains the tested commit and primary m7
+  contains the later guarded handoff. The goal remains active. Continue the
+  public chat host join with the recorded ownership/cleanup ordering; no
+  maintainer decision is currently waiting.
+
 - Done: prepared chat signal installation reuses the existing capability
   holder and manager-lifetime guard. The handler is installed before Core's
   acknowledged transfer. Only the exact guarded holder then activates or
@@ -4967,7 +4984,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Run the full fast check once on the clean committed resume/startup/signal integration candidate; retain its exact SHA, complete output and final result without reusing the earlier repair-only proof.
+- [x] Run the full fast check once on the clean committed resume/startup/signal integration candidate; retain its exact SHA, complete output and final result without reusing the earlier repair-only proof.
 
 - [x] Confirm diagnostic writer dispatch through same-sender owner status before the existing blocked-device receive; retain the failed committed integration observation and prove unchanged pressure/accounting/receive/cleanup assertions on both supported pairs.
 - [x] Pin the complete approved read/search generation registry in composition tests while proving legacy selections for all 128 tool subsets and optional question registration on both supported pairs; retain the failed integration parent.
