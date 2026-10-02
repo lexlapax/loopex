@@ -91,6 +91,33 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T02 retains tool_result_preparation_failed_v1 before emitting an
+  unavailable refusal. The closed record captures episode/run/turn, exact
+  source fingerprint, bounded cause and observation clock. Replay independently
+  checks deadline/origin or exhausted credit; definite adapter failure is a
+  reserved-source fact with no copied exception or adapter detail. Failure
+  preserves counters/cursor and cannot reset the episode. Count exhaustion
+  consumes no seventeenth source. Existing refusal-v2 and failed-terminal
+  constructors derive the accepted artifact_preparation_* causes from the
+  retained fact; a missing, altered or invented fact cannot justify the cause.
+  Reservation admission now checks captured renderer/history capability and
+  source validity before IO can become eligible. The original receipt and
+  prior requests stay exact. Live worker dispatch, cancellation, public
+  transfer-store wiring and early spill remain unfinished.
+  Four complete focused files pass 60 cases in 7.0 seconds current and 6.9
+  seconds floor, with warning-free compilation, formatting, docs, dependency
+  and status gates passing. Complete outputs:
+  `/private/tmp/loopex-m7-preparation-failures-current-final-20261002.log`, SHA-256
+  `b0ebe5d2ece2ecedb4e01dc234c6ef1b2d587f4732ee62bfbfa49a34ec061e43`;
+  `/private/tmp/loopex-m7-preparation-failures-floor-final-20261002.log`, SHA-256
+  `da2e3f1cefbaea4a7f399b08dc587fc2d1bcc99936e85c3b1888a8bb3712e5ca`.
+  An unnecessary draft fixture mapping lacked its required reasoning subset
+  and refused genesis before three witnesses; the original fixture profile
+  remains sufficient and was restored. Failed output is retained at
+  `/private/tmp/loopex-m7-preparation-failures-current-initial-20261002.log`, SHA-256
+  `d0c1868da2694cfd0407e090d4fceb4f0825faf20f79ec503c81374980defb7f`.
+  Original: 33 done / 153 remaining. Added: 122 done / 10 remaining.
+
 - Done: T02's versioned preparation records now reserve one oldest-first
   oversized inline source before IO and complete it under the same episode.
   The closed tool_result_preparation_state_v1 payload binds staging/run/turn,
@@ -2864,6 +2891,8 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
 
 ### Added implementation subtasks
+
+- [x] Retain bounded source preparation failure facts and independently derive unavailable refusal-v2/terminal causes; prove no extra source charge or deadline reset and reject unsupported history before reservation.
 
 - [x] Reserve versioned preparation source credit and fixed deadline, commit exact prepared references without recharging, prove replay/membership/immutable projection and forbid staging under an outstanding reservation. Live retention, failure facts and cancellation remain pending.
 

@@ -821,10 +821,15 @@ defmodule Loopex.Runtime.SessionState do
           :ready | {:reserved, map(), map()} | {:ok, proposal()} | {:error, atom()}
   def propose_preparation_reservation(state, run_id, now) do
     with {:ok, identity} <- preparation_identity(state, run_id),
+         :ok <- preflight_run_history(state, run_id),
          {:ok, sources} <- preparation_sources(state, run_id) do
       episode = state.artifact_preparations[identity["episode_id"]]
 
       case {episode, sources} do
+        {%{"status" => "failed"}, _} ->
+          {:ok, cause} = ArtifactPreparation.failure_cause(episode)
+          {:error, cause}
+
         {%{"status" => "reserved"}, [source | _]} ->
           {:reserved, source, episode}
 
@@ -843,6 +848,26 @@ defmodule Loopex.Runtime.SessionState do
             internal_proposal(state, identity["episode_id"] <> ":reserve", record)
           end
       end
+    end
+  end
+
+  @doc false
+  @spec propose_preparation_failure(t(), binary(), atom(), integer()) ::
+          {:ok, proposal()} | {:error, atom()}
+  def propose_preparation_failure(state, run_id, cause, now) do
+    with {:ok, identity} <- preparation_identity(state, run_id),
+         {:ok, [source | _]} <- preparation_sources(state, run_id),
+         {:ok, record} <-
+           ArtifactPreparation.failure(
+             state.artifact_preparations[identity["episode_id"]],
+             identity,
+             source,
+             now,
+             cause
+           ) do
+      internal_proposal(state, identity["episode_id"] <> ":failure", record)
+    else
+      _ -> {:error, :invalid_artifact_preparation_transition}
     end
   end
 
@@ -2957,6 +2982,7 @@ defmodule Loopex.Runtime.SessionState do
               "executor_receipt_committed",
               "tool_result_preparation_state_v1",
               "tool_result_reference_prepared",
+              "tool_result_preparation_failed_v1",
               "outcome_unknown_committed",
               "run_terminal_committed",
               "tool_result_committed",
@@ -3887,6 +3913,7 @@ defmodule Loopex.Runtime.SessionState do
     run_id = record["run_id"]
 
     with {:ok, identity} <- preparation_identity(state, run_id),
+         :ok <- preflight_run_history(state, run_id),
          {:ok, [source | _]} <- preparation_sources(state, run_id),
          {:ok, episode} <-
            ArtifactPreparation.replay_reservation(
@@ -3941,6 +3968,33 @@ defmodule Loopex.Runtime.SessionState do
                record,
                state.journal_version + 1,
                job
+             )
+       }, []}
+    else
+      _ -> {:error, :invalid_artifact_preparation_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{kind: "tool_result_preparation_failed_v1"} = record) do
+    run_id = record["run_id"]
+
+    with {:ok, identity} <- preparation_identity(state, run_id),
+         {:ok, [source | _]} <- preparation_sources(state, run_id),
+         {:ok, episode} <-
+           ArtifactPreparation.replay_failure(
+             state.artifact_preparations[identity["episode_id"]],
+             record,
+             identity,
+             source
+           ) do
+      {:ok,
+       %{
+         state
+         | artifact_preparations:
+             Map.put(
+               state.artifact_preparations,
+               identity["episode_id"],
+               episode
              )
        }, []}
     else
@@ -7605,9 +7659,28 @@ defmodule Loopex.Runtime.SessionState do
                  lineage_elements(state, run_id),
                  Enum.reject(state.run_order, &(&1 == run_id))
                ),
-             {:ok, _, _} <- projected_lineage(state, run_id, 0) do
-          preflight_continuation(state, run_id)
+             {:ok, _, _} <- projected_lineage(state, run_id, 0),
+             {:ok, _} <- preparation_sources(state, run_id),
+             :ok <- preflight_continuation(state, run_id) do
+          retained_preparation_failure(state, run_id)
         end
+    end
+  end
+
+  defp retained_preparation_failure(state, run_id) do
+    case preparation_identity(state, run_id) do
+      {:ok, identity} ->
+        case state.artifact_preparations[identity["episode_id"]] do
+          %{"status" => "failed"} = episode ->
+            {:ok, cause} = ArtifactPreparation.failure_cause(episode)
+            {:error, cause}
+
+          _ ->
+            :ok
+        end
+
+      _ ->
+        :ok
     end
   end
 
@@ -7659,7 +7732,11 @@ defmodule Loopex.Runtime.SessionState do
       when cause in [
              :canonical_history_rendering_unsupported,
              :context_projection_invalid,
-             :artifact_metadata_unrepresentable
+             :artifact_metadata_unrepresentable,
+             :artifact_preparation_count_exhausted,
+             :artifact_preparation_bytes_exhausted,
+             :artifact_preparation_deadline,
+             :artifact_preparation_failed
            ] do
     case {run_configuration(state, run_id), Map.get(state.pending_work, run_id)} do
       {%{} = configuration, %{stage: stage, turn_number: _} = work}
@@ -7768,7 +7845,11 @@ defmodule Loopex.Runtime.SessionState do
            cause in [
              :canonical_history_rendering_unsupported,
              :context_projection_invalid,
-             :artifact_metadata_unrepresentable
+             :artifact_metadata_unrepresentable,
+             :artifact_preparation_count_exhausted,
+             :artifact_preparation_bytes_exhausted,
+             :artifact_preparation_deadline,
+             :artifact_preparation_failed
            ],
          true <- failure["cause"] == Atom.to_string(cause) do
       :ok

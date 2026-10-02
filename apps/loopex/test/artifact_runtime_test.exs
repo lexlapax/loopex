@@ -371,6 +371,82 @@ defmodule Loopex.ArtifactRuntimeTest do
              SessionState.recover(state.session_id, prefix ++ [row] ++ suffix, events)
   end
 
+  test "retained preparation failure proves the compact unavailable refusal and terminal" do
+    for cause <- [:artifact_preparation_failed, :artifact_preparation_deadline] do
+      {fixture, state} = preparation_fixture()
+      run = state.active_run_id
+      now = System.system_time(:millisecond)
+      assert {:ok, reservation} = SessionState.propose_preparation_reservation(state, run, now)
+      reserved = retain_preparation_proposal(fixture, state, reservation)
+      [episode] = Map.values(reserved.artifact_preparations)
+      observed = if cause == :artifact_preparation_deadline, do: episode["deadline_ms"], else: now
+
+      assert {:error, :invalid_context_refusal} =
+               SessionState.propose_context_preparation_failure(reserved, run, cause)
+
+      assert {:ok, failure} =
+               SessionState.propose_preparation_failure(reserved, run, cause, observed)
+
+      failed = retain_preparation_proposal(fixture, reserved, failure, :unknown)
+      assert {:error, ^cause} = SessionState.preflight_run_history(failed, run)
+
+      assert {:error, ^cause} =
+               SessionState.propose_preparation_reservation(failed, run, observed + 1)
+
+      assert {:ok, terminal} =
+               SessionState.propose_context_preparation_failure(failed, run, cause)
+
+      [refusal, finished] = terminal.records
+      assert refusal["projection_state"] == "unavailable"
+      assert refusal["failure"]["cause"] == Atom.to_string(cause)
+
+      for field <-
+            ~w(provider_estimated_tokens ordered_descriptor_digest system_message_count session_message_count steer_message_count tool_definition_count record_byte_cost) do
+        assert is_nil(refusal[field])
+      end
+
+      assert finished["failure"] == refusal["failure"]
+      final = retain_preparation_proposal(fixture, failed, terminal)
+      assert is_nil(final.active_run_id)
+      assert final.prepared_tool_results == %{}
+      assert final.conversation == state.conversation
+      assert {:ok, recovered} = recover_preparation(fixture, state.session_id)
+      assert recovered.artifact_preparations == final.artifact_preparations
+
+      records = Fixture.records(fixture, state.session_id)
+      events = Fixture.events(fixture, state.session_id)
+      [fact] = failure.records
+
+      for altered <- [
+            Map.put(fact, "cause", "invented"),
+            Map.put(fact, "extra", "hidden"),
+            put_in(fact, ["source", "record_byte_cost"], 1)
+          ] do
+        history =
+          Enum.map(records, fn row ->
+            if row.payload.kind == fact.kind, do: %{row | payload: altered}, else: row
+          end)
+
+        assert {:error, :invalid_artifact_preparation_transition} =
+                 SessionState.recover(state.session_id, history, events)
+      end
+
+      failure_row = Enum.find(records, &(&1.payload.kind == fact.kind))
+
+      missing =
+        records
+        |> Enum.reject(&(&1.journal_version == failure_row.journal_version))
+        |> Enum.map(fn row ->
+          if row.journal_version > failure_row.journal_version,
+            do: %{row | journal_version: row.journal_version - 1},
+            else: row
+        end)
+
+      assert {:error, :invalid_context_refusal} =
+               SessionState.recover(state.session_id, missing, events)
+    end
+  end
+
   test "episode accepts its exact source and byte caps then refuses more work" do
     identity = %{"episode_id" => "episode", "run_id" => "run", "turn_id" => "turn"}
     source = %{preparation_source() | record_byte_cost: 65_536}
@@ -400,6 +476,26 @@ defmodule Loopex.ArtifactRuntimeTest do
 
     assert {:error, :artifact_preparation_count_exhausted} =
              ArtifactPreparation.reserve(completed, identity, source, 1_100, nil)
+
+    assert {:ok, failure} =
+             ArtifactPreparation.failure(
+               completed,
+               identity,
+               source,
+               1_100,
+               :artifact_preparation_count_exhausted
+             )
+
+    assert {:ok, failed} =
+             ArtifactPreparation.replay_failure(completed, failure, identity, source)
+
+    assert failed["source_count"] == 16
+    assert failed["source_record_bytes"] == 1_048_576
+    assert failed["cursor"] == 16
+    wrong_cause = Map.put(failure, "cause", "artifact_preparation_bytes_exhausted")
+
+    assert {:error, :invalid_artifact_preparation_transition} =
+             ArtifactPreparation.replay_failure(completed, wrong_cause, identity, source)
 
     assert {:error, :context_projection_invalid} =
              ArtifactPreparation.reserve(
@@ -611,6 +707,7 @@ defmodule Loopex.ArtifactRuntimeTest do
       )
 
     on_exit(fn -> Fixture.stop(fixture) end)
+
     genesis = Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions)
 
     assert {:ok, session} =

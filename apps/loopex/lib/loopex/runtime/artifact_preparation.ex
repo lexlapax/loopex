@@ -107,6 +107,79 @@ defmodule Loopex.Runtime.ArtifactPreparation do
     end
   end
 
+  @doc false
+  @spec failure(map() | nil, map(), map(), integer(), atom()) ::
+          {:ok, map()} | {:error, atom()}
+  def failure(episode, identity, source, now, cause) when is_map(episode) do
+    with :ok <- source_admitted(source),
+         :ok <- clock_admitted(now),
+         true <- Map.take(episode, ~w(episode_id run_id turn_id)) == identity,
+         true <- failure_agrees?(episode, source, now, cause) do
+      {:ok,
+       Map.merge(identity, %{
+         :kind => "tool_result_preparation_failed_v1",
+         "cause" => Atom.to_string(cause),
+         "observed_at_ms" => now,
+         "source" => fingerprint(source)
+       })}
+    else
+      _ -> {:error, :invalid_artifact_preparation_transition}
+    end
+  end
+
+  def failure(_, _, _, _, _), do: {:error, :invalid_artifact_preparation_transition}
+
+  @doc false
+  @spec replay_failure(map() | nil, map(), map(), map()) ::
+          {:ok, map()} | {:error, atom()}
+  def replay_failure(episode, record, identity, source) do
+    with {:ok, cause} <- failure_cause(record),
+         {:ok, expected} <- failure(episode, identity, source, record["observed_at_ms"], cause),
+         true <- record == expected do
+      {:ok,
+       Map.merge(episode, %{
+         "status" => "failed",
+         "cause" => record["cause"],
+         "observed_at_ms" => record["observed_at_ms"]
+       })}
+    else
+      _ -> {:error, :invalid_artifact_preparation_transition}
+    end
+  end
+
+  @doc false
+  @spec failure_cause(map()) :: {:ok, atom()} | :error
+  def failure_cause(record) do
+    case record["cause"] do
+      "artifact_preparation_count_exhausted" -> {:ok, :artifact_preparation_count_exhausted}
+      "artifact_preparation_bytes_exhausted" -> {:ok, :artifact_preparation_bytes_exhausted}
+      "artifact_preparation_deadline" -> {:ok, :artifact_preparation_deadline}
+      "artifact_preparation_failed" -> {:ok, :artifact_preparation_failed}
+      _ -> :error
+    end
+  end
+
+  defp failure_agrees?(episode, source, now, :artifact_preparation_failed) do
+    episode["status"] == "reserved" and episode["source"] == fingerprint(source) and
+      within_deadline(episode, now) == :ok
+  end
+
+  defp failure_agrees?(episode, source, now, cause)
+       when cause in [
+              :artifact_preparation_count_exhausted,
+              :artifact_preparation_bytes_exhausted
+            ] do
+    episode["status"] == "completed" and
+      reservation_capacity(episode, source, now) == {:error, cause}
+  end
+
+  defp failure_agrees?(episode, _source, now, :artifact_preparation_deadline) do
+    episode["status"] in ["reserved", "completed"] and
+      within_deadline(episode, now) == {:error, :artifact_preparation_deadline}
+  end
+
+  defp failure_agrees?(_, _, _, _), do: false
+
   defp source_admitted(source) do
     if is_integer(source.record_byte_cost) and
          source.record_byte_cost in 1..@source_byte_limit and
