@@ -14,9 +14,10 @@ defmodule Loopex.Runtime.CompactionSource do
   most 1,030 bytes. The caller's check runs before each chunk, allowing traversal
   to spend its owning episode's deadline and cancellation budget.
 
-  Complete-unit selection and complete maintenance-request preflight belong to
-  the session owner. The owner chooses complete or excerpt form before calling;
-  excerpt candidates arrive in the fixed 4,096, 2,048, 1,024, 512 quota order.
+  The session owner chooses the eligible whole-unit range and supplies complete
+  maintenance-request preflight. Selection tests bounded complete prefixes and
+  applies the strategy-revision-3 small-prefix rule. Excerpt candidates arrive
+  in the fixed 4,096, 2,048, 1,024, 512 quota order.
   A source-cap fit alone never authorizes provider dispatch. Prior checkpoint
   data is supplied from validated replay and appears once in each envelope.
   """
@@ -49,21 +50,125 @@ defmodule Loopex.Runtime.CompactionSource do
 
   def encode(_, _, _, _), do: {:error, :context_projection_invalid}
 
-  defp scan(messages, check) do
-    initial = %{count: 0, hash: :crypto.hash_init(:sha256), complete: "", prefix: "", suffix: ""}
+  # Concept: source sizing consumes whole units and never strands a small prefix.
+  # Technical depth: the owner supplies only its contiguous eligible range,
+  # already projected under ADR 0041. Each unit is a nonempty message enumerable.
+  # The callback preflights the entire maintenance request, including its reserve;
+  # a source-only fit provides no dispatch authority. Prefix scanning retains one
+  # bounded source candidate and stops when further complete sources cannot fit.
+  @doc false
+  @spec select(
+          list(),
+          map() | nil,
+          (map() -> :ok | {:refused, term()} | {:error, atom()}),
+          (-> :ok | {:error, atom()})
+        ) :: {:ok, map() | nil} | {:error, atom()}
+  def select(units, prior, preflight, check)
+      when is_list(units) and is_function(preflight, 1) and is_function(check, 0) do
+    with :ok <- valid_prior(prior),
+         {:ok, best} <- complete_prefixes(units, prior, preflight, check) do
+      cond do
+        units == [] ->
+          {:ok, nil}
 
-    with {:ok, initial} <- consume("[", initial, check),
-         {:ok, scanned, false} <-
-           Enum.reduce_while(messages, {:ok, initial, true}, fn message, {:ok, acc, first?} ->
-             with true <- canonical_message?(message),
-                  {:ok, acc} <- consume(if(first?, do: "", else: ","), acc, check),
-                  {:ok, acc} <- value(message, acc, check, 1) do
-               {:cont, {:ok, acc, false}}
-             else
-               {:error, _} = error -> {:halt, error}
-               _invalid -> {:halt, {:error, :context_projection_invalid}}
-             end
-           end),
+        is_nil(best) ->
+          select_excerpt(units, 1, prior, preflight, check)
+
+        best.unit_count < length(units) and best.source.message_byte_length <= 6_144 ->
+          select_excerpt(units, best.unit_count + 1, prior, preflight, check)
+
+        true ->
+          {:ok, best}
+      end
+    end
+  end
+
+  def select(_, _, _, _), do: {:error, :context_projection_invalid}
+
+  defp complete_prefixes(units, prior, preflight, check) do
+    with {:ok, initial} <- consume("[", initial_scan(), check) do
+      Enum.reduce_while(Enum.with_index(units, 1), {:ok, initial, true, nil}, fn
+        {unit, index}, {:ok, acc, first?, best} ->
+          starting_count = acc.count
+
+          with :ok <- check.(),
+               true <- not is_nil(Enumerable.impl_for(unit)),
+               {:ok, acc, false} <- scan_unit(unit, acc, first?, check),
+               true <- acc.count > starting_count,
+               {:ok, candidates} <- prefix_candidate(acc, prior),
+               {:ok, best} <- admit_prefix(candidates, index, best, preflight, check) do
+            if candidates == [],
+              do: {:halt, {:ok, best}},
+              else: {:cont, {:ok, acc, false, best}}
+          else
+            {:error, _} = error -> {:halt, error}
+            _invalid -> {:halt, {:error, :context_projection_invalid}}
+          end
+      end)
+      |> case do
+        {:ok, _acc, _first?, best} -> {:ok, best}
+        result -> result
+      end
+    end
+  end
+
+  defp prefix_candidate(%{complete: nil}, _prior), do: {:ok, []}
+
+  defp prefix_candidate(acc, prior),
+    do: complete(%{acc | complete: acc.complete <> "]", count: acc.count + 1}, prior)
+
+  defp admit_prefix([], _index, best, _preflight, _check), do: {:ok, best}
+
+  defp admit_prefix([candidate], index, best, preflight, check) do
+    with :ok <- check.() do
+      case preflight.(candidate) do
+        :ok -> {:ok, %{source: candidate, unit_count: index}}
+        {:refused, _measurement} -> {:ok, best}
+        {:error, _} = error -> error
+        _invalid -> {:error, :context_projection_invalid}
+      end
+    end
+  end
+
+  defp select_excerpt(units, count, prior, preflight, check) do
+    messages = units |> Stream.take(count) |> Stream.flat_map(& &1)
+
+    with {:ok, candidates} <- encode(messages, prior, :excerpt, check) do
+      Enum.reduce_while(candidates, {:error, :compaction_excerpt_budget_too_small}, fn
+        candidate, _acc ->
+          with :ok <- check.() do
+            case preflight.(candidate) do
+              :ok -> {:halt, {:ok, %{source: candidate, unit_count: count}}}
+              {:refused, _measurement} -> {:cont, {:error, :compaction_excerpt_budget_too_small}}
+              {:error, _} = error -> {:halt, error}
+              _invalid -> {:halt, {:error, :context_projection_invalid}}
+            end
+          else
+            {:error, _} = error -> {:halt, error}
+          end
+      end)
+    end
+  end
+
+  defp initial_scan,
+    do: %{count: 0, hash: :crypto.hash_init(:sha256), complete: "", prefix: "", suffix: ""}
+
+  defp scan_unit(messages, acc, first?, check) do
+    Enum.reduce_while(messages, {:ok, acc, first?}, fn message, {:ok, acc, first?} ->
+      with true <- canonical_message?(message),
+           {:ok, acc} <- consume(if(first?, do: "", else: ","), acc, check),
+           {:ok, acc} <- value(message, acc, check, 1) do
+        {:cont, {:ok, acc, false}}
+      else
+        {:error, _} = error -> {:halt, error}
+        _invalid -> {:halt, {:error, :context_projection_invalid}}
+      end
+    end)
+  end
+
+  defp scan(messages, check) do
+    with {:ok, initial} <- consume("[", initial_scan(), check),
+         {:ok, scanned, false} <- scan_unit(messages, initial, true, check),
          {:ok, scanned} <- consume("]", scanned, check) do
       {:ok,
        Map.put(scanned, :digest, Base.encode16(:crypto.hash_final(scanned.hash), case: :lower))}
@@ -254,7 +359,11 @@ defmodule Loopex.Runtime.CompactionSource do
         "},\"prior_checkpoint\":" <>
         json(prior) <> ",\"version\":\"loopex.compaction.source.v2\"}"
 
-    {:ok, if(byte_size(bytes) <= @cap, do: [candidate(bytes, false, nil)], else: [])}
+    {:ok,
+     if(byte_size(bytes) <= @cap,
+       do: [Map.put(candidate(bytes, false, nil), :message_byte_length, scanned.count)],
+       else: []
+     )}
   end
 
   defp excerpts(scanned, prior) do

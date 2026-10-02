@@ -91,6 +91,22 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T07's bounded source selector scans complete eligible-unit prefixes,
+  retains the largest passing complete maintenance-request preflight and uses
+  serialized-message bytes for the 6,144-byte small-prefix threshold. A small
+  prefix consumes its next oversized eligible unit through a marked excerpt;
+  refusal of every quota cannot fall back to the small complete prefix. The
+  fixed quota order is tested independently of source-cap fit, and cancellation
+  before another lazy unit is read preserves the caller's failure. Entire
+  assistant/result groups remain covered, with their full-list count and digest.
+  Both supported pairs pass 49 source, summary and conversation tests in
+  0.4 seconds each. This selects from an owner-supplied eligible range; tail
+  release, actual request construction, episode persistence and dispatch remain
+  open. No original T07 item is closed by this local selector alone.
+  Current output: `/private/tmp/loopex-m7-compaction-selection-current.log`,
+  SHA-256 `6156487bdf743bd71d9a80cc98b18f9495ef362d81967f639e3b9f9f3451d6c0`.
+  Floor output: `/private/tmp/loopex-m7-compaction-selection-floor.log`, SHA-256
+  `7987c014ab139640d59a5f61d38697af3be710e5c1c7116a4a31c395cb3ecd05`.
 - Done: original T09's remaining runtime boundary tests are complete. Direct
   denial and policy deferral create no question or executor effect. An exact
   8,192-byte answer remains admitted, replayable and recoverable when the next
@@ -198,7 +214,7 @@ did not resolve them. No paid provider calls were made during this check.
   conversation witness remains a separate release obligation.
 - Done: T02 exact-generation capability checks now guard runtime admission,
   registry loading and the local executor's compiled tool inventory. Original
-  checklist completion is 26/186 items and 1/20 top-level tasks.
+  checklist completion is 27/186 items and 2/20 original top-level tasks.
 - Done: T02 attachment-budget baseline audit distinguishes existing attachment
   limitations from the required job-owned bounds. Snapshot creation failure now
   closes its source descriptor before returning; both toolchains prove the repair.
@@ -2347,6 +2363,7 @@ or check was relaxed.
 - [x] Build replay-derived indivisible compaction units with same-run inputs, terminal trailing inputs, current/unfinished protection and frozen native-prefix source protection; prove idle release and exact grouping after real journal recovery.
 - [x] Stream exact source-v2 complete/excerpt encodings with bounded candidate/end buffers, full-list digest/count, fixed UTF-8-safe quota order, prior checkpoint reuse and traversal cancellation/deadline checks; pin independent byte, cap and numeric vectors.
 - [x] Admit whole maintenance callbacks, retain canonical usage on incomplete/invalid summaries, require natural completion first, and share closed summary/carry-forward validation with prior checkpoint reuse; prove escaping, size, shape and callback-generation boundaries.
+- [x] Select bounded complete source prefixes through owner-supplied whole-request preflight, enforce the revision-3 small-prefix/next-unit rule without fallback, and prove whole-unit coverage, exact threshold, quota order and cancellation before later reads.
 
 ## T08 — Implement model selection and private thinking continuation
 
