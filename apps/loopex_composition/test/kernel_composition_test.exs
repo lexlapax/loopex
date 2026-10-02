@@ -200,9 +200,21 @@ defmodule LoopexCompositionTest do
 
     assert runtime_defaults
            |> Keyword.fetch!(:tools)
-           |> Enum.map(& &1["tool_id"])
+           |> Enum.map(&{&1["tool_id"], &1["tool_version"]})
            |> Enum.sort() ==
-             ~w(loopex.bash loopex.edit loopex.find loopex.grep loopex.ls loopex.read loopex.read loopex.write)
+             [
+               {"loopex.bash", "1.0.0"},
+               {"loopex.edit", "1.0.0"},
+               {"loopex.find", "1.0.0"},
+               {"loopex.find", "1.1.0"},
+               {"loopex.grep", "1.0.0"},
+               {"loopex.grep", "1.1.0"},
+               {"loopex.ls", "1.0.0"},
+               {"loopex.ls", "1.1.0"},
+               {"loopex.read", "1.0.0"},
+               {"loopex.read", "1.1.0"},
+               {"loopex.write", "1.0.0"}
+             ]
   end
 
   test "required host inputs are validated before the first effect" do

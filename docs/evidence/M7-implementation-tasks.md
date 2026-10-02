@@ -99,6 +99,38 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the full current fast check on
+  `410911990c021dcd6fcfde33a635c158834bacde` exited 1. Its last progress sample
+  was 1,370 seconds; no final total duration was emitted after suite failure.
+  Nine application suites passed. Composition failed three stale registry
+  expectations, and CLI failed one abrupt-writer-loss monitor witness. Complete
+  failed output: `/private/tmp/loopex-m7-41091199-fast-check.log`, SHA-256
+  `d1d4627c46389cf8633bea26fb61b48a7798cbb0078448a1ea0930ebc08d602a`.
+  This candidate remains failed evidence and will not be retried as a pass.
+
+  Composition assertions now pin all eleven exact ID/version pairs, including
+  both read/search generations. All 128 tool subsets across all three durable
+  constructors still require legacy read/search selection; opt-in questions
+  retain their exact definition and remain absent otherwise. Both complete
+  affected files pass 26 cases: 9.2 seconds current and 9.3 seconds floor.
+  `/private/tmp/loopex-m7-generation-registry-current-v1.log`, SHA-256
+  `0a7c7c034403ffc43830b8dc3ba468fe0623b2e6303f7e6f0bd9ec1fb240ae9e`;
+  `/private/tmp/loopex-m7-generation-registry-floor-v1.log`, SHA-256
+  `53f01fe2868e8fd4f99dd6f0b28996a9cbb8ee5e326b98e60f6459f429d6fe42`.
+
+  The CLI fault witness received `noproc` because a monitor sent to the worker
+  and a fault sent to its writer can arrive in either order. A same-sender
+  process-info request now confirms that the target installed the monitor
+  before the fault is sent elsewhere. Both abrupt writer loss and ordinary
+  owner exit retain their exact termination reasons and original 100-ms DOWN
+  waits. No production code, grace, retry or assertion was weakened. The whole
+  output and driver files pass 29 cases on each pair: 10.8 seconds current and
+  10.6 floor. `/private/tmp/loopex-m7-chat-worker-monitor-current-v1.log`, SHA-256
+  `1bf24fd796efa58890578621841bc1d96257396d8a1a89503d69312310cc9a34`;
+  `/private/tmp/loopex-m7-chat-worker-monitor-floor-v1.log`, SHA-256
+  `491397904533acacda77affc78d05b591873ff4a1ffe6ad2b528c5d2a342e450`.
+  A full check of a new clean committed repair candidate remains pending.
+
 - Done: T02's remaining integration proof now reads a Core-prepared legacy
   inline result through the real local executor, journal and public artifact
   store after an empty-registry restart. The original bash 1.0 job has its exact
@@ -4675,6 +4707,9 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [x] Confirm diagnostic writer dispatch through same-sender owner status before the existing blocked-device receive; retain the failed committed integration observation and prove unchanged pressure/accounting/receive/cleanup assertions on both supported pairs.
+- [x] Pin the complete approved read/search generation registry in composition tests while proving legacy selections for all 128 tool subsets and optional question registration on both supported pairs; retain the failed integration parent.
+- [x] Establish chat writer/worker monitors at their targets before faults sent to other processes; preserve exact killed/normal reasons and original DOWN waits, retaining failed integration evidence and both-pair output/driver proof.
+- [ ] Run the full fast check once on the clean committed repair candidate after the failed 41091199 integration run; retain its exact SHA, complete output and final result.
 
 
 - [x] Restore the reference composition size gate by consolidating preflight in the existing DurableOptions owner; preserve validation precedence and constructor behavior on both toolchains.

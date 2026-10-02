@@ -160,6 +160,7 @@ defmodule LoopexCli.ChatOutputTest do
 
     worker = :sys.get_state(writer).current.pid
     worker_monitor = Process.monitor(worker)
+    assert_monitor_established(worker)
     Process.exit(writer, :kill)
     assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :killed}
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}
@@ -184,9 +185,20 @@ defmodule LoopexCli.ChatOutputTest do
     assert ChatOutput.write(writer, :control, "forged") == {:error, :not_output_owner}
     writer_monitor = Process.monitor(writer)
     worker_monitor = Process.monitor(worker)
+    assert_monitor_established(writer)
+    assert_monitor_established(worker)
     send(owner, :stop)
     assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :normal}
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}
+  end
+
+  # Concept: the fault witness observes the worker's death, not a late monitor.
+  # Technical depth: monitors and a fault sent to another process can arrive in
+  # either order. This same-sender process-info request follows the monitor at
+  # its target before the writer or owner receives the fault.
+  defp assert_monitor_established(pid) do
+    assert {:monitored_by, monitors} = Process.info(pid, :monitored_by)
+    assert self() in monitors
   end
 
   defp device do
