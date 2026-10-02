@@ -449,7 +449,8 @@ Its exact members are ADR 0017's nineteen-key v1 shape with `kind` changed to
 v2, the four members `category`, `dimension`, `observed`, `limit` replaced by
 `failure`, and five added members: `configuration_version`, `episode_id`,
 `targets`, `projection_state` and `measurement_scope`. Configuration is the
-captured version; episode is null or its bounded owning identity. All earlier count/digest/disposition rules remain for the canonical descriptor
+captured version; episode is null or its bounded owning identity. Historical
+required-only count/digest/disposition rules remain for the canonical descriptor
 sequence. The complete estimate additionally includes continuation under ADR
 0044; it is not asserted equal to descriptor subtotals alone. Use ADR 0044's
 estimator for new requests, including continuation cost. `targets` is null for
@@ -457,7 +458,41 @@ ordinary hard-limit refusal, or exactly `{revision, record_target, input_target}
 with ADR 0044's captured rule and recomputed values. No source text is retained. `projection_state` is `measured` or `unavailable`.
 Numeric failures require measured. With measured, measurement_scope is exactly
 `ordinary` or `maintenance`; counts/digest/estimate describe that captured
-required-only candidate, not an admitted request. Ordinary uses the last minimum
+minimum candidate, not an admitted request. Frozen project/resource descriptors
+remain part of that candidate when ADR 0044 forbids changing the earlier prefix.
+The maintainer selected the following count amendment on 2026-10-02:
+
+- The exact historical four-count v2 shape remains valid for required-only input.
+- A measured candidate containing frozen optional descriptors adds exactly the pair
+  `project_resource_count` and `resource_pack_count`. Both are unsigned 64-bit
+  integers, including truthful zero for an absent class. At least one is
+  positive; the six counts are individually bounded and their sum cannot exceed
+  unsigned 64-bit range. In the live constructor their sum equals the complete
+  descriptor count. Tool definitions are counted separately from messages even
+  when their descriptor provenance is system.
+  Fresh optional intake retains its earlier whole-block admission/withholding
+  path; this extension cannot turn a removable optional block into a terminal
+  required-context failure.
+- Project descriptors have provenance `project_resource`; resource descriptors
+  have provenance `resource_pack`. The pair partitions those exact message
+  descriptors, preserving the ordered descriptor digest and full provider token
+  estimate. A positive project count requires project disposition `staged`, and
+  `staged` requires a positive project count. Resource-only candidates retain
+  the applicable earlier project disposition. Required-only shapes do not gain
+  a staged nonempty project claim.
+- Missing one member, extra members, negative, noninteger or overflowing counts,
+  an all-zero added pair, or inconsistent project disposition refuse. Recovery
+  preserves committed observations and validates their shape, bounds and
+  relations; it does not fabricate a rejected descriptor preimage. Earlier
+  readers must refuse the extended shape rather than stripping its counts.
+- Unavailable projections retain their exact historical shape with four null
+  counts; they omit the added pair because no optional projection was measured.
+  The amendment adds no source bodies or new public failure members. Prove the
+  live partition and ordered digest against the actual preflight input, and
+  compare the complete normalized refusal's measured bytes with independent
+  deterministic external-term encoding. Keep required-only v1/v2 replay proofs.
+
+Ordinary uses the last minimum
 projection; maintenance requires its owning episode and captured summary request
 configuration, with targets null and the episode's derived input allowance.
 Its system limit remains the captured parent system ceiling. A measured

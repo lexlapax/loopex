@@ -92,6 +92,10 @@ defmodule Loopex.Runtime.SessionState do
                              (@context_refusal_keys -- ~w(category dimension observed limit)) ++
                                ~w(failure configuration_version episode_id targets projection_state measurement_scope)
                            )
+  @context_refusal_optional_counts ~w(project_resource_count resource_pack_count)
+  @context_refusal_v2_frozen_keys Enum.sort(
+                                    @context_refusal_v2_keys ++ @context_refusal_optional_counts
+                                  )
 
   alias Loopex.ArtifactStore
   alias Loopex.Bounds
@@ -1116,7 +1120,7 @@ defmodule Loopex.Runtime.SessionState do
 
     case admit_context_candidate(record, state) do
       {:ok, fixed} -> {:ok, fixed}
-      {:refused, refusal} -> context_refusal_result(record, refusal, work, turn_number)
+      {:refused, refusal} -> context_refusal_result(state, record, refusal, work, turn_number)
       {:error, reason} -> {:error, reason}
     end
   end
@@ -1269,13 +1273,13 @@ defmodule Loopex.Runtime.SessionState do
   # Concept: the refusal keeps what an operator can act on and nothing that
   # caused it.
   #
-  # Technical depth: the four counts partition the exact descriptor sequence
+  # Technical depth: the counts partition the exact descriptor sequence
   # whose bytes produced the token estimate and the ordered digest, so
   # incrementing or reclassifying one without changing that sequence is refused
   # by the live constructor. No descriptor body, source reference, or oversized
   # candidate is retained, which is what makes the refusal's size independent of
   # history length.
-  defp context_refusal_result(record, refusal, work, turn_number) do
+  defp context_refusal_result(state, record, refusal, work, turn_number) do
     receipt = Map.fetch!(record, "context_receipt")
     blocks = Map.fetch!(receipt, "blocks")
     request = Map.fetch!(record, "request")
@@ -1286,35 +1290,51 @@ defmodule Loopex.Runtime.SessionState do
     message_blocks = Enum.take(blocks, messages)
     system = Enum.count(message_blocks, &(&1["provenance_class"] == "system"))
     session = Enum.count(message_blocks, &(&1["provenance_class"] == "session")) - steer
+    project = Enum.count(message_blocks, &(&1["provenance_class"] == "project_resource"))
+    resources = Enum.count(message_blocks, &(&1["provenance_class"] == "resource_pack"))
+    configured? = not is_nil(record["configuration_version"])
+    frozen? = not is_nil(frozen_context(state, work.run_id))
 
-    if system + session + steer + tools == length(blocks) do
+    if system + session + steer + tools + project + resources == length(blocks) and
+         (project + resources == 0 or (configured? and frozen?)) do
       compact =
         compact_refusal(receipt, refusal, work, turn_number, %{
           system: system,
           session: session,
           steer: steer,
-          tools: tools
+          tools: tools,
+          project: project,
+          resources: resources
         })
 
-      {:refused, configured_refusal(compact, record["configuration_version"])}
+      refusal = configured_refusal(compact, record["configuration_version"])
+
+      refusal =
+        if project + resources > 0 do
+          Map.merge(refusal, %{
+            "project_resource_count" => project,
+            "resource_pack_count" => resources
+          })
+        else
+          refusal
+        end
+
+      {:refused, refusal}
     else
       {:refused_not_required_only, refusal}
     end
   end
 
-  # Concept: four counts that do not add up to the sequence they claim to
-  # describe are not a refusal an operator can trust.
+  # Concept: A refusal describes every class in the measured candidate.
   #
   # Technical depth: ADR 0017 gives the compact refusal exactly the system,
   # session, steer, and tool counts, and makes their sum the descriptor count of
   # the sequence whose bytes produced `provider_estimated_tokens` and
   # `ordered_descriptor_digest`. There is no count for a project descriptor, so a
-  # candidate carrying one cannot be described by this record at all, and the
-  # reducer cannot detect that later: recovery holds no descriptor bodies. The
-  # live constructor is the only place with that preimage, so a candidate whose
-  # sequence is not the required-only one is reported as
-  # `:refused_not_required_only` -- enough for its caller to withhold the
-  # optional class and re-decide, and never a record that can be retained
+  # v1 candidate carrying optional descriptors cannot use that record. Configured
+  # v2 candidates retain their frozen optional prefix and add the approved pair
+  # of project/resource counts. The live constructor owns the descriptor
+  # preimage and proves the complete partition before retaining compact counts.
   defp compact_refusal(receipt, refusal, work, turn_number, counts) do
     %{
       "run_id" => Map.fetch!(work, :run_id),
@@ -1323,7 +1343,7 @@ defmodule Loopex.Runtime.SessionState do
       "dimension" => Map.fetch!(refusal, "dimension"),
       "token_estimator" => Bounds.estimator(),
       "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
-      "project_disposition" => refusal_project_disposition(receipt),
+      "project_disposition" => refusal_project_disposition(receipt, counts),
       "system_message_count" => counts.system,
       "session_message_count" => counts.session,
       "steer_message_count" => counts.steer,
@@ -1369,7 +1389,10 @@ defmodule Loopex.Runtime.SessionState do
   # rather than being relabelled absent or declined, and an eligible project
   # that was never reached because required content already failed says exactly
   # that instead of suggesting it was staged.
-  defp refusal_project_disposition(receipt) do
+  defp refusal_project_disposition(receipt, %{project: project}) when project > 0,
+    do: get_in(receipt, ["project_resource", "disposition"])
+
+  defp refusal_project_disposition(receipt, _counts) do
     case Map.fetch!(receipt, "project_resource") do
       %{"disposition" => "staged", "detail" => %{"entries" => []}} -> "staged_empty"
       %{"disposition" => "staged"} -> "not_evaluated_required_failure"
@@ -7537,7 +7560,12 @@ defmodule Loopex.Runtime.SessionState do
     configuration = run_configuration(state, run_id)
     failure = refusal["failure"]
 
-    with true <- Enum.sort(Map.keys(refusal)) == @context_refusal_v2_keys,
+    with true <-
+           Enum.sort(Map.keys(refusal)) in [
+             @context_refusal_v2_keys,
+             @context_refusal_v2_frozen_keys
+           ],
+         true <- valid_v2_descriptor_counts?(refusal),
          true <- is_map(configuration),
          true <- refusal["configuration_version"] == configuration["configuration_version"],
          true <- is_nil(refusal["episode_id"]) and is_nil(refusal["targets"]),
@@ -7573,9 +7601,14 @@ defmodule Loopex.Runtime.SessionState do
     common =
       refusal
       |> Map.drop(
-        ~w(failure configuration_version episode_id targets projection_state measurement_scope)
+        ~w(failure configuration_version episode_id targets projection_state measurement_scope) ++
+          @context_refusal_optional_counts
       )
       |> Map.merge(Map.take(failure, ~w(category dimension observed limit)))
+      |> Map.update!("project_disposition", fn
+        "staged" -> "not_evaluated_required_failure"
+        disposition -> disposition
+      end)
 
     validate_context_refusal_base(
       state,
@@ -7584,6 +7617,35 @@ defmodule Loopex.Runtime.SessionState do
       "loopex.context_bytes.v2"
     )
   end
+
+  # Concept: Frozen optional inputs stay visible in a compact measured refusal.
+  # Technical depth: The pair is present together only when at least one optional
+  # descriptor exists. Required-only and unavailable legacy v2 shapes stay exact.
+  # The Store protects committed observations; replay validates their bounds and
+  # relations without inventing a missing descriptor preimage.
+  defp valid_v2_descriptor_counts?(refusal) do
+    required =
+      ~w(system_message_count session_message_count steer_message_count tool_definition_count)
+
+    counts = required ++ @context_refusal_optional_counts
+
+    cond do
+      Enum.all?(@context_refusal_optional_counts, &(not Map.has_key?(refusal, &1))) ->
+        refusal["project_disposition"] != "staged"
+
+      true ->
+        staged? = refusal["project_disposition"] == "staged"
+        project? = refusal["project_resource_count"] > 0
+
+        Enum.all?(counts, &nonnegative_uint64?(refusal[&1])) and
+          Enum.sum(Enum.map(counts, &refusal[&1])) <= @uint64_max and
+          refusal["project_resource_count"] + refusal["resource_pack_count"] > 0 and
+          staged? == project?
+    end
+  end
+
+  defp nonnegative_uint64?(value),
+    do: is_integer(value) and value >= 0 and value <= @uint64_max
 
   defp validate_context_refusal_base(state, refusal, system_limit, estimator) do
     run_id = Map.get(refusal, "run_id")

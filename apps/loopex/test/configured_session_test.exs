@@ -578,6 +578,227 @@ defmodule Loopex.ConfiguredSessionTest do
              )
   end
 
+  test "numeric refusal counts the exact frozen optional descriptor prefix" do
+    body = "Frozen guidance 猫\n"
+
+    project = %{
+      workspace: %{workspace_ref: "workspace-ref", repository_origin: nil, revision: nil},
+      entries: [
+        %{
+          label: "AGENTS.md",
+          content: body,
+          byte_size: byte_size(body),
+          content_digest: Canonical.digest_bytes(body),
+          contained: true
+        }
+      ]
+    }
+
+    {:ok, project_digest, _} = Loopex.ProjectResource.digest(project)
+
+    decision = %{
+      manifest_digest: project_digest,
+      workspace_ref: "workspace-ref",
+      trust_scope: "project_resource",
+      decision_source: "host_supplied",
+      issued_at: "2026-10-02T00:00:00Z",
+      expires_at: nil,
+      revocation_state: "active"
+    }
+
+    resources = %{
+      version: "loopex.resource_pack/1",
+      workspace_ref: "workspace-ref",
+      revision: nil,
+      packs: [
+        %{
+          source_id: "project",
+          origin: nil,
+          commit: nil,
+          tree_digest: nil,
+          name: "frozen-guide",
+          description: "Frozen guide",
+          manual_only: true,
+          files: [
+            %{
+              label: "SKILL.md",
+              content: body,
+              size: byte_size(body),
+              digest: Canonical.digest_bytes(body),
+              contained: true
+            }
+          ]
+        }
+      ]
+    }
+
+    for selection <- [:project, :resource, :both] do
+      optional =
+        if(selection in [:project, :both],
+          do: [project_manifest: project, project_decision: decision],
+          else: []
+        ) ++
+          if(selection in [:resource, :both], do: [resource_manifest: resources], else: [])
+
+      turn =
+        put_in(
+          open_turn("write"),
+          [:calls, Access.at(0), :arguments, "path"],
+          String.duplicate("x", 12_000)
+        )
+
+      fixture = start([script: [turn, %{text: "must not dispatch", calls: []}]] ++ optional)
+
+      config =
+        continuation_configuration()
+        |> Map.put("context_token_budget", 2_000)
+        |> Map.put("system_class_tokens", 1_800)
+        |> put_in(["budget_origins", "context_token_budget"], "explicit")
+
+      assert {:ok, session} =
+               Loopex.create_session(fixture.runtime, %{},
+                 command_id: "create",
+                 genesis: genesis(fixture.definitions, config)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      if selection in [:resource, :both] do
+        {:ok, digest, normalized} = Loopex.ResourcePack.digest(resources)
+        resource_decision = %{decision | manifest_digest: digest, trust_scope: "project_skills"}
+
+        assert {:accepted, "admit"} =
+                 Loopex.command(
+                   attachment,
+                   %{
+                     type: :admit_resources,
+                     command_id: "admit",
+                     manifest_digest: digest,
+                     decision: resource_decision
+                   }
+                 )
+
+        [pack] = normalized["packs"]
+
+        assert {:accepted, "activate"} =
+                 Loopex.command(
+                   attachment,
+                   %{
+                     type: :activate_skill,
+                     command_id: "activate",
+                     manifest_digest: digest,
+                     source_id: "project",
+                     name: "frozen-guide",
+                     pack_digest: Loopex.ResourcePack.pack_digest(pack),
+                     supporting_labels: []
+                   }
+                 )
+      end
+
+      {:ok, children} = Runtime.Supervisor.children(fixture.runtime.supervisor)
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      # Concept: Counts describe the rejected candidate, including frozen input.
+      # Technical depth: This serial fixture observes only this coordinator's
+      # pure preflight inputs; a trace-delivery barrier fixes the complete preimage.
+      :erlang.trace_pattern({SessionState, :preflight_model_request, 4}, true, [:local])
+      :erlang.trace(coordinator, true, [:call, {:tracer, self()}])
+
+      try do
+        assert {:accepted, "prompt"} =
+                 Loopex.command(
+                   attachment,
+                   %{type: :prompt, command_id: "prompt", content: "work"}
+                 )
+
+        events = finish(attachment)
+        barrier = :erlang.trace_delivered(coordinator)
+        candidates = refusal_preimages(coordinator, barrier, [])
+        records = Fixture.records(fixture, session)
+
+        [refusal] =
+          for row <- records, row.payload.kind == "context_admission_refused_v2", do: row.payload
+
+        terminal = Enum.find(events, &(&1.kind == "run.finished"))
+        assert terminal["outcome"] == "failed"
+        assert terminal["failure"] == refusal["failure"]
+        assert refusal["failure"]["dimension"] == "context_tokens"
+        assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+        {state, run, request, options} = List.last(candidates)
+        receipt = Keyword.fetch!(options, :context_receipt)
+        message_blocks = Enum.drop(receipt["blocks"], -length(request.tools))
+        counts = Enum.frequencies_by(message_blocks, & &1["provenance_class"])
+        assert refusal["project_resource_count"] == Map.get(counts, "project_resource", 0)
+        assert refusal["resource_pack_count"] == Map.get(counts, "resource_pack", 0)
+        assert refusal["system_message_count"] == Map.get(counts, "system", 0)
+        assert refusal["session_message_count"] == Map.get(counts, "session", 0)
+        assert refusal["steer_message_count"] == 0
+        assert refusal["tool_definition_count"] == length(request.tools)
+        assert refusal["ordered_descriptor_digest"] == descriptor_digest(receipt["blocks"])
+
+        assert Enum.sum(
+                 for key <- ~w(project_resource_count resource_pack_count system_message_count
+          session_message_count steer_message_count tool_definition_count),
+                     do: refusal[key]
+               ) ==
+                 length(receipt["blocks"])
+
+        assert refusal["provider_estimated_tokens"] == receipt["provider_estimated_tokens"]
+
+        assert refusal["project_disposition"] ==
+                 if(selection in [:project, :both], do: "staged", else: "no_manifest")
+
+        assert {:refused, ^refusal} =
+                 SessionState.preflight_model_request(state, run, request, options)
+
+        assert {:ok, normalized, cost} = Loopex.Store.normalize_and_measure_item(:record, refusal)
+        assert cost == byte_size(:erlang.term_to_binary(normalized, [:deterministic]))
+        assert cost < 65_536
+        refute :erlang.term_to_binary(refusal) =~ body
+        assert {:ok, _} = SessionState.recover(session, records, Fixture.events(fixture, session))
+
+        for changed <- [
+              Map.delete(refusal, "resource_pack_count"),
+              Map.put(refusal, "project_resource_count", -1),
+              Map.put(refusal, "resource_pack_count", nil),
+              Map.put(refusal, "resource_pack_count", 1.5),
+              Map.put(refusal, "resource_pack_count", 18_446_744_073_709_551_616),
+              Map.put(refusal, "resource_pack_count", 18_446_744_073_709_551_615),
+              Map.put(refusal, "unexpected_count", 0),
+              Map.put(
+                refusal,
+                "project_disposition",
+                if(selection in [:project, :both], do: "no_manifest", else: "staged")
+              ),
+              Map.merge(refusal, %{"project_resource_count" => 0, "resource_pack_count" => 0})
+            ] do
+          altered =
+            Enum.map(records, fn row ->
+              if row.payload == refusal, do: %{row | payload: changed}, else: row
+            end)
+
+          assert {:error, _} =
+                   SessionState.recover(session, altered, Fixture.events(fixture, session))
+        end
+      after
+        :erlang.trace_pattern({SessionState, :preflight_model_request, 4}, false, [:local])
+        if Process.alive?(coordinator), do: :erlang.trace(coordinator, false, [:call])
+      end
+    end
+  end
+
+  defp refusal_preimages(coordinator, barrier, acc) do
+    receive do
+      {:trace, ^coordinator, :call,
+       {SessionState, :preflight_model_request, [state, run, request, options]}} ->
+        refusal_preimages(coordinator, barrier, [{state, run, request, options} | acc])
+
+      {:trace_delivered, ^coordinator, ^barrier} ->
+        Enum.reverse(acc)
+    after
+      5_000 -> flunk("preflight trace delivery was not proved")
+    end
+  end
+
   test "aggregate continuation overflow records an unavailable projection before another attempt" do
     turns =
       for id <- ["first", "second"] do

@@ -82,7 +82,12 @@ smaller model. Current-run inputs, the groups that follow them in the same run,
 and open exchanges remain protected, so compaction during a run covers only
 history from before that run. Failure projections are versioned and name
 either the measured ordinary/maintenance bound or the precise preparation failure; old records keep
-their old validation. Size preparation must strictly reduce both projected
+their old validation. The maintainer's 2026-10-02 amendment permits a compact
+numeric refusal to count frozen project and resource descriptors alongside
+required input. It describes the complete measured candidate without dropping
+or relabelling a native exchange's earlier prefix; old four-count records remain
+readable. No rejected source text is retained in the refusal.
+Size preparation must strictly reduce both projected
 token count and exact record size. Explicit repair of unsupported terminal
 rendering instead advances coverage past offending groups within hard limits
 until rendering passes; a small group may become a larger summary. Insufficient room for the minimum

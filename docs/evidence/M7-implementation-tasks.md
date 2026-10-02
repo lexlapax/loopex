@@ -91,6 +91,49 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the maintainer-approved refusal-v2 amendment adds the exact optional
+  pair project_resource_count/resource_pack_count for measured frozen prefixes.
+  Both are unsigned 64-bit, at least one is positive, the six-count sum is
+  bounded, and positive project input agrees with staged disposition. The live
+  constructor partitions the complete descriptor sequence without dropping the
+  native prefix. Required-only v1/v2 and unavailable v2 retain their historical
+  shapes; fresh optional blocks retain withholding rather than becoming terminal
+  required failures. Both ADR companions record the concrete schema.
+  Actual project-only, resource-only and combined exchanges prove the captured
+  preflight partition, independently recomputed ordered digest, exact estimate,
+  no second dispatch, body-free compact record, independent deterministic byte
+  encoding and replay. Missing, negative, null, fractional, overflowing,
+  all-zero, extra and disposition-inconsistent count variants refuse.
+  Complete configured, context admission and skill context files pass 66 cases
+  in 7.5 seconds current and 7.3 seconds floor; compilation, formatting, docs,
+  dependency and status gates pass. Complete outputs:
+  `/private/tmp/loopex-m7-frozen-refusal-current-verified-20261002.log`, SHA-256
+  `8030fd3825d7c76f07c24de4a9a774645dd53ef174d03a03e40a95bf88d50325`;
+  `/private/tmp/loopex-m7-frozen-refusal-floor-verified-20261002.log`, SHA-256
+  `00b243a2f1951154a439c3289352cfa84a4ced8b0af2fac41543a1043bc3d0d4`.
+  The original implementation stops without a terminal on
+  refused_not_required_only; the corrected fixture retains that failure at
+  `/private/tmp/loopex-m7-frozen-refusal-before-final-20261002.log`, SHA-256
+  `a00bd0566e13236d8026c888997a1814aa84b2c96e6ef121a3ec2e59774811eb`.
+  The first draft's overly broad optional-count eligibility terminated fresh
+  resource intake; its failure remains at
+  `/private/tmp/loopex-m7-frozen-refusal-current-complete-20261002.log`, SHA-256
+  `9d4f4d43f240497329019bc2646e2832cddcde16c14e04741a663d01c0328a13`.
+  Restricting eligibility to a captured frozen context repairs that regression.
+  A new fixture assertion initially double-counted system-provenance tool
+  descriptors as messages; its failed output remains at
+  `/private/tmp/loopex-m7-frozen-refusal-current-initial-20261002.log`, SHA-256
+  `860c69c0d15cc7f94c31fcf1df0f32b5d8563e8869ac9eacf7c0be9cea89685e`.
+  Original: 33 done / 153 remaining. Added: 119 done / 10 remaining.
+- Integration check: exact committed 4d77e61c candidate ran once and exited 1.
+  Core's 898 tests and nine other application suites passed; composition passed
+  447 of 448 and failed the no-policy-callback inventory assertion described
+  below. That assertion is repaired in 065f02a8 with focused proof, but the
+  failed candidate is not a successful integration result. Complete output:
+  `/private/tmp/loopex-m7-4d77e61c-fast-check.log`, SHA-256
+  `999ac6c713b5140e6c549dbf360a32f92ba9e2df7d8e1b13edff182fa7bf1d31`.
+  No full check has run on the subsequent inventory/count amendment bytes.
+
 - Done: the composition authority inventory now verifies the approved contextual
   question adapter supplies no default authority. It still proves omitted/nil
   host policy refusal and admits exactly that adapter in the inventory, then
@@ -3408,7 +3451,7 @@ or check was relaxed.
 - [x] Build and validate bounded aggregate request envelopes from full committed settlements and lineage positions, including source/configuration replay checks.
 - [x] Charge the complete expanded ordinary envelope in revision-four receipts and independently verify every retained cost field.
 - [x] Preserve frozen project input through owner recovery, reject native-ID collisions before tools, and retain replayable aggregate-overflow preparation failures.
-- [ ] Resolve and implement the numeric refusal schema for frozen project/resource input; prove its exact bounds and replay.
+- [x] Resolve and implement the numeric refusal schema for frozen project/resource input; prove its exact bounds and replay.
 - [ ] Prove frozen resource-pack input and steer ordering across continuation/restart boundaries.
 - [x] Implement bounded native event assembly and pinned SSE parse/flush validation with permanent failure, exact content reconstruction and cumulative usage evidence.
 - [x] Render captured native requests and seal the final Finch request; prove exact tools, controls and ceilings against the pinned builder and hook order.
