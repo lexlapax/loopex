@@ -347,6 +347,7 @@ defmodule Loopex.Runtime.Control do
        token: Keyword.fetch!(options, :token),
        runtime_id: Keyword.fetch!(options, :runtime_id),
        store: Keyword.fetch!(options, :store),
+       artifact_store: Keyword.get(options, :artifact_store),
        attachment_capacity: Keyword.fetch!(options, :attachment_capacity),
        model: Keyword.fetch!(options, :model),
        maintenance_model: Keyword.get(options, :maintenance_model),
@@ -2716,6 +2717,7 @@ defmodule Loopex.Runtime.Control do
         options = [
           control: self(),
           store: state.store,
+          artifact_store: state.artifact_store,
           session_id: session_id,
           generation: generation,
           succession_id: succession_id,

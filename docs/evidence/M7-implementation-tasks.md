@@ -91,6 +91,46 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T02's live preparation uses the configured public transfer store. The
+  session owner commits source credit before verified put, waits for the exact
+  worker DOWN, and commits the prepared reference before staging another
+  request. Abort and the retained run cutoff join that worker before a terminal
+  event. Adapter raise/throw/exit becomes a bounded retained failure; private
+  adapter detail does not enter records. Missing transfer configuration refuses
+  with the same named cause. Recovery with an empty registry repeats the exact
+  reserved source under the same counters, episode identity and cutoff, without
+  another reservation. Both live uncertain commits resolve by re-presenting the
+  exact transaction before downstream work. Original receipts stay immutable.
+  Four focused files pass 69 cases in 7.7 seconds current and 7.6 seconds floor;
+  warning-free compilation, formatting, docs, dependency and status gates pass.
+  Complete outputs:
+  `/private/tmp/loopex-m7-preparation-live-current-verified-20261002.log`, SHA-256
+  `70be4246b3eac9334ef9f6841f4d17f45de8f661246851d8455f2dde17bc38ff`;
+  `/private/tmp/loopex-m7-preparation-live-floor-verified-20261002.log`, SHA-256
+  `852d04007fdda3581c9a16e19a62ee86505373301e9072ae5d43e759bb38bdf6`;
+  `/private/tmp/loopex-m7-preparation-live-gates-20261002.log`, SHA-256
+  `2d658cad685689c00ef9c25d4afabb82c319344f20f2464ed82f7df3a0287a52`.
+  Draft witnesses incorrectly assumed journal rows carried transaction IDs and
+  that internal resolution queried status. The corrected fixture observes the
+  actual exact re-presentation. Failed outputs remain retained:
+  `/private/tmp/loopex-m7-preparation-live-current-recovery-20261002.log`, SHA-256
+  `eb970a4ae6ba6a4c48a74551b020224bfdde17e2bdd74bbf495e20f91a7787a7`;
+  `/private/tmp/loopex-m7-preparation-live-current-recovery-fixed-20261002.log`, SHA-256
+  `2e68f39747cf5fb21805f260921422a5b88970c14a0a3835d0b836906c52a8b2`;
+  `/private/tmp/loopex-m7-preparation-live-current-final-20261002.log`, SHA-256
+  `df91dd70fd0a7da253bfe241fcd550c9dc24160d40d4dbd19437c603d283a88e`;
+  `/private/tmp/loopex-m7-preparation-live-floor-20261002.log`, SHA-256
+  `27656b09af5a261f261647d65b5622ae0ab692d1bbf040a71d1619eb29e6ff20`.
+  Early spill/new tool generations and the long episode-cutoff witness remain
+  unfinished. Original: 33 done / 153 remaining. Added: 123 done / 10 remaining.
+- Integration check: exact 360d293ac9e84b783be58c7b0fd9808601f7e45e
+  ran once and passed all 11 application suites and preliminary gates in 906
+  seconds. Complete output: `/private/tmp/loopex-m7-360d293a-fast-check.log`, SHA-256
+  `472a980511a8404d02f0eedbcc6a424bf4053b42084cab8edcc32f23d36a7cbd`.
+  It covers the pure preparation reservations/references, not the subsequent
+  retained failure or live lifecycle changes. Earlier failures remain failures;
+  this does not resolve the outstanding provider-cutoff flake or close M7.
+
 - Done: T02 retains tool_result_preparation_failed_v1 before emitting an
   unavailable refusal. The closed record captures episode/run/turn, exact
   source fingerprint, bounded cause and observation clock. Replay independently
@@ -2891,6 +2931,8 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
 
 ### Added implementation subtasks
+
+- [x] Run verified preparation through the public transfer store after durable reservation; join exact workers before reference/terminal commits and prove uncertain commits, recovery, cancellation, run-cutoff precedence and bounded adapter failures on both toolchains.
 
 - [x] Retain bounded source preparation failure facts and independently derive unavailable refusal-v2/terminal causes; prove no extra source charge or deadline reset and reject unsupported history before reservation.
 

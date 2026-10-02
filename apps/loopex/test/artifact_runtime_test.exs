@@ -18,11 +18,43 @@ defmodule Loopex.ArtifactRuntimeTest do
 
     alias LoopexProtocol.Canonical
 
-    def start do
-      Agent.start_link(fn -> %{objects: %{}, uses: %{}} end)
+    def start(options \\ []) do
+      Agent.start_link(fn ->
+        %{
+          objects: %{},
+          uses: %{},
+          observer: options[:observer],
+          gate: options[:gate],
+          failure: options[:failure]
+        }
+      end)
     end
 
     def put(pid, bytes, %{media_type: media_type, role: role, metadata: metadata}) do
+      settings = Agent.get(pid, &Map.take(&1, [:observer, :gate, :failure]))
+
+      if is_pid(settings.observer),
+        do: send(settings.observer, {:artifact_put, self(), bytes, metadata})
+
+      if settings.gate do
+        receive do
+          :retain_source -> :ok
+        after
+          5_000 -> raise "artifact fixture gate was not released"
+        end
+      end
+
+      case settings.failure do
+        :raise -> raise "private artifact adapter failure"
+        :throw -> throw({:private_adapter_failure, bytes})
+        :exit -> exit({:private_adapter_failure, metadata})
+        nil -> retain(pid, bytes, media_type, role, metadata)
+      end
+    end
+
+    def put(_pid, _bytes, _use), do: {:error, :adapter_received_unnormalized_use}
+
+    defp retain(pid, bytes, media_type, role, metadata) do
       digest = Canonical.digest_bytes(bytes)
       object = %{digest: digest, size: byte_size(bytes), locator: "runtime:" <> digest}
 
@@ -58,8 +90,6 @@ defmodule Loopex.ArtifactRuntimeTest do
       {:ok, reference}
     end
 
-    def put(_pid, _bytes, _use), do: {:error, :adapter_received_unnormalized_use}
-
     def fetch(pid, object) do
       case Agent.get(pid, &Map.fetch(&1.objects, object.locator)) do
         {:ok, {_stored, bytes}} -> {:ok, bytes}
@@ -79,6 +109,280 @@ defmodule Loopex.ArtifactRuntimeTest do
         {:ok, artifact_use} -> {:ok, artifact_use}
         :error -> {:error, :unknown_artifact_use}
       end
+    end
+  end
+
+  test "live retention commits source credit before IO and exact reference before the next request" do
+    {:ok, artifact_pid} = RetainedArtifactStore.start(observer: self(), gate: true)
+    on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
+    store = %{module: RetainedArtifactStore, handle: artifact_pid}
+    {fixture, session, attachment} = live_preparation_fixture(artifact_store: store)
+    assert_receive {:artifact_put, worker, bytes, metadata}, 1_000
+    exact = Process.monitor(worker)
+    records = Fixture.records(fixture, session)
+    reservation = Enum.find(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
+    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))
+    assert reservation.journal_version > receipt.journal_version
+    assert reservation.payload["source_count"] == 1
+    assert bytes == receipt.payload["receipt"]["output"]
+
+    assert metadata ==
+             Map.take(
+               receipt.payload["receipt"],
+               ~w(session_id run_id operation_id attempt tool_call_id)
+             )
+
+    assert Agent.get(artifact_pid, & &1.objects) == %{}
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    send(worker, :retain_source)
+    assert List.last(await_run_finished(attachment))["outcome"] == "completed"
+    assert_receive {:DOWN, ^exact, :process, ^worker, :normal}
+    refute Process.alive?(worker)
+    records = Fixture.records(fixture, session)
+    prepared = Enum.find(records, &(&1.payload.kind == "tool_result_reference_prepared"))
+    [_, next_request] = Enum.filter(records, &(&1.payload.kind == "model_request_committed_v2"))
+    assert prepared.journal_version < next_request.journal_version
+    assert prepared.payload["source"]["source_digest"] == Canonical.digest_bytes(bytes)
+    assert prepared.payload["source"]["source_byte_count"] == byte_size(bytes)
+    assert prepared.payload["completed_at_ms"] < reservation.payload["deadline_ms"]
+    [_, dispatched] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    message = Enum.find(dispatched.messages, &(&1["role"] == "tool"))
+    assert {:ok, encoded} = LoopexProtocol.Frame.encode(message)
+    assert IO.iodata_length(encoded) - 1 <= 2_048
+    assert {:ok, notice} = LoopexProtocol.Frame.decode(message["content"], 2_048)
+    assert notice["use_locator"] == prepared.payload["reference"]["use_locator"]
+    assert notice["omitted"] == true
+    assert Agent.get(artifact_pid, &map_size(&1.objects)) == 1
+    assert {:ok, recovered} = recover_preparation(fixture, session)
+    [source] = Map.values(recovered.tool_result_sources)
+    [episode] = Map.values(recovered.artifact_preparations)
+    assert episode["source_record_bytes"] == source.record_byte_cost
+    assert episode["source_count"] == 1 and episode["cursor"] == 1
+  end
+
+  test "missing transfer-store configuration retains a named failure without another dispatch" do
+    {fixture, session, attachment} = live_preparation_fixture([])
+    finished = List.last(await_run_finished(attachment))
+    assert finished["outcome"] == "failed"
+    assert finished["failure"]["cause"] == "artifact_preparation_failed"
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    records = Fixture.records(fixture, session)
+    assert Enum.any?(records, &(&1.payload.kind == "tool_result_preparation_failed_v1"))
+    refute Enum.any?(records, &(&1.payload.kind == "tool_result_reference_prepared"))
+    assert {:ok, _replayed} = recover_preparation(fixture, session)
+  end
+
+  test "abort joins the exact blocked retention worker before publishing the terminal" do
+    {:ok, artifact_pid} = RetainedArtifactStore.start(observer: self(), gate: true)
+    on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
+
+    {fixture, session, attachment} =
+      live_preparation_fixture(
+        artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
+      )
+
+    assert_receive {:artifact_put, worker, _bytes, _metadata}, 1_000
+    exact = Process.monitor(worker)
+
+    assert {:accepted, "abort-preparation"} =
+             Loopex.command(
+               attachment,
+               %{type: :abort, command_id: "abort-preparation"}
+             )
+
+    assert List.last(await_run_finished(attachment))["outcome"] == "cancelled"
+    refute Process.alive?(worker)
+    assert_receive {:DOWN, ^exact, :process, ^worker, :killed}
+    assert Agent.get(artifact_pid, & &1.objects) == %{}
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    refute Enum.any?(
+             Fixture.records(fixture, session),
+             &(&1.payload.kind == "tool_result_reference_prepared")
+           )
+
+    assert {:ok, _replayed} = recover_preparation(fixture, session)
+  end
+
+  test "uncertain live reservation and completion resolve before storage and model dispatch" do
+    {store_pid, _journal} = Loopex.M1RuntimeTestStore.start_store()
+    :ok = Loopex.M1RuntimeTestStore.observe_representations(store_pid, self())
+
+    :ok =
+      Loopex.M1RuntimeTestStore.hold_next_record_before_linearization(
+        store_pid,
+        "tool_result_preparation_state_v1",
+        self()
+      )
+
+    {:ok, artifact_pid} = RetainedArtifactStore.start(observer: self(), gate: true)
+    on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
+
+    {fixture, session, attachment} =
+      live_preparation_fixture(
+        store: store_pid,
+        artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
+      )
+
+    assert_receive {:record_held_before_linearization, waiter, ^store_pid,
+                    "tool_result_preparation_state_v1", reservation_tx},
+                   1_000
+
+    refute_received {:artifact_put, _, _, _}
+    assert Agent.get(artifact_pid, & &1.objects) == %{}
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    :ok =
+      Loopex.M1RuntimeTestStore.inject(
+        store_pid,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    Loopex.M1RuntimeTestStore.release(waiter)
+
+    assert_receive {:transaction_represented, ^store_pid, ^reservation_tx,
+                    {:committed, _reservation_id, _reservation_receipt}},
+                   1_000
+
+    assert_receive {:artifact_put, worker, _bytes, _metadata}, 1_000
+    exact = Process.monitor(worker)
+
+    :ok =
+      Loopex.M1RuntimeTestStore.inject(
+        store_pid,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    send(worker, :retain_source)
+
+    assert_receive {:transaction_represented, ^store_pid, completion_tx,
+                    {:committed, _completion_id, completion_receipt}},
+                   1_000
+
+    assert List.last(await_run_finished(attachment))["outcome"] == "completed"
+    assert_receive {:DOWN, ^exact, :process, ^worker, :normal}
+    records = Fixture.records(fixture, session)
+    [reservation] = Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
+    [prepared] = Enum.filter(records, &(&1.payload.kind == "tool_result_reference_prepared"))
+    assert reservation.payload["source_count"] == 1
+    assert prepared.payload["source"] == reservation.payload["source"]
+    assert reservation_tx.records == [reservation.payload]
+    assert completion_tx.records == [prepared.payload]
+    assert completion_receipt.journal_versions.last == prepared.journal_version
+
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 2
+    assert {:ok, _replayed} = recover_preparation(fixture, session)
+  end
+
+  test "recovery reuses the exact reservation and source after the retention worker is joined" do
+    {:ok, artifact_pid} = RetainedArtifactStore.start(observer: self(), gate: true)
+    on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
+    artifact_store = %{module: RetainedArtifactStore, handle: artifact_pid}
+    {fixture, session, _attachment} = live_preparation_fixture(artifact_store: artifact_store)
+    assert_receive {:artifact_put, old_worker, bytes, metadata}, 1_000
+    exact = Process.monitor(old_worker)
+    assert {:ok, before} = recover_preparation(fixture, session)
+    [reservation] = Map.values(before.artifact_preparations)
+    assert :ok = Loopex.stop(fixture.runtime)
+    refute Process.alive?(old_worker)
+    assert_receive {:DOWN, ^exact, :process, ^old_worker, _}
+
+    restarted =
+      Fixture.start(
+        store: fixture.store,
+        tools: [],
+        artifact_store: artifact_store,
+        script: [%{text: "done", calls: []}]
+      )
+
+    on_exit(fn -> Fixture.stop(restarted) end)
+
+    assert {:ok, ^session} =
+             Loopex.resume_session(restarted.runtime, session, command_id: "resume-preparation")
+
+    assert {:ok, attachment} =
+             Loopex.attach(restarted.runtime, session,
+               after_event_sequence: before.event_sequence
+             )
+
+    assert_receive {:artifact_put, new_worker, ^bytes, ^metadata}, 1_000
+    assert new_worker != old_worker
+    new_exact = Process.monitor(new_worker)
+    assert {:ok, pending} = recover_preparation(restarted, session)
+    assert pending.artifact_preparations == before.artifact_preparations
+    assert Loopex.AgentLoopTestModel.dispatched(restarted.model) == []
+    send(new_worker, :retain_source)
+    assert List.last(await_run_finished(attachment))["outcome"] == "completed"
+    assert_receive {:DOWN, ^new_exact, :process, ^new_worker, :normal}
+    assert {:ok, after_resume} = recover_preparation(restarted, session)
+    [completed] = Map.values(after_resume.artifact_preparations)
+
+    assert Map.take(
+             completed,
+             ~w(episode_id started_at_ms deadline_ms deadline_origin source_count source_record_bytes)
+           ) ==
+             Map.take(
+               reservation,
+               ~w(episode_id started_at_ms deadline_ms deadline_origin source_count source_record_bytes)
+             )
+
+    assert completed["cursor"] == 1
+
+    assert Enum.count(
+             Fixture.records(restarted, session),
+             &(&1.payload.kind == "tool_result_preparation_state_v1")
+           ) == 1
+  end
+
+  test "the committed run cutoff joins retention and keeps its run-bound outcome" do
+    {:ok, artifact_pid} = RetainedArtifactStore.start(observer: self(), gate: true)
+    on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
+
+    {fixture, session, attachment} =
+      live_preparation_fixture(
+        bounds_deadline_ms: 1_000,
+        artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
+      )
+
+    assert_receive {:artifact_put, worker, _bytes, _metadata}, 1_000
+    exact = Process.monitor(worker)
+    finished = List.last(await_run_finished(attachment))
+    assert finished["outcome"] == "bound_reached"
+    assert finished["bound"] == "deadline"
+    refute Process.alive?(worker)
+    assert_receive {:DOWN, ^exact, :process, ^worker, :killed}
+    assert Agent.get(artifact_pid, & &1.objects) == %{}
+    records = Fixture.records(fixture, session)
+    [reserved] = Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_state_v1"))
+    assert reserved.payload["deadline_origin"] == "run"
+    refute Enum.any?(records, &(&1.payload.kind == "tool_result_preparation_failed_v1"))
+    refute Enum.any?(records, &(&1.payload.kind == "tool_result_reference_prepared"))
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert {:ok, _replayed} = recover_preparation(fixture, session)
+  end
+
+  for failure <- [:raise, :throw, :exit] do
+    test "adapter #{failure} becomes a bounded retained failure with no exception detail" do
+      {:ok, artifact_pid} =
+        RetainedArtifactStore.start(observer: self(), failure: unquote(failure))
+
+      on_exit(fn -> if Process.alive?(artifact_pid), do: Agent.stop(artifact_pid) end)
+
+      {fixture, session, attachment} =
+        live_preparation_fixture(
+          artifact_store: %{module: RetainedArtifactStore, handle: artifact_pid}
+        )
+
+      finished = List.last(await_run_finished(attachment))
+      assert finished["outcome"] == "failed"
+      assert finished["failure"]["cause"] == "artifact_preparation_failed"
+      assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+      records = Fixture.records(fixture, session)
+      [fact] = Enum.filter(records, &(&1.payload.kind == "tool_result_preparation_failed_v1"))
+      assert fact.payload["cause"] == "artifact_preparation_failed"
+      refute inspect(records) =~ "private artifact adapter failure"
+      refute inspect(records) =~ "private_adapter_failure"
+      assert {:ok, _replayed} = recover_preparation(fixture, session)
     end
   end
 
@@ -335,28 +639,29 @@ defmodule Loopex.ArtifactRuntimeTest do
 
   test "an outstanding preparation reservation prevents otherwise valid staging on replay" do
     {fixture, state} = preparation_fixture()
-    records = Fixture.records(fixture, state.session_id)
-    events = Fixture.events(fixture, state.session_id)
-    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))
-    finished = Enum.find(events, &(&1.kind == "tool.finished"))
-    prefix = Enum.take_while(records, &(&1.journal_version <= receipt.journal_version))
-    prefix_events = Enum.take_while(events, &(&1.event_sequence <= finished.event_sequence))
-    assert {:ok, before_staging} = SessionState.recover(state.session_id, prefix, prefix_events)
-    run = before_staging.active_run_id
+    run = state.active_run_id
+    {request, options} = inline_staging_candidate(fixture, state)
+    assert {:ok, staging} = SessionState.propose_model_request(state, run, request, options)
+    _staged = retain_preparation_proposal(fixture, state, staging)
+    assert {:ok, _baseline} = recover_preparation(fixture, state.session_id)
 
     assert {:ok, reservation} =
              SessionState.propose_preparation_reservation(
-               before_staging,
+               state,
                run,
                System.system_time(:millisecond)
              )
 
     assert {:error, :artifact_preparation_pending} =
-             SessionState.propose_model_request(reservation.next, run, %{})
+             SessionState.propose_model_request(reservation.next, run, request, options)
+
+    records = Fixture.records(fixture, state.session_id)
+    events = Fixture.events(fixture, state.session_id)
+    prefix = Enum.take_while(records, &(&1.journal_version <= state.journal_version))
 
     row = %{
-      receipt
-      | journal_version: receipt.journal_version + 1,
+      List.last(prefix)
+      | journal_version: state.journal_version + 1,
         payload: hd(reservation.records)
     }
 
@@ -688,6 +993,134 @@ defmodule Loopex.ArtifactRuntimeTest do
     end
   end
 
+  # Concept: the staging barrier is tested against an independently valid inline
+  # candidate, including full original source bytes and actual Store admission.
+  # Technical depth: use the retained first request's fixed system/tool receipts
+  # and rebuild only selected lineage descriptors, totals and ordered digest.
+  defp inline_staging_candidate(fixture, state) do
+    [first] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+
+    initial =
+      Enum.find(
+        Fixture.records(fixture, state.session_id),
+        &(&1.payload.kind == "model_request_committed_v2")
+      )
+
+    receipt = initial.payload["context_receipt"]
+
+    assert {:ok, entries, projection} =
+             SessionState.projected_lineage(state, state.active_run_id, 2_048)
+
+    messages = [hd(first.messages) | Enum.map(entries, &elem(&1, 1))]
+
+    assert {:ok, request} =
+             Loopex.Model.request(first.model, messages,
+               tools: first.tools,
+               sampling: first.sampling,
+               deadline: System.system_time(:millisecond) + 600_000
+             )
+
+    fixed = Enum.filter(receipt["blocks"], &(&1["provenance_class"] == "system"))
+    [system | tools] = fixed
+
+    session =
+      Enum.map(entries, fn {source, message} ->
+        bytes = Canonical.encode(message)
+
+        %{
+          "source_reference" => source,
+          "provenance_class" => "session",
+          "trust_class" => "session_owned_durable_truth",
+          "content_digest" => Canonical.digest_bytes(bytes),
+          "byte_cost" => byte_size(bytes),
+          "token_cost" => Loopex.Bounds.estimate(bytes)
+        }
+      end)
+
+    blocks = [system] ++ session ++ tools
+
+    cost = fn rows ->
+      %{
+        "byte_cost" => Enum.sum(Enum.map(rows, & &1["byte_cost"])),
+        "token_cost" => Enum.sum(Enum.map(rows, & &1["token_cost"]))
+      }
+    end
+
+    totals =
+      Map.put(cost.(blocks), "by_provenance", %{
+        "system" => cost.(fixed),
+        "session" => cost.(session),
+        "project_resource" => %{"byte_cost" => 0, "token_cost" => 0}
+      })
+
+    framed =
+      Enum.map(blocks, fn block ->
+        encoded = Canonical.encode(block)
+        [<<byte_size(encoded)::unsigned-big-integer-size(64)>>, encoded]
+      end)
+
+    digest =
+      :crypto.hash(:sha256, ["loopex.context.descriptors.v1", <<0>>, framed])
+      |> Base.encode16(case: :lower)
+
+    receipt =
+      Map.merge(receipt, %{
+        "blocks" => blocks,
+        "totals" => totals,
+        "provider_estimated_tokens" => totals["token_cost"],
+        "record_byte_cost" => 0,
+        "ordered_descriptor_digest" => digest
+      })
+
+    {request, [context_receipt: receipt, lineage_projection: projection]}
+  end
+
+  defp live_preparation_fixture(options) do
+    [_, range] =
+      Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
+      |> File.read!()
+      |> JSON.decode!()
+      |> Map.fetch!("vectors")
+
+    fixture =
+      Fixture.start(
+        Keyword.merge(options,
+          tools: [Fixture.tool_definition(), range["definition"]],
+          script: [
+            %{
+              text: "work",
+              calls: [
+                %{
+                  id: String.duplicate("\"", 1_000),
+                  name: "write",
+                  arguments: %{"path" => "output"}
+                }
+              ]
+            },
+            %{text: "done", calls: []}
+          ]
+        )
+      )
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+    genesis = Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions)
+
+    assert {:ok, session} =
+             Loopex.Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "live-prepare",
+               %{},
+               genesis
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+    {fixture, session, attachment}
+  end
+
   defp preparation_fixture do
     [_, range] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
@@ -700,6 +1133,7 @@ defmodule Loopex.ArtifactRuntimeTest do
     fixture =
       Fixture.start(
         tools: [Fixture.tool_definition(), range["definition"]],
+        bounds_max_turns: 1,
         script: [
           %{text: "work", calls: [%{id: id, name: "write", arguments: %{"path" => "output"}}]},
           %{text: "done", calls: []}
@@ -708,7 +1142,13 @@ defmodule Loopex.ArtifactRuntimeTest do
 
     on_exit(fn -> Fixture.stop(fixture) end)
 
-    genesis = Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions)
+    configuration =
+      Loopex.ConfiguredGenesisFixture.configuration()
+      |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
+      |> put_in(["provider_mapping", "mapping_revision"], "fixture.terminal-history.v1")
+      |> put_in(["provider_mapping", "canonical_terminal_tool_history"], true)
+
+    genesis = Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions, configuration)
 
     assert {:ok, session} =
              Loopex.Runtime.create_session_with_genesis(fixture.runtime, "prepare", %{}, genesis)
@@ -718,7 +1158,7 @@ defmodule Loopex.ArtifactRuntimeTest do
     assert {:accepted, "prompt"} =
              Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
 
-    assert List.last(await_run_finished(attachment))["outcome"] == "completed"
+    assert List.last(await_run_finished(attachment))["outcome"] == "bound_reached"
     assert :ok = Loopex.stop(fixture.runtime)
     assert {:ok, recovered} = recover_preparation(fixture, session)
 

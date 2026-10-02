@@ -132,6 +132,7 @@ defmodule Loopex.ArtifactReadAdmissionTest do
     fixture =
       Fixture.start(
         tools: context.definitions,
+        bounds_max_turns: 1,
         script: [
           %{text: "work", calls: [%{id: id, name: "write", arguments: %{"path" => "output"}}]},
           %{text: "done", calls: []}
@@ -140,7 +141,7 @@ defmodule Loopex.ArtifactReadAdmissionTest do
 
     on_exit(fn -> Fixture.stop(fixture) end)
     {session, attachment} = run(fixture, "prepare-source")
-    assert List.last(finish(attachment))["outcome"] == "completed"
+    assert List.last(finish(attachment))["outcome"] == "bound_reached"
 
     records = Fixture.records(fixture, session)
     receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))

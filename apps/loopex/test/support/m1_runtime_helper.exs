@@ -61,6 +61,10 @@ defmodule Loopex.M1RuntimeTestStore do
 
   def inspect_state(pid), do: GenServer.call(pid, :inspect_state)
   def observed(pid), do: GenServer.call(pid, :observed)
+
+  def observe_representations(pid, observer) when is_pid(observer),
+    do: GenServer.call(pid, {:observe_representations, observer})
+
   def injected(pid), do: GenServer.call(pid, :injected)
   def fail_reads(pid, enabled), do: GenServer.call(pid, {:fail_reads, enabled})
 
@@ -111,6 +115,7 @@ defmodule Loopex.M1RuntimeTestStore do
        sessions: %{},
        resolutions: %{},
        status_queries: [],
+       representation_observer: nil,
        event_reads: [],
        injected: MapSet.new(),
        observed: MapSet.new(),
@@ -129,6 +134,9 @@ defmodule Loopex.M1RuntimeTestStore do
   end
 
   @impl GenServer
+  def handle_call({:observe_representations, observer}, _from, state),
+    do: {:reply, :ok, %{state | representation_observer: observer}}
+
   def handle_call({:inject, {transition, phase} = pair}, _from, state) do
     recovery_setup =
       if phase == :recovery_representation,
@@ -443,6 +451,13 @@ defmodule Loopex.M1RuntimeTestStore do
          {:ok, binding} <- Store.immutable_binding(transaction) do
       case retained(state, transaction) do
         {:ok, %{binding: ^binding, outcome: outcome}} ->
+          if is_pid(state.representation_observer),
+            do:
+              send(
+                state.representation_observer,
+                {:transaction_represented, self(), transaction, outcome}
+              )
+
           {checkpoint, state} = checkpoint(state, transition, :recovery_representation)
           reply_checkpoint(checkpoint, from, state, transaction, outcome)
 

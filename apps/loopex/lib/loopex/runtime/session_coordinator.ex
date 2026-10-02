@@ -399,6 +399,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        transaction: nil,
        incarnation: nil,
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
+       artifact_store: Keyword.get(options, :artifact_store),
        workers: Keyword.fetch!(options, :workers),
        owner_workers: Keyword.fetch!(options, :owner_workers),
        model: Keyword.fetch!(options, :model),
@@ -954,6 +955,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
               :run_deadline,
               :interaction_expired,
               :policy_timeout,
+              :artifact_preparation_deadline,
               :model_reserve,
               :execute_result_reserve,
               :cleanup_settled
@@ -1070,6 +1072,49 @@ defmodule Loopex.Runtime.SessionCoordinator do
         |> cancel_policy_timeout(reference)
         |> disarm_deadline(run_id)
         |> complete_policy_consultation(run_id, result)
+
+      {{:artifact_preparation, run_id, pid, metadata}, remaining} ->
+        # Concept: receipt storage finishes only after its worker has stopped.
+        # Technical depth: retain the bounded result until this exact monitor's
+        # DOWN. No preparation fact or model request commits from a live worker.
+        metadata = Map.put(metadata, :result, result)
+
+        {:noreply,
+         put_in_flight(
+           %{state | in_flight: remaining},
+           reference,
+           {:artifact_preparation, run_id, pid, metadata}
+         )}
+    end
+  end
+
+  defp handle_owner_info({:artifact_preparation_deadline, reference, run_id}, state) do
+    case state.in_flight[reference] do
+      {:artifact_preparation, ^run_id, _pid, metadata} ->
+        if System.system_time(:millisecond) < metadata.deadline do
+          timer =
+            arm_slice(
+              {:artifact_preparation_deadline, reference, run_id},
+              metadata.deadline - System.system_time(:millisecond)
+            )
+
+          {:noreply,
+           put_in_flight(
+             state,
+             reference,
+             put_elem(state.in_flight[reference], 3, %{metadata | timer: timer})
+           )}
+        else
+          state = cancel_artifact_preparation(state, run_id)
+
+          if metadata.origin == "run",
+            do: finish_at_deadline(state, run_id),
+            else:
+              retain_artifact_preparation_failure(state, run_id, :artifact_preparation_deadline)
+        end
+
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -1350,6 +1395,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
           run_id,
           :receipt_lookup_failed
         )
+
+      {{:artifact_preparation, run_id, _pid, metadata}, remaining} ->
+        Process.cancel_timer(metadata.timer)
+        result = if reason == :normal, do: Map.get(metadata, :result), else: nil
+        finish_artifact_preparation(%{state | in_flight: remaining}, run_id, result)
 
       {_work, remaining} ->
         {:stop, {:worker_failed, reason}, %{state | in_flight: remaining}}
@@ -3291,6 +3341,185 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # model configuration declares no `max_tokens` is refused here rather than
   # truncated at dispatch by a number no record names.
   defp prepare_model_request(state, work) do
+    now = System.system_time(:millisecond)
+
+    if in_flight?(state, :artifact_preparation, work.run_id) do
+      {:noreply, state}
+    else
+      case SessionState.propose_preparation_reservation(
+             state.durable,
+             work.run_id,
+             now
+           ) do
+        :ready ->
+          stage_prepared_model_request(state, work)
+
+        {:ok, proposal} ->
+          with {:ok, next} <- commit_internal(state, proposal) do
+            send(self(), :advance_work)
+            {:noreply, next}
+          else
+            {:error, reason} -> {:stop, {:artifact_preparation_commit_failed, reason}, state}
+          end
+
+        {:reserved, source, episode} ->
+          start_artifact_preparation(state, work.run_id, source, episode)
+
+        {:error, :run_deadline_reached} ->
+          finish_at_deadline(state, work.run_id)
+
+        {:error, :invalid_artifact_preparation_clock} ->
+          cause =
+            if is_integer(now) and now >= 0 and now <= @uint64_max,
+              do: "deadline_addition_overflow",
+              else: "clock_out_of_domain"
+
+          commit_deadline_failure(state, work.run_id, cause)
+
+        {:error, cause}
+        when cause in [
+               :artifact_preparation_count_exhausted,
+               :artifact_preparation_bytes_exhausted,
+               :artifact_preparation_deadline
+             ] ->
+          retain_artifact_preparation_failure(state, work.run_id, cause)
+
+        {:error, cause}
+        when cause in [
+               :canonical_history_rendering_unsupported,
+               :context_projection_invalid,
+               :artifact_metadata_unrepresentable,
+               :artifact_preparation_failed
+             ] ->
+          commit_context_preparation_failure(state, work.run_id, cause)
+
+        {:error, reason} ->
+          {:stop, {:artifact_preparation_failed, reason}, state}
+      end
+    end
+  end
+
+  # Concept: a reserved source uses the same host store as public transfers.
+  # Technical depth: the verified put receives only exact receipt text and its
+  # five original labels. Exceptions stay inside this supervised worker; handles
+  # and adapter error details never enter records, events or diagnostics.
+  defp start_artifact_preparation(state, run_id, source, episode) do
+    now = System.system_time(:millisecond)
+
+    cond do
+      now >= episode["deadline_ms"] and episode["deadline_origin"] == "run" ->
+        finish_at_deadline(state, run_id)
+
+      now >= episode["deadline_ms"] ->
+        retain_artifact_preparation_failure(state, run_id, :artifact_preparation_deadline)
+
+      true ->
+        store = state.artifact_store
+
+        task =
+          Task.Supervisor.async_nolink(state.owner_workers, fn ->
+            try do
+              case store do
+                %{module: _module, handle: _handle} ->
+                  metadata =
+                    Map.merge(source.metadata, %{
+                      "role" => "tool_output",
+                      "media_type" => "text/plain"
+                    })
+
+                  case Loopex.ArtifactStore.put(store, source.content, metadata) do
+                    {:ok, reference} -> {:ok, reference}
+                    _ -> {:error, :artifact_preparation_failed}
+                  end
+
+                _ ->
+                  {:error, :artifact_preparation_failed}
+              end
+            rescue
+              _ -> {:error, :artifact_preparation_failed}
+            catch
+              _, _ -> {:error, :artifact_preparation_failed}
+            end
+          end)
+
+        metadata = %{
+          deadline: episode["deadline_ms"],
+          origin: episode["deadline_origin"],
+          timer:
+            arm_slice(
+              {:artifact_preparation_deadline, task.ref, run_id},
+              episode["deadline_ms"] - now
+            )
+        }
+
+        {:noreply,
+         put_in_flight(state, task.ref, {:artifact_preparation, run_id, task.pid, metadata})}
+    end
+  end
+
+  defp finish_artifact_preparation(state, run_id, {:ok, reference}) do
+    now = System.system_time(:millisecond)
+
+    case SessionState.propose_prepared_reference(state.durable, run_id, reference, now) do
+      {:ok, proposal} ->
+        with {:ok, next} <- commit_internal(state, proposal) do
+          send(self(), :advance_work)
+          {:noreply, next}
+        else
+          {:error, reason} -> {:stop, {:artifact_preparation_commit_failed, reason}, state}
+        end
+
+      {:error, :run_deadline_reached} ->
+        finish_at_deadline(state, run_id)
+
+      {:error, :artifact_preparation_deadline} ->
+        retain_artifact_preparation_failure(state, run_id, :artifact_preparation_deadline)
+
+      {:error, _} ->
+        retain_artifact_preparation_failure(state, run_id, :artifact_preparation_failed)
+    end
+  end
+
+  defp finish_artifact_preparation(state, run_id, _failed),
+    do: retain_artifact_preparation_failure(state, run_id, :artifact_preparation_failed)
+
+  defp retain_artifact_preparation_failure(state, run_id, cause) do
+    now = System.system_time(:millisecond)
+
+    cause =
+      case SessionState.propose_preparation_reservation(state.durable, run_id, now) do
+        {:reserved, _source, episode} ->
+          if now >= episode["deadline_ms"] and episode["deadline_origin"] == "preparation",
+            do: :artifact_preparation_deadline,
+            else: cause
+
+        _ ->
+          cause
+      end
+
+    cond do
+      deadline_reached?(state, run_id) ->
+        finish_at_deadline(state, run_id)
+
+      SessionState.preflight_run_history(state.durable, run_id) == {:error, cause} ->
+        commit_context_preparation_failure(state, run_id, cause)
+
+      true ->
+        case SessionState.propose_preparation_failure(state.durable, run_id, cause, now) do
+          {:ok, proposal} ->
+            with {:ok, next} <- commit_internal(state, proposal) do
+              commit_context_preparation_failure(next, run_id, cause)
+            else
+              {:error, reason} -> {:stop, {:artifact_preparation_commit_failed, reason}, state}
+            end
+
+          {:error, reason} ->
+            {:stop, {:artifact_preparation_failed, reason}, state}
+        end
+    end
+  end
+
+  defp stage_prepared_model_request(state, work) do
     run_id = work.run_id
     {declared, _charged} = SessionState.accounting(state.durable, run_id)
     elements = SessionState.lineage_elements(state.durable, run_id)
@@ -6020,6 +6249,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # it truthfully.
   defp terminate_superseded_effect_free_work(state) do
     Enum.reduce(state.in_flight, state, fn
+      {_reference, {:artifact_preparation, run_id, _pid, _metadata}}, next ->
+        cancel_artifact_preparation(next, run_id)
+
       {reference, {:model, run_id, pid, tree}}, next ->
         _ = Task.Supervisor.terminate_child(next.owner_workers, pid)
         _ = take_worker_result(reference)
@@ -6519,6 +6751,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       state
     else
       state = disarm_deadline(state, run_id)
+      state = cancel_artifact_preparation(state, run_id)
       state = cancel_policy_consultation(state, run_id)
       {state, model} = cancel_model_attempt(state, run_id, purpose)
       job_id = dispatched_job_id(state, run_id)
@@ -6704,6 +6937,33 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
         |> Map.update!(:in_flight, &Map.delete(&1, reference))
         |> cancel_policy_timeout(reference)
+    end
+  end
+
+  # Concept: cancellation proves the retention worker gone before ending its run.
+  # Technical depth: kill and join the exact local Task monitor, draining its
+  # preceding result signal. Adapter-owned orphan storage receives no committed
+  # session membership. The same path handles abort, cutoff and owner loss.
+  defp cancel_artifact_preparation(state, run_id) do
+    case Enum.find(state.in_flight, fn
+           {_, {:artifact_preparation, ^run_id, _, _}} -> true
+           _ -> false
+         end) do
+      {reference, {:artifact_preparation, ^run_id, pid, metadata}} ->
+        Process.cancel_timer(metadata.timer)
+        Process.exit(pid, :kill)
+        join_artifact_preparation(reference, pid)
+        %{state | in_flight: Map.delete(state.in_flight, reference)}
+
+      nil ->
+        state
+    end
+  end
+
+  defp join_artifact_preparation(reference, pid) do
+    receive do
+      {^reference, _result} -> join_artifact_preparation(reference, pid)
+      {:DOWN, ^reference, :process, ^pid, _reason} -> :ok
     end
   end
 
