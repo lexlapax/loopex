@@ -13,6 +13,11 @@ tracked separately and do not increase the original denominator. An unchecked
 original item may have substantial partial implementation; it closes only when
 its entire stated outcome is proved.
 
+Run `python3 scripts/m7-task-status.py` for the current T00–T19 tally. The
+[read-only reporter](../../scripts/m7-task-status.py) counts the two sections
+separately and refuses missing/duplicate task headings or a changed original
+186-item denominator. Historical progress paragraphs are not tally inputs.
+
 At each task or subtask completion, report done and remaining counts for both
 the original checklist and the added implementation subtasks, separately and
 grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
@@ -90,6 +95,15 @@ questions under Current work remain unanswered; the history-correction approval
 did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
+
+- Done: one added T00 subtask supplies `python3 scripts/m7-task-status.py`
+  for repeatable task reports from the canonical checkbox sections. It prints
+  every T00–T19 row, counts original and added work separately, ignores
+  historical status prose and refuses duplicate/missing task headings, empty
+  original sections or a changed 186-item original denominator. The path is
+  anchored to the script, so invocation outside the repository reports the
+  same ledger. Current original tally is 43 done / 143 remaining; added tally
+  is 133 done / 11 remaining. This changes task reporting, not a product proof.
 
 - Pending maintainer choice: prepared chat recovery needs the exact retained
   configuration and immutable definitions, while existing status deliberately
@@ -3355,6 +3369,7 @@ bGlzZWNvbmQpIDw9IGN1dG9mZgogICAgIGVuZAogICBlbmQKIAo=
 
 ### Added implementation subtasks
 
+- [x] Add a read-only numbered checklist reporter that separates original and added counts, validates T00–T19 ordering and preserves the supplied 186-item original denominator.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
 - [ ] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
 - [x] Pin legacy and planned M7 read-definition canonical preimages/digests and the revision-1 literal artifact-read capability table.
