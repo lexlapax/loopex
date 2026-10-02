@@ -91,6 +91,32 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: a shared host diagnostic consumer drains the existing private sink while
+  a separately supervised one-entry IO worker is stalled. Its explicit pending
+  queue stays at 256 bounded entries; excess and shutdown-discarded entries
+  count by trace/ordinary kind. Acknowledged writes count as emitted, and
+  unacknowledged writes remain delivery-unconfirmed through failure and closing.
+  The drain's observed 6,000-message mailbox backlog is deliberately separate
+  from its proved output queue/writer bounds. Owner loss, abrupt drain and
+  supervisor loss, broken output, buffer-status redaction, serialized writer
+  capacity and expired shared deadlines are proved. Both supported pairs pass
+  all ten tests in 0.6 seconds each, with warning-free compilation, formatting
+  and documentation ordering. Complete outputs:
+  `/private/tmp/loopex-m7-diagnostic-current-verified.log`, SHA-256
+  `4725cac08f1b2e61d9a397d40c3bf3f64072be8c57d0c04759bf322a513b826a`;
+  `/private/tmp/loopex-m7-diagnostic-floor-verified.log`, SHA-256
+  `d1cbd73db366fa34d98e1ac2a3e43dcca730bc56cfad9866f1abd7e055235987`.
+  This completes an added T10 subtask. Chat, ask and daemon startup/trace
+  integration remain open; no original item is closed by the consumer alone.
+  Original checklist: 28 done / 158 remaining. Added subtasks: 92 done / 11
+  remaining.
+- Running: the full fast check is running once on
+  `611b2541bc2c68b515769dcb0f7a63055f9a0d8a` in a new managed checkout.
+  Its dependency root is a real ignored directory, and exact HEAD plus complete
+  porcelain status were checked before the run. The former check worktree is
+  archived. Complete output is accumulating at
+  `/private/tmp/loopex-m7-611b2541-fast-check.log`; its result/digest remain pending.
+  This exact candidate includes the control codec, not the later consumer.
 - Done: the closed input, question and error control encoder preserves opaque
   identities and canonical quantity encodings, refuses missing/extra members
   and malformed producer-specific choices, and counts the prefix and LF in
@@ -2590,6 +2616,7 @@ or check was relaxed.
 - [x] Retain the original unknown proposal and exact OwnerLane transaction, return uncertainty immediately, and resolve only through owner-owned 100-ms worker ticks under one fixed first-unknown backstop; prove before/after persistence, exact bytes, non-commit and joined owner/deadline cleanup.
 - [x] Defer internal worker results and owner timers in arrival order while admission is unresolved; prove model/executor evidence, real run deadline ordering, abort cleanup before deferred scheduling and actual backstop release into the existing mutation fence on both toolchains.
 - [x] Encode closed input, question and error records with exact branch fields, producer-specific choices, opaque identities and the inclusive 65,536-byte cap; prove hostile content cannot forge a second record, legacy oversize refuses without truncation and output drains unchanged on both toolchains. Wait, status, closing and driver integration remain pending.
+- [x] Implement the shared independently draining diagnostic consumer with a 256-entry pending queue, one supervised writer, separate trace/ordinary delivery/drop/unconfirmed counters and captured cleanup bounds; prove observed mailbox growth separately, redaction, stalled/broken IO and owner/drain/supervisor loss on both toolchains. Host startup and trace integration remain pending.
 
 ## T11 — Implement specialized read-only helpers
 
