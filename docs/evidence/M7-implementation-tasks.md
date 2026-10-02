@@ -91,6 +91,48 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Integration check: exact e1f9d7ba59b3511fa07308cf6ea747909b75ff8b
+  ran once and passed all 11 application suites and every preliminary gate in
+  904 seconds. Complete output: `/private/tmp/loopex-m7-e1f9d7ba-fast-check.log`,
+  SHA-256 `9eadc817b82b0c87fea29438b4173853a8e05f44f89855cac6e456c6b97f6ee8`.
+  This verifies the retained preparation failure facts and live lifecycle
+  together. It does not erase earlier failed evidence, resolve the outstanding
+  provider-cutoff flake, authorize the pending contracts, or close M7.
+  The following checklist-only audit passes the documentation check in 18
+  seconds: `/private/tmp/loopex-m7-t03-audit-docs-20261002.log`, SHA-256
+  `423a1965ceffb7a086c7a92b01aadec29b580c3afaf090f48a0bee5f0fb74dcb`.
+
+- Done: audited T03's original obligations against the implemented runtime and
+  retained tests. Captured host instruction maps replace fixed Core text for
+  configured sessions; legacy selection preserves its original renderer.
+  Project and resource/skill facts keep separate source classes. Configured
+  system ceilings and complete request bounds precede dispatch. Receipt revision
+  4 binds captured instruction/configuration identities and independently
+  measured continuation costs, while old receipt generations retain their
+  decoders. Exact rendering/limits, actual two-prompt restart, malformed
+  substitutions, required refusal order, frozen native costs and typed resource
+  admission pass in four complete files: 73 cases in 7.6 seconds on each pair.
+  `/private/tmp/loopex-m7-t03-obligations-current-20261002.log`, SHA-256
+  `cc4deab414213b4187700b92d13493b1eca8068c20bbed675a6db535aa7c33bf`;
+  `/private/tmp/loopex-m7-t03-obligations-floor-20261002.log`, SHA-256
+  `6d0e5941ebb612f4cf6e28157d2b6430ba78df4453895b311a3da930ab2d0a35`.
+  Five original T03 checkboxes now close. Host workflow fact capture, the full
+  admitted/declined/changed instruction scenarios and policy/helper authority
+  remain open. Original: 38 done / 148 remaining. Added: 123 done / 11 remaining.
+- Decision pending: T02 early spill needs an immutable executor projection
+  context. Recommended artifact_policy is the closed retain=true plus projection
+  map with revision=1, artifact_read equal to the captured binding or explicit
+  null, and normalized_call_id from the existing lineage recipe. The entire
+  policy remains digest/grant-bound; old jobs retain exact bytes and spill
+  behavior. New read/search generations validate this context before effects;
+  new search allowances cover their exact capture ceiling. Alternative: a new
+  JobRequest protocol generation with first-class projection members. The
+  schema, compatibility and proof packet is retained at
+  `/private/tmp/loopex-m7-early-spill-decision.md`. AGENTS.md's new cross-app
+  contract tier requires a maintainer decision; dependent implementation stays
+  pending. The earlier repeated public tool-event identity packet remains a
+  separate unanswered decision.
+
 - Done: T02's live preparation uses the configured public transfer store. The
   session owner commits source credit before verified put, waits for the exact
   worker DOWN, and commits the prepared reference before staging another
@@ -2954,6 +2996,7 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Implement pure receipt-content excerpt formatting with the complete 2,048-byte message cap, maximal UTF-8 prefixes, fixed binary descriptions, source digest/ranges and named metadata refusal; verify both supported toolchains.
 - [x] Join excerpt formatting to ordinary staging and independently validated replay with retained projection provenance, unchanged historical requests and frozen native prefixes; allocate the shared raw-prefix allowance against both required header variants.
 - [ ] Complete bounded reference-preparation episodes and prepared-reference membership, then make above-cap inline sources eligible; join the accepted earlier spill rule and pin the remaining new tool generations.
+- [ ] Resolve the early-spill projection context contract, bind it to exact jobs, pin remaining read/search generations and prove full capture/spill/replay behavior without altering legacy jobs.
 
 ### Verification evidence
 
@@ -3440,12 +3483,12 @@ or check was relaxed.
 
 ### Original checklist
 
-- [ ] Replace core’s fixed instructions with the accepted host instruction map and rendering.
-- [ ] Keep project and skill resources separately typed and admitted.
+- [x] Replace core’s fixed instructions with the accepted host instruction map and rendering.
+- [x] Keep project and skill resources separately typed and admitted.
 - [ ] Capture workspace/environment facts and exact selected tool schemas.
-- [ ] Enforce the configured system ceiling and complete serialized-request limit.
-- [ ] Implement receipt revision 4, including continuation costs and source/configuration binding.
-- [ ] Preserve old receipt decoding.
+- [x] Enforce the configured system ceiling and complete serialized-request limit.
+- [x] Implement receipt revision 4, including continuation costs and source/configuration binding.
+- [x] Preserve old receipt decoding.
 - [ ] Test admitted, declined, changed and oversized instructions, long paths, restart and exact staged bytes.
 - [ ] Prove instructions cannot widen policy or helper authority.
 
