@@ -83,14 +83,31 @@ defmodule Loopex do
   both that commit and a fresh session-owner succession. Exact command
   re-presentation returns the retained session ID; changed canonical genesis
   conflicts.
+
+  An explicit `:genesis` option submits the host's complete prepared v2/v3
+  genesis through the same exact-creation writer. Its normalized options must
+  equal `session_options`; it supplies no runtime defaults. Creation identity
+  binds the original options and exact genesis, and a duplicate is resolved
+  before consulting current tool registrations or model routes. Present nil or
+  malformed genesis refuses rather than selecting legacy creation. Omission
+  retains the existing v2 path. The genesis is bounded plain data validated by
+  `Loopex.Runtime.SessionGenesis`, never host handles or credentials.
   """
   @spec create_session(Runtime.t(), map(), keyword()) :: {:ok, binary()} | {:error, term()}
   def create_session(runtime, session_options, options)
       when is_map(session_options) and is_list(options) do
-    with {:ok, command_id} <- Keyword.fetch(options, :command_id) do
-      Runtime.create_session(runtime, command_id, session_options)
+    with true <- Keyword.keyword?(options),
+         {:ok, command_id} <- Keyword.fetch(options, :command_id) do
+      case Keyword.fetch(options, :genesis) do
+        {:ok, genesis} ->
+          Runtime.create_session_with_genesis(runtime, command_id, session_options, genesis)
+
+        :error ->
+          Runtime.create_session(runtime, command_id, session_options)
+      end
     else
       :error -> {:error, :command_id_required}
+      false -> {:error, :invalid_session_creation}
     end
   end
 

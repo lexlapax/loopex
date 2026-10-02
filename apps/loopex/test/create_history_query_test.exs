@@ -29,7 +29,10 @@ defmodule Loopex.CreateHistoryQueryTest do
 
       for invalid <- [:legacy, nil, [], "session_genesis_v2"] do
         assert {:error, :invalid_session_creation} =
-                 Runtime.create_session_with_genesis(fixture.runtime, "invalid", options, invalid)
+                 Loopex.create_session(fixture.runtime, options,
+                   command_id: "invalid",
+                   genesis: invalid
+                 )
       end
 
       assert before_invalid_create == M1RuntimeTestStore.inspect_state(fixture.store)
@@ -52,7 +55,39 @@ defmodule Loopex.CreateHistoryQueryTest do
         end
 
       assert {:ok, session} =
-               Runtime.create_session_with_genesis(fixture.runtime, "exact", options, genesis)
+               Loopex.create_session(fixture.runtime, options,
+                 command_id: "exact",
+                 genesis: genesis
+               )
+
+      assert {:ok, ^session} =
+               Loopex.create_session(fixture.runtime, options,
+                 command_id: "exact",
+                 genesis: genesis
+               )
+
+      before_conflict = M1RuntimeTestStore.inspect_state(fixture.store)
+      changed = put_in(genesis, ["runtime_configuration", "cleanup_grace_ms"], 1_501)
+
+      assert {:error, :tx_id_conflict} =
+               Loopex.create_session(fixture.runtime, options,
+                 command_id: "exact",
+                 genesis: changed
+               )
+
+      assert {:error, :invalid_session_creation} =
+               Loopex.create_session(fixture.runtime, %{},
+                 command_id: "mismatched",
+                 genesis: genesis
+               )
+
+      assert {:error, :command_id_required} =
+               Loopex.create_session(fixture.runtime, options, genesis: genesis)
+
+      assert {:error, :invalid_session_creation} =
+               Loopex.create_session(fixture.runtime, options, ["not-keyword"])
+
+      assert before_conflict == M1RuntimeTestStore.inspect_state(fixture.store)
 
       :ok = Loopex.stop(fixture.runtime)
       {:ok, store} = Store.new(M1RuntimeTestStore, fixture.store)

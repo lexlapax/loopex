@@ -43,6 +43,11 @@ companion, and the local executor. Both define seven tools; the durable default
 keeps the original four coding tools active. An embedder that wants different
 edges composes the ports and calls `Loopex.start_link/1` directly.
 
+A host may prepare and capture a session's complete initial settings before
+creation, then submit that exact genesis through the public creation facade.
+Creation retains those settings even if files or defaults change afterward;
+repeating the same command cannot create another session with changed settings.
+
 The durable embedded API is a direct facade, not a transport or a sixth
 boundary behaviour. The ephemeral composition wraps that same facade rather
 than creating another loop. The command, the reference client, the app server,
@@ -211,7 +216,16 @@ claiming that the run finished.
 
 `create_session/3` and `resume_session/3` require a `:command_id`; an exact
 re-presentation returns the retained result, and changed content under the same
-identity conflicts. `command/2` accepts maps with `:type` and `:command_id`:
+identity conflicts. `create_session/3` optionally accepts `genesis: payload`,
+where payload is a complete normalized v2/v3 genesis prepared by
+`Loopex.Runtime.SessionGenesis.resolve/2` or validated by `normalize/1`.
+Its normalized `options` must equal the submitted session options. The exact
+payload supplies the captured settings without re-expanding runtime defaults;
+its digest joins the original options in the command identity. A present nil
+or malformed genesis refuses before a create mutation. Omitting the option
+retains ordinary v2 creation. This public option was selected by the maintainer
+on 2026-10-02 and reuses the existing exact-genesis writer.
+`command/2` accepts maps with `:type` and `:command_id`:
 `:prompt`, `:steer`, and `:follow_up` carry binary `:content`; `:abort` carries
 nothing else; `:interaction_answer`, `:admit_resources`, and `:activate_skill`
 are described below. `{:accepted, command_id}` means the command committed

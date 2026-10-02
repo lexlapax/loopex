@@ -282,11 +282,9 @@ defmodule LoopexCli.ChatConfigurationTest do
       session =
         LoopexComposition.with_runtime(options, fn runtime ->
           assert {:ok, session} =
-                   Runtime.create_session_with_genesis(
-                     runtime,
-                     "chat-create",
-                     prepared.session_options,
-                     prepared.genesis
+                   Loopex.create_session(runtime, prepared.session_options,
+                     command_id: "chat-create",
+                     genesis: prepared.genesis
                    )
 
           assert retained_genesis(runtime, session) == prepared.genesis

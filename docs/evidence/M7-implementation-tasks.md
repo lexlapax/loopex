@@ -91,6 +91,51 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: public `Loopex.create_session/3` accepts explicit `genesis: payload`
+  and delegates to the existing exact writer. Omission preserves v2 creation;
+  present nil/malformed payload, mismatched options and malformed command
+  options refuse. Repetition keeps the exact original session; changed genesis
+  preserves the writer's `tx_id_conflict`. Both v2/v3 use shared validation and
+  historical lookup. Chat's real local-store creation/restart witness now uses
+  the public facade. Complete Core file passes six cases in 0.5 seconds on each
+  pair; complete chat file passes eleven in 7.9 seconds current and 7.7 seconds
+  floor. Compilation, formatting, docs, dependency and status gates pass.
+  Complete outputs:
+  `/private/tmp/loopex-m7-public-genesis-core-current-final-20261002.log`, SHA-256
+  `9b31fa1e5e3ed43003800ab4daa6fb6e89a0c829ede4a514e9219e7c21bb7fd1`;
+  `/private/tmp/loopex-m7-public-genesis-core-floor-20261002.log`, SHA-256
+  `52aa0ee3705fc1e98b70fe7a643a3f784db51fcbab09ce41bda7cbeb8b77c352`;
+  `/private/tmp/loopex-m7-public-genesis-chat-current-20261002.log`, SHA-256
+  `d278bea301b5b773e9231de7158119ca7fa56dc17e6fdc09807fc8a404f8ce16`;
+  `/private/tmp/loopex-m7-public-genesis-chat-floor-20261002.log`, SHA-256
+  `1c366da5a7897350d1051616901255c5abece59ca32dcba4212dbebb87c92c2f`.
+  The initial new conflict assertion guessed a different category and failed
+  one of six cases; it was corrected to the unchanged writer contract. Retained
+  failed output: `/private/tmp/loopex-m7-public-genesis-core-current-20261002.log`,
+  SHA-256 `7461f25171f8c7e76c3c8a395f482d3d6eef3bd6b8fac85f29a0c20e5228ff49`.
+  Original: 32 done / 154 remaining. Added: 112 done / 11 remaining.
+- Applied: the exact maintainer-approved diagnostic-loss patch, SHA-256
+  `2076f86b43c07390e93ce9e6e7b232d5e7c7d430dfc56fd254ee9cc416b4187f`.
+  It captures one 1,000-ms deadline at owner/drain fault injection and proves
+  exact worker, supervisor and consumer DOWNs within the remaining shared
+  allowance and final cutoff. All thirteen diagnostic cases pass in 0.7 seconds
+  current and 0.6 seconds floor, including blocked IO and supervisor faults.
+  Complete outputs:
+  `/private/tmp/loopex-m7-diagnostic-loss-approved-current-20261002.log`, SHA-256
+  `e71f6f4d36b44313eb96b0f546f110777e1a282a658e5ee1ca1280c789e00744`;
+  `/private/tmp/loopex-m7-diagnostic-loss-approved-floor-20261002.log`, SHA-256
+  `ec625303d49e05a9ddabdbda9895920b69775484b1a92fdc441de8f47967da52`.
+  The added T16 item remains open until the new committed integration check
+  runs; earlier failed outputs remain failed evidence.
+- Decisions resolved — 2026-10-02: the maintainer selected public facade
+  extension for exact genesis, reuse of the public transfer store for result
+  preparation, concrete refusal-v2 amendment with optional project/resource
+  counts and byte proofs, the captured 1,000-ms diagnostic fixture cutoff,
+  and contextual Policy-port extension for absent-responder denial. These
+  explicit choices supersede the pending packets below; implementation and
+  verification remain open. The diagnostic override is also retained in the
+  Concept plan's Progress and Evidence section. No runtime cleanup bound or
+  provider-launcher terminal test bound changes with that approval.
 - Done: T08's registered reasoning subset and literal mappings are joined
   through complete file/flag chat preparation into exact validated genesis.
   All nine accepted cells retain the full subset, thinking controls, continuation
@@ -3196,6 +3241,7 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.
+- [x] Expose maintainer-selected exact prepared genesis through the public creation facade; preserve legacy omission, conflict identity, malformed-input refusal and shared v2/v3 validation, and prove real durable chat creation/restart on both supported toolchains.
 
 ## T07 — Implement automatic and explicit compaction
 
@@ -3373,7 +3419,7 @@ or check was relaxed.
 - [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
 
 - [x] Extend the existing ephemeral serial answer slot and pending projection for tagged model text/choice/decline, preserving legacy policy choices; prove maximum text, producer/kind refusal, unchanged pending observations, actual Core/HTTP continuation without executor intents and subsequent prompts on both toolchains. Public question opt-in and responder integration remain open.
-- [ ] Resolve the one-shot absent-responder admission boundary through the requested maintainer decision; implement the selected immutable runtime gate or contextual Policy amendment and prove denial before interaction admission without changing ordinary policy decisions.
+- [ ] Implement the maintainer-selected contextual Policy amendment for one-shot absent-responder admission; prove denial before interaction admission without changing ordinary policy decisions.
 
 ## T13 — Complete coding fixtures and operator instructions
 

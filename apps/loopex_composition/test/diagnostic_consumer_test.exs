@@ -238,6 +238,8 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
       supervisor_ref = Process.monitor(supervisor)
       consumer_ref = Process.monitor(consumer)
 
+      cutoff = System.monotonic_time(:millisecond) + 1_000
+
       case disposition do
         :owner ->
           send(owner, :stop)
@@ -247,9 +249,16 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
           send(owner, :stop)
       end
 
-      assert_receive {:DOWN, ^worker_ref, :process, ^worker, _}
-      assert_receive {:DOWN, ^supervisor_ref, :process, ^supervisor, _}
-      assert_receive {:DOWN, ^consumer_ref, :process, ^consumer, _}
+      for {pid, monitor} <- [
+            {worker, worker_ref},
+            {supervisor, supervisor_ref},
+            {consumer, consumer_ref}
+          ] do
+        remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
+        assert_receive {:DOWN, ^monitor, :process, ^pid, _}, remaining
+      end
+
+      assert System.monotonic_time(:millisecond) <= cutoff
     end
   end
 
