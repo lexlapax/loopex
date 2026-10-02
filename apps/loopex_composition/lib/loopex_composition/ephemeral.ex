@@ -110,20 +110,48 @@ defmodule LoopexComposition.Ephemeral do
   ## Concept
 
   Answers the session's current pending interaction by its exact offered id.
+  Choice-ID shorthand stays available; model questions also accept tagged text,
+  tagged choice and explicit decline.
 
   ## Technical depth
 
-  Identifier shape is checked after the handle, before the owner compares the
-  live pending question and its choices.
+  The handle is checked before response grammar. Responses are a choice ID,
+  `{:choice, id}`, `{:text, text}` or `:decline`. Text is nonempty UTF-8 of at
+  most 8,192 bytes. The serial owner checks the pending producer and kind before
+  occupying its existing command slot: policy-defer questions remain choice-only.
+  This call grants no authority and starts no responder worker.
   """
-  @spec answer(session(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def answer(session, interaction_id, choice_id) do
+  @spec answer(
+          session(),
+          String.t(),
+          String.t() | {:choice, binary()} | {:text, binary()} | :decline
+        ) ::
+          {:ok, map()} | {:error, term()}
+  def answer(session, interaction_id, response) do
     with {:ok, owner} <- available(session, :read),
-         true <- bounded_id?(interaction_id, 256) and bounded_id?(choice_id, 64) do
-      request(owner, {:answer, interaction_id, choice_id})
+         true <- bounded_id?(interaction_id, 256),
+         {:ok, answer} <- answer_response(response) do
+      request(owner, {:answer, interaction_id, answer})
     else
       false -> {:error, :invalid_interaction_answer}
       error -> error
+    end
+  end
+
+  defp answer_response({:choice, id}), do: answer_response(id)
+
+  defp answer_response(id) when is_binary(id) do
+    if bounded_id?(id, 64), do: {:ok, id}, else: {:error, :invalid_interaction_answer}
+  end
+
+  defp answer_response({:text, text}), do: model_response(%{"text" => text})
+  defp answer_response(:decline), do: model_response(%{"disposition" => "declined"})
+  defp answer_response(_), do: {:error, :invalid_interaction_answer}
+
+  defp model_response(answer) do
+    case LoopexProtocol.Session.Answer.normalize(answer) do
+      {:ok, normalized} -> {:ok, normalized}
+      :error -> {:error, :invalid_interaction_answer}
     end
   end
 

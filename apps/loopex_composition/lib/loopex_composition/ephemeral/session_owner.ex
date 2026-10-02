@@ -1761,22 +1761,39 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     defp command_nonce(_configuration), do: :crypto.strong_rand_bytes(32)
   end
 
+  defp answer_matches?(
+         %{"interaction_id" => id, "producer" => "model_tool"} = question,
+         id,
+         answer
+       ) do
+    request = %{
+      kind: if(question["kind"] == "text", do: :text, else: :choice),
+      choices: Enum.map(question["choices"], &%{id: &1["id"], label: &1["label"]})
+    }
+
+    normalized = if is_binary(answer), do: %{"choice_id" => answer}, else: answer
+    match?({:ok, _}, Loopex.Interaction.model_answer(request, normalized))
+  end
+
   defp answer_matches?(%{"interaction_id" => id, "choices" => choices}, id, choice)
-       when is_list(choices) do
+       when is_list(choices) and is_binary(choice) do
     Enum.any?(choices, &(Map.get(&1, "id") == choice))
   end
 
   defp answer_matches?(_interaction, _id, _choice), do: false
 
+  defp answer_command(command_id, interaction_id, answer) do
+    command = %{type: :interaction_answer, command_id: command_id, interaction_id: interaction_id}
+
+    if is_binary(answer),
+      do: Map.put(command, :choice_id, answer),
+      else: Map.put(command, :answer, answer)
+  end
+
   defp begin_live_answer(state, borrower, request, interaction_id, choice_id) do
     {command_id, session} = next_command_id(state.session, :answer)
 
-    command = %{
-      type: :interaction_answer,
-      command_id: command_id,
-      interaction_id: interaction_id,
-      choice_id: choice_id
-    }
+    command = answer_command(command_id, interaction_id, choice_id)
 
     %{state | session: session}
     |> begin_live_command(
@@ -1796,12 +1813,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp reserve_live_answer(state, borrower, request, interaction_id, choice_id) do
     {command_id, session} = next_command_id(state.session, :answer)
 
-    command = %{
-      type: :interaction_answer,
-      command_id: command_id,
-      interaction_id: interaction_id,
-      choice_id: choice_id
-    }
+    command = answer_command(command_id, interaction_id, choice_id)
 
     started_at = System.monotonic_time()
     monitor = Process.monitor(borrower)
@@ -2129,7 +2141,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         is_nil(active.borrower) ->
           state |> retire_reserved_answer() |> schedule_live_poll_fresh()
 
-        not answer_matches?(state.session.interaction, command.interaction_id, command.choice_id) ->
+        not answer_matches?(
+          state.session.interaction,
+          command.interaction_id,
+          Map.get(command, :answer, Map.get(command, :choice_id))
+        ) ->
           state
           |> retire_reserved_answer({:error, :invalid_interaction_answer})
           |> schedule_live_poll_fresh()
@@ -2342,15 +2358,37 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       |> Map.take(~w(interaction_id run_id turn tool_call_id prompt choices expires_at))
       |> Map.put("status", "pending")
 
+    question =
+      case Map.get(event, "producer") do
+        nil ->
+          question
+
+        "model_tool" ->
+          question
+          |> Map.put("producer", "model_tool")
+          |> Map.put("kind", event["interaction_kind"])
+
+        _ ->
+          Map.put(question, "producer", :invalid)
+      end
+
     if valid_interaction?(question), do: {:ok, state, {:question, question}}, else: :error
   end
 
   defp project_selected_event(state, %{kind: kind} = event)
-       when kind in ["interaction.expired", "interaction.cancelled", "interaction.resolved"] do
+       when kind in [
+              "interaction.expired",
+              "interaction.cancelled",
+              "interaction.resolved",
+              "interaction.answered",
+              "interaction.declined"
+            ] do
     interaction = state.session.interaction
 
     if interaction && event["interaction_id"] == interaction["interaction_id"] &&
-         event["run_id"] == interaction["run_id"] do
+         event["run_id"] == interaction["run_id"] &&
+         (kind not in ["interaction.answered", "interaction.declined"] or
+            interaction["producer"] == "model_tool") do
       session = %{
         state.session
         | interaction: nil,
@@ -2412,23 +2450,51 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     System.monotonic_time() + native(delay)
   end
 
-  defp valid_interaction?(question) when is_map(question) do
+  defp valid_interaction?(%{"producer" => "model_tool", "kind" => kind} = question)
+       when kind in ["choice", "text"] do
+    choices = question["choices"]
+
+    with true <- valid_question_base?(question, ~w(producer kind)),
+         true <- is_list(choices),
+         true <- Enum.all?(choices, &(is_map(&1) and Map.keys(&1) -- ["id", "label"] == [])),
+         labels = Enum.map(choices, & &1["label"]),
+         arguments =
+           if(kind == "text",
+             do: %{"question" => question["prompt"]},
+             else: %{"question" => question["prompt"], "choices" => labels}
+           ),
+         {:ok, request} <- Loopex.Interaction.model_request(arguments),
+         true <- Enum.map(request.choices, &%{"id" => &1.id, "label" => &1.label}) == choices do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp valid_interaction?(question), do: valid_policy_interaction?(question)
+
+  defp valid_policy_interaction?(question) when is_map(question) do
     choices = Map.get(question, "choices")
 
+    valid_question_base?(question, []) and is_list(choices) and length(choices) in 1..8 and
+      Enum.all?(choices, fn choice ->
+        is_map(choice) and Enum.sort(Map.keys(choice)) == ["id", "label"] and
+          bounded_id?(choice["id"], 64) and bounded_id?(choice["label"], 256)
+      end) and
+      length(Enum.uniq_by(choices, & &1["id"])) == length(choices)
+  end
+
+  defp valid_question_base?(question, extra_keys) do
     Enum.sort(Map.keys(question)) ==
-      Enum.sort(~w(interaction_id run_id turn tool_call_id status prompt choices expires_at)) and
+      Enum.sort(
+        ~w(interaction_id run_id turn tool_call_id status prompt choices expires_at) ++ extra_keys
+      ) and
       bounded_id?(question["interaction_id"], 256) and
       bounded_id?(question["run_id"], 256) and
       positive_uint64?(question["turn"]) and
       bounded_id?(question["tool_call_id"], 65_536) and
       question["status"] == "pending" and
       bounded_id?(question["prompt"], 2_048) and
-      is_list(choices) and length(choices) in 1..8 and
-      Enum.all?(choices, fn choice ->
-        is_map(choice) and Enum.sort(Map.keys(choice)) == ["id", "label"] and
-          bounded_id?(choice["id"], 64) and bounded_id?(choice["label"], 256)
-      end) and
-      length(Enum.uniq_by(choices, & &1["id"])) == length(choices) and
       positive_uint64?(question["expires_at"])
   end
 
@@ -2875,6 +2941,13 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       if config.tools == :read_only,
         do: @read_only,
         else: if(config.tools == :none, do: [], else: @coding)
+
+    {tools, active} =
+      if Map.get(config, :questions, false) and config.tools != :none do
+        {tools ++ [LoopexProtocol.ToolDefinition.question_definition()], active ++ ["loopex.ask"]}
+      else
+        {tools, active}
+      end
 
     trace = Map.fetch!(startup.registered, :trace_handle)
 

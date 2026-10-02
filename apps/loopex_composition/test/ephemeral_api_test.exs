@@ -70,6 +70,24 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
             "expires_at" => 1_800_000_000
           })
 
+        command.content in ["model-text", "model-choice"] ->
+          enqueue(%{
+            :kind => "interaction.requested",
+            "run_id" => run_id,
+            "interaction_id" => "model-question",
+            "producer" => "model_tool",
+            "interaction_kind" => if(command.content == "model-text", do: "text", else: "choice"),
+            "turn" => 1,
+            "tool_call_id" => "model-call",
+            "prompt" => "How should this work?",
+            "choices" =>
+              if(command.content == "model-text",
+                do: [],
+                else: [%{"id" => "choice-1", "label" => "Keep nil"}]
+              ),
+            "expires_at" => System.system_time(:millisecond) + 60_000
+          })
+
         command.content == "unknown" ->
           enqueue(%{
             :kind => "run.finished",
@@ -89,6 +107,32 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
           finish(run_id, "completed")
       end
 
+      {:accepted, command.command_id}
+    end
+
+    def command(
+          _attachment,
+          %{type: :interaction_answer, interaction_id: "model-question"} = command
+        ) do
+      answer = Map.get(command, :answer, %{"choice_id" => Map.get(command, :choice_id)})
+
+      text =
+        case answer do
+          %{"text" => text} -> text
+          %{"choice_id" => id} -> "choice: " <> id
+          %{"disposition" => "declined"} -> "declined"
+        end
+
+      run_id = Process.get(:run_id)
+
+      enqueue(%{
+        :kind => if(text == "declined", do: "interaction.declined", else: "interaction.answered"),
+        "interaction_id" => "model-question",
+        "run_id" => run_id
+      })
+
+      enqueue(%{:kind => "assistant.message_appended", "run_id" => run_id, "content" => text})
+      finish(run_id, "completed")
       {:accepted, command.command_id}
     end
 
@@ -402,6 +446,97 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
 
     assert {:ok, %{text: "choice: yes", outcome: :completed}} =
              Ephemeral.answer(session, "interaction-1", "yes")
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "tagged text preserves the full admitted answer and clears the model question", %{tmp: tmp} do
+    session = start_private_session(tmp, ScriptedFacade)
+
+    assert {:error,
+            {:interaction_pending,
+             %{"producer" => "model_tool", "kind" => "text", "choices" => []}}} =
+             Ephemeral.ask(session, "model-text")
+
+    text = String.duplicate("é", 4_096)
+
+    assert {:ok, %{text: ^text, outcome: :completed}} =
+             Ephemeral.answer(session, "model-question", {:text, text})
+
+    assert {:ok, %{text: ^text}} = Ephemeral.last_result(session)
+    assert {:ok, %{outcome: :completed}} = Ephemeral.ask(session, "next prompt")
+
+    assert {:error, :invalid_interaction_answer} =
+             Ephemeral.answer(session, "model-question", :decline)
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "malformed tagged responses and wrong-kind answers leave a text question pending", %{
+    tmp: tmp
+  } do
+    session = start_private_session(tmp, ScriptedFacade)
+    assert {:error, {:interaction_pending, question}} = Ephemeral.ask(session, "model-text")
+
+    for response <- [
+          {:text, ""},
+          {:text, <<255>>},
+          {:text, String.duplicate("x", 8_193)},
+          {:text, nil},
+          {:choice, "choice-1"},
+          "choice-1",
+          {:decline},
+          %{"text" => "answer"},
+          {:text, "answer", :extra},
+          {:choice, String.duplicate("x", 65)}
+        ] do
+      assert {:error, :invalid_interaction_answer} =
+               Ephemeral.answer(session, "model-question", response)
+
+      assert {:error, {:interaction_pending, ^question}} = Ephemeral.last_result(session)
+    end
+
+    assert {:error, :invalid_interaction_answer} = Ephemeral.answer(session, "wrong", :decline)
+
+    assert {:ok, %{text: "declined", outcome: :completed}} =
+             Ephemeral.answer(session, "model-question", :decline)
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "tagged choices retain the policy-defer choice-only boundary", %{tmp: tmp} do
+    session = start_private_session(tmp, ScriptedFacade)
+    assert {:error, {:interaction_pending, question}} = Ephemeral.ask(session, "question")
+
+    for response <- [{:text, "yes"}, :decline, {:choice, "not-offered"}] do
+      assert {:error, :invalid_interaction_answer} =
+               Ephemeral.answer(session, "interaction-1", response)
+
+      assert {:error, {:interaction_pending, ^question}} = Ephemeral.last_result(session)
+    end
+
+    assert {:ok, %{text: "choice: yes"}} =
+             Ephemeral.answer(session, "interaction-1", {:choice, "yes"})
+
+    assert :ok = Ephemeral.stop_session(session)
+  end
+
+  test "model choices accept a tagged offered identity and refuse text", %{tmp: tmp} do
+    session = start_private_session(tmp, ScriptedFacade)
+
+    assert {:error,
+            {:interaction_pending, %{"producer" => "model_tool", "kind" => "choice"} = question}} =
+             Ephemeral.ask(session, "model-choice")
+
+    for response <- [{:text, "Keep nil"}, {:choice, "choice-2"}] do
+      assert {:error, :invalid_interaction_answer} =
+               Ephemeral.answer(session, "model-question", response)
+
+      assert {:error, {:interaction_pending, ^question}} = Ephemeral.last_result(session)
+    end
+
+    assert {:ok, %{text: "choice: choice-1"}} =
+             Ephemeral.answer(session, "model-question", {:choice, "choice-1"})
 
     assert :ok = Ephemeral.stop_session(session)
   end

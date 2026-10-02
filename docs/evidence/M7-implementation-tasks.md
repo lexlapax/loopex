@@ -91,6 +91,40 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T12's `answer/3` keeps the choice-ID shorthand and adds tagged
+  choice/text and explicit decline. The existing serial owner checks the pending
+  producer and kind before occupying its command slot, including an answer
+  reserved while the sole event reader is polling. Policy-defer remains
+  choice-only; malformed, wrong-kind, unoffered and stale answers leave the
+  pending observation unchanged. Model question projection retains its producer
+  and kind; answered/declined terminals clear only model questions. No response
+  creates a responder worker or grants effect authority.
+  The private prepared owner configuration can select the exact question tool
+  generation alongside its existing nonempty tools. Public startup grammar
+  still refuses `questions`; the complete opt-in/responder union remains open.
+  Existing API/serial tests and three actual-owner/Core/local-HTTP witnesses
+  pass 36 cases in 19.5 seconds on each toolchain. Actual Core records prove
+  model questions/answers without executor intents, preserve a 2,200-byte answer
+  in the next request, refuse stale answers and admit a subsequent prompt.
+  The scripted boundary witness also preserves the full 8,192-byte UTF-8 maximum.
+  Development verification caught a replacement-script syntax error, then a new
+  real-path fixture reading session identity from the wrong owner field. Both
+  were corrected without weakening product validation or prior assertions.
+  Complete outputs include those failures and final passes:
+  `/private/tmp/loopex-m7-ephemeral-tagged-answer-current-initial-20261002.log`, SHA-256
+  `e29df8d6c5eac4da172bc3bc0c8fc9d35900899d6edef1e392310c31df7ea993`.
+  `/private/tmp/loopex-m7-ephemeral-tagged-answer-current-fixed-20261002.log`, SHA-256
+  `d2a5e8d34970d339409b799aa2701d3a348404daaa76e99ba99c07f0f6d8fa6b`.
+  `/private/tmp/loopex-m7-ephemeral-tagged-answer-current-real-20261002.log`, SHA-256
+  `e6632cc39237ce86cd25587c06e3057d8f0da69f99afc1fd39016bf4b5c367a7`.
+  `/private/tmp/loopex-m7-ephemeral-tagged-answer-current-complete-20261002.log`, SHA-256
+  `391d939f46d7434ea245a81f27724fd7863855e213eaedf1fb7cd6ffde6078a3`.
+  `/private/tmp/loopex-m7-ephemeral-tagged-answer-floor-complete-20261002.log`, SHA-256
+  `e7f3aa6c300f978e5d39dc0527fa79c9fded004e2775d041ecd03fa6eb22a5e1`.
+  Compile, formatting, documentation and dependency gates pass. Original T12's
+  tagged-answer item is complete; startup opt-in, one-shot responder, cancellation
+  joins and attended evidence remain open. Original counts: 30 done / 156
+  remaining. Added counts: 104 done / 12 remaining.
 - Done: T11's accepted private `Runtime.effect_intents/4` query authenticates
   runtime/session scope, scans bounded captured journal cuts and verifies an
   opaque raw prefix token before returning resumed coverage. Empty projected
@@ -3112,7 +3146,7 @@ or check was relaxed.
 - [ ] Forward accepted instruction, model, reasoning, provider-binding, maintenance, question and trace options.
 - [ ] Preserve reusable embedded sessions and buffered transport.
 - [ ] Keep questions opt-in and preserve old tool selections.
-- [ ] Implement tagged choice, text and decline answers.
+- [x] Implement tagged choice, text and decline answers.
 - [ ] Consume the question responder only in the one-call API; reject unsupported combinations.
 - [ ] Run one monitored responder worker outside the serial owner.
 - [ ] Join responder termination before another question or successful cleanup.
@@ -3125,6 +3159,8 @@ or check was relaxed.
 - [x] Integrate the accepted optional trace map into ephemeral preflight, granted private-actor registration, post-capability-binding activation and bounded teardown; extend startup/loss fault proofs to the diagnostic drain, private writer supervisor and active IO worker, and preserve absent/disabled startup behavior.
 
 - [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
+
+- [x] Extend the existing ephemeral serial answer slot and pending projection for tagged model text/choice/decline, preserving legacy policy choices; prove maximum text, producer/kind refusal, unchanged pending observations, actual Core/HTTP continuation without executor intents and subsequent prompts on both toolchains. Public question opt-in and responder integration remain open.
 
 ## T13 — Complete coding fixtures and operator instructions
 
@@ -3261,7 +3297,7 @@ before a provider demonstration.
 | Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Nine ordinary adapter mappings registered with both native transports, per-cell streaming/bound/disclosure and canonical terminal-history conformance; host integration, separate summarizer and live witnesses pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Core startup capture and durable/ephemeral instruction forwarding implemented; model routing, episode capture, checkpoint and compaction pending |
-| Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Pending |
+| Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Durable Core lifecycle/replay and ephemeral tagged answer path implemented; public option/responder, wire and attended evidence pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
 | Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Shared reference/exclusion validation, ephemeral startup/dispatch, durable token selection and direct/borrowed/daemon custody startup implemented; CLI and helper integration pending |
 | Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths, trusted trace selectors, flag parser, new-session precedence/origins and initial capability/instruction admission implemented; complete role/maintenance preparation, command entry and redacted inspection pending |

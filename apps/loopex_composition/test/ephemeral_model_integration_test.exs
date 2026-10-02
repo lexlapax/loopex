@@ -370,6 +370,82 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert content =~ "invalid_tool_arguments"
   end
 
+  for {arguments, response, expected} <- [
+        {%{"question" => "How should nil be encoded?"}, {:text, String.duplicate("é", 1_100)},
+         String.duplicate("é", 1_100)},
+        {%{"question" => "Which encoding?", "choices" => ["empty", "literal null"]},
+         {:choice, "choice-2"}, "literal null"},
+        {%{"question" => "How should nil be encoded?"}, :decline, "declined"}
+      ] do
+    test "the actual ephemeral owner carries #{inspect(response |> then(fn value -> if is_tuple(value), do: elem(value, 0), else: value end))} through Core and real HTTP" do
+      root =
+        Path.join(
+          System.tmp_dir!(),
+          "loopex-question-#{Base.encode16(:crypto.strong_rand_bytes(12))}"
+        )
+
+      File.mkdir!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      port =
+        start_server([
+          {:tool, "ask", unquote(Macro.escape(arguments))},
+          "answered",
+          "next prompt survived"
+        ])
+
+      {:ok, config} =
+        LoopexComposition.Ephemeral.Preflight.prepare(
+          policy: Policy,
+          model: "ollama:llama3.2",
+          base_url: "http://127.0.0.1:#{port}/v1",
+          cwd: root,
+          tools: :read_only,
+          max_tokens: 128,
+          timeout: 15_000
+        )
+
+      # The public questions/responder option union is a later integration unit.
+      # This accepted selection exercises the actual owner/runtime/transport path.
+      config = Map.put(config, :questions, true)
+      supervisor = Process.whereis(LoopexComposition.Ephemeral.OwnerSupervisor)
+      {:ok, activation} = LoopexComposition.Ephemeral.OwnerActivation.start(supervisor)
+      owner = LoopexComposition.Ephemeral.OwnerActivation.owner(activation)
+      {:ok, cell} = LoopexComposition.Ephemeral.OwnerActivation.begin(activation)
+
+      assert {:ok, :session_ready} =
+               LoopexComposition.Ephemeral.SessionOwner.start_session(owner, config, 16_000)
+
+      session = {:loopex_ephemeral_session, owner, cell}
+      on_exit(fn -> Ephemeral.stop_session(session) end)
+
+      assert {:error,
+              {:interaction_pending, %{"producer" => "model_tool", "interaction_id" => id}}} =
+               Ephemeral.ask(session, "ask about encoding")
+
+      assert_receive {:model_request, first}, 15_000
+      assert Enum.any?(request_body(first)["tools"], &(&1["function"]["name"] == "ask"))
+      refute_receive {:model_request, _}, 50
+      startup = :sys.get_state(owner).startup
+      store = startup.registered.store_handle
+      session_id = startup.session_id
+
+      assert {:ok, %{text: "answered", outcome: :completed}} =
+               Ephemeral.answer(session, id, unquote(Macro.escape(response)))
+
+      assert_receive {:model_request, second}, 15_000
+      [tool] = Enum.filter(request_body(second)["messages"], &(&1["role"] == "tool"))
+      assert tool["content"] =~ unquote(expected)
+      assert {:ok, records} = Loopex.Store.load_records(store, session_id, 0, 256)
+      refute Enum.any?(records, &(&1.payload.kind == "effect_intent_committed"))
+      assert Enum.any?(records, &(&1.payload.kind == "model_question_response_admitted_v1"))
+      assert {:error, :invalid_interaction_answer} = Ephemeral.answer(session, id, :decline)
+      assert {:ok, %{text: "next prompt survived"}} = Ephemeral.ask(session, "next")
+      assert_receive {:model_request, _}, 15_000
+      assert :ok = Ephemeral.stop_session(session)
+    end
+  end
+
   defp ephemeral_roots do
     System.tmp_dir!()
     |> Path.join("loopex-*")
