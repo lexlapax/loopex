@@ -379,14 +379,47 @@ defmodule LoopexCompositionTest do
                policy: nil
              )
 
-    # No module in this application implements the policy behaviour, so there is
-    # nothing here a host could accidentally inherit.
+    # Concept: A composition adapter supplies no default authority of its own.
+    # Technical depth: The contextual question adapter exists to restrict a
+    # supplied host policy. Exercise every shipped tool without that policy,
+    # through both callback selections, rather than forbidding the adapter port.
     {:ok, modules} = :application.get_key(:loopex_composition, :modules)
 
-    refute Enum.any?(modules, fn module ->
-             Code.ensure_loaded?(module) and
-               function_exported?(module, :decide, 1)
-           end)
+    adapters =
+      Enum.filter(modules, fn module ->
+        Code.ensure_loaded?(module) and function_exported?(module, :decide, 1)
+      end)
+
+    assert adapters == [LoopexComposition.Ephemeral.QuestionPolicy]
+
+    definitions =
+      Loopex.Executor.Local.CodingTools.definitions() ++
+        [LoopexProtocol.ToolDefinition.question_definition()]
+
+    for adapter <- adapters, definition <- definitions do
+      request = %{
+        session_id: "session",
+        run_id: "run",
+        tool_call_id: "call",
+        generation: LoopexProtocol.ToolDefinition.generation(definition),
+        arguments: %{},
+        effect_class: definition["effect_class"],
+        idempotency_class: definition["idempotency_class"],
+        workspace_lease: "workspace"
+      }
+
+      assert Loopex.Policy.evaluate_callback(adapter, request, :admit_defer) ==
+               {:deny, :policy_unavailable}
+
+      assert {:deny, category} =
+               Loopex.Policy.evaluate_callback(
+                 %{module: adapter, context: nil},
+                 request,
+                 :admit_defer
+               )
+
+      assert category in Loopex.Policy.reason_categories()
+    end
   end
 
   test "the composition resolves its state root explicitly and never through application environment" do

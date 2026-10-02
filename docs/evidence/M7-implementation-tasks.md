@@ -91,6 +91,24 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the composition authority inventory now verifies the approved contextual
+  question adapter supplies no default authority. It still proves omitted/nil
+  host policy refusal and admits exactly that adapter in the inventory, then
+  checks every shipped ordinary and question generation denies through a bare
+  reference and through contextual invocation without a supplied host policy.
+  The prior blanket no-decide/1-export assertion rejected the new denying
+  adapter during the 4d77e61c integration run. The proof now tests its actual
+  authority contract; it does not waive a check or admit permissive defaults.
+  The complete kernel composition file passes all nine cases on both pairs.
+  Complete outputs:
+  `/private/tmp/loopex-m7-question-policy-inventory-current-20261002.log`, SHA-256
+  `2036405d6a42c4efb93c39a07214f2eb646b20818a8dda9ee6d37e671d1b3b97`;
+  `/private/tmp/loopex-m7-question-policy-inventory-floor-20261002.log`, SHA-256
+  `f4adc86be48450784db8f09d384675d8681f87f94864b228740eb441b0180af8`.
+  That exact committed integration run remains active for the other suites;
+  its composition failure remains failed evidence. Original: 33 done / 153
+  remaining. Added: 118 done / 11 remaining.
+
 - Done: public ephemeral startup accepts Boolean questions, default false,
   appending the exact question generation only to nonempty profiles. Invalid
   values, empty enabled profiles and per-call overrides refuse. Reusable
@@ -3588,6 +3606,7 @@ or check was relaxed.
 - [x] Repair the provider-child supervisor-loss fixture's monitor/fault ordering; preserve exact killed termination and original assertion bounds, retaining the failed committed integration output and both-toolchain proof.
 - [ ] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
 - [ ] Resolve the repeated provider-call public-event identity decision; implement the accepted compatibility path and prove old replay, repeated calls, cancellation, reconciliation and mutation uncertainty without rewriting retained events.
+- [x] Adapt the composition authority inventory to the approved contextual question adapter; retain the failed no-callback assertion and verify absent/nil host refusal plus denied bare/contextual decisions for every shipped tool generation on both toolchains.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.
 
