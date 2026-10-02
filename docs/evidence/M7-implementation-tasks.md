@@ -114,8 +114,9 @@ did not resolve them. No paid provider calls were made during this check.
   `ebe2ad33729bc295b9328a03101249274decddca553cb4d951d4026f861546be`.
   Embedded startup still rejects the not-yet-integrated trace option; the new
   pure validator cannot silently enable or discard an authored trace request.
-  This completes one added T10 subtask. Original checklist: 28 done / 158
-  remaining. Added subtasks: 93 done / 11 remaining.
+  This completes one added T10 subtask. One T12 integration subtask now tracks
+  the expanded ephemeral actor/cleanup proof. Original checklist: 28 done / 158
+  remaining. Added subtasks: 93 done / 12 remaining.
 - Done: a shared host diagnostic consumer drains the existing private sink while
   a separately supervised one-entry IO worker is stalled. Its explicit pending
   queue stays at 256 bounded entries; excess and shutdown-discarded entries
@@ -239,7 +240,14 @@ did not resolve them. No paid provider calls were made during this check.
   Original checklist: 28 done / 158 remaining. Added subtasks: 90 done / 11
   remaining. The chat driver and its pipe-ordering obligation remain open.
 - Next: join the shared diagnostic consumer and accepted trace configuration
-  into owning startup and teardown. Complete the remaining chat control records
+  into owning startup and teardown, beginning with T12's private ephemeral
+  owner. Its current granted startup registers each actor before activation;
+  diagnostics must join that registration and loss/fault proof. Trace activation
+  follows capability binding and precedes dispatch. Consumer and writer cleanup
+  need an explicit joined certificate within the existing shared shutdown bound;
+  parent DOWN alone cannot prove a nested IO worker gone. Preserve the absent/
+  disabled default and keep rejecting enabled startup until the lifecycle is
+  integrated. Complete the remaining chat control records
   and join the owning driver after the exact-genesis
   creation decision. The creation, preparation-store and refusal-schema questions
   were bundled again for the maintainer; no dependent contract change is made.
@@ -2685,6 +2693,8 @@ or check was relaxed.
 - [ ] Complete the attended ephemeral-question witness.
 
 ### Added implementation subtasks
+
+- [ ] Integrate the accepted optional trace map into ephemeral preflight, granted private-actor registration, post-capability-binding activation and bounded teardown; extend startup/loss fault proofs to the diagnostic drain, private writer supervisor and active IO worker, and preserve absent/disabled startup behavior.
 
 - [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
 
