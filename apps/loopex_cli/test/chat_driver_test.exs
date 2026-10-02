@@ -7,6 +7,55 @@ defmodule LoopexCli.ChatDriverTest do
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
 
+  test "new chat stages captured workspace facts and every selected immutable tool schema" do
+    for profile <- ~w(none coding read-only) do
+      prepared = prepared_configuration(profile)
+      definitions = prepared.genesis["tool_selection"]["definitions"]
+      captured = prepared.selection.configuration["instructions"]
+      facts = JSON.decode!(captured["environment"])
+      assert facts["workspace"] == prepared.selection.profile["paths"]["workspace"]
+      assert facts["tool_profile"] == profile
+      assert Enum.sort(Map.keys(facts)) == ~w(platform tool_profile workspace)
+      assert Enum.sort(Map.keys(facts["platform"])) == ~w(architecture os)
+      {_, native_os} = :os.type()
+
+      assert facts["platform"]["os"] ==
+               if(native_os in [:darwin, :linux], do: Atom.to_string(native_os), else: "other")
+
+      fixture =
+        start_fixture([%{text: "done", calls: []}],
+          model: prepared.selection.configuration["model"],
+          tools: definitions
+        )
+
+      {:ok, session} =
+        Loopex.create_session(fixture.runtime, prepared.session_options,
+          command_id: "create",
+          genesis: prepared.genesis
+        )
+
+      {:ok, input} = StringIO.open("inspect this workspace\n/wait\n/quit\n", encoding: :latin1)
+      {:ok, output} = StringIO.open("", encoding: :latin1)
+
+      {:ok, driver} =
+        ChatDriver.start_link(fixture.runtime, session, input, output, configuration: prepared)
+
+      assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
+      assert ChatDriver.close(driver, :confirmed) == 0
+      [request] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+      {:ok, rendered} = Loopex.Runtime.Instructions.render(captured)
+      assert hd(request.messages) == %{"role" => "system", "content" => rendered}
+      assert request.tools == definitions
+
+      assert Enum.sort(Enum.map(request.tools, & &1["tool_id"])) ==
+               Enum.sort(prepared.active_tools)
+
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+      refute rendered =~ "M7_CHAT_DRIVER_SLOT"
+      assert Fixture.records(fixture, session) |> hd() |> Map.fetch!(:payload) == prepared.genesis
+    end
+  end
+
   test "configure admission updates the host cache only after owner confirmation" do
     prepared = prepared_configuration()
 
@@ -729,7 +778,7 @@ defmodule LoopexCli.ChatDriverTest do
     fixture
   end
 
-  defp prepared_configuration do
+  defp prepared_configuration(tools \\ "none") do
     root =
       Path.join(
         System.tmp_dir!(),
@@ -746,7 +795,7 @@ defmodule LoopexCli.ChatDriverTest do
       "paths" => %{"workspace" => "workspace", "state_root" => "state"},
       "session" => %{
         "model" => "anthropic:claude-haiku-4-5",
-        "tools" => "none",
+        "tools" => tools,
         "system_class_tokens" => 8000,
         "max_tokens" => 1024,
         "bounds" => %{"max_turns" => 8, "deadline_ms" => 1000, "token_budget" => 10000}

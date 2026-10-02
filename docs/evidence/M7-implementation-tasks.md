@@ -96,6 +96,52 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Maintainer decisions, 2026-10-02: the maintainer answered "1. approverd.
+  2. approved. 3. approved." to the three pending recommendations. Implementation
+  is authorized for the capability-scoped public prepared-resume read, versioned
+  tool-event identity records and the digest-bound early-spill projection context.
+  The prepared read returns exactly `{configuration, tool_selection,
+  policy_defer_mode, cleanup_grace_ms}` from retained state under the unspent
+  capability's current holder and owner fence, with legacy nils unchanged and no
+  activation, mutation or dispatch. Its packet is retained at
+  `/private/tmp/loopex-m7-prepared-configuration-read-decision.md`, SHA-256
+  `613b7ddf96697140d56f6a846d59809f5fe2d6f802615ca273d50ae05dbec209`.
+  New effect-intent, executor-receipt and non-receipt tool-terminal record variants
+  derive tool event IDs from session/run/turn/call identity; historical variants
+  retain their original IDs and public member sets remain unchanged. Packet:
+  `/private/tmp/loopex-m7-tool-event-identity-decision.md`, SHA-256
+  `4d4751b0092731e0d79b8e06abacfac6119bfec36b61b60f438f92a4406f17dd`.
+  Projection-aware read/search jobs retain the existing ordered JobRequest outer
+  contract and digest-bind `artifact_policy.projection` with exactly `revision: 1`,
+  `artifact_read: null | <frozen four-member binding>` and `normalized_call_id:
+  "lx_<48 lowercase hex>"`. Core reconstructs these from retained selection and
+  lineage, executors validate before effects, and legacy jobs keep exact bytes
+  and spill behavior. New search generations capture at most 16,384 bytes and
+  retain complete output when the encoded message exceeds 2,048 bytes with a
+  non-null read binding. Packet:
+  `/private/tmp/loopex-m7-early-spill-decision.md`, SHA-256
+  `d8bcadf912294f9fbed7f265a9139cacd18565dbfdd58ff77150bf84f1efbadb`.
+  Old readers refuse unsupported variants/generations; migration rewrites no
+  retained job, receipt or event. These decisions supersede the pending labels
+  in the earlier progress entries below. Closure, merge, tag and publication
+  remain separate decisions.
+
+- Done: the original T03 workspace/environment and selected-schema item now has
+  a live staging proof for all three immutable tool profiles: none, coding and
+  read-only. Prepared host facts include the exact workspace, platform and
+  selected profile; the actual Core-dispatched request contains the exact
+  rendered instructions and every selected definition, matching retained v3
+  genesis. No executor job or credential reference enters the instructions.
+  Sixty-four affected chat cases pass with warnings as errors on both toolchains:
+  current 21.3 seconds, floor 21.2 seconds. Complete outputs:
+  `/private/tmp/loopex-m7-chat-workspace-capture-current-v1.log`, SHA-256
+  `76e3442e8aa70e72b5466fb6459a574323be65dc5fdfafa8055a1d8cd0a20607`;
+  `/private/tmp/loopex-m7-chat-workspace-capture-floor-v1.log`, SHA-256
+  `f067a2be04be07fa181498071a93df8d27892e0015199d06dc84ce87cd428ce8`.
+  This uses a model-boundary fixture; real-provider and built-command proofs
+  remain separate open items. Original tally is 44 done / 142 remaining;
+  added tally remains 133 done / 11 remaining.
+
 - Done: one added T00 subtask supplies `python3 scripts/m7-task-status.py`
   for repeatable task reports from the canonical checkbox sections. It prints
   every T00–T19 row, counts original and added work separately, ignores
@@ -3960,7 +4006,7 @@ or check was relaxed.
 
 - [x] Replace core’s fixed instructions with the accepted host instruction map and rendering.
 - [x] Keep project and skill resources separately typed and admitted.
-- [ ] Capture workspace/environment facts and exact selected tool schemas.
+- [x] Capture workspace/environment facts and exact selected tool schemas.
 - [x] Enforce the configured system ceiling and complete serialized-request limit.
 - [x] Implement receipt revision 4, including continuation costs and source/configuration binding.
 - [x] Preserve old receipt decoding.
@@ -3971,7 +4017,7 @@ or check was relaxed.
 
 - [x] Implement pure closed instruction capture, exact rendering and retained-digest validation; preserve legacy fallback bytes through the shared renderer.
 - [x] Stage captured v3 instructions with configuration-bound revision-4 provenance and exact system/tool costs; reject substituted configuration/source identities on replay.
-- [x] Implement reference-host default/explicit/role capture, bounded regular-file reads and exact JSON environment byte/digest vectors; live configuration/chat wiring remains pending.
+- [x] Implement reference-host default/explicit/role capture, bounded regular-file reads and exact JSON environment byte/digest vectors; prove captured facts and immutable schemas in live chat staging. Public command startup and role-helper joins remain pending.
 
 ## T04 — Implement configuration, genesis and provider routing
 
