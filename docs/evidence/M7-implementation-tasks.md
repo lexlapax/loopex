@@ -91,6 +91,18 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the resumed full fast check on `ba0d453f5317b64ac4e47eb794e8db63d7c0f717`
+  passes all eleven application suites, 3,036 tests with 34 existing exclusions,
+  in 890 seconds. Complete output:
+  `/private/tmp/loopex-m7-ba0d453f-fast-check.log`, SHA-256
+  `d1bb5747ca8c491110159d12ef6215038b6a036d0791b30a34bc9d025153dd8a`.
+  The prior two failures remain retained; their repaired candidate is now proved.
+- Done: four initial M7 fixture roots and independent oracles cover ledger
+  repair, both possible row-default choices, the exact duplicated-fee finding
+  and generated long-conversation file facts. Four positive/negative control
+  cases pass on each supported toolchain. Complete manifest/schema pins,
+  required question/helper calls, checkpoint/restart witnesses and provider
+  execution remain open.
 - Done: original T01 is complete, including live conversation after failure and
   prompt commit uncertainty on either side of persistence. The real-provider
   conversation witness remains a separate release obligation.
@@ -277,6 +289,25 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Development observations
 
+- 2026-10-01: T00's base oracles run outside each disposable workspace;
+  fixture implementations and generated outputs stay in the workspace.
+  Repair rejects the seeded empty-ledger failure and accepts exact signed sums.
+  Feature independently checks the chosen default and both explicit modes;
+  no default is selected for a real task by these controls. Review requires the
+  exact bounded TSV finding and call-chain sequence while preserving every
+  workspace byte. Long checks actual files against `amber` and batch size 3.
+  The tests exercise the oracles directly, with no provider or runtime startup.
+  Current: four cases in 4.8 seconds, output
+  `/private/tmp/loopex-m7-base-oracles-current.log`, SHA-256
+  `9ed6d7cf7563a5f9338099dbfbb68af0bfcb5284d9efadc83456a05acbcf3a6c`.
+  Floor: four cases in 4.6 seconds, output
+  `/private/tmp/loopex-m7-base-oracles-floor.log`, SHA-256
+  `c718cc9e188cbeca05626f3e698cbfa37a71bef6cdb44fe97e53e530c71df5f0`.
+  The first control run failed because it expected exit 1 for failed ExUnit
+  assertions; both supported versions document and return exit 2. The controls
+  now require that exact code without changing the task assertions. Retained
+  first output: `/private/tmp/loopex-m7-base-oracles-current-first.log`, SHA-256
+  `a9d1d226952053f277e993fcb84c62ee41d42f23302d0ab1818f4b76b35ea9c4`.
 - 2026-10-01: ChatOutput admits rendered bytes only from its creating host,
   counts active and queued writes together against 256 KiB, evicts queued
   progress before required output, and never truncates a control record above
@@ -1549,6 +1580,7 @@ did not resolve them. No paid provider calls were made during this check.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
 - [ ] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
 - [x] Pin legacy and planned M7 read-definition canonical preimages/digests and the revision-1 literal artifact-read capability table.
+- [x] Create the four fixed base workspace roots and independent repair, feature, review and long-conversation oracles; prove both feature-default branches and positive/negative oracle controls on both toolchains.
 
 <a id="t01-conversation-continuity"></a>
 ## T01 — Preserve conversation across prompts and restarts
