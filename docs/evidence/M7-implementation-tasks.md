@@ -91,6 +91,55 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Integration check: exact `6750f9220da572c97e309e488a228b7a05bc17c4`
+  exited 1. Preliminary gates passed; all application test assertions passed,
+  but Core's `--warnings-as-errors` lane refused two compiler type warnings in
+  the new parameterized frozen-resource fixture. Core passed 922 cases with
+  five exclusions in 229.2 seconds; its command then aborted because each
+  expanded test compared a statically fixed atom to the other boundary atom.
+  Ten other suites were green. This candidate remains failed evidence, despite
+  its successful assertions. Complete output:
+  `/private/tmp/loopex-m7-6750f922-fast-check.log`, SHA-256
+  `62110f8a991b9d806cc5dbc090cd16d30b57121bf9b05bdaa0ea29916e788103`.
+  The earlier provider deadline flake and Task.Supervisor diagnostic remain
+  separate unresolved observations; this failure is the fixture compiler warning.
+
+- Done: the T08 fixture retains both named boundary tests and every original
+  assertion, with their shared body in a private helper receiving the boundary
+  at runtime. This removes the disjoint literal comparisons through ordinary
+  function structure, with no warning suppression, skipped case or changed
+  wait. Focused verification now explicitly uses `mix test --warnings-as-errors`.
+  Both toolchains pass all 36 configured-session cases and 14 historical mapping
+  cases: 6.5/0.8 seconds current and 6.6/0.8 seconds floor. These runs include
+  the new active-bound status proof below. Counts remain original 42 done / 144
+  remaining and added 129 done / 10 remaining. Complete outputs:
+  `/private/tmp/loopex-m7-status-resource-warning-current-20261002.log`, SHA-256
+  `c570d88858bf3f65c5960adb53164da04ed1db82b41cd1ca6e5f292714f6462d`;
+  `/private/tmp/loopex-m7-status-resource-warning-floor-20261002.log`, SHA-256
+  `16ba16dc2d74b87e18d128094eaf5e37186d7f164906545cd38ca6c98a2b7379`.
+  The preceding focused logs retain successful assertions plus these warnings;
+  they are not warning-free test evidence.
+
+- Done: the existing local status view also exposes `active_bounds`, a closed
+  projection of the active run's committed max_turns, token_budget, relative
+  deadline_ms and staged absolute deadline. Settled status is null; before
+  staging the absolute member is null. Projection reads the existing reducer
+  accounting view without clocks or current runtime defaults, and does not
+  substitute charged usage for declared limits. A real gated executor run
+  verifies 41-digit turn/token limits and the exact dispatched request cutoff,
+  then confirms null after completion. Both complete configured-session and
+  historical wire-mapping suites pass 50 cases: 6.9/0.9 seconds current and
+  6.7/0.8 seconds floor. The historical wire allowlist remains unchanged.
+  This extends the already completed added T06 status subtask; counts remain
+  original 42 done / 144 remaining, added 129 done / 10 remaining. The authored
+  `deadline_at_ms` command/record integration remains pending; this change does
+  not claim that feature or the live chat driver complete.
+  Complete outputs:
+  `/private/tmp/loopex-m7-active-bound-status-current-20261002.log`, SHA-256
+  `86f8375d2152bd845735c72d5c4b7397755c76b3081893ef71332a2effff816c`;
+  `/private/tmp/loopex-m7-active-bound-status-floor-20261002.log`, SHA-256
+  `75071ec61227c3054a6c5fc534d9d453a11b24d0ddad827f358c450d50b2ad56`.
+
 - Done: M7's accepted configuration-inspection allowlist is now exposed through
   the existing local `session_status` facade as `configuration`, read from the
   sole owner's committed reducer state. It contains exactly version, model,
@@ -3777,7 +3826,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Expose the accepted committed configuration allowlist through existing local session status; prove initial/configured/restarted values, unresolved legacy null, private-data exclusion and the unchanged historical wire allowlist on both supported toolchains. New generation snapshots and live chat integration remain pending.
+- [x] Expose the accepted committed configuration allowlist and current active-run bounds through existing local session status; prove initial/configured/restarted values, unresolved legacy and settled nulls, private-data exclusion, arbitrary turn/token counts, the exact staged absolute cutoff and the unchanged historical wire allowlist on both supported toolchains. Authored absolute ceilings, new generation snapshots and live chat integration remain pending.
 - [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.
 - [x] Expose maintainer-selected exact prepared genesis through the public creation facade; preserve legacy omission, conflict identity, malformed-input refusal and shared v2/v3 validation, and prove real durable chat creation/restart on both supported toolchains.
 

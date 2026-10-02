@@ -660,6 +660,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # bytes, capabilities and provider mappings. Legacy unresolved state
         # remains nil; runtime launch defaults never fill this observation.
         configuration: SessionConfiguration.public_view(state.durable.configuration),
+        active_bounds: active_bounds(state.durable),
         active_context_token_budget:
           SessionState.context_token_budget(state.durable, state.durable.active_run_id),
         pending_work_ids:
@@ -950,6 +951,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       _not_resolving ->
         handle_owner_info(message, state)
+    end
+  end
+
+  # Concept: status separates admitted relative limits from the staged cutoff.
+  # Technical depth: accounting reads committed quantities without a clock or
+  # current host default. Nil means no active run; turns/tokens retain integers
+  # beyond u64, and only the fixed declared/deadline fields leave this boundary.
+  defp active_bounds(durable) do
+    case SessionState.accounting(durable, durable.active_run_id) do
+      {nil, _charged} ->
+        nil
+
+      {declared, _charged} ->
+        Map.take(declared, [:max_turns, :token_budget, :deadline_ms, :deadline])
     end
   end
 

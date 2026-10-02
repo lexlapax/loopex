@@ -400,6 +400,10 @@ defmodule Loopex do
   version, model/reasoning, reply/context/system ceilings and instruction
   version/digest allowlist. It is nil for unresolved legacy configuration;
   instruction bytes, provider mappings and current host defaults are excluded.
+  `active_bounds` is nil when settled, otherwise the committed max_turns,
+  token_budget, relative deadline_ms and staged absolute deadline allowlist.
+  The absolute deadline is nil before staging and never recomputed here.
+  Turn/token quantities retain their arbitrary positive integer domains.
   """
   @spec session_status(Runtime.t(), binary()) :: {:ok, map()} | {:error, term()}
   def session_status(runtime, session_id), do: Runtime.session_status(runtime, session_id)
