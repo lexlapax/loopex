@@ -91,6 +91,27 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Running: the full fast check of exact candidate
+  `a47022cfcfdcc5f62c72654705e90a7d91a6cebb` is retained at
+  `/private/tmp/loopex-m7-a47022cf-fast-check.log` in the isolated managed
+  `m7-trace-check` checkout. Composition has finished RED with 432 passed,
+  one failed startup-protocol test and one existing exclusion. The other ten
+  application suites are still running; the complete output digest and final
+  exit status remain pending. Do not rerun that unchanged candidate as a pass.
+  The failure is in the direct SessionRoot protocol fixture, outside the initial
+  filename-based focused selection. Its sequence still expected runtime_holder
+  immediately after trace_handle. The repair explicitly grants and acknowledges
+  disabled diagnostics, proves no next phase before that acknowledgement, and
+  proves no prepared subtree before the exact trace-start grant. Wrong-reference
+  grants still refuse. Both complete eight-test files pass in 2.2 seconds:
+  `/private/tmp/loopex-m7-root-trace-order-current-20261002.log`, SHA-256
+  `e4a67721cd56edc9eb5293d209690699ae356893b524b31a271558607896f7cf`;
+  `/private/tmp/loopex-m7-root-trace-order-floor-20261002.log`, SHA-256
+  `b582eae86fe79a5ccefb94541268384b61c45fb77c525c7d09d44b9bd4edc79c`.
+  This completes one added T16 subtask: original counts stay 28 done / 158
+  remaining; added counts are 95 done / 11 remaining. Run the new committed
+  repaired candidate once after the first check reaches its terminal result.
+  Retain the first complete log before archiving its worktree.
 - Done: T12's optional ephemeral trace lifecycle is integrated. The closed trace
   map validates before preflight effects. Enabled startup grants and registers
   the diagnostic drain and its private writer supervisor before binding and
@@ -128,9 +149,9 @@ did not resolve them. No paid provider calls were made during this check.
   SHA-256 `81c76b7379d051f56f45cee376554bff3bfb52f215011f108927ccdb74f863de`;
   `/private/tmp/loopex-m7-ephemeral-trace-first-20261002.log`, SHA-256
   `2697782ba841271f4a225dbfc4cd5500750aef6db2913318f2bcd1e9df103cef`.
-  No required check, timeout or cleanup proof was weakened. The next full fast
-  check must use the committed integration candidate; no full check has yet
-  covered these trace-integration bytes.
+  No required check, timeout or cleanup proof was weakened. The first full
+  check of the committed integration is running with the protocol-fixture
+  failure and verified repair recorded above.
 - Done: trace selector resolution now lives in composition and both CLI
   configuration callers use that same compiled trusted-module inventory.
   A shared pure validator translates the accepted binary-keyed host trace map
@@ -2805,6 +2826,7 @@ or check was relaxed.
 - [x] Investigate and fix OwnerGroup supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain failing-before and process-lifetime evidence independently of passing assertions.
 - [x] Repair the complete owned-process inventories in credential-plane and runtime-owner fault tests; include the transfer-owner crash and prove all eight children stop on both toolchains.
 - [x] Make the owner-group supervisor-report test establish and restore its Logger application lifetime; prove the original failure-report assertions from isolated Core on both toolchains.
+- [x] Update the direct SessionRoot startup protocol proof for granted diagnostics and trace activation; preserve exact acknowledgements, wrong-reference refusal and original time bounds on both toolchains.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
 

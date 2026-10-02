@@ -210,7 +210,11 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     ack(root, ref, :trace_capability, trace_pid, :trace_handle)
     trace_handle = grant(root, ref, :trace_handle)
     assert_received {:trace_handle, ^trace_pid}
-    ack(root, ref, :trace_handle, trace_handle, :runtime_holder)
+    ack(root, ref, :trace_handle, trace_handle, :diagnostics)
+    diagnostics = grant(root, ref, :diagnostics, 5_000)
+    assert diagnostics == nil
+    refute_receive {:phase_ready, ^root, ^ref, :runtime_holder}, 30
+    ack(root, ref, :diagnostics, diagnostics, :runtime_holder)
     holder = grant(root, ref, :runtime_holder)
     refute_receive {:phase_ready, ^holder, ^ref, :runtime}, 30
     send(holder, {:grant, self(), ref, :runtime, []})
@@ -225,7 +229,14 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     send(root, {:grant, self(), ref, :trace_bind, nil})
     assert_receive {:phase_result, ^root, ^ref, :trace_bind, :ok}, 1_000
     assert_received {:trace_bind, ^trace_handle, ^runtime}
+    assert_receive {:phase_ready, ^root, ^ref, :trace_start}, 1_000
+    refute_receive {:subtree_prepared, ^root, ^ref, _}, 30
+    send(root, {:grant, self(), make_ref(), :trace_start, nil})
+    refute_receive {:subtree_prepared, ^root, ^ref, _}, 30
+    send(root, {:grant, self(), ref, :trace_start, nil})
+    assert_receive {:phase_result, ^root, ^ref, :trace_start, :ok}, 1_000
     assert_receive {:subtree_prepared, ^root, ^ref, prepared}, 1_000
+    assert prepared.diagnostics == nil
     assert prepared.runtime == runtime
     assert prepared.runtime_holder == holder
     assert prepared.store == %{pid: store_pid, handle: store_handle}
