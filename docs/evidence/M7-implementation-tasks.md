@@ -91,6 +91,25 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T07 admits maintenance replies through the existing whole-callback
+  provider boundary, retains their exact canonical usage, and checks natural
+  completion before calls or output. Nine-key v2 replies fail as incomplete;
+  unreadable callbacks provide no admitted reply. Closed summary/carry-forward
+  limits now share one validator with prior checkpoint reuse, including all
+  escaping, path, list and combined-envelope bounds. No checkpoint is committed
+  by this validator; progress, cancellation precedence and owner integration
+  remain open. Eight new cases plus source, provider-ceiling and configured
+  recovery regressions pass: 47 tests on each supported toolchain, 3.7 seconds
+  current and 3.5 seconds floor.
+  Current output: `/private/tmp/loopex-m7-compaction-summary-current.log`, SHA-256
+  `776ffbf02496750074b4856841fb353ae028b03cbda139b855558582b68655b1`.
+  Floor output: `/private/tmp/loopex-m7-compaction-summary-floor.log`, SHA-256
+  `41c9ca0cf23b23e3f30d8f2432a8a8df6690c14bca62a0ec5866d53f03945d86`.
+  Initial test fixtures used the conversation call field instead of provider
+  callback `id`, and expected usage `kind` instead of the existing `status`.
+  Those fixture shapes were corrected; production admission was preserved.
+  Initial output: `/private/tmp/loopex-m7-compaction-summary-current-first.log`,
+  SHA-256 `d7caaafb57662bafce7b1ebbcd9cff1a216ddfad1ce4c143883295dfafbf3b02`.
 - Done: T07's source-v2 encoder streams canonical messages into exact counts
   and SHA-256 without collecting the whole projected list or serialized unit.
   It retains at most a 16,384-byte complete candidate and two 4,099-byte end
@@ -2289,6 +2308,7 @@ or check was relaxed.
 - [x] Resolve the separately configured host summarizer and prove its fixed-budget thinking-off native request and natural completion through both transports.
 - [x] Build replay-derived indivisible compaction units with same-run inputs, terminal trailing inputs, current/unfinished protection and frozen native-prefix source protection; prove idle release and exact grouping after real journal recovery.
 - [x] Stream exact source-v2 complete/excerpt encodings with bounded candidate/end buffers, full-list digest/count, fixed UTF-8-safe quota order, prior checkpoint reuse and traversal cancellation/deadline checks; pin independent byte, cap and numeric vectors.
+- [x] Admit whole maintenance callbacks, retain canonical usage on incomplete/invalid summaries, require natural completion first, and share closed summary/carry-forward validation with prior checkpoint reuse; prove escaping, size, shape and callback-generation boundaries.
 
 ## T08 — Implement model selection and private thinking continuation
 

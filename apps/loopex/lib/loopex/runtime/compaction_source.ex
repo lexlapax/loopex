@@ -21,6 +21,7 @@ defmodule Loopex.Runtime.CompactionSource do
   data is supplied from validated replay and appears once in each envelope.
   """
 
+  alias Loopex.Runtime.CompactionSummary
   alias LoopexProtocol.{Canonical, Frame}
 
   @cap 16_384
@@ -322,12 +323,8 @@ defmodule Loopex.Runtime.CompactionSource do
        ) do
     with true <- map_size(prior) == 4 and is_binary(digest) and byte_size(digest) == 64,
          true <- Regex.match?(~r/\A[0-9a-f]{64}\z/, digest),
-         true <- is_boolean(excerpted) and is_binary(summary) and byte_size(summary) <= 4_094,
-         true <- String.valid?(summary),
-         true <- valid_carry?(carry),
-         true <- byte_size(json(summary)) <= 4_096,
-         true <- byte_size(json(carry)) <= 2_048,
-         true <- byte_size(json(%{"summary" => summary, "carry_forward" => carry})) <= 6_144 do
+         true <- is_boolean(excerpted),
+         :ok <- CompactionSummary.validate(%{"summary" => summary, "carry_forward" => carry}) do
       :ok
     else
       _invalid -> {:error, :context_projection_invalid}
@@ -335,18 +332,6 @@ defmodule Loopex.Runtime.CompactionSource do
   end
 
   defp valid_prior(_), do: {:error, :context_projection_invalid}
-
-  defp valid_carry?(%{"files_read" => read, "files_changed" => changed} = carry)
-       when map_size(carry) == 2 and is_list(read) and is_list(changed) do
-    Enum.all?([read, changed], fn paths ->
-      length(paths) <= 32 and
-        Enum.all?(paths, fn path ->
-          is_binary(path) and byte_size(path) <= 1_024 and String.valid?(path)
-        end)
-    end)
-  end
-
-  defp valid_carry?(_), do: false
 
   defp json(value) do
     {:ok, framed} = Frame.encode(%{"v" => value})
