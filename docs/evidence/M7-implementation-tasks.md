@@ -91,6 +91,31 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: M7's accepted configuration-inspection allowlist is now exposed through
+  the existing local `session_status` facade as `configuration`, read from the
+  sole owner's committed reducer state. It contains exactly version, model,
+  reasoning, reply/context/system ceilings and instruction version/digest.
+  Instruction bytes, model capabilities and provider mappings stay private.
+  Legacy unresolved configuration is nil rather than adopting host defaults.
+  Live tests inspect initial genesis, an atomic configured version and recovery
+  under different launch defaults; private instruction canaries remain absent.
+  The historical foreground mapping still selects its old exact allowlist;
+  no new field is emitted before the complete M7 generation switch. Authority is
+  the accepted M7 technical plan's Configuration records row, implemented through
+  `SessionConfiguration.public_view`, with no new facade operation or authority.
+  Both toolchains pass 35 configured-session cases and 14 historical mapping
+  cases: 6.8 and 0.8 seconds current, 6.6 and 0.8 seconds floor. This completes
+  one added T06 subtask, no original item. Original: 42 done / 144 remaining.
+  Added: 129 done / 10 remaining. Live chat status construction and startup/
+  command/cleanup integration remain open.
+  Complete retained outputs:
+  `/private/tmp/loopex-m7-configuration-status-core-current-20261002.log`, SHA-256
+  `92bd5bf6355ec083905f596f497d948a38adcbe7b8fc107272bf993488f5d353`;
+  `/private/tmp/loopex-m7-configuration-status-wire-current-20261002.log`, SHA-256
+  `8be14d08d77b6f9d47ed3a87d7ee9bf39bc1e0050fe68e8c319328acf8b26883`;
+  `/private/tmp/loopex-m7-configuration-status-floor-20261002.log`, SHA-256
+  `f5507a22e91077e25b1b470e2e0b2bad3c76e871ec539db25f3f41b79545b54f`.
+
 - Done: T08's frozen resource-pack/steer continuation proof covers both live
   continuation and a real owner kill/restart after the executor receipt has
   committed. An admitted skill and selected supporting file appear as exact
@@ -3752,6 +3777,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Expose the accepted committed configuration allowlist through existing local session status; prove initial/configured/restarted values, unresolved legacy null, private-data exclusion and the unchanged historical wire allowlist on both supported toolchains. New generation snapshots and live chat integration remain pending.
 - [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.
 - [x] Expose maintainer-selected exact prepared genesis through the public creation facade; preserve legacy omission, conflict identity, malformed-input refusal and shared v2/v3 validation, and prove real durable chat creation/restart on both supported toolchains.
 

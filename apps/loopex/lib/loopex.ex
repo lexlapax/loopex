@@ -396,7 +396,10 @@ defmodule Loopex do
 
   The result omits owner-incarnation capability, Store handles, command content,
   and attachment state. It is reached only through the supplied runtime and is
-  not a mutation or authority grant.
+  not a mutation or authority grant. M7's `configuration` member is the committed
+  version, model/reasoning, reply/context/system ceilings and instruction
+  version/digest allowlist. It is nil for unresolved legacy configuration;
+  instruction bytes, provider mappings and current host defaults are excluded.
   """
   @spec session_status(Runtime.t(), binary()) :: {:ok, map()} | {:error, term()}
   def session_status(runtime, session_id), do: Runtime.session_status(runtime, session_id)

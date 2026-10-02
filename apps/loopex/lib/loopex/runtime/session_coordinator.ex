@@ -655,6 +655,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
         event_sequence: state.durable.event_sequence,
         active_run_id: state.durable.active_run_id,
         cleanup_grace_ms: state.durable.cleanup_grace_ms,
+        # Concept: inspection reports the session's committed settings.
+        # Technical depth: M7's configuration allowlist excludes instruction
+        # bytes, capabilities and provider mappings. Legacy unresolved state
+        # remains nil; runtime launch defaults never fill this observation.
+        configuration: SessionConfiguration.public_view(state.durable.configuration),
         active_context_token_budget:
           SessionState.context_token_budget(state.durable, state.durable.active_run_id),
         pending_work_ids:

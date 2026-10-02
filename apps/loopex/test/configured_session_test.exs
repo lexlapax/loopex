@@ -1124,6 +1124,18 @@ defmodule Loopex.ConfiguredSessionTest do
     refute log =~ "shutdown_error", log
   end
 
+  test "legacy status reports unresolved configuration without adopting host launch defaults" do
+    fixture = start(script: [], max_tokens: 3)
+
+    assert {:ok, session} =
+             Loopex.create_session(fixture.runtime, %{}, command_id: "legacy-create")
+
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
+    assert status.configuration == nil
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+  end
+
   test "live configuration commits one version and restart preserves new and earlier run captures" do
     fixture = start(script: [%{text: "first", calls: []}, %{text: "second", calls: []}])
 
@@ -1136,6 +1148,20 @@ defmodule Loopex.ConfiguredSessionTest do
              )
 
     assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    initial = configuration()
+
+    expected_initial = %{
+      "configuration_version" => 1,
+      "model" => "scripted:v1",
+      "reasoning" => "default",
+      "max_tokens" => 1024,
+      "context_token_budget" => 8192,
+      "system_class_tokens" => 5000,
+      "instructions" => %{"version" => "host.v1", "digest" => initial["instructions"]["digest"]}
+    }
+
+    assert {:ok, initial_status} = Loopex.session_status(fixture.runtime, session)
+    assert initial_status.configuration == expected_initial
     prompt(attachment, "first", "first prompt")
 
     {:ok, instructions} =
@@ -1145,8 +1171,6 @@ defmodule Loopex.ConfiguredSessionTest do
         "environment" => "",
         "appendix" => ""
       })
-
-    initial = configuration()
 
     changes = %{
       "model" => "scripted:v2",
@@ -1168,6 +1192,22 @@ defmodule Loopex.ConfiguredSessionTest do
 
     assert {:accepted, "configure"} =
              Runtime.command_with_configuration(attachment, command, candidate)
+
+    expected_configured = %{
+      "configuration_version" => 2,
+      "model" => "scripted:v2",
+      "reasoning" => "default",
+      "max_tokens" => 512,
+      "context_token_budget" => 6000,
+      "system_class_tokens" => 5000,
+      "instructions" => %{"version" => "host.v2", "digest" => instructions["digest"]}
+    }
+
+    assert {:ok, configured_status} = Loopex.session_status(fixture.runtime, session)
+    assert configured_status.configuration == expected_configured
+    refute :erlang.term_to_binary(configured_status) =~ "host-switch-canary"
+    refute Map.has_key?(configured_status.configuration, "provider_mapping")
+    refute Map.has_key?(configured_status.configuration, "model_capabilities")
 
     before_duplicate = Fixture.records(fixture, session)
     assert {:accepted, "configure"} = Runtime.command_with_configuration(attachment, command, %{})
@@ -1215,6 +1255,10 @@ defmodule Loopex.ConfiguredSessionTest do
 
     assert {:ok, ^session} =
              Loopex.resume_session(restarted.runtime, session, command_id: "resume")
+
+    assert {:ok, restarted_status} = Loopex.session_status(restarted.runtime, session)
+    assert restarted_status.configuration == expected_configured
+    refute :erlang.term_to_binary(restarted_status) =~ "host-switch-canary"
 
     assert {:ok, restarted_state} =
              SessionState.recover(
