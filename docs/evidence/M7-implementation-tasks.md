@@ -91,6 +91,39 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the private chat driver captures already validated invocation run bounds
+  once and adds them only to fresh prompts. Queued follow-ups use Core's inherited
+  ordinary limits; steer and answers receive no bound override. A real owner
+  scenario holds both the initial and promoted model calls, checks exact
+  41-digit turn/token limits and each dispatched absolute cutoff through public
+  status, and proves the wait barrier leaves quit unread until both runs finish.
+  This extends the completed T06 driver subtask; no new checkbox credit.
+  Thirteen driver cases pass with warnings as errors on both toolchains:
+  current 1.0 seconds, floor 0.8 seconds. Complete outputs:
+  `/private/tmp/loopex-m7-chat-driver-bounds-current.log`, SHA-256
+  `66c9d248eddf7e1ffaec3d9f839f7d61a9166f7976c3037aa1182ba8bcdc23dc`;
+  `/private/tmp/loopex-m7-chat-driver-bounds-floor.log`, SHA-256
+  `8d58972290e378a7140fe255d84128fe9e546f27b53ba152d9e90fb3e4878d61`.
+
+- Pending maintainer choice: expose the existing prepared configure operation as
+  `Loopex.command_with_configuration(attachment, authored_command, resolved_candidate)`,
+  or explicitly authorize the reference host's direct private Runtime bridge.
+  The public method is recommended so capability metadata stays separate from
+  authored input while the CLI retains its public-facade-only boundary. The
+  earlier exact-genesis public creation approval did not select this signature.
+  No dependent public configure implementation has started. Concrete packet:
+  `/private/tmp/loopex-m7-configure-facade-decision.md`, SHA-256
+  `4f7cf31054776c3afb9cf52b159d25bb3f893a91a9666345618889cb1eb4f3e0`.
+  The two earlier event-identity and early-spill choices remain pending separately.
+
+- Running: full fast check of exact
+  `462c3ccad69ff245303d53e9af9dd6cd7beba29a` in the isolated check checkout,
+  output `/private/tmp/loopex-m7-462c3cca-fast-check.log`. The log is still
+  being written, so its final result and digest are pending. Do not rerun or
+  switch that checkout until the check finishes. This source includes the
+  driver and IO-owner fixture correction, but predates the invocation-bound
+  extension above.
+
 - Integration check: exact `5a21442a9a984b2338d33e3610f5bc68ab93c2dd`
   passed the full current-pair fast check in 907 seconds. All eleven application
   suites and preliminary gates passed. Complete output:
@@ -3892,7 +3925,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
+- [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, captured invocation bounds and queued-run inheritance, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
 
 - [x] Expose the accepted committed configuration allowlist and current active-run bounds through existing local session status; prove initial/configured/restarted values, unresolved legacy and settled nulls, private-data exclusion, arbitrary turn/token counts, the exact staged absolute cutoff and the unchanged historical wire allowlist on both supported toolchains. Authored absolute ceilings, new generation snapshots and live chat integration remain pending.
 - [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.

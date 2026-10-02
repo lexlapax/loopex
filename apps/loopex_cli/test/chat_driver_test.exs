@@ -397,6 +397,41 @@ defmodule LoopexCli.ChatDriverTest do
     assert ChatDriver.close(driver, :confirmed) == 1
   end
 
+  test "captured invocation bounds reach each prompt while queued follow-up inherits the active run" do
+    fixture =
+      start_fixture([
+        %{text: "first", calls: [], hold: self()},
+        %{text: "followed", calls: [], hold: self()}
+      ])
+
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    {:ok, input} = StringIO.open("one\n/follow-up next\n/wait\n/quit\n", encoding: :latin1)
+    output = observing_output()
+    huge = Integer.pow(10, 40)
+    bounds = %{max_turns: huge, token_budget: huge + 1, deadline_ms: 60_000}
+    {host, _} = start_host(fixture.runtime, session, input, output, bounds: bounds)
+    assert_receive {:holding, first_worker}, 5_000
+    await_record(fn record -> record["event"] == "input" and record["input_sequence"] == "3" end)
+    assert {:ok, first_status} = Loopex.session_status(fixture.runtime, session)
+    [first_request] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    assert first_status.active_bounds == Map.put(bounds, :deadline, first_request.deadline)
+    assert {"/quit\n", ""} = StringIO.contents(input)
+    send(first_worker, :release)
+    assert_receive {:holding, second_worker}, 5_000
+    assert {:ok, second_status} = Loopex.session_status(fixture.runtime, session)
+    [^first_request, second_request] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    assert first_status.active_run_id != second_status.active_run_id
+    assert second_status.active_bounds == Map.put(bounds, :deadline, second_request.deadline)
+    assert {"/quit\n", ""} = StringIO.contents(input)
+    send(second_worker, :release)
+
+    assert_receive {:provisional, ^host, %{exit_code: 0, last_outcome: %{outcome: :completed}}},
+                   5_000
+
+    send(host, {:close, :confirmed})
+    assert_receive {:closed, ^host, 0}, 5_000
+  end
+
   defp pipe_input(bytes) do
     device = spawn(fn -> input_loop(bytes, nil) end)
     on_exit(fn -> Process.exit(device, :kill) end)

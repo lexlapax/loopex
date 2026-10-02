@@ -48,8 +48,9 @@ defmodule LoopexCli.ChatDriver do
 
   ## Technical depth
 
-  Devices are existing Latin-1 byte devices. Options select pipe or interactive refusal handling and the private
-  facade test seam. The creating caller is monitored even on a normal exit.
+  Devices are existing Latin-1 byte devices. Options select pipe or interactive refusal handling, already validated
+  invocation run bounds and the private facade test seam. Only fresh prompts
+  receive those bounds; follow-ups inherit their active run through Core. The creating caller is monitored even on a normal exit.
   """
   def start_link(runtime, session_id, input, output, options \\ []),
     do: GenServer.start_link(__MODULE__, {self(), runtime, session_id, input, output, options})
@@ -104,6 +105,7 @@ defmodule LoopexCli.ChatDriver do
       session: session,
       input: input,
       mode: Keyword.get(options, :mode, :pipe),
+      default_bounds: Keyword.get(options, :bounds),
       writer: writer,
       facade: facade,
       workers: %{},
@@ -427,7 +429,14 @@ defmodule LoopexCli.ChatDriver do
         admit(state, %{type: :abort, command_id: id})
 
       {type, content} when type in [:prompt, :steer, :follow_up] ->
-        admit(state, %{type: type, content: content, command_id: id})
+        command = %{type: type, content: content, command_id: id}
+
+        command =
+          if type == :prompt and state.default_bounds != nil,
+            do: Map.put(command, :bounds, state.default_bounds),
+            else: command
+
+        admit(state, command)
 
       {:answer, interaction, answer} ->
         admit(state, %{
