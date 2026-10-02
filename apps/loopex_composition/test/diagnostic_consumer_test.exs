@@ -268,6 +268,59 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
     assert_receive {:DOWN, ^worker_ref, :process, ^worker, _}
   end
 
+  test "closing asks the supervisor to terminate its blocked writer before collecting joins" do
+    parent = self()
+    device = device()
+
+    owner =
+      spawn(fn ->
+        Process.flag(:trap_exit, true)
+        {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+        send(consumer, {:loopex_diagnostic, %{"kind" => "ordinary"}})
+        send(parent, {:consumer, consumer})
+
+        receive do
+          :close ->
+            send(parent, :closing)
+            send(parent, {:closed, DiagnosticConsumer.close(consumer, deadline())})
+        end
+      end)
+
+    assert_receive {:consumer, consumer}
+    assert_receive {:device_write, worker, _}
+    supervisor = :sys.get_state(consumer).supervisor
+    :sys.get_state(supervisor)
+    worker_ref = Process.monitor(worker)
+    supervisor_ref = Process.monitor(supervisor)
+    true = :erlang.suspend_process(supervisor)
+
+    try do
+      send(owner, :close)
+      assert_receive :closing
+      await_supervisor_shutdown(supervisor, deadline())
+      assert Process.alive?(worker)
+    after
+      :erlang.resume_process(supervisor)
+    end
+
+    assert_receive {:closed, {:ok, final}}
+    assert final.counts.diagnostic == %{emitted: 0, dropped: 0, unconfirmed: 1}
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, _}
+    assert_receive {:DOWN, ^supervisor_ref, :process, ^supervisor, :normal}
+  end
+
+  defp await_supervisor_shutdown(supervisor, cutoff) do
+    case Process.info(supervisor, :message_queue_len) do
+      {:message_queue_len, count} when count > 0 ->
+        :ok
+
+      _ ->
+        assert System.monotonic_time(:millisecond) < cutoff
+        Process.sleep(1)
+        await_supervisor_shutdown(supervisor, cutoff)
+    end
+  end
+
   defp await_idle(consumer) do
     wait_for(consumer, fn view -> view.pending == 0 and view.active == false end)
   end

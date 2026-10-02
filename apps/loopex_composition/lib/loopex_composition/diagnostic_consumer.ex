@@ -146,8 +146,8 @@ defmodule LoopexComposition.DiagnosticConsumer do
   def handle_call({:close, deadline}, _from, state) when is_integer(deadline) do
     deadline = min(deadline, now() + state.grace)
     state = discard_queue(state)
-    {state, worker_joined} = stop_writer(state, deadline)
     supervisor_joined = stop_supervisor(state.supervisor, deadline)
+    {state, worker_joined} = stop_writer(state, deadline)
     final = view(%{state | supervisor: nil})
 
     reply =
@@ -208,8 +208,8 @@ defmodule LoopexComposition.DiagnosticConsumer do
 
   def handle_info({:close_diagnostics, ref}, %{closing: {ref, deadline}} = state) do
     state = discard_queue(state)
-    {state, worker_joined} = stop_writer(state, deadline)
     supervisor_joined = stop_supervisor(state.supervisor, deadline)
+    {state, worker_joined} = stop_writer(state, deadline)
     final = view(%{state | supervisor: nil})
 
     result =
@@ -236,8 +236,8 @@ defmodule LoopexComposition.DiagnosticConsumer do
   @impl true
   def terminate(_, state) do
     deadline = now() + state.grace
-    {_state, _joined} = stop_writer(state, deadline)
     stop_supervisor(state.supervisor, deadline)
+    {_state, _joined} = stop_writer(state, deadline)
     :ok
   end
 
@@ -345,6 +345,10 @@ defmodule LoopexComposition.DiagnosticConsumer do
 
   defp stop_supervisor(nil, _), do: true
 
+  # Concept: the private supervisor performs its own child shutdown first.
+  # Technical depth: killing a writer and receiving its DOWN does not order its
+  # linked EXIT at the supervisor before a stop request from this other sender.
+  # Stop that supervisor, then collect both monitors under the same cutoff.
   defp stop_supervisor(supervisor, deadline) do
     ref = Process.monitor(supervisor)
 

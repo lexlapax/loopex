@@ -91,6 +91,44 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: diagnostic shutdown now asks the private supervisor to stop before
+  collecting the writer and supervisor monitor joins. Killing a task first and
+  receiving its DOWN does not order that task's linked EXIT at the supervisor
+  ahead of a stop request from a different sender. A suspended-supervisor fault
+  witness failed on the old ordering: its blocked writer was already dead before
+  the supervisor could process shutdown. The new ordering leaves that child
+  under its supervisor until shutdown, then proves both joins and unchanged
+  unconfirmed-delivery accounting. Synchronous close, asynchronous close and
+  owner-loss termination use this order; the existing Task worker, actor count,
+  cleanup grace and receive timeouts remain unchanged.
+  Complete diagnostic/ephemeral-trace files pass 24 tests in 6.2 seconds current
+  and 6.1 seconds floor. Real CLI stderr/JSON and OS-signal files pass eight
+  tests with one existing exclusion, 22.1 seconds current and 19.9 seconds floor.
+  Compile, formatting, documentation and dependency gates pass. Outputs:
+  `/private/tmp/loopex-m7-diagnostic-supervisor-first-red-20261002.log`, SHA-256
+  `0347a1cad069343d497e35f4a43c60c247b4904e92c7fa6df929422f2bfa5b99`.
+  `/private/tmp/loopex-m7-diagnostic-supervisor-first-current-20261002.log`, SHA-256
+  `f108e156eb325bfba1abe42796e6b8deb1f25e249261f0273b38236dac9c37b6`.
+  `/private/tmp/loopex-m7-diagnostic-supervisor-first-floor-20261002.log`, SHA-256
+  `75364c015e84f48570fcdd39d885d985a537211a5d1fb39985f6d1a39587e911`.
+  `/private/tmp/loopex-m7-diagnostic-supervisor-first-cli-current-20261002.log`, SHA-256
+  `7d899b23a63af1b9e608049a500678d776778771820be8bcd62a896262374d16`.
+  `/private/tmp/loopex-m7-diagnostic-supervisor-first-cli-floor-20261002.log`, SHA-256
+  `6895b9d90dc7a041e16f046ee08e4c2208d2ba1783f468d5070d4ce5e6fae59f`.
+  This fixes the demonstrated child-before-supervisor teardown race. It does
+  not establish a universal 100 ms scheduler bound for abrupt consumer death;
+  the separate proposed assertion-deadline override stays unapplied and open.
+  Original counts remain 30 done / 156 remaining. Added counts: 105 done /
+  12 remaining. Other Task.Supervisor and policy ETS lifecycle investigations
+  remain open.
+- Passed: the full fast check ran once on clean query implementation SHA
+  `46ffbf7e633f7410c6884f5f1bab026766944495`. All eleven application suites
+  passed: 3,174 tests, 34 existing exclusions, 900 seconds. Complete output:
+  `/private/tmp/loopex-m7-46ffbf7e-fast-check.log`, SHA-256
+  `5a12917d71cd5db79a9fba7399c3e930d7ac1f8e2178471d331652c294073239`.
+  It predates the tagged ephemeral answer and diagnostic shutdown changes.
+  Earlier diagnostic timing failures remain retained; this pass does not turn
+  those unchanged-revision failures into passes or close their investigation.
 - Done: T12's `answer/3` keeps the choice-ID shorthand and adds tagged
   choice/text and explicit decline. The existing serial owner checks the pending
   producer and kind before occupying its command slot, including an answer
@@ -3232,6 +3270,7 @@ or check was relaxed.
 - [x] Update the direct SessionRoot startup protocol proof for granted diagnostics and trace activation; preserve exact acknowledgements, wrong-reference refusal and original time bounds on both toolchains.
 - [x] Establish an actual blocked diagnostic writer before mailbox pressure; preserve the 6,000-message observation, exact queue/writer/drop accounting and unchanged receive/cleanup timeouts on both toolchains.
 - [x] Remove the spawned-host startup scheduling assumption from the abrupt chat-writer-loss fixture; retain unchanged receive timeouts and prove both exact writer and linked IO-worker killed DOWNs on both toolchains.
+- [x] Order diagnostic shutdown through its private supervisor before collecting writer/supervisor joins; prove a failing-before suspended-supervisor fault and unchanged delivery accounting, grace, existing loss/deadline assertions, ephemeral trace and real CLI signal/JSON behavior on both supported toolchains.
 - [ ] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
