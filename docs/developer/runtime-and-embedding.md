@@ -393,10 +393,16 @@ companion ReqLLM model adapter:
 | `:active_tools` | Optional unique list of declared tool IDs, from the four coding tools and `loopex.grep`, `loopex.find`, `loopex.ls`. Omission keeps the coding four active. |
 | `:context_token_budget` | Defaults to `8_192` estimated tokens; an explicit valid value is forwarded unchanged. |
 | `:cleanup_grace_ms`, `:process_probe` | Forwarded to the session and executor together, so a run's ending reports the period its cleanup ran under. |
-| `:artifact_transfers` | `false` by default. `true` starts a transfer owner and hands the same artifact store to the runtime; absent, the runtime refuses the transfer family. |
+| `:artifact_transfers` | `false` by default. `true` hands the artifact store to the runtime for public attachment transfers. The composition always owns one transfer process for executor job ranges; both uses share its capacity. |
 | `:recover_stale_writer` | `false` by default; see [recovery](#technical-embedding-recovery). |
 | `:resource_manifest`, `:project_manifest`, `:project_decision`, `:progress_to`, `:diagnostics_to` | Passed to the runtime unchanged. |
 | `:credential_plane` | A shared credential plane; see below. |
+
+Nonempty durable selections register both supported `loopex.read` generations.
+The legacy active selection pins 1.0.0; configured chat captures 1.1.0 and its
+artifact-read capability in v3 genesis. Registration admits a generation without
+changing a session's frozen selection. An empty active selection still starts
+the job transfer owner, because resumed sessions use their retained tools.
 
 **The provider credential is consumed once.** A composition started without a
 `:credential_plane` reads `LOOPEX_PROVIDER_API_KEY`, deletes it from the VM

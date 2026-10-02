@@ -64,14 +64,17 @@ defmodule LoopexComposition do
   runtime on the same state root. Leaving it absent is refused by any marker,
   live holder or not, which is the pre-existing behaviour and stays the default.
 
-  `:artifact_transfers` defaults to `false`. Passing `true` starts this
-  composition's transfer owner and hands the same artifact store to the runtime,
+  `:artifact_transfers` defaults to `false`. Passing `true` hands this
+  composition's artifact store to the runtime,
   so a caller may open, read and close a bounded transfer against an artifact a
   tool retained. Left absent, the runtime is handed no artifact store at all and
   refuses the whole transfer family under one name, which is what an embedder
   that only spills and later retrieves through `artifacts/1` wants: a runtime
   that named a store but held no transfer owner would refuse every transfer
-  under a second, less obvious name instead.
+  under a second, less obvious name instead. The composition always owns one
+  transfer process for executor job ranges, including retained sessions resumed
+  without their tools in the current host registry. Public attachment transfers
+  and executor jobs share that process's capacity.
 
   `:model` selects a hosted `provider:model` string; Ollama is refused by this
   credential-backed durable profile. `:bounds` accepts positive unsigned-64-bit
@@ -141,7 +144,7 @@ defmodule LoopexComposition do
   `options` is `start/1`'s host option set plus the host-started
   `:credential_plane` map carrying `:capability` and the credential
   `:model_options`. `lifecycle` accepts only `:interrupt`, a zero-arity
-  function evaluated before each of the Store, optional transfers, workspace
+  function evaluated before each of the Store, transfers, workspace
   lease, executor and runtime; `{:stop, reason}` starts nothing further.
   Returns `{:ok, edges}` or `{:error, reason, partial_edges}` naming exactly
   the edges started, as `LoopexComposition.Edges` describes.
@@ -269,23 +272,20 @@ defmodule LoopexComposition do
     end)
   end
 
-  # Concept: one artifact store, spilled into by the hands and, when the host
-  # asked for transfers, read from by the runtime as well.
+  # Concept: one artifact store and transfer owner serve the executor's job reads
+  # and any public attachment transfers the host enabled.
   #
   # Technical depth: the transfer owner is a process the handle carries rather
   # than a named global, so the descriptors of this placement belong to this
   # composition and stop with it. It is started through the same owned seam as
   # every other process here, which is what makes its cleanup part of the
   # composition's confirmed stop rather than a leak the caller must chase.
-  defp artifact_placement(root, options) do
-    with {:ok, spill} <- artifacts(root) do
-      if Keyword.get(options, :artifact_transfers, false) do
-        with {:ok, owner} <- start_edge(Transfers, root: Path.join(root, "artifacts")),
-             do: {:ok, %{spill | handle: Map.put(spill.handle, :transfers, owner)}}
-      else
-        {:ok, spill}
-      end
-    end
+  # A resumed session's frozen read generation can be absent from today's host
+  # registry. Starting this owner cannot depend on the current active-tool list.
+  defp artifact_placement(root, _options) do
+    with {:ok, spill} <- artifacts(root),
+         {:ok, owner} <- start_edge(Transfers, root: Path.join(root, "artifacts")),
+         do: {:ok, %{spill | handle: Map.put(spill.handle, :transfers, owner)}}
   end
 
   # Concept: the runtime is handed an artifact store exactly when the host asked

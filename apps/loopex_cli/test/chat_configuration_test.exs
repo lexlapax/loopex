@@ -35,6 +35,19 @@ defmodule LoopexCli.ChatConfigurationTest do
       if profile != "none" do
         assert Enum.find(definitions, &(&1["tool_id"] == "loopex.ask")) ==
                  ToolDefinition.question_definition()
+
+        assert prepared.genesis["tool_selection"]["artifact_read"] == %{
+                 "revision" => "loopex.artifact_read.v1",
+                 "tool_id" => "loopex.read",
+                 "tool_version" => "1.1.0",
+                 "definition_digest" =>
+                   "858956b73d7059ffaf18943d28bb0654ee3ca935f86cec3a136ba8e93b6e3c9e"
+               }
+
+        assert Enum.find(definitions, &(&1["tool_id"] == "loopex.read"))["tool_version"] ==
+                 "1.1.0"
+      else
+        assert is_nil(prepared.genesis["tool_selection"]["artifact_read"])
       end
 
       assert prepared.genesis["policy_defer_mode"] == "admit"

@@ -216,15 +216,20 @@ defmodule LoopexComposition.DurableOptionsTest do
              LoopexComposition.start_edges(credential_plane: nil, model: "bad")
   end
 
-  test "all 128 active-id subsets reach every real constructor literally" do
+  test "all 128 active-id subsets retain their selection with a pinned legacy read" do
     subsets = Enum.reduce(@ids, [[]], fn id, sets -> sets ++ Enum.map(sets, &[id | &1]) end)
     assert length(subsets) == 128
 
     for entry <- @entries, ids <- subsets do
       options = capture(entry, active_tools: ids)
-      assert options[:active_tools] == ids
+      assert options[:active_tools] == legacy_selection(ids)
       definitions = Enum.map(options[:tools], & &1["tool_id"])
-      assert Enum.sort(definitions) == if(ids == [], do: [], else: Enum.sort(@ids))
+
+      assert Enum.sort(definitions) ==
+               if(ids == [], do: [], else: Enum.sort(@ids ++ ["loopex.read"]))
+
+      assert Enum.filter(options[:tools], &(&1["tool_id"] == "loopex.read"))
+             |> Enum.map(& &1["tool_version"]) == if(ids == [], do: [], else: ["1.0.0", "1.1.0"])
     end
   end
 
@@ -233,9 +238,9 @@ defmodule LoopexComposition.DurableOptionsTest do
 
     for entry <- @entries, ids <- [["loopex.ask"], ["loopex.read", "loopex.ask"]] do
       options = capture(entry, active_tools: ids)
-      assert options[:active_tools] == ids
+      assert options[:active_tools] == legacy_selection(ids)
       assert Enum.filter(options[:tools], &(&1["tool_id"] == "loopex.ask")) == [question]
-      assert Enum.count(options[:tools]) == length(@ids) + 1
+      assert Enum.count(options[:tools]) == length(@ids) + 2
     end
 
     for entry <- @entries do
@@ -281,7 +286,7 @@ defmodule LoopexComposition.DurableOptionsTest do
     for entry <- @entries do
       defaults = capture(entry, [])
       assert defaults[:model].model == "anthropic:claude-haiku-4-5"
-      assert defaults[:active_tools] == Enum.take(@ids, 4)
+      assert defaults[:active_tools] == legacy_selection(Enum.take(@ids, 4))
       refute Keyword.has_key?(defaults, :bounds)
       refute Keyword.has_key?(defaults, :sampling)
       assert defaults[:policy_identity] == %{"id" => inspect(Policy), "revision" => "0.2.0"}
@@ -314,6 +319,13 @@ defmodule LoopexComposition.DurableOptionsTest do
       refute Keyword.has_key?(opts, :unknown)
       refute Keyword.has_key?(opts, :skills)
     end
+  end
+
+  defp legacy_selection(ids) do
+    Enum.map(ids, fn
+      "loopex.read" -> {"loopex.read", "1.0.0"}
+      id -> id
+    end)
   end
 
   defp capture(entry, extra) do

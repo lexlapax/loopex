@@ -11,7 +11,7 @@ defmodule LoopexComposition.Edges do
 
   `start/4` runs `LoopexComposition`'s one composition chain in the caller's
   process. It installs a tracking starter through that chain's existing edge
-  seam: before each of the Store, optional transfers, workspace lease,
+  seam: before each of the Store, transfers, workspace lease,
   executor and runtime it evaluates the host's `interrupt`, and after each
   successful start it records the pid, or the runtime together with its
   supervisor. Any other start the chain performs passes through unchanged. An

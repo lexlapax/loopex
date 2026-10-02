@@ -54,11 +54,11 @@ defmodule LoopexComposition.StartEdgesTest do
     assert {:ok, edges} = LoopexComposition.start_edges(options)
 
     assert Map.keys(edges) |> Enum.sort() ==
-             [:executor, :runtime, :runtime_supervisor, :store, :workspace_lease]
+             [:executor, :runtime, :runtime_supervisor, :store, :transfers, :workspace_lease]
 
     {:links, links} = Process.info(self(), :links)
 
-    for key <- [:store, :workspace_lease, :executor, :runtime_supervisor] do
+    for key <- [:store, :transfers, :workspace_lease, :executor, :runtime_supervisor] do
       assert Map.fetch!(edges, key) in links
     end
 
@@ -82,8 +82,9 @@ defmodule LoopexComposition.StartEdgesTest do
     assert {:error, {:stop, :operator_stop}, partial} =
              LoopexComposition.start_edges(options, interrupt: interrupt)
 
-    assert Map.keys(partial) |> Enum.sort() == [:store, :workspace_lease]
+    assert Map.keys(partial) |> Enum.sort() == [:store, :transfers]
     assert Process.alive?(partial.store)
+    assert Process.alive?(partial.transfers)
     stop_all(partial, host)
   end
 

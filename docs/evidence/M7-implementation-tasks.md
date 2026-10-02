@@ -41,6 +41,10 @@ they do not mean the original task is complete. This follows the maintainer's
   reserved work and a linked deadline watchdog. Exact 1.1.0 executor dispatch now
   uses that callback, refuses adapters without it and retains readable receipts
   through restart. Existing attachment callbacks remain compatible.
+- Done: configured chat captures read 1.1.0 through composition's admitted
+  inventory. The legacy active read stays pinned to 1.0.0; both are registered.
+  Durable composition always owns the shared job transfer process, including
+  empty current tool selections. Public attachment access remains explicit.
 - Done: T02 resolves committed-receipt artifact membership before policy and
   binds approved ranges to their exact source in the journaled job. Prepared
   references remain open. The receipt-owned range workflow is now proved with
@@ -1536,9 +1540,65 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Join the job-range callback to exact 1.1.0 executor dispatch, unsupported-adapter refusal, range encoding and settlement; prove repeated dispatch does not reopen a completed job and exercise cancellation through the real executor.
 
 - [x] Join receipt-owned ranges through the real session owner, local journal, executor and artifact store; prove restart with an empty registry, immutable object retrieval after workspace changes, and exact range projection into later prompts. Include the required artifact-object source label in the encoded cap.
-- [ ] Wire the reference host's captured M7 tool selection to read 1.1.0 and provide its job transfer owner even when the public attachment transfer family is disabled.
+- [x] Wire the reference host's captured M7 tool selection to read 1.1.0 and provide its job transfer owner even when the public attachment transfer family is disabled.
 
 ### Verification evidence
+
+Configured chat now selects the exact read 1.1.0 definition from composition's
+inventory before deriving and retaining its artifact capability. Nonempty durable
+constructor selections admit both read generations. The existing Core exact
+ID/version selection pins legacy activation to read 1.0.0, so admission of the
+new version does not rewrite old defaults. Empty selections remain empty.
+The captured-chat test proves real v3 creation and restart with that selection.
+The CLI continues to depend on composition rather than a concrete executor.
+
+The durable composition always starts one existing Transfers owner and supplies
+it to its executor's artifact handle. The current active-tool list cannot decide
+whether this owner is needed: a resumed session may hold a different frozen read
+generation. The public attachment family still receives a runtime artifact store
+only when `artifact_transfers: true`. Both uses share capacity when enabled. The
+new always-started process follows the existing composition owner, partial-start
+cleanup and interrupt chain; no new ownership layer or option was introduced.
+
+Tests now inspect all eight single-credential composition edges rather than only
+the first four, retain reverse-order partial cleanup, inject transfer-start
+failure, and await actual transfer DOWN after independent-owner runtime stop.
+The dual-credential constructor joins all nine edges. All 128 legacy active-tool
+subsets still reach each constructor with read 1.0.0 selected exactly, while
+configured chat pins the accepted 1.1.0 digest. This completes the added host
+wiring subtask without closing another original T02 item.
+
+The current toolchain passes 53 composition cases in 30.8 seconds, nine additional
+kernel-composition cases in 0.5 seconds, and 96 CLI cases in 26.4 seconds. The floor
+passes the same 62 composition cases in 30.9 seconds and 96 CLI cases in 26.0
+seconds. Applications and toolchains run sequentially in separate VMs.
+
+- Current composition: `/private/tmp/loopex-m7-host-range-final-composition-current.log`,
+  SHA-256 `5436bf63bf726cc610a3301b71fa23505404147a84b664d41c067138edf0c24c`.
+- Current kernel composition: `/private/tmp/loopex-m7-host-range-kernel-current.log`,
+  SHA-256 `c2c718afdacae58bc82b9368f92b9e12efe01b80a592323731edc6b731d63e54`.
+- Current CLI: `/private/tmp/loopex-m7-host-range-cli-final-current.log`,
+  SHA-256 `adb44129bb811678cc5190508860706356d0a5f1d90ab6f4e2320e4dcd22bb75`.
+- Floor composition: `/private/tmp/loopex-m7-host-range-composition-floor.log`,
+  SHA-256 `dcfee510ec52cec9b7ea8d5cd3258dadee94b94cff47ccd245002f7802e57fc9`.
+- Floor CLI: `/private/tmp/loopex-m7-host-range-cli-floor.log`,
+  SHA-256 `972c6762b5c3df2beb218ab07a624db0428bc3c4309403b90a9956c81c69a5cf`.
+
+Earlier runs exposed stale startup-edge expectations and a cleanup witness that
+sampled the transfer before its independent owner finished stopping it; the
+witness now joins its monitor. Captured creation then refused because the runtime
+had not admitted 1.1.0; admitting both versions through existing selection
+semantics resolved that defect. The CLI architecture check rejected a direct
+executor reference in chat preparation; using composition's inventory preserved
+the boundary. These failures remain retained and do not count as passes.
+
+- Initial placement failures: `/private/tmp/loopex-m7-host-range-placement-current.log`,
+  SHA-256 `3845d16575dbc25da608c8f897919e1bcc12e92e746a6cdf130b8cd131e6d9cf`.
+- Missing runtime admission: `/private/tmp/loopex-m7-host-range-chat-current.log`,
+  SHA-256 `715b5e2ca7b5b82a7616aac9868356b3300649ae812ff9fb8e0eaa1f74384a18`.
+- CLI boundary failure: `/private/tmp/loopex-m7-host-range-cli-regression-current.log`,
+  SHA-256 `57542a51b8beb9001ff6ac6b13cbc25d88fe4a436193455dbdf75c97b73746b9`.
+
 
 The full receipt-owned range path now runs through a real session coordinator,
 local journal, local executor and local artifact store. A scripted model reads a

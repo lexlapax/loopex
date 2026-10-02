@@ -84,7 +84,7 @@ defmodule LoopexComposition.DurableBindingsStartupTest do
              )
 
     owned = collect_owned([])
-    assert length(owned) == 8
+    assert length(owned) == 9
     assert Enum.all?(owned, &(not Process.alive?(&1)))
   end
 

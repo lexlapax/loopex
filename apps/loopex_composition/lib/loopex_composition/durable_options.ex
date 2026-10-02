@@ -120,13 +120,22 @@ defmodule LoopexComposition.DurableOptions do
           do: [LoopexProtocol.ToolDefinition.question_definition()],
           else: []
 
-      Loopex.Executor.Local.CodingTools.definitions() ++ questions
+      Loopex.Executor.Local.CodingTools.generations() ++ questions
     end
   end
 
   @doc false
   def runtime_options(options) do
-    [active_tools: Keyword.get(options, :active_tools, @coding)] ++
+    # Concept: admitting a newer generation does not rewrite legacy selection.
+    # Technical depth: Core already accepts exact ID/version selections. Pin the
+    # legacy read default while captured v3 genesis can choose the admitted 1.1.0.
+    active =
+      Enum.map(Keyword.get(options, :active_tools, @coding), fn
+        "loopex.read" -> {"loopex.read", "1.0.0"}
+        id -> id
+      end)
+
+    [active_tools: active] ++
       for key <- [:bounds, :sampling, :maintenance_instructions, :maintenance_model],
           {:ok, value} <- [Keyword.fetch(options, key)],
           do: {key, value}

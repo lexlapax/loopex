@@ -3,6 +3,17 @@ defmodule LoopexCompositionTest do
 
   use ExUnit.Case, async: false
 
+  @owned_modules [
+    Loopex.LLM.ReqLLM.CredentialRegistry,
+    Loopex.LLM.ReqLLM.CredentialCustody,
+    Loopex.Trace.Capability,
+    Loopex.Store.Local,
+    Loopex.Store.Local.Transfers,
+    Loopex.Executor.Local.WorkspaceLease,
+    Loopex.Executor.Local,
+    Loopex
+  ]
+
   # Concept: an embedder fixture that composes the kernel and depends on no
   # command application.
   #
@@ -185,13 +196,13 @@ defmodule LoopexCompositionTest do
     runtime_defaults = Map.fetch!(defaults, Loopex)
 
     assert Keyword.fetch!(runtime_defaults, :active_tools) ==
-             ["loopex.read", "loopex.write", "loopex.edit", "loopex.bash"]
+             [{"loopex.read", "1.0.0"}, "loopex.write", "loopex.edit", "loopex.bash"]
 
     assert runtime_defaults
            |> Keyword.fetch!(:tools)
            |> Enum.map(& &1["tool_id"])
            |> Enum.sort() ==
-             ~w(loopex.bash loopex.edit loopex.find loopex.grep loopex.ls loopex.read loopex.write)
+             ~w(loopex.bash loopex.edit loopex.find loopex.grep loopex.ls loopex.read loopex.read loopex.write)
   end
 
   test "required host inputs are validated before the first effect" do
@@ -241,6 +252,7 @@ defmodule LoopexCompositionTest do
 
   test "a later error raise or exit cleans every process acquired before it" do
     cases = [
+      {Loopex.Store.Local.Transfers, :error},
       {Loopex.Executor.Local.WorkspaceLease, :error},
       {Loopex.Executor.Local, :raise},
       {Loopex, :exit}
@@ -252,18 +264,7 @@ defmodule LoopexCompositionTest do
       {captured, stopped} =
         capture_start_failure(state_root, workspace, failed_module, failure)
 
-      expected =
-        Enum.take(
-          [
-            Loopex.LLM.ReqLLM.CredentialRegistry,
-            Loopex.LLM.ReqLLM.CredentialCustody,
-            Loopex.Trace.Capability,
-            Loopex.Store.Local,
-            Loopex.Executor.Local.WorkspaceLease,
-            Loopex.Executor.Local
-          ],
-          length(captured)
-        )
+      expected = Enum.take(@owned_modules, length(captured))
 
       assert Enum.map(captured, &elem(&1, 0)) == expected
       assert stopped == Enum.reverse(expected)
@@ -293,8 +294,8 @@ defmodule LoopexCompositionTest do
                )
 
       acquired =
-        for _ <- 1..4 do
-          assert_receive {^marker, owner, module, result}
+        for module <- @owned_modules do
+          assert_receive {^marker, owner, ^module, result}
           {owner, module, result}
         end
 
@@ -335,8 +336,8 @@ defmodule LoopexCompositionTest do
                )
 
       acquired =
-        for _ <- 1..4 do
-          assert_receive {^marker, owner, module, result}
+        for module <- @owned_modules do
+          assert_receive {^marker, owner, ^module, result}
           {owner, module, result}
         end
 
@@ -519,19 +520,7 @@ defmodule LoopexCompositionTest do
                  policy: Embedder
                )
 
-      count =
-        Enum.find_index(
-          [
-            Loopex.LLM.ReqLLM.CredentialRegistry,
-            Loopex.LLM.ReqLLM.CredentialCustody,
-            Loopex.Trace.Capability,
-            Loopex.Store.Local,
-            Loopex.Executor.Local.WorkspaceLease,
-            Loopex.Executor.Local,
-            Loopex
-          ],
-          &(&1 == failed_module)
-        )
+      count = Enum.find_index(@owned_modules, &(&1 == failed_module))
 
       acquired =
         for _ <- 1..count do

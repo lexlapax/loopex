@@ -6,14 +6,10 @@ defmodule LoopexComposition.ArtifactTransfersTest do
   # Concept: serving an artifact transfer is a capability a host asks for, and
   # the composition either wires it whole or does not claim it at all.
   #
-  # Technical depth: this case lives beside the composition corpus rather than
-  # in it because the M2 gate binds that corpus by digest; the gate's lock is on
-  # those bytes, and new evidence is added next to them. A runtime handed an
-  # artifact store but no transfer owner would answer every transfer with
-  # `transfers_unavailable`, which is a worse answer than declaring the family
-  # unsupported, so the owner and the runtime's store are one decision here and
-  # both are observed through the composition's own caller-local seam rather
-  # than by searching the virtual machine for processes.
+  # Technical depth: the executor always receives a live transfer owner for
+  # frozen job ranges. Only the enabled public family receives a runtime store.
+  # The composition's caller-local seam observes those distinct placements and
+  # their shared owner without searching the virtual machine for processes.
 
   alias Loopex.Store.Local.{Artifacts, Transfers}
 
@@ -25,20 +21,31 @@ defmodule LoopexComposition.ArtifactTransfersTest do
     def decide(_request), do: {:allow, nil}
   end
 
-  test "a composition that was not asked for transfers names the runtime no artifact store" do
+  test "job transfers remain available with empty host tools and no public attachment family" do
     {state_root, workspace} = roots()
     observe()
 
-    assert {:ok, runtime} = LoopexComposition.TestHost.start(options(state_root, workspace))
+    assert {:ok, runtime} =
+             LoopexComposition.TestHost.start(
+               options(state_root, workspace) ++ [active_tools: []]
+             )
+
     stop_later(runtime)
 
     assert_receive {:composed_runtime, launch}, 5_000
     refute Keyword.has_key?(launch, :artifact_store)
-    refute_received {:composed_transfers, _owner}
+    assert_receive {:composed_transfers, owner}, 5_000
+    assert_receive {:composed_executor, executor_options}, 5_000
+    assert executor_options[:artifacts].handle.transfers == owner
+    assert Transfers.live(owner) == []
 
     # The executor still spills, so an artifact outlives the run; what is absent
     # is only the runtime's ability to serve it over a transfer.
     assert File.dir?(Path.join(state_root, "artifacts"))
+    monitor = Process.monitor(owner)
+    assert :ok = Loopex.stop(runtime)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, _}, 5_000
+    refute Process.alive?(owner)
   end
 
   test "asking for transfers starts one owner, names it to the runtime, and stops it with the composition" do
@@ -138,6 +145,10 @@ defmodule LoopexComposition.ArtifactTransfersTest do
       Loopex, :start_link, [launch] ->
         send(parent, {:composed_runtime, launch})
         apply(Loopex, :start_link, [launch])
+
+      Loopex.Executor.Local, :start_link, [executor_options] ->
+        send(parent, {:composed_executor, executor_options})
+        Loopex.Executor.Local.start_link(executor_options)
 
       module, function, arguments ->
         apply(module, function, arguments)

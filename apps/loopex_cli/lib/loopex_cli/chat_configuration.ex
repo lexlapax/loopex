@@ -90,8 +90,14 @@ defmodule LoopexCli.ChatConfiguration do
   defp delegation(_), do: :ok
 
   defp selected_definitions(active) do
+    # Concept: new configured sessions capture the artifact-capable read generation.
+    # Technical depth: select the literal version before genesis derives its
+    # capability; retained sessions keep their captured definitions on resume.
     DurableOptions.definitions(active_tools: active)
-    |> Enum.filter(&(&1["tool_id"] in active))
+    |> Enum.filter(fn definition ->
+      definition["tool_id"] in active and
+        (definition["tool_id"] != "loopex.read" or definition["tool_version"] == "1.1.0")
+    end)
   end
 
   defp capture_instructions(profile) do
