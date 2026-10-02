@@ -4,7 +4,7 @@ end
 
 defmodule LoopexCli.TraceSelectorsTest do
   use ExUnit.Case, async: false
-  alias LoopexCli.TraceSelectors
+  alias LoopexComposition.TraceSelectors
 
   test "wildcards resolve as application identities, with exact compiled modules" do
     assert TraceSelectors.resolve([

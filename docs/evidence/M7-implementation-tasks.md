@@ -91,6 +91,31 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: trace selector resolution now lives in composition and both CLI
+  configuration callers use that same compiled trusted-module inventory.
+  A shared pure validator translates the accepted binary-keyed host trace map
+  into enabled plus closed runtime configuration, with a diagnostics-only sink.
+  Disabled tracing still validates all authored fields; unknown selectors create
+  no atoms, and inspection starts no applications or trace. The old CLI-only
+  implementation is removed. Both pairs pass the complete composition trace
+  configuration/consumer files, 16 tests in 0.6 seconds each, and the three
+  CLI selector/schema/options files, 30 tests in 0.09 seconds current and 0.1
+  seconds floor. Compilation, formatting, documentation and dependency direction
+  pass. The dependency gate first refused the untracked new sources; staging
+  their ordinary 100644 blobs satisfied its identity precondition, without
+  weakening the gate. Complete test outputs:
+  `/private/tmp/loopex-m7-trace-selection-current.log`, SHA-256
+  `98b8fbb3234fb437f3609c68deb61fda358b2e7af3f4682e2d596f97a068a969`;
+  `/private/tmp/loopex-m7-trace-selection-floor.log`, SHA-256
+  `3abff825408bbef55c6df672cb607d317f6c4cc73e3a1a353f2d69357c728b8e`;
+  `/private/tmp/loopex-m7-shared-trace-cli-current.log`, SHA-256
+  `f9bb54f3d1b0fe8454c1dc042f2b6e8b0837c3c4751668f9164022e284147468`;
+  `/private/tmp/loopex-m7-shared-trace-cli-floor.log`, SHA-256
+  `ebe2ad33729bc295b9328a03101249274decddca553cb4d951d4026f861546be`.
+  Embedded startup still rejects the not-yet-integrated trace option; the new
+  pure validator cannot silently enable or discard an authored trace request.
+  This completes one added T10 subtask. Original checklist: 28 done / 158
+  remaining. Added subtasks: 93 done / 11 remaining.
 - Done: a shared host diagnostic consumer drains the existing private sink while
   a separately supervised one-entry IO worker is stalled. Its explicit pending
   queue stays at 256 bounded entries; excess and shutdown-discarded entries
@@ -2622,6 +2647,7 @@ or check was relaxed.
 - [x] Defer internal worker results and owner timers in arrival order while admission is unresolved; prove model/executor evidence, real run deadline ordering, abort cleanup before deferred scheduling and actual backstop release into the existing mutation fence on both toolchains.
 - [x] Encode closed input, question and error records with exact branch fields, producer-specific choices, opaque identities and the inclusive 65,536-byte cap; prove hostile content cannot forge a second record, legacy oversize refuses without truncation and output drains unchanged on both toolchains. Wait, status, closing and driver integration remain pending.
 - [x] Implement the shared independently draining diagnostic consumer with a 256-entry pending queue, one supervised writer, separate trace/ordinary delivery/drop/unconfirmed counters and captured cleanup bounds; prove observed mailbox growth separately, redaction, stalled/broken IO and owner/drain/supervisor loss on both toolchains. Host startup and trace integration remain pending.
+- [x] Share trusted-module selector resolution between CLI and composition, and validate the accepted closed host trace map into diagnostics-only runtime configuration; prove disabled-field validation, exact lowered ceilings, no atom creation or application startup, and unchanged CLI configuration behavior on both toolchains. Owning startup/teardown remains pending.
 
 ## T11 — Implement specialized read-only helpers
 

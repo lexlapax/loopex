@@ -1,4 +1,4 @@
-defmodule LoopexCli.TraceSelectors do
+defmodule LoopexComposition.TraceSelectors do
   @moduledoc """
   ## Concept
 

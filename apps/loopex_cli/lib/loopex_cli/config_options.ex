@@ -17,7 +17,8 @@ defmodule LoopexCli.ConfigOptions do
   """
 
   alias LoopexComposition.ProviderBindings
-  alias LoopexCli.{AskOptions, TraceSelectors}
+  alias LoopexCli.AskOptions
+  alias LoopexComposition.TraceSelectors
 
   @common ~w(config workspace state-root model reasoning compaction-model max-steps
              deadline-ms token-budget max-tokens context-token-budget system-class-tokens

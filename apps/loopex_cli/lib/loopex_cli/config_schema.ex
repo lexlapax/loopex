@@ -20,7 +20,8 @@ defmodule LoopexCli.ConfigSchema do
   reading that inventory starts no application and resolves no credential.
   """
 
-  alias LoopexCli.{AskOptions, TraceSelectors}
+  alias LoopexCli.AskOptions
+  alias LoopexComposition.TraceSelectors
   alias LoopexComposition.ProviderBindings
 
   @uint64 18_446_744_073_709_551_615
