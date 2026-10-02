@@ -35,7 +35,7 @@ defmodule Loopex.ReferenceClient.Policy.AllowAll do
   @notice "loopex: the allow-all host policy is active. " <>
             "This is permissive local authority, not a permission model: " <>
             "every tool call this session makes will be allowed."
-  @notice_table Loopex.ReferenceClient.Policy.AllowAll.Notices
+  @notice_key {__MODULE__, :announced}
 
   @doc """
   ## Concept
@@ -59,45 +59,34 @@ defmodule Loopex.ReferenceClient.Policy.AllowAll do
 
   # Concept: say it once, to whoever is listening.
   #
-  # Technical depth: a named ETS set gives one atomic first insertion per VM
-  # rather than a racy read-then-write per call. That is deliberately coarser
-  # than per runtime: the decision request carries no runtime identity, and two
-  # runtimes in one VM using this policy are permissive for the same reason.
-  # Repeating the line adds nothing an operator did not already read. The init
-  # process inherits the table so a short-lived first caller cannot erase the
-  # announcement state when it exits.
+  # Technical depth: persistent_term retains the VM-wide fact independently of
+  # caller lifetime. A local global transaction serializes its check and write;
+  # each calling process is a distinct requester for the same notice resource.
+  # No ETS ownership is transferred to init when the first caller exits.
   defp announce do
-    if :ets.insert_new(notice_table(), {:announced, true}), do: IO.puts(:stderr, @notice)
-    :ok
+    if :persistent_term.get(@notice_key, false) do
+      :ok
+    else
+      case :global.trans({{__MODULE__, :notice}, self()}, &announce_under_lock/0, [node()]) do
+        :ok -> :ok
+        aborted -> raise "policy notice lock failed: #{inspect(aborted)}"
+      end
+    end
   end
 
-  defp notice_table do
-    case :ets.whereis(@notice_table) do
-      :undefined ->
-        try do
-          :ets.new(@notice_table, [
-            :named_table,
-            :public,
-            :set,
-            {:heir, Process.whereis(:init), :loopex_notice_table}
-          ])
-        rescue
-          ArgumentError -> @notice_table
-        end
-
-      table ->
-        table
+  defp announce_under_lock do
+    unless :persistent_term.get(@notice_key, false) do
+      IO.puts(:stderr, @notice)
+      :persistent_term.put(@notice_key, true)
     end
+
+    :ok
   end
 
   @doc false
   @spec reset_notice_for_test() :: :ok
   def reset_notice_for_test do
-    case :ets.whereis(@notice_table) do
-      :undefined -> :ok
-      table -> :ets.delete(table, :announced)
-    end
-
+    :persistent_term.erase(@notice_key)
     :ok
   end
 end

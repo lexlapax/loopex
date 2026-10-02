@@ -91,6 +91,29 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the reference client's explicitly selected AllowAll policy no longer
+  transfers a VM-lifetime notice table to init. The retained defect reproduces
+  after a short-lived first decision caller exits: its table survives at init
+  and init logs an unexpected ETS-TRANSFER. The policy now retains the notice
+  fact in persistent_term and serializes the first update through a local global
+  transaction with distinct caller identities, matching the CLI's existing
+  approach without importing another client. Policy decisions and notice text
+  remain unchanged; no actor or ETS table is allocated.
+  The complete policy file passes four tests on both toolchains (0.2 seconds
+  current, 0.1 seconds floor), including 64 concurrent decisions and exact first
+  caller DOWN followed by a silent later decision. The complete reference-client
+  suite passes 20 tests with two existing exclusions in 3.7 seconds current.
+  Compile, formatting, documentation, dependency and status gates pass.
+  Complete failing-before and final outputs:
+  `/private/tmp/loopex-m7-policy-notice-lifetime-red-20261002.log`, SHA-256
+  `07326d1eeff959969e258ba509188607b597ee17aede2e42c8489d58936ce67f`;
+  `/private/tmp/loopex-m7-policy-notice-lifetime-current-20261002.log`, SHA-256
+  `772f3ecd1f7a2ba3706fa235b614c62800fc23a0d8890a07f9389e5aad5e7b09`;
+  `/private/tmp/loopex-m7-policy-notice-lifetime-floor-20261002.log`, SHA-256
+  `c0dd4626b3d4171096ad666e2afc6f439ed609a5cfbd5b622943018f156cbedf`;
+  `/private/tmp/loopex-m7-policy-reference-suite-current-20261002.log`, SHA-256
+  `0e75edd68f9e4d81e4211b0924012df582b537729b5eb0b65a1f915f27992387`.
+  Original counts remain 30 done / 156 remaining. Added: 107 done / 11 remaining.
 - Passed: the full fast check ran once on clean implementation SHA
   `bd2828eae9d9095634e002875bbb9001dd9a12d0`. All eleven application suites
   passed: 3,182 tests, 34 existing exclusions, 895 seconds. Complete output:
@@ -3309,7 +3332,7 @@ or check was relaxed.
 - [x] Order diagnostic shutdown through its private supervisor before collecting writer/supervisor joins; prove a failing-before suspended-supervisor fault and unchanged delivery accounting, grace, existing loss/deadline assertions, ephemeral trace and real CLI signal/JSON behavior on both supported toolchains.
 - [ ] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
-- [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
+- [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.
 
 ## T17 — Assemble and test the closure candidate
 

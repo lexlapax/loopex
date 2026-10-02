@@ -83,6 +83,18 @@ defmodule Loopex.ReferenceClient.AllowAllPolicyTest do
     refute quiet =~ AllowAll.notice()
   end
 
+  test "a short-lived first caller preserves the notice without transferring an ETS table to init" do
+    output =
+      capture_io(:stderr, fn ->
+        {caller, monitor} = spawn_monitor(fn -> AllowAll.decide(request()) end)
+        assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}
+      end)
+
+    assert output == AllowAll.notice() <> "\n"
+    assert :ets.whereis(Loopex.ReferenceClient.Policy.AllowAll.Notices) == :undefined
+    assert capture_io(:stderr, fn -> AllowAll.decide(request()) end) == ""
+  end
+
   test "concurrent permissive decisions still emit one authority notice in the VM" do
     output =
       capture_io(:stderr, fn ->
