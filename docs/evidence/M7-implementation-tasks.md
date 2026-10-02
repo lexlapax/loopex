@@ -96,6 +96,18 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: candidate `35519cc9c532a84c2fd8256bd9a3caf7d6e34621` passed its one
+  full current-pair fast check in 1,386 seconds from a clean separate checkout.
+  The exact SHA is retained in the complete output at
+  `/private/tmp/loopex-m7-35519cc9-fast-check.log`; SHA-256
+  `0d29feea7c5ae01515c53c83bcdf00172bd72b29969f7256ba9bb3c55f614d04`.
+  All eleven credential-free application suites passed with warnings as errors.
+  Existing lane exclusions remain unchanged; this is not release, paid-provider,
+  old-reader/rollback or milestone-closure evidence. The added T12 repeated-tool-ID
+  integration subtask is complete. Original tally remains 44 done / 142 todo;
+  added tally is 135 done / 10 todo. The approved T02 early-spill implementation
+  is in progress in the primary checkout and is not covered by this candidate.
+
 - Implementation candidate: the approved repeated-tool-ID fix now writes
   `effect_intent_committed_v2`, `executor_receipt_committed_v2`,
   `tool_result_committed_v2`, `outcome_unknown_committed_v2`,
@@ -4396,7 +4408,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Version tool-event identity records under the approved session/run/turn/call recipe; preserve exact historical IDs and unchanged public members, prove repeated raw IDs and question/effect continuation, and run the committed integration candidate's full check.
+- [x] Version tool-event identity records under the approved session/run/turn/call recipe; preserve exact historical IDs and unchanged public members, prove repeated raw IDs and question/effect continuation, and run the committed integration candidate's full check.
 
 - [x] Integrate one-call-only callback consumption, owner-registered temporary workers, fixed call/expiry/join cutoffs and single-reader continuation; prove serial exact joins, stale identities, ordinary abort, caller death and cleanup uncertainty through actual Core/local HTTP on both supported pairs.
 
