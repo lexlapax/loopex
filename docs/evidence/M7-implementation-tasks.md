@@ -99,23 +99,181 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
-- Integration checkpoint: status implementation and focused proof are committed
-  and pushed at `203ccceed42cf1a9005028e7e26e4a385776da3f`. Original tally is
-  49 done / 137 todo; added tally is 147 done / 7 todo. Primary m7 is clean
-  before this progress-only checkpoint. The existing clean verification checkout
-  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex` is detached at that exact
-  implementation SHA. Its full current-pair fast check has started once and is
-  still running, with complete output streaming to
-  `/private/tmp/loopex-m7-203cccee-fast-check.log`. The current shell handle is
-  73062; it is only a transient cache for reading that process. Do not hash or
-  judge the output until the wrapper exits. Do not restart this run or attribute
-  the earlier 15bc success to it. This documentation child is not its tested SHA.
-  No agents are running, no new maintainer question is pending, and the goal
-  remains active. Continue the public chat host join while the independent
-  verification checkout runs; retain its terminal result and exact-byte digest
-  when complete. Active maintenance and completed compact owner observations,
-  public entry/config inspection, prepared resume workspace/policy/route checks,
-  helpers and the other original M7 outcomes remain open.
+- Integration checkpoint: the full current-pair fast check passed once on
+  `203ccceed42cf1a9005028e7e26e4a385776da3f`. All eleven application suites
+  and repository gates passed in 1,388 reported seconds, with unchanged
+  prescribed exclusions. The wrapper exited 0 after 1,387 measured seconds.
+  Complete output `/private/tmp/loopex-m7-203cccee-fast-check.log`, SHA-256
+  `9ada6578a957702f13ebedd7d5a944100dbe16ccf51eac3ced3b71137c7525b0`.
+  Its terminal shell result was collected before hashing. The clean verification
+  checkout remains detached at that implementation SHA; this documentation child
+  is not the tested SHA. No check or agent remains live. Original tally is
+  49 done / 137 todo; added tally is 148 done / 10 todo after recording this
+  integration proof and three new startup decisions. The goal remains active.
+  Floor full-check, release matrix, live maintenance, public entry/config
+  inspection, helper integration and other original M7 outcomes remain open.
+
+- Decision packet awaiting a new maintainer answer: the preceding three approvals
+  remain bound to the prepared configuration read, tool-event identity and early
+  spill decisions recorded below. They do not accept these startup proposals.
+  Exact packet `/private/tmp/loopex-m7-chat-startup-decision.md`, SHA-256
+  `d4f6a1a4db1a625854ebb67161bc4cd8593c2031375fd3c4d3c8e4cbe32d75c4`.
+  Its complete proposed bytes are retained here for resume. Dependent public
+  contracts, the legacy-workspace amendment and settings admission remain
+  unimplemented until an explicit new decision. Independent work may continue.
+
+  ## Concept
+
+  Three startup choices are needed to finish the reference chat command. They are
+  separate from the three already approved decisions. The maintainer owns these
+  choices under AGENTS.md's public/cross-application and persistence tiers.
+
+  1. Recommend public local startup reads. The approved prepared configuration
+     read has exactly four fields and does not expose the facts needed to check
+     pending policy, admitted model routes, or workspace bindings. Public status
+     intentionally omits them. Add a separate holder-only prepared startup read,
+     and expose the existing read-only exact-create lookup and provenance queries
+     through the facade. This keeps the host on the facade and preserves the
+     approved configuration result. The alternative extends that four-field
+     result and still needs facade wrappers for the existing creation queries.
+
+  2. Recommend pinning the existing physical workspace reference in new chat's
+     genesis options. No new journal kind or kernel workspace interpretation is
+     needed. For existing roots without that binding, require an explicit
+     --workspace on each resume, compare every retained pending-effect workspace
+     reference, and clearly identify this as a legacy host-selected binding. It
+     does not prove the original directory's physical identity. This is a narrow
+     amendment to ADR 0049's matching-workspace requirement, because old empty
+     or model-only roots did not record an identity to compare. It preserves all
+     staged requests, grants, receipts and historical records. Alternatively,
+     require a separate immutable host workspace-binding ledger and a governed
+     legacy adoption step; that adds persistence/recovery and backup machinery.
+     Neither option silently treats the selected file's path as historical proof.
+
+  3. Recommend an owner-only settings-report path in the existing diagnostic
+     consumer. The generic diagnostic renderer hashes every binary over 64 bytes
+     and sensitive-key values, so it cannot display effective paths and budgets
+     faithfully. A closed already-redacted settings report needs separate admission
+     while retaining the same bounded queue, writer, counters and cleanup. Generic
+     diagnostics retain their existing renderer. The alternative has an additional
+     stderr writer and requires arbitration, separate accounting and extra joins.
+
+  These proposals do not enable helpers, alter run bounds, extend cleanup waits,
+  change provider attempts, or authorize milestone closure or publication.
+
+  ## Technical depth
+
+  Decision 1, exact proposed local APIs:
+
+      Loopex.prepared_session_startup(activation)
+        :: {:ok, %{
+             session_options: <exact retained genesis options>,
+             pending_policy_identity: nil | %{"id" => <binary>, "revision" => <binary>},
+             admitted_models: [<exact retained model identity>],
+             admitted_workspace_refs: [<retained pending-effect workspace identity>]
+           }} | {:error, term()}
+
+      Loopex.lookup_create_result(runtime, command_id, session_options, genesis)
+      Loopex.creation_provenance(runtime, selector)
+
+  The latter two forward the existing Runtime methods with their current exact
+  result unions, refusals and sixteen-row provenance pagination. No new Store
+  callback is introduced. The prepared read uses the same current-holder,
+  unspent-capability and owner fence as prepared_session_configuration/1. It
+  reads one serial state and does not activate, mutate, dispatch, resolve a
+  credential, query a catalog or supply current defaults. Policy identity covers
+  an unresolved policy-produced interaction, including an answered interaction
+  awaiting policy reevaluation; model-tool questions have no policy binding.
+  Models are the unique exact identities from admitted run/staged provider work,
+  not current launch defaults. Workspace references come from admitted pending
+  execution grants/intents, not completed historical effects. Arrays are unique
+  and deterministically sorted. Unknown or corrupt required capture refuses.
+  The complete plain result must fit 65,536 canonical bytes. It never truncates;
+  unrepresentable results refuse prepared_startup_too_large and the host abandons
+  before activation. Legacy genesis options remain unchanged. No routing handles,
+  PIDs, monitors, capabilities or private thinking/continuation are added. This
+  trusted-holder read is not a wire or diagnostic projection.
+
+  Prove retained values across actual restart and different host defaults;
+  policy-produced open/answered questions; admitted old/new model identities;
+  pending effect workspace references; empty/legacy captures; nonholder,
+  transfer, activation, abandonment, abort and supersession; exact-byte refusal;
+  unchanged journals/events and zero dispatch before activation. Existing
+  configuration/status result shapes and historical consumers stay unchanged.
+
+  Decision 2, exact new reference-chat options:
+
+      %{"surface" => "chat", "workspace_binding" => %{
+          "revision" => 1,
+          "workspace_ref" => <existing WorkspaceIdentity.reference(workspace)>
+      }}
+
+  The existing reference is the digest of verified canonical root, device and
+  inode. Capture it before creation, compare it at startup against the selected
+  workspace and the execution/resource placement, and admit the complete genesis
+  under the unchanged 65,536-byte ceiling. A conflicting binding refuses before
+  activation. Core stores and returns bounded host options without interpreting
+  the reference as authority. Configure cannot change this binding. A failed or
+  unknown creation never publishes a new session as confirmed; exact-create
+  lookup/provenance remains read-only and tied to the original command/genesis.
+
+  Legacy options are never rewritten. With an absent binding, an explicit
+  --workspace is mandatory even when the file selects the same path. The host
+  verifies its current physical identity and every available retained pending
+  workspace reference. Conflicts still refuse. If historical identity is absent,
+  the startup report says legacy_host_selected rather than verified_historical.
+  This attestation applies to this invocation only; later unbound resumes require
+  the explicit flag again. The existing explicit --model rule for a configuration-
+  less settled legacy session, pending-policy checks, admitted-route checks and
+  helper-binding requirements remain mandatory. Old staged requests and effect
+  identities are not regenerated or relabeled. Implement and prove both settled
+  and unresolved M6 upgrades, unknown-effect nonredispatch, symlink retargeting,
+  physical-directory replacement, current-reference conflicts and exact unchanged
+  historical bytes. Migration instructions and fixture argv record this explicit
+  legacy choice while preserving fixed prompts, budgets, oracles and attempt counts.
+
+  Decision 3, exact host-private report data:
+
+      [%{"setting" => <allowlisted effective setting pointer>,
+         "value" => <bounded plain already-redacted presentation value>,
+         "origin" => "flag" | "env" | "file#<pointer>" | "default" | "committed"}]
+
+  The creating owner submits one report asynchronously without awaiting IO.
+  Consumer admission validates the closed row shape and selected-setting allowlist.
+  Provider rows expose provider identity, reference form/validity and commands
+  unavailable to a credential-free binding, never environment-reference names or
+  values. Captured instruction bodies, role prompts, provider capabilities,
+  provider mappings and private continuation are excluded. Values and origins
+  come from the confirmed selection; omitted resume files are not read again.
+  Numeric quantities use exact decimal strings. Arrays use ordered indexed rows.
+  UTF-8 and control characters are encoded into one physical JSON line per row.
+  The existing 4,096-byte entry ceiling includes LF. An oversized row drops whole
+  and counts as diagnostic loss; it is never truncated into a false selected value.
+  The existing 256-entry pending queue, one writer and diagnostic emitted/dropped/
+  unconfirmed counts apply. One owner submission is best-effort and never gates
+  startup. No other runtime actor obtains the trusted report path. Ordinary trace
+  and diagnostic messages still use Entry.render and its redaction. Test owner
+  refusal, redaction canaries, long/escaped paths, exact byte limits, array order,
+  committed origins, queue loss, broken/stalled stderr and exact process joins.
+
+  Evidence locations:
+  - apps/loopex/lib/loopex.ex: prepared configuration's closed four-member result;
+    facade status excludes private pending policy/model/workspace capture.
+  - apps/loopex/lib/loopex/runtime.ex: existing lookup_create_result/4 and
+    creation_provenance/2 read-only contracts.
+  - apps/loopex/lib/loopex/runtime/session_state.ex: retained run configurations,
+    pending work, effect intents and unresolved interaction records.
+  - apps/loopex/lib/loopex/interaction.ex: public view omits policy identity.
+  - apps/loopex_composition/lib/workspace_identity.ex: existing physical identity.
+  - apps/loopex/lib/loopex/runtime/resource_snapshot.ex: runtime-local resource
+    catalog does not provide an always-present retained workspace binding.
+  - apps/loopex/lib/loopex/session_directory.ex: existing metadata binds runtime
+    placement, not workspace.
+  - apps/loopex/lib/loopex/trace/entry.ex: generic long-binary/key redaction.
+  - apps/loopex_composition/lib/loopex_composition/diagnostic_consumer.ex: existing
+    fixed queue/entry/writer/cleanup contract.
+  - docs/adr/0049-explicit-host-configuration-technical.md: retained resume checks,
+    effective values/origins, bounded startup report and legacy model selection.
 
 - Done: ordered private-driver `/status` now acknowledges its input before
   reading public session status and runtime trace counters through the command
@@ -4794,6 +4952,9 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
+- [ ] Resolve and implement new-chat physical workspace binding and the explicit legacy-unbound resume decision; prove retained identity conflicts, physical replacement, unchanged historical bytes and actual settled/unresolved migration.
+
 - [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, captured invocation bounds and queued-run inheritance, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
 - [x] Resolve the prepared-recovery configuration-read boundary, then expose its exact retained host capture under capability ownership and prove refusal/fencing without activation or dispatch.
 
@@ -4918,6 +5079,8 @@ or check was relaxed.
 - [ ] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
+
+- [ ] Resolve and implement the owner-only effective-settings report admission decision; preserve shared diagnostic queue/writer/cleanup bounds and prove redaction, exact values/origins, byte refusal and loss accounting.
 
 - [x] Join ordered status to public session/trace reads and the confirmed host capture; implement closed nested status and standalone compact-result codecs with exact quantities, private-data refusal, byte limits, stale-cache refusal and blocked-read cancellation proof on both toolchains. Public host entry, live maintenance observations and coordinated independent consumer/schema proof remain open.
 
@@ -5065,6 +5228,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Run the full fast check once on the clean committed guarded-activation and ordered-status candidate; retain exact SHA, complete output and terminal digest without reusing earlier integration proof.
 
 - [x] Run the full fast check once on the clean committed resume/startup/signal integration candidate; retain its exact SHA, complete output and final result without reusing the earlier repair-only proof.
 
