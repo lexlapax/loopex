@@ -112,12 +112,17 @@ did not resolve them. No paid provider calls were made during this check.
   `a44cbc6fb5609081f5e27f9f0a7e6f54c4badb8a7e5cc33e6b3d9e205044df35`.
   Original checklist: 28 done / 158 remaining. Added subtasks: 91 done / 11
   remaining.
-- Running: the full fast check on
-  `39f57d8b13787761c799b78e51bb785c76a15a03` has two provider fixture failures.
+- Failed evidence retained: the full fast check on
+  `39f57d8b13787761c799b78e51bb785c76a15a03` exited 1 with two provider fixture failures.
   Its isolated checkout contains an untracked dependency symlink: `/deps/`
   ignores directories, not symlinks. The clean-source fixtures correctly refuse.
-  This is a check-setup failure, not PASS; the CLI suite is still finishing.
-  Retain the complete output before cleanup. The next integration candidate
+  This is a check-setup failure, not PASS: 3,090 tests passed, two failed and 34
+  existing exclusions remained. The clean-source fixtures in provider companion
+  entry and child-environment conformance both refused; no gate was weakened.
+  Complete output: `/private/tmp/loopex-m7-39f57d8b-fast-check.log`, SHA-256
+  `17031200b7a03b5033aadfe6c2b342d8e1cb5d5b9b7e665a0c2525e79616b97a`.
+  The setup symlink was removed after the check finished and worktree archival
+  was requested; the retained output is outside it. The next integration candidate
   must use a real ignored dependency directory and prove its checkout clean
   before running. Do not rerun the same full candidate as a pass.
 - Done: observation boundary review preserves the existing opaque command
@@ -178,8 +183,7 @@ did not resolve them. No paid provider calls were made during this check.
   `1a8e454600e71dabcee4aefd916a3d04dd637468ecf8fc31f82b0c669b6a2813`.
   Original checklist: 28 done / 158 remaining. Added subtasks: 90 done / 11
   remaining. The chat driver and its pipe-ordering obligation remain open.
-- Next: finish and retain the failed admission integration check, then run the
-  next committed integration candidate with a verified clean setup. Complete
+- Next: run the next committed integration candidate with a verified clean setup. Complete
   the remaining chat control records and join the owning driver after the exact-genesis
   creation decision. The creation, preparation-store and refusal-schema questions
   were bundled again for the maintainer; no dependent contract change is made.
