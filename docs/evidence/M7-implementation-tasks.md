@@ -99,6 +99,57 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: prepared chat signal installation reuses the existing capability
+  holder and manager-lifetime guard. The handler is installed before Core's
+  acknowledged transfer. Only the exact guarded holder then activates or
+  abandons; the driver remains the sole local abort submitter, and Core's
+  serial owner orders activation against that abort. Refused transfers clear
+  the advertised holder, unresolved transfers retain uncertainty, and local
+  installation refusal releases the unacknowledged holder. Prepared duplicate
+  installation preserves its exact `interrupt_already_installed` refusal and
+  original holder. Losing the chat driver withdraws the advertised capability
+  and releases the holder; Core confirms abandonment of still-prepared work.
+  An already submitted presentation retains the existing non-retraction rule.
+
+  Real Core cases prove exact handoff and holder-only activation, abandonment,
+  interrupted activation refusal without dispatch, duplicate-holder preservation
+  and abrupt driver loss with exact holder DOWN and public abandonment. The
+  complete chat interrupt/OS-signal, ask interrupt and legacy prepared-recovery
+  files pass 84 cases current in 33.0 seconds and 82 floor in 32.1 seconds,
+  warnings as errors. The two-case difference is the existing conditional OTP
+  tty-handler fixtures. Current
+  `/private/tmp/loopex-m7-chat-handoff-current-v4.log`, SHA-256
+  `edb749b23f3b8fb640004623e966cdcb194bec9392335e3bcbee2b449acd2351`;
+  floor `/private/tmp/loopex-m7-chat-handoff-floor-v3.log`, SHA-256
+  `c5e74b87d380f8a9b207e0ce68518bfa3a8fd0cf5e25b3c509e1de9f4002bc57`.
+  Compilation, format, documentation, dependency and status gates pass.
+
+  The first draft masked the prepared duplicate refusal as generic unavailable.
+  It now preserves the existing precise refusal before any transfer.
+  Failed output `/private/tmp/loopex-m7-chat-handoff-current-v1.log`, SHA-256
+  `646d7d116bf735608adee5ff53ba8cd8bfef91c1f0172e3fb2fd2696c20b6117`.
+  A subsequent malformed one-line cond failed compilation before tests on both
+  pairs; the enclosing function now uses its explicit do/end block. Outputs
+  `/private/tmp/loopex-m7-chat-handoff-current-v2.log` and
+  `/private/tmp/loopex-m7-chat-handoff-floor-v1.log`, both SHA-256
+  `e6f07fe7964d8db90b86c27a676d3cdd9522dd7a613da2faa311738d557255ac`.
+  No required assertion, cutoff, public Core contract or persistence changed.
+  This completes one added T10 subtask; no original aggregate closes.
+
+  The current full check remains live on 15bcaf73, which predates this handoff
+  source. Its output is `/private/tmp/loopex-m7-15bcaf73-fast-check.log`, with
+  no final result/digest yet. Observe that exact run, never restart it merely
+  because observation times out. Next join the public chat host using these
+  stages. Keep explicit host state across composition cleanup so discarded
+  callback results cannot lose the driver or signal-route identities; retain
+  those identities directly rather than in global state. Confirm the startup
+  checks while the capability is held, install this guarded route, activate
+  through its holder and retain unknown transfer/presentation facts unchanged.
+  Finish the exact route after outer cleanup and before driver close, carrying
+  its final exit decision. Effective display, workspace/pending-policy and
+  admitted-work routes, trace/diagnostic lifetime, status/maintenance and
+  helper/legacy resume remain open.
+
 - Running: the full current-pair fast check has started once on exact
   `15bcaf73b6877cf30581a842ae775a2482da1604` in the existing detached
   `/Users/spuri/.codex/worktrees/m7-trace-check/loopex` checkout. Complete output
@@ -4770,6 +4821,8 @@ or check was relaxed.
 - [ ] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
+
+- [x] Join prepared chat installation to the existing acknowledged holder and manager guard; prove holder-only activation/abandonment, driver-owned abort fencing, exact duplicate preservation and fail-closed transport loss on both toolchains. Public host startup checks and composition remain pending.
 
 - [x] Route installed process signals through the existing chat driver without competing aborts; retain exact installer/manager/reference ownership, late-install retirement, host/driver loss and truthful late-interrupt closing exits, proving actual OS signals in separate VMs and legacy prepared recovery on both toolchains. Public host composition and prepared activation handoff remain pending.
 

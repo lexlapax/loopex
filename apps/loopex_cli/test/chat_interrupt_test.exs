@@ -50,6 +50,121 @@ defmodule LoopexCli.ChatInterruptTest do
     refute Interrupt.chat_live(manager, ref)
   end
 
+  test "prepared chat transfers to the guarded holder and activates through that exact holder",
+       f do
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_session(f.fixture.runtime, f.session, "resume")
+
+    {:ok, driver} = driver(f)
+    {:ok, _} = ChatDriver.prepare(driver)
+    ref = make_ref()
+    assert {:ok, manager} = Interrupt.install_chat(driver, ref, 5000, activation)
+    assert manager == f.manager
+
+    assert {:error, :resume_activation_holder_mismatch} =
+             Loopex.prepared_session_configuration(activation)
+
+    assert {:ok, holder} = :gen_event.call(manager, Interrupt, {:prepared_holder, activation})
+    monitor = Process.monitor(holder)
+    assert self() in elem(Process.info(holder, :monitored_by), 1)
+    assert {:ok, session} = Interrupt.activate_prepared(activation)
+    assert session == f.session
+    assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}, 1000
+    assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert :ok = Loopex.stop(f.fixture.runtime)
+    assert {:ok, :ordinary} = Interrupt.finish_chat(manager, ref)
+    assert ChatDriver.close(driver, :confirmed) == 0
+    assert length(Loopex.AgentLoopTestModel.dispatched(f.fixture.model)) == 1
+  end
+
+  test "an installed prepared chat signal fences holder activation without dispatch", f do
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_session(f.fixture.runtime, f.session, "resume")
+
+    {:ok, driver} = driver(f)
+    {:ok, _} = ChatDriver.prepare(driver)
+    ref = make_ref()
+    assert {:ok, manager} = Interrupt.install_chat(driver, ref, 5000, activation)
+    assert :ok = :gen_event.sync_notify(manager, :sigterm)
+    assert %{exit_code: 1, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert {:error, :resume_activation_fenced} = Interrupt.activate_prepared(activation)
+    assert Loopex.AgentLoopTestModel.dispatched(f.fixture.model) == []
+    assert Agent.get(f.fixture.executor, & &1.jobs) == []
+    assert {"one\n/wait\n/quit\n", ""} == StringIO.contents(f.input)
+    assert {:ok, :interrupted} = Interrupt.finish_chat(manager, ref)
+    assert ChatDriver.close(driver, :confirmed, 1) == 1
+  end
+
+  test "prepared chat abandonment uses the acknowledged holder and releases it", f do
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_session(f.fixture.runtime, f.session, "resume")
+
+    {:ok, driver} = driver(f)
+    {:ok, _} = ChatDriver.prepare(driver)
+    ref = make_ref()
+    assert {:ok, manager} = Interrupt.install_chat(driver, ref, 5000, activation)
+    assert {:ok, holder} = :gen_event.call(manager, Interrupt, {:prepared_holder, activation})
+    monitor = Process.monitor(holder)
+    assert :ok = Interrupt.abandon_prepared(activation)
+    assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}, 1000
+
+    assert {:error, :resume_activation_abandoned} =
+             Loopex.prepared_session_configuration(activation)
+
+    ChatDriver.interrupt(driver)
+    assert %{exit_code: 1, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert {:ok, :ordinary} = Interrupt.finish_chat(manager, ref)
+    assert ChatDriver.close(driver, :confirmed) == 1
+    assert Loopex.AgentLoopTestModel.dispatched(f.fixture.model) == []
+  end
+
+  test "driver loss withdraws a prepared chat holder and abandons before activation", f do
+    Process.flag(:trap_exit, true)
+
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_session(f.fixture.runtime, f.session, "resume")
+
+    {:ok, driver} = driver(f)
+    {:ok, _} = ChatDriver.prepare(driver)
+    ref = make_ref()
+    assert {:ok, manager} = Interrupt.install_chat(driver, ref, 5000, activation)
+    assert {:ok, holder} = :gen_event.call(manager, Interrupt, {:prepared_holder, activation})
+    monitor = Process.monitor(holder)
+    assert self() in elem(Process.info(holder, :monitored_by), 1)
+    Process.exit(driver, :kill)
+    assert_receive {:EXIT, ^driver, :killed}, 1000
+    assert_receive {^manager, ^ref, :chat_driver_down}, 1000
+    assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}, 1000
+    assert {:error, :prepared_activation_not_installed} = Interrupt.activate_prepared(activation)
+    await_abandoned(activation, System.monotonic_time(:millisecond) + 1000)
+    assert Loopex.AgentLoopTestModel.dispatched(f.fixture.model) == []
+    assert Agent.get(f.fixture.executor, & &1.jobs) == []
+    assert {"one\n/wait\n/quit\n", ""} == StringIO.contents(f.input)
+    assert {:error, :interrupt_handler_unavailable} = Interrupt.finish_chat(manager, ref)
+    assert [:erl_signal_handler] == :gen_event.which_handlers(manager)
+  end
+
+  test "duplicate prepared installation retains its original guarded holder", f do
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_session(f.fixture.runtime, f.session, "resume")
+
+    {:ok, driver} = driver(f)
+    {:ok, _} = ChatDriver.prepare(driver)
+    ref = make_ref()
+    assert {:ok, manager} = Interrupt.install_chat(driver, ref, 5000, activation)
+    assert {:ok, holder} = :gen_event.call(manager, Interrupt, {:prepared_holder, activation})
+
+    assert {:error, :interrupt_already_installed} =
+             Interrupt.install_chat(driver, make_ref(), 5000, activation)
+
+    assert {:ok, ^holder} = :gen_event.call(manager, Interrupt, {:prepared_holder, activation})
+    assert Interrupt.chat_live(manager, ref)
+    assert {:ok, _} = Interrupt.activate_prepared(activation)
+    assert %{exit_code: 0} = ChatDriver.run(driver)
+    assert {:ok, :ordinary} = Interrupt.finish_chat(manager, ref)
+    assert ChatDriver.close(driver, :confirmed) == 0
+  end
+
   test "a signal after input finished is reflected in the final closing exit", f do
     {:ok, driver} = driver(f)
     {:ok, _} = ChatDriver.prepare(driver)
@@ -316,6 +431,21 @@ defmodule LoopexCli.ChatInterruptTest do
       assert System.monotonic_time(:millisecond) < cutoff
       Process.sleep(10)
       await_queued_swap(manager, cutoff)
+    end
+  end
+
+  defp await_abandoned(activation, cutoff) do
+    case Loopex.prepared_session_configuration(activation) do
+      {:error, :resume_activation_abandoned} ->
+        :ok
+
+      {:error, :resume_activation_holder_mismatch} ->
+        assert System.monotonic_time(:millisecond) < cutoff
+        Process.sleep(10)
+        await_abandoned(activation, cutoff)
+
+      other ->
+        flunk("prepared owner did not confirm abandonment: #{inspect(other)}")
     end
   end
 end

@@ -184,6 +184,43 @@ defmodule LoopexCli.Interrupt do
 
   def install_chat(_, _, _), do: {:error, :interrupt_handler_unavailable}
 
+  @doc """
+  ## Concept
+
+  Install the chat signal route while handing off a prepared resume capability.
+
+  ## Technical depth
+
+  Reuse the existing prepared holder and manager-lifetime guard. Installation
+  precedes the owner-acknowledged transfer; only that holder can activate or
+  abandon through activate_prepared or abandon_prepared. Signals notify the
+  driver, whose ordinary abort fences activation at Core's serial owner.
+  Transfer uncertainty is returned unchanged and forbids another installation
+  or an activation retry. Before transfer, local refusal releases the holder.
+  After a refused transfer the route stays live without advertising a holder.
+  """
+  def install_chat(driver, reference, cleanup_grace_ms, activation)
+      when is_pid(driver) and is_reference(reference) do
+    with {:ok, bounds} <- Loopex.Executor.cancellation_bounds(cleanup_grace_ms),
+         {:ok, lifetime} <- prepare_holder(activation) do
+      fields = %{chat: %{owner: self(), driver: driver, ref: reference, phase: :idle}}
+
+      case do_install(nil, bounds.cli_backstop_ms, activation, lifetime, fields) do
+        {:ok, manager} ->
+          {:ok, manager}
+
+        {:error, _} = refusal ->
+          release(lifetime.holder)
+          refusal
+
+        {:unresolved, _} = unresolved ->
+          unresolved
+      end
+    end
+  end
+
+  def install_chat(_, _, _, _), do: {:error, :interrupt_handler_unavailable}
+
   defp install_command_handler(main_pid, reference, fields) do
     case Process.whereis(:erl_signal_server) do
       manager when is_pid(manager) ->
@@ -968,10 +1005,10 @@ defmodule LoopexCli.Interrupt do
     :exit, _unavailable -> {:error, :prepared_activation_unavailable}
   end
 
-  defp do_install(attachment, grace_ms, activation, holder_lifetime) do
+  defp do_install(attachment, grace_ms, activation, holder_lifetime, fields \\ %{}) do
     case Process.whereis(:erl_signal_server) do
       manager when is_pid(manager) ->
-        install_on(manager, attachment, grace_ms, activation, holder_lifetime)
+        install_on(manager, attachment, grace_ms, activation, holder_lifetime, fields)
 
       nil ->
         {:error, :prepared_activation_not_installed}
@@ -1118,35 +1155,60 @@ defmodule LoopexCli.Interrupt do
   # The default handler is swapped during initial installation so signal
   # coverage remains continuous. A stale handler snapshot cannot grant a second
   # claim. Session calls and participant waits occur only in the installer.
-  defp install_on(manager, attachment, grace_ms, activation, holder_lifetime) do
-    state = %{
-      attachment: attachment,
-      terminal: self(),
-      grace_ms: grace_ms,
-      activation: activation,
-      holder: prepared_holder(holder_lifetime)
-    }
+  defp install_on(manager, attachment, grace_ms, activation, holder_lifetime, fields) do
+    state =
+      %{
+        attachment: attachment,
+        terminal: self(),
+        grace_ms: grace_ms,
+        activation: activation,
+        holder: prepared_holder(holder_lifetime)
+      }
+      |> Map.merge(fields)
 
     with :ok <- arm_holder(holder_lifetime, manager),
          {:ok, handlers} <- observe_handlers(manager),
+         :ok <- prepared_handlers_supported(fields, handlers),
          :ok <- install_handler(manager, handlers, state) do
-      Enum.each(@signals, fn signal ->
-        try do
-          :os.set_signal(signal, :handle)
-        rescue
-          _unsupported -> :ok
-        end
-      end)
+      case prepared_signals(manager, fields) do
+        :ok ->
+          case complete_prepared_handoff(holder_lifetime, activation, manager) do
+            :ok -> {:ok, manager}
+            result -> result
+          end
 
-      remove_default_handlers(manager)
-
-      case complete_prepared_handoff(holder_lifetime, activation, manager) do
-        :ok -> {:ok, manager}
-        result -> result
+        {:error, _} = refusal ->
+          cancel_command_until_removed(manager, fields.chat.ref, fields)
+          refusal
       end
     end
   catch
     :exit, _lost_mutation_result -> {:unresolved, :resume_handoff_unresolved}
+  end
+
+  defp prepared_handlers_supported(%{chat: _}, handlers) do
+    cond do
+      __MODULE__ in handlers -> {:error, :interrupt_already_installed}
+      ask_handlers_supported?(handlers) -> :ok
+      true -> {:error, :interrupt_handler_unavailable}
+    end
+  end
+
+  defp prepared_handlers_supported(_, _), do: :ok
+
+  defp prepared_signals(_manager, %{chat: _}), do: handle_ask_signals()
+
+  defp prepared_signals(manager, _) do
+    Enum.each(@signals, fn signal ->
+      try do
+        :os.set_signal(signal, :handle)
+      rescue
+        _unsupported -> :ok
+      end
+    end)
+
+    remove_default_handlers(manager)
+    :ok
   end
 
   defp prepared_holder(nil), do: nil
@@ -1508,8 +1570,15 @@ defmodule LoopexCli.Interrupt do
         %{chat: %{driver: driver, driver_monitor: monitor} = chat} = state
       ) do
     status = if reason == :normal, do: :closed, else: :lost
-    if status == :lost, do: send(chat.owner, {self(), chat.ref, :chat_driver_down})
-    {:ok, %{state | chat: %{chat | driver: nil, driver_status: status}}}
+    next = %{state | chat: %{chat | driver: nil, driver_status: status}}
+
+    if status == :lost do
+      send(chat.owner, {self(), chat.ref, :chat_driver_down})
+      if is_pid(state.holder), do: release(state.holder)
+      {:ok, %{next | activation: nil, holder: nil}}
+    else
+      {:ok, next}
+    end
   end
 
   def handle_info(
