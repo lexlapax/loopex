@@ -767,6 +767,10 @@ defmodule Loopex.ConfiguredSessionTest do
       )
 
     [first_run, second_run] = recovered.run_order
+    assert {:ok, selection_units} = SessionState.compaction_units(recovered, second_run)
+    assert Enum.map(selection_units, & &1.run_id) == [first_run, second_run]
+    assert Enum.all?(selection_units, & &1.complete?)
+    refute Enum.any?(selection_units, & &1.protected?)
     assert recovered.configuration == candidate
     assert SessionState.run_configuration(recovered, first_run) == initial
     assert SessionState.run_configuration(recovered, second_run) == candidate
@@ -781,6 +785,15 @@ defmodule Loopex.ConfiguredSessionTest do
 
     assert {:ok, ^session} =
              Loopex.resume_session(restarted.runtime, session, command_id: "resume")
+
+    assert {:ok, restarted_state} =
+             SessionState.recover(
+               session,
+               Fixture.records(restarted, session),
+               Fixture.events(restarted, session)
+             )
+
+    assert SessionState.compaction_units(restarted_state, second_run) == {:ok, selection_units}
 
     assert {:ok, next_attachment} =
              Loopex.attach(restarted.runtime, session,

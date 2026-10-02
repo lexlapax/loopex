@@ -148,6 +148,100 @@ defmodule Loopex.Conversation do
 
   def lineage_entries(_invalid), do: {:error, :context_projection_invalid}
 
+  # Concept: compaction preserves complete exchanges and their preceding inputs.
+  # Technical depth: these transient units contain no maintenance records. A
+  # selector may cover only a contiguous prefix before its first protected unit.
+  # Request sizing, tail release and checkpoint coverage are applied separately.
+  @doc false
+  @spec compaction_units([element()], binary() | nil, [binary()], [map()]) ::
+          {:ok, [map()]} | {:error, :context_projection_invalid}
+  def compaction_units(elements, current_run, terminal_runs, frozen_sources)
+      when is_list(elements) and (is_binary(current_run) or is_nil(current_run)) and
+             is_list(terminal_runs) and
+             is_list(frozen_sources) do
+    with {:ok, calls, _results} <- lineage_identities(elements),
+         true <- MapSet.size(MapSet.new(Map.values(calls))) == map_size(calls),
+         runs = Enum.chunk_by(elements, & &1.run_id),
+         run_ids = Enum.map(runs, &hd(&1).run_id),
+         true <- length(run_ids) == MapSet.size(MapSet.new(run_ids)) do
+      terminal = MapSet.new(terminal_runs)
+      frozen = MapSet.new(frozen_sources)
+
+      {:ok,
+       Enum.flat_map(runs, fn run_elements ->
+         run_units(run_elements)
+         |> Enum.map(fn unit ->
+           frozen? =
+             Enum.any?(project_entries(unit.elements), &MapSet.member?(frozen, elem(&1, 0)))
+
+           Map.put(
+             unit,
+             :protected?,
+             unit.run_id == current_run or not MapSet.member?(terminal, unit.run_id) or
+               not unit.complete? or frozen?
+           )
+         end)
+       end)}
+    else
+      _invalid -> {:error, :context_projection_invalid}
+    end
+  end
+
+  def compaction_units(_, _, _, _), do: {:error, :context_projection_invalid}
+
+  defp run_units(elements) do
+    results =
+      elements
+      |> Enum.filter(&(&1.kind == :tool_result))
+      |> Map.new(&{{&1.turn_number, &1.tool_call_id}, &1})
+
+    {units, pending} =
+      Enum.reduce(elements, {[], []}, fn
+        %{kind: :user_message} = input, {units, pending} ->
+          {units, [input | pending]}
+
+        %{kind: :assistant_message} = assistant, {units, pending} ->
+          ordered_results =
+            Enum.flat_map(assistant.tool_calls, fn call ->
+              case Map.fetch(results, {assistant.turn_number, call.tool_call_id}) do
+                {:ok, result} -> [result]
+                :error -> []
+              end
+            end)
+
+          unit = %{
+            kind: :assistant_group,
+            run_id: assistant.run_id,
+            elements: Enum.reverse(pending) ++ [assistant | ordered_results],
+            complete?: length(ordered_results) == length(assistant.tool_calls)
+          }
+
+          {[unit | units], []}
+
+        %{kind: :tool_result}, acc ->
+          acc
+      end)
+
+    units =
+      case pending do
+        [] ->
+          units
+
+        [input | _] ->
+          [
+            %{
+              kind: :inputs,
+              run_id: input.run_id,
+              elements: Enum.reverse(pending),
+              complete?: true
+            }
+            | units
+          ]
+      end
+
+    Enum.reverse(units)
+  end
+
   @doc """
   ## Concept
 

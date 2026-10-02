@@ -91,6 +91,19 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T07 now derives indivisible assistant/result groups with preceding
+  same-run inputs and trailing input-only units. Current work, unfinished groups,
+  pending interactions and every unit containing a frozen native-prefix source
+  remain protected. Idle sessions can release their terminal history. This is
+  selection-unit construction; request sizing, tail release, checkpoint storage
+  and maintenance dispatch remain open.
+  Eight new cases plus existing lineage and configured-session regressions pass:
+  58 tests on each supported toolchain, 3.7 seconds current and 3.6 seconds floor.
+  Recovery of a real two-run journal preserves the exact units after restart.
+  Current output: `/private/tmp/loopex-m7-compaction-units-current-verified.log`,
+  SHA-256 `98b536b84d58c622babd85832fc8eab79ada7c2d1ae41a9380eb3d92b492cb87`.
+  Floor output: `/private/tmp/loopex-m7-compaction-units-floor.log`, SHA-256
+  `5e3d32f57be8d308c3d3dd7574cd9201b6a9e7874d3567b083fdfbcfec13fe63`.
 - Done: the resumed full fast check on `ba0d453f5317b64ac4e47eb794e8db63d7c0f717`
   passes all eleven application suites, 3,036 tests with 34 existing exclusions,
   in 890 seconds. Complete output:
@@ -2254,6 +2267,7 @@ or check was relaxed.
 - [x] Validate explicit Core maintenance model/instruction startup settings and privately forward exact captured instruction bytes to session owners.
 - [x] Validate and forward explicit maintenance instructions through all durable constructors and ephemeral startup before owned effects, preserving per-call refusal.
 - [x] Resolve the separately configured host summarizer and prove its fixed-budget thinking-off native request and natural completion through both transports.
+- [x] Build replay-derived indivisible compaction units with same-run inputs, terminal trailing inputs, current/unfinished protection and frozen native-prefix source protection; prove idle release and exact grouping after real journal recovery.
 
 ## T08 — Implement model selection and private thinking continuation
 

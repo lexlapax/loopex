@@ -700,6 +700,33 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: selection protects work and native prefixes retained by this owner.
+  # Technical depth: run order and pending work come from validated replay;
+  # absence of pending work alone cannot release a run with an open interaction.
+  @doc false
+  @spec compaction_units(t(), binary()) ::
+          {:ok, [map()]} | {:error, :context_projection_invalid}
+  def compaction_units(%__MODULE__{} = state, run_id) do
+    if run_id in state.run_order do
+      interaction = open_interaction_record(state)
+      interaction_run = interaction && interaction.run_id
+
+      terminal_runs =
+        Enum.reject(state.run_order, fn run ->
+          Map.has_key?(state.pending_work, run) or run == interaction_run
+        end)
+
+      Conversation.compaction_units(
+        lineage_elements(state, run_id),
+        state.active_run_id,
+        terminal_runs,
+        Map.keys(frozen_lineage(state, state.active_run_id))
+      )
+    else
+      {:error, :context_projection_invalid}
+    end
+  end
+
   @doc false
   @spec projected_lineage(t(), binary(), non_neg_integer(), list() | nil) ::
           {:ok, list(), map() | nil} | {:error, atom()}

@@ -41,6 +41,168 @@ defmodule Loopex.ConversationTest do
 
   defp project(elements), do: Conversation.project(elements, system: "SYS")
 
+  test "compaction groups preceding inputs and every result in call order" do
+    prompt = user("go")
+    steer = %{user("use both") | command_id: "steer"}
+    first = assistant(1, [call("a"), call("b")])
+    a = result(1, "a", :failed)
+    b = result(1, "b", :cancelled)
+    next_input = %{user("continue") | command_id: "continue"}
+    last = assistant(2, [], "done")
+    elements = [prompt, steer, first, b, next_input, a, last]
+
+    assert {:ok, [group, completion]} =
+             Conversation.compaction_units(elements, "r2", ["r1"], [])
+
+    assert group == %{
+             kind: :assistant_group,
+             run_id: "r1",
+             complete?: true,
+             protected?: false,
+             elements: [prompt, steer, first, a, b]
+           }
+
+    assert completion.elements == [next_input, last]
+    assert completion.complete?
+    refute completion.protected?
+  end
+
+  test "terminal input-only runs keep failed and cancelled prompts eligible" do
+    first = user("failed before reply")
+    second = %{user("cancelled before reply") | run_id: "r2", command_id: "c2"}
+    current = %{user("now") | run_id: "r3", command_id: "c3"}
+
+    assert {:ok, [a, b, c]} =
+             Conversation.compaction_units([first, second, current], "r3", ["r1", "r2"], [])
+
+    assert a.kind == :inputs
+    assert a.elements == [first]
+    assert b.elements == [second]
+    refute a.protected?
+    refute b.protected?
+    assert c.protected?
+  end
+
+  test "all current-run groups and trailing inputs remain protected" do
+    elements = [
+      user("go"),
+      assistant(1, []),
+      %{user("steer") | command_id: "s"},
+      assistant(2, []),
+      %{user("tail") | command_id: "t"}
+    ]
+
+    assert {:ok, units} = Conversation.compaction_units(elements, "r1", ["r1"], [])
+    assert length(units) == 3
+    assert Enum.all?(units, & &1.protected?)
+  end
+
+  test "unfinished groups retain available results and block contiguous coverage" do
+    first = [user("old"), assistant(1, [])]
+    unfinished = [assistant(2, [call("a"), call("b")]), result(2, "b")]
+
+    later = [
+      %{user("later") | run_id: "r2", command_id: "c2"},
+      %{assistant(1, []) | run_id: "r2"}
+    ]
+
+    assert {:ok, [old, pending, trailing] = units} =
+             Conversation.compaction_units(first ++ unfinished ++ later, "r3", ["r1", "r2"], [])
+
+    refute old.protected?
+    assert pending.protected?
+    refute pending.complete?
+    assert pending.elements == unfinished
+    refute trailing.protected?
+    assert Enum.take_while(units, &(not &1.protected?)) == [old]
+  end
+
+  test "any frozen native-prefix source protects its complete unit" do
+    elements = [user("go"), assistant(1, [call("a")]), result(1, "a")]
+    assert {:ok, entries} = Conversation.lineage_entries(elements)
+
+    for {source, _message} <- entries do
+      assert {:ok, [unit]} = Conversation.compaction_units(elements, "r2", ["r1"], [source])
+      assert unit.protected?
+      assert unit.elements == elements
+    end
+
+    assert {:ok, [unit]} =
+             Conversation.compaction_units(elements, "r2", ["r1"], [
+               %{"kind" => "session_command", "run_id" => "r9", "command_id" => "c1"}
+             ])
+
+    refute unit.protected?
+  end
+
+  test "nonterminal runs cannot release their input-only units" do
+    assert {:ok, [unit]} = Conversation.compaction_units([user("waiting")], "r2", [], [])
+    assert unit.protected?
+    assert unit.kind == :inputs
+  end
+
+  test "compaction refuses orphan, duplicate and noncontiguous lineage" do
+    valid = [user("go"), assistant(1, [call("a")]), result(1, "a")]
+    other = %{user("other") | run_id: "r2", command_id: "c2"}
+
+    for invalid <- [
+          [result(1, "a")],
+          valid ++ [result(1, "a")],
+          valid ++ [other, assistant(2, [])],
+          [:invalid]
+        ] do
+      assert Conversation.compaction_units(invalid, "r3", ["r1", "r2"], []) ==
+               {:error, :context_projection_invalid}
+    end
+
+    assert Conversation.compaction_units(nil, "r1", [], []) ==
+             {:error, :context_projection_invalid}
+
+    assert Conversation.compaction_units([], "r1", [], []) == {:ok, []}
+  end
+
+  test "owner derives protected runs and native-prefix sources from its state" do
+    alias Loopex.Runtime.SessionState
+    old = [user("old"), assistant(1, [])]
+    current = [%{user("new") | run_id: "r2", command_id: "c2"}]
+    assert {:ok, entries} = Conversation.lineage_entries(old)
+
+    exchange = %{
+      base_request: %{messages: Enum.map(entries, &elem(&1, 1))},
+      base_receipt: %{
+        "blocks" =>
+          Enum.map(entries, fn {source, _} ->
+            %{"provenance_class" => "session", "source_reference" => source}
+          end)
+      }
+    }
+
+    state = %SessionState{
+      run_order: ["r1", "r2"],
+      active_run_id: "r2",
+      conversation: %{"r1" => old, "r2" => current},
+      pending_work: %{"r2" => %{continuation_exchange: exchange}}
+    }
+
+    assert {:ok, units} = SessionState.compaction_units(state, "r2")
+    assert Enum.all?(units, & &1.protected?)
+    assert {:ok, [earlier]} = SessionState.compaction_units(state, "r1")
+    assert earlier.protected?
+    state = %{state | pending_work: %{}}
+    assert {:ok, [a, b]} = SessionState.compaction_units(state, "r2")
+    refute a.protected?
+    assert b.protected?
+    idle = %{state | active_run_id: nil}
+    assert {:ok, idle_units} = SessionState.compaction_units(idle, "r2")
+    refute Enum.any?(idle_units, & &1.protected?)
+    state = %{state | open_interaction: "i", interactions: %{"i" => %{run_id: "r1"}}}
+    assert {:ok, [a, _]} = SessionState.compaction_units(state, "r2")
+    assert a.protected?
+
+    assert SessionState.compaction_units(state, "missing") ==
+             {:error, :context_projection_invalid}
+  end
+
   test "terminal tool history requires capability through empty completions and later runs" do
     tool_turn = [user("go"), assistant(1, [call("a")]), result(1, "a")]
     assert Conversation.terminal_tool_history(tool_turn, ["r1"]) == {:ok, true}
