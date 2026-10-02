@@ -90,7 +90,7 @@ defmodule Loopex.Runtime do
           | {:tools, [LoopexProtocol.ToolDefinition.t()]}
           | {:active_tools, [binary() | {binary(), binary()}]}
           | {:bounds, map()}
-          | {:policy, module() | nil}
+          | {:policy, Loopex.Policy.adapter() | nil}
           | {:project_manifest, map() | nil}
           | {:project_decision, map() | nil}
           | {:resource_manifest, map() | nil}
@@ -1160,13 +1160,17 @@ defmodule Loopex.Runtime do
   defp loop_authority(policy, _grant_decision) when is_atom(policy) and not is_nil(policy),
     do: {:policy, policy}
 
+  defp loop_authority(%{module: _, context: _} = policy, _grant_decision),
+    do: {:policy, policy}
+
   defp loop_authority(_policy, grant_decision), do: {:literal, grant_decision}
 
   defp validate_policy(policy, tools, tool) do
     active? = tools != [] or is_map(tool)
 
     cond do
-      is_atom(policy) and not is_nil(policy) -> {:ok, policy}
+      Loopex.Policy.valid_adapter?(policy) -> {:ok, policy}
+      is_map(policy) -> {:error, :host_policy_required}
       not active? -> {:ok, nil}
       true -> {:error, :host_policy_required}
     end
@@ -1446,9 +1450,16 @@ defmodule Loopex.Runtime do
     # literal alongside would mean every host restating a decision the port now
     # owns.
     case authority do
-      {:policy, module} when is_atom(module) and not is_nil(module) -> :ok
-      {:literal, {:host_policy, :allow}} -> :ok
-      _absent -> {:error, :incomplete_loop_configuration}
+      {:policy, policy} ->
+        if Loopex.Policy.valid_adapter?(policy),
+          do: :ok,
+          else: {:error, :incomplete_loop_configuration}
+
+      {:literal, {:host_policy, :allow}} ->
+        :ok
+
+      _absent ->
+        {:error, :incomplete_loop_configuration}
     end
   end
 

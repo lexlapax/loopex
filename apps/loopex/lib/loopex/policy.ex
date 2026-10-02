@@ -48,6 +48,16 @@ defmodule Loopex.Policy do
   exception propagate: a crashing policy must produce a decision, not take the
   session down with it.
 
+  A host may explicitly supply `%{module: adapter, context: private_context}`
+  instead of a bare module. This selects the adapter's optional `decide/2`
+  callback; a bare module always uses `decide/1`. The opaque callback context is
+  trusted host implementation state, distinct from the bounded decision context
+  returned by an allow. Core never interprets, journals or publishes it, and
+  telemetry names only the adapter module. An unavailable contextual callback
+  denies without falling back to `decide/1`. Runtime startup validates explicit
+  contextual adapters before owned effects. The maintainer selected this
+  contextual port extension for M7 on 2026-10-02.
+
   The request carries session and run identity, the resolved generation triple,
   validated arguments, effect class, idempotency class, and the workspace lease
   reference. It carries no pid, no credential, and no provider value, so a policy
@@ -128,6 +138,55 @@ defmodule Loopex.Policy do
   @callback decide(request()) ::
               {:allow, context()} | {:deny, reason_category()} | {:defer, term()}
 
+  @typedoc """
+  ## Concept
+
+  A host-selected policy, optionally with private per-runtime callback state.
+
+  ## Technical depth
+
+  The contextual reference has exactly module and context. Context remains
+  private implementation data; it is never a decision context or authority
+  grant. Durable policy identity and revision remain explicit startup inputs.
+  """
+  @type adapter :: module() | %{required(:module) => module(), required(:context) => term()}
+
+  @doc """
+  ## Concept
+
+  Decide with the host's explicitly selected private callback context.
+
+  ## Technical depth
+
+  Only contextual adapter references invoke this optional callback. Its return
+  algebra, validation, timeout and defer projection match decide/1. Existing
+  bare modules keep decide/1; no callback result or argument acquires authority
+  before the ordinary session-owner commit.
+  """
+  @callback decide(request(), term()) ::
+              {:allow, context()} | {:deny, reason_category()} | {:defer, term()}
+  @optional_callbacks decide: 2
+
+  @doc false
+  @spec valid_adapter?(term()) :: boolean()
+  def valid_adapter?(module) when is_atom(module) and not is_nil(module), do: true
+
+  def valid_adapter?(%{module: module, context: _} = adapter)
+      when map_size(adapter) == 2 and is_atom(module) and not is_nil(module),
+      do: Code.ensure_loaded?(module) and function_exported?(module, :decide, 2)
+
+  def valid_adapter?(_), do: false
+
+  @doc false
+  @spec adapter_module(adapter()) :: module() | nil
+  def adapter_module(module) when is_atom(module), do: module
+
+  def adapter_module(%{module: module, context: _} = adapter)
+      when map_size(adapter) == 2 and is_atom(module),
+      do: module
+
+  def adapter_module(_), do: nil
+
   @doc """
   ## Concept
 
@@ -146,20 +205,21 @@ defmodule Loopex.Policy do
   def decision_timeout_ms, do: @decision_timeout_ms
 
   @doc false
-  @spec evaluate_callback(module(), request()) ::
+  @spec evaluate_callback(adapter(), request()) ::
           {:allow, context()} | {:deny, reason_category()}
-  def evaluate_callback(module, request) when is_atom(module) and is_map(request),
-    do: safely(module, request)
+  def evaluate_callback(module, request)
+      when (is_atom(module) or is_map(module)) and is_map(request),
+      do: safely(module, request)
 
   def evaluate_callback(_module, _request), do: {:deny, :policy_unavailable}
 
   @doc false
-  @spec evaluate_callback(module(), request(), :refuse_defer | :admit_defer) ::
+  @spec evaluate_callback(adapter(), request(), :refuse_defer | :admit_defer) ::
           {:allow, context()} | {:deny, reason_category()} | {:defer, Interaction.request()}
   def evaluate_callback(module, request, :refuse_defer), do: evaluate_callback(module, request)
 
   def evaluate_callback(module, request, :admit_defer)
-      when is_atom(module) and is_map(request),
+      when (is_atom(module) or is_map(module)) and is_map(request),
       do: evaluate_safely(module, request)
 
   def evaluate_callback(_module, _request, :admit_defer), do: {:deny, :policy_unavailable}
@@ -179,8 +239,8 @@ defmodule Loopex.Policy do
   that wants an interactive `defer`, which is a different decision that
   `evaluate/2` admits and this one-shot form refuses.
   """
-  @spec decide(module(), request()) :: {:allow, context()} | {:deny, reason_category()}
-  def decide(module, request) when is_atom(module) and is_map(request) do
+  @spec decide(adapter(), request()) :: {:allow, context()} | {:deny, reason_category()}
+  def decide(module, request) when (is_atom(module) or is_map(module)) and is_map(request) do
     caller = self()
     reply_ref = make_ref()
 
@@ -198,10 +258,10 @@ defmodule Loopex.Policy do
 
   ## Technical depth
 
-  Accepted ADR 0024 adds this evaluator around the same `decide/1` callback.
-  There is no second callback and no new arity: the host cannot tell which
-  caller it is answering, so a policy that defers is answering the one algebra
-  ADR 0009 always defined. `decide/2` keeps M2's fail-closed projection of a
+  Accepted ADR 0024 adds this evaluator around the same decision algebra.
+  Bare modules use decide/1; an explicitly contextual adapter uses decide/2
+  with its unchanged private context. Both receive the same request and return
+  the one algebra ADR 0009 defines. `decide/2` keeps M2's fail-closed projection of a
   defer, which the inherited gate still proves; this evaluator returns the
   validated question instead, and a defer that is not inside the admitted
   question family is `policy_unavailable`, not a malformed interaction.
@@ -211,9 +271,9 @@ defmodule Loopex.Policy do
   and its own answer. Evaluation is non-authorizing until its result commits:
   nothing here mints a grant, and only an allow can lead to one.
   """
-  @spec evaluate(module(), request()) ::
+  @spec evaluate(adapter(), request()) ::
           {:allow, context()} | {:deny, reason_category()} | {:defer, Interaction.request()}
-  def evaluate(module, request) when is_atom(module) and is_map(request) do
+  def evaluate(module, request) when (is_atom(module) or is_map(module)) and is_map(request) do
     caller = self()
     reply_ref = make_ref()
 
@@ -314,7 +374,7 @@ defmodule Loopex.Policy do
   # bound, and refusing it as unavailable is the same fail-closed direction the
   # rest of this boundary takes.
   defp evaluate_safely(module, request) do
-    instrumented(module, request, fn -> normalize(module.decide(request), :admit_defer) end)
+    instrumented(module, request, fn -> normalize(invoke(module, request), :admit_defer) end)
   rescue
     _error -> {:deny, :policy_unavailable}
   catch
@@ -322,12 +382,20 @@ defmodule Loopex.Policy do
   end
 
   defp safely(module, request) do
-    instrumented(module, request, fn -> normalize(module.decide(request), :refuse_defer) end)
+    instrumented(module, request, fn -> normalize(invoke(module, request), :refuse_defer) end)
   rescue
     _error -> {:deny, :policy_unavailable}
   catch
     _kind, _value -> {:deny, :policy_unavailable}
   end
+
+  defp invoke(module, request) when is_atom(module), do: module.decide(request)
+
+  defp invoke(%{module: module, context: context} = adapter, request)
+       when map_size(adapter) == 2 and is_atom(module),
+       do: module.decide(request, context)
+
+  defp invoke(_, _), do: {:deny, :policy_unavailable}
 
   # Concept: one host decision, timed and named by its category.
   #
@@ -343,7 +411,7 @@ defmodule Loopex.Policy do
         session_id: Map.get(request, :session_id),
         run_id: Map.get(request, :run_id),
         tool_call_id: Map.get(request, :tool_call_id),
-        policy: inspect(module)
+        policy: inspect(adapter_module(module))
       },
       work,
       &decision_category/1

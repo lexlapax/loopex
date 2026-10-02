@@ -91,6 +91,37 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the maintainer-selected contextual Policy port accepts an exact
+  `%{module: adapter, context: private_context}` reference and invokes optional
+  `decide/2`; bare modules preserve `decide/1`. Invalid references and missing
+  contextual callbacks refuse without falling back. Runtime startup validates
+  the reference; telemetry retains only the adapter module. Private context
+  never enters decisions, events or history. The complete contextual and
+  existing interaction files pass 29 cases in 12.2 seconds current and 12.1
+  seconds floor, including actual owner dispatch, denial before a pending
+  question and exact aborted-worker shutdown. Compilation, formatting,
+  documentation, dependency and status gates pass. One-shot composition and
+  responder integration remain open. Complete outputs:
+  `/private/tmp/loopex-m7-policy-context-current-complete-20261002.log`, SHA-256
+  `e38932dd9d6c02e226cf56ca1140cea4485c3b80d5d394ef39c70f55e8360fe7`;
+  `/private/tmp/loopex-m7-policy-context-floor-complete-20261002.log`, SHA-256
+  `631feb828a4e7ea1312f1c3d4e5e2714e0d6bff6cd435ac915cee6a778e716dd`.
+  A new assertion initially guessed killed rather than the existing shutdown
+  reason; the failed output remains at
+  `/private/tmp/loopex-m7-policy-context-core-current-verified-20261002.log`,
+  SHA-256 `099148427d9c447981ff5853c0e90183bee64eb72bbe39788b0e2ddfe59bd1c1`.
+- Integration check: exact committed candidate
+  `44a716df846ddd4581d417cbe261c3fbd1714b27` ran once and exited 1.
+  Preliminary gates and ten application suites passed, including composition's
+  approved diagnostic-loss proof and all 385 provider cases. Core passed
+  888 of 889: the provider-child supervisor-loss fixture observed `noproc`
+  instead of the asserted killed reason. This is failed integration evidence.
+  Complete output: `/private/tmp/loopex-m7-44a716df-fast-check.log`, SHA-256
+  `13d7452089ba14a415cc80164da6c3a22124c1f9643fc2b96c25cae7b5842f23`.
+  The earlier provider-launcher deadline failure on e5 remains unresolved;
+  its pass here does not repair or invalidate that failed evidence.
+  Original: 32 done / 154 remaining. Added: 114 done / 12 remaining.
+
 - Done: public `Loopex.create_session/3` accepts explicit `genesis: payload`
   and delegates to the existing exact writer. Omission preserves v2 creation;
   present nil/malformed payload, mismatched options and malformed command
@@ -3419,6 +3450,7 @@ or check was relaxed.
 - [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
 
 - [x] Extend the existing ephemeral serial answer slot and pending projection for tagged model text/choice/decline, preserving legacy policy choices; prove maximum text, producer/kind refusal, unchanged pending observations, actual Core/HTTP continuation without executor intents and subsequent prompts on both toolchains. Public question opt-in and responder integration remain open.
+- [x] Extend the Policy port with an optional contextual decide/2 callback, exact startup reference validation and private module-only telemetry; prove legacy behavior, fail-closed callbacks, actual owner dispatch and abort cleanup on both toolchains.
 - [ ] Implement the maintainer-selected contextual Policy amendment for one-shot absent-responder admission; prove denial before interaction admission without changing ordinary policy decisions.
 
 ## T13 — Complete coding fixtures and operator instructions
@@ -3497,7 +3529,9 @@ or check was relaxed.
 - [x] Establish an actual blocked diagnostic writer before mailbox pressure; preserve the 6,000-message observation, exact queue/writer/drop accounting and unchanged receive/cleanup timeouts on both toolchains.
 - [x] Remove the spawned-host startup scheduling assumption from the abrupt chat-writer-loss fixture; retain unchanged receive timeouts and prove both exact writer and linked IO-worker killed DOWNs on both toolchains.
 - [x] Order diagnostic shutdown through its private supervisor before collecting writer/supervisor joins; prove a failing-before suspended-supervisor fault and unchanged delivery accounting, grace, existing loss/deadline assertions, ephemeral trace and real CLI signal/JSON behavior on both supported toolchains.
-- [ ] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
+- [x] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
+- [ ] Repair the provider-child supervisor-loss fixture's monitor/fault ordering; preserve exact killed termination and original assertion bounds, retaining the failed committed integration output and both-toolchain proof.
+- [ ] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.
 

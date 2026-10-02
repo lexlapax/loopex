@@ -43,6 +43,11 @@ companion, and the local executor. Both define seven tools; the durable default
 keeps the original four coding tools active. An embedder that wants different
 edges composes the ports and calls `Loopex.start_link/1` directly.
 
+A direct runtime may also receive a policy with explicit private callback state.
+The host controls that state and its lifetime; it does not become a durable
+policy answer, an authority grant or session data. Existing policy modules keep
+their original callback.
+
 A host may prepare and capture a session's complete initial settings before
 creation, then submit that exact genesis through the public creation facade.
 Creation retains those settings even if files or defaults change afterward;
@@ -59,7 +64,7 @@ may also drive a server from another language over
 Seven constraints shape every embedding:
 
 - **The host names authority.** A runtime with any tool active refuses to start
-  without a policy module, and a policy needs a stable identity so a question it
+  without a host policy, and a policy needs a stable identity so a question it
   asked can be resumed only by the same policy.
 - **The host chooses context.** A direct runtime requires an explicit context
   token budget; nothing in core defaults it.
@@ -129,8 +134,19 @@ recover sessions but runs no turns, and supplying only some is invalid:
 | `:executor` | `%{module:, reference:, identity:, epoch:, fencing_token:, workspace_ref:, workspace_lease:}` naming a `Loopex.Executor` implementation and its placement. |
 | `:tools` | A list of tool definitions (`LoopexProtocol.ToolDefinition`), the only path by which a reserved `loopex.` identifier reaches the registry. |
 | `:active_tools` | Which declared tools a session offers, by `tool_id` or `{tool_id, tool_version}`; all of them when omitted. |
-| `:policy` | The `Loopex.Policy` module. Required whenever a tool is active: its absence returns `{:error, :host_policy_required}`. |
+| `:policy` | A `Loopex.Policy` module, or exactly `%{module: adapter, context: private_context}` selecting its optional `decide/2`. Required whenever a tool is active: its absence returns `{:error, :host_policy_required}`. |
 | `:policy_identity` | `%{"id" => binary, "revision" => binary}`, each 1 to 256 bytes. Required whenever `:policy` is named. |
+
+Bare policies always use `decide/1`. Explicit contextual references require an
+available `decide/2` before runtime startup; missing callbacks and malformed
+contextual references return `host_policy_required`. They never fall back to
+`decide/1`. The callback context is opaque private host implementation data,
+distinct from the bounded decision context a policy returns. Core forwards it
+unchanged, retains none in journals/events and names only the module in policy
+telemetry. The same allow/deny/defer validation, callback timeout, owner
+cancellation and explicit durable policy identity apply to both forms. Hosts
+must change their policy revision when a context change changes policy behavior.
+This additive Policy-port extension was selected by the maintainer on 2026-10-02.
 
 Optional options:
 
