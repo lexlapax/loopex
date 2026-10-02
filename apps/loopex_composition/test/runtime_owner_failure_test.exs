@@ -32,7 +32,12 @@ defmodule LoopexComposition.RuntimeOwnerFailureTest do
     %{options: options}
   end
 
-  for module <- [Loopex.Store.Local, Loopex.Executor.Local, Loopex.Executor.Local.WorkspaceLease] do
+  for module <- [
+        Loopex.Store.Local,
+        Loopex.Store.Local.Transfers,
+        Loopex.Executor.Local,
+        Loopex.Executor.Local.WorkspaceLease
+      ] do
     test "bracketed runtime ends every owned process after #{inspect(module)} dies", %{
       options: options
     } do
@@ -121,10 +126,14 @@ defmodule LoopexComposition.RuntimeOwnerFailureTest do
   end
 
   defp acquired_edges do
-    for _ <- 1..7 do
-      assert_receive {:acquired, owner, module, {:ok, owned}}, 1_000
-      {owner, module, owned}
-    end
+    acquired =
+      for _ <- 1..8 do
+        assert_receive {:acquired, owner, module, {:ok, owned}}, 1_000
+        {owner, module, owned}
+      end
+
+    assert {_, Loopex, _} = List.last(acquired)
+    acquired
   end
 
   defp pid(Loopex, runtime), do: runtime.supervisor

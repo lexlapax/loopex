@@ -19,6 +19,76 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Restart handoff — 2026-10-01
+
+The maintainer requested a pause for restart. Work remains on `m7`; no merge,
+closure, tag or release is authorized. No delegated agents are running. The
+full check process has finished; do not restart or poll its former session.
+Original checklist: 25 done / 161 remaining. Added subtasks: 82 done / 11
+remaining, including the two completed T16 repairs below. T01 remains the
+only fully completed original top-level task.
+
+The maintainer approved the published title-only history correction. `m7` and
+`origin/m7` were advanced with an exact force-with-lease from
+`7543f0776761edc73d2d218528e0258c0967ff4c` to
+`1548e8c07dacd295e43de620e79b965adcf905e7`. All eleven replacement trees,
+author/committer metadata and other messages match their originals. The
+original history remains at local `codex/m7-before-title-fix`. The sole changed
+title is `runtime(M7): prove conversation through failure and uncertainty`.
+The mapping is retained at `/private/tmp/loopex-m7-title-correction.md`; its
+pre-publication wording describes preparation, not the subsequent push.
+Verification: `/private/tmp/loopex-m7-title-correction-verification.log`, SHA-256
+`b9ff70547246dcdd1dd7da2b94bc1297ebaadd94159bcd95d63286625ce0b386`.
+
+The full fast check ran once on unchanged commit
+`1548e8c07dacd295e43de620e79b965adcf905e7` and exited 1. Preliminary gates
+passed. Nine application suites passed; Core and composition each failed one
+test. Complete output: `/private/tmp/loopex-m7-1548e8c0-fast-check.log`, SHA-256
+`08c3964d8255e22f2af5e8e5bf842aeaeb5d3784218b8ad16923cc4d167a8d5c`.
+This is failed evidence, not a successful integration check.
+
+Both test repairs are applied in this checkpoint and pass focused verification:
+
+- Composition's credential-plane test read seven acquisition messages although
+  composition now owns eight processes. It consequently missed the final
+  runtime edge. The runtime-owner failure test also read seven and silently
+  omitted the runtime from cleanup assertions. Both now collect eight; the
+  latter asserts that the final acquisition is Loopex and includes Transfers
+  in its child-loss cases. Patch: `/private/tmp/loopex-m7-composition-owned-edges.patch`.
+  Failure output: `/private/tmp/loopex-m7-1548e8c0-composition-failure.log`,
+  SHA-256 `ace5d57df39332cab307fd2e3c1ca61c11c043b3d15861ee92b7647e10f47a9a`.
+- Core's owner-group report test assumed the Logger application's translator
+  filter existed. Isolated Core does not start Logger, so `Keyword.update!`
+  received an empty filter list. The serial test now starts Logger explicitly,
+  restores the filters and stops only applications it started. The actual
+  supervisor-failure assertions remain intact. Patch:
+  `/private/tmp/loopex-m7-owner-log-start.patch`. Failure output:
+  `/private/tmp/loopex-m7-1548e8c0-core-failure.log`, SHA-256
+  `1698e317a660a67d3a4f66062bdb2399dbbf63bc8ef2f93740f3cb1715c724b2`.
+
+The complete affected files pass on both supported toolchains, with Core run
+from its own application directory to exercise the Logger startup condition.
+Current: two Core tests in 0.05 seconds and six composition tests in 0.3 seconds.
+Floor: two Core tests in 0.06 seconds and six composition tests in 0.3 seconds.
+No timeout, retry, assertion or required check was weakened. Complete outputs:
+
+- `/private/tmp/loopex-m7-resume-owner-current.log`, SHA-256
+  `8d4443374a16f3974bf383b13b449c0bfab5417aa145c7a89c7ee6bab51a6694`.
+- `/private/tmp/loopex-m7-resume-owner-floor.log`, SHA-256
+  `1c17a31517401409abc508636337ae354aba2155dc2e3e2ce84e2fb9e95fd2af`.
+- `/private/tmp/loopex-m7-resume-composition-current.log`, SHA-256
+  `5d5fb53f59b2e18894769f0f1a61774351de46aedb3924fbb675efd56bb8e8ce`.
+- `/private/tmp/loopex-m7-resume-composition-floor.log`, SHA-256
+  `ab3335d4e822a8c55b0293501117dde0d5acbd791b8006c798dfa5ae6bfa8fcd`.
+
+First resume action: run the full fast check once on this committed repair
+candidate, retaining the complete output and exact SHA. No full check has run
+on these repaired bytes. Do not repeat the failed parent as a pass.
+Then resume T02 bounded preparation and early spill, preserving its fixed
+reservation/deadline rules and frozen native prefixes. The three contract
+questions under Current work remain unanswered; the history-correction approval
+did not resolve them. No paid provider calls were made during this check.
+
 ## Current work
 
 - Done: original T01 is complete, including live conversation after failure and
@@ -2347,6 +2417,8 @@ or check was relaxed.
 - [x] Route configuration model validation through composition and preserve the command-surface dependency scan.
 - [x] Complete native stream fixtures across CLI/daemon workflows and retain real-HTTP Core byte-refusal and settlement-depth accounting witnesses.
 - [x] Investigate and fix OwnerGroup supervisor shutdown_error/noproc diagnostics observed in configured-runtime test cleanup; retain failing-before and process-lifetime evidence independently of passing assertions.
+- [x] Repair the complete owned-process inventories in credential-plane and runtime-owner fault tests; include the transfer-owner crash and prove all eight children stop on both toolchains.
+- [x] Make the owner-group supervisor-report test establish and restore its Logger application lifetime; prove the original failure-report assertions from isolated Core on both toolchains.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
 

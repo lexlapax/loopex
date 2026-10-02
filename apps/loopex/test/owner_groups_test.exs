@@ -56,9 +56,11 @@ defmodule Loopex.Runtime.OwnerGroupsTest do
 
   test "a private worker-supervisor fault still reports an actual child failure" do
     # Concept: this test observes a real supervisor fault, including its report.
-    # Technical depth: Elixir suppresses SASL supervisor reports by default.
-    # Enable that report class only inside this serial test and restore the
-    # exact filter configuration, independent of the invoking shell's defaults.
+    # Technical depth: Core does not start the Logger application. This serial
+    # test starts it explicitly before enabling SASL supervisor reports, then
+    # restores both the filter configuration and the application lifetime.
+    {:ok, started} = Application.ensure_all_started(:logger)
+    on_exit(fn -> Enum.each(Enum.reverse(started), &Application.stop/1) end)
     filters = :logger.get_primary_config().filters
 
     enabled =

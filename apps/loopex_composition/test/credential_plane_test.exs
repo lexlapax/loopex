@@ -82,7 +82,7 @@ defmodule LoopexComposition.CredentialPlaneTest do
           assert System.get_env(variable) == nil
           assert_receive {:composition_owner, owner}
 
-          edges = receive_edges(7, [])
+          edges = receive_edges(8, [])
           assert Enum.all?(edges, &(elem(&1, 0) == owner))
 
           {_owner, Loopex, [runtime_options], {:ok, ^runtime}} =
