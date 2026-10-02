@@ -99,6 +99,24 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Integration checkpoint: status implementation and focused proof are committed
+  and pushed at `203ccceed42cf1a9005028e7e26e4a385776da3f`. Original tally is
+  49 done / 137 todo; added tally is 147 done / 7 todo. Primary m7 is clean
+  before this progress-only checkpoint. The existing clean verification checkout
+  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex` is detached at that exact
+  implementation SHA. Its full current-pair fast check has started once and is
+  still running, with complete output streaming to
+  `/private/tmp/loopex-m7-203cccee-fast-check.log`. The current shell handle is
+  73062; it is only a transient cache for reading that process. Do not hash or
+  judge the output until the wrapper exits. Do not restart this run or attribute
+  the earlier 15bc success to it. This documentation child is not its tested SHA.
+  No agents are running, no new maintainer question is pending, and the goal
+  remains active. Continue the public chat host join while the independent
+  verification checkout runs; retain its terminal result and exact-byte digest
+  when complete. Active maintenance and completed compact owner observations,
+  public entry/config inspection, prepared resume workspace/policy/route checks,
+  helpers and the other original M7 outcomes remain open.
+
 - Done: ordered private-driver `/status` now acknowledges its input before
   reading public session status and runtime trace counters through the command
   worker. It reports exact committed model/version/reasoning, active bounds,
