@@ -178,27 +178,30 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert second_request =~ "needle.txt"
   end
 
-  test "one-call embedding refuses an unanswered tool question after proved cleanup" do
-    root = Path.join(System.tmp_dir!(), "loopex-deferral-#{System.unique_integer([:positive])}")
-    File.mkdir!(root)
-    on_exit(fn -> File.rm_rf!(root) end)
-    port = start_server([{:tool, "ls", %{"path" => "."}}])
-    prior_roots = ephemeral_roots()
+  for enabled <- [false, true] do
+    test "one-call embedding preserves ordinary policy deferral with questions=#{enabled}" do
+      root = Path.join(System.tmp_dir!(), "loopex-deferral-#{System.unique_integer([:positive])}")
+      File.mkdir!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+      port = start_server([{:tool, "ls", %{"path" => "."}}])
+      prior_roots = ephemeral_roots()
 
-    assert {:error, :interaction_requires_session} =
-             Ephemeral.run("list the workspace",
-               policy: DeferringPolicy,
-               model: "ollama:llama3.2",
-               base_url: "http://127.0.0.1:#{port}/v1",
-               cwd: root,
-               tools: :read_only,
-               max_tokens: 128,
-               timeout: 15_000
-             )
+      assert {:error, :interaction_requires_session} =
+               Ephemeral.run("list the workspace",
+                 policy: DeferringPolicy,
+                 model: "ollama:llama3.2",
+                 base_url: "http://127.0.0.1:#{port}/v1",
+                 cwd: root,
+                 tools: :read_only,
+                 questions: unquote(enabled),
+                 max_tokens: 128,
+                 timeout: 15_000
+               )
 
-    assert_receive {:model_request, request}, 15_000
-    assert request =~ "POST /v1/chat/completions HTTP/1.1"
-    assert MapSet.difference(ephemeral_roots(), prior_roots) == MapSet.new()
+      assert_receive {:model_request, request}, 15_000
+      assert request =~ "POST /v1/chat/completions HTTP/1.1"
+      assert MapSet.difference(ephemeral_roots(), prior_roots) == MapSet.new()
+    end
   end
 
   test "an unanswered real-core interaction expires and frees the embedded session" do
@@ -370,6 +373,45 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     assert content =~ "invalid_tool_arguments"
   end
 
+  test "one-shot questions without a responder deny before waiting and preserve ordinary effects" do
+    root =
+      Path.join(System.tmp_dir!(), "loopex-no-responder-#{System.unique_integer([:positive])}")
+
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    port =
+      start_server([
+        {:tool, "ask", %{"question" => "Which encoding?"}},
+        {:tool, "ls", %{"path" => "."}, "call_loopex_2"},
+        "continued without waiting"
+      ])
+
+    assert {:ok, %{outcome: :completed, text: "continued without waiting", tools: tools}} =
+             Ephemeral.run("ask then list",
+               policy: Policy,
+               model: "ollama:llama3.2",
+               base_url: "http://127.0.0.1:#{port}/v1",
+               cwd: root,
+               tools: :read_only,
+               questions: true,
+               max_tokens: 128,
+               timeout: 15_000
+             )
+
+    assert [
+             %{tool_id: "loopex.ask", outcome: "denied"},
+             %{tool_id: "loopex.ls", outcome: "completed"}
+           ] = tools
+
+    assert_receive {:model_request, first}, 15_000
+    assert Enum.any?(request_body(first)["tools"], &(&1["function"]["name"] == "ask"))
+    assert_receive {:model_request, second}, 15_000
+    [denied] = Enum.filter(request_body(second)["messages"], &(&1["role"] == "tool"))
+    assert denied["content"] =~ "interaction_unsupported"
+    assert_receive {:model_request, _third}, 15_000
+  end
+
   for {arguments, response, expected} <- [
         {%{"question" => "How should nil be encoded?"}, {:text, String.duplicate("é", 1_100)},
          String.duplicate("é", 1_100)},
@@ -394,29 +436,19 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
           "next prompt survived"
         ])
 
-      {:ok, config} =
-        LoopexComposition.Ephemeral.Preflight.prepare(
-          policy: Policy,
-          model: "ollama:llama3.2",
-          base_url: "http://127.0.0.1:#{port}/v1",
-          cwd: root,
-          tools: :read_only,
-          max_tokens: 128,
-          timeout: 15_000
-        )
+      assert {:ok, session} =
+               Ephemeral.start_session(
+                 policy: Policy,
+                 model: "ollama:llama3.2",
+                 base_url: "http://127.0.0.1:#{port}/v1",
+                 cwd: root,
+                 tools: :read_only,
+                 questions: true,
+                 max_tokens: 128,
+                 timeout: 15_000
+               )
 
-      # The public questions/responder option union is a later integration unit.
-      # This accepted selection exercises the actual owner/runtime/transport path.
-      config = Map.put(config, :questions, true)
-      supervisor = Process.whereis(LoopexComposition.Ephemeral.OwnerSupervisor)
-      {:ok, activation} = LoopexComposition.Ephemeral.OwnerActivation.start(supervisor)
-      owner = LoopexComposition.Ephemeral.OwnerActivation.owner(activation)
-      {:ok, cell} = LoopexComposition.Ephemeral.OwnerActivation.begin(activation)
-
-      assert {:ok, :session_ready} =
-               LoopexComposition.Ephemeral.SessionOwner.start_session(owner, config, 16_000)
-
-      session = {:loopex_ephemeral_session, owner, cell}
+      {:loopex_ephemeral_session, owner, _cell} = session
       on_exit(fn -> Ephemeral.stop_session(session) end)
 
       assert {:error,
@@ -676,7 +708,10 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     end
   end
 
-  defp response({:tool, name, arguments}) do
+  defp response({:tool, name, arguments}),
+    do: response({:tool, name, arguments, "call_loopex_1"})
+
+  defp response({:tool, name, arguments, call_id}) do
     JSON.encode!(%{
       id: "chatcmpl-loopex-tool",
       object: "chat.completion",
@@ -690,7 +725,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
             content: nil,
             tool_calls: [
               %{
-                id: "call_loopex_1",
+                id: call_id,
                 type: "function",
                 function: %{name: name, arguments: JSON.encode!(arguments)}
               }

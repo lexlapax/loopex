@@ -272,13 +272,20 @@ Store history.
 
 `LoopexComposition.Ephemeral.run/2` composes, runs one prompt and cleans up in
 one call. `start_session/1` returns an opaque handle for successive `ask/3`
-calls; `answer/3` submits an offered choice for a pending policy interaction,
+calls; `answer/3` submits an offered choice for a pending policy interaction or
+a tagged choice, tagged text or decline for a model question,
 `last_result/1` and `history/1` read bounded observations, and
 `stop_session/1` ends the owned session. Pass the handle back; do not inspect
 its internals. The process that created it owns its lifetime even if another
 process borrows the handle. This API uses the same kernel and policy port as the
 durable facade, but stores session truth only in memory. VM loss ends it, with
 no resume or migration to the durable profile.
+
+Model questions require explicit `questions: true` at startup. A reusable
+session returns the pending question for its host to answer. A one-shot call
+without a responder denies model questions before opening an interaction and
+continues with that tool's denial result. Ordinary tools retain the supplied
+host's policy decisions.
 
 An ephemeral host may request a trace at session startup. Its private owner
 starts diagnostic delivery to stderr and keeps the trace across successive
@@ -356,6 +363,13 @@ Malformed or origin-ambiguous base URLs are refused before dispatch, with a
 fixed diagnostic rather than the dependency's raw error. `:tools` is
 `:none`, `:coding` (the original four), or `:read_only` (`read`, `grep`, `find`,
 `ls`), defaulting to `:coding`.
+`:questions` is Boolean and defaults false, preserving the selected ordinary
+tool definitions. True appends the exact `loopex.ask` generation; enabling it
+with `tools: :none` refuses during option validation. `ask/3` cannot override
+this startup selection. The one-shot absence-of-responder path uses a
+host-composition adapter through the optional contextual Policy callback,
+with the original policy identity and no private context in durable data.
+Reusable `start_session/1` does not install that one-shot policy.
 Every model admits every preset. `:skills` accepts at most four named project
 or user skill directories. `:cwd` defaults to the current working directory;
 `:max_steps`, `:deadline_ms`, `:max_tokens`, `:context_token_budget`, `:timeout`

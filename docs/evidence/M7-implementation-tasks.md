@@ -91,6 +91,46 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: public ephemeral startup accepts Boolean questions, default false,
+  appending the exact question generation only to nonempty profiles. Invalid
+  values, empty enabled profiles and per-call overrides refuse. Reusable
+  text/choice/decline witnesses now use the public start_session facade. The
+  one-shot wrapper uses the selected contextual Policy port to deny the exact
+  question generation before admission, preserves the original policy identity,
+  and delegates ordinary allow and defer decisions. Actual HTTP continuation
+  proves denial followed by an ordinary effect for distinct provider call IDs;
+  the separately retained repeated-ID defect below remains open. Complete
+  options, model integration, API and run-cleanup files pass 54 cases in 22.0
+  seconds current and 22.1 seconds floor. Compilation, formatting, docs,
+  dependency and status gates pass after staging the new production adapter.
+  Responder callback support and attended proof remain open. Complete outputs:
+  `/private/tmp/loopex-m7-public-questions-current-complete-20261002.log`, SHA-256
+  `482bef67855c1aabac777e6bb7e949187c0ea918cf729a59629036c5defbf44c`;
+  `/private/tmp/loopex-m7-public-questions-floor-complete-20261002.log`, SHA-256
+  `e1005a44db4a7dddcb18a0482005b19af41d7155960acb2433dd133ec61debaf`.
+  Original: 33 done / 153 remaining. Added: 117 done / 11 remaining.
+
+- Pending decision: public tool event IDs currently bind session and call ID,
+  while canonical lineage permits the same provider ID in a later run/turn.
+  A denied question followed by an effect with that ID ends the coordinator
+  with executor_fact_failed/duplicate_event_id after dispatch. Recommended:
+  version the affected intent, receipt and non-receipt terminal records and
+  include run/turn/call in new event identities, preserving old replay bytes.
+  Alternative: a new captured session event-identity revision plus migration.
+  No dependent implementation is authorized yet. Decision packet:
+  `/private/tmp/loopex-m7-tool-event-identity-decision.md`.
+  Credential-free exact-DOWN reproduction:
+  `/private/tmp/loopex-m7-question-continuation-diagnosis.exs`, SHA-256
+  `09ecb1263a70d8aede7cd02da7bfb21bc8b6b662c5d6fc794c780dcd281d1b7d`;
+  `/private/tmp/loopex-m7-question-continuation-diagnosis.log`, SHA-256
+  `3c81c4f5985434214afb95cf39a9fbbf2491daf8a420d54d39a8b42872d3d4ac`.
+  Runtime-owned trace: `/private/tmp/loopex-m7-no-responder-trace-20261002.log`,
+  SHA-256 `23dcf46afd2f23bd1c19a5d1157328e439d587be434be0a700c378d724127fde`.
+  Original public HTTP failure:
+  `/private/tmp/loopex-m7-public-questions-current-20261002.log`, SHA-256
+  `fc97c1156c43b107cf3f1854bb58f8980d40d5e8e118e01ce9c1dbe36983f648`.
+  Distinct-call boundary proof below does not repair this defect.
+
 - Done: the provider-child supervisor-loss fixture now obtains a child
   acknowledgement after sending its monitor signal and before killing the
   supervisor. This establishes the monitor before a termination propagated by
@@ -3448,7 +3488,7 @@ or check was relaxed.
 
 - [ ] Forward accepted instruction, model, reasoning, provider-binding, maintenance, question and trace options.
 - [ ] Preserve reusable embedded sessions and buffered transport.
-- [ ] Keep questions opt-in and preserve old tool selections.
+- [x] Keep questions opt-in and preserve old tool selections.
 - [x] Implement tagged choice, text and decline answers.
 - [ ] Consume the question responder only in the one-call API; reject unsupported combinations.
 - [ ] Run one monitored responder worker outside the serial owner.
@@ -3464,8 +3504,9 @@ or check was relaxed.
 - [x] Join explicit provider bindings to startup and committed-model dispatch, preserve caller-only credential resolution, and forward separately resolved maintenance models to Core.
 
 - [x] Extend the existing ephemeral serial answer slot and pending projection for tagged model text/choice/decline, preserving legacy policy choices; prove maximum text, producer/kind refusal, unchanged pending observations, actual Core/HTTP continuation without executor intents and subsequent prompts on both toolchains. Public question opt-in and responder integration remain open.
+- [x] Add Boolean public questions startup selection, refuse an empty enabled tool profile and per-call overrides, migrate actual text/choice/decline HTTP witnesses to the public facade and preserve absent-responder ordinary allow/defer decisions and cleanup on both supported toolchains.
 - [x] Extend the Policy port with an optional contextual decide/2 callback, exact startup reference validation and private module-only telemetry; prove legacy behavior, fail-closed callbacks, actual owner dispatch and abort cleanup on both toolchains.
-- [ ] Implement the maintainer-selected contextual Policy amendment for one-shot absent-responder admission; prove denial before interaction admission without changing ordinary policy decisions.
+- [x] Implement the maintainer-selected contextual Policy amendment for one-shot absent-responder admission; prove denial before interaction admission without changing ordinary policy decisions.
 
 ## T13 — Complete coding fixtures and operator instructions
 
@@ -3546,6 +3587,7 @@ or check was relaxed.
 - [x] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
 - [x] Repair the provider-child supervisor-loss fixture's monitor/fault ordering; preserve exact killed termination and original assertion bounds, retaining the failed committed integration output and both-toolchain proof.
 - [ ] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
+- [ ] Resolve the repeated provider-call public-event identity decision; implement the accepted compatibility path and prove old replay, repeated calls, cancellation, reconciliation and mutation uncertainty without rewriting retained events.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.
 

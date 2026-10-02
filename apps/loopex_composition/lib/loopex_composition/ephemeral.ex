@@ -52,11 +52,18 @@ defmodule LoopexComposition.Ephemeral do
   with the session. Startup refusal unwinds the owned composition; unproved
   diagnostic teardown prevents a successful cleanup acknowledgement. Per-call
   trace changes, callbacks, sinks and runtime references are refused.
+  Optional `:questions` is Boolean and defaults false. True adds the exact
+  model-question tool to a nonempty tool profile. A reusable session answers
+  through `answer/3`; an empty profile with questions enabled refuses.
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, reason()}
   def start_session(options) do
     with {:ok, configuration} <- Preflight.prepare(options),
-         {:ok, supervisor} <- owner_supervisor(),
+         do: start_prepared(configuration)
+  end
+
+  defp start_prepared(configuration) do
+    with {:ok, supervisor} <- owner_supervisor(),
          {:ok, activation} <- OwnerActivation.start(supervisor),
          {:ok, cell} <- OwnerActivation.begin(activation),
          owner = OwnerActivation.owner(activation),
@@ -74,17 +81,32 @@ defmodule LoopexComposition.Ephemeral do
 
   The stop is mandatory after a handle exists. An unproved stop takes precedence
   over the prompt result so the caller is not told its temporary root vanished.
+  With questions enabled, this wrapper selects a contextual host policy that
+  denies the exact model-question generation before an interaction can open.
+  Ordinary tool decisions still consult the supplied host policy.
   """
   @spec run(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(prompt, options \\ []) do
     with {:ok, _selected} <- LoopexComposition.Ephemeral.Options.parse(options),
          :ok <- valid_prompt(prompt),
-         {:ok, session} <- start_session(options) do
+         {:ok, configuration} <- Preflight.prepare(options),
+         {:ok, session} <- start_prepared(one_shot_configuration(configuration)) do
       first = ask(session, prompt)
       stop = stop_session(session)
       run_result(first, stop)
     end
   end
+
+  defp one_shot_configuration(%{questions: true} = configuration) do
+    configuration
+    |> Map.put(:policy_identity, %{"id" => inspect(configuration.policy), "revision" => "0.2.0"})
+    |> Map.put(:policy, %{
+      module: LoopexComposition.Ephemeral.QuestionPolicy,
+      context: configuration.policy
+    })
+  end
+
+  defp one_shot_configuration(configuration), do: configuration
 
   @doc """
   ## Concept

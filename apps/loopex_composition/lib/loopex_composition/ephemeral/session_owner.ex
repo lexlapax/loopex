@@ -2976,7 +2976,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       runtime_id: TempRoot.runtime_id(startup.owned_root.nonce),
       store: Map.fetch!(startup.registered, :store_handle),
       policy: config.policy,
-      policy_identity: %{"id" => inspect(config.policy), "revision" => "0.2.0"},
+      policy_identity:
+        Map.get(config, :policy_identity) ||
+          %{"id" => inspect(config.policy), "revision" => "0.2.0"},
       executor: %{
         module: Loopex.Executor.Local,
         reference: Map.fetch!(startup.registered, :executor),

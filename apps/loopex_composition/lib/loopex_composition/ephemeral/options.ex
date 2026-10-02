@@ -6,6 +6,7 @@ defmodule LoopexComposition.Ephemeral.Options do
     :model,
     :req_llm,
     :tools,
+    :questions,
     :skills,
     :cwd,
     :max_steps,
@@ -26,18 +27,24 @@ defmodule LoopexComposition.Ephemeral.Options do
   # later guards resolve defaults. Explicit nil still fails the value grammar.
   def parse(options) do
     with :ok <- outer(options, @keys) do
-      Enum.reduce_while(@keys, {:ok, %{}}, fn key, {:ok, normalized} ->
-        result =
-          case Keyword.fetch(options, key) do
-            {:ok, value} -> validate(key, value)
-            :error -> default(key, normalized)
-          end
+      result =
+        Enum.reduce_while(@keys, {:ok, %{}}, fn key, {:ok, normalized} ->
+          result =
+            case Keyword.fetch(options, key) do
+              {:ok, value} -> validate(key, value)
+              :error -> default(key, normalized)
+            end
 
-        case result do
-          {:ok, value} -> {:cont, {:ok, Map.put(normalized, key, value)}}
-          {:error, _} = error -> {:halt, error}
-        end
-      end)
+          case result do
+            {:ok, value} -> {:cont, {:ok, Map.put(normalized, key, value)}}
+            {:error, _} = error -> {:halt, error}
+          end
+        end)
+
+      case result do
+        {:ok, %{tools: :none, questions: true}} -> invalid(:questions)
+        other -> other
+      end
     end
   end
 
@@ -68,6 +75,7 @@ defmodule LoopexComposition.Ephemeral.Options do
 
   defp default(key, _) when key in [:req_llm, :cwd, :base_url], do: {:ok, nil}
   defp default(:tools, _), do: {:ok, :coding}
+  defp default(:questions, _), do: {:ok, false}
   defp default(:skills, _), do: {:ok, []}
   defp default(:max_steps, _), do: {:ok, 16}
   defp default(:deadline_ms, _), do: {:ok, 600_000}
@@ -120,6 +128,7 @@ defmodule LoopexComposition.Ephemeral.Options do
 
   defp validate(:req_llm, value), do: accept(:req_llm, value, value == :host_started)
   defp validate(:tools, value), do: accept(:tools, value, value in [:none, :coding, :read_only])
+  defp validate(:questions, value), do: accept(:questions, value, is_boolean(value))
 
   defp validate(:skills, value) do
     cond do

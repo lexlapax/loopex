@@ -44,6 +44,7 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
                 model: "ollama:llama3.2",
                 req_llm: nil,
                 tools: :coding,
+                questions: false,
                 skills: [],
                 cwd: nil,
                 max_steps: 16,
@@ -57,6 +58,29 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
                 maintenance_model: nil,
                 trace: nil
               }}
+  end
+
+  test "questions require a Boolean startup opt-in and a nonempty tool profile" do
+    for tools <- [:coding, :read_only], enabled <- [false, true] do
+      assert {:ok, %{questions: ^enabled}} =
+               Options.parse(policy: Policy, tools: tools, questions: enabled)
+    end
+
+    assert {:ok, %{questions: false}} = Options.parse(policy: Policy, tools: :none)
+
+    assert Options.parse(policy: Policy, tools: :none, questions: true) ==
+             {:error, {:invalid_option, :questions}}
+
+    for invalid <- [nil, 0, 1, "true", %{}] do
+      assert Options.parse(policy: Policy, questions: invalid) ==
+               {:error, {:invalid_option, :questions}}
+    end
+
+    assert Options.parse(policy: Policy, question_responder: fn _ -> :decline end) ==
+             {:error, {:invalid_option, :unknown_key}}
+
+    assert Options.ask_options([questions: true], 42) ==
+             {:error, {:invalid_option, :unknown_key}}
   end
 
   test "trace is a closed startup map, validated even when disabled" do
