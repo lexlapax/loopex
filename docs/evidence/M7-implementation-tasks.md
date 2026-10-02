@@ -110,12 +110,16 @@ did not resolve them. No paid provider calls were made during this check.
   integration remain open; no original item is closed by the consumer alone.
   Original checklist: 28 done / 158 remaining. Added subtasks: 92 done / 11
   remaining.
-- Running: the full fast check is running once on
+- Passed: the full fast check ran once on
   `611b2541bc2c68b515769dcb0f7a63055f9a0d8a` in a new managed checkout.
   Its dependency root is a real ignored directory, and exact HEAD plus complete
   porcelain status were checked before the run. The former check worktree is
-  archived. Complete output is accumulating at
-  `/private/tmp/loopex-m7-611b2541-fast-check.log`; its result/digest remain pending.
+  archived. All eleven application suites pass: 3,101 tests passed with 34
+  existing exclusions in 960 seconds. Complete output:
+  `/private/tmp/loopex-m7-611b2541-fast-check.log`, SHA-256
+  `2bf7d0a6772e04dff1b36c798fd2b344b1b968eb91ef0fe4c3bd15dd4c8e277e`.
+  This run replaces no failed evidence and no same-candidate suite is repeated.
+  Archival of this completed check worktree was requested after output retention.
   This exact candidate includes the control codec, not the later consumer.
 - Done: the closed input, question and error control encoder preserves opaque
   identities and canonical quantity encodings, refuses missing/extra members
@@ -209,8 +213,9 @@ did not resolve them. No paid provider calls were made during this check.
   `1a8e454600e71dabcee4aefd916a3d04dd637468ecf8fc31f82b0c669b6a2813`.
   Original checklist: 28 done / 158 remaining. Added subtasks: 90 done / 11
   remaining. The chat driver and its pipe-ordering obligation remain open.
-- Next: run the next committed integration candidate with a verified clean setup. Complete
-  the remaining chat control records and join the owning driver after the exact-genesis
+- Next: join the shared diagnostic consumer and accepted trace configuration
+  into owning startup and teardown. Complete the remaining chat control records
+  and join the owning driver after the exact-genesis
   creation decision. The creation, preparation-store and refusal-schema questions
   were bundled again for the maintainer; no dependent contract change is made.
 - Done: T07's bounded source selector scans complete eligible-unit prefixes,
