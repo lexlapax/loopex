@@ -112,6 +112,7 @@ defmodule LoopexComposition.ModelQuestionRestartTest do
 
     {:ok, second_store} = Local.start_link(path: path)
     second_runtime = start_runtime(second_store, model, effects, [])
+    assert_empty_effect_history(second_runtime, session, path)
     assert {:ok, ^session} = Loopex.resume_session(second_runtime, session, command_id: "resume")
 
     assert {:ok, second_attachment} =
@@ -138,6 +139,7 @@ defmodule LoopexComposition.ModelQuestionRestartTest do
 
     {:ok, third_store} = Local.start_link(path: path)
     third_runtime = start_runtime(third_store, model, effects, [])
+    assert_empty_effect_history(third_runtime, session, path)
 
     assert {:ok, ^session} =
              Loopex.resume_session(third_runtime, session, command_id: "resume-final")
@@ -199,6 +201,22 @@ defmodule LoopexComposition.ModelQuestionRestartTest do
     end)
 
     runtime
+  end
+
+  defp assert_empty_effect_history(runtime, session, path) do
+    {:ok, %{sessions: supervisor}} = Runtime.children(runtime)
+    assert DynamicSupervisor.which_children(supervisor) == []
+    before = File.read!(path)
+    assert_effect_pages(runtime, session, nil)
+    assert before == File.read!(path)
+    assert DynamicSupervisor.which_children(supervisor) == []
+  end
+
+  defp assert_effect_pages(runtime, session, cursor) do
+    assert {:ok, %{rows: [], next_cursor: next}} =
+             Runtime.effect_intents(runtime, session, cursor, 3)
+
+    if next, do: assert_effect_pages(runtime, session, next)
   end
 
   defp await_event(attachment, kind, deadline \\ nil) do

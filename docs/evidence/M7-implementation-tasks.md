@@ -91,6 +91,56 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T11's accepted private `Runtime.effect_intents/4` query authenticates
+  runtime/session scope, scans bounded captured journal cuts and verifies an
+  opaque raw prefix token before returning resumed coverage. Empty projected
+  rows still advance coverage; only nil next_cursor completes the cut. Closed
+  cursor/error forms, contiguous bounded Store records, supported record shapes,
+  plain job/terminal projections and complete response limits refuse malformed
+  history. The reader neither activates a coordinator nor writes history. The
+  existing Control guardian joins its reader before timeout or owner-loss
+  results. Actual Memory and Local histories, Local log reopen, v3 model/question
+  histories and a literal effect-free genesis/token vector pass on both pairs.
+  Shared process-only test adapters were moved byte-for-byte from the guarded
+  Core helper for use by both applications; temporary host paths remain isolated.
+  Initial composition fixtures failed because the guarded Core helper lacked
+  a temporary LOOPEX_HOME, then because modern tool options lacked explicit
+  tool/policy fields. The final fixture uses isolated paths and explicit accepted
+  options; product validation and existing assertions remain unchanged.
+  Complete Core selection: 130 tests, 26.7 seconds current and 26.5 seconds floor.
+  Complete Store/question selection: five tests, 0.5 seconds on each pair.
+  Compilation, formatting, documentation, dependency and status gates pass.
+  Retained outputs, including the two development failures:
+  `/private/tmp/loopex-m7-effect-query-core-current-complete-20261002.log`, SHA-256
+  `674d77436e9292ddc27ea3fd823b03950e52d650eb3ef7b2c1a1f729affe48b8`.
+  `/private/tmp/loopex-m7-effect-query-core-floor-20261002.log`, SHA-256
+  `a5748831bd51855c8dd0c005289fbc14d6980a6b281f6d6bf2f187c8a7e592d7`.
+  `/private/tmp/loopex-m7-effect-query-stores-current-initial-20261002.log`, SHA-256
+  `8c53763facfca724069be52e09ec46096bba588aa06691a8db8461f053f629dc`.
+  `/private/tmp/loopex-m7-effect-query-stores-current-final-20261002.log`, SHA-256
+  `7d436900f81c0e92ebdadfd2568426dafd9b1174329c1c18323d2ec5786bd0e2`.
+  `/private/tmp/loopex-m7-effect-query-stores-current-complete-20261002.log`, SHA-256
+  `36d371ab8cbc46d5a065665dc41daf409661f62cd721cb2837e62c6f804e159f`.
+  `/private/tmp/loopex-m7-effect-query-stores-floor-20261002.log`, SHA-256
+  `dc0c64a3eac91d67daf677e1feba202a9167b00dd8111b1732ded4cbe33ab595`.
+  Original T11's read-only provenance/effect query item is complete. The stateless
+  query validates the admitted record shapes and effect projections; it does not
+  replay whole-session transitions or join intent/terminal rows across pages.
+  New maintenance writers must extend its supported record inventory in their
+  integration change. Host classification, cache coverage and helper recovery
+  remain open. Original counts: 29 done / 157 remaining. Added counts:
+  103 done / 12 remaining. Four maintainer decisions remain pending.
+- Failed evidence retained: the full fast check ran once on clean SHA
+  `87c1205ab69a492560ac415c4be67c844bef920b` and exited 1. Preliminary gates and
+  ten application suites passed. Composition passed 434 tests and failed one
+  diagnostic owner/drain-loss case: its supervisor DOWN missed the existing
+  implicit 100 ms assertion window. Total: 3,163 passed, one failed and 34
+  existing exclusions. The last measured progress line was 892 seconds; the
+  failed runner printed no final elapsed duration. Complete output:
+  `/private/tmp/loopex-m7-87c1205a-fast-check.log`, SHA-256
+  `265819095065373913bacde075ceb98d1e17e36b2b0e032fc246ea024da8b302`.
+  The earlier full pass does not resolve this repeated failure. The proposed
+  captured-grace proof remains unapplied and awaits the maintainer's decision.
 - Done: T11's private effect-fact projection reuses the reducer's job, grant
   and receipt decoders, checks closed complete records and nested projections,
   validates canonical job bytes/digest and exact session/run bindings, and
@@ -3033,7 +3083,7 @@ or check was relaxed.
 
 - [ ] Implement saved roles with exact instructions, models, credentials and finite allowances.
 - [ ] Register the opt-in helper tool and immutable read-only tool selection.
-- [ ] Add the required read-only runtime/store provenance and effect-intent queries.
+- [x] Add the required read-only runtime/store provenance and effect-intent queries.
 - [ ] Implement exact create-result lookup and retain genesis before child creation.
 - [ ] Implement parent bindings, catalogs, allowance ledgers, stop records and receipt routing.
 - [ ] Implement bounded private codecs, framing checks, writer fencing and reserved completion space.
@@ -3051,7 +3101,9 @@ or check was relaxed.
 
 - [x] Implement accepted exact-genesis read-only create-result lookup; preserve the legacy query, refuse sentinel substitution before exact creation, and prove changed defaults, absent current registrations, distinct uncertainty and actual local log reopen through both shipped Stores on both supported pairs.
 - [x] Implement accepted bounded creation-provenance point/page queries and optional Store callback with replay-derived per-runtime ordinals; prove complete captured cuts, later creates, exact/changed repetitions, unsupported history, damaged indexes, closed/duplicate-safe decoding, unavailable callbacks, no activation/writes and local log reopen on both supported pairs.
-- [x] Decode bounded private effect-intent and terminal projections using existing reducer codecs; prove actual dispatched jobs and owner-created records, closed fields, canonical bytes/digests, scope, receipt-versus-core-refusal disposition, null-call unknowns, historical deadlines and malformed/oversized refusals on both supported pairs. Stateless paging and startup classification remain open.
+- [x] Decode bounded private effect-intent and terminal projections using existing reducer codecs; prove actual dispatched jobs and owner-created records, closed fields, canonical bytes/digests, scope, receipt-versus-core-refusal disposition, null-call unknowns, historical deadlines and malformed/oversized refusals on both supported pairs. The following subtask implements paging; startup classification remains open.
+
+- [x] Implement accepted bounded stateless effect-intent pages and resume-token verification through Runtime Control; prove captured cuts, literal empty-history tokens, both real Stores and reopen, v3 question histories, distinct refusals, no writes/activation and joined reader cleanup on both supported toolchains.
 
 ## T12 — Complete ephemeral support
 
@@ -3203,7 +3255,7 @@ before a provider demonstration.
 | Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Ordinary nil/non-nil continuation costs and source/configuration bindings implemented; maintenance bindings pending |
 | Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 and unavailable terminal-history preparation failures implemented; other causes, maintenance/headroom and wire projections pending |
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
-| Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers and live exact create implemented; exact lookup/provenance pending |
+| Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers, live exact create, exact lookup and provenance queries implemented; helper host integration pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound staging, bounded expansion, v1 nil-only compatibility and streamed/buffered native rendering implemented |
 | Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |

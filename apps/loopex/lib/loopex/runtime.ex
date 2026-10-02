@@ -343,6 +343,37 @@ defmodule Loopex.Runtime do
 
   def creation_provenance(_, _), do: {:error, :runtime_unavailable}
 
+  @doc """
+  ## Concept
+
+  Scans a captured private journal prefix for executor intents and tool terminals
+  without activating a session or granting effect authority.
+
+  ## Technical depth
+
+  ADR 0046 accepts a nil cursor, a scoped captured-cut cursor or a scoped resume
+  boundary with its opaque prefix token. A call scans at most `limit` records,
+  where limit is 1–16. Every scanned record advances coverage, including pages
+  with no projected rows; only nil next_cursor completes the captured prefix.
+  Resume verifies one retained boundary before scanning a fresh head. Results
+  exclude grants and owner stamps and remain private host recovery data.
+  Composition joins terminal rows to earlier intents by exact run/call identity.
+  Invalid queries, absent sessions, unavailable history and invalid history
+  remain distinct. Control loss returns runtime_unavailable.
+  """
+  @spec effect_intents(t(), binary(), term(), integer()) ::
+          {:ok, map()}
+          | {:error,
+             :invalid_query
+             | :session_absent
+             | :history_unavailable
+             | :invalid_history
+             | :runtime_unavailable}
+  def effect_intents(%__MODULE__{} = runtime, session_id, cursor, limit),
+    do: control_call(runtime, {:effect_intents, runtime.token, session_id, cursor, limit})
+
+  def effect_intents(_, _, _, _), do: {:error, :runtime_unavailable}
+
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do
