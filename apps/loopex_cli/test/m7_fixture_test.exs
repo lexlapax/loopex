@@ -1,12 +1,15 @@
 defmodule LoopexCli.M7FixtureTest do
   use ExUnit.Case, async: false
 
+  alias Mix.Tasks.Loopex.M7Evidence.FixtureManifest
+
   @fixtures Path.expand("../../../test/fixtures/m7", __DIR__)
 
   setup do
     root = Path.join(System.tmp_dir!(), "loopex-m7-oracle-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)
     on_exit(fn -> File.rm_rf!(root) end)
+    assert {:ok, _catalog} = FixtureManifest.load(@fixtures)
     %{root: root}
   end
 
@@ -86,6 +89,101 @@ defmodule LoopexCli.M7FixtureTest do
     assert {_, 2} = oracle("long", workspace)
   end
 
+  test "the source catalog pins every seed, oracle, action and permitted change" do
+    assert {:ok, catalog} = FixtureManifest.load(@fixtures)
+    assert Enum.sort(Map.keys(catalog["fixtures"])) == ~w(feature long repair review)
+    assert catalog["external"] == %{"status" => "pending_maintainer_selection"}
+    assert catalog["execution_manifest"]["status"] == "pending"
+
+    for {_name, entry} <- catalog["fixtures"] do
+      assert entry["run_bounds"] == %{
+               "max_turns" => 16,
+               "deadline_ms" => 600_000,
+               "token_budget" => 1_000_000
+             }
+
+      assert :ok = FixtureManifest.verify_oracle(entry, @fixtures)
+    end
+
+    assert [%{"tool_id" => "loopex.ask", "require_committed_answer" => true}] =
+             catalog["fixtures"]["feature"]["required_model_actions"]
+
+    assert catalog["fixtures"]["review"]["allowed_changed_paths"] == []
+  end
+
+  test "malformed catalogs and changed seed/oracle bytes refuse before execution", %{root: root} do
+    copied = Path.join(root, "catalog")
+    File.cp_r!(@fixtures, copied)
+    original = File.read!(Path.join(copied, "manifest.json"))
+    catalog = JSON.decode!(original)
+
+    mutations = [
+      Map.put(catalog, "extra", true),
+      Map.delete(catalog, "fixtures"),
+      Map.put(catalog, "version", 2),
+      update_in(catalog["fixtures"], &Map.delete(&1, "long")),
+      put_in(catalog, ["fixtures", "repair", "workspace"], "../repair"),
+      put_in(catalog, ["fixtures", "repair", "allowed_changed_paths"], ["../oracle.exs"]),
+      put_in(catalog, ["fixtures", "repair", "run_bounds", "max_turns"], 64),
+      put_in(catalog, ["fixtures", "feature", "required_model_actions"], []),
+      put_in(catalog, ["fixtures", "review", "objective_results", "finding"], "all good"),
+      put_in(
+        catalog,
+        ["fixtures", "long", "initial_files", "WORKSPACE.md", "sha256"],
+        String.duplicate("0", 64)
+      )
+    ]
+
+    for changed <- mutations do
+      File.write!(Path.join(copied, "manifest.json"), JSON.encode!(changed))
+      assert {:error, :fixture_manifest_unavailable} = FixtureManifest.load(copied)
+    end
+
+    File.write!(
+      Path.join(copied, "manifest.json"),
+      "{\"version\":1," <> binary_part(original, 1, byte_size(original) - 1)
+    )
+
+    assert {:error, :fixture_manifest_unavailable} = FixtureManifest.load(copied)
+    File.write!(Path.join(copied, "manifest.json"), original)
+    assert {:ok, _} = FixtureManifest.load(copied)
+    File.write!(Path.join(copied, "repair/oracle.exs"), "IO.puts(:pass)\n")
+    assert {:error, :fixture_manifest_unavailable} = FixtureManifest.load(copied)
+  end
+
+  test "complete workspace inventories reject check edits, additions, mode changes and symlinks",
+       %{root: root} do
+    assert {:ok, catalog} = FixtureManifest.load(@fixtures)
+    workspace = copy_fixture(root, "review")
+    entry = catalog["fixtures"]["review"]
+    assert :ok = FixtureManifest.verify_workspace(entry, workspace)
+    fees = Path.join(workspace, "lib/fees.ex")
+    original = File.read!(fees)
+    File.write!(fees, original <> "# changed\n")
+
+    assert {:error, :fixture_workspace_changed} =
+             FixtureManifest.verify_workspace(entry, workspace)
+
+    File.write!(fees, original)
+    File.chmod!(fees, 0o755)
+
+    assert {:error, :fixture_workspace_changed} =
+             FixtureManifest.verify_workspace(entry, workspace)
+
+    File.chmod!(fees, 0o644)
+    File.write!(Path.join(workspace, ".extra"), "extra")
+
+    assert {:error, :fixture_workspace_changed} =
+             FixtureManifest.verify_workspace(entry, workspace)
+
+    File.rm!(Path.join(workspace, ".extra"))
+    File.rm!(fees)
+    File.ln_s!(Path.join(@fixtures, "review/workspace/lib/fees.ex"), fees)
+
+    assert {:error, :fixture_workspace_changed} =
+             FixtureManifest.verify_workspace(entry, workspace)
+  end
+
   defp copy_fixture(root, name) do
     workspace = Path.join(root, name)
     File.cp_r!(Path.join([@fixtures, name, "workspace"]), workspace)
@@ -93,10 +191,20 @@ defmodule LoopexCli.M7FixtureTest do
   end
 
   defp oracle(name, workspace, env \\ []) do
-    System.cmd("elixir", [Path.join([@fixtures, name, "oracle.exs"])],
-      env: [{"M7_WORKSPACE", workspace} | env],
-      stderr_to_stdout: true
-    )
+    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    entry = catalog["fixtures"][name]
+    assert :ok = FixtureManifest.verify_workspace(entry, workspace)
+    assert :ok = FixtureManifest.verify_oracle(entry, @fixtures)
+
+    result =
+      System.cmd("elixir", [Path.join([@fixtures, name, "oracle.exs"])],
+        env: [{"M7_WORKSPACE", workspace} | env],
+        stderr_to_stdout: true
+      )
+
+    assert :ok = FixtureManifest.verify_workspace(entry, workspace)
+    assert :ok = FixtureManifest.verify_oracle(entry, @fixtures)
+    result
   end
 
   defp workspace_bytes(workspace) do

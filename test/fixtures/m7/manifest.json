@@ -1,0 +1,264 @@
+{
+  "execution_manifest": {
+    "coverage": "V1-V13",
+    "status": "pending"
+  },
+  "external": {
+    "status": "pending_maintainer_selection"
+  },
+  "fixtures": {
+    "feature": {
+      "allowed_changed_paths": [
+        "lib/row_encoder.ex"
+      ],
+      "allowed_created_paths": [],
+      "initial_directories": {
+        "lib": 493
+      },
+      "initial_files": {
+        "lib/row_encoder.ex": {
+          "mode": 420,
+          "sha256": "24c3ea1edfd01ad63a0093e27888216835ca35e5d4c7d0886308f8828bddf676"
+        }
+      },
+      "invocation": {
+        "additional_environment": [
+          "M7_NIL_DEFAULT"
+        ],
+        "argv": [
+          "elixir",
+          "{oracle}"
+        ],
+        "environment": {
+          "M7_WORKSPACE": "{workspace}"
+        }
+      },
+      "objective_results": {
+        "choice-1": "empty",
+        "choice-2": "literal_null",
+        "explicit_modes": [
+          "empty",
+          "literal_null"
+        ],
+        "ordinary_row": "left,3,right"
+      },
+      "oracle": {
+        "mode": 420,
+        "path": "feature/oracle.exs",
+        "sha256": "4c18b1018680411db576543787ead036d993ac70cd2c4cc33e0e7c21a1d6e63c"
+      },
+      "prompts": [
+        "Add nil_mode to RowEncoder.encode/2, preserving ordinary rows. Both explicit modes must work: empty renders nil as an empty field; literal_null renders nil as null. The default is deliberately undecided. Before editing, call the ask tool with question \"Which default should nil_mode use?\" and choices [\"empty\", \"literal_null\"]. Implement the operator's chosen default, change only lib/row_encoder.ex, and run the exact approved test invocation supplied by the harness."
+      ],
+      "required_model_actions": [
+        {
+          "arguments": {
+            "choices": [
+              "empty",
+              "literal_null"
+            ],
+            "question": "Which default should nil_mode use?"
+          },
+          "require_committed_answer": true,
+          "tool_id": "loopex.ask"
+        }
+      ],
+      "run_bounds": {
+        "deadline_ms": 600000,
+        "max_turns": 16,
+        "token_budget": 1000000
+      },
+      "workspace": "feature/workspace"
+    },
+    "long": {
+      "allowed_changed_paths": [],
+      "allowed_created_paths": [
+        "release.txt",
+        "batches.txt"
+      ],
+      "initial_directories": {},
+      "initial_files": {
+        "WORKSPACE.md": {
+          "mode": 420,
+          "sha256": "c58eb288a00ee89425f6f84ac82a509e9d8da6251f9229af1498a824dbaede7d"
+        }
+      },
+      "invocation": {
+        "additional_environment": [],
+        "argv": [
+          "elixir",
+          "{oracle}"
+        ],
+        "environment": {
+          "M7_WORKSPACE": "{workspace}"
+        }
+      },
+      "objective_results": {
+        "batch_size": 3,
+        "batches.txt": "amber-001\namber-002\namber-003\n",
+        "release.txt": "amber\n",
+        "release_prefix": "amber",
+        "required_runtime_joins": [
+          "automatic_checkpoint",
+          "explicit_checkpoint",
+          "restart",
+          "retained_raw_facts"
+        ]
+      },
+      "oracle": {
+        "mode": 420,
+        "path": "long/oracle.exs",
+        "sha256": "fb3d41ae671bcf99887076a1c695b2150f7d7298ab9271b32533890dee05e7eb"
+      },
+      "prompts": [
+        "Remember these exact facts for our later release work: release_prefix=amber and batch_size=3. Keep WORKSPACE.md unchanged.",
+        "Explain how to keep a release prefix and batch size consistent across dependent steps. Do not create output files yet.",
+        "After automatic compaction, explain the retained release decisions. Do not change WORKSPACE.md.",
+        "After the host's explicit compaction and session restart, create release.txt containing the exact prefix followed by LF and batches.txt containing exactly batch_size lines numbered from 001, each prefixed by release_prefix and a hyphen. Run the exact approved test invocation supplied by the harness."
+      ],
+      "required_model_actions": [],
+      "run_bounds": {
+        "deadline_ms": 600000,
+        "max_turns": 16,
+        "token_budget": 1000000
+      },
+      "workspace": "long/workspace"
+    },
+    "repair": {
+      "allowed_changed_paths": [
+        "lib/ledger.ex"
+      ],
+      "allowed_created_paths": [],
+      "initial_directories": {
+        "lib": 493
+      },
+      "initial_files": {
+        "lib/ledger.ex": {
+          "mode": 420,
+          "sha256": "3f060fed2ec7bae102b701c71f96e19e486b1be6bb455d2d4d16c56d6c924d93"
+        }
+      },
+      "invocation": {
+        "additional_environment": [],
+        "argv": [
+          "elixir",
+          "{oracle}"
+        ],
+        "environment": {
+          "M7_WORKSPACE": "{workspace}"
+        }
+      },
+      "objective_results": {
+        "empty": 0,
+        "negative": {
+          "entries": [
+            -12,
+            -7
+          ],
+          "total": -19
+        },
+        "positive": {
+          "entries": [
+            12,
+            7,
+            4
+          ],
+          "total": 23
+        },
+        "refunds": {
+          "entries": [
+            12,
+            -7,
+            4,
+            -9
+          ],
+          "total": 0
+        }
+      },
+      "oracle": {
+        "mode": 420,
+        "path": "repair/oracle.exs",
+        "sha256": "9eee963c9afba0ecbfe7d8a55254dd1205212c8ba1224d786b42f00a3f3e225e"
+      },
+      "prompts": [
+        "Diagnose the boundary bug in Ledger.total/1 without editing. Explain the cause and the smallest repair. Requirements are complete; no clarifying question is needed.",
+        "Apply the repair you diagnosed to lib/ledger.ex. Preserve positive and negative sums, including refunds, and change no other path. Requirements are complete; no clarifying question is needed.",
+        "Run the exact approved test invocation supplied by the harness and report its result. Requirements are complete; no clarifying question is needed.",
+        "After reopening this same session, explain the original cause and the decision behind your repair without changing files."
+      ],
+      "required_model_actions": [],
+      "run_bounds": {
+        "deadline_ms": 600000,
+        "max_turns": 16,
+        "token_budget": 1000000
+      },
+      "workspace": "repair/workspace"
+    },
+    "review": {
+      "allowed_changed_paths": [],
+      "allowed_created_paths": [],
+      "initial_directories": {
+        "lib": 493
+      },
+      "initial_files": {
+        "lib/checkout.ex": {
+          "mode": 420,
+          "sha256": "08258fa97e9720847e521d88539bf1c82048c6e35753eaca5a82c85702041f6a"
+        },
+        "lib/fees.ex": {
+          "mode": 420,
+          "sha256": "a62daa0408a8a431e8deee5a2153f0d7318dcaa311651d8ce8c9e2c84e6e9b39"
+        },
+        "lib/invoice.ex": {
+          "mode": 420,
+          "sha256": "9879de39c8d63eefd7c9607ca4f949eb6695932e1c812af541db057d269e4891"
+        }
+      },
+      "invocation": {
+        "additional_environment": [
+          "M7_FINDING"
+        ],
+        "argv": [
+          "elixir",
+          "{oracle}"
+        ],
+        "environment": {
+          "M7_WORKSPACE": "{workspace}"
+        }
+      },
+      "objective_results": {
+        "finding": "file\tfunction\tdefect_code\tcall_chain\nlib/fees.ex\ttotal/2\tduplicate_fee\tCheckout.quote/2>Invoice.total/2>Fees.total/2\n",
+        "quote": {
+          "amount": 1200,
+          "fee": 75,
+          "observed": 1350
+        }
+      },
+      "oracle": {
+        "mode": 420,
+        "path": "review/oracle.exs",
+        "sha256": "539514431689f903876af59012c5ccc05dea7a5ea1c0a5e234b12e8298a6430f"
+      },
+      "prompts": [
+        "Use the investigate helper role to trace Checkout.quote/2 through this repository without edits. Then use the separately instructed review helper role to review that chain without edits. Return only a TSV finding with columns file, function, defect_code, call_chain; name the exact source path, function, defect and complete >-separated call chain. No workspace changes are allowed."
+      ],
+      "required_model_actions": [
+        {
+          "role": "investigate",
+          "tool_id": "loopex.task"
+        },
+        {
+          "role": "review",
+          "tool_id": "loopex.task"
+        }
+      ],
+      "run_bounds": {
+        "deadline_ms": 600000,
+        "max_turns": 16,
+        "token_budget": 1000000
+      },
+      "workspace": "review/workspace"
+    }
+  },
+  "version": 1
+}

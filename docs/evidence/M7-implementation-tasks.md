@@ -91,6 +91,38 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Passed: the full fast check ran once on clean implementation SHA
+  `bd2828eae9d9095634e002875bbb9001dd9a12d0`. All eleven application suites
+  passed: 3,182 tests, 34 existing exclusions, 895 seconds. Complete output:
+  `/private/tmp/loopex-m7-bd2828ea-fast-check.log`, SHA-256
+  `364f044af71530fca0c6ca20972b504ad09359575cb0e6a60da1bda061a6a6a4`.
+  This candidate includes tagged ephemeral answers and supervisor-first diagnostic
+  teardown; it predates the fixture catalog. Earlier timing failures remain
+  retained, and the separate diagnostic-loss deadline decision remains open.
+- Done: T13's source catalog pins the four retained seeds and independent oracle
+  bytes/modes, literal prompts, baseline bounds, permitted workspace changes,
+  objective results and required question/helper actions. The validator refuses
+  duplicate/unknown JSON members, invalid paths, changed sources/oracles,
+  forbidden workspace edits/additions/modes and symlinks. Existing seeded-failure
+  and corrected-result tests now check workspace inventories and oracle identity
+  before and after each actual oracle invocation. No seed or oracle bytes changed.
+  The seven-test file passes in 4.8 seconds current and 4.5 seconds floor without
+  warnings. Compile, formatting, documentation, dependency and status gates pass.
+  Complete outputs:
+  `/private/tmp/loopex-m7-fixture-catalog-current-verified-20261002.log`, SHA-256
+  `a2b971b1de5a3e97588d17cc34d6283d678c93ed0912e8968f586cae6b7eacd9`.
+  `/private/tmp/loopex-m7-fixture-catalog-floor-verified-20261002.log`, SHA-256
+  `ce6ee4c2e677cc76b6da203e51f7153b777c862ae9378428f2b25ea772562686`.
+  Development runs passed assertions but reported clause-ordering and then runtime
+  deprecation warnings; both were corrected before the final checks. Retained:
+  `/private/tmp/loopex-m7-fixture-catalog-current-initial-20261002.log`, SHA-256
+  `e02e47049fdf225ec9eac30731bf210fddc4f5e4f13ede8b29631671d7efa7b1`;
+  `/private/tmp/loopex-m7-fixture-catalog-current-final-20261002.log`, SHA-256
+  `a899fde9dce50fabdd6876051cdc15fcb813dc882648a79bd8c4e27e70afc388`.
+  Complete V1–V13 execution bindings, approved fixture-host policy, committed
+  question/helper/checkpoint joins, provider execution and the deferred external
+  target remain open. No provider attempt ran. Original counts remain 30 done /
+  156 remaining; added counts are 106 done / 12 remaining.
 - Done: diagnostic shutdown now asks the private supervisor to stop before
   collecting the writer and supervisor monitor joins. Killing a task first and
   receiving its DOWN does not order that task's linked EXIT at the supervisor
@@ -3214,6 +3246,10 @@ or check was relaxed.
 - [ ] Make every V1–V13 instruction runnable, with one owner and evidence slot per step/subcase.
 - [ ] Complete the specified human-attended steps with a named operator.
 - [ ] Collect previous executions without adding extra model attempts.
+
+### Added implementation subtasks
+
+- [x] Pin the retained four coding fixtures in a closed source catalog with literal prompts, bounds, digests/modes, allowed changes, objective results and required model actions; protect complete workspace and immutable oracle inventories around actual deterministic oracle runs on both toolchains.
 
 ## T14 — Implement attempts tracking and evidence validation
 
