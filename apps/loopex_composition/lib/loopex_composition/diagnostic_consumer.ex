@@ -43,7 +43,32 @@ defmodule LoopexComposition.DiagnosticConsumer do
   @spec start_link(IO.device(), non_neg_integer()) :: GenServer.on_start()
   def start_link(device, cleanup_grace_ms)
       when is_integer(cleanup_grace_ms) and cleanup_grace_ms >= 0,
-      do: GenServer.start_link(__MODULE__, {self(), device, cleanup_grace_ms})
+      do: start_link({self(), device, cleanup_grace_ms})
+
+  # Concept: a private supervisor starts the drain for its already-bound host.
+  # Technical depth: the explicit owner comes from internal actor registration,
+  # never from trace options. Public standalone startup captures its caller.
+  @doc false
+  def start_link({owner, device, cleanup_grace_ms})
+      when is_pid(owner) and is_integer(cleanup_grace_ms) and cleanup_grace_ms >= 0,
+      do: GenServer.start_link(__MODULE__, {owner, device, cleanup_grace_ms})
+
+  # Concept: the host registers these private process identities before use.
+  # Technical depth: this inspection is owner-only and is never a durable or
+  # public session projection. A shutdown registration seals dispatch first.
+  @doc false
+  def owned_processes(consumer), do: GenServer.call(consumer, :owned_processes)
+
+  # Concept: the owner can keep handling its shutdown timer while writers end.
+  # Technical depth: admission is bounded by the existing deadline. The result
+  # message names the exact reference; a timed-out admission proves no cleanup.
+  @doc false
+  def begin_close(consumer, reference, deadline)
+      when is_reference(reference) and is_integer(deadline) do
+    GenServer.call(consumer, {:begin_close, reference, deadline}, remaining(deadline))
+  catch
+    :exit, _ -> {:error, :cleanup_unknown}
+  end
 
   @doc """
   ## Concept
@@ -93,6 +118,7 @@ defmodule LoopexComposition.DiagnosticConsumer do
        queue: :queue.new(),
        pending: 0,
        current: nil,
+       closing: nil,
        counts: %{trace: counters(), diagnostic: counters()},
        failure: nil
      }}
@@ -103,6 +129,18 @@ defmodule LoopexComposition.DiagnosticConsumer do
     do: {:reply, {:error, :not_diagnostic_owner}, state}
 
   def handle_call(:status, _from, state), do: {:reply, view(state), state}
+
+  def handle_call(:owned_processes, _from, state), do: {:reply, {:ok, owned(state)}, state}
+
+  def handle_call({:begin_close, ref, deadline}, _from, %{closing: nil} = state)
+      when is_reference(ref) and is_integer(deadline) do
+    deadline = min(deadline, now() + state.grace)
+    send(self(), {:close_diagnostics, ref})
+    {:reply, {:ok, owned(state)}, %{state | closing: {ref, deadline}}}
+  end
+
+  def handle_call({:begin_close, _, _}, _from, state),
+    do: {:reply, {:error, :diagnostic_closing}, state}
 
   def handle_call({:close, deadline}, _from, state) when is_integer(deadline) do
     deadline = min(deadline, now() + state.grace)
@@ -127,7 +165,7 @@ defmodule LoopexComposition.DiagnosticConsumer do
     kind = if item["kind"] in ["trace_call", "trace_dropped"], do: :trace, else: :diagnostic
 
     state =
-      if state.failure == nil and state.pending < @queue_entries do
+      if state.failure == nil and state.closing == nil and state.pending < @queue_entries do
         bytes = Entry.render(item, @entry_bytes - 1) <> "\n"
 
         %{state | queue: :queue.in({kind, bytes}, state.queue), pending: state.pending + 1}
@@ -167,6 +205,21 @@ defmodule LoopexComposition.DiagnosticConsumer do
   def handle_info({:EXIT, supervisor, _}, %{supervisor: supervisor} = state),
     do: {:noreply, fail(state)}
 
+  def handle_info({:close_diagnostics, ref}, %{closing: {ref, deadline}} = state) do
+    state = discard_queue(state)
+    {state, worker_joined} = stop_writer(state, deadline)
+    supervisor_joined = stop_supervisor(state.supervisor, deadline)
+    final = view(%{state | supervisor: nil})
+
+    result =
+      if worker_joined and supervisor_joined and now() <= deadline,
+        do: {:ok, final},
+        else: {:error, :cleanup_unknown, final}
+
+    send(state.owner, {:diagnostic_consumer_closed, self(), ref, result})
+    {:stop, :normal, %{state | supervisor: nil}}
+  end
+
   def handle_info(_, state), do: {:noreply, state}
 
   @impl true
@@ -189,6 +242,15 @@ defmodule LoopexComposition.DiagnosticConsumer do
 
   defp counters, do: %{emitted: 0, dropped: 0, unconfirmed: 0}
 
+  # Concept: shutdown registration captures every process still able to write.
+  # Technical depth: begin_close seals dispatch before replying with this list.
+  # Previously completed workers were joined; after sealing, no new writer can
+  # appear between registration and the asynchronous cleanup certificate.
+  defp owned(state) do
+    worker = if state.current, do: state.current.task.pid
+    Enum.filter([self(), state.supervisor, worker], &is_pid/1)
+  end
+
   defp count(state, kind, counter) do
     put_in(state.counts[kind][counter], state.counts[kind][counter] + 1)
   end
@@ -205,7 +267,7 @@ defmodule LoopexComposition.DiagnosticConsumer do
     }
   end
 
-  defp dispatch(%{current: nil, failure: nil} = state) do
+  defp dispatch(%{current: nil, failure: nil, closing: nil} = state) do
     case :queue.out(state.queue) do
       {{:value, {kind, bytes}}, rest} ->
         device = state.device

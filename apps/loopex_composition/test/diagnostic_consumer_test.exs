@@ -3,6 +3,48 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
 
   alias LoopexComposition.DiagnosticConsumer
 
+  test "supervised startup binds the explicit host and asynchronous closing seals dispatch" do
+    device = device()
+    consumer = start_supervised!({DiagnosticConsumer, {self(), device, 1_000}})
+    assert {:ok, [^consumer, supervisor]} = DiagnosticConsumer.owned_processes(consumer)
+    send(consumer, {:loopex_diagnostic, %{"kind" => "trace_call"}})
+    assert_receive {:device_write, writer, _}
+    send(consumer, {:loopex_diagnostic, %{"kind" => "ordinary"}})
+    ref = make_ref()
+    consumer_ref = Process.monitor(consumer)
+    supervisor_ref = Process.monitor(supervisor)
+    writer_ref = Process.monitor(writer)
+
+    assert {:ok, [^consumer, ^supervisor, ^writer]} =
+             DiagnosticConsumer.begin_close(consumer, ref, deadline())
+
+    assert_receive {:diagnostic_consumer_closed, ^consumer, ^ref, {:ok, final}}
+    assert final.counts.trace == %{emitted: 0, dropped: 0, unconfirmed: 1}
+    assert final.counts.diagnostic == %{emitted: 0, dropped: 1, unconfirmed: 0}
+    refute Process.alive?(writer)
+    refute Process.alive?(supervisor)
+    assert_receive {:DOWN, ^writer_ref, :process, ^writer, _}
+    assert_receive {:DOWN, ^supervisor_ref, :process, ^supervisor, _}
+    assert_receive {:DOWN, ^consumer_ref, :process, ^consumer, :normal}
+    refute_receive {:device_write, _, _}, 0
+    refute_receive {:diagnostic_consumer_closed, ^consumer, ^ref, _}, 0
+  end
+
+  test "private registration and asynchronous shutdown remain owner-only" do
+    device = device()
+    {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+
+    task =
+      Task.async(fn ->
+        {DiagnosticConsumer.owned_processes(consumer),
+         DiagnosticConsumer.begin_close(consumer, make_ref(), deadline())}
+      end)
+
+    assert Task.await(task) == {{:error, :not_diagnostic_owner}, {:error, :not_diagnostic_owner}}
+    assert DiagnosticConsumer.status(consumer).failure == nil
+    assert {:ok, _} = DiagnosticConsumer.close(consumer, deadline())
+  end
+
   test "observed mailbox growth stays distinct from the proved explicit output bound" do
     device = device()
     {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)

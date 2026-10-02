@@ -91,6 +91,23 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Running: T12 trace lifecycle integration has its private diagnostic actor
+  operations ready. Supervised startup can bind the intended host; owner-only
+  inspection supplies its private process identities. Asynchronous shutdown
+  seals dispatch before returning the drain, supervisor and active writer for
+  registration, then reports a reference-bound cleanup certificate under the
+  captured deadline. This permits the serial owner to keep handling its timer
+  while cleanup runs. It does not yet expose or accept the embedded trace option:
+  ephemeral Options, SessionRoot and SessionOwner remain unchanged.
+  Both pairs pass all 18 diagnostic/configuration tests in 0.6 seconds each,
+  including the new supervised-owner and asynchronous cleanup proofs.
+  Compilation, formatting and documentation ordering pass. Complete outputs:
+  `/private/tmp/loopex-m7-diagnostic-lifecycle-current.log`, SHA-256
+  `b7068ed29cb3e4fbae3dce037a1bee2e2b29960909382cc9a3760b586c7ba068`;
+  `/private/tmp/loopex-m7-diagnostic-lifecycle-floor.log`, SHA-256
+  `1f00ac570b8888f7a2c531208ff83e7100ba90b938a60299c7ef966e2284a8c2`.
+  No checklist item closes for this partial integration. Counts remain 28/158
+  original and 93/12 added.
 - Done: trace selector resolution now lives in composition and both CLI
   configuration callers use that same compiled trusted-module inventory.
   A shared pure validator translates the accepted binary-keyed host trace map
