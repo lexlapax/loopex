@@ -2,7 +2,7 @@ defmodule LoopexCli.ChatControl do
   @moduledoc """
   ## Concept
 
-  Encode the chat driver's acknowledgements, questions and errors as closed host
+  Encode the chat driver's acknowledgements, questions, barriers and endings as closed host
   records. Model text remains quoted transcript text, separate from these records.
 
   ## Technical depth
@@ -12,12 +12,13 @@ defmodule LoopexCli.ChatControl do
   retain no runtime state. Identities use the protocol's unpadded base64url;
   sequence and expiry quantities use its canonical decimal strings. JSON encoding
   reuses `LoopexProtocol.Frame`, so embedded LF and controls cannot introduce a
-  second record. Oversized legacy identities refuse without truncation. Wait,
-  status and closing records join this encoder when their public projections are
-  integrated; this module does not infer settlement or cleanup from a question.
+  second record. Oversized legacy identities refuse without truncation. Terminal
+  objects use the shared protocol codec. Status joins this encoder with its
+  public projection; this module does not infer settlement or cleanup.
   """
 
   alias LoopexProtocol.{Frame, Wire}
+  alias LoopexProtocol.Session.Outcome
 
   @record_bytes 65_536
   @u64_max 18_446_744_073_709_551_615
@@ -33,7 +34,9 @@ defmodule LoopexCli.ChatControl do
       :choices,
       :expires_at_ms
     ],
-    error: [:input_sequence, :code]
+    error: [:input_sequence, :code],
+    wait: [:input_sequence, :state, :session_id, :run_id, :interaction_id, :command_id, :outcome],
+    closing: [:exit_code, :cleanup, :last_outcome]
   }
 
   @doc """
@@ -49,7 +52,7 @@ defmodule LoopexCli.ChatControl do
   perform transport-failure cleanup for that refusal. This function neither
   acknowledges a command nor establishes the truth of the supplied fields.
   """
-  @spec encode(:input | :question | :error, term()) ::
+  @spec encode(:input | :question | :error | :wait | :closing, term()) ::
           {:ok, binary()}
           | {:error, :invalid_control_record | :control_record_too_large}
   def encode(event, fields) when is_map(fields) and not is_struct(fields) do
@@ -109,6 +112,106 @@ defmodule LoopexCli.ChatControl do
        }}
     end
   end
+
+  defp project(:wait, fields) do
+    with {:ok, sequence} <- quantity(fields.input_sequence, false),
+         {:ok, session} <- identity(fields.session_id, 256),
+         {:ok, run} <- nullable_identity(fields.run_id),
+         {:ok, interaction} <- nullable_identity(fields.interaction_id),
+         {:ok, command} <- nullable_identity(fields.command_id),
+         {:ok, outcome} <- wait_outcome(fields) do
+      {:ok,
+       %{
+         "input_sequence" => sequence,
+         "state" => Atom.to_string(fields.state),
+         "session_id" => session,
+         "run_id" => run,
+         "interaction_id" => interaction,
+         "command_id" => command,
+         "outcome" => outcome
+       }}
+    end
+  end
+
+  defp project(:closing, fields) do
+    with true <- is_integer(fields.exit_code) and fields.exit_code in 0..255,
+         true <- fields.cleanup in [:confirmed, :unknown],
+         {:ok, outcome} <- nullable_outcome(fields.last_outcome),
+         true <-
+           fields.exit_code != 0 or
+             (fields.cleanup == :confirmed and
+                (is_nil(outcome) or outcome["outcome"] == "completed")) do
+      {:ok,
+       %{
+         "exit_code" => fields.exit_code,
+         "cleanup" => Atom.to_string(fields.cleanup),
+         "last_outcome" => outcome
+       }}
+    else
+      _ -> :error
+    end
+  end
+
+  defp wait_outcome(%{
+         state: :settled,
+         interaction_id: nil,
+         command_id: nil,
+         run_id: nil,
+         outcome: nil
+       }),
+       do: {:ok, nil}
+
+  defp wait_outcome(%{
+         state: :settled,
+         interaction_id: nil,
+         command_id: nil,
+         run_id: run,
+         outcome: %{outcome: outcome} = value
+       })
+       when is_binary(run) and outcome in [:completed, :cancelled, :failed, :bound_reached],
+       do: Outcome.encode_wire(value)
+
+  defp wait_outcome(%{
+         state: :question,
+         interaction_id: interaction,
+         command_id: nil,
+         run_id: run,
+         outcome: nil
+       })
+       when is_binary(run) and is_binary(interaction), do: {:ok, nil}
+
+  defp wait_outcome(%{
+         state: :uncertain,
+         interaction_id: nil,
+         command_id: nil,
+         run_id: run,
+         outcome: %{outcome: :outcome_unknown} = value
+       })
+       when is_binary(run), do: Outcome.encode_wire(value)
+
+  defp wait_outcome(%{
+         state: :uncertain,
+         interaction_id: nil,
+         command_id: command,
+         run_id: nil,
+         outcome: :commit_unknown
+       })
+       when is_binary(command), do: {:ok, "commit_unknown"}
+
+  defp wait_outcome(%{
+         state: :uncertain,
+         interaction_id: nil,
+         command_id: nil,
+         outcome: :cleanup_unknown
+       }),
+       do: {:ok, "cleanup_unknown"}
+
+  defp wait_outcome(_), do: :error
+
+  defp nullable_identity(nil), do: {:ok, nil}
+  defp nullable_identity(value), do: identity(value)
+  defp nullable_outcome(nil), do: {:ok, nil}
+  defp nullable_outcome(value), do: Outcome.encode_wire(value)
 
   defp choices(:model_tool, :text, []), do: {:ok, []}
 

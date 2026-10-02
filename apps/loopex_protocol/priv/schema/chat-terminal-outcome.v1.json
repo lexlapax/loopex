@@ -1,0 +1,63 @@
+{
+  "contract": "chat_terminal_outcome",
+  "revision": 1,
+  "required": [
+    "outcome",
+    "details"
+  ],
+  "additional_members": "refuse",
+  "details": {
+    "completed": [
+      "cleanup_grace_ms"
+    ],
+    "cancelled": [
+      "cleanup_grace_ms"
+    ],
+    "failed": [
+      "reason",
+      "failure",
+      "cleanup_grace_ms"
+    ],
+    "bound_reached": [
+      "bound",
+      "observed",
+      "declared_limit",
+      "accounting_source",
+      "cleanup_grace_ms"
+    ],
+    "outcome_unknown": [
+      "reconciliation_ref",
+      "cleanup_grace_ms"
+    ]
+  },
+  "quantities": {
+    "encoding": "canonical_decimal_string",
+    "cleanup_grace_ms": "positive_u64",
+    "deadline": "nonnegative_u64",
+    "max_turns": "arbitrary_nonnegative_integer",
+    "token_budget": "arbitrary_nonnegative_integer",
+    "context_failure_observed_max": "55340232221128654844",
+    "context_failure_limit": "positive_u64"
+  },
+  "reconciliation_ref": {
+    "encoding": "unpadded_base64url_of_original_opaque_bytes",
+    "original_min_bytes": 1,
+    "original_max_bytes": 65536
+  },
+  "failure": {
+    "required": [
+      "category",
+      "retryable",
+      "dimension",
+      "observed",
+      "limit"
+    ],
+    "additional_members": "refuse",
+    "retryable": false,
+    "categories": [
+      "deadline_preflight_failed",
+      "context_budget_exceeded"
+    ]
+  },
+  "presentation": "enclosing_control_record_cap_including_prefix_and_LF"
+}

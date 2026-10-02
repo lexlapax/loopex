@@ -66,7 +66,9 @@ defmodule LoopexCli.ChatControlTest do
           {:input,
            %{input_sequence: 1, command_id: "command", disposition: :admitted, code: :accepted}},
           {:question, question()},
-          {:error, %{input_sequence: nil, code: :input_failed}}
+          {:error, %{input_sequence: nil, code: :input_failed}},
+          {:wait, wait()},
+          {:closing, %{exit_code: 0, cleanup: :confirmed, last_outcome: nil}}
         ] do
       assert {:ok, _} = ChatControl.encode(event, fields)
 
@@ -227,12 +229,195 @@ defmodule LoopexCli.ChatControlTest do
         })
 
       {:ok, question} = ChatControl.encode(:question, question())
+      {:ok, barrier} = ChatControl.encode(:wait, wait())
+
+      {:ok, closing} =
+        ChatControl.encode(:closing, %{
+          exit_code: 0,
+          cleanup: :confirmed,
+          last_outcome: completed()
+        })
+
       assert :ok = ChatOutput.write(writer, :control, input)
       assert :ok = ChatOutput.write(writer, :control, question)
+      assert :ok = ChatOutput.write(writer, :control, barrier)
+      assert :ok = ChatOutput.write(writer, :control, closing)
       assert :ok = ChatOutput.finish(writer)
-      assert StringIO.contents(device) == {"", input <> question}
+      assert StringIO.contents(device) == {"", input <> question <> barrier <> closing}
     end)
   end
+
+  test "wait records retain run-only outcomes and the distinct question and uncertainty branches" do
+    base = wait()
+
+    unknown = %{
+      outcome: :outcome_unknown,
+      details: %{"cleanup_grace_ms" => 1, "reconciliation_ref" => <<255, 0>>}
+    }
+
+    for fields <- [
+          base,
+          %{base | run_id: <<255, 0>>, outcome: completed()},
+          %{base | state: :question, run_id: "run", interaction_id: <<0, 255>>},
+          %{base | state: :uncertain, run_id: "run", outcome: unknown},
+          %{base | state: :uncertain, command_id: <<0, 255>>, outcome: :commit_unknown},
+          %{base | state: :uncertain, outcome: :cleanup_unknown},
+          %{base | state: :uncertain, run_id: "run", outcome: :cleanup_unknown}
+        ] do
+      assert {:ok, bytes} = ChatControl.encode(:wait, fields)
+      record = decode(bytes)
+      assert record["state"] == Atom.to_string(fields.state)
+      assert record["input_sequence"] == "1"
+      assert record["session_id"] == Wire.encode_identity(fields.session_id)
+
+      for key <- [:run_id, :interaction_id, :command_id] do
+        native = Map.fetch!(fields, key)
+
+        assert record[Atom.to_string(key)] ==
+                 if(is_nil(native), do: nil, else: Wire.encode_identity(native))
+      end
+
+      case fields.outcome do
+        nil ->
+          assert record["outcome"] == nil
+
+        literal when is_atom(literal) ->
+          assert record["outcome"] == Atom.to_string(literal)
+
+        terminal ->
+          assert LoopexProtocol.Session.Outcome.decode_wire(record["outcome"]) == {:ok, terminal}
+      end
+    end
+  end
+
+  test "wait refuses inconsistent identities, missing terminal evidence and misplaced host codes" do
+    base = wait()
+
+    for invalid <- [
+          %{base | state: :active},
+          %{base | run_id: "run"},
+          %{base | outcome: completed()},
+          %{base | interaction_id: "interaction"},
+          %{base | command_id: "command"},
+          %{base | state: :question, run_id: "run"},
+          %{base | state: :question, interaction_id: "interaction"},
+          %{
+            base
+            | state: :question,
+              run_id: "run",
+              interaction_id: "interaction",
+              outcome: completed()
+          },
+          %{base | state: :uncertain, outcome: :commit_unknown},
+          %{
+            base
+            | state: :uncertain,
+              run_id: "run",
+              command_id: "command",
+              outcome: :commit_unknown
+          },
+          %{base | state: :uncertain, command_id: "command", outcome: :cleanup_unknown},
+          %{base | state: :uncertain, run_id: "run", outcome: completed()},
+          %{
+            base
+            | state: :uncertain,
+              run_id: "run",
+              outcome: %{outcome: :outcome_unknown, details: %{}}
+          },
+          %{base | state: :uncertain, outcome: "cleanup_unknown"},
+          %{base | state: :uncertain, interaction_id: "interaction", outcome: :cleanup_unknown},
+          %{base | state: :uncertain, run_id: "", outcome: :cleanup_unknown},
+          %{base | input_sequence: 0}
+        ] do
+      assert ChatControl.encode(:wait, invalid) == {:error, :invalid_control_record}
+    end
+  end
+
+  test "closing reports prior failure even when the last run succeeded and refuses false success" do
+    base = %{exit_code: 1, cleanup: :confirmed, last_outcome: completed()}
+    assert {:ok, line} = ChatControl.encode(:closing, base)
+    assert decode(line)["exit_code"] == 1
+    assert decode(line)["last_outcome"]["outcome"] == "completed"
+    assert {:ok, _} = ChatControl.encode(:closing, %{base | cleanup: :unknown})
+    assert {:ok, _} = ChatControl.encode(:closing, %{base | last_outcome: nil})
+
+    for invalid <- [
+          %{base | exit_code: -1},
+          %{base | exit_code: 256},
+          %{base | exit_code: "1"},
+          %{base | cleanup: :other},
+          %{base | exit_code: 0, cleanup: :unknown},
+          %{base | last_outcome: :cleanup_unknown},
+          %{
+            base
+            | exit_code: 0,
+              last_outcome: %{outcome: :cancelled, details: %{"cleanup_grace_ms" => 1}}
+          }
+        ] do
+      assert ChatControl.encode(:closing, invalid) == {:error, :invalid_control_record}
+    end
+  end
+
+  test "terminal presentation cap preserves arbitrary counts and refuses oversized opaque references" do
+    native = %{
+      outcome: :bound_reached,
+      details: %{
+        "bound" => "token_budget",
+        "observed" => 9,
+        "declared_limit" => 1,
+        "accounting_source" => "estimated",
+        "cleanup_grace_ms" => 1
+      }
+    }
+
+    fields = %{exit_code: 1, cleanup: :confirmed, last_outcome: native}
+    assert {:ok, baseline} = ChatControl.encode(:closing, fields)
+    digits = String.duplicate("9", 1 + 65_536 - byte_size(baseline))
+    maximum = put_in(fields, [:last_outcome, :details, "observed"], String.to_integer(digits))
+    assert {:ok, line} = ChatControl.encode(:closing, maximum)
+    assert byte_size(line) == 65_536
+    assert decode(line)["last_outcome"]["details"]["observed"] == digits
+
+    overflow =
+      put_in(fields, [:last_outcome, :details, "observed"], String.to_integer(digits <> "9"))
+
+    assert ChatControl.encode(:closing, overflow) == {:error, :control_record_too_large}
+
+    unknown = %{
+      outcome: :outcome_unknown,
+      details: %{
+        "cleanup_grace_ms" => 1,
+        "reconciliation_ref" => :binary.copy(<<255>>, 65_536)
+      }
+    }
+
+    assert {:ok, _} = LoopexProtocol.Session.Outcome.encode_wire(unknown)
+
+    assert ChatControl.encode(:closing, %{fields | last_outcome: unknown}) ==
+             {:error, :control_record_too_large}
+
+    assert ChatControl.encode(:wait, %{
+             wait()
+             | state: :uncertain,
+               run_id: "run",
+               outcome: unknown
+           }) ==
+             {:error, :control_record_too_large}
+  end
+
+  defp wait do
+    %{
+      input_sequence: 1,
+      state: :settled,
+      session_id: "session",
+      run_id: nil,
+      interaction_id: nil,
+      command_id: nil,
+      outcome: nil
+    }
+  end
+
+  defp completed, do: %{outcome: :completed, details: %{"cleanup_grace_ms" => 5000}}
 
   defp question do
     %{

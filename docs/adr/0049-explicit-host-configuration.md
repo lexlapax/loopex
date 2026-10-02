@@ -87,6 +87,23 @@ configuration. Their private owner starts and stops tracing with its runtime
 and the stderr drain/writer. An embedding caller gains no raw runtime
 reference or remote trace authority through that option.
 
+<a id="concept-adr-0049-terminal-outcome"></a>
+### Terminal run objects
+
+Technical depth: [Closed terminal schema](0049-explicit-host-configuration-technical.md#technical-adr-0049-terminal-outcome).
+
+Chat barriers and closing records use one compact object containing exactly
+`outcome` and `details`. It reports a terminal run, with the existing bound,
+failure or reconciliation evidence. It contains no transcript, profile,
+duplicate run identity or host cleanup claim. Quantities preserve Core's domains;
+reconciliation references preserve opaque bytes. Existing ask JSON and retained
+public events keep their encodings. This experimental presentation needs no
+stored-data migration and can be removed with the chat command on rollback.
+
+The maintainer [approved this amendment](../evidence/M7-implementation-tasks.md#decision-m7-chat-terminal-outcome-2026-10-02)
+on 2026-10-02. The original acceptance row below still binds its historical
+candidate; it does not claim to include this later amendment.
+
 <a id="concept-adr-0049-consequences"></a>
 ### Observable Consequences
 

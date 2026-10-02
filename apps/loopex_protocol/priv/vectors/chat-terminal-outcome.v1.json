@@ -1,0 +1,992 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "chat_terminal_outcome",
+  "cases": [
+    {
+      "name": "completed",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "5000"
+        }
+      },
+      "decoded": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "5000"
+        }
+      }
+    },
+    {
+      "name": "cancelled-max-grace",
+      "input": {
+        "outcome": "cancelled",
+        "details": {
+          "cleanup_grace_ms": "18446744073709551615"
+        }
+      },
+      "decoded": {
+        "outcome": "cancelled",
+        "details": {
+          "cleanup_grace_ms": "18446744073709551615"
+        }
+      }
+    },
+    {
+      "name": "model_call_failed",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": "model_call_failed",
+          "failure": null
+        }
+      },
+      "decoded": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": "model_call_failed",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "unreadable_model_answer",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": "unreadable_model_answer",
+          "failure": null
+        }
+      },
+      "decoded": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": "unreadable_model_answer",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "deadline-preflight",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "deadline_preflight_failed",
+            "retryable": false,
+            "dimension": null,
+            "observed": null,
+            "limit": null
+          }
+        }
+      },
+      "decoded": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "deadline_preflight_failed",
+            "retryable": false,
+            "dimension": null,
+            "observed": null,
+            "limit": null
+          }
+        }
+      }
+    },
+    {
+      "name": "system_class_tokens",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "system_class_tokens",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      },
+      "decoded": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "system_class_tokens",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      }
+    },
+    {
+      "name": "context_tokens",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_tokens",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      },
+      "decoded": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_tokens",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      }
+    },
+    {
+      "name": "context_record_bytes",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_record_bytes",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      },
+      "decoded": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_record_bytes",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      }
+    },
+    {
+      "name": "context_record_depth",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_record_depth",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      },
+      "decoded": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_record_depth",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      }
+    },
+    {
+      "name": "context_record_cardinality",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_record_cardinality",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      },
+      "decoded": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_record_cardinality",
+            "observed": "55340232221128654844",
+            "limit": "18446744073709551615"
+          }
+        }
+      }
+    },
+    {
+      "name": "max_turns-None",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "max_turns",
+          "observed": "0",
+          "declared_limit": "18446744073709551615",
+          "accounting_source": null
+        }
+      },
+      "decoded": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "max_turns",
+          "observed": "0",
+          "declared_limit": "18446744073709551615",
+          "accounting_source": null
+        }
+      }
+    },
+    {
+      "name": "token_budget-reported",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "0",
+          "declared_limit": "18446744073709551615",
+          "accounting_source": "reported"
+        }
+      },
+      "decoded": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "0",
+          "declared_limit": "18446744073709551615",
+          "accounting_source": "reported"
+        }
+      }
+    },
+    {
+      "name": "token_budget-estimated",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "0",
+          "declared_limit": "18446744073709551615",
+          "accounting_source": "estimated"
+        }
+      },
+      "decoded": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "0",
+          "declared_limit": "18446744073709551615",
+          "accounting_source": "estimated"
+        }
+      }
+    },
+    {
+      "name": "deadline-None",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "deadline",
+          "observed": "0",
+          "declared_limit": "18446744073709551615",
+          "accounting_source": null
+        }
+      },
+      "decoded": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "deadline",
+          "observed": "0",
+          "declared_limit": "18446744073709551615",
+          "accounting_source": null
+        }
+      }
+    },
+    {
+      "name": "max_turns-beyond-u64",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "max_turns",
+          "observed": "99999999999999999999999999999999999999999999999999999999999999",
+          "declared_limit": "99999999999999999999999999999999999999999999999999999999999998",
+          "accounting_source": "estimated"
+        }
+      },
+      "decoded": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "max_turns",
+          "observed": "99999999999999999999999999999999999999999999999999999999999999",
+          "declared_limit": "99999999999999999999999999999999999999999999999999999999999998",
+          "accounting_source": "estimated"
+        }
+      }
+    },
+    {
+      "name": "token_budget-beyond-u64",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "99999999999999999999999999999999999999999999999999999999999999",
+          "declared_limit": "99999999999999999999999999999999999999999999999999999999999998",
+          "accounting_source": "estimated"
+        }
+      },
+      "decoded": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "99999999999999999999999999999999999999999999999999999999999999",
+          "declared_limit": "99999999999999999999999999999999999999999999999999999999999998",
+          "accounting_source": "estimated"
+        }
+      }
+    },
+    {
+      "name": "opaque-reconciliation",
+      "input": {
+        "outcome": "outcome_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reconciliation_ref": "AP8NCg"
+        }
+      },
+      "decoded": {
+        "outcome": "outcome_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reconciliation_ref": {
+            "opaque_hex": "00ff0d0a"
+          }
+        }
+      }
+    },
+    {
+      "name": "no-ending",
+      "input": {
+        "outcome": "no_ending",
+        "details": {
+          "cleanup_grace_ms": "5000"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "host-code",
+      "input": {
+        "outcome": "cleanup_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "numeric-outcome",
+      "input": {
+        "outcome": 1,
+        "details": {
+          "cleanup_grace_ms": "5000"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "null",
+      "input": null,
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "list",
+      "input": [],
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "top-extra",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "5000"
+        },
+        "profile": "durable"
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "missing-details",
+      "input": {
+        "outcome": "completed"
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "missing-grace",
+      "input": {
+        "outcome": "completed",
+        "details": {}
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "details-extra",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "text": "secret"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-0",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "0"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-1",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "-1"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-2",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "01"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-3",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "+1"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-4",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": " 1"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-5",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "1 "
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-6",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "1\n"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-7",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "1e3"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-8",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": "18446744073709551616"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-9",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": 1
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-10",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": true
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-grace-11",
+      "input": {
+        "outcome": "completed",
+        "details": {
+          "cleanup_grace_ms": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "bad-reference-",
+      "input": {
+        "outcome": "outcome_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reconciliation_ref": ""
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "bad-reference-AA==",
+      "input": {
+        "outcome": "outcome_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reconciliation_ref": "AA=="
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "bad-reference-AB",
+      "input": {
+        "outcome": "outcome_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reconciliation_ref": "AB"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "bad-reference-*",
+      "input": {
+        "outcome": "outcome_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reconciliation_ref": "*"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "bad-reference-123",
+      "input": {
+        "outcome": "outcome_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reconciliation_ref": 123
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "bad-reference-None",
+      "input": {
+        "outcome": "outcome_unknown",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reconciliation_ref": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "missing-reason",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "failure": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "raw-reason",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": "raw secret",
+          "failure": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "two-alternatives",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": "model_call_failed",
+          "failure": {
+            "category": "deadline_preflight_failed",
+            "retryable": false,
+            "dimension": null,
+            "observed": null,
+            "limit": null
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "absent-alternative",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "preflight-two-wire-members",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "deadline_preflight_failed",
+            "retryable": false
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-failure-retryable-True",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": true,
+            "dimension": "context_tokens",
+            "observed": "0",
+            "limit": "1"
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-failure-dimension-other",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "other",
+            "observed": "0",
+            "limit": "1"
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-failure-observed-55340232221128654845",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_tokens",
+            "observed": "55340232221128654845",
+            "limit": "1"
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-failure-observed--1",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_tokens",
+            "observed": "-1",
+            "limit": "1"
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-failure-limit-0",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_tokens",
+            "observed": "0",
+            "limit": "0"
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-failure-limit-01",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_tokens",
+            "observed": "0",
+            "limit": "01"
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-failure-limit-18446744073709551616",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_tokens",
+            "observed": "0",
+            "limit": "18446744073709551616"
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-failure-private-secret",
+      "input": {
+        "outcome": "failed",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "reason": null,
+          "failure": {
+            "category": "context_budget_exceeded",
+            "retryable": false,
+            "dimension": "context_tokens",
+            "observed": "0",
+            "limit": "1",
+            "private": "secret"
+          }
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-bound-bound",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "other",
+          "observed": "0",
+          "declared_limit": "1",
+          "accounting_source": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-bound-observed",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "-1",
+          "declared_limit": "1",
+          "accounting_source": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-bound-declared_limit",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "0",
+          "declared_limit": 1,
+          "accounting_source": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-bound-accounting_source",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "0",
+          "declared_limit": "1",
+          "accounting_source": "unknown"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "invalid-bound-private",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "token_budget",
+          "observed": "0",
+          "declared_limit": "1",
+          "accounting_source": null,
+          "private": "secret"
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "deadline-observed-overflow",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "deadline",
+          "observed": "18446744073709551616",
+          "declared_limit": "1",
+          "accounting_source": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    },
+    {
+      "name": "deadline-declared_limit-overflow",
+      "input": {
+        "outcome": "bound_reached",
+        "details": {
+          "cleanup_grace_ms": "5000",
+          "bound": "deadline",
+          "observed": "0",
+          "declared_limit": "18446744073709551616",
+          "accounting_source": null
+        }
+      },
+      "error": "invalid_terminal_outcome"
+    }
+  ]
+}

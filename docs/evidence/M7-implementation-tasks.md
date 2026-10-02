@@ -91,6 +91,41 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the full fast check passed once on exact
+  `385cf8cf84a4603f797191b823a84dd409a0b1ec` in 906 seconds, including
+  composition's diagnostic dispatch fixture. All eleven application suites
+  passed. Complete output: `/private/tmp/loopex-m7-385cf8cf-fast-check.log`,
+  SHA-256 `0c58d9468c3beabdcc33b3d04cdf50d76ed4a4b1a58bb1902375c873d2f5c43b`.
+  This is current-pair integration evidence for that exact candidate. The prior
+  failed candidates remain failed evidence; the provider-launcher deadline flake
+  and unrelated Task.Supervisor diagnostic still need causal investigation.
+
+- Done: the approved T10 terminal codec, closed wait/closing constructors and
+  independent payload vectors preserve run-only outcomes, exact null/host
+  uncertainty branches, arbitrary ordinary turn/token quantities, u64 deadline/
+  cleanup quantities and opaque reconciliation bytes. The codec adds no Core
+  mutation or stored-data migration. Closing refuses a zero exit with unknown
+  cleanup or an unsuccessful last run; a successful last run can still carry
+  nonzero exit for prior failure. Native preflight failures expand only their
+  known null fields. Existing ask JSON and event bytes remain unchanged.
+  Both toolchains pass 11 protocol cases including the independent Node lane
+  and 37 CLI cases. Protocol takes 0.07 seconds on each pair; CLI takes
+  5.6 seconds current and 5.4 seconds floor. The same 64 literal terminal
+  vectors run in both languages. Presentation tests retain an exactly
+  65,536-byte closing record, refuse one extra byte and oversized legacy opaque
+  references without truncation, and drain input/question/wait/closing bytes
+  unchanged through the actual output writer. Complete retained outputs:
+  `/private/tmp/loopex-m7-chat-terminal-protocol-current-20261002.log`, SHA-256
+  `0a0bed7d0e79632bdd808b00ceae9b099a88f0a0a90e7220ed5e3c0ba19f1143`;
+  `/private/tmp/loopex-m7-chat-terminal-cli-current-20261002.log`, SHA-256
+  `8010fdcca935e93bac98490f9d15a62b25cd510b0b5ad41cedbd12cee7f89441`;
+  `/private/tmp/loopex-m7-chat-terminal-floor-20261002.log`, SHA-256
+  `bb9b07552c19d2fc84dee88c87f1a22e510563bce253427a917109ec994d9c9c`.
+  Warning-free compilation, formatting, documentation, dependency and status
+  gates passed. This completes one added T10 subtask, no original item.
+  Status construction and the live chat driver remain in the original checklist.
+  Original: 42 done / 144 remaining. Added: 127 done / 11 remaining.
+
 - Integration check: exact 7d10f9f6941c105e3cd15ee21e03d4ba484f4f67
   completed with exit 1. Preliminary gates and ten application suites passed;
   composition passed 466 cases with one exclusion and failed the initial
@@ -118,8 +153,10 @@ did not resolve them. No paid provider calls were made during this check.
   their own committed integration check. Original: 42 done / 144 remaining.
   Added: 126 done / 12 remaining, including the pending T10 schema choice below.
 
-- Pending maintainer decision: T10's ADR 0049 reference to a public outcome
-  object has no shared terminal-only codec/schema. The proposed new chat object
+<a id="decision-m7-chat-terminal-outcome-2026-10-02"></a>
+- Maintainer decision, 2026-10-02: approved the terminal-only chat object,
+  shared codec and independent vectors, preserving existing ask/event bytes.
+  The accepted new chat object
   is exactly `{outcome, details}`. Completed/cancelled details are exactly
   `{cleanup_grace_ms}`; failed details `{reason, failure, cleanup_grace_ms}`
   preserve the existing public reason/structured-failure alternatives;
@@ -130,12 +167,14 @@ did not resolve them. No paid provider calls were made during this check.
   reconciliation reference keeps opaque protocol identity encoding. There are
   no text/tool/profile/identity duplicates or host cleanup facts inside the
   terminal object. No_ending is excluded; null and the accepted uncertain-wait
-  host literals keep their meanings. Recommendation: pin this closed schema
-  through ADR 0049's amendment path, share its protocol codec and independent
-  vectors, and leave existing ask JSON/event bytes unchanged. Alternative:
-  nest the complete ask object, accepting duplication and its larger presentation
-  and profile coupling. Packet: `/private/tmp/loopex-m7-chat-outcome-decision.md`.
-  The async question is pending; no dependent codec/schema work is implemented.
+  host literals keep their meanings. ADR 0049's pair records this approved
+  amendment without rewriting its original acceptance history. Exact approved
+  packet: `/private/tmp/loopex-m7-chat-outcome-decision.md`, SHA-256
+  `3faa03f1b4167e53e6b612e7f900def682e63ba7cf3e402e785014b30a1a43f9`.
+  The human response was: "Approve terminal-only object (recommended; compact
+  records, new shared codec and vectors, existing ask unchanged)". The shared
+  codec, terminal wait/closing constructors and independent vectors are now
+  implemented and pass focused verification above.
 
 - Done: T12 one-call responder integration consumes the unary callback before
   startup, rejects disabled/non-unary/duplicate selections, and retains reusable
@@ -3799,7 +3838,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Resolve the concrete terminal-only chat outcome schema through the maintainer decision; retain the accepted run-only/null/uncertainty meanings and existing ask/event bytes, then implement the shared codec, closed control constructors and independent vectors.
+- [x] Resolve the concrete terminal-only chat outcome schema through the maintainer decision; retain the accepted run-only/null/uncertainty meanings and existing ask/event bytes, then implement the shared codec, closed terminal wait/closing constructors and independent vectors. Status and driver integration remain in the original checklist.
 
 
 - [x] Implement bounded single-line framing and explicit chat-action parsing, with wait-line backpressure, exact JSON answers and malformed-input refusal on both toolchains; driver admission remains pending.

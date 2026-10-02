@@ -20,6 +20,8 @@ imports anything outside Node's own standard library.
 | `daemon-takeover.mjs` | The cross-process takeover: observe a session another client controls, wait for that controller's lease to lapse, take control with a fresh epoch, abort the running work and release |
 | `question-answer.mjs` | Decode the closed M7 choice/text/decline answer payload; preparation for the coordinated generation-3/4 switch |
 | `question-answer-vectors.mjs` | Independently check literal answer vectors and UTF-8/identity byte boundaries |
+| `terminal-outcome.mjs` | Decode chat's closed terminal run objects with exact BigInt counts and opaque references |
+| `terminal-outcome-vectors.mjs` | Independently check terminal outcome vectors and reference boundaries |
 
 Run the M7 answer payload checks with the pinned Node interpreter:
 

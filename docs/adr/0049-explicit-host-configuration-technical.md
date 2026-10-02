@@ -211,6 +211,47 @@ encodings for IDs. Each object has `v:1`, an `event` and exactly its branch:
 | `closing` | `exit_code`, `cleanup` from confirmed/unknown, `last_outcome` or null |
 | `error` | `input_sequence` or null, `code` as a stable host error code or the original stable command-disposition code |
 
+<a id="technical-adr-0049-terminal-outcome"></a>
+#### Closed terminal schema
+
+Concept: [Terminal run objects](0049-explicit-host-configuration.md#concept-adr-0049-terminal-outcome).
+
+`wait.outcome` and `closing.last_outcome` use the same string-keyed object,
+exactly `{outcome, details}`. Both objects and every nested object are closed.
+
+| Outcome | Exact details members |
+| --- | --- |
+| `completed`, `cancelled` | `cleanup_grace_ms` |
+| `failed` | `reason`, `failure`, `cleanup_grace_ms` |
+| `bound_reached` | `bound`, `observed`, `declared_limit`, `accounting_source`, `cleanup_grace_ms` |
+| `outcome_unknown` | `reconciliation_ref`, `cleanup_grace_ms` |
+
+All quantities are canonical decimal strings. Cleanup grace is positive u64;
+deadline observed/declared quantities are nonnegative u64. Ordinary `max_turns`
+and `token_budget` observed/declared quantities retain arbitrary nonnegative
+integers, subject to the enclosing presentation limit. Bound names are exactly
+`max_turns`, `token_budget`, `deadline`; accounting source is `reported`,
+`estimated` or null. Reconciliation references use the existing unpadded
+base64url opaque identity grammar, with 1–65,536 original bytes. Decoders refuse
+padding and noncanonical spellings and never require UTF-8 identity bytes.
+
+Failure retains exactly the existing alternatives: `reason` is
+`model_call_failed` or `unreadable_model_answer` with null `failure`, or null
+`reason` with a structured failure. The wire failure is exactly
+`{category, retryable, dimension, observed, limit}`; retryable is false.
+`deadline_preflight_failed` has three null quantity/dimension fields. The existing
+two-member native preflight failure projects to that complete wire form.
+`context_budget_exceeded` has dimension from `system_class_tokens`,
+`context_tokens`, `context_record_bytes`, `context_record_depth`,
+`context_record_cardinality`; observed is nonnegative and at most
+55,340,232,221,128,654,844, and limit is positive u64. No raw diagnostic reason
+is added. There is no `no_ending` branch.
+
+For example, a completed run is
+`{"outcome":"completed","details":{"cleanup_grace_ms":"5000"}}`.
+Literal payload vectors, an independent Node decoder and inclusive control-byte
+ceiling tests prove this shared codec. They do not establish runtime settlement.
+
 Question content uses ADR 0045; policy-defer questions retain ADR 0024's bounds.
 Each choice is exactly `{id, label}` using its producer's public choice grammar.
 `last_outcome` and ordinary `outcome` values use the public outcome object,
