@@ -104,6 +104,11 @@ did not resolve them. No paid provider calls were made during this check.
   anchored to the script, so invocation outside the repository reports the
   same ledger. Current original tally is 43 done / 143 remaining; added tally
   is 133 done / 11 remaining. This changes task reporting, not a product proof.
+  The actual report is retained at `/private/tmp/loopex-m7-task-status-final-report.log`,
+  SHA-256 `7ca35f6ea8eb8114739c90a7c6a5cd751052329299ce5f7a70a0f114b0718604`.
+  Structure/status and formatting pass; output
+  `/private/tmp/loopex-m7-task-status-gates.log`, SHA-256
+  `2bde8a90a81179a725541af673d41ae58ba2fe7412c7c71baabe135c933638c4`.
 
 - Pending maintainer choice: prepared chat recovery needs the exact retained
   configuration and immutable definitions, while existing status deliberately
@@ -145,11 +150,17 @@ did not resolve them. No paid provider calls were made during this check.
   admission, protocol generations, live thinking-round witnesses and maintenance
   checkpoint joins keep their own original items open.
 
-- Running: full current-pair fast check of exact
-  `66aef0e19b031e9ff12aa6ee339b6c73d13640d4` in the isolated check checkout.
-  Output `/private/tmp/loopex-m7-66aef0e1-fast-check.log` is still being written;
-  its result and digest are pending. It predates the all-six-field test extension
-  above. Do not rerun or switch the check checkout while this run is active.
+- Integration check: exact `66aef0e19b031e9ff12aa6ee339b6c73d13640d4`
+  passed the full current-pair fast check in 907 seconds. All eleven application
+  suites and preliminary gates passed; CLI passed 478 cases with its six
+  existing exclusions. Complete output:
+  `/private/tmp/loopex-m7-66aef0e1-fast-check.log`, SHA-256
+  `6ceed4ac9d04603a2ed2618b3893e9a5f6b02b1bc7dd526d0b85e1de25b8fde3`.
+  This includes host configure preparation, live busy/history refusal and exact
+  unknown observation. It predates the later all-six-field test extension and
+  read-only task reporter. No floor closure matrix or release check has run.
+  Earlier provider-deadline flake and supervisor diagnostics remain retained;
+  this later pass does not erase those observations. No check process is running.
 
 - Done: one added T08 subtask joins host configure preparation to the private
   chat driver's command holder through the approved public facade. Closed
