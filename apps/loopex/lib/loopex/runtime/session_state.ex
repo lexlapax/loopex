@@ -361,6 +361,24 @@ defmodule Loopex.Runtime.SessionState do
 
   def propose(_state, _command, _resolved), do: {:error, :invalid_command}
 
+  # Concept: retained admission is evidence; an absent index entry is not absence.
+  # Technical depth: this replay-derived view contains no Store or scheduling
+  # effects. Refusal codes are the reducer's fixed atoms, never authored text.
+  @doc false
+  @spec command_disposition(t(), binary()) :: Loopex.Runtime.command_observation()
+  def command_disposition(%__MODULE__{} = state, command_id) do
+    case Map.get(state.commands, command_id) do
+      %{reply: {:accepted, ^command_id}, run_id: run_id} ->
+        {:committed, :admitted, :accepted, run_id}
+
+      %{reply: {:error, code}, run_id: run_id} when is_atom(code) ->
+        {:committed, :refused, code, run_id}
+
+      _absent ->
+        {:pending, nil, :commit_unknown, nil}
+    end
+  end
+
   @doc false
   @spec drain_abort_command_id(binary(), non_neg_integer()) :: binary()
   def drain_abort_command_id(session_id, owner_epoch)
@@ -2681,7 +2699,14 @@ defmodule Loopex.Runtime.SessionState do
          false <- Map.has_key?(state.commands, command_id),
          {:ok, reply, active_run_id, pending_work, expected_events, patch} <-
            command_effect(state, record, command_type, admission, command_id) do
-      command_binding = %{digest: digest, reply: reply}
+      run_id =
+        record["run_id"] ||
+          case Map.get(state.interactions, record["interaction_id"]) do
+            %{run_id: run_id} -> run_id
+            _absent -> nil
+          end
+
+      command_binding = %{digest: digest, reply: reply, run_id: run_id}
 
       {:ok,
        Map.merge(
@@ -6001,7 +6026,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, _record, bytes} <- Store.normalize_and_measure_item(:record, record),
          true <- bytes <= 16_384,
          {:ok, resources, reply} <- apply_resource_disposition(state, normalized, record) do
-      binding = %{digest: digest, reply: reply}
+      binding = %{digest: digest, reply: reply, run_id: nil}
 
       {:ok,
        %{

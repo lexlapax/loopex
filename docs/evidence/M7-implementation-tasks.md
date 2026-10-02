@@ -99,15 +99,34 @@ did not resolve them. No paid provider calls were made during this check.
   This proves the current integration, not the
   unfinished M7 outcomes or its floor/release closure matrix. No suite repeats
   on this candidate. The following evidence-only commit does not change source.
-- Next: implement ADR 0049's attachment-based command-disposition observation
-  and unknown-admission resolver. Preserve the original proposal and exact
-  OwnerLane transaction, use the fixed 100-ms ticks and first-unknown backstop,
-  defer internal results/timers in arrival order, and resolve before any
-  publication, dispatch or cleanup admission. Missing command-index entries or
-  owner loss must remain pending/unavailable, never fabricated non-admission.
-  The facade, Runtime and coordinator lack this API. This work can proceed
-  independently of the three pending contract decisions; the chat creation
-  bridge/facade choice was surfaced again during this verification.
+- Done: original T10's unknown-admission resolver and three added subtasks are
+  complete. The attachment-based observation API reads replay-derived command
+  facts without Store calls, activation or dispatch. Missing identities stay
+  pending; only an exact conclusive Store refusal proves not_committed. Question
+  answers retain their interaction's committed run identity through recovery.
+  The first unknown command reply returns immediately. Every later exact
+  transaction presentation runs in an owner-owned worker on a 100-ms tick,
+  within one first-unknown plus committed cleanup backstop. Other commands keep
+  the fenced reply; no authored command is resubmitted. Conclusive adoption
+  starts normal abort cleanup before draining deferred scheduling, worker and
+  timer signals in arrival order. Real two-second run deadlines, both actual
+  22,001-ms backstop paths, owner loss, executor receipts, resource transaction
+  identities, before/after persistence and recreated owners are proved.
+  The nine complete affected Core files pass 211 tests with one existing
+  long-bound exclusion on each supported pair, 132.9 seconds current and
+  132.8 seconds floor. No retry or timeout was inflated. Warning-free compilation,
+  formatting and compiled documentation pass. Complete outputs:
+  `/private/tmp/loopex-m7-admission-current-verified.log`, SHA-256
+  `31ec638266ec042910519fa6ecc0e94053a20483b148c525fa939cac574e3bee`;
+  `/private/tmp/loopex-m7-admission-floor-verified.log`, SHA-256
+  `1a8e454600e71dabcee4aefd916a3d04dd637468ecf8fc31f82b0c669b6a2813`.
+  Original checklist: 28 done / 158 remaining. Added subtasks: 90 done / 11
+  remaining. The chat driver and its pipe-ordering obligation remain open.
+- Next: run the full fast check once on the committed admission integration
+  candidate, retaining its complete output and exact SHA. Then implement the
+  closed chat control records and join the owning driver after the exact-genesis
+  creation decision. The creation, preparation-store and refusal-schema questions
+  were bundled again for the maintainer; no dependent contract change is made.
 - Done: T07's bounded source selector scans complete eligible-unit prefixes,
   retains the largest passing complete maintenance-request preflight and uses
   serialized-message bytes for the 6,144-byte small-prefix threshold. A small
@@ -411,6 +430,30 @@ did not resolve them. No paid provider calls were made during this check.
   retain their explicit maintainer decision gates.
 
 ## Development observations
+
+- 2026-10-01: admission verification first exposed three test setup defects:
+  missing steer run ID, missing model script and a Store fault matching later
+  abort settlement rather than just the original admission transaction. The
+  wrapper now binds the first target transaction ID and records the actual
+  callback caller. Retained failures:
+  `/private/tmp/loopex-m7-command-disposition-current-first.log`, SHA-256
+  `9d2135afbbc330d89ac7bac3bf3e761af3207f632e912802cff9ef6fd7896591`;
+  `/private/tmp/loopex-m7-command-disposition-current-second.log`, SHA-256
+  `30a9fd61fb90443fa22be1fa6aba40d66a2c760210c68a4d96017fc8671fbada`.
+  Bounded blocking-call diagnosis:
+  `/private/tmp/loopex-m7-abort-resolver-stack-bounded.log`, SHA-256
+  `d9ae23f9fbf8aeb61593ffd172af79124c0c32c0b5b84252c3db26f1f71f01f4`.
+  The first broader run used a nonexistent run.admitted event in a new assertion;
+  it now checks the real user.message_appended and run.started facts:
+  `/private/tmp/loopex-m7-admission-current-regressions-first.log`, SHA-256
+  `5ec7c874413899df3e046f3c142128fe628dce2e5023e4def5a4ba2dc9d4838c`.
+  Review also reproduced a production ordering defect: draining a deferred
+  advance_work before establishing the resolved abort's cleanup fabricated
+  outcome_unknown. Restoring held signals for selective cleanup reads and
+  starting normal cleanup before queue reduction repairs it. The regression
+  retains the scheduling-before-result interleaving and expects cancelled:
+  `/private/tmp/loopex-m7-admission-abort-order-repro.log`, SHA-256
+  `58142016b8777a0ef7df5fe5bfc21195e17b6cde29d99f53a370687b6b7925bf`.
 
 - 2026-10-01: T00's base oracles run outside each disposable workspace;
   fixture implementations and generated outputs stay in the workspace.
@@ -2459,7 +2502,7 @@ or check was relaxed.
 - [ ] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.
 - [ ] Implement the exact pipe grammar and closed control records.
 - [ ] Enforce record limits, bounded input admission, the 256-KiB output queue and control-drain deadline.
-- [ ] Implement the unknown-admission resolver using the original transaction identity and proposal.
+- [x] Implement the unknown-admission resolver using the original transaction identity and proposal.
 - [ ] Preserve input ordering while admission is uncertain; do not submit duplicate commands or fenced aborts.
 - [ ] Make EOF, incomplete fragments, earlier failures and uncertain cleanup produce the specified outcomes.
 - [ ] Implement tracing through flags and files, including enable/disable and owner cleanup.
@@ -2471,6 +2514,9 @@ or check was relaxed.
 
 - [x] Implement bounded single-line framing and explicit chat-action parsing, with wait-line backpressure, exact JSON answers and malformed-input refusal on both toolchains; driver admission remains pending.
 - [x] Implement the bounded independently draining output writer and escaped transcript lines; prove progress eviction, control deadlines and joined worker cleanup on both toolchains. Closed records and driver integration remain pending.
+- [x] Expose attachment-based command observation with a closed result, replay-derived admitted/refused facts and committed run identity; prove missing/recreated identities remain pending and observation performs no owner Store callbacks.
+- [x] Retain the original unknown proposal and exact OwnerLane transaction, return uncertainty immediately, and resolve only through owner-owned 100-ms worker ticks under one fixed first-unknown backstop; prove before/after persistence, exact bytes, non-commit and joined owner/deadline cleanup.
+- [x] Defer internal worker results and owner timers in arrival order while admission is unresolved; prove model/executor evidence, real run deadline ordering, abort cleanup before deferred scheduling and actual backstop release into the existing mutation fence on both toolchains.
 
 ## T11 — Implement specialized read-only helpers
 

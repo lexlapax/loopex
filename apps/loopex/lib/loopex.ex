@@ -154,6 +154,26 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Observe the disposition of an earlier command without submitting it again.
+  Unknown admission remains unknown until this owner has conclusive evidence.
+
+  ## Technical depth
+
+  ADR 0049's local observation returns committed with the original admitted or
+  refused code and retained run identity, not_committed only after the original
+  transaction conclusively refuses, or pending with commit_unknown. Missing
+  command facts, owner replacement and resolver expiry cannot prove absence.
+  This call activates nothing, performs no Store mutation and dispatches no work.
+  An unavailable attachment or owner returns owner_unavailable.
+  """
+  @spec command_disposition(Attachment.t(), binary()) ::
+          {:ok, Runtime.command_observation()} | {:error, :owner_unavailable}
+  def command_disposition(attachment, command_id),
+    do: Runtime.command_disposition(attachment, command_id)
+
+  @doc """
+  ## Concept
+
   Inspects the resource catalog admitted by this session's operator.
 
   ## Technical depth

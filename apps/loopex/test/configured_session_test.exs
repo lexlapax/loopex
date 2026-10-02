@@ -1024,7 +1024,8 @@ defmodule Loopex.ConfiguredSessionTest do
       )
 
     Loopex.M1RuntimeTestStore.release(waiter)
-    assert_receive {:configure_result, ^caller, {:accepted, "configure"}}, 5_000
+    assert_receive {:configure_result, ^caller, {:error, :commit_unknown}}, 5_000
+    await_command_observation(attachment, "configure", {:committed, :admitted, :accepted, nil})
 
     assert Enum.filter(Fixture.records(fixture, session), &(&1.payload.kind == kind))
            |> Enum.map(& &1.payload) == [proposed]
@@ -1623,8 +1624,10 @@ defmodule Loopex.ConfiguredSessionTest do
       )
 
     Loopex.M1RuntimeTestStore.release(answer_waiter)
-    assert_receive {:unknown_answer_result, ^caller, {:accepted, "answer"}}, 5_000
+    assert_receive {:unknown_answer_result, ^caller, {:error, :commit_unknown}}, 5_000
     events = finish(attachment)
+    run_id = question["run_id"]
+    await_command_observation(attachment, "answer", {:committed, :admitted, :accepted, run_id})
     assert Enum.count(events, &(&1.kind == "interaction.answered")) == 1
     records = Fixture.records(fixture, session)
 
@@ -2520,6 +2523,19 @@ defmodule Loopex.ConfiguredSessionTest do
              Loopex.command(attachment, %{type: :prompt, command_id: id, content: content})
 
     assert Enum.find(finish(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+  end
+
+  defp await_command_observation(attachment, command_id, expected, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 5_000
+    observation = Loopex.command_disposition(attachment, command_id)
+
+    if observation == {:ok, expected} do
+      :ok
+    else
+      assert System.monotonic_time(:millisecond) < deadline, inspect(observation)
+      Process.sleep(10)
+      await_command_observation(attachment, command_id, expected, deadline)
+    end
   end
 
   defp await_question(attachment, deadline \\ nil) do

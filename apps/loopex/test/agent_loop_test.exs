@@ -1353,8 +1353,12 @@ defmodule Loopex.AgentLoopTest do
       pair = {:session_journal_commit, unquote(phase)}
       :ok = M1RuntimeTestStore.inject(fixture.store, pair)
       command = %{type: :prompt, command_id: "uncertain-prompt", content: "Next input"}
-      assert {:accepted, "uncertain-prompt"} = Loopex.command(attachment, command)
+      assert {:error, :commit_unknown} = Loopex.command(attachment, command)
       assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+      assert {:ok, {:committed, :admitted, :accepted, _run_id}} =
+               Loopex.command_disposition(attachment, "uncertain-prompt")
+
       assert {:accepted, "uncertain-prompt"} = Loopex.command(attachment, command)
       assert pair in M1RuntimeTestStore.observed(fixture.store)
 

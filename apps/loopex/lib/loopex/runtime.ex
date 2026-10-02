@@ -51,6 +51,22 @@ defmodule Loopex.Runtime do
   @typedoc """
   ## Concept
 
+  The local owner's evidence about one earlier command admission.
+
+  ## Technical depth
+
+  Committed facts retain their admitted/refused code and run identity. Only an
+  exact conclusive Store refusal proves not_committed. Missing facts and
+  unresolved transactions stay pending. Observation grants no effect authority.
+  """
+  @type command_observation ::
+          {:committed, :admitted | :refused, atom(), binary() | nil}
+          | {:not_committed, nil, :admission_not_committed, nil}
+          | {:pending, nil, :commit_unknown, nil}
+
+  @typedoc """
+  ## Concept
+
   Explicit configuration for one runtime instance.
 
   ## Technical depth
@@ -419,6 +435,29 @@ defmodule Loopex.Runtime do
   end
 
   def command(_attachment, _command), do: {:error, :attachment_required}
+
+  @doc false
+  @spec command_disposition(Attachment.t(), binary()) ::
+          {:ok, command_observation()} | {:error, :owner_unavailable}
+  def command_disposition(%Attachment{} = attachment, command_id)
+      when is_binary(command_id) and byte_size(command_id) > 0 and
+             byte_size(command_id) <= @max_identifier_bytes do
+    with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
+           Attachment.routing(attachment),
+         {:ok, coordinator, owner} <-
+           control_call(
+             runtime,
+             {:route_command, runtime.token, session_id, attachment_id, incarnation_id}
+           ),
+         {:ok, _} = result <-
+           SessionCoordinator.command_disposition(coordinator, owner, command_id) do
+      result
+    else
+      _unavailable -> {:error, :owner_unavailable}
+    end
+  end
+
+  def command_disposition(_, _), do: {:error, :owner_unavailable}
 
   @doc false
   @spec command_with_configuration(Attachment.t(), map(), term()) ::

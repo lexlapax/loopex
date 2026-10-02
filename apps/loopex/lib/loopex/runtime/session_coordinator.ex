@@ -83,6 +83,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @owner_retry_ceiling_ms 400
   @max_owner_retries 12
   @max_historical_attempts 1_024
+  @admission_resolution_ms 100
+  @session_status_timeout_ms 5_000
   @recovery_contract "loopex-executor-recovery-v1"
   @reconciliation_fields [
     :reconciliation_query_id,
@@ -197,6 +199,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @doc false
+  @spec command_disposition(pid(), owner(), binary()) ::
+          {:ok, Loopex.Runtime.command_observation()} | {:error, :owner_unavailable}
+  def command_disposition(coordinator, owner, command_id) do
+    case safe_call(
+           coordinator,
+           {:command_disposition, owner, command_id},
+           @session_status_timeout_ms
+         ) do
+      {:ok, _} = result -> result
+      _unavailable -> {:error, :owner_unavailable}
+    end
+  end
+
+  @doc false
   @spec command_with_configuration(pid(), owner(), map(), term()) ::
           {:accepted, binary()} | {:error, term()}
   def command_with_configuration(coordinator, owner, command, candidate)
@@ -265,7 +281,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # `{:error, :session_unavailable}` for a caller free to ask again. That is why
   # this one call carries a bound and why making the other three match it would
   # reintroduce the defect those two commits removed.
-  @session_status_timeout_ms 5_000
 
   # The floor of the cleanup period ADR 0016 admits. It is a domain boundary, not
   # a wait: every duration derived from it comes from `cancellation_bounds/1`.
@@ -446,6 +461,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
        # with nothing saying why, so every retained question arms one.
        interaction_timers: %{},
        pending_fault: nil,
+       unknown_admission: nil,
+       # Concept: only a conclusive transaction refusal proves non-admission.
+       # Technical depth: retain the latest such unknown-command observation in
+       # one bounded slot. Older absent facts report pending, never absence.
+       admission_non_commit: nil,
        query: nil,
        # Concept: whether this owner still owes the reconciliation of a
        # dispatched effect it was activated over.
@@ -652,6 +672,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:reply, {:ok, status}, state}
     else
       {:reply, {:error, :session_unavailable}, state}
+    end
+  end
+
+  def handle_call({:command_disposition, supplied_owner, command_id}, _from, state) do
+    if state.phase == :ready and supplied_owner == state.owner and not state.superseded do
+      observation = SessionState.command_disposition(state.durable, command_id)
+
+      observation =
+        if observation == {:pending, nil, :commit_unknown, nil} and
+             state.admission_non_commit == command_id,
+           do: {:not_committed, nil, :admission_not_committed, nil},
+           else: observation
+
+      {:reply, {:ok, observation}, state}
+    else
+      {:reply, {:error, :owner_unavailable}, state}
     end
   end
 
@@ -870,14 +906,76 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @impl GenServer
-  def handle_info(:retry_owner, %{phase: phase} = state)
-      when phase in [:discovering, :acquiring, :recovering] do
+  def handle_info({:resolve_command_admission, identity}, state) do
+    case state.unknown_admission do
+      %{identity: ^identity, expired: false, worker: nil} -> start_admission_resolution(state)
+      _stale -> {:noreply, state}
+    end
+  end
+
+  def handle_info({:command_admission_deadline, identity}, state) do
+    case state.unknown_admission do
+      %{identity: ^identity, expired: false} -> expire_admission_resolution(state)
+      _stale -> {:noreply, state}
+    end
+  end
+
+  def handle_info({reference, result}, %{unknown_admission: %{worker: %{ref: reference}}} = state)
+      when is_reference(reference),
+      do: finish_admission_resolution(state, result)
+
+  def handle_info(
+        {:DOWN, reference, :process, _pid, _reason},
+        %{unknown_admission: %{worker: %{ref: reference}}} = state
+      ) do
+    pending = %{state.unknown_admission | worker: nil}
+    {:noreply, schedule_admission_resolution(%{state | unknown_admission: pending})}
+  end
+
+  def handle_info(message, state) do
+    case state.unknown_admission do
+      %{expired: false} = pending ->
+        if deferred_admission_message?(message, state) do
+          pending = %{pending | deferred: :queue.in(message, pending.deferred)}
+          {:noreply, %{state | unknown_admission: pending}}
+        else
+          handle_owner_info(message, state)
+        end
+
+      _not_resolving ->
+        handle_owner_info(message, state)
+    end
+  end
+
+  defp deferred_admission_message?(:advance_work, _state), do: true
+
+  defp deferred_admission_message?({tag, _, _}, _state)
+       when tag in [
+              :run_deadline,
+              :interaction_expired,
+              :policy_timeout,
+              :model_reserve,
+              :execute_result_reserve,
+              :cleanup_settled
+            ],
+       do: true
+
+  defp deferred_admission_message?({:continue_fault, _}, _state), do: true
+  defp deferred_admission_message?({reference, _}, _state) when is_reference(reference), do: true
+
+  defp deferred_admission_message?({:DOWN, reference, :process, _, _}, state),
+    do: Map.has_key?(state.in_flight, reference)
+
+  defp deferred_admission_message?(_, _state), do: false
+
+  defp handle_owner_info(:retry_owner, %{phase: phase} = state)
+       when phase in [:discovering, :acquiring, :recovering] do
     acquisition_result(advance_acquisition(state))
   end
 
-  def handle_info(:advance_work, state), do: advance_work(state)
+  defp handle_owner_info(:advance_work, state), do: advance_work(state)
 
-  def handle_info({:executor_progress_owner_lost, run_id, relay}, state) do
+  defp handle_owner_info({:executor_progress_owner_lost, run_id, relay}, state) do
     next =
       case Map.fetch(state.streams, {:executor, run_id}) do
         {:ok, stream} ->
@@ -904,7 +1002,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # bound. A superseded or acquiring owner does nothing: the successor owns the
   # decision, and two owners committing one terminal is exactly what the
   # succession fence exists to prevent.
-  def handle_info({:run_deadline, run_id, deadline}, state) do
+  defp handle_owner_info({:run_deadline, run_id, deadline}, state) do
     state = %{state | deadline_timers: Map.delete(state.deadline_timers, run_id)}
 
     cond do
@@ -936,7 +1034,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_info({reference, result}, state) when is_reference(reference) do
+  defp handle_owner_info({reference, result}, state) when is_reference(reference) do
     case Map.pop(state.in_flight, reference) do
       {nil, _remaining} ->
         {:noreply, state}
@@ -975,7 +1073,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_info({:cleanup_settled, run_id, disposition}, state),
+  defp handle_owner_info({:cleanup_settled, run_id, disposition}, state),
     do: complete_cleanup(state, run_id, disposition)
 
   # Concept: the reserve elapsing is not a verdict about the provider; it is the
@@ -985,7 +1083,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # stopped and the attempt settles conservatively. Whatever the worker had
   # already produced is drained first, because a reply that landed inside the
   # reserve is the attempt's own evidence and its usage is exact.
-  def handle_info({:model_reserve, run_id, until}, state) do
+  defp handle_owner_info({:model_reserve, run_id, until}, state) do
     {timer, remaining} = Map.pop(state.model_reserves, run_id)
     state = %{state | model_reserves: remaining}
 
@@ -1049,7 +1147,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # the dispatched operation before any replacement. The predecessor therefore
   # stays exactly as long as it owns evidence-producing executor work, which is
   # the lifetime ADR 0014 gives it.
-  def handle_info({:execute_result_reserve, run_id, until}, state) do
+  defp handle_owner_info({:execute_result_reserve, run_id, until}, state) do
     if state.phase != :ready or state.superseded do
       {:noreply, state}
     else
@@ -1070,11 +1168,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # the lifetime handoff unproved and fails the public call without relabelling
   # the owner's committed/refused fact. Only the exact acknowledgement can
   # complete the blocked public call.
-  def handle_info(
-        {:loopex_prepared_transfer_installer_lost, guard, installer, holder, nonce, handoff},
-        %{prepared_transfer: transfer} = state
-      )
-      when is_map(transfer) do
+  defp handle_owner_info(
+         {:loopex_prepared_transfer_installer_lost, guard, installer, holder, nonce, handoff},
+         %{prepared_transfer: transfer} = state
+       )
+       when is_map(transfer) do
     case transfer do
       %{
         guard: ^guard,
@@ -1095,17 +1193,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_info(
-        {:loopex_prepared_transfer_installer_lost, _guard, _installer, _holder, _nonce, _handoff},
-        state
-      ),
-      do: {:noreply, state}
+  defp handle_owner_info(
+         {:loopex_prepared_transfer_installer_lost, _guard, _installer, _holder, _nonce,
+          _handoff},
+         state
+       ),
+       do: {:noreply, state}
 
-  def handle_info(
-        {:loopex_prepared_transfer_guard_ready, guard, holder, nonce, handoff, prepare},
-        %{prepared_transfer: transfer} = state
-      )
-      when is_map(transfer) do
+  defp handle_owner_info(
+         {:loopex_prepared_transfer_guard_ready, guard, holder, nonce, handoff, prepare},
+         %{prepared_transfer: transfer} = state
+       )
+       when is_map(transfer) do
     case transfer do
       %{
         guard: ^guard,
@@ -1131,17 +1230,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_info(
-        {:loopex_prepared_transfer_guard_ready, _guard, _holder, _nonce, _handoff, _prepare},
-        state
-      ),
-      do: {:noreply, state}
+  defp handle_owner_info(
+         {:loopex_prepared_transfer_guard_ready, _guard, _holder, _nonce, _handoff, _prepare},
+         state
+       ),
+       do: {:noreply, state}
 
-  def handle_info(
-        {:loopex_prepared_owner_verdict_ack, guard, holder, nonce, handoff, commit, verdict},
-        %{prepared_transfer: transfer} = state
-      )
-      when is_map(transfer) and is_reference(commit) do
+  defp handle_owner_info(
+         {:loopex_prepared_owner_verdict_ack, guard, holder, nonce, handoff, commit, verdict},
+         %{prepared_transfer: transfer} = state
+       )
+       when is_map(transfer) and is_reference(commit) do
     case transfer do
       %{
         guard: ^guard,
@@ -1171,18 +1270,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_info(
-        {:loopex_prepared_owner_verdict_ack, _guard, _holder, _nonce, _handoff, _commit,
-         _verdict},
-        state
-      ),
-      do: {:noreply, state}
+  defp handle_owner_info(
+         {:loopex_prepared_owner_verdict_ack, _guard, _holder, _nonce, _handoff, _commit,
+          _verdict},
+         state
+       ),
+       do: {:noreply, state}
 
-  def handle_info({tag, reference, :process, _pid, _reason}, state)
-      when tag in [
-             :prepared_transfer_holder_down,
-             :prepared_transfer_guard_down
-           ] do
+  defp handle_owner_info({tag, reference, :process, _pid, _reason}, state)
+       when tag in [
+              :prepared_transfer_holder_down,
+              :prepared_transfer_guard_down
+            ] do
     case state.prepared_transfer do
       %{holder_monitor: ^reference} ->
         state
@@ -1206,7 +1305,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_info({:DOWN, reference, :process, _pid, reason}, state) do
+  defp handle_owner_info({:DOWN, reference, :process, _pid, reason}, state) do
     case Map.pop(state.in_flight, reference) do
       {nil, _remaining} ->
         {:noreply, state}
@@ -1268,7 +1367,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # answer on a process identifier never being reused. Only a still-`:prepared`
   # capability is affected; one already spent, abandoned, or fenced has its
   # answer already.
-  def handle_info({:prepared_holder_down, monitor, :process, _pid, _reason}, state) do
+  defp handle_owner_info({:prepared_holder_down, monitor, :process, _pid, _reason}, state) do
     case {state.prepared, state.prepared_transfer} do
       {%{monitor: ^monitor}, %{verdict: :committed}} ->
         # The participant consumes the forwarded verdict and the preparer's
@@ -1296,7 +1395,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # ordinary competing transitions ordered at the journal, and the first
   # committed one wins. A timer that fires for a question this owner no longer
   # holds open is exactly that race resolved elsewhere, so it changes nothing.
-  def handle_info({:interaction_expired, interaction_id, run_id}, state) do
+  defp handle_owner_info({:interaction_expired, interaction_id, run_id}, state) do
     state = cancel_interaction_expiry(state, interaction_id)
 
     if state.durable.open_interaction == interaction_id do
@@ -1306,7 +1405,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_info({:policy_timeout, reference, run_id}, state) do
+  defp handle_owner_info({:policy_timeout, reference, run_id}, state) do
     case Map.pop(state.in_flight, reference) do
       {{:policy, ^run_id, pid}, remaining} ->
         _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
@@ -1329,14 +1428,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_info(
-        {:continue_fault, reference},
-        %{pending_fault: %{reference: reference} = fault} = state
-      ) do
+  defp handle_owner_info(
+         {:continue_fault, reference},
+         %{pending_fault: %{reference: reference} = fault} = state
+       ) do
     commit_executor_fact(%{state | pending_fault: nil}, fault.run_id, fault.receipt)
   end
 
-  def handle_info({:continue_fault, _stale_reference}, state), do: {:noreply, state}
+  defp handle_owner_info({:continue_fault, _stale_reference}, state), do: {:noreply, state}
 
   @impl GenServer
   def format_status(status) do
@@ -2199,7 +2298,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # set -- stays out. An answered interaction is also a transition of accepted
   # ADR 0024's lifecycle, and is reported as one exactly when its admission
   # succeeded.
-  defp commit_command(state, command, candidate \\ :unprepared) do
+  defp commit_command(state, command, candidate \\ :unprepared)
+
+  defp commit_command(%{unknown_admission: pending} = state, _command, _candidate)
+       when is_map(pending), do: {:reply, {:error, :commit_unknown}, state}
+
+  defp commit_command(state, command, candidate) do
     type = command_field(command, :type)
 
     admit = fn ->
@@ -2728,34 +2832,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp apply_transaction(state, transaction, proposal) do
-    {outcome, lane} = resolve_transaction(state.lane, transaction)
+    {outcome, lane, first_unknown_at} = resolve_transaction_with_clock(state.lane, transaction)
     state = %{state | lane: lane}
     expected_tx_id = proposal.tx_id
 
     case outcome do
       {:committed, ^expected_tx_id, receipt} ->
-        with {:ok, next} <- SessionState.commit_proposal(proposal, receipt),
-             :ok <-
-               Control.post_commit(
-                 state.control,
-                 state.session_id,
-                 state.owner,
-                 %{
-                   journal_version: next.journal_version,
-                   event_sequence: next.event_sequence
-                 },
-                 receipt
-               ) do
-          send(self(), :advance_work)
-          {:reply, proposal.reply, %{state | durable: next}}
-        else
-          {:error, :superseded_owner} ->
-            {:reply, {:error, {:superseded_after_commit, proposal.reply}},
-             superseded_owner(state)}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+        finish_command_commit(state, proposal, receipt)
 
       {:not_committed, reason} when reason in [:stale_owner_epoch, :stale_owner_incarnation_id] ->
         {:reply, {:error, :superseded_owner}, superseded_owner(state)}
@@ -2764,10 +2847,196 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:reply, {:error, reason}, state}
 
       {:commit_unknown, _tx_id} ->
-        {:reply, {:error, :commit_unknown}, state}
+        next = retain_unknown_admission(state, transaction, proposal, first_unknown_at)
+        {:reply, {:error, :commit_unknown}, next}
 
       {:fenced, :commit_unknown} ->
         {:reply, {:error, :commit_unknown}, state}
+    end
+  end
+
+  defp finish_command_commit(state, proposal, receipt) do
+    with {:ok, next} <- SessionState.commit_proposal(proposal, receipt),
+         :ok <-
+           Control.post_commit(
+             state.control,
+             state.session_id,
+             state.owner,
+             %{journal_version: next.journal_version, event_sequence: next.event_sequence},
+             receipt
+           ) do
+      send(self(), :advance_work)
+      {:reply, proposal.reply, %{state | durable: next}}
+    else
+      {:error, :superseded_owner} ->
+        {:reply, {:error, {:superseded_after_commit, proposal.reply}}, superseded_owner(state)}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Concept: one original command is observed until certainty or its fixed cutoff.
+  # Technical depth: the worker re-presents only this owner-stamped preimage.
+  # The coordinator alone installs its returned lane and commits the proposal.
+  # No worker rebuilds state or starts another mutation. Missing/late evidence
+  # leaves the original lane fenced, including when the worker itself is gone.
+  defp retain_unknown_admission(state, transaction, proposal, started) do
+    {:ok, %{cli_backstop_ms: backstop}} =
+      Executor.cancellation_bounds(state.durable.cleanup_grace_ms)
+
+    identity = make_ref()
+    deadline = started + backstop
+    delay = max(deadline - System.monotonic_time(:millisecond), 0)
+    timer = Process.send_after(self(), {:command_admission_deadline, identity}, delay)
+
+    command_id =
+      Enum.find_value(proposal.records, fn record ->
+        record["command_id"] || get_in(record, ["command", "command_id"])
+      end)
+
+    pending = %{
+      identity: identity,
+      command_id: command_id,
+      proposal: proposal,
+      transaction: transaction,
+      deadline: deadline,
+      deadline_timer: timer,
+      tick: nil,
+      worker: nil,
+      expired: false,
+      deferred: :queue.new()
+    }
+
+    schedule_admission_resolution(%{
+      state
+      | unknown_admission: pending,
+        admission_non_commit: nil
+    })
+  end
+
+  defp schedule_admission_resolution(state) do
+    pending = state.unknown_admission
+    remaining = max(pending.deadline - System.monotonic_time(:millisecond), 0)
+
+    tick =
+      Process.send_after(
+        self(),
+        {:resolve_command_admission, pending.identity},
+        min(@admission_resolution_ms, remaining)
+      )
+
+    %{state | unknown_admission: %{pending | tick: tick}}
+  end
+
+  defp start_admission_resolution(state) do
+    if System.monotonic_time(:millisecond) >= state.unknown_admission.deadline do
+      expire_admission_resolution(state)
+    else
+      case Control.current_owner(state.control, state.session_id, state.owner) do
+        :ok ->
+          lane = state.lane
+          transaction = state.unknown_admission.transaction
+
+          worker =
+            Task.Supervisor.async_nolink(state.owner_workers, fn ->
+              OwnerLane.transact(lane, transaction)
+            end)
+
+          pending = %{state.unknown_admission | worker: worker, tick: nil}
+          {:noreply, %{state | unknown_admission: pending}}
+
+        _unavailable ->
+          expire_admission_resolution(state)
+      end
+    end
+  end
+
+  defp finish_admission_resolution(state, {outcome, lane}) do
+    pending = state.unknown_admission
+    Task.shutdown(pending.worker, :brutal_kill)
+    state = %{state | unknown_admission: %{pending | worker: nil}}
+
+    cond do
+      System.monotonic_time(:millisecond) >= pending.deadline ->
+        expire_admission_resolution(state)
+
+      match?({:committed, _, _}, outcome) ->
+        {:committed, tx_id, receipt} = outcome
+
+        if tx_id == pending.proposal.tx_id do
+          state = clear_unknown_admission(%{state | lane: lane})
+          {:reply, _reply, next} = finish_command_commit(state, pending.proposal, receipt)
+
+          # Concept: a resolved abort owns normal cleanup before scheduling.
+          # Technical depth: restore held signals for cleanup's selective reads,
+          # then establish its live cleanup state before draining an earlier
+          # advance_work. Otherwise that signal takes the recovery-only path
+          # and fabricates an unknown ending for work this owner still holds.
+          Enum.each(:queue.to_list(pending.deferred), &send(self(), &1))
+
+          case begin_admitted_cleanup({:reply, pending.proposal.reply, next}) do
+            {:reply, _reply, next} -> drain_deferred_admission(next, pending.deferred)
+            {:stop, reason, _reply, next} -> {:stop, reason, next}
+          end
+        else
+          expire_admission_resolution(state)
+        end
+
+      match?({:not_committed, _}, outcome) ->
+        state =
+          clear_unknown_admission(%{state | lane: lane, admission_non_commit: pending.command_id})
+
+        release_deferred_admission(state, pending.deferred)
+
+      true ->
+        {:noreply, schedule_admission_resolution(%{state | lane: lane})}
+    end
+  end
+
+  defp clear_unknown_admission(state) do
+    pending = state.unknown_admission
+    Process.cancel_timer(pending.deadline_timer)
+    if pending.tick, do: Process.cancel_timer(pending.tick)
+    %{state | unknown_admission: nil}
+  end
+
+  defp expire_admission_resolution(state) do
+    pending = state.unknown_admission
+    if pending.worker, do: Task.shutdown(pending.worker, :brutal_kill)
+    Process.cancel_timer(pending.deadline_timer)
+    if pending.tick, do: Process.cancel_timer(pending.tick)
+    next = %{pending | expired: true, worker: nil, tick: nil, deferred: :queue.new()}
+    release_deferred_admission(%{state | unknown_admission: next}, pending.deferred)
+  end
+
+  # Concept: earlier owner messages stay earlier after the admission fence opens.
+  # Technical depth: reduce synchronously, rather than re-enqueueing behind
+  # newer mailbox messages. Restore exact signals so existing cleanup's selective
+  # receives can observe worker result/DOWN before reducing the deferred queue.
+  # Remove each restored copy as its original is handled; a cleanup may already
+  # have consumed it. Existing handler stop/fence behavior is preserved.
+  defp release_deferred_admission(state, queue) do
+    Enum.each(:queue.to_list(queue), &send(self(), &1))
+    drain_deferred_admission(state, queue)
+  end
+
+  defp drain_deferred_admission(state, queue) do
+    case :queue.out(queue) do
+      {:empty, _} ->
+        {:noreply, state}
+
+      {{:value, message}, rest} ->
+        receive do
+          ^message -> :ok
+        after
+          0 -> :ok
+        end
+
+        case handle_info(message, state) do
+          {:noreply, next} -> drain_deferred_admission(next, rest)
+          result -> result
+        end
     end
   end
 
@@ -2779,6 +3048,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # the session's point of view, so they are one span with the outcome the
   # resolution reached, not two with a misleading first verdict.
   defp resolve_transaction(lane, transaction) do
+    {outcome, lane, _first_unknown_at} = transact_with_clock(lane, transaction, :internal)
+    {outcome, lane}
+  end
+
+  # Concept: an uncertain admission leaves the owner free to observe and stop.
+  # Technical depth: its next exact presentation runs in the resolver worker at
+  # the 100-ms tick. An inline second Store call could block that first deadline
+  # indefinitely. Internal transitions retain their existing resolution path.
+  defp resolve_transaction_with_clock(lane, transaction),
+    do: transact_with_clock(lane, transaction, :command)
+
+  defp transact_with_clock(lane, transaction, scope) do
     Instrumentation.span(
       [:commit],
       %{
@@ -2788,11 +3069,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
       },
       fn ->
         case OwnerLane.transact(lane, transaction) do
-          {{:commit_unknown, _tx_id}, next_lane} -> OwnerLane.transact(next_lane, transaction)
-          result -> result
+          {{:commit_unknown, _tx_id}, next_lane} ->
+            first_unknown_at = System.monotonic_time(:millisecond)
+
+            if scope == :internal do
+              {outcome, final_lane} = OwnerLane.transact(next_lane, transaction)
+              {outcome, final_lane, first_unknown_at}
+            else
+              {{:commit_unknown, transaction.tx_id}, next_lane, first_unknown_at}
+            end
+
+          {outcome, next_lane} ->
+            {outcome, next_lane, nil}
         end
       end,
-      &commit_category/1
+      fn {outcome, lane, _clock} -> commit_category({outcome, lane}) end
     )
   end
 
@@ -6045,6 +6336,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # one, and one naming no active run all start nothing. A second interrupt
   # naming a run already being cleaned up is answered and starts no second
   # cleanup, which is what Outcome 8 requires of it.
+  defp begin_admitted_cleanup({:reply, _reply, %{unknown_admission: pending}} = result)
+       when is_map(pending), do: result
+
   defp begin_admitted_cleanup({:reply, reply, state}) do
     case SessionState.aborting_run(state.durable) do
       nil ->
