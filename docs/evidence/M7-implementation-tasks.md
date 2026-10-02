@@ -91,6 +91,39 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: ADR 0046's accepted host-private `Runtime.lookup_create_result/4`
+  normalizes complete retained v2/v3 genesis and matching original options,
+  constructs the exact transaction purely and reads its existing Store binding.
+  It never expands current cleanup defaults, activates a coordinator or checks
+  current tool/model registration. Both shipped Stores prove unchanged state;
+  the local proof reopens the actual log before lookup. Conflict, absence,
+  malformed input, Store uncertainty and Control loss retain their distinct
+  meanings. The existing three-argument query stays unchanged.
+  Inspection also found that exact-create accepted the private `:legacy`
+  sentinel as a request to substitute current defaults. Its new map guard
+  refuses before a Store write. The regression fails against the original
+  branch with an actual session created:
+  `/private/tmp/loopex-m7-exact-history-sentinel-regression-20261002.log`, SHA-256
+  `6407324069a1b86011faf35b6dfd237c3a2f85017fe7122dd7db1baf2bd247e8`.
+  The first guard returned a two-member error instead of the existing detailed
+  response; that development failure is retained:
+  `/private/tmp/loopex-m7-exact-history-current-final-20261002.log`, SHA-256
+  `b0a4cdff3e6006803bfe5280297d19d20efa3f93233c68c34518e4656450bdd4`.
+  The final guard uses the existing detailed refusal and passes all 64 tests in
+  the complete Core history/genesis/configured files on both pairs, 6.0 seconds
+  current and 5.9 seconds floor. The complete composition history/restart files
+  pass three cases in 0.3 seconds each. Final outputs:
+  `/private/tmp/loopex-m7-exact-history-current-verified-20261002.log`, SHA-256
+  `6bb51636f2ef1ecf172e806022f400ab4f3ba0a16d9540573a022f5c1f335475`;
+  `/private/tmp/loopex-m7-exact-history-floor-final-20261002.log`, SHA-256
+  `71255566ab6f98bba770e682d36992970dc8a0cb8b51b5f3004d8107fce1150d`;
+  `/private/tmp/loopex-m7-exact-history-stores-current-final-20261002.log`, SHA-256
+  `8b4db55552afbbd42fd75c788f9e98ea4656220c22ef7f2fa4082a71cfc98563`;
+  `/private/tmp/loopex-m7-exact-history-stores-floor-20261002.log`, SHA-256
+  `e247503fc9663ea8c26031bd353ec82cb912667e8052b6014230625834ab744a`.
+  One added T11 prerequisite is complete. Original counts remain 28 done / 158
+  remaining; added counts are 100 done / 12 remaining. Helper implementation,
+  creation provenance and complete runtime enumeration remain open.
 - Done: literal model-question vectors pin the argument/request ETF preimages,
   digests, stable run/question identities and normalized response-command bytes
   for text, choice and decline. The real-owner decoder proof retains actual
@@ -2908,6 +2941,10 @@ or check was relaxed.
 - [ ] Test read-only authority, nesting refusal, budgets, concurrent parents, cancellation and exhausted-call reopening.
 - [ ] Inject faults at every binding, reserve, create, prompt, stop, settlement, receipt and cache boundary.
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
+
+### Added implementation subtasks
+
+- [x] Implement accepted exact-genesis read-only create-result lookup; preserve the legacy query, refuse sentinel substitution before exact creation, and prove changed defaults, absent current registrations, distinct uncertainty and actual local log reopen through both shipped Stores on both supported pairs.
 
 ## T12 — Complete ephemeral support
 

@@ -536,7 +536,20 @@ defmodule Loopex.Runtime.Control do
         state
       ) do
     if token == state.token and is_nil(state.quiescing) do
-      create_session(state, command_id, session_options, from, :detailed, genesis)
+      if is_map(genesis) do
+        create_session(state, command_id, session_options, from, :detailed, genesis)
+      else
+        reply =
+          detailed_session_reply(
+            {:error, :invalid_session_creation},
+            :detailed,
+            :no_activation,
+            state,
+            nil
+          )
+
+        {:reply, reply, state}
+      end
     else
       {:reply, {:error, :runtime_unavailable}, state}
     end
@@ -565,6 +578,23 @@ defmodule Loopex.Runtime.Control do
     reply =
       if token == state.token do
         {:ok, lookup_create_result(state, command_id, session_options)}
+      else
+        {:error, :runtime_unavailable}
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call(
+        {:lookup_create_result, token, command_id, session_options, genesis},
+        _from,
+        state
+      ) do
+    reply =
+      if token == state.token do
+        if is_map(genesis),
+          do: {:ok, lookup_create_result(state, command_id, session_options, genesis)},
+          else: {:ok, :unexpected}
       else
         {:error, :runtime_unavailable}
       end
@@ -2426,9 +2456,10 @@ defmodule Loopex.Runtime.Control do
     }
   end
 
-  defp lookup_create_result(state, command_id, session_options) do
+  defp lookup_create_result(state, command_id, session_options, supplied_genesis \\ :legacy) do
     with true <- valid_identifier?(command_id),
-         {:ok, genesis} <- session_genesis(session_options, state.cleanup_grace_ms),
+         {:ok, genesis} <-
+           creation_genesis(session_options, state.cleanup_grace_ms, supplied_genesis),
          {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis) do
       command = create_command(state.runtime_id, command_id, transaction)
 

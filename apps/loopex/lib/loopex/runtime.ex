@@ -284,6 +284,35 @@ defmodule Loopex.Runtime do
   def lookup_create_result(_runtime, _command_id, _session_options),
     do: {:error, :runtime_unavailable}
 
+  @doc """
+  ## Concept
+
+  Finds the historical result of an exact retained creation without creating
+  a session or replacing its settings with current runtime defaults.
+
+  ## Technical depth
+
+  ADR 0046's host-private recovery query validates the complete retained v2/v3
+  genesis and requires its normalized options to equal `session_options`.
+  Control constructs the exact Store transaction purely and reads its command
+  binding. Changed genesis returns `:conflict`; malformed input is `:unexpected`.
+  Store uncertainty stays `:store_unavailable`. No catalog, registered generation,
+  provider route, coordinator activation or mutation is needed for this read.
+  The three-argument query retains its existing current-default behavior.
+  """
+  @spec lookup_create_result(t(), binary(), map(), map()) ::
+          {:ok, {:historical, binary()} | :absent | :conflict | :store_unavailable | :unexpected}
+          | {:error, :runtime_unavailable}
+  def lookup_create_result(%__MODULE__{} = runtime, command_id, session_options, genesis) do
+    control_call(
+      runtime,
+      {:lookup_create_result, runtime.token, command_id, session_options, genesis}
+    )
+  end
+
+  def lookup_create_result(_runtime, _command_id, _session_options, _genesis),
+    do: {:error, :runtime_unavailable}
+
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do
