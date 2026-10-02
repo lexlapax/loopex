@@ -355,6 +355,89 @@ defmodule Loopex.ConfiguredSessionTest do
     assert length(Agent.get(fixture.executor, & &1.jobs)) == 2
   end
 
+  test "native reuse freezes previously staged excerpt bytes and source ranges" do
+    [_, vector] =
+      Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
+      |> File.read!()
+      |> JSON.decode!()
+      |> Map.fetch!("vectors")
+
+    digest = String.duplicate("b", 64)
+
+    reference = %{
+      digest: digest,
+      size: 8_192,
+      locator: digest,
+      media_type: "text/plain",
+      role: "tool_output",
+      use_canonicalization_version: Canonical.version(),
+      use_digest: digest,
+      use_locator: "use:" <> digest
+    }
+
+    fixture =
+      start(
+        tools: [Fixture.tool_definition(), vector["definition"]],
+        artifacts: %{"first" => [reference], "second" => [reference]},
+        script: [
+          open_turn("first"),
+          open_turn("second"),
+          %{
+            text: "done",
+            hold: self(),
+            reply_overrides: %{completion: "natural", continuation: closed_capsule("done")}
+          }
+        ]
+      )
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               genesis(fixture.definitions, continuation_configuration())
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(
+               attachment,
+               %{type: :prompt, command_id: "prompt", content: "work"}
+             )
+
+    assert_receive {:holding, provider}, 5_000
+    [_, second, third] = AgentLoopTestModel.dispatched(fixture.model)
+    assert Enum.take(third.messages, length(second.messages)) == second.messages
+
+    assert {:ok, state} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+
+    assert {:ok, entries, projection} =
+             SessionState.projected_lineage(state, state.active_run_id, 0)
+
+    [old, appended] = for {_, %{"role" => "tool"} = message} <- entries, do: message
+    assert old == Enum.find(second.messages, &(&1["role"] == "tool"))
+    assert {:ok, notice} = LoopexProtocol.Frame.decode(appended["content"], 2_048)
+    assert notice["excerpt_byte_count"] == 0
+    [frozen, new] = projection["ranges"]
+    assert frozen["byte_count"] > 0
+    assert new["byte_count"] == 0
+    send(provider, :release)
+    assert List.last(finish(attachment))["outcome"] == "completed"
+
+    assert {:ok, _} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+  end
+
   test "native identity collision refuses a later reply before another tool intent" do
     fixture = start(script: [open_turn("same"), open_turn("same")])
 

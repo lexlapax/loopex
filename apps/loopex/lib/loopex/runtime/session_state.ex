@@ -183,6 +183,7 @@ defmodule Loopex.Runtime.SessionState do
           pending_work: map(),
           conversation: map(),
           artifact_sources: map(),
+          lineage_projection_revision: nil | 1,
           run_order: [binary()],
           bounds: map(),
           context_budgets: map(),
@@ -217,6 +218,7 @@ defmodule Loopex.Runtime.SessionState do
             # Technical depth: this derived index contains full references and
             # canonical source-payload digests, never object contents or handles.
             artifact_sources: %{},
+            lineage_projection_revision: nil,
             run_order: [],
             bounds: %{},
             # The context-admission ceiling each run committed at its own prompt
@@ -698,6 +700,64 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  @doc false
+  @spec projected_lineage(t(), binary(), non_neg_integer(), list() | nil) ::
+          {:ok, list(), map() | nil} | {:error, atom()}
+  def projected_lineage(state, run_id, allowance, elements \\ nil) do
+    binding = state.tool_selection && state.tool_selection["artifact_read"]
+
+    Loopex.Runtime.LineageProjection.project(
+      elements || lineage_elements(state, run_id),
+      binding,
+      state.artifact_sources,
+      frozen_lineage(state, run_id),
+      allowance
+    )
+  end
+
+  # Concept: each open exchange keeps every message already sent to its provider.
+  # Technical depth: the latest settled request freezes appended results too;
+  # the original base request alone would allow their prefixes to shrink later.
+  defp frozen_lineage(state, run_id) do
+    case get_in(state.pending_work, [run_id, :continuation_exchange]) do
+      nil ->
+        %{}
+
+      exchange ->
+        request = Map.get(exchange, :latest_request, exchange.base_request)
+        receipt = Map.get(exchange, :latest_receipt, exchange.base_receipt)
+        projection = Map.get(exchange, :latest_projection)
+        ranges = if projection, do: projection["ranges"], else: []
+        by_source = Map.new(ranges, &{&1["source_reference"], &1})
+
+        request.messages
+        |> Enum.zip(receipt["blocks"])
+        |> Enum.filter(fn {_, block} -> block["provenance_class"] == "session" end)
+        |> Map.new(fn {message, block} ->
+          source = block["source_reference"]
+          {source, %{message: message, range: by_source[source]}}
+        end)
+    end
+  end
+
+  # Concept: historical inline staging stays readable without permitting a
+  # later request to discard the projection provenance already in use.
+  # Technical depth: the cutover is derived from validated committed staging records.
+  defp projected_entries(state, run_id, nil) do
+    if is_nil(state.lineage_projection_revision),
+      do: Conversation.lineage_entries(lineage_elements(state, run_id)),
+      else: {:error, :context_projection_invalid}
+  end
+
+  defp projected_entries(state, run_id, %{"revision" => 1, "allowance" => allowance} = projection)
+       when map_size(projection) == 3 do
+    with {:ok, entries, ^projection} <- projected_lineage(state, run_id, allowance),
+         do: {:ok, entries},
+         else: (_ -> {:error, :context_projection_invalid})
+  end
+
+  defp projected_entries(_, _, _), do: {:error, :context_projection_invalid}
+
   @doc """
   ## Concept
 
@@ -743,20 +803,20 @@ defmodule Loopex.Runtime.SessionState do
   Every source binds the captured model/configuration and exact canonical text,
   arguments and results. The first request and every post-terminal run use nil.
   """
-  @spec model_continuation(t(), binary(), [map()], binary() | nil) ::
+  @spec model_continuation(t(), binary(), [map()], binary() | nil, map() | nil) ::
           {:ok, map() | nil} | {:error, :context_projection_invalid}
-  def model_continuation(state, run_id, messages, applied_steer) do
+  def model_continuation(state, run_id, messages, applied_steer, projection \\ nil) do
     case get_in(state.pending_work, [run_id, :continuation_exchange]) do
       nil -> {:ok, nil}
-      exchange -> build_continuation(state, run_id, messages, applied_steer, exchange)
+      exchange -> build_continuation(state, run_id, messages, applied_steer, exchange, projection)
     end
   end
 
-  defp build_continuation(state, run_id, messages, applied_steer, exchange) do
+  defp build_continuation(state, run_id, messages, applied_steer, exchange, projection) do
     configuration = run_configuration(state, run_id)
 
     with true <- is_map(configuration),
-         {:ok, entries} <- Conversation.lineage_entries(lineage_elements(state, run_id)),
+         {:ok, entries} <- projected_entries(state, run_id, projection),
          {:ok, steer} <- projected_steer(state, run_id, applied_steer),
          expected = Enum.map(entries, &elem(&1, 1)) ++ steer,
          offset = length(messages) - length(expected),
@@ -1079,6 +1139,15 @@ defmodule Loopex.Runtime.SessionState do
       "context_receipt" => Keyword.get(options, :context_receipt),
       kind: kind
     }
+
+    # Concept: excerpt provenance is private staging data, not provider context.
+    # Technical depth: ADR 0042 fixes the receipt at 17 or 18 outer keys. The
+    # revisioned staging member is included in complete-record admission instead.
+    record =
+      case Keyword.get(options, :lineage_projection) do
+        nil -> record
+        projection -> Map.put(record, "lineage_projection", projection)
+      end
 
     case run_configuration(state, run_id) do
       nil ->
@@ -3167,7 +3236,13 @@ defmodule Loopex.Runtime.SessionState do
          :ok <- Loopex.Model.validate_request(request),
          :ok <- validate_request_configuration(state, record, request, run_id),
          {:ok, continuation} <-
-           model_continuation(state, run_id, request.messages, applied_steer),
+           model_continuation(
+             state,
+             run_id,
+             request.messages,
+             applied_steer,
+             record["lineage_projection"]
+           ),
          true <- request.continuation == continuation,
          turn_number = next_turn_number(work),
          true <- turn_id == stable_id("turn", run_id, turn_number),
@@ -3185,11 +3260,16 @@ defmodule Loopex.Runtime.SessionState do
             turn_number: turn_number,
             request: request,
             context_receipt: record["context_receipt"],
+            lineage_projection: record["lineage_projection"],
             applied_steer: applied_steer
           }
         })
 
-      {:ok, put_pending(state, run_id, next_work), []}
+      next = put_pending(state, run_id, next_work)
+      revision = get_in(record, ["lineage_projection", "revision"])
+
+      {:ok, %{next | lineage_projection_revision: revision || state.lineage_projection_revision},
+       []}
     else
       _other -> {:error, :invalid_model_request_transition}
     end
@@ -3213,14 +3293,24 @@ defmodule Loopex.Runtime.SessionState do
             ] do
     with true <- not is_nil(Map.get(state.run_resources, run_id)),
          true <-
-           map_size(record) == if(kind == "model_request_committed_resources_v1", do: 8, else: 9),
+           map_size(record) ==
+             if(kind == "model_request_committed_resources_v1",
+               do: 8,
+               else: if(Map.has_key?(record, "lineage_projection"), do: 10, else: 9)
+             ),
          {:ok, request} <- decode_request(request),
          %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
            Map.get(state.pending_work, run_id),
          :ok <- Loopex.Model.validate_request(request),
          :ok <- validate_request_configuration(state, record, request, run_id),
          {:ok, continuation} <-
-           model_continuation(state, run_id, request.messages, applied_steer),
+           model_continuation(
+             state,
+             run_id,
+             request.messages,
+             applied_steer,
+             record["lineage_projection"]
+           ),
          true <- request.continuation == continuation,
          turn_number = next_turn_number(work),
          true <- turn_id == stable_id("turn", run_id, turn_number),
@@ -3238,11 +3328,16 @@ defmodule Loopex.Runtime.SessionState do
             turn_number: turn_number,
             request: request,
             context_receipt: record["context_receipt"],
+            lineage_projection: record["lineage_projection"],
             applied_steer: applied_steer
           }
         })
 
-      {:ok, put_pending(state, run_id, next_work), []}
+      next = put_pending(state, run_id, next_work)
+      revision = get_in(record, ["lineage_projection", "revision"])
+
+      {:ok, %{next | lineage_projection_revision: revision || state.lineage_projection_revision},
+       []}
     else
       _other -> {:error, :invalid_model_request_transition}
     end
@@ -4406,6 +4501,7 @@ defmodule Loopex.Runtime.SessionState do
           turn_number: staged.turn_number,
           request: request,
           request_context_receipt: staged.context_receipt,
+          request_lineage_projection: staged.lineage_projection,
           model_attempt: 1,
           model_termination: nil,
           pending_calls: []
@@ -4675,7 +4771,17 @@ defmodule Loopex.Runtime.SessionState do
       })
 
     source = %{record: record, turn_number: work.turn_number}
-    Map.put(work, :continuation_exchange, %{exchange | sources: exchange.sources ++ [source]})
+
+    Map.put(
+      work,
+      :continuation_exchange,
+      Map.merge(exchange, %{
+        sources: exchange.sources ++ [source],
+        latest_request: work.request,
+        latest_receipt: work.request_context_receipt,
+        latest_projection: work.request_lineage_projection
+      })
+    )
   end
 
   defp retain_continuation(work, _record, _reply), do: Map.delete(work, :continuation_exchange)
@@ -6239,7 +6345,14 @@ defmodule Loopex.Runtime.SessionState do
 
     with :ok <- validate_receipt_shell(receipt),
          :ok <- validate_receipt_generation(receipt, request),
-         :ok <- validate_lineage_projection(state, request, run_id, applied_steer),
+         :ok <-
+           validate_lineage_projection(
+             state,
+             request,
+             run_id,
+             applied_steer,
+             record["lineage_projection"]
+           ),
          {:ok, sources} <- expected_context_sources(state, receipt, run_id, applied_steer),
          {:ok, expected} <- expected_context_blocks(request, sources),
          true <- Map.get(receipt, "blocks") == expected,
@@ -6267,7 +6380,11 @@ defmodule Loopex.Runtime.SessionState do
                  "model_request_committed_v2",
                  "model_request_committed_resources_v2"
                ],
-             true <- map_size(record) == 9,
+             true <-
+               map_size(record) == if(Map.has_key?(record, "lineage_projection"), do: 10, else: 9),
+             true <-
+               not Map.has_key?(record, "lineage_projection") or
+                 is_map(record["lineage_projection"]),
              true <- record["configuration_version"] == configuration["configuration_version"],
              true <- request.canonicalization_version == "loopex.model_request.v2",
              true <- request.model == configuration["model"],
@@ -6298,7 +6415,14 @@ defmodule Loopex.Runtime.SessionState do
 
     with :ok <- validate_resource_receipt_shell(receipt),
          :ok <- validate_receipt_generation(receipt, request),
-         :ok <- validate_lineage_projection(state, request, run_id, applied_steer),
+         :ok <-
+           validate_lineage_projection(
+             state,
+             request,
+             run_id,
+             applied_steer,
+             record["lineage_projection"]
+           ),
          {:ok, resource_sources} <-
            validate_resource_pack_header(
              receipt["resource_packs"],
@@ -6617,13 +6741,14 @@ defmodule Loopex.Runtime.SessionState do
          _state,
          %{canonicalization_version: "loopex.model_request.v1"},
          _run_id,
-         _steer
+         _steer,
+         _projection
        ),
        do: :ok
 
-  defp validate_lineage_projection(state, request, run_id, applied_steer) do
+  defp validate_lineage_projection(state, request, run_id, applied_steer, projection) do
     with {:ok, entries} <-
-           request_session_entries(state, run_id, request.canonicalization_version),
+           projected_entries(state, run_id, projection),
          {:ok, steer} <- projected_steer(state, run_id, applied_steer),
          expected = Enum.map(entries, &elem(&1, 1)) ++ steer,
          true <- Enum.take(request.messages, -length(expected)) == expected do
@@ -7047,7 +7172,8 @@ defmodule Loopex.Runtime.SessionState do
                  configuration,
                  lineage_elements(state, run_id),
                  Enum.reject(state.run_order, &(&1 == run_id))
-               ) do
+               ),
+             {:ok, _, _} <- projected_lineage(state, run_id, 0) do
           preflight_continuation(state, run_id)
         end
     end
@@ -7072,14 +7198,15 @@ defmodule Loopex.Runtime.SessionState do
         steer = pending_steer(state, run_id)
         applied = steer && steer.command_id
 
-        with {:ok, entries} <- Conversation.lineage_entries(lineage_elements(state, run_id)),
+        with {:ok, entries, projection} <- projected_lineage(state, run_id, 2_048),
              {:ok, suffix} <- projected_steer(state, run_id, applied),
              {:ok, _} <-
                model_continuation(
                  state,
                  run_id,
                  prefix ++ Enum.map(entries, &elem(&1, 1)) ++ suffix,
-                 applied
+                 applied,
+                 projection
                ) do
           :ok
         else
@@ -7097,7 +7224,11 @@ defmodule Loopex.Runtime.SessionState do
   # configuration, null measurements and the exact cause. The refusal and failed
   # terminal commit together; replay independently derives the same condition.
   def propose_context_preparation_failure(%__MODULE__{} = state, run_id, cause)
-      when cause in [:canonical_history_rendering_unsupported, :context_projection_invalid] do
+      when cause in [
+             :canonical_history_rendering_unsupported,
+             :context_projection_invalid,
+             :artifact_metadata_unrepresentable
+           ] do
     case {run_configuration(state, run_id), Map.get(state.pending_work, run_id)} do
       {%{} = configuration, %{stage: stage, turn_number: _} = work}
       when stage in ["model_pending", "turn_settled"] ->
@@ -7201,7 +7332,12 @@ defmodule Loopex.Runtime.SessionState do
              &is_nil(refusal[&1])
            ),
          {:error, cause} <- preflight_run_history(state, run_id),
-         true <- cause in [:canonical_history_rendering_unsupported, :context_projection_invalid],
+         true <-
+           cause in [
+             :canonical_history_rendering_unsupported,
+             :context_projection_invalid,
+             :artifact_metadata_unrepresentable
+           ],
          true <- failure["cause"] == Atom.to_string(cause) do
       :ok
     else

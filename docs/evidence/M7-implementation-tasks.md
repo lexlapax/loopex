@@ -26,7 +26,7 @@ they do not mean the original task is complete. This follows the maintainer's
   conversation witness remains a separate release obligation.
 - Done: T02 exact-generation capability checks now guard runtime admission,
   registry loading and the local executor's compiled tool inventory. Original
-  checklist completion is 24/186 items and 1/20 top-level tasks.
+  checklist completion is 25/186 items and 1/20 top-level tasks.
 - Done: T02 attachment-budget baseline audit distinguishes existing attachment
   limitations from the required job-owned bounds. Snapshot creation failure now
   closes its source descriptor before returning; both toolchains prove the repair.
@@ -34,7 +34,10 @@ they do not mean the original task is complete. This follows the maintainer's
   the complete 8,192-byte conversation-message limit, including double escaping,
   normalized call identity and metadata. Local storage and executor integration
   now pass real range tests. The real session-owner path preserves receipt-owned
-  ranges across restart; prepared references and excerpt projection remain open.
+  ranges across restart. Receipt-owned excerpt staging and replay now work;
+  prepared references and earlier spill thresholds remain open. Legacy v2/v3
+  sessions preserve full inline results after object deletion and registry-free
+  restart, completing the original legacy-inline compatibility item.
 - Decision recorded: on 2026-10-01 the maintainer selected the separate optional
   `ArtifactStore.read_job_range(handle, validated_job)` callback for job reads.
   The local callback now verifies real objects with shared transfer capacity,
@@ -47,8 +50,9 @@ they do not mean the original task is complete. This follows the maintainer's
   empty current tool selections. Public attachment access remains explicit.
 - Done: the pure T02 receipt-content formatter proves the largest UTF-8 prefix
   within the complete 2,048-byte tool message, including double escaping and
-  reference metadata. Source ranges bind the original receipt bytes. Staging,
-  replay, frozen-prefix handling and aggregate allocation are not yet joined.
+  reference metadata. Source ranges bind the original receipt bytes. Ordinary
+  staging, replay, frozen prefixes and shared allocation are now joined for
+  receipt-owned references. Oversized inline sources still need preparation.
 - Done: T02 resolves committed-receipt artifact membership before policy and
   binds approved ranges to their exact source in the journaled job. Prepared
   references remain open. The receipt-owned range workflow is now proved with
@@ -182,6 +186,11 @@ they do not mean the original task is complete. This follows the maintainer's
   facade, or keep that facade unchanged and route chat through composition to
   the accepted host-private exact-genesis operation. No dependent public API
   change has been made.
+- Decision pending: provide Core a separate optional `artifact_preparation_store`
+  using the existing ArtifactStore put contract, or enable the existing public
+  transfer store whenever preparation is needed. Separate preparation access is
+  recommended so composition's `artifact_transfers: false` keeps its behavior.
+  No dependent startup-contract change has been made.
 - Decision pending: ADR 0043's required-only refusal counts cannot describe an
   oversized ADR 0044 frozen request containing project/resource blocks. The
   proposed v2 amendment adds explicit counts for those classes. Do not implement
@@ -1528,7 +1537,7 @@ second-prompt witness and milestone closure checks remain open.
 - [ ] Validate artifact ownership and arguments in the session owner before policy admission; add resolved executor data after approval.
 - [x] Implement 4-KiB range reads, encoded-result limits, offsets, progress and EOF.
 - [ ] Add bounded preparation, aggregate excerpt allocation and job-owned transfer accounting.
-- [ ] Preserve legacy inline behavior where the complete request fits.
+- [x] Preserve legacy inline behavior where the complete request fits.
 - [ ] Test escaping, Unicode, forged references, cross-session access, digest mismatch, exhaustion, cancellation and recovery.
 - [x] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
 
@@ -1546,9 +1555,75 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Join receipt-owned ranges through the real session owner, local journal, executor and artifact store; prove restart with an empty registry, immutable object retrieval after workspace changes, and exact range projection into later prompts. Include the required artifact-object source label in the encoded cap.
 - [x] Wire the reference host's captured M7 tool selection to read 1.1.0 and provide its job transfer owner even when the public attachment transfer family is disabled.
 - [x] Implement pure receipt-content excerpt formatting with the complete 2,048-byte message cap, maximal UTF-8 prefixes, fixed binary descriptions, source digest/ranges and named metadata refusal; verify both supported toolchains.
-- [ ] Join excerpt formatting to ordinary staging and independently validated replay with retained projection provenance, unchanged historical requests and frozen native prefixes; allocate the shared raw-prefix allowance against both required header variants.
+- [x] Join excerpt formatting to ordinary staging and independently validated replay with retained projection provenance, unchanged historical requests and frozen native prefixes; allocate the shared raw-prefix allowance against both required header variants.
+- [ ] Complete bounded reference-preparation episodes and prepared-reference membership, then make above-cap inline sources eligible; join the accepted earlier spill rule and pin the remaining new tool generations.
 
 ### Verification evidence
+
+Receipt-owned excerpts now reach ordinary request staging. Configured private
+staging records carry the closed `lineage_projection` revision-1 map with a
+shared allowance and ordered source ranges. ADR 0042's revision-4 context
+receipts retain exactly 17 or 18 outer keys, as appropriate; the projection is
+not an extra receipt member. Review caught that placement error in the initial
+implementation before commit; the final tests pin both fixed receipt shapes. Replay reconstructs the expected message and range
+from committed result content and artifact membership. Historical unprojected
+requests remain readable before the first projected staging record; subsequent rows
+cannot drop or null the projection field. Both reader paths reject altered
+range offsets, content digests or artifact uses independently of unchanged
+request bytes, receipt totals and record sizes.
+
+Required allocation measures allowance zero against both empty resource-header
+variants and searches 0..2048 using complete request/receipt admission. Optional
+project and resource blocks are admitted afterward. Native exchanges preserve
+messages and range provenance from their latest settled request; only newly
+appended eligible results use the new allowance. Configuration sizing passes its
+explicit retained-history or empty-history candidate through the same projector.
+A first implementation accidentally read only admitted run history there; the
+existing configuration test caught the omission and the corrected path passes.
+
+The real local-store/executor workflow now completes a file read, two successive
+4-KiB artifact reads and a final prompt under its original 8,192-token budget,
+including both restart placements and immutable original receipts. This removes
+the earlier third-range overflow. An additional live test lowers a captured
+context budget and proves that the next larger shared allowance exceeds it.
+Native reuse retains an earlier nonempty excerpt when the next result is
+projected at zero. Resource integration withholds an oversized optional skill
+while retaining the selected required allowance and replayable provenance.
+
+The final broad Core selection passes 198 cases in 28.7 seconds on current and
+28.8 seconds on floor. The added exact receipt-shape assertions pass in the
+19-case current admission/resource selection in 1.7 seconds and are included in
+the floor broad run. Four real session workflows pass in 1.1 seconds on each
+pair: two range/restart placements and legacy read 1.0.0 under both v2 and v3
+genesis. Both legacy cases preserve their complete above-cap receipt content
+with deleted artifact objects and an empty host registry after restart. They
+create no new artifact directory or excerpt provenance and replay successfully.
+This proves the original legacy-inline compatibility item.
+
+- Current Core: `/private/tmp/loopex-m7-excerpt-staging-record-core-current.log`,
+  SHA-256 `4648203883f7bf4a1ec9c12bbe82eb337eccafa1e46ddb0a6f0fa110c6744f0f`.
+- Floor Core: `/private/tmp/loopex-m7-excerpt-staging-record-core-floor.log`,
+  SHA-256 `eee1c2f8f46235704927a0db4c685c9e99ed021db99f5d9ee3af876061445a28`.
+- Current receipt shapes: `/private/tmp/loopex-m7-excerpt-staging-record-shape-current.log`,
+  SHA-256 `79c6bef752578544fd568ef46ce14a0ff9f01a93df61ae9be8feb5a3da853eac`.
+- Current real sessions: `/private/tmp/loopex-m7-excerpt-staging-record-session-verified-current.log`,
+  SHA-256 `1f54d602b39d944ff487f23145b7aaacfe0038d9d86348d2f3349a7ad7bfad7d`.
+- Floor real sessions: `/private/tmp/loopex-m7-excerpt-staging-record-session-verified-floor.log`,
+  SHA-256 `110a823ce665d77a93671270023314d7c5208a5ed688a58472d38387612e0e2a`.
+- Structural checks: `/private/tmp/loopex-m7-excerpt-staging-record-structure.log`,
+  SHA-256 `06f0927de989fdf8b1383b7d2c9a6bbd3562c0de97286663adf43ef3d7e52580`.
+  The full integration-candidate fast check remains pending at commit time.
+- Initial configuration regression, retained as a failure:
+  `/private/tmp/loopex-m7-excerpt-integration-core-first.log`,
+  SHA-256 `852d693e8f88d84579302023700764183e8780e4b69bacf9a9566913c4b9c560`.
+- Initial legacy-fixture compilation failure, repaired before the four-case run:
+  `/private/tmp/loopex-m7-excerpt-staging-record-session-final-current.log`,
+  SHA-256 `97d4dcce4286de45b4ea551b0f087bde01ad59e73416147261c541f9069847cb`.
+
+This closes the added staging/replay subtask, not the original bounded-excerpt
+outcome. Above-cap inline results without usable references remain fixed until
+the preparation episode is implemented. No preparation write, early-spill rule,
+compaction behavior, new tool generation or closure claim is included here.
 
 The pure ToolResultExcerpt formatter accepts an existing full artifact reference
 and a raw-prefix allowance from zero through 2,048. It measures both JSON layers
@@ -1564,7 +1639,7 @@ The maximality cases independently try the next complete codepoint across ASCII,
 multibyte and heavily escaped sources at ten allowances. Together with the
 existing conversation suite, 22 tests pass in 0.09 seconds on current and 0.1
 seconds on floor. This completes an added formatting subtask only. The original
-bounded-excerpt item remains open until preparation, staging and replay use it.
+bounded-excerpt item remains open while reference preparation is incomplete.
 
 - Current: `/private/tmp/loopex-m7-excerpt-formatter-final-current.log`,
   SHA-256 `3adefc2f08d96bc8d54d1f1ca62f74fc3aa7fdc2044f121931877301818a05cb`.

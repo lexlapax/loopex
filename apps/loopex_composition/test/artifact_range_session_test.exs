@@ -59,7 +59,50 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     end
   end
 
-  defp workflow(restart_after) do
+  for captured <- [false, true] do
+    test "legacy read keeps complete inline content without objects or a host registry, captured=#{captured}" do
+      fixture = fixture("1.0.0", unquote(captured))
+
+      assert {:ok, attachment} =
+               Loopex.attach(fixture.runtime, fixture.session, after_event_sequence: 0)
+
+      assert List.last(run(attachment, "file", %{"path" => "source.txt"}))["outcome"] ==
+               "completed"
+
+      [_, request] = Agent.get(fixture.observer, & &1)
+      message = Enum.find(request.messages, &(&1["role"] == "tool"))
+      assert byte_size(message["content"]) > 2_048
+      assert {:ok, records} = Store.load_records(fixture.store, fixture.session, 0, 1_000)
+      [receipt] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed"))
+      assert message["content"] == receipt.payload["receipt"]["output"]
+      assert message["outcome"] == "completed"
+      File.rm_rf!(fixture.artifact_root)
+
+      {runtime, store, attachment} =
+        restart(
+          fixture.runtime,
+          fixture.path,
+          fixture.executor_options,
+          fixture.observer,
+          fixture.session,
+          fixture.workspace
+        )
+
+      assert List.last(run(attachment, "finish", %{"finish" => true}))["outcome"] == "completed"
+      requests = Agent.get(fixture.observer, & &1)
+      assert length(requests) == 3
+      assert message in List.last(requests).messages
+      assert {:ok, records} = Store.load_records(store, fixture.session, 0, 1_000)
+      assert {:ok, events} = Store.load_events(store, fixture.session, 0, 1_000)
+      assert {:ok, recovered} = SessionState.recover(fixture.session, records, events)
+      assert recovered.lineage_projection_revision == nil
+      refute Enum.any?(records, &Map.has_key?(&1.payload, "lineage_projection"))
+      refute File.exists?(fixture.artifact_root)
+      assert :ok = Loopex.stop(runtime)
+    end
+  end
+
+  defp fixture(version, captured \\ true) do
     root =
       Path.join(System.tmp_dir!(), "loopex-range-session-#{System.unique_integer([:positive])}")
 
@@ -86,16 +129,55 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     observer = start_supervised!({Agent, fn -> [] end})
     path = Path.join(root, "store.log")
     store = start_supervised!({Store, path: path})
-    definition = Enum.find(CodingTools.generations(), &(&1["tool_version"] == "1.1.0"))
+
+    definition =
+      Enum.find(
+        CodingTools.generations(),
+        &(&1["tool_id"] == "loopex.read" and &1["tool_version"] == version)
+      )
+
     runtime = runtime(store, executor, observer, [definition])
 
-    assert {:ok, session} =
-             Runtime.create_session_with_genesis(
-               runtime,
-               "create",
-               %{},
-               Loopex.ConfiguredGenesisFixture.genesis([definition])
-             )
+    created =
+      if captured do
+        Runtime.create_session_with_genesis(
+          runtime,
+          "create",
+          %{},
+          Loopex.ConfiguredGenesisFixture.genesis([definition])
+        )
+      else
+        Loopex.create_session(runtime, %{}, command_id: "create")
+      end
+
+    assert {:ok, session} = created
+
+    %{
+      runtime: runtime,
+      store: store,
+      observer: observer,
+      session: session,
+      transfers: transfers,
+      path: path,
+      executor_options: executor_options,
+      workspace: workspace,
+      bytes: bytes,
+      artifact_root: artifact_root
+    }
+  end
+
+  defp workflow(restart_after) do
+    %{
+      runtime: runtime,
+      store: store,
+      observer: observer,
+      session: session,
+      transfers: transfers,
+      path: path,
+      executor_options: executor_options,
+      workspace: workspace,
+      bytes: bytes
+    } = fixture("1.1.0")
 
     assert {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
     first = run(attachment, "file", %{"path" => "source.txt"})
@@ -139,19 +221,66 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
         do: restart(runtime, path, executor_options, observer, session, workspace),
         else: {runtime, store, attachment}
 
-    third = run(attachment, "finish", %{"finish" => true})
+    third = run(attachment, "next-range", %{arguments | "offset" => 24_096})
     assert List.last(third)["outcome"] == "completed", inspect(third, limit: :infinity)
+    fourth = run(attachment, "finish", %{"finish" => true})
+    assert List.last(fourth)["outcome"] == "completed", inspect(fourth, limit: :infinity)
     requests = Agent.get(observer, & &1)
-    assert length(requests) == 5
+    assert length(requests) == 7
     assert range_message in List.last(requests).messages
 
     assert {:ok, records} = Store.load_records(store, session, 0, 1_000)
     assert {:ok, events} = Store.load_events(store, session, 0, 1_000)
     assert {:ok, recovered} = SessionState.recover(session, records, events)
     assert recovered.artifact_sources[use] == resolved
-    assert Enum.count(records, &(&1.payload.kind == "executor_receipt_committed")) == 2
+    assert Enum.count(records, &(&1.payload.kind == "executor_receipt_committed")) == 3
+    assert recovered.lineage_projection_revision == 1
+    assert_excerpt_provenance(session, records, events, requests, source.payload)
     assert :sys.get_state(transfers).jobs == %{}
     assert :ok = Loopex.stop(runtime)
+  end
+
+  defp assert_excerpt_provenance(session, records, events, requests, source) do
+    first_result = Enum.find(Enum.at(requests, 1).messages, &(&1["role"] == "tool"))
+    assert {:ok, notice} = Frame.decode(first_result["content"], 2_048)
+    assert notice["excerpt_source"] == "receipt_content"
+    assert notice["omitted"]
+    original = source["receipt"]["output"]
+    assert byte_size(original) > 2_048
+    assert notice["excerpt"] == binary_part(original, 0, notice["excerpt_byte_count"])
+    assert {:ok, bytes} = Frame.encode(first_result)
+    assert IO.iodata_length(bytes) - 1 <= 2_048
+
+    row =
+      Enum.find(records, fn row ->
+        match?([_ | _], get_in(row.payload, ["lineage_projection", "ranges"]))
+      end)
+
+    projection = row.payload["lineage_projection"]
+    [range] = projection["ranges"]
+    assert range["source_digest"] == Canonical.digest_bytes(original)
+    assert range["byte_count"] == notice["excerpt_byte_count"]
+
+    # Equal-width substitutions preserve request bytes, receipt totals and
+    # measured record size. Replay must reject the false source provenance itself.
+    for changed <- [
+          Map.put(range, "offset", 1),
+          Map.put(range, "source_digest", String.duplicate("f", 64)),
+          Map.put(range, "artifact_use", "use:" <> String.duplicate("f", 64))
+        ] do
+      forged =
+        Enum.map(records, fn record ->
+          if record.journal_version == row.journal_version,
+            do:
+              put_in(record, [:payload, "lineage_projection", "ranges"], [
+                changed
+              ]),
+            else: record
+        end)
+
+      assert {:error, :invalid_model_request_transition} =
+               SessionState.recover(session, forged, events)
+    end
   end
 
   defp restart(runtime, path, executor_options, observer, session, workspace) do

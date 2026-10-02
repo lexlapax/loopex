@@ -1,5 +1,6 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.SkillContextSelectivePolicy do
   @moduledoc false
@@ -93,6 +94,77 @@ defmodule Loopex.SkillContextTest do
 
     assert recovered.resources["selections"] |> Enum.map(& &1["pack_index"]) == [1, 0]
     assert Enum.count(rows, &(&1.payload.kind == "model_attempt_opened_v1")) == 1
+  end
+
+  test "artifact excerpt allocation precedes whole optional resource admission" do
+    [_, vector] =
+      Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
+      |> File.read!()
+      |> JSON.decode!()
+      |> Map.fetch!("vectors")
+
+    pack = %{
+      source_id: "project",
+      origin: nil,
+      commit: nil,
+      tree_digest: nil,
+      name: "large",
+      description: "Oversized optional instructions",
+      manual_only: true,
+      files: [file("SKILL.md", String.duplicate("s", 32_000))]
+    }
+
+    context =
+      start_context(
+        packs: [pack],
+        configuration: Loopex.ConfiguredGenesisFixture.configuration(),
+        tools: [Fixture.tool_definition(), vector["definition"]],
+        script: [
+          %{text: "write", calls: [%{id: "write", name: "write", arguments: %{"path" => "x"}}]},
+          %{text: "done"}
+        ]
+      )
+
+    digest = String.duplicate("b", 64)
+
+    reference = %{
+      digest: digest,
+      size: 8_192,
+      locator: digest,
+      media_type: "text/plain",
+      role: "tool_output",
+      use_canonicalization_version: Canonical.version(),
+      use_digest: digest,
+      use_locator: "use:" <> digest
+    }
+
+    Agent.update(context.fixture.executor, &%{&1 | artifacts: %{"write" => [reference]}})
+    admit(context)
+    select(context, "large", [])
+    prompt(context, "work")
+    settle(context)
+    rows = Fixture.records(context.fixture, context.session)
+    staged = Enum.filter(rows, &(&1.payload.kind == "model_request_committed_resources_v2"))
+    assert length(staged) == 2
+
+    for row <- staged do
+      receipt = row.payload["context_receipt"]
+      assert map_size(receipt) == 18
+      refute Map.has_key?(receipt, "lineage_projection")
+      assert row.payload["lineage_projection"]["allowance"] == 2_048
+      assert Enum.any?(receipt["resource_packs"]["blocks"], &(&1["status"] == "context_tokens"))
+      assert Enum.any?(receipt["resource_packs"]["blocks"], &(&1["status"] == "staged"))
+    end
+
+    assert [%{"byte_count" => 21}] =
+             List.last(staged).payload["lineage_projection"]["ranges"]
+
+    assert {:ok, _} =
+             SessionState.recover(
+               context.session,
+               rows,
+               Fixture.events(context.fixture, context.session)
+             )
   end
 
   test "only settled operator commands change the next run selection" do
@@ -624,7 +696,17 @@ defmodule Loopex.SkillContextTest do
       )
 
     on_exit(fn -> Fixture.stop(fixture) end)
-    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+
+    {:ok, session} =
+      case Keyword.get(options, :configuration) do
+        nil ->
+          Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+
+        configuration ->
+          genesis = Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions, configuration)
+          Loopex.Runtime.create_session_with_genesis(fixture.runtime, "create", %{}, genesis)
+      end
+
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
 
     %{

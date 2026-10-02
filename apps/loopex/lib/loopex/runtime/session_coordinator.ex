@@ -2431,6 +2431,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
            run_id: run_id,
            deadline: deadline,
            max_tokens: configuration["max_tokens"],
+           excerpt_allowance: 0,
            elements:
              Enum.flat_map(state.durable.run_order, &SessionState.elements(state.durable, &1)),
            steer: nil,
@@ -3043,7 +3044,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
         commit_deadline_failure(state, run_id, category)
 
       {:error, cause}
-      when cause in [:canonical_history_rendering_unsupported, :context_projection_invalid] ->
+      when cause in [
+             :canonical_history_rendering_unsupported,
+             :context_projection_invalid,
+             :artifact_metadata_unrepresentable
+           ] ->
         commit_context_preparation_failure(state, run_id, cause)
 
       {:error, reason} ->
@@ -3069,11 +3074,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp stage_frozen_candidate(state, staging, frozen) do
-    with {:ok, candidate} <-
+    with {:ok, staging} <-
+           allocate_excerpts(state, staging, frozen.selected, frozen.project, [frozen.resources]),
+         {:ok, candidate} <-
            model_candidate(state, staging, frozen.selected, frozen.project, frozen.resources) do
       SessionState.propose_model_request(state.durable, staging.run_id, candidate.request,
         applied_steer: staging.steer && staging.steer.command_id,
-        context_receipt: candidate.receipt
+        context_receipt: candidate.receipt,
+        lineage_projection: candidate.projection
       )
     end
   end
@@ -3087,8 +3095,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
         do: ProjectResource.receipt(:not_evaluated_required_failure, %{}),
         else: receipt
 
-    with {:ok, _required} <- measure_candidate(state, staging, [], project, initial),
-         :ok <- reserve_empty_resource_header(state, staging, project, initial),
+    with {:ok, staging} <-
+           allocate_excerpts(
+             state,
+             staging,
+             [],
+             project,
+             Enum.uniq([initial, reserved_resource_header(initial)])
+           ),
          {:ok, selected, project} <-
            admit_project_block(state, staging, reserved_resource_header(initial), blocks, receipt),
          {:ok, selected, resource_header} <-
@@ -3096,22 +3110,55 @@ defmodule Loopex.Runtime.SessionCoordinator do
          {:ok, candidate} <- model_candidate(state, staging, selected, project, resource_header) do
       SessionState.propose_model_request(state.durable, staging.run_id, candidate.request,
         applied_steer: staging.steer && staging.steer.command_id,
-        context_receipt: candidate.receipt
+        context_receipt: candidate.receipt,
+        lineage_projection: candidate.projection
       )
     end
   end
 
-  defp reserve_empty_resource_header(_state, _staging, _project, nil), do: :ok
+  # Concept: required history receives the largest shared excerpt allowance
+  # before optional context is admitted. Both legal empty headers must fit.
+  # Technical depth: each probe builds and preflights the complete retained
+  # request/receipt, including fixed-point bytes, depth, cardinality and tokens.
+  defp allocate_excerpts(state, staging, selected, project, headers) do
+    if get_in(state.durable.tool_selection || %{}, ["artifact_read"]) do
+      zero = Map.put(staging, :excerpt_allowance, 0)
 
-  defp reserve_empty_resource_header(state, staging, project, initial) do
-    # This exact legal projection supplies the measured reservation. No padding
-    # or synthetic record-byte count enters either a request or a refusal.
-    header = reserved_resource_header(initial)
-
-    case measure_candidate(state, staging, [], project, header) do
-      {:ok, _reserved} -> :ok
-      failure -> failure
+      with :ok <- measure_headers(state, zero, selected, project, headers) do
+        search_excerpts(state, zero, selected, project, headers, 1, 2_048)
+      end
+    else
+      with :ok <- measure_headers(state, staging, selected, project, headers),
+           do: {:ok, staging}
     end
+  end
+
+  defp search_excerpts(_state, best, _selected, _project, _headers, low, high)
+       when low > high, do: {:ok, best}
+
+  defp search_excerpts(state, best, selected, project, headers, low, high) do
+    middle = div(low + high, 2)
+    candidate = Map.put(best, :excerpt_allowance, middle)
+
+    case measure_headers(state, candidate, selected, project, headers) do
+      :ok ->
+        search_excerpts(state, candidate, selected, project, headers, middle + 1, high)
+
+      {kind, _} when kind in [:refused, :refused_not_required_only] ->
+        search_excerpts(state, best, selected, project, headers, low, middle - 1)
+
+      failure ->
+        failure
+    end
+  end
+
+  defp measure_headers(state, staging, selected, project, headers) do
+    Enum.reduce_while(headers, :ok, fn header, :ok ->
+      case measure_candidate(state, staging, selected, project, header) do
+        {:ok, _candidate} -> {:cont, :ok}
+        failure -> {:halt, failure}
+      end
+    end)
   end
 
   defp reserved_resource_header(nil), do: nil
@@ -3250,7 +3297,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          {:ok, _record} <-
            SessionState.preflight_model_request(state.durable, staging.run_id, candidate.request,
              applied_steer: staging.steer && staging.steer.command_id,
-             context_receipt: candidate.receipt
+             context_receipt: candidate.receipt,
+             lineage_projection: candidate.projection
            ) do
       {:ok, candidate}
     end
@@ -3259,7 +3307,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp model_candidate(state, staging, selected, project_receipt, resource_header) do
     {blocks, sources} = Enum.unzip(selected)
 
-    with {:ok, entries} <- Conversation.lineage_entries(staging.elements),
+    with {:ok, entries, projection} <-
+           SessionState.projected_lineage(
+             state.durable,
+             staging.run_id,
+             Map.get(staging, :excerpt_allowance, 2_048),
+             staging.elements
+           ),
          messages =
            [%{"role" => "system", "content" => system_block(state, staging.run_id)}] ++
              Enum.map(blocks, &%{"role" => "user", "content" => &1}) ++
@@ -3270,7 +3324,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
              state.durable,
              staging.run_id,
              messages,
-             staging.steer && staging.steer.command_id
+             staging.steer && staging.steer.command_id,
+             projection
            ),
          {:ok, request} <-
            Model.request(
@@ -3295,7 +3350,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
              SessionState.context_token_budget(state.durable, staging.run_id),
              resource_header
            ) do
-      {:ok, %{request: request, receipt: receipt}}
+      {:ok, %{request: request, receipt: receipt, projection: projection}}
     end
   end
 

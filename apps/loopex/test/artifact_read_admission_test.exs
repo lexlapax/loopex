@@ -363,6 +363,158 @@ defmodule Loopex.ArtifactReadAdmissionTest do
              job.validated_arguments["resolved_artifact"]
   end
 
+  test "ordinary allocation chooses the largest shared allowance fitting the actual budget",
+       context do
+    script = [
+      %{text: "tools", calls: [call("write", %{"path" => "output"})]},
+      %{text: "done", calls: []}
+    ]
+
+    fixture =
+      Fixture.start(
+        tools: context.definitions,
+        artifacts: %{"write" => [context.reference]},
+        script: script ++ script
+      )
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+    {baseline, attachment} = run(fixture, "baseline")
+    assert List.last(finish(attachment))["outcome"] == "completed"
+
+    original =
+      Fixture.records(fixture, baseline)
+      |> Enum.filter(&(&1.payload.kind == "model_request_committed_v2"))
+      |> List.last()
+
+    target = original.payload["context_receipt"]["provider_estimated_tokens"] - 3
+    initial = Loopex.ConfiguredGenesisFixture.configuration()
+
+    assert {:ok, configuration} =
+             Loopex.Runtime.SessionConfiguration.update(
+               initial,
+               %{"context_token_budget" => target, "system_class_tokens" => target},
+               initial["model_capabilities"],
+               initial["provider_mapping"],
+               fixture.definitions
+             )
+
+    genesis = Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions, configuration)
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(fixture.runtime, "bounded", %{}, genesis)
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(
+               attachment,
+               %{type: :prompt, command_id: "prompt", content: "use the tool"}
+             )
+
+    assert List.last(finish(attachment))["outcome"] == "completed"
+
+    row =
+      Fixture.records(fixture, session)
+      |> Enum.filter(&(&1.payload.kind == "model_request_committed_v2"))
+      |> List.last()
+
+    receipt = row.payload["context_receipt"]
+    projection = row.payload["lineage_projection"]
+    assert map_size(receipt) == 17
+    refute Map.has_key?(receipt, "lineage_projection")
+    assert receipt["provider_estimated_tokens"] == target
+    assert projection["allowance"] in 0..20
+    source = "tool output for write"
+    message = List.last(row.payload["request"]["messages"])
+    raw = %{message | "content" => source}
+
+    assert {:ok, larger} =
+             Loopex.Runtime.ToolResultExcerpt.encode(
+               raw,
+               context.reference,
+               projection["allowance"] + 1
+             )
+
+    delta =
+      Loopex.Bounds.estimate(Canonical.encode(larger.message)) -
+        Loopex.Bounds.estimate(Canonical.encode(message))
+
+    assert delta > 0
+    assert receipt["provider_estimated_tokens"] + delta > target
+
+    assert {:ok, _} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+  end
+
+  test "historical staging remains readable but projection provenance cannot disappear after cutover",
+       context do
+    fixture = Fixture.start(tools: context.definitions, script: [%{text: "one"}, %{text: "two"}])
+    on_exit(fn -> Fixture.stop(fixture) end)
+    {session, attachment} = run(fixture, "compatibility")
+    assert List.last(finish(attachment))["outcome"] == "completed"
+
+    assert {:accepted, "next"} =
+             Loopex.command(
+               attachment,
+               %{type: :prompt, command_id: "next", content: "again"}
+             )
+
+    assert List.last(finish(attachment))["outcome"] == "completed"
+    records = Fixture.records(fixture, session)
+    events = Fixture.events(fixture, session)
+    [first, second] = Enum.filter(records, &(&1.payload.kind == "model_request_committed_v2"))
+    assert second.payload["lineage_projection"]["ranges"] == []
+
+    malformed =
+      Enum.map(records, fn row ->
+        if row.journal_version == first.journal_version do
+          payload = Map.put(row.payload, "lineage_projection", nil)
+          %{row | payload: fix_record_cost(payload)}
+        else
+          row
+        end
+      end)
+
+    assert {:error, :invalid_model_request_transition} =
+             SessionState.recover(session, malformed, events)
+
+    historical = remove_projection(records, first.journal_version)
+    assert {:ok, state} = SessionState.recover(session, historical, events)
+    assert state.lineage_projection_revision == 1
+
+    assert {:error, :invalid_model_request_transition} =
+             SessionState.recover(
+               session,
+               remove_projection(records, second.journal_version),
+               events
+             )
+  end
+
+  defp remove_projection(records, version) do
+    Enum.map(records, fn row ->
+      if row.journal_version == version do
+        payload =
+          Map.delete(row.payload, "lineage_projection")
+
+        %{row | payload: fix_record_cost(payload)}
+      else
+        row
+      end
+    end)
+  end
+
+  defp fix_record_cost(payload) do
+    {:ok, _, bytes} = Loopex.Store.normalize_and_measure_item(:record, payload)
+
+    if payload["context_receipt"]["record_byte_cost"] == bytes,
+      do: payload,
+      else: fix_record_cost(put_in(payload, ["context_receipt", "record_byte_cost"], bytes))
+  end
+
   defp start(context, calls, later \\ []) do
     script = [%{text: "tools", calls: calls}, %{text: "done", calls: []}]
 
