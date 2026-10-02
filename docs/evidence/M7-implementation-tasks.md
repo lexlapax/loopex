@@ -91,6 +91,22 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T08's registered reasoning subset and literal mappings are joined
+  through complete file/flag chat preparation into exact validated genesis.
+  All nine accepted cells retain the full subset, thinking controls, continuation
+  requirement, reply allowance, derived context ceiling and value origins.
+  Manual budgets equal to reply allowance refuse; allowance plus one admits
+  without enlargement. Fable none, unregistered high/low and misleading aliases
+  refuse before state creation. No summarizer is inferred. Complete chat and
+  selection files pass 25 cases in 8.9 seconds current and 9.0 seconds floor;
+  compile, formatting, documentation, dependency and status gates pass.
+  Complete outputs: `/private/tmp/loopex-m7-chat-cells-current-20261002.log`,
+  SHA-256 `c69c3f16628943d4479678157fd933f48fbd53ae2c3019c7dd528ac606136ca8`;
+  `/private/tmp/loopex-m7-chat-cells-floor-20261002.log`, SHA-256
+  `12ce56038bd9e8871b777df6c210e7702cb9266df56eca670818aa101afae850`.
+  This establishes prepared configuration; chat execution, daemon routing,
+  checkpoint preflight and real-provider witnesses remain open. Original:
+  32 done / 154 remaining. Added: 111 done / 11 remaining.
 - Done: T13's fixture source catalog now requires each retained task's exact
   changed/created path allowance, rather than accepting any well-formed path
   list. Four mutation witnesses reject review edits, invented repair files,
@@ -3236,7 +3252,7 @@ or check was relaxed.
 - [ ] Join host resolution and prepared daemon routing; extend configuration preflight to committed checkpoints and maintenance quiescence.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [x] Register all nine literal reasoning cells after deterministic native request/response, bound, disclosure and terminal-history conformance; share exact mappings with transport validation.
-- [ ] Join registered reasoning subsets and exact mapping resolution to whole-profile preparation.
+- [x] Join registered reasoning subsets and exact mapping resolution to whole-profile preparation.
 - [x] Prepare exact v2/v3 callback projection, source-bound v3 settlement readers and monotonic historical-prefix recovery before writer migration.
 - [x] Emit v3 for every new ordinary settlement, migrate exact callback fixtures, and prove whole-record accounting, required-capsule admission and historical schemas through live recovery.
 - [x] Implement pure exact native-array capture and reconstruction through the shared expander, with closed fields and stop/call relations.

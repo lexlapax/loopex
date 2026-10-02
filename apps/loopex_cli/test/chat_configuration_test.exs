@@ -81,6 +81,93 @@ defmodule LoopexCli.ChatConfigurationTest do
     end
   end
 
+  test "complete chat preparation captures every registered reasoning cell in exact genesis",
+       fixture do
+    haiku = "anthropic:claude-haiku-4-5-20251001"
+    fable = "anthropic:claude-fable-5-1"
+
+    for {authored, model, levels, level, thinking, continuation} <- [
+          {"anthropic:claude-haiku-4-5", haiku, ~w(default none low medium high), "default",
+           %{"mode" => "omitted"}, false},
+          {haiku, haiku, ~w(default none low medium high), "none", %{"mode" => "disabled"},
+           false},
+          {haiku, haiku, ~w(default none low medium high), "low",
+           %{"mode" => "manual", "budget_tokens" => 1024}, true},
+          {haiku, haiku, ~w(default none low medium high), "medium",
+           %{"mode" => "manual", "budget_tokens" => 2048}, true},
+          {haiku, haiku, ~w(default none low medium high), "high",
+           %{"mode" => "manual", "budget_tokens" => 4096}, true},
+          {fable, fable, ~w(default low medium high), "default", %{"mode" => "omitted"}, true},
+          {fable, fable, ~w(default low medium high), "low",
+           %{"mode" => "adaptive", "effort" => "low", "display" => "summarized"}, true},
+          {fable, fable, ~w(default low medium high), "medium",
+           %{"mode" => "adaptive", "effort" => "medium", "display" => "summarized"}, true},
+          {fable, fable, ~w(default low medium high), "high",
+           %{"mode" => "adaptive", "effort" => "high", "display" => "summarized"}, true}
+        ] do
+      assert {:ok, prepared} =
+               load(fixture, ["--model", authored, "--reasoning", level, "--max-tokens", "8192"])
+
+      configuration = prepared.genesis["initial_configuration"]
+      assert configuration == prepared.selection.configuration
+      assert configuration["model"] == model
+      assert configuration["reasoning"] == level
+      assert configuration["max_tokens"] == 8192
+      assert configuration["model_capabilities"]["reasoning_levels"] == levels
+
+      assert configuration["context_token_budget"] ==
+               if(model == haiku, do: 191_808, else: 991_808)
+
+      assert configuration["provider_mapping"] == %{
+               "mapping_revision" =>
+                 if(model == haiku,
+                   do: "loopex.anthropic.haiku45.v1",
+                   else: "loopex.anthropic.fable51.v1"
+                 ),
+               "renderer_revision" => "loopex.anthropic.native.v1",
+               "continuation_required" => continuation,
+               "canonical_terminal_tool_history" => true,
+               "thinking_disabled" => level == "none",
+               "thinking" => thinking
+             }
+
+      assert prepared.selection.origins["/session/model"] == "flag"
+      assert prepared.selection.origins["/session/reasoning"] == "flag"
+      assert prepared.selection.origins["/session/max_tokens"] == "flag"
+      assert {:ok, normalized} = SessionGenesis.normalize(prepared.genesis)
+      assert normalized == prepared.genesis
+      assert prepared.selection.maintenance_model == nil
+      refute File.exists?(Path.join(fixture.root, "state"))
+    end
+  end
+
+  test "chat preparation refuses unsupported cells and never enlarges manual reply allowances",
+       fixture do
+    for {level, budget} <- [{"low", 1024}, {"medium", 2048}, {"high", 4096}] do
+      assert load(fixture, ["--reasoning", level, "--max-tokens", Integer.to_string(budget)]) ==
+               {:error, :invalid_model_mapping}
+
+      assert {:ok, prepared} =
+               load(fixture, ["--reasoning", level, "--max-tokens", Integer.to_string(budget + 1)])
+
+      assert prepared.selection.configuration["max_tokens"] == budget + 1
+
+      assert prepared.selection.configuration["provider_mapping"]["thinking"]["budget_tokens"] ==
+               budget
+    end
+
+    for {model, level} <- [
+          {"anthropic:claude-fable-5-1", "none"},
+          {"anthropic:claude-haiku-latest", "high"},
+          {"anthropic:unregistered-fixture", "low"}
+        ] do
+      assert load(fixture, ["--model", model, "--reasoning", level, "--max-tokens", "8192"]) ==
+               {:error, :invalid_model_mapping}
+    end
+
+    refute File.exists?(Path.join(fixture.root, "state"))
+  end
+
   test "missing paths and authored bounds refuse before startup and cannot be repaired later",
        fixture do
     File.write!(fixture.config_path, :json.encode(Map.delete(profile(), "paths")))
