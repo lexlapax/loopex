@@ -124,6 +124,14 @@ defmodule LoopexCli.M7FixtureTest do
       update_in(catalog["fixtures"], &Map.delete(&1, "long")),
       put_in(catalog, ["fixtures", "repair", "workspace"], "../repair"),
       put_in(catalog, ["fixtures", "repair", "allowed_changed_paths"], ["../oracle.exs"]),
+      put_in(catalog, ["fixtures", "review", "allowed_changed_paths"], ["lib/fees.ex"]),
+      put_in(catalog, ["fixtures", "repair", "allowed_created_paths"], ["fake-test.exs"]),
+      put_in(catalog, ["fixtures", "feature", "allowed_changed_paths"], []),
+      put_in(catalog, ["fixtures", "long", "allowed_created_paths"], [
+        "release.txt",
+        "batches.txt",
+        "extra.txt"
+      ]),
       put_in(catalog, ["fixtures", "repair", "run_bounds", "max_turns"], 64),
       put_in(catalog, ["fixtures", "feature", "required_model_actions"], []),
       put_in(catalog, ["fixtures", "review", "objective_results", "finding"], "all good"),

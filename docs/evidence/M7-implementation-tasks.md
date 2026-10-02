@@ -91,6 +91,31 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T13's fixture source catalog now requires each retained task's exact
+  changed/created path allowance, rather than accepting any well-formed path
+  list. Four mutation witnesses reject review edits, invented repair files,
+  removed feature edit allowance and extra long-fixture outputs. Existing
+  seed/oracle bytes and all seven deterministic cases remain unchanged.
+  Extended tests fail against the prior validator; the corrected complete file
+  passes seven cases in 5.1 seconds current and 4.6 seconds floor. Compilation,
+  formatting, documentation, dependency and status gates pass. Complete outputs:
+  `/private/tmp/loopex-m7-fixture-write-policy-red-20261002.log`, SHA-256
+  `d726502b8532f6a408b650136219b1ea372f6d50067e12a46cbd5e78b5211b63`;
+  `/private/tmp/loopex-m7-fixture-write-policy-current-final-20261002.log`, SHA-256
+  `a4c89c2d9884c9a403f3993f41bdbb7af3b48aa152035bfbb95309a76a954c38`;
+  `/private/tmp/loopex-m7-fixture-write-policy-floor-20261002.log`, SHA-256
+  `b2e18050fabacedd03f4333708af977e447cfe3dd08bbd6fa9fe9ccb310e1041`.
+  Original counts: 32 done / 154 remaining. Added: 110 done / 12 remaining.
+- Failed: the complete fast check ran once on clean checkpoint projection SHA
+  `e5f03ff8e946dc6c99bf3f955f76894fdd27371d` and exited 1. Ten application
+  suites pass; ReqLLM passes 384/385 with its namespace-cleanup interrupted-wait
+  case missing Port exit-status and DOWN inside the captured 2,100 ms window.
+  Its subsequent live process-group inventory is empty and all five guard
+  signals succeeded. This does not prove the terminal bound. Required cleanup
+  acknowledgement refusal and termination assertions remain intact; root-cause
+  investigation is pending. Complete output:
+  `/private/tmp/loopex-m7-e5f03ff8-fast-check.log`, SHA-256
+  `aa02a54a81bbc417818025580fedfc8c787bb513e15a05d05386ebede9f67f75`.
 - Passed: full fast check once on clean fixture catalog SHA
   `08beed1583474ed737df60ca7063b89a8a6afe90`: all eleven application suites,
   3,185 passed, 34 existing exclusions, 890 seconds. Complete output:
@@ -3352,6 +3377,7 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [x] Pin the retained four coding fixtures in a closed source catalog with literal prompts, bounds, digests/modes, allowed changes, objective results and required model actions; protect complete workspace and immutable oracle inventories around actual deterministic oracle runs on both toolchains.
+- [x] Freeze each fixture catalog entry to its exact changed/created path policy; reject well-formed edits that broaden or remove the retained task allowance, with failing-before and both-toolchain proofs.
 
 ## T14 — Implement attempts tracking and evidence validation
 

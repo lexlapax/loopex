@@ -99,7 +99,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.FixtureManifest do
   defp valid_entry?(name, entry) do
     closed?(entry, @entry_keys) and entry["workspace"] == name <> "/workspace" and
       files?(entry["initial_files"]) and directories?(entry["initial_directories"]) and
-      paths?(entry["allowed_changed_paths"]) and paths?(entry["allowed_created_paths"]) and
+      entry["allowed_changed_paths"] == changed_paths(name) and
+      entry["allowed_created_paths"] == created_paths(name) and
       entry["allowed_changed_paths"] -- Map.keys(entry["initial_files"]) == [] and
       Enum.all?(entry["allowed_created_paths"], &(not Map.has_key?(entry["initial_files"], &1))) and
       closed?(entry["oracle"], ~w(path sha256 mode)) and
@@ -199,10 +200,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.FixtureManifest do
       is_map(dirs) and map_size(dirs) <= 16 and
         Enum.all?(dirs, fn {path, mode} -> path?(path) and mode == 493 end)
 
-  defp paths?(paths),
-    do:
-      is_list(paths) and length(paths) <= 16 and
-        length(Enum.uniq(paths)) == length(paths) and Enum.all?(paths, &path?/1)
+  defp changed_paths("repair"), do: ["lib/ledger.ex"]
+  defp changed_paths("feature"), do: ["lib/row_encoder.ex"]
+  defp changed_paths(_), do: []
+  defp created_paths("long"), do: ["release.txt", "batches.txt"]
+  defp created_paths(_), do: []
 
   defp path?(path),
     do:
