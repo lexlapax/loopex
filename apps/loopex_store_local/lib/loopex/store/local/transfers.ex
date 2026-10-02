@@ -69,6 +69,62 @@ defmodule Loopex.Store.Local.Transfers do
   @spec live(pid()) :: [binary()]
   def live(owner) when is_pid(owner), do: GenServer.call(owner, :live)
 
+  @doc false
+  @spec reserve_job(pid(), integer()) :: {:ok, map()} | {:error, atom()}
+  def reserve_job(owner, deadline),
+    do: GenServer.call(owner, {:reserve_job, deadline}, :infinity)
+
+  @doc false
+  @spec release_job(pid(), reference()) :: :ok
+  def release_job(owner, monitor), do: GenServer.call(owner, {:release_job, monitor}, :infinity)
+
+  @doc false
+  @spec job_window(map(), map(), map(), integer(), pid()) :: {:ok, binary()} | {:error, term()}
+  def job_window(state, object, window, deadline, guardian) do
+    with {:ok, source} <- object_path(state, object),
+         {:ok, size} <- object_size(source, state.limits),
+         :ok <- exact_size(size, object),
+         {:ok, bounds} <- window_bounds(window, size),
+         :ok <- reserve_open_work(size, state.limits.open_work_bytes),
+         {:ok, snapshot, digest} <-
+           verify_into_snapshot(state, source, size,
+             open_deadline_ms:
+               min(state.limits.open_deadline_ms, deadline - System.monotonic_time(:millisecond)),
+             work_observer: guardian
+           ) do
+      try do
+        if digest == object.digest do
+          send(guardian, {:job_read_phase, self(), System.monotonic_time(:millisecond)})
+
+          if bounds.length == 0 do
+            {:ok, ""}
+          else
+            case :file.pread(snapshot, bounds.start, bounds.length) do
+              {:ok, bytes} when byte_size(bytes) == bounds.length ->
+                charge(guardian, :emitted, byte_size(bytes))
+                {:ok, bytes}
+
+              {:ok, bytes} ->
+                charge(guardian, :emitted, byte_size(bytes))
+                {:error, :artifact_unreadable}
+
+              _ ->
+                {:error, :artifact_unreadable}
+            end
+          end
+        else
+          {:error, :artifact_digest_mismatch}
+        end
+      after
+        File.close(snapshot)
+      end
+    end
+  end
+
+  defp reserve_open_work(size, budget) do
+    if 2 * size <= budget, do: :ok, else: {:error, :open_work_budget_exhausted}
+  end
+
   @impl GenServer
   def init(options) do
     root = Keyword.fetch!(options, :root)
@@ -81,11 +137,33 @@ defmodule Loopex.Store.Local.Transfers do
        root: root,
        scratch: scratch,
        limits: Keyword.get(options, :limits, ArtifactStore.transfer_limits()),
-       transfers: %{}
+       transfers: %{},
+       jobs: %{}
      }}
   end
 
   @impl GenServer
+  def handle_call({:reserve_job, deadline}, {caller, _tag}, state) do
+    with true <- Process.alive?(caller) and System.monotonic_time(:millisecond) < deadline,
+         :ok <- admit_count(state) do
+      monitor = Process.monitor(caller)
+      placement = state |> Map.take([:root, :scratch, :limits]) |> Map.put(:job_monitor, monitor)
+      {:reply, {:ok, placement}, %{state | jobs: Map.put(state.jobs, monitor, caller)}}
+    else
+      false -> {:reply, {:error, :open_deadline_exhausted}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:release_job, monitor}, {caller, _tag}, state) do
+    if Map.get(state.jobs, monitor) == caller do
+      Process.demonitor(monitor, [:flush])
+      {:reply, :ok, %{state | jobs: Map.delete(state.jobs, monitor)}}
+    else
+      {:reply, :ok, state}
+    end
+  end
+
   def handle_call({:open, object, use_locator, window, options}, _from, state) do
     with :ok <- admit_count(state),
          {:ok, source} <- object_path(state, object),
@@ -140,11 +218,15 @@ defmodule Loopex.Store.Local.Transfers do
   @impl GenServer
   def handle_info({:expire, transfer_ref}, state), do: {:noreply, release(state, transfer_ref)}
 
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state),
+    do: {:noreply, %{state | jobs: Map.delete(state.jobs, monitor)}}
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
   def terminate(_reason, state) do
     Enum.each(state.transfers, fn {_ref, record} -> File.close(record.device) end)
+    Enum.each(state.jobs, fn {_ref, worker} -> Process.exit(worker, :kill) end)
     :ok
   end
 
@@ -213,7 +295,15 @@ defmodule Loopex.Store.Local.Transfers do
     result =
       File.open(source, [:read, :binary, :raw], fn reader ->
         with {:ok, snapshot} <- open_snapshot(state) do
-          case copy(reader, snapshot, :crypto.hash_init(:sha256), size, deadline, budget) do
+          case copy(
+                 reader,
+                 snapshot,
+                 :crypto.hash_init(:sha256),
+                 size,
+                 deadline,
+                 budget,
+                 Keyword.get(options, :work_observer)
+               ) do
             {:ok, digest} ->
               {:ok, snapshot, digest}
 
@@ -231,10 +321,10 @@ defmodule Loopex.Store.Local.Transfers do
     end
   end
 
-  defp copy(_reader, _snapshot, _context, _left, _deadline, budget) when budget < 0,
+  defp copy(_reader, _snapshot, _context, _left, _deadline, budget, _observer) when budget < 0,
     do: {:error, :open_work_budget_exhausted}
 
-  defp copy(reader, snapshot, context, left, deadline, budget) do
+  defp copy(reader, snapshot, context, left, deadline, budget, observer) do
     cond do
       System.monotonic_time(:millisecond) > deadline ->
         {:error, :open_deadline_exhausted}
@@ -247,26 +337,39 @@ defmodule Loopex.Store.Local.Transfers do
 
         case :file.read(reader, wanted) do
           {:ok, bytes} when byte_size(bytes) == wanted ->
+            charge(observer, :source_read, wanted)
+
             case :file.write(snapshot, bytes) do
               :ok ->
+                charge(observer, :snapshot_written, wanted)
+
                 copy(
                   reader,
                   snapshot,
                   :crypto.hash_update(context, bytes),
                   left - wanted,
                   deadline,
-                  budget - 2 * wanted
+                  budget - 2 * wanted,
+                  observer
                 )
 
               {:error, reason} ->
+                charge(observer, :snapshot_write_uncertain, wanted)
                 {:error, {:artifact_unreadable, reason}}
             end
+
+          {:ok, bytes} ->
+            charge(observer, :source_read, byte_size(bytes))
+            {:error, :artifact_truncated}
 
           _short_or_error ->
             {:error, :artifact_truncated}
         end
     end
   end
+
+  defp charge(nil, _kind, _bytes), do: :ok
+  defp charge(observer, kind, bytes), do: send(observer, {:job_storage_work, self(), kind, bytes})
 
   # Concept: a snapshot with no name.
   #
@@ -312,7 +415,7 @@ defmodule Loopex.Store.Local.Transfers do
   end
 
   defp admit_count(state) do
-    if map_size(state.transfers) < state.limits.per_runtime,
+    if map_size(state.transfers) + map_size(state.jobs) < state.limits.per_runtime,
       do: :ok,
       else: {:error, :transfer_limit_reached}
   end
@@ -321,7 +424,11 @@ defmodule Loopex.Store.Local.Transfers do
   # the object where the adapter put it rather than inventing a second layout.
   defp object_path(state, %{locator: locator})
        when is_binary(locator) and byte_size(locator) == 64 do
-    {:ok, Path.join([state.root, binary_part(locator, 0, 2), locator])}
+    if locator =~ ~r/\A[0-9a-f]{64}\z/ do
+      {:ok, Path.join([state.root, binary_part(locator, 0, 2), locator])}
+    else
+      {:error, :unknown_artifact}
+    end
   end
 
   defp object_path(_state, _object), do: {:error, :unknown_artifact}

@@ -184,9 +184,10 @@ defmodule Loopex.Store.Local.Artifacts do
   @spec describe(handle(), binary()) :: {:ok, ArtifactStore.artifact_use()} | {:error, term()}
   def describe(%{root: root}, @use_locator_prefix <> use_digest) when is_binary(use_digest) do
     if mine?(use_digest) do
-      case File.read(use_path(root, use_digest)) do
+      case read_use(use_path(root, use_digest)) do
         {:ok, bytes} -> decode_use(bytes)
         {:error, :enoent} -> {:error, :unknown_artifact_use}
+        {:error, :artifact_integrity_failed} -> {:error, :artifact_integrity_failed}
         {:error, reason} -> {:error, {:artifact_unreadable, reason}}
       end
     else
@@ -195,6 +196,28 @@ defmodule Loopex.Store.Local.Artifacts do
   end
 
   def describe(_handle, _use_locator), do: {:error, :unknown_artifact_use}
+
+  defp read_use(path) do
+    limit = ArtifactStore.max_use_bytes()
+
+    case File.open(path, [:read, :binary, :raw], fn reader ->
+           with {:ok, bytes} when byte_size(bytes) <= limit <- :file.read(reader, limit + 1),
+                :eof <- :file.read(reader, 1) do
+             {:ok, bytes}
+           else
+             {:error, reason} -> {:error, reason}
+             _ -> {:error, :artifact_integrity_failed}
+           end
+         end) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl Loopex.ArtifactStore
+  @spec read_job_range(handle(), Loopex.Executor.JobRequest.t()) ::
+          {:ok, binary()} | {:error, term()}
+  def read_job_range(handle, job), do: Loopex.Store.Local.JobRange.read(handle, job)
 
   @impl Loopex.ArtifactStore
   @spec open_transfer(handle(), ArtifactStore.artifact_object(), binary(), map()) ::
@@ -417,6 +440,8 @@ defmodule Loopex.Store.Local.Artifacts do
   # than a label. `:safe` refuses a term carrying a pid, port, reference,
   # function, or an atom this VM does not already know, and a truncated or
   # foreign file raises rather than decoding into a plausible record.
+  defp decode_use(<<131, 80, _compressed::binary>>), do: {:error, :artifact_integrity_failed}
+
   defp decode_use(bytes) do
     with [@use_tag, ordered] <- :erlang.binary_to_term(bytes, [:safe]),
          artifact_use when is_map(artifact_use) <- unorder(ordered),

@@ -13,6 +13,12 @@ tracked separately and do not increase the original denominator. An unchecked
 original item may have substantial partial implementation; it closes only when
 its entire stated outcome is proved.
 
+At each task or subtask completion, report done and remaining counts for both
+the original checklist and the added implementation subtasks, separately and
+grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
+they do not mean the original task is complete. This follows the maintainer's
+2026-10-01 update to the active implementation goal.
+
 ## Current work
 
 - Done: original T01 is complete, including live conversation after failure and
@@ -29,8 +35,10 @@ its entire stated outcome is proved.
   normalized call identity and metadata. Storage and executor integration remain open.
 - Decision recorded: on 2026-10-01 the maintainer selected the separate optional
   `ArtifactStore.read_job_range(handle, validated_job)` callback for job reads.
-  Implement it with the accepted job bounds and shared transfer capacity; legacy
-  adapters without it refuse job reads. Existing attachment callbacks remain compatible.
+  The local callback now verifies real objects with shared transfer capacity,
+  reserved work and a linked deadline watchdog. Executor dispatch and refusal for
+  adapters without the callback remain to be joined. Existing attachment callbacks
+  remain compatible.
 - Done: T02 resolves committed-receipt artifact membership before policy and
   binds approved ranges to their exact source in the journaled job. Prepared
   references and real range transfers remain open, so original counts are unchanged.
@@ -1521,7 +1529,8 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Reproduce and repair source-descriptor leakage on snapshot creation failure; close snapshot descriptors on permission/unlink failure and verify existing transfer behavior on both supported toolchains.
 - [ ] Enforce the accepted job-owned cancellation/deadline and cumulative-work bounds when integrating range execution; the attachment implementation does not yet provide these guarantees.
 - [x] Implement pure UTF-8 range-result encoding and prove maximal progress under the complete encoded conversation-message ceiling, including escaped content and metadata, through the real lineage projector.
-- [ ] Implement the maintainer-selected optional job-range callback and join its verified bytes to the range encoder and executor settlement.
+- [x] Implement the maintainer-selected optional job-range callback in the local store, including canonical job validation, closed resolved data, stored provenance, shared capacity, whole-object verification, work reservation, deadline watchdog and descriptor cleanup.
+- [ ] Join the job-range callback to exact 1.1.0 executor dispatch, unsupported-adapter refusal, range encoding and settlement; prove repeated dispatch does not reopen a completed job and exercise cancellation through the real executor.
 
 ### Verification evidence
 
@@ -1532,8 +1541,77 @@ window with job deadline/cancellation, shared four-transfer capacity, bounded
 work accounting and cleanup before return. Adapters lacking the callback refuse
 job range reads; the existing attachment triple stays compatible. The alternative
 was versioning and extending that triple with job context. This records the
-current maintainer decision authorizing the new cross-application callback;
-implementation and its conformance proof remain pending.
+current maintainer decision authorizing the new cross-application callback.
+The local implementation is described below; executor integration remains pending.
+
+The optional port callback returns only the requested raw bytes, shortened at
+EOF, after cleanup. It runs in the executor's disposable I/O process, which may
+be terminated to enforce a bound. `Runtime.ArtifactRead.job_range/1` independently
+validates the canonical job and closed 1.1.0 resolution before storage. The local
+adapter revalidates the full object/use binding and matches all five provenance
+labels against the resolved source and current session. The session owner still
+owns proof of journal membership; this callback does not reconstruct the journal.
+
+The transfer owner reserves one of its four shared slots and monitors the job
+caller. All file I/O stays in that caller; a linked watchdog owns no descriptors.
+The watchdog can terminate a caller blocked in I/O or waiting for admission,
+enforces the earlier monotonic/wall cutoff, bounds opening at 60 seconds and
+reading at five seconds, and stops the caller if the transfer owner disappears.
+The one-shot window's lifetime is consequently shorter than the ten-minute
+transfer ceiling. Successful return follows source/use/snapshot closure,
+capacity release and observed watchdog termination. Caller death releases its
+slot through the monitor. Existing attachment operations retain their API.
+
+Before storage, the callback reserves the greater of 1 MiB and the full source
+read plus snapshot write plus requested emission. It refuses objects above
+64 MiB or reservations above the 1-GiB job allowance. The debit begins at 1 MiB
+and grows monotonically with observed reads, writes and emission. A failed write
+conservatively charges its attempted length once. The local verifier also rejects
+insufficient open-work allowance before opening the object. The callback opens
+one window and has no reopen loop; the executor's repeated-dispatch proof remains
+an integration obligation rather than a claim about direct adapter calls.
+
+The shared verifier now validates the local 64-character hexadecimal locator
+before constructing a path. A negative case supplies a valid canonical use whose
+locator names an existing non-object file; the local namespace refuses it.
+Use-record reads are bounded by the existing canonical-use ceiling, reject
+trailing bytes, and reject compressed terms before decoding. Existing canonical
+use bytes remain unchanged.
+
+The real-storage witnesses cover first/last/empty ranges, corruption outside the
+requested range, session/source mismatch, malformed resolved jobs, capacity in
+both directions, queue-time deadline expiry without late reservation, and
+open-work refusal before source I/O. Scoped tracing observes actual source/use/
+snapshot descriptors closed while the caller remains alive, plus exactly one
+source pass and snapshot write on success and corruption, with emitted bytes
+charged only on success. The complete Store suite passed 89 tests on each
+toolchain before the final locator case and monotonic-debit refinement. Final
+focused transfer tests and Core artifact tests cover those final changes; this
+is not yet a complete executor or closure proof.
+
+Final transfer tests pass 41 cases in 1.9 seconds on each toolchain; Core
+artifact tests pass 14 in 0.8 seconds on each. Retained outputs:
+
+- Final current transfers: `/private/tmp/loopex-m7-job-range-boundary-current.log`,
+  SHA-256 `cb07936c62a545ff9cbcf2bdb085910bc0a2ca28b2c6fe01696a26c29734a6c9`.
+- Final floor transfers: `/private/tmp/loopex-m7-job-range-boundary-floor.log`,
+  SHA-256 `4d66e3b7a14906106957fa261498949867066274b47131d0b9049f6211231042`.
+- Current Core: `/private/tmp/loopex-m7-job-range-core-current.log`, SHA-256
+  `c53cdbe53a35e7ff5b018cd6191dc4928089a7017765c94b098ba1edfe7ab3ed`.
+- Floor Core: `/private/tmp/loopex-m7-job-range-core-floor.log`, SHA-256
+  `bf4177db653357efd2e6a9c8a8a03c0e9f147635bc5abd156ec03fd0d7de552c`.
+- Earlier complete current Store suite, 11.3 seconds:
+  `/private/tmp/loopex-m7-job-range-store-current.log`, SHA-256
+  `655d69c123586448b596ba852327ea973998c565c9da55d29357a09baed911f5`.
+- Earlier complete floor Store suite, 11.1 seconds:
+  `/private/tmp/loopex-m7-job-range-store-floor.log`, SHA-256
+  `2b0152cb9d85ed30229d25fc4fcba0a5ba5ce5935c6a2b8b1567bd560085371f`.
+
+The first seven-case run exposed an extra `artifact_unreadable` wrapper around
+the new oversized-use refusal. The adapter now preserves the existing
+`artifact_integrity_failed` classification and keeps actual I/O errors distinct.
+That failed output is retained at `/private/tmp/loopex-m7-job-range-first.log`,
+SHA-256 `230c66ceab158e1cfc330da5efffab27289989fed65dc07ff78a5937e088327d`.
 
 `Executor.Local.ArtifactRange` now encodes an already verified window, without
 storage access or a claim of membership/integrity validation. It retains the

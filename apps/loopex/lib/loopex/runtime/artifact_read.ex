@@ -17,6 +17,59 @@ defmodule Loopex.Runtime.ArtifactRead do
   alias LoopexProtocol.Canonical
 
   @uint64_max 18_446_744_073_709_551_615
+  @reference_keys [
+    :digest,
+    :size,
+    :locator,
+    :media_type,
+    :role,
+    :use_canonicalization_version,
+    :use_digest,
+    :use_locator
+  ]
+
+  @doc false
+  @spec job_range(map()) :: {:ok, map()} | {:error, :invalid_tool_arguments}
+  def job_range(
+        %{tool_id: "loopex.read", tool_version: "1.1.0", validated_arguments: arguments} = job
+      ) do
+    with :ok <- Loopex.Executor.validate_job(job),
+         %{"resolved_artifact" => %{"reference" => plain, "source" => source} = resolved} <-
+           arguments,
+         true <- map_size(resolved) == 2 and is_map(plain) and map_size(plain) == 8,
+         reference = Map.new(@reference_keys, &{&1, Map.get(plain, Atom.to_string(&1))}),
+         true <- Loopex.ArtifactStore.valid_reference?(reference),
+         true <- valid_source?(source),
+         model = Map.delete(arguments, "resolved_artifact"),
+         {:ok, ^arguments} <- resolve_range(model, %{reference.use_locator => resolved}) do
+      {:ok,
+       %{reference: reference, source: source, offset: model["offset"], length: model["length"]}}
+    else
+      _ -> {:error, :invalid_tool_arguments}
+    end
+  end
+
+  def job_range(_), do: {:error, :invalid_tool_arguments}
+
+  defp valid_source?(
+         %{
+           "record_kind" => kind,
+           "journal_version" => version,
+           "record_digest" => digest,
+           "run_id" => run,
+           "operation_id" => operation,
+           "attempt" => attempt,
+           "tool_call_id" => call
+         } = source
+       ) do
+    map_size(source) == 7 and
+      kind in ["executor_receipt_committed", "tool_result_reference_prepared"] and
+      is_integer(version) and version > 0 and is_integer(attempt) and attempt > 0 and
+      is_binary(digest) and byte_size(digest) == 64 and digest =~ ~r/\A[0-9a-f]{64}\z/ and
+      Enum.all?([run, operation, call], &(is_binary(&1) and &1 != ""))
+  end
+
+  defp valid_source?(_), do: false
 
   @doc false
   @spec resolve(map(), map(), map()) :: {:ok, map()} | {:error, :invalid_tool_arguments}

@@ -33,7 +33,8 @@ defmodule Loopex.ArtifactStore do
 
   ## Technical depth
 
-  Four callbacks and five core-owned facades. The `handle` is edge-private
+  Four required callbacks and five core-owned facades, with optional attachment
+  transfers and job-range retrieval. The `handle` is edge-private
   placement state and is never journaled, published, or transported; the
   `t:artifact_reference/0` is the only thing that crosses a boundary.
 
@@ -261,13 +262,24 @@ defmodule Loopex.ArtifactStore do
 
   @callback close_transfer(handle :: term(), transfer()) :: :ok | {:error, term()}
 
+  # Concept: an approved job retrieves one verified range without an attachment.
+  # Technical depth: the executor validates its grant before this optional call.
+  # The adapter verifies the resolved object/use and session provenance, reserves
+  # shared runtime capacity and job work before storage, and owns deadline,
+  # cancellation and descriptor cleanup. Success returns exactly the requested
+  # raw bytes, shortened only at EOF, after cleanup. It never falls back to fetch.
+  # Invoke in the executor's disposable I/O process: deadline enforcement may
+  # terminate that process, whose DOWN is the executor's cleanup evidence.
+  @callback read_job_range(handle :: term(), Loopex.Executor.JobRequest.t()) ::
+              {:ok, binary()} | {:error, term()}
+
   # Concept: the transfer triple is a capability, not a requirement.
   #
   # Technical depth: accepted ADR 0028 narrowly extends ADR 0015's callback
   # inventory rather than replacing it, so an adapter written before this
   # decision stays conformant and the facade refuses the query family as
   # unsupported rather than crashing on a missing function.
-  @optional_callbacks open_transfer: 4, read_transfer: 3, close_transfer: 2
+  @optional_callbacks open_transfer: 4, read_transfer: 3, close_transfer: 2, read_job_range: 2
 
   @doc """
   ## Concept
