@@ -18,6 +18,7 @@ defmodule Loopex.Runtime.LineageProjection do
 
   alias Loopex.Conversation
   alias Loopex.Runtime.ToolResultExcerpt
+  alias LoopexProtocol.Frame
   alias LoopexProtocol.ToolDefinition
 
   @question_generation ToolDefinition.generation(ToolDefinition.question_definition())
@@ -32,21 +33,7 @@ defmodule Loopex.Runtime.LineageProjection do
   def project(elements, binding, sources, frozen, allowance)
       when is_map(binding) and is_integer(allowance) and allowance in 0..2_048 do
     with {:ok, entries} <- Conversation.lineage_entries(elements) do
-      results =
-        elements
-        |> Enum.filter(&(&1.kind == :tool_result))
-        |> Map.new(&{{&1.run_id, &1.turn_number, &1.tool_call_id}, &1})
-
-      calls =
-        Enum.reduce(elements, %{}, fn
-          %{kind: :assistant_message} = element, acc ->
-            Enum.reduce(element.tool_calls, acc, fn call, acc ->
-              Map.put(acc, {element.run_id, element.turn_number, call.tool_call_id}, call)
-            end)
-
-          _, acc ->
-            acc
-        end)
+      {results, calls} = result_facts(elements)
 
       Enum.reduce_while(entries, {:ok, [], []}, fn {source, message}, {:ok, projected, ranges} ->
         case project_entry(source, message, results, calls, binding, sources, frozen, allowance) do
@@ -70,6 +57,71 @@ defmodule Loopex.Runtime.LineageProjection do
   end
 
   def project(_, _, _, _, _), do: {:error, :context_projection_invalid}
+
+  @doc false
+  @spec preparation_candidates(list(), map() | nil, map(), map()) ::
+          {:ok, [map()]} | {:error, atom()}
+  # Concept: only oversized, unfrozen executor results without a usable
+  # reference need retention before ordinary excerpt allocation.
+  # Technical depth: inspect the complete encoded tool message, including
+  # escaping and identity. Selection precedes this call; excluded history never
+  # enters its ordered result. No storage access or episode credit is consumed.
+  def preparation_candidates(_elements, nil, _sources, _frozen), do: {:ok, []}
+
+  def preparation_candidates(elements, binding, sources, frozen) when is_map(binding) do
+    with {:ok, entries} <- Conversation.lineage_entries(elements) do
+      {results, calls} = result_facts(elements)
+
+      Enum.reduce_while(entries, {:ok, []}, fn
+        {%{"kind" => "session_tool_result"} = source, message}, {:ok, candidates} ->
+          identity = {source["run_id"], source["turn"], source["call_id"]}
+          result = Map.fetch!(results, identity)
+          call = Map.fetch!(calls, identity)
+
+          with {:ok, encoded} <- Frame.encode(message) do
+            fixed = Map.has_key?(frozen, source) or fixed_result?(call, binding)
+            retained = match?({:ok, _}, reference(result, sources))
+
+            if not fixed and not retained and IO.iodata_length(encoded) - 1 > 2_048 do
+              {:cont, {:ok, [%{source_reference: source, message: message} | candidates]}}
+            else
+              {:cont, {:ok, candidates}}
+            end
+          else
+            _ -> {:halt, {:error, :context_projection_invalid}}
+          end
+
+        _, acc ->
+          {:cont, acc}
+      end)
+      |> case do
+        {:ok, candidates} -> {:ok, Enum.reverse(candidates)}
+        error -> error
+      end
+    end
+  end
+
+  def preparation_candidates(_, _, _, _), do: {:error, :context_projection_invalid}
+
+  defp result_facts(elements) do
+    results =
+      elements
+      |> Enum.filter(&(&1.kind == :tool_result))
+      |> Map.new(&{{&1.run_id, &1.turn_number, &1.tool_call_id}, &1})
+
+    calls =
+      Enum.reduce(elements, %{}, fn
+        %{kind: :assistant_message} = element, acc ->
+          Enum.reduce(element.tool_calls, acc, fn call, acc ->
+            Map.put(acc, {element.run_id, element.turn_number, call.tool_call_id}, call)
+          end)
+
+        _, acc ->
+          acc
+      end)
+
+    {results, calls}
+  end
 
   defp project_entry(source, message, results, calls, binding, sources, frozen, allowance) do
     case Map.fetch(frozen, source) do

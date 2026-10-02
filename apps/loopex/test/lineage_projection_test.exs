@@ -2,10 +2,14 @@ defmodule Loopex.LineageProjectionTest do
   use ExUnit.Case, async: true
 
   alias Loopex.Runtime.{ArtifactReadCapabilities, LineageProjection}
+  alias Loopex.Conversation
   alias LoopexProtocol.Frame
 
   @binding ArtifactReadCapabilities.table() |> Map.values() |> Enum.find(& &1)
   @read {@binding["tool_id"], @binding["tool_version"], @binding["definition_digest"]}
+  @question_generation LoopexProtocol.ToolDefinition.generation(
+                         LoopexProtocol.ToolDefinition.question_definition()
+                       )
 
   test "only receipt-owned references become excerpts and the original elements stay complete" do
     {elements, sources} = fixture()
@@ -31,6 +35,73 @@ defmodule Loopex.LineageProjectionTest do
     for index <- [sources, %{}], allowance <- [0, 2_048] do
       assert {:ok, entries, nil} = LineageProjection.project(elements, nil, index, %{}, allowance)
       assert elem(List.last(entries), 1)["content"] == List.last(elements).content
+    end
+  end
+
+  test "preparation uses encoded message cost, oldest-first order and usable membership" do
+    {elements, sources} = fixture()
+    later = elements |> Enum.drop(1) |> Enum.map(&%{&1 | turn_number: 2})
+
+    assert {:ok, [first, second]} =
+             LineageProjection.preparation_candidates(elements ++ later, @binding, %{}, %{})
+
+    assert first.source_reference["turn"] == 1
+    assert second.source_reference["turn"] == 2
+    assert first.message["content"] == List.last(elements).content
+
+    assert {:ok, []} =
+             LineageProjection.preparation_candidates(elements ++ later, @binding, sources, %{})
+
+    assert {:ok, [^second]} =
+             LineageProjection.preparation_candidates(
+               elements ++ later,
+               @binding,
+               %{},
+               %{first.source_reference => %{message: first.message, range: nil}}
+             )
+
+    altered = update_in(sources, [reference().use_locator, "reference", "size"], &(&1 + 1))
+
+    assert {:ok, [^first]} =
+             LineageProjection.preparation_candidates(elements, @binding, altered, %{})
+
+    assert {:ok, []} = LineageProjection.preparation_candidates(elements, nil, %{}, %{})
+  end
+
+  test "the exact encoded ceiling includes escaping and identity rather than raw text alone" do
+    {elements, _sources} = fixture()
+    short = put_in(elements, [Access.at(2), :content], String.duplicate("x", 1_929))
+    message = elem(List.last(elem(Conversation.lineage_entries(short), 1)), 1)
+    assert {:ok, encoded} = Frame.encode(message)
+    assert IO.iodata_length(encoded) - 1 == 2_048
+
+    assert {:ok, []} = LineageProjection.preparation_candidates(short, @binding, %{}, %{})
+
+    longer = update_in(short, [Access.at(2), :content], &(&1 <> "x"))
+    assert {:ok, [_]} = LineageProjection.preparation_candidates(longer, @binding, %{}, %{})
+
+    escaped = put_in(short, [Access.at(2), :content], String.duplicate("\"", 1_100))
+    assert byte_size(List.last(escaped).content) < 2_048
+    assert {:ok, [_]} = LineageProjection.preparation_candidates(escaped, @binding, %{}, %{})
+  end
+
+  test "questions and explicit artifact ranges remain fixed when they lack a reference" do
+    {elements, _} = fixture()
+
+    question =
+      put_in(
+        elements,
+        [Access.at(1), :tool_calls, Access.at(0), :generation],
+        @question_generation
+      )
+
+    range =
+      update_in(elements, [Access.at(1), :tool_calls, Access.at(0)], fn call ->
+        %{call | generation: @read, arguments: %{"artifact_use" => reference().use_locator}}
+      end)
+
+    for fixed <- [question, range] do
+      assert {:ok, []} = LineageProjection.preparation_candidates(fixed, @binding, %{}, %{})
     end
   end
 

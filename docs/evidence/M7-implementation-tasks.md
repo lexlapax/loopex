@@ -91,6 +91,28 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T02 now selects oversized inline preparation sources from the selected
+  ordinary lineage, using each complete encoded tool message rather than raw
+  content length. Receipt replay retains the original canonical record digest,
+  independently measured record byte cost, journal identity and only ADR 0015's
+  five provenance labels. Frozen native prefixes, questions, explicit ranges,
+  usable committed references and excluded units consume no preparation work.
+  Exact 2,048-byte, escaping, ordered-source, unavailable-reference and retained
+  receipt/replay witnesses pass 19 cases in 1.5 seconds on both supported pairs.
+  Original facts stay immutable; this adds no storage writes yet. Episode
+  reservation, completed reference records, live retention and early spill
+  remain open. Complete outputs:
+  `/private/tmp/loopex-m7-preparation-sources-current-complete-20261002.log`, SHA-256
+  `2fce001b7c58920a4407fce2fc33811df754978f9bcbc349b20013bae09208b2`;
+  `/private/tmp/loopex-m7-preparation-sources-floor-complete-20261002.log`, SHA-256
+  `501ac4c54f9e67c052835d921fc469d044d8a3b36a6f53b1c004b7179edd0b3e`.
+  Initial fixture assertions overlooked normalized call-ID length and used a
+  source whose encoded cost was below the cap; the failed output remains at
+  `/private/tmp/loopex-m7-preparation-sources-current-initial-20261002.log`, SHA-256
+  `a5d50f18989c65a64cbafb8217764eb90affd69d53aec7f8826e606af90d7d2b`.
+  Corrected fixtures pin actual normalized message cost and escaped content.
+  Original: 33 done / 153 remaining. Added: 120 done / 10 remaining.
+
 - Done: the maintainer-approved refusal-v2 amendment adds the exact optional
   pair project_resource_count/resource_pack_count for measured frozen prefixes.
   Both are unsigned 64-bit, at least one is positive, the six-count sum is
@@ -2799,6 +2821,8 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Audit the existing attachment-budget baseline without silently taking on deferred M8 work.
 
 ### Added implementation subtasks
+
+- [x] Select oversized unfrozen inline sources using complete encoded message cost and reconstruct their exact receipt digest, record byte cost and five-label provenance through replay before durable preparation reservation.
 
 - [x] Implement and test pure exact-generation derivation and retained-binding validation.
 - [x] Enforce the literal read-generation table during runtime/registry loading and executor startup; select executor tools by exact ID/version and retain the frozen capability through restart with an empty host registry. Artifact range execution and prepared-reference replay remain pending.

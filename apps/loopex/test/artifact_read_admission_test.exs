@@ -125,6 +125,74 @@ defmodule Loopex.ArtifactReadAdmissionTest do
              {:error, :invalid_effect_intent_transition}
   end
 
+  test "preparation sources retain exact committed receipt provenance and measured bytes",
+       context do
+    id = String.duplicate("\"", 1_000)
+
+    fixture =
+      Fixture.start(
+        tools: context.definitions,
+        script: [
+          %{text: "work", calls: [%{id: id, name: "write", arguments: %{"path" => "output"}}]},
+          %{text: "done", calls: []}
+        ]
+      )
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+    {session, attachment} = run(fixture, "prepare-source")
+    assert List.last(finish(attachment))["outcome"] == "completed"
+
+    records = Fixture.records(fixture, session)
+    receipt = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed"))
+    events = Fixture.events(fixture, session)
+    assert {:ok, recovered} = SessionState.recover(session, records, events)
+    [run] = recovered.run_order
+    assert {:ok, [source]} = SessionState.preparation_sources(recovered, run)
+
+    assert source.record_digest == Canonical.digest(receipt.payload)
+    assert source.journal_version == receipt.journal_version
+
+    assert {:ok, normalized, cost} =
+             Loopex.Store.normalize_and_measure_item(:record, receipt.payload)
+
+    assert source.record_byte_cost == cost
+    assert cost == byte_size(:erlang.term_to_binary(normalized, [:deterministic]))
+    assert source.content == receipt.payload["receipt"]["output"]
+
+    assert source.source_reference == %{
+             "kind" => "session_tool_result",
+             "run_id" => run,
+             "turn" => 1,
+             "call_id" => id
+           }
+
+    assert source.metadata ==
+             Map.take(
+               receipt.payload["receipt"],
+               ~w(session_id run_id operation_id attempt tool_call_id)
+             )
+
+    assert map_size(source.metadata) == 5
+    assert byte_size(source.content) < 2_048
+
+    # Concept: excluded units consume no storage allowance.
+    # Technical depth: the selected projection, not the whole receipt index,
+    # determines candidates after future compaction/tail selection.
+    selected =
+      Enum.filter(SessionState.lineage_elements(recovered, run), &(&1.kind == :user_message))
+
+    assert {:ok, []} = SessionState.preparation_sources(recovered, run, selected)
+    assert {:ok, []} = SessionState.preparation_sources(%{recovered | tool_selection: nil}, run)
+
+    assert {:error, :context_projection_invalid} =
+             SessionState.preparation_sources(%{recovered | tool_result_sources: %{}}, run)
+
+    refute Enum.any?(records, &(&1.payload.kind == "tool_result_reference_prepared"))
+    assert {:ok, repeated} = SessionState.recover(session, records, events)
+    assert repeated.tool_result_sources == recovered.tool_result_sources
+    assert repeated.conversation == recovered.conversation
+  end
+
   test "uncommitted receipts grant no membership and uncertain commits retain one source",
        context do
     for phase <- [:before_linearization, :after_linearization_before_result] do

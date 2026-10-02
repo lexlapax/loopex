@@ -187,6 +187,7 @@ defmodule Loopex.Runtime.SessionState do
           pending_work: map(),
           conversation: map(),
           artifact_sources: map(),
+          tool_result_sources: map(),
           lineage_projection_revision: nil | 1,
           run_order: [binary()],
           bounds: map(),
@@ -222,6 +223,10 @@ defmodule Loopex.Runtime.SessionState do
             # Technical depth: this derived index contains full references and
             # canonical source-payload digests, never object contents or handles.
             artifact_sources: %{},
+            # Concept: preparation retains receipt provenance without changing it.
+            # Technical depth: this replay-derived index holds the original
+            # record digest/cost and ADR 0015's five use labels, not output copies.
+            tool_result_sources: %{},
             lineage_projection_revision: nil,
             run_order: [],
             bounds: %{},
@@ -769,6 +774,41 @@ defmodule Loopex.Runtime.SessionState do
       frozen_lineage(state, run_id),
       allowance
     )
+  end
+
+  @doc false
+  @spec preparation_sources(t(), binary(), list() | nil) ::
+          {:ok, [map()]} | {:error, atom()}
+  # Concept: storage work is selected from committed ordinary history only.
+  # Technical depth: ordered candidates carry exact receipt identity, measured
+  # source-record bytes, original text and the five existing provenance labels.
+  # Native prefixes, explicit ranges, questions and already retained references
+  # consume no preparation credit. The owner reserves credit before doing IO.
+  def preparation_sources(state, run_id, elements \\ nil) do
+    binding = state.tool_selection && state.tool_selection["artifact_read"]
+
+    with {:ok, candidates} <-
+           Loopex.Runtime.LineageProjection.preparation_candidates(
+             elements || lineage_elements(state, run_id),
+             binding,
+             state.artifact_sources,
+             frozen_lineage(state, run_id)
+           ) do
+      Enum.reduce_while(candidates, {:ok, []}, fn candidate, {:ok, sources} ->
+        case Map.fetch(state.tool_result_sources, candidate.source_reference) do
+          {:ok, original} ->
+            source = Map.put(original, :content, candidate.message["content"])
+            {:cont, {:ok, [source | sources]}}
+
+          :error ->
+            {:halt, {:error, :context_projection_invalid}}
+        end
+      end)
+      |> case do
+        {:ok, sources} -> {:ok, Enum.reverse(sources)}
+        error -> error
+      end
+    end
   end
 
   # Concept: each open exchange keeps every message already sent to its provider.
@@ -3673,7 +3713,8 @@ defmodule Loopex.Runtime.SessionState do
          :ok <- receipt_matches_job(receipt, job),
          outcome = conversation_outcome(receipt.outcome),
          true <- outcome in Conversation.outcomes(),
-         true <- Conversation.admits_result?(elements(state, run_id), run_id, call.tool_call_id) do
+         true <- Conversation.admits_result?(elements(state, run_id), run_id, call.tool_call_id),
+         {:ok, normalized, source_bytes} <- Store.normalize_and_measure_item(:record, record) do
       result = %{
         kind: :tool_result,
         run_id: run_id,
@@ -3702,6 +3743,7 @@ defmodule Loopex.Runtime.SessionState do
         state
         |> append_element(run_id, result)
         |> put_pending(run_id, next_work)
+        |> retain_tool_result_source(result, normalized, source_bytes, job)
         |> Map.update!(:artifact_sources, fn sources ->
           Loopex.Runtime.ArtifactRead.retain(
             sources,
@@ -7971,5 +8013,30 @@ defmodule Loopex.Runtime.SessionState do
 
     reply = {:error, {:command_admission_too_large, dimension, candidate, observed, 65_536}}
     build_proposal(state, command.command_id, record, [], reply)
+  end
+
+  defp retain_tool_result_source(state, result, record, bytes, job) do
+    source = %{
+      "kind" => "session_tool_result",
+      "run_id" => result.run_id,
+      "turn" => result.turn_number,
+      "call_id" => result.tool_call_id
+    }
+
+    original = %{
+      source_reference: source,
+      record_digest: Canonical.digest(record),
+      record_byte_cost: bytes,
+      journal_version: state.journal_version + 1,
+      metadata: %{
+        "session_id" => state.session_id,
+        "run_id" => job.run_id,
+        "operation_id" => job.operation_id,
+        "attempt" => job.attempt,
+        "tool_call_id" => job.tool_call_id
+      }
+    }
+
+    %{state | tool_result_sources: Map.put(state.tool_result_sources, source, original)}
   end
 end
