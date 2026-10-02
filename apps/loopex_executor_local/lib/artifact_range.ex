@@ -27,6 +27,52 @@ defmodule Loopex.Executor.Local.ArtifactRange do
 
   @ceiling 8_192
   @measurement_id "lx_" <> String.duplicate("0", 48)
+  @refusals [
+    :unknown_artifact,
+    :artifact_use_mismatch,
+    :unknown_artifact_use,
+    :artifact_integrity_failed,
+    :artifact_digest_mismatch,
+    :invalid_tool_arguments,
+    :artifact_job_bound_exceeded,
+    :transfers_unavailable,
+    :transfer_limit_reached,
+    :open_deadline_exhausted,
+    :open_work_budget_exhausted,
+    :artifact_unreadable,
+    :artifact_truncated,
+    :artifact_too_large,
+    :invalid_artifact_range,
+    :artifact_range_unsupported_content,
+    :artifact_range_unrepresentable
+  ]
+
+  @doc false
+  @spec read(term(), map(), map(), non_neg_integer()) :: {atom(), binary(), :complete}
+  def read(%{module: module, handle: handle}, job, range, limit) when is_atom(module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :read_job_range, 2) do
+      reference = Map.new(range.reference, fn {key, value} -> {Atom.to_string(key), value} end)
+
+      with {:ok, bytes} when is_binary(bytes) <- module.read_job_range(handle, job),
+           {:ok, encoded} <-
+             encode(reference, range.offset, range.length, bytes, min(limit, @ceiling)) do
+        {:completed, encoded, :complete}
+      else
+        {:error, reason} when reason in @refusals -> refusal(reason, limit)
+        {:error, {:artifact_unreadable, _detail}} -> refusal(:artifact_unreadable, limit)
+        _invalid -> refusal(:artifact_range_failed, limit)
+      end
+    else
+      refusal(:artifact_transfer_unsupported, limit)
+    end
+  end
+
+  def read(_store, _job, _range, limit), do: refusal(:artifact_transfer_unsupported, limit)
+
+  defp refusal(reason, limit) do
+    text = "artifact range failed: " <> Atom.to_string(reason)
+    {:failed, binary_part(text, 0, min(byte_size(text), limit)), :complete}
+  end
 
   @doc false
   @spec encode(map(), non_neg_integer(), pos_integer(), binary(), pos_integer()) ::

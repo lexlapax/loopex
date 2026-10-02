@@ -48,7 +48,7 @@ defmodule Loopex.Executor.LocalTest do
     on_exit(fn -> stop_fixture(fixture) end)
     File.write!(Path.join(fixture.workspace, "source.txt"), "retained file")
 
-    for version <- ["1.1.0", "9.9.9"] do
+    for version <- ["1.1.1", "9.9.9"] do
       {original, _grant} =
         job_and_grant(fixture, "read-#{version}", "loopex.read", %{"path" => "source.txt"})
 
@@ -2214,7 +2214,7 @@ defmodule Loopex.Executor.LocalTest do
 
     assert match?(
              {:call, _, {:atom, _, :bounded_guardian_with_remaining},
-              [_, _, _, {:call, _, {:atom, _, :effect_owner}, []}]},
+              [_, _, _, {:call, _, {:atom, _, :effect_owner}, []}, _cancel_job]},
              guarded_call
            ),
            "run_bounded_tool/6 did not call the guardian with effect_owner/0"

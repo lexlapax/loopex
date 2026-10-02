@@ -205,6 +205,38 @@ defmodule Loopex.Executor.Local.CodingTools do
                          }
                        end)
 
+  @range_read %{
+    "budgets" => %{
+      "artifact_bytes" => 67_108_864,
+      "output_bytes" => 16384,
+      "wall_time_ms" => 30000
+    },
+    "description" =>
+      "Read a workspace text file, or an authorized artifact range. Artifact ranges require artifact_use, offset and length (at most 4096 bytes).",
+    "effect_class" => "read_only",
+    "idempotency_class" => "safe_retry",
+    "name" => "read",
+    "parameter_schema" => %{
+      "properties" => %{
+        "artifact_use" => %{
+          "description" => "Committed use:<sha256> reference.",
+          "type" => "string"
+        },
+        "length" => %{"description" => "1 to 4096 bytes.", "type" => "integer"},
+        "offset" => %{"description" => "Unsigned byte offset.", "type" => "integer"},
+        "path" => %{"description" => "Path relative to the workspace root.", "type" => "string"}
+      },
+      "required" => [],
+      "type" => "object"
+    },
+    "result_shape" => %{
+      "content_type" => "text",
+      "description" => "File content or a bounded JSON range with exact next offset and EOF."
+    },
+    "tool_id" => "loopex.read",
+    "tool_version" => "1.1.0"
+  }
+
   @doc """
   ## Concept
 
@@ -218,6 +250,10 @@ defmodule Loopex.Executor.Local.CodingTools do
   """
   @spec definitions() :: [map()]
   def definitions, do: @definitions ++ @search_definitions
+
+  @doc false
+  @spec generations() :: [map()]
+  def generations, do: definitions() ++ [@range_read]
 
   @doc """
   ## Concept

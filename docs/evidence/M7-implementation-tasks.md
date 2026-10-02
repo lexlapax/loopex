@@ -32,16 +32,19 @@ they do not mean the original task is complete. This follows the maintainer's
   closes its source descriptor before returning; both toolchains prove the repair.
 - Done: T02 pure range-result encoding selects the largest UTF-8 prefix within
   the complete 8,192-byte conversation-message limit, including double escaping,
-  normalized call identity and metadata. Storage and executor integration remain open.
+  normalized call identity and metadata. Local storage and executor integration
+  now pass real range tests; prepared references and owner-workflow integration
+  remain open.
 - Decision recorded: on 2026-10-01 the maintainer selected the separate optional
   `ArtifactStore.read_job_range(handle, validated_job)` callback for job reads.
   The local callback now verifies real objects with shared transfer capacity,
-  reserved work and a linked deadline watchdog. Executor dispatch and refusal for
-  adapters without the callback remain to be joined. Existing attachment callbacks
-  remain compatible.
+  reserved work and a linked deadline watchdog. Exact 1.1.0 executor dispatch now
+  uses that callback, refuses adapters without it and retains readable receipts
+  through restart. Existing attachment callbacks remain compatible.
 - Done: T02 resolves committed-receipt artifact membership before policy and
   binds approved ranges to their exact source in the journaled job. Prepared
-  references and real range transfers remain open, so original counts are unchanged.
+  references and the composed session-owner workflow remain open, so original
+  counts are unchanged.
 - Done: reproduce cross-run conversation loss with the real session-owner path
   and a scripted model in `apps/loopex/test/agent_loop_test.exs`.
 - Done: run-scoped result joins, replayed admission order, revision-1 normalized
@@ -1527,12 +1530,68 @@ second-prompt witness and milestone closure checks remain open.
 - [x] Enforce the literal read-generation table during runtime/registry loading and executor startup; select executor tools by exact ID/version and retain the frozen capability through restart with an empty host registry. Artifact range execution and prepared-reference replay remain pending.
 - [x] Resolve committed-receipt artifact membership and closed range arguments before policy, keep policy/deferred identity on original arguments, and bind approved job resolution to the exact retained source. Prove cross-session refusal, uncertain receipt commits, restart and altered-source replay refusal; prepared-reference membership remains pending.
 - [x] Reproduce and repair source-descriptor leakage on snapshot creation failure; close snapshot descriptors on permission/unlink failure and verify existing transfer behavior on both supported toolchains.
-- [ ] Enforce the accepted job-owned cancellation/deadline and cumulative-work bounds when integrating range execution; the attachment implementation does not yet provide these guarantees.
+- [x] Enforce the accepted job-owned cancellation/deadline and cumulative-work bounds when integrating range execution; the attachment implementation does not yet provide these guarantees.
 - [x] Implement pure UTF-8 range-result encoding and prove maximal progress under the complete encoded conversation-message ceiling, including escaped content and metadata, through the real lineage projector.
 - [x] Implement the maintainer-selected optional job-range callback in the local store, including canonical job validation, closed resolved data, stored provenance, shared capacity, whole-object verification, work reservation, deadline watchdog and descriptor cleanup.
-- [ ] Join the job-range callback to exact 1.1.0 executor dispatch, unsupported-adapter refusal, range encoding and settlement; prove repeated dispatch does not reopen a completed job and exercise cancellation through the real executor.
+- [x] Join the job-range callback to exact 1.1.0 executor dispatch, unsupported-adapter refusal, range encoding and settlement; prove repeated dispatch does not reopen a completed job and exercise cancellation through the real executor.
 
 ### Verification evidence
+
+The local executor now serves the pinned read 1.1.0 definition alongside 1.0.0,
+selects dispatch and retained-receipt readers by both ID and version, and keeps
+the legacy default selection. The new path branch is closed and retains ordinary
+workspace reads. Artifact requests use only the optional job-range callback;
+adapters without it refuse without falling back to whole-object fetch. Encoded
+range results return directly with no recursive artifact spill.
+
+Range cancellation registers a temporary job-specific message alias after the
+reader is monitored and before it starts. The caller closes that alias before
+draining requests, so a late sender cannot cancel a subsequent job in the same
+caller. Cancellation kills and observes the exact reader and guardian under one
+cleanup episode. The existing settlement path answers `cleaned` only after the
+confirmed receipt is retained and open authority removed. Deadline failure says
+no range was returned; it does not claim that no storage bytes were read.
+
+Ten composition tests join the real local executor and artifact store. They
+cover escaped/UTF-8 windows and EOF, legacy adapters without the callback,
+invalid grants and closed arguments, both path generations, cancellation after
+verified IO and while transfer admission is queued, deadline expiry, a reused
+caller with an expired cancellation alias, and restart/repeated dispatch after
+the original object is deleted. Successful, cancelled and deadline-failed jobs
+each invoke the range callback once. These witnesses complete two added T02
+subtasks. Original T02 items remain open where excerpt preparation, prepared
+reference membership or the composed session-owner workflow is still missing.
+
+
+Final range-executor verification passes all 165 focused cases on each supported
+toolchain, with the composition and executor applications run in separate VMs.
+The long-bound and real-provider lanes remain separate required release proof.
+
+- Current integration, 10 cases in 1.5 seconds:
+  `/private/tmp/loopex-m7-range-executor-verified-current.log`, SHA-256
+  `7f71c6e849cf18f1b4e6c14112aa10d540b065bce6709c3df09cc2d0cb2a7e28`.
+- Current executor regression, 155 cases in 117.2 seconds:
+  `/private/tmp/loopex-m7-range-executor-verified-regression-current.log`, SHA-256
+  `9061061fa977b499654dc25e5827cd3f2012b7056ce103198e6f87f43bf0b730`.
+- Floor integration, 10 cases in 1.5 seconds:
+  `/private/tmp/loopex-m7-range-executor-verified-floor.log`, SHA-256
+  `1d938bf4eb2dd050303a64acd791e00e3c217766afc52ee1232389705ad6e4ba`.
+- Floor executor regression, 155 cases in 118.7 seconds:
+  `/private/tmp/loopex-m7-range-executor-verified-regression-floor.log`, SHA-256
+  `1882bfb41263287da448c9eea207ebe6e7dee5df9dde0f54d20f82ad857edf0a`.
+
+The first integration run exposed missing filesystem cancellation routing and a
+fixture that changed arguments under a reused job ID. Cancellation
+was implemented and the malformed-arguments fixture now uses a distinct job ID.
+The first broader run passed 154/155 cases; its structural assertion expected a
+four-argument guardian call. It now recognizes the added cancellation argument
+while still requiring `effect_owner/0` in the fourth position. Neither failed
+run counts as passing evidence.
+
+- First integration failure: `/private/tmp/loopex-m7-range-executor-first.log`,
+  SHA-256 `ca1cdb49e8ab2adc8c5e53e7b4166477e71ebcd05224d4fff9ebfa496715173f`.
+- Initial executor regression failure: `/private/tmp/loopex-m7-range-executor-regression-current.log`,
+  SHA-256 `040f1d80db604ff69378af75c202a599c248be88dbd075383e0b8d77bce28e09`.
 
 On 2026-10-01, the maintainer answered the storage-boundary decision with
 “Separate optional job-range callback (recommended).” The presented choice was

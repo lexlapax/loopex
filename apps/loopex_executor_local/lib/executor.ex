@@ -301,7 +301,7 @@ defmodule Loopex.Executor.Local do
     # Technical depth: validate the compiled definitions against Core's literal
     # table before starting an owner or opening its ledger. Each generation is
     # checked separately because the executor may retain coexisting versions.
-    if Enum.all?(CodingTools.definitions(), fn definition ->
+    if Enum.all?(CodingTools.generations(), fn definition ->
          match?({:ok, _}, Loopex.Runtime.ArtifactReadCapabilities.resolve([definition]))
        end) do
       GenServer.start_link(__MODULE__, options)
@@ -396,7 +396,9 @@ defmodule Loopex.Executor.Local do
   this is the hand's code — while cancellation remains independently reachable
   from the process doing that work.
 
-  Routes the request to the live launch owner that holds the captured process
+  Artifact range reads route through a job-scoped alias to the reader's caller,
+  which joins the exact reader and guardian before retaining a cancellation.
+  Process tools route to the live launch owner that holds the captured process
   group, the job's committed cleanup period, and the probe. That owner signals
   and confirms its own group; a cached numeric identifier never becomes signal
   authority in a different process. An absent or unavailable owner proves
@@ -418,6 +420,9 @@ defmodule Loopex.Executor.Local do
     case lookup_inflight(executor, job_id) do
       {:owned, worker, grace, probe} ->
         cancel_owned_job(worker, cancellation_episode(grace, probe))
+
+      {:owned, worker, grace, probe, request_alias} ->
+        cancel_owned_job(worker, cancellation_episode(grace, probe), request_alias)
 
       # Concept: an identity nothing here has ever heard of is an identity this
       # executor cannot speak for, and saying nothing is different from saying
@@ -563,11 +568,11 @@ defmodule Loopex.Executor.Local do
   # before the answer arrives, as it already could before the margin existed;
   # production uses `Executor.cancel/4`, whose observation bound covers the
   # period plus 2 s.
-  defp cancel_owned_job(worker, {until, grace, _probe} = episode) do
+  defp cancel_owned_job(worker, {until, grace, _probe} = episode, request_alias \\ nil) do
     token = make_ref()
     reply_to = Process.alias()
     monitor = watch_for_answer(token, worker)
-    send(worker, {:loopex_cancel_pending, token, reply_to, episode})
+    send(request_alias || worker, {:loopex_cancel_pending, token, reply_to, episode})
 
     try do
       await_cancel_result(worker, monitor, token, until + cancel_reply_margin_ms(grace))
@@ -912,6 +917,10 @@ defmodule Loopex.Executor.Local do
         authority = table && process_authority(table, job_id)
 
         case {table && :ets.lookup(table, job_id), authority} do
+          {[{^job_id, {:range, worker, request_alias}}], {worker, grace}}
+          when is_pid(worker) and is_reference(request_alias) and is_integer(grace) and grace > 0 ->
+            {:owned, worker, grace, probe, request_alias}
+
           {[{^job_id, {:starting, worker}}], {worker, grace}}
           when is_pid(worker) and is_integer(grace) and grace > 0 ->
             {:owned, worker, grace, probe}
@@ -2202,7 +2211,7 @@ defmodule Loopex.Executor.Local do
            }),
          true <- job.executor_identity == state.identity,
          true <- job.origin_executor_epoch == state.epoch,
-         {:ok, arguments} <- validate_arguments(tool, job.validated_arguments),
+         {:ok, arguments} <- validate_job_arguments(tool, job),
          :ok <- Loopex.Executor.Local.ReadOnlyTools.validate_path(lease.path, arguments) do
       {:ok, tool, lease_pid, lease.path, arguments}
     else
@@ -2969,7 +2978,7 @@ defmodule Loopex.Executor.Local do
   end
 
   defp tool_generation(id, version) do
-    case Enum.find(CodingTools.definitions(), fn definition ->
+    case Enum.find(CodingTools.generations(), fn definition ->
            definition["tool_id"] == id and definition["tool_version"] == version
          end) do
       nil ->
@@ -2980,6 +2989,25 @@ defmodule Loopex.Executor.Local do
          %{id: id, version: version, effect_class: definition["effect_class"], coding: definition}}
     end
   end
+
+  defp validate_job_arguments(
+         %{coding: %{"tool_id" => "loopex.read", "tool_version" => "1.1.0"}},
+         job
+       ) do
+    case job.validated_arguments do
+      %{"path" => path} = arguments when map_size(arguments) == 1 and is_binary(path) ->
+        if path != "" and String.valid?(path),
+          do: {:ok, %{kind: :read, path: path}},
+          else: {:error, :invalid_tool_arguments}
+
+      _range ->
+        with {:ok, range} <- Loopex.Runtime.ArtifactRead.job_range(job) do
+          {:ok, %{kind: :artifact_read, range: range, job: job}}
+        end
+    end
+  end
+
+  defp validate_job_arguments(tool, job), do: validate_arguments(tool, job.validated_arguments)
 
   defp validate_arguments(%{id: @write_tool}, arguments),
     do: write_arguments(arguments, 0)
@@ -3087,6 +3115,11 @@ defmodule Loopex.Executor.Local do
        ) do
     deadline = effective_deadline(job, tool)
     limits = cap_output_limit(effective_output_limits(job, tool), receipt_output_limit)
+
+    arguments =
+      if arguments.kind == :artifact_read,
+        do: Map.put(arguments, :artifacts, state.artifacts),
+        else: arguments
 
     {tool_result, progress_count, cleanup_confirmation} =
       run_coding_tool(
@@ -3385,7 +3418,7 @@ defmodule Loopex.Executor.Local do
     )
   end
 
-  defp bounded_guardian_with_remaining(work, remaining, lease_pid, owner) do
+  defp bounded_guardian_with_remaining(work, remaining, lease_pid, owner, cancel_job \\ nil) do
     caller = self()
     tag = make_ref()
 
@@ -3395,10 +3428,31 @@ defmodule Loopex.Executor.Local do
         send(caller, {tag, decision})
       end)
 
-    await_guardian_decision(guardian, reference, tag, nil, remaining)
+    # Concept: a late cancellation cannot address a later job in this caller.
+    # Technical depth: close the job's delivery alias before draining queued
+    # requests; senders that retained the old alias can no longer enqueue work.
+    request_alias = if cancel_job, do: Process.alias()
+
+    try do
+      await_guardian_decision(guardian, reference, tag, nil, remaining, cancel_job, request_alias)
+    after
+      if cancel_job do
+        Process.unalias(request_alias)
+        forget_inflight(cancel_job)
+        for {token, reply_to} <- queued_cancellations(), do: hold_cancellation(token, reply_to)
+      end
+    end
   end
 
-  defp await_guardian_decision(guardian, reference, tag, effect_state, remaining) do
+  defp await_guardian_decision(
+         guardian,
+         reference,
+         tag,
+         effect_state,
+         remaining,
+         cancel_job,
+         request_alias
+       ) do
     receive do
       {^tag, decision} ->
         # The send is the guardian's final expression, but the message can
@@ -3420,11 +3474,56 @@ defmodule Loopex.Executor.Local do
 
       {^tag, :guardian_effect, ^guardian, effect} when is_pid(effect) ->
         effect_monitor = Process.monitor(effect)
+
+        if cancel_job do
+          register_starting_process(cancel_job, self(), cleanup_grace_ms(), request_alias)
+        end
+
         send(guardian, {tag, :guardian_armed, effect})
-        await_guardian_decision(guardian, reference, tag, {effect, effect_monitor}, remaining)
+
+        await_guardian_decision(
+          guardian,
+          reference,
+          tag,
+          {effect, effect_monitor},
+          remaining,
+          cancel_job,
+          request_alias
+        )
+
+      {:loopex_cancel_pending, token, reply_to, {until, _grace, _probe}}
+      when is_binary(cancel_job) and not is_nil(effect_state) ->
+        hold_cancellation(token, reply_to)
+        Process.put(:loopex_cleanup_episode, until)
+        {effect, effect_monitor} = effect_state
+        Process.exit(effect, :kill)
+        Process.exit(guardian, :kill)
+        effect_down = await_cancelled_process(effect, effect_monitor, until)
+        guardian_down = await_cancelled_process(guardian, reference, until)
+
+        receive do
+          {^tag, _decision} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:cancelled, effect_down and guardian_down}
 
       {:DOWN, ^reference, :process, ^guardian, reason} ->
         {:guardian_stopped, reason, stop_guardian_effect(effect_state, remaining)}
+    end
+  end
+
+  # Concept: cancellation confirms both the reader and its guardian before settlement.
+  # Technical depth: the two DOWN observations spend one caller-supplied cleanup
+  # episode. A timeout cannot produce a confirmed receipt or a cleaned reply.
+  defp await_cancelled_process(pid, monitor, until) do
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> true
+    after
+      max(until - cleanup_now_ms(), 0) ->
+        Process.demonitor(monitor, [:flush])
+        false
     end
   end
 
@@ -4037,7 +4136,7 @@ defmodule Loopex.Executor.Local do
          _progress,
          _identity
        )
-       when kind in [:read, :write, :edit, :grep, :find, :ls] do
+       when kind in [:read, :artifact_read, :write, :edit, :grep, :find, :ls] do
     remaining = fence_remaining(deadline)
 
     if remaining <= 0 do
@@ -4108,10 +4207,15 @@ defmodule Loopex.Executor.Local do
            end,
            fn -> fence_remaining(deadline) end,
            lease_pid,
-           effect_owner()
+           effect_owner(),
+           if(arguments.kind == :artifact_read, do: arguments.job.job_id)
          ) do
       {:done, result} ->
         {result, true}
+
+      {:cancelled, confirmed} ->
+        outcome = if confirmed, do: :cancelled, else: :outcome_unknown
+        {{outcome, "artifact range read cancelled", :complete}, confirmed}
 
       {:stopped, reason} ->
         {abandoned(:worker_stopped, arguments, true, reason), true}
@@ -4156,7 +4260,7 @@ defmodule Loopex.Executor.Local do
   defp abandoned_outcome(:effect_owner_lost, _arguments, true), do: :outcome_unknown
 
   defp abandoned_outcome(:worker_stopped, %{kind: kind}, true)
-       when kind in [:read, :grep, :find, :ls] do
+       when kind in [:read, :artifact_read, :grep, :find, :ls] do
     :failed
   end
 
@@ -4164,7 +4268,7 @@ defmodule Loopex.Executor.Local do
   defp abandoned_outcome(:guardian_stopped, _arguments, _stopped), do: :outcome_unknown
 
   defp abandoned_outcome(:deadline, %{kind: kind}, true)
-       when kind in [:read, :grep, :find, :ls] do
+       when kind in [:read, :artifact_read, :grep, :find, :ls] do
     :failed
   end
 
@@ -4192,13 +4296,15 @@ defmodule Loopex.Executor.Local do
       detail_text <> stop_text <> " " <> effect_text(cause, arguments, stopped) <> "]"
   end
 
+  defp effect_text(:deadline, %{kind: :artifact_read}, true), do: "No range was returned."
+
   defp effect_text(:deadline, %{kind: kind}, true)
        when kind in [:read, :grep, :find, :ls] do
     "Nothing was read."
   end
 
   defp effect_text(:worker_stopped, %{kind: kind}, true)
-       when kind in [:read, :grep, :find, :ls] do
+       when kind in [:read, :artifact_read, :grep, :find, :ls] do
     "Nothing was returned."
   end
 
@@ -4213,6 +4319,15 @@ defmodule Loopex.Executor.Local do
 
   defp filesystem_effect(workspace, %{kind: :ls} = arguments, limits),
     do: Loopex.Executor.Local.ReadOnlyTools.execute(workspace, arguments, limits.output)
+
+  defp filesystem_effect(_workspace, %{kind: :artifact_read} = arguments, limits) do
+    Loopex.Executor.Local.ArtifactRange.read(
+      arguments.artifacts,
+      arguments.job,
+      arguments.range,
+      limits.output
+    )
+  end
 
   defp filesystem_effect(workspace, %{kind: :read, path: path}, limits) do
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
@@ -5188,11 +5303,12 @@ defmodule Loopex.Executor.Local do
     ArgumentError -> :error
   end
 
-  defp register_starting_process(job_id, worker, grace) do
+  defp register_starting_process(job_id, worker, grace, request_alias \\ nil) do
     authority = {@process_authority_key, job_id}
+    route = if request_alias, do: {:range, worker, request_alias}, else: {:starting, worker}
 
     :ets.insert(inflight_table(), [
-      {job_id, {:starting, worker}},
+      {job_id, route},
       {authority, worker, grace}
     ])
 
@@ -8128,7 +8244,7 @@ defmodule Loopex.Executor.Local do
   defp environment_names_readable?(_names), do: false
 
   defp tool_receipt_readable?(receipt) do
-    case tool(receipt.tool_id) do
+    case tool_generation(receipt.tool_id, receipt.tool_version) do
       {:ok,
        %{
          version: version,
@@ -8165,7 +8281,7 @@ defmodule Loopex.Executor.Local do
   end
 
   defp receipt_output_limit(receipt) do
-    case tool(receipt.tool_id) do
+    case tool_generation(receipt.tool_id, receipt.tool_version) do
       {:ok, %{coding: %{"budgets" => %{"output_bytes" => output}}}} -> output
       {:ok, _demonstration_tool} -> @max_output_bytes
       :error -> @max_output_bytes
