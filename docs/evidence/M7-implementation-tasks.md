@@ -91,6 +91,35 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the closed input, question and error control encoder preserves opaque
+  identities and canonical quantity encodings, refuses missing/extra members
+  and malformed producer-specific choices, and counts the prefix and LF in
+  the exact 65,536-byte ceiling. Escaped hostile question content stays within
+  one physical record. Maximum admitted question content and oversized legacy
+  identities are proved without truncation, including delivery through the
+  independently draining writer. Wait, status, closing and the owning driver
+  remain open; this completes one added T10 subtask, no original item.
+  Both supported pairs pass the three complete control/input/output test files:
+  29 tests, 5.7 seconds current and 5.4 seconds floor. Warning-free compilation,
+  formatting and documentation ordering pass. Complete outputs:
+  `/private/tmp/loopex-m7-chat-control-current-final.log`, SHA-256
+  `078e3031d97c8e7fc00c7bd2b1a46e3181f8b7902195a6986983c41642f0c5f9`;
+  `/private/tmp/loopex-m7-chat-control-floor-final.log`, SHA-256
+  `bda4979fbed7c66fc06d9d4a7f56f9b1e396e80b7f47a23f1756055b224b5fb8`.
+  The first run passed its tests but exposed a dynamic-range guard warning;
+  the guard now uses explicit comparisons. That initial output is retained:
+  `/private/tmp/loopex-m7-chat-control-current-first.log`, SHA-256
+  `a44cbc6fb5609081f5e27f9f0a7e6f54c4badb8a7e5cc33e6b3d9e205044df35`.
+  Original checklist: 28 done / 158 remaining. Added subtasks: 91 done / 11
+  remaining.
+- Running: the full fast check on
+  `39f57d8b13787761c799b78e51bb785c76a15a03` has two provider fixture failures.
+  Its isolated checkout contains an untracked dependency symlink: `/deps/`
+  ignores directories, not symlinks. The clean-source fixtures correctly refuse.
+  This is a check-setup failure, not PASS; the CLI suite is still finishing.
+  Retain the complete output before cleanup. The next integration candidate
+  must use a real ignored dependency directory and prove its checkout clean
+  before running. Do not rerun the same full candidate as a pass.
 - Done: observation boundary review preserves the existing opaque command
   identity range and reports absent identities through 65,536 bytes as pending,
   including IDs larger than the Store's 256-byte transaction-identity ceiling.
@@ -149,9 +178,9 @@ did not resolve them. No paid provider calls were made during this check.
   `1a8e454600e71dabcee4aefd916a3d04dd637468ecf8fc31f82b0c669b6a2813`.
   Original checklist: 28 done / 158 remaining. Added subtasks: 90 done / 11
   remaining. The chat driver and its pipe-ordering obligation remain open.
-- Next: run the full fast check once on the committed admission integration
-  candidate, retaining its complete output and exact SHA. Then implement the
-  closed chat control records and join the owning driver after the exact-genesis
+- Next: finish and retain the failed admission integration check, then run the
+  next committed integration candidate with a verified clean setup. Complete
+  the remaining chat control records and join the owning driver after the exact-genesis
   creation decision. The creation, preparation-store and refusal-schema questions
   were bundled again for the maintainer; no dependent contract change is made.
 - Done: T07's bounded source selector scans complete eligible-unit prefixes,
@@ -2556,6 +2585,7 @@ or check was relaxed.
 - [x] Expose attachment-based command observation with a closed result, replay-derived admitted/refused facts, stable structured-refusal codes and committed run identity; preserve opaque IDs and prove missing/recreated identities remain pending without owner Store callbacks.
 - [x] Retain the original unknown proposal and exact OwnerLane transaction, return uncertainty immediately, and resolve only through owner-owned 100-ms worker ticks under one fixed first-unknown backstop; prove before/after persistence, exact bytes, non-commit and joined owner/deadline cleanup.
 - [x] Defer internal worker results and owner timers in arrival order while admission is unresolved; prove model/executor evidence, real run deadline ordering, abort cleanup before deferred scheduling and actual backstop release into the existing mutation fence on both toolchains.
+- [x] Encode closed input, question and error records with exact branch fields, producer-specific choices, opaque identities and the inclusive 65,536-byte cap; prove hostile content cannot forge a second record, legacy oversize refuses without truncation and output drains unchanged on both toolchains. Wait, status, closing and driver integration remain pending.
 
 ## T11 — Implement specialized read-only helpers
 
