@@ -91,6 +91,52 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Pending maintainer choice: prepared chat recovery needs the exact retained
+  configuration and immutable definitions, while existing status deliberately
+  exposes only safe configuration values and instruction version/digest.
+  Recommend `Loopex.prepared_session_configuration(activation)` returning the
+  closed local four-member map `{configuration, tool_selection,
+  policy_defer_mode, cleanup_grace_ms}` under the current unspent capability's
+  holder and current-owner fence. Configuration/selection remain nil for legacy
+  v2, never current defaults. The read neither spends the capability nor commits,
+  activates or dispatches. It exposes captured instruction bytes to the trusted
+  holder, with no credential, private continuation or runtime handle, and keeps
+  existing status/wire allowlists unchanged. Transfer, abandonment, activation,
+  abort and supersession enforce the existing capability refusals. The alternate
+  choice authorizes a private Runtime read and its host-boundary exception.
+  No dependent implementation has started. Concrete packet:
+  `/private/tmp/loopex-m7-prepared-configuration-read-decision.md`, SHA-256
+  `613b7ddf96697140d56f6a846d59809f5fe2d6f802615ca273d50ae05dbec209`.
+  One added T06 subtask is now pending. Original tally is 43 done / 143
+  remaining; added tally is 132 done / 11 remaining. Earlier event-identity
+  and early-spill decisions remain pending independently.
+
+- Done: audit closes the first original T08 item, committed per-run
+  model/reasoning configuration and all six permitted configure fields. The
+  existing live owner tests prove distinct models before/after configure,
+  retained per-run configurations, restart, exact duplicate dispositions and
+  commit-boundary faults through the approved facade. The chat workflow now
+  admits all six fields together, proves default reasoning omission then exact
+  `none`/thinking-disabled sampling, canonical model alias, changed instruction
+  bytes, all three effective ceilings and safe instruction-digest inspection.
+  Raw instruction content is absent from the transcript. Sixty-three affected
+  chat cases pass with warnings as errors on both toolchains: current 19.1
+  seconds, floor 19.0 seconds. Complete outputs:
+  `/private/tmp/loopex-m7-chat-configure-all-fields-current-v1.log`, SHA-256
+  `1573645a3bcf55dda3386cedf19376d169faf14132d909e4b240754750b8c7b3`;
+  `/private/tmp/loopex-m7-chat-configure-all-fields-floor-v1.log`, SHA-256
+  `a69b2da44c33d7987489720ac3affd7e942803313dc5d545ffbcea0037b9739a`.
+  Original checklist is 43 done / 143 remaining; added subtasks remain
+  132 done / 10 remaining. This closes the local configuration item; daemon
+  admission, protocol generations, live thinking-round witnesses and maintenance
+  checkpoint joins keep their own original items open.
+
+- Running: full current-pair fast check of exact
+  `66aef0e19b031e9ff12aa6ee339b6c73d13640d4` in the isolated check checkout.
+  Output `/private/tmp/loopex-m7-66aef0e1-fast-check.log` is still being written;
+  its result and digest are pending. It predates the all-six-field test extension
+  above. Do not rerun or switch the check checkout while this run is active.
+
 - Done: one added T08 subtask joins host configure preparation to the private
   chat driver's command holder through the approved public facade. Closed
   updates resolve only admitted provider routes and the immutable definitions;
@@ -3974,6 +4020,7 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, captured invocation bounds and queued-run inheritance, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
+- [ ] Resolve the prepared-recovery configuration-read boundary, then expose its exact retained host capture under capability ownership and prove refusal/fencing without activation or dispatch.
 
 - [x] Expose the accepted committed configuration allowlist and current active-run bounds through existing local session status; prove initial/configured/restarted values, unresolved legacy and settled nulls, private-data exclusion, arbitrary turn/token counts, the exact staged absolute cutoff and the unchanged historical wire allowlist on both supported toolchains. Authored absolute ceilings, new generation snapshots and live chat integration remain pending.
 - [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.
@@ -4011,7 +4058,7 @@ or check was relaxed.
 
 ### Original checklist
 
-- [ ] Implement committed per-run model/reasoning configuration and the permitted configure fields.
+- [x] Implement committed per-run model/reasoning configuration and the permitted configure fields.
 - [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
 - [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
 - [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.

@@ -21,8 +21,26 @@ defmodule LoopexCli.ChatDriverTest do
         genesis: prepared.genesis
       )
 
+    {:ok, instructions} =
+      Loopex.Runtime.Instructions.capture(%{
+        "version" => "chat.configured.v1",
+        "base" => "configured-instruction-canary",
+        "environment" => "",
+        "appendix" => ""
+      })
+
+    changes = %{
+      "model" => "anthropic:claude-haiku-4-5",
+      "reasoning" => "none",
+      "instructions" => instructions,
+      "max_tokens" => 4096,
+      "context_token_budget" => 16_000,
+      "system_class_tokens" => 4000
+    }
+
     bytes =
-      "one\n/wait\n/configure {\"max_tokens\":2048}\n/configure {\"max_tokens\":999999}\n/configure {\"max_tokens\":4096}\ntwo\n/wait\n/quit\n"
+      "one\n/wait\n/configure {\"max_tokens\":2048}\n/configure {\"max_tokens\":999999}\n/configure " <>
+        IO.iodata_to_binary(:json.encode(changes)) <> "\ntwo\n/wait\n/quit\n"
 
     {:ok, input} = StringIO.open(bytes, encoding: :latin1)
     {:ok, output} = StringIO.open("", encoding: :latin1)
@@ -37,12 +55,23 @@ defmodule LoopexCli.ChatDriverTest do
     assert ChatDriver.close(driver, :confirmed) == 0
     [first, second] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
     assert first.sampling["max_tokens"] == 1024
+    refute Map.has_key?(first.sampling, "reasoning")
     assert second.sampling["max_tokens"] == 4096
+    assert second.sampling["reasoning"] == "none"
+    assert second.sampling["provider_mapping"]["thinking_disabled"]
+    {:ok, rendered} = Loopex.Runtime.Instructions.render(instructions)
+    assert hd(second.messages)["content"] == rendered
     assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
     assert status.configuration["configuration_version"] == 3
     assert status.configuration["max_tokens"] == 4096
+    assert status.configuration["reasoning"] == "none"
+    assert status.configuration["model"] == "anthropic:claude-haiku-4-5-20251001"
+    assert status.configuration["context_token_budget"] == 16_000
+    assert status.configuration["system_class_tokens"] == 4000
+    assert status.configuration["instructions"] == Map.take(instructions, ~w(version digest))
     assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "session.configured")) == 2
     {_, transcript} = StringIO.contents(output)
+    refute transcript =~ "configured-instruction-canary"
     acks = Enum.filter(records(transcript), &(&1["event"] == "input"))
     assert Enum.map(acks, & &1["input_sequence"]) == Enum.map(1..8, &Integer.to_string/1)
 
