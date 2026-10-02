@@ -48,6 +48,25 @@ defmodule LoopexComposition.Ephemeral.Options do
     end
   end
 
+  # Concept: the one-call callback belongs to its caller, never startup data.
+  # Technical depth: validate the complete closed grammar before removing it;
+  # reusable startup and per-prompt parsing keep their existing key sets.
+  def run_options(options) do
+    with :ok <- outer(options, @keys ++ [:question_responder]),
+         {:ok, selected} <- parse(Keyword.delete(options, :question_responder)) do
+      case Keyword.fetch(options, :question_responder) do
+        :error ->
+          {:ok, Keyword.delete(options, :question_responder), nil}
+
+        {:ok, callback} when is_function(callback, 1) and selected.questions ->
+          {:ok, Keyword.delete(options, :question_responder), callback}
+
+        {:ok, _} ->
+          invalid(:question_responder)
+      end
+    end
+  end
+
   def ask_options(options, timeout) do
     with :ok <- outer(options, [:timeout]) do
       case Keyword.fetch(options, :timeout) do

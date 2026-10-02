@@ -91,6 +91,45 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: T12 one-call responder integration consumes the unary callback before
+  startup, rejects disabled/non-unary/duplicate selections, and retains reusable
+  startup and per-call grammar. One temporary private-supervisor child is
+  registered and monitored before its exact grant. The owner observes committed
+  events through its existing single reader while the callback runs. Exact
+  worker DOWN, current interaction and runtime generation precede answers through
+  the existing validation/mutation slot. One captured call cutoff spans every
+  question; Core expiry remains a committed run outcome. Invalid/raised/thrown/
+  exited callbacks trigger ordinary abort and mandatory cleanup. Expiry, caller
+  death and stop kill the exact worker; a fixed existing-grace join cutoff retains
+  cleanup uncertainty even if later teardown completes. Stale response identities,
+  forged DOWN while alive, serial joins, maximum text, choice, decline, blocked
+  work, run expiry, caller death, policy deferral, root-removal uncertainty and
+  missed join cutoffs have actual owner/Core/local-HTTP witnesses. The selected
+  six files pass 73 cases in 42.0 seconds current and 42.1 seconds floor.
+  No attended/provider or closure result is claimed.
+  `/private/tmp/loopex-m7-responder-live-current-verified-20261002.log`, SHA-256
+  `d301ae4e55d8937625051363089d157c2436aeedca8e8535ad6826c77c809379`;
+  `/private/tmp/loopex-m7-responder-live-floor-verified-20261002.log`, SHA-256
+  `5ddb16297cfd79892a2066f47e2ad5d7bcf1d79dbd1aa836ecbcad23930f7580`.
+  The draft join-refusal branch incorrectly read a startup-only root field after
+  readiness. It now uses the retained owned-root identity. Failed current/floor
+  outputs are `/private/tmp/loopex-m7-responder-live-current-join-failed-20261002.log`,
+  SHA-256 `99f4671e0072701ddc690593f246cc8de3ca92eaef2d03bcc1c22c91bca87a14`,
+  and `/private/tmp/loopex-m7-responder-live-floor-join-failed-20261002.log`,
+  SHA-256 `34ba8850122bb2f1963201b05d6a93bb5ee2dc56fabc248861ee5832dc2c176a`.
+  Parameterized test-title compilation errors were corrected; both outputs remain
+  at `/private/tmp/loopex-m7-responder-live-current-test-compile-failed-20261002.log`,
+  SHA-256 `41c1a770d0fe684fa4621fe263eff6f07d96d4378fe2a2fb2b70048679b5ea16`,
+  and `/private/tmp/loopex-m7-responder-live-floor-test-compile-failed-20261002.log`,
+  SHA-256 `7622fdab20b5d869fcc1a5e9dd173727eeb5fad3d7375974c4ecbaf8cb0ab361`.
+  The existing global temporary-root snapshot also attributed a concurrent floor
+  VM's root to the current call. Each serial model-integration fixture now owns
+  a distinct TMPDIR namespace; the original root-absence assertion remains.
+  The failed run stays at
+  `/private/tmp/loopex-m7-responder-live-current-shared-temp-failed-20261002.log`,
+  SHA-256 `794282b027002a269f946804b909cff4d79dbe123b7e04322e1d451b6cec4151`.
+  Original: 42 done / 144 remaining. Added: 125 done / 11 remaining.
+
 - Done: T12's bounded callback component strips host/runtime fields from the
   model-question DTO, reconstructs exact offered choice identities through the
   existing Interaction validator, and waits for an exact owner/generation/reference
@@ -3760,14 +3799,17 @@ or check was relaxed.
 - [ ] Preserve reusable embedded sessions and buffered transport.
 - [x] Keep questions opt-in and preserve old tool selections.
 - [x] Implement tagged choice, text and decline answers.
-- [ ] Consume the question responder only in the one-call API; reject unsupported combinations.
-- [ ] Run one monitored responder worker outside the serial owner.
-- [ ] Join responder termination before another question or successful cleanup.
-- [ ] Test blocked, invalid, failed and late callbacks, cancellation, expiry and cleanup uncertainty.
+- [x] Consume the question responder only in the one-call API; reject unsupported combinations.
+- [x] Run one monitored responder worker outside the serial owner.
+- [x] Join responder termination before another question or successful cleanup.
+- [x] Test blocked, invalid, failed and late callbacks, cancellation, expiry and cleanup uncertainty.
 - [ ] Preserve the existing credential and transport-cleanup guarantees.
 - [ ] Complete the attended ephemeral-question witness.
 
 ### Added implementation subtasks
+
+- [x] Integrate one-call-only callback consumption, owner-registered temporary workers, fixed call/expiry/join cutoffs and single-reader continuation; prove serial exact joins, stale identities, ordinary abort, caller death and cleanup uncertainty through actual Core/local HTTP on both supported pairs.
+
 
 - [x] Implement the bounded model-question DTO and grant-gated temporary responder worker with exact answer validation, sanitized failures and supervisor-owned process joins; live one-call owner integration remains open.
 
@@ -3925,12 +3967,12 @@ before a provider demonstration.
 | Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Nine ordinary adapter mappings registered with both native transports, per-cell streaming/bound/disclosure and canonical terminal-history conformance; host integration, separate summarizer and live witnesses pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Core startup capture and durable/ephemeral instruction forwarding implemented; model routing, episode capture, checkpoint and compaction pending |
-| Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Durable Core lifecycle/replay and ephemeral tagged answer path implemented; public option/responder, wire and attended evidence pending |
+| Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Durable Core lifecycle/replay, public ephemeral questions and joined one-call responder implemented; wire and attended evidence pending |
 | Helper durable ownership | ADR 0046 | Bounded role/catalog bindings; reservation/allowance/monotonic-stop facts; derived job-index v1 | Host helper adapter; Runtime queries; Store; local executor | Pending |
 | Host provider bindings | ADR 0048 | Explicit admitted routes and credential references through existing custody boundaries | Composition; ReqLLM provider route/custody; helper adapter | Shared reference/exclusion validation, ephemeral startup/dispatch, durable token selection and direct/borrowed/daemon custody startup implemented; CLI and helper integration pending |
 | Host configuration grammar | ADR 0049 | Closed file/flag grammar, exact precedence, role selections, safe inspect and trace options | CLI; composition options; host renderer | Bounded JSON decoder, authored schema, relative file paths, trusted trace selectors, flag parser, new-session precedence/origins and initial capability/instruction admission implemented; complete role/maintenance preparation, command entry and redacted inspection pending |
 | Foreground and daemon wire | ADR 0044 coordinated contract | Foreground /3 and daemon /4; complete schema digests/vectors and negotiation | Protocol; AppServer; daemon servers; independent Node clients | Pending |
 | Public projection | ADRs 0043–0046/0049 | Versioned snapshots/events; bounded numbers/cursors; allowlisted configuration and maintenance | SessionState; protocol; AppServer; daemon; clients | Pending |
-| Ephemeral entry points | ADRs 0042–0045/0048/0049 | Combined closed startup options; one-call responder consumed locally; joined termination | Ephemeral.Options/Preflight/Bootstrap/SessionOwner; facade | Pending |
+| Ephemeral entry points | ADRs 0042–0045/0048/0049 | Combined closed startup options; one-call responder consumed locally; joined termination | Ephemeral.Options/Preflight/Bootstrap/SessionOwner; facade | Joined question callback, provider bindings and trace implemented; full option forwarding and attended/provider closure evidence pending |
 | Execution evidence | M7 technical acceptance contract | Fixed fixture/operator manifest; Pending scaffold; hash-chained single-writer attempts and fsync barriers | mix loopex.m7_evidence; release runner; PTY driver; evidence files | Pending |
 | Upgrade and rollback | M7 compatibility contract | Exact retained M6 artifact/root fixtures; retain old rollback pair and add distinct M7 pair | rollback lane/scripts; Store recovery; operator instructions | Pending |

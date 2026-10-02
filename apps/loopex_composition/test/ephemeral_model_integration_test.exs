@@ -43,6 +43,29 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     end
   end
 
+  setup do
+    # Concept: cleanup witnesses observe only this fixture's temporary roots.
+    # Technical depth: distinct VMs may run supported toolchains concurrently;
+    # a shared system-temp snapshot would attribute a peer VM's root to this call.
+    original = System.get_env("TMPDIR")
+
+    namespace =
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-model-fixture-#{Base.encode16(:crypto.strong_rand_bytes(12))}"
+      )
+
+    File.mkdir!(namespace)
+    System.put_env("TMPDIR", namespace)
+
+    on_exit(fn ->
+      if original, do: System.put_env("TMPDIR", original), else: System.delete_env("TMPDIR")
+      File.rm_rf!(namespace)
+    end)
+
+    :ok
+  end
+
   test "a real in-process model turn retires custody before a second ask and stop" do
     root = Path.join(System.tmp_dir!(), "loopex-model-#{System.unique_integer([:positive])}")
     File.mkdir!(root)
@@ -476,6 +499,405 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
       assert_receive {:model_request, _}, 15_000
       assert :ok = Ephemeral.stop_session(session)
     end
+  end
+
+  for {arguments, response, expected} <- [
+        {%{"question" => "How should nil be encoded?"}, {:text, String.duplicate("é", 4_096)},
+         String.duplicate("é", 4_096)},
+        {%{"question" => "Which encoding?", "choices" => ["empty", "literal null"]},
+         {:choice, "choice-2"}, "literal null"},
+        {%{"question" => "How should nil be encoded?"}, :decline, "declined"}
+      ] do
+    test "one-call responder joins exact #{inspect(response |> then(fn value -> if is_tuple(value), do: elem(value, 0), else: value end))} worker before completing" do
+      workspace = responder_workspace()
+      port = start_server([{:tool, "ask", unquote(Macro.escape(arguments))}, "answered once"])
+      parent = self()
+
+      callback = fn dto ->
+        send(parent, {:callback, self(), dto})
+
+        receive do
+          :respond -> unquote(Macro.escape(response))
+        end
+      end
+
+      task =
+        Task.async(fn ->
+          Ephemeral.run("ask once", responder_options(workspace, port, callback))
+        end)
+
+      assert_receive {:callback, worker, dto}, 15_000
+      monitor = Process.monitor(worker)
+      owner = responder_owner(task.pid)
+      state = :sys.get_state(owner)
+      owned_root = state.startup.owned_root.path
+      assert state.responder.pid == worker
+      assert Enum.sort(Map.keys(dto)) == ~w(choices expires_at interaction_id kind prompt)
+      refute Map.has_key?(state.startup.configuration, :question_responder)
+      assert state.session.active.kind == :observe
+      refute owner == worker
+      send(worker, :respond)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 15_000
+      assert {:ok, %{text: "answered once", outcome: :completed}} = Task.await(task, 15_000)
+      refute File.exists?(owned_root)
+      assert_receive {:model_request, _first}, 15_000
+      assert_receive {:model_request, second}, 15_000
+      [tool] = Enum.filter(request_body(second)["messages"], &(&1["role"] == "tool"))
+      assert tool["content"] =~ unquote(expected)
+    end
+  end
+
+  test "serial callbacks reuse one runtime and the original wait cutoff" do
+    workspace = responder_workspace()
+
+    port =
+      start_server([
+        {:tool, "ask", %{"question" => "First?"}, "question_1"},
+        {:tool, "ask", %{"question" => "Second?"}, "question_2"},
+        "both answered"
+      ])
+
+    parent = self()
+
+    callback = fn dto ->
+      send(parent, {:callback, self(), dto})
+
+      receive do
+        :respond -> {:text, "yes"}
+      end
+    end
+
+    task =
+      Task.async(fn ->
+        Ephemeral.run("ask twice", responder_options(workspace, port, callback))
+      end)
+
+    assert_receive {:callback, first, first_dto}, 15_000
+    owner = responder_owner(task.pid)
+    initial = :sys.get_state(owner)
+    generation = initial.responder.generation
+    deadline = initial.responder.deadline
+    runtime = initial.startup.registered.runtime
+    monitor = Process.monitor(first)
+    send(first, :respond)
+    assert_receive {:DOWN, ^monitor, :process, ^first, :normal}, 15_000
+    assert_receive {:callback, second, second_dto}, 15_000
+    refute Process.alive?(first)
+    refute second == first
+    refute first_dto["interaction_id"] == second_dto["interaction_id"]
+    current = :sys.get_state(owner)
+    assert current.responder.generation == generation
+    assert current.responder.deadline == deadline
+    assert current.startup.registered.runtime == runtime
+    assert current.responder.pid == second
+
+    send(
+      owner,
+      {first, generation, initial.responder.reference, :question_response,
+       {:ok, {:text, "stale"}}}
+    )
+
+    send(
+      owner,
+      {second, make_ref(), current.responder.reference, :question_response,
+       {:ok, {:text, "wrong generation"}}}
+    )
+
+    assert :sys.get_state(owner).responder.result == nil
+    monitor = Process.monitor(second)
+    send(second, :respond)
+    assert_receive {:DOWN, ^monitor, :process, ^second, :normal}, 15_000
+    assert {:ok, %{text: "both answered"}} = Task.await(task, 15_000)
+  end
+
+  test "invalid and raised callbacks abort instead of leaving a pending question" do
+    for reply <- [:invalid, :raise, :throw, :exit] do
+      workspace = responder_workspace()
+      port = start_server([{:tool, "ask", %{"question" => "Answer?"}}, "must not continue"])
+      parent = self()
+
+      callback = fn _dto ->
+        send(parent, {:callback, self()})
+
+        receive do
+          :respond -> :ok
+        end
+
+        case reply do
+          :invalid -> self()
+          :raise -> raise "private callback detail"
+          :throw -> throw("private callback detail")
+          :exit -> exit("private callback detail")
+        end
+      end
+
+      task =
+        Task.async(fn -> Ephemeral.run("ask", responder_options(workspace, port, callback)) end)
+
+      assert_receive {:callback, worker}, 15_000
+      monitor = Process.monitor(worker)
+      owner = responder_owner(task.pid)
+      owned_root = :sys.get_state(owner).startup.owned_root.path
+      send(worker, :respond)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 15_000
+      assert {:error, :responder_failed} = Task.await(task, 15_000)
+      refute File.exists?(owned_root)
+      assert_receive {:model_request, _}, 15_000
+      refute_receive {:model_request, _}, 50
+    end
+  end
+
+  test "blocked callback is killed at the captured call cutoff and joined before cleanup" do
+    workspace = responder_workspace()
+    port = start_server([{:tool, "ask", %{"question" => "Wait forever?"}}])
+    parent = self()
+
+    callback = fn _dto ->
+      send(parent, {:callback, self()})
+
+      receive do
+        :never -> {:text, "late"}
+      end
+    end
+
+    task =
+      Task.async(fn ->
+        Ephemeral.run(
+          "ask",
+          Keyword.put(responder_options(workspace, port, callback), :timeout, 1_500)
+        )
+      end)
+
+    assert_receive {:callback, worker}, 15_000
+    monitor = Process.monitor(worker)
+    owner = responder_owner(task.pid)
+    state = :sys.get_state(owner)
+    owned_root = state.startup.owned_root.path
+    # A forged DOWN must not release a worker that is still alive.
+    send(owner, {:DOWN, state.responder.monitor, :process, worker, :normal})
+    :sys.get_state(owner)
+    assert Process.alive?(worker)
+    assert :sys.get_state(owner).responder.pid == worker
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 15_000
+    assert {:error, {:timeout, _snapshot}} = Task.await(task, 15_000)
+    refute File.exists?(owned_root)
+  end
+
+  test "callback result cannot replace Core's run expiry" do
+    workspace = responder_workspace()
+    port = start_server([{:tool, "ask", %{"question" => "Wait?"}}, "must not continue"])
+    parent = self()
+
+    callback = fn _dto ->
+      send(parent, {:callback, self()})
+
+      receive do
+        :never -> {:text, "late"}
+      end
+    end
+
+    task =
+      Task.async(fn ->
+        Ephemeral.run(
+          "ask",
+          Keyword.put(responder_options(workspace, port, callback), :deadline_ms, 1_500)
+        )
+      end)
+
+    assert_receive {:callback, worker}, 15_000
+    monitor = Process.monitor(worker)
+    owner = responder_owner(task.pid)
+    state = :sys.get_state(owner)
+
+    assert state.responder.deadline <
+             System.monotonic_time() +
+               System.convert_time_unit(2_000, :millisecond, :native)
+
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 15_000
+    assert {:error, {:run, :bound_reached, _}} = Task.await(task, 15_000)
+    refute File.exists?(state.startup.owned_root.path)
+    assert_receive {:model_request, _}, 15_000
+    refute_receive {:model_request, _}, 50
+  end
+
+  test "caller death kills and joins the responder and its owning tree" do
+    workspace = responder_workspace()
+    port = start_server([{:tool, "ask", %{"question" => "Wait?"}}])
+    parent = self()
+
+    callback = fn _dto ->
+      send(parent, {:callback, self()})
+
+      receive do
+        :never -> {:text, "late"}
+      end
+    end
+
+    {caller, caller_monitor} =
+      spawn_monitor(fn ->
+        Ephemeral.run("ask", responder_options(workspace, port, callback))
+      end)
+
+    assert_receive {:callback, worker}, 15_000
+    monitor = Process.monitor(worker)
+    owner = responder_owner(caller)
+    owner_monitor = Process.monitor(owner)
+    state = :sys.get_state(owner)
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 15_000
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 15_000
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 15_000
+    refute File.exists?(state.startup.owned_root.path)
+    refute Enum.any?(Map.keys(state.startup.process_monitors), &Process.alive?/1)
+  end
+
+  test "responder failure yields cleanup uncertainty when root removal is unproved" do
+    workspace = responder_workspace()
+    port = start_server([{:tool, "ask", %{"question" => "Answer?"}}])
+    parent = self()
+
+    callback = fn _dto ->
+      send(parent, {:callback, self()})
+
+      receive do
+        :respond -> :invalid
+      end
+    end
+
+    task =
+      Task.async(fn -> Ephemeral.run("ask", responder_options(workspace, port, callback)) end)
+
+    assert_receive {:callback, worker}, 15_000
+    monitor = Process.monitor(worker)
+    owner = responder_owner(task.pid)
+    state = :sys.get_state(owner)
+    owned = state.startup.owned_root.path
+    on_exit(fn -> File.rm_rf!(owned) end)
+
+    :sys.replace_state(owner, fn current ->
+      root = current.startup.owned_root
+
+      put_in(current, [:startup, :owned_root], %{
+        root
+        | identity: %{root.identity | inode: root.identity.inode + 1}
+      })
+    end)
+
+    send(worker, :respond)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 15_000
+
+    assert {:error, {:cleanup_unproved, %{pending: [:root_removal], root: ^owned}}} =
+             Task.await(task, 15_000)
+
+    assert File.exists?(owned)
+    refute Process.alive?(worker)
+  end
+
+  for trigger <- [:deadline, :late_down] do
+    test "a missed exact join cutoff through #{trigger} retains uncertainty after ordinary cleanup" do
+      workspace = responder_workspace()
+      port = start_server([{:tool, "ask", %{"question" => "Wait?"}}])
+      parent = self()
+
+      callback = fn _dto ->
+        send(parent, {:callback, self()})
+
+        receive do
+          :respond -> {:text, "late"}
+        end
+      end
+
+      task =
+        Task.async(fn -> Ephemeral.run("ask", responder_options(workspace, port, callback)) end)
+
+      assert_receive {:callback, worker}, 15_000
+      monitor = Process.monitor(worker)
+      owner = responder_owner(task.pid)
+      state = :sys.get_state(owner)
+      # Fault injection proves the cutoff disposition with a genuinely live
+      # registered worker. Normal and killed joins have separate witnesses.
+      :sys.replace_state(owner, fn current ->
+        put_in(current.responder.join_deadline, System.monotonic_time() - 1)
+      end)
+
+      reason =
+        case unquote(trigger) do
+          :deadline ->
+            send(
+              owner,
+              {:question_responder_join_deadline, state.responder.generation,
+               state.responder.reference}
+            )
+
+            :killed
+
+          :late_down ->
+            send(worker, :respond)
+            :normal
+        end
+
+      assert_receive {:DOWN, ^monitor, :process, ^worker, ^reason}, 15_000
+
+      assert {:error, {:cleanup_unproved, %{pending: [:session_subtree]}}} =
+               Task.await(task, 15_000)
+
+      refute File.exists?(state.startup.owned_root.path)
+    end
+  end
+
+  test "policy-defer interactions never invoke the model-question responder" do
+    workspace = responder_workspace()
+    port = start_server([{:tool, "ls", %{"path" => "."}}])
+    parent = self()
+
+    callback = fn _dto ->
+      send(parent, :unexpected_callback)
+      :decline
+    end
+
+    options =
+      responder_options(workspace, port, callback) |> Keyword.put(:policy, DeferringPolicy)
+
+    assert {:error, :interaction_requires_session} = Ephemeral.run("list", options)
+    refute_receive :unexpected_callback, 50
+  end
+
+  defp responder_workspace do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-responder-#{Base.encode16(:crypto.strong_rand_bytes(12))}"
+      )
+
+    File.mkdir!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    root
+  end
+
+  defp responder_options(root, port, callback) do
+    [
+      policy: Policy,
+      model: "ollama:llama3.2",
+      base_url: "http://127.0.0.1:#{port}/v1",
+      cwd: root,
+      tools: :read_only,
+      questions: true,
+      question_responder: callback,
+      provider_bindings: %{"ollama" => %{"credential" => %{"none" => true}}},
+      max_tokens: 128,
+      timeout: 15_000
+    ]
+  end
+
+  defp responder_owner(creator) do
+    DynamicSupervisor.which_children(LoopexComposition.Ephemeral.OwnerSupervisor)
+    |> Enum.find_value(fn {_id, pid, _type, _modules} ->
+      if :sys.get_state(pid).creator == creator, do: pid
+    end)
+    |> then(fn owner ->
+      assert is_pid(owner)
+      owner
+    end)
   end
 
   defp ephemeral_roots do

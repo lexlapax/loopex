@@ -28,6 +28,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   alias LoopexComposition.SessionAdmission
   alias LoopexComposition.DiagnosticConsumer
   alias LoopexComposition.Ephemeral.{FacadeClient, ModelCensus, SessionRoot, TempRoot}
+  alias LoopexComposition.Ephemeral.QuestionResponder
 
   @startup_ms 5_000
   @startup_wait_ms 16_000
@@ -156,6 +157,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
          startup: nil,
          abort: nil,
          model_census: nil,
+         responder: nil,
          session: nil,
          stop: nil
        }}
@@ -165,6 +167,115 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   @impl true
+  def handle_info(
+        {pid, generation, reference, :question_response, result},
+        %{responder: %{pid: pid, generation: generation, reference: reference} = responder} =
+          state
+      ) do
+    # Concept: a callback cannot authorize an answer while its worker remains live.
+    # Technical depth: hold only the bounded result until the exact monitor's
+    # DOWN. Expiry, stop and generation identity still take precedence there.
+    {:noreply, watch_responder_join(%{state | responder: %{responder | result: result}})}
+  end
+
+  def handle_info(
+        {:DOWN, monitor, :process, pid, reason},
+        %{responder: %{pid: pid, monitor: monitor} = responder} = state
+      ) do
+    if Process.alive?(pid) do
+      {:noreply, state}
+    else
+      Process.cancel_timer(responder.timer)
+      if responder.join_timer, do: Process.cancel_timer(responder.join_timer)
+
+      result =
+        cond do
+          state.phase != :ready ->
+            {:error, :responder_cancelled}
+
+          is_integer(responder.join_deadline) and not fresh?(responder.join_deadline) ->
+            {:responder_join_unproved, responder_uncertainty(state)}
+
+          not fresh?(responder.deadline) ->
+            {:error, :responder_expired}
+
+          not match?(
+            %{"interaction_id" => id} when id == responder.interaction_id,
+            state.session.interaction
+          ) ->
+            {:error, :responder_expired}
+
+          reason != :normal ->
+            {:error, :responder_failed}
+
+          responder.generation != state.startup.generation ->
+            {:error, :responder_failed}
+
+          true ->
+            responder.result || {:error, :responder_failed}
+        end
+
+      unless responder.notified, do: send(responder.borrower, {self(), responder.request, result})
+
+      startup = %{
+        state.startup
+        | process_monitors: Map.delete(state.startup.process_monitors, pid),
+          registered: Map.delete(state.startup.registered, :question_responder)
+      }
+
+      next = %{state | responder: nil, startup: startup}
+      {:noreply, mark_stopped_child_down(next, pid)}
+    end
+  end
+
+  def handle_info(
+        {:question_responder_deadline, generation, reference},
+        %{responder: %{generation: generation, reference: reference} = responder} = state
+      ) do
+    if fresh?(responder.deadline) do
+      timer =
+        Process.send_after(
+          self(),
+          {:question_responder_deadline, generation, reference},
+          remaining(responder.deadline)
+        )
+
+      {:noreply, %{state | responder: %{responder | timer: timer}}}
+    else
+      {:noreply, stop_responder(state)}
+    end
+  end
+
+  def handle_info(
+        {:question_responder_join_deadline, generation, reference},
+        %{phase: :ready, responder: %{generation: generation, reference: reference} = responder} =
+          state
+      ) do
+    if fresh?(responder.join_deadline) do
+      timer =
+        Process.send_after(
+          self(),
+          {:question_responder_join_deadline, generation, reference},
+          remaining(responder.join_deadline)
+        )
+
+      {:noreply, put_in(state.responder.join_timer, timer)}
+    else
+      # Concept: missing termination proof cannot become callback success.
+      # Technical depth: preserve the registered monitor for ordinary cleanup;
+      # this private handoff carries the existing bounded uncertainty shape.
+      uncertainty = responder_uncertainty(state)
+
+      send(
+        responder.borrower,
+        {self(), responder.request, {:responder_join_unproved, uncertainty}}
+      )
+
+      state = put_in(state.responder.notified, true)
+      {:noreply, begin_stop(state, nil)}
+    end
+  end
+
   def handle_info({:loopex_session_admission, _, _, _, _, _} = message, state),
     do: {:noreply, handle_model_message(state, message)}
 
@@ -661,34 +772,57 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   end
 
   def handle_info(
+        {borrower, request, :public, {:question_responder, interaction_id, callback, deadline}},
+        %{phase: :ready} = state
+      )
+      when is_pid(borrower) and is_reference(request) and is_function(callback, 1) and
+             is_integer(deadline) do
+    with nil <- state.responder,
+         %{"interaction_id" => ^interaction_id} = interaction <- state.session.interaction,
+         {:ok, dto} <- QuestionResponder.question(interaction) do
+      deadline = min(deadline, state.session.interaction_wake_deadline)
+
+      if fresh?(deadline) do
+        {:noreply, start_question_responder(state, borrower, request, callback, dto, deadline)}
+      else
+        send(borrower, {self(), request, {:error, :responder_expired}})
+        {:noreply, state}
+      end
+    else
+      _ ->
+        send(borrower, {self(), request, {:error, :responder_failed}})
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
         {borrower, request, :public, {:answer, interaction_id, choice_id}},
         %{phase: :ready} = state
       )
       when is_pid(borrower) and is_reference(request) do
-    interaction = state.session.interaction
-
-    cond do
-      not answer_matches?(interaction, interaction_id, choice_id) ->
-        send(borrower, {self(), request, {:error, :invalid_interaction_answer}})
-        {:noreply, state}
-
-      is_nil(state.session.active) ->
-        {:noreply, begin_live_answer(state, borrower, request, interaction_id, choice_id)}
-
-      state.session.active.kind == :observe and
-          state.session.active.operation == :poll_scheduled ->
-        state = state |> put_in([:session, :active], nil) |> put_in([:session, :poll_marker], nil)
-        {:noreply, begin_live_answer(state, borrower, request, interaction_id, choice_id)}
-
-      state.session.active.kind == :observe and
-          state.session.active.operation == :next_event ->
-        {:noreply, reserve_live_answer(state, borrower, request, interaction_id, choice_id)}
-
-      true ->
-        send(borrower, {self(), request, {:error, :invalid_interaction_answer}})
-        {:noreply, state}
-    end
+    answer_request(
+      state,
+      borrower,
+      request,
+      interaction_id,
+      choice_id,
+      state.startup.configuration.timeout
+    )
   end
+
+  def handle_info(
+        {borrower, request, :public, {:answer_until, interaction_id, answer, deadline}},
+        %{phase: :ready} = state
+      )
+      when is_pid(borrower) and is_reference(request) and is_integer(deadline) do
+    if fresh?(deadline),
+      do: answer_request(state, borrower, request, interaction_id, answer, {:deadline, deadline}),
+      else: wait_run(state, borrower, request, deadline)
+  end
+
+  def handle_info({borrower, request, :public, {:wait_run, deadline}}, %{phase: :ready} = state)
+      when is_pid(borrower) and is_reference(request) and is_integer(deadline),
+      do: wait_run(state, borrower, request, deadline)
 
   def handle_info({borrower, request, :public, _operation}, state)
       when is_pid(borrower) and is_reference(request) do
@@ -1497,6 +1631,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   # Technical depth: an in-flight borrower is moved into stop state before its
   # operation can produce a second public reply.
   defp begin_stop(state, waiter) do
+    if state.responder, do: Process.exit(state.responder.pid, :kill)
+
     _ = :atomics.compare_exchange(state.cell, 1, 0, 1)
     now = System.monotonic_time()
     grace_deadline = now + native(state.cleanup_grace_ms)
@@ -1790,7 +1926,69 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       else: Map.put(command, :answer, answer)
   end
 
-  defp begin_live_answer(state, borrower, request, interaction_id, choice_id) do
+  defp answer_request(state, borrower, request, interaction_id, choice_id, wait) do
+    interaction = state.session.interaction
+
+    cond do
+      not answer_matches?(interaction, interaction_id, choice_id) ->
+        send(borrower, {self(), request, {:error, :invalid_interaction_answer}})
+        {:noreply, state}
+
+      is_nil(state.session.active) ->
+        {:noreply, begin_live_answer(state, borrower, request, interaction_id, choice_id, wait)}
+
+      state.session.active.kind == :observe and
+          state.session.active.operation == :poll_scheduled ->
+        state = state |> put_in([:session, :active], nil) |> put_in([:session, :poll_marker], nil)
+        {:noreply, begin_live_answer(state, borrower, request, interaction_id, choice_id, wait)}
+
+      state.session.active.kind == :observe and
+          state.session.active.operation == :next_event ->
+        {:noreply, reserve_live_answer(state, borrower, request, interaction_id, choice_id, wait)}
+
+      true ->
+        send(borrower, {self(), request, {:error, :invalid_interaction_answer}})
+        {:noreply, state}
+    end
+  end
+
+  # Concept: expiry follows the existing run rather than creating an ending.
+  # Technical depth: lend the sole observer to this borrower under the original
+  # fixed wait cutoff. Neither a second attachment nor a fresh wait is opened.
+  defp wait_run(state, borrower, request, deadline) do
+    cond do
+      not state.session.run_open ->
+        send(borrower, {self(), request, state.session.last_result})
+        {:noreply, state}
+
+      is_nil(state.session.active) ->
+        state |> begin_interaction_observation() |> wait_run(borrower, request, deadline)
+
+      state.session.active.kind == :observe and is_nil(state.session.active.borrower) ->
+        active = %{
+          state.session.active
+          | borrower: borrower,
+            borrower_monitor: Process.monitor(borrower),
+            request: request,
+            wait_deadline: deadline,
+            started_at: System.monotonic_time()
+        }
+
+        next = put_in(state.session.active, active)
+
+        {:noreply,
+         if(fresh?(deadline),
+           do: schedule_public_tick(next),
+           else: timeout_live_request(next)
+         )}
+
+      true ->
+        send(borrower, {self(), request, {:error, :session_unavailable}})
+        {:noreply, state}
+    end
+  end
+
+  defp begin_live_answer(state, borrower, request, interaction_id, choice_id, wait) do
     {command_id, session} = next_command_id(state.session, :answer)
 
     command = answer_command(command_id, interaction_id, choice_id)
@@ -1801,16 +1999,109 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       request,
       :answer,
       command,
-      state.startup.configuration.timeout
+      wait
     )
   end
+
+  # Concept: callback work is a temporary child of this call's private tree.
+  # Technical depth: register the exact monitor and generation before granting
+  # execution. Runtime stop sees that same child and cannot prove cleanup from
+  # a result message or supervisor acknowledgement while its worker is alive.
+  defp start_question_responder(state, borrower, request, callback, dto, deadline) do
+    generation = state.startup.generation
+    reference = make_ref()
+    supervisor = state.startup.registered.private_supervisor
+
+    case Supervisor.start_child(supervisor, %{
+           id: {:question_responder, reference},
+           start:
+             {QuestionResponder, :start_link, [self(), generation, reference, callback, dto]},
+           restart: :temporary,
+           shutdown: state.cleanup_grace_ms,
+           type: :worker
+         }) do
+      {:ok, pid} ->
+        monitor = Process.monitor(pid)
+
+        timer =
+          Process.send_after(
+            self(),
+            {:question_responder_deadline, generation, reference},
+            remaining(deadline)
+          )
+
+        responder = %{
+          pid: pid,
+          monitor: monitor,
+          generation: generation,
+          reference: reference,
+          interaction_id: dto["interaction_id"],
+          borrower: borrower,
+          request: request,
+          deadline: deadline,
+          timer: timer,
+          join_timer: nil,
+          join_deadline: nil,
+          notified: false,
+          result: nil
+        }
+
+        startup = %{
+          state.startup
+          | process_monitors: Map.put(state.startup.process_monitors, pid, monitor),
+            registered: Map.put(state.startup.registered, :question_responder, pid)
+        }
+
+        send(pid, {self(), generation, reference, :execute})
+        next = %{state | responder: responder, startup: startup}
+        if is_nil(next.session.active), do: begin_interaction_observation(next), else: next
+
+      _failed ->
+        send(borrower, {self(), request, {:error, :responder_failed}})
+        state
+    end
+  end
+
+  defp responder_uncertainty(state) do
+    {:error,
+     {:cleanup_unproved,
+      %{
+        root: state.startup.owned_root.path,
+        root_ownership: :owned,
+        pending: [:session_subtree],
+        ending: :none,
+        cause: :session_unavailable
+      }}}
+  end
+
+  defp stop_responder(%{responder: nil} = state), do: state
+
+  defp stop_responder(state) do
+    Process.exit(state.responder.pid, :kill)
+    watch_responder_join(state)
+  end
+
+  defp watch_responder_join(%{responder: %{join_deadline: nil} = responder} = state) do
+    deadline = System.monotonic_time() + native(state.cleanup_grace_ms)
+
+    timer =
+      Process.send_after(
+        self(),
+        {:question_responder_join_deadline, responder.generation, responder.reference},
+        remaining(deadline)
+      )
+
+    put_in(state.responder, %{responder | join_deadline: deadline, join_timer: timer})
+  end
+
+  defp watch_responder_join(state), do: state
 
   # Concept: an answer arriving during the sole expiry reader still competes
   # at core's journal; the reader cannot turn it into a local refusal.
   # Technical depth: reserve one answer on the active poll and send its command
   # only after that exact facade response. Its original public deadline runs
   # while the poll finishes; no second attachment reader is created.
-  defp reserve_live_answer(state, borrower, request, interaction_id, choice_id) do
+  defp reserve_live_answer(state, borrower, request, interaction_id, choice_id, wait) do
     {command_id, session} = next_command_id(state.session, :answer)
 
     command = answer_command(command_id, interaction_id, choice_id)
@@ -1827,7 +2118,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
         kind: :answer,
         command_id: command_id,
         started_at: started_at,
-        wait_deadline: started_at + native(state.startup.configuration.timeout),
+        wait_deadline: wait_deadline(started_at, wait),
         admission: :pregrant,
         queued_command: command
       })
@@ -1835,9 +2126,12 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     %{state | session: %{session | active: active}} |> schedule_public_tick()
   end
 
+  defp wait_deadline(_started_at, {:deadline, deadline}), do: deadline
+  defp wait_deadline(started_at, milliseconds), do: started_at + native(milliseconds)
+
   defp begin_live_command(state, borrower, request, kind, command, wait_ms) do
     started_at = System.monotonic_time()
-    wait_deadline = started_at + native(wait_ms)
+    wait_deadline = wait_deadline(started_at, wait_ms)
     monitor = Process.monitor(borrower)
 
     active = %{
@@ -2422,6 +2716,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   defp project_selected_event(state, _event), do: {:ok, state, nil}
 
   defp settle_live(state, result, interaction) do
+    state = if is_nil(interaction), do: stop_responder(state), else: state
     active = state.session.active
     if is_pid(active.borrower), do: send(active.borrower, {self(), active.request, result})
 

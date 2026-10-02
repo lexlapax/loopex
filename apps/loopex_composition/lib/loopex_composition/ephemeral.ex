@@ -81,23 +81,75 @@ defmodule LoopexComposition.Ephemeral do
 
   The stop is mandatory after a handle exists. An unproved stop takes precedence
   over the prompt result so the caller is not told its temporary root vanished.
-  With questions enabled, this wrapper selects a contextual host policy that
-  denies the exact model-question generation before an interaction can open.
-  Ordinary tool decisions still consult the supplied host policy.
+  The one-call-only `:question_responder` is a host function receiving the
+  bounded question DTO and returning tagged text, choice or decline. It stays
+  outside startup and durable data. One supervised worker at a time answers
+  through the serial owner's existing validation and command slot; its exact
+  termination precedes another question and cleanup. The caller's wait deadline
+  is captured once across all questions. Invalid replies and exceptions abort
+  the run and return `:responder_failed` after proved cleanup. Expiry and run
+  bounds retain Core's committed outcome. Host callback effects have no rollback;
+  trusted host code must not recursively create another call or session here.
+  With questions enabled and no callback, a contextual host policy denies the
+  exact model-question generation before an interaction can open. Ordinary
+  tool decisions still consult the supplied host policy.
   """
   @spec run(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(prompt, options \\ []) do
-    with {:ok, _selected} <- LoopexComposition.Ephemeral.Options.parse(options),
+    with {:ok, startup_options, responder} <-
+           LoopexComposition.Ephemeral.Options.run_options(options),
          :ok <- valid_prompt(prompt),
-         {:ok, configuration} <- Preflight.prepare(options),
-         {:ok, session} <- start_prepared(one_shot_configuration(configuration)) do
-      first = ask(session, prompt)
+         {:ok, configuration} <- Preflight.prepare(startup_options),
+         {:ok, session} <- start_prepared(one_shot_configuration(configuration, responder)) do
+      {:loopex_ephemeral_session, owner, _cell} = session
+
+      deadline =
+        System.monotonic_time() +
+          System.convert_time_unit(configuration.timeout, :millisecond, :native)
+
+      first = request(owner, {:ask, prompt, {:deadline, deadline}})
+      result = respond_to_questions(first, owner, responder, deadline)
       stop = stop_session(session)
-      run_result(first, stop)
+      run_result(result, stop)
     end
   end
 
-  defp one_shot_configuration(%{questions: true} = configuration) do
+  defp respond_to_questions(
+         {:error, {:interaction_pending, %{"producer" => "model_tool", "interaction_id" => id}}},
+         owner,
+         callback,
+         deadline
+       )
+       when is_function(callback, 1) do
+    result =
+      case request(owner, {:question_responder, id, callback, deadline}) do
+        {:ok, response} ->
+          with {:ok, answer} <- answer_response(response) do
+            case request(owner, {:answer_until, id, answer, deadline}) do
+              {:error, :invalid_interaction_answer} -> request(owner, {:wait_run, deadline})
+              other -> other
+            end
+          end
+
+        {:error, :responder_expired} ->
+          request(owner, {:wait_run, deadline})
+
+        {:error, :responder_failed} ->
+          {:error, :responder_failed}
+
+        {:error, :responder_cancelled} ->
+          {:error, :session_unavailable}
+
+        other ->
+          other
+      end
+
+    respond_to_questions(result, owner, callback, deadline)
+  end
+
+  defp respond_to_questions(result, _owner, _callback, _deadline), do: result
+
+  defp one_shot_configuration(%{questions: true} = configuration, nil) do
     configuration
     |> Map.put(:policy_identity, %{"id" => inspect(configuration.policy), "revision" => "0.2.0"})
     |> Map.put(:policy, %{
@@ -106,7 +158,7 @@ defmodule LoopexComposition.Ephemeral do
     })
   end
 
-  defp one_shot_configuration(configuration), do: configuration
+  defp one_shot_configuration(configuration, _responder), do: configuration
 
   @doc """
   ## Concept
@@ -231,6 +283,7 @@ defmodule LoopexComposition.Ephemeral do
   end
 
   defp run_result(_first, {:error, :session_unavailable} = stop), do: stop
+  defp run_result({:responder_join_unproved, uncertainty}, :ok), do: uncertainty
   defp run_result(first, :ok), do: one_shot_ending(first)
 
   defp one_shot_ending({:error, {:interaction_pending, _}}),

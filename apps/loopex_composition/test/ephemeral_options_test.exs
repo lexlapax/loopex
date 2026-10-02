@@ -83,6 +83,33 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
              {:error, {:invalid_option, :unknown_key}}
   end
 
+  test "run consumes only an enabled unary callback and leaves startup grammar closed" do
+    callback = fn _ -> :decline end
+    options = [policy: Policy, questions: true, question_responder: callback]
+    assert {:ok, [policy: Policy, questions: true], ^callback} = Options.run_options(options)
+    assert {:ok, [policy: Policy], nil} = Options.run_options(policy: Policy)
+
+    for bad <- [nil, false, self(), fn -> :decline end, fn _, _ -> :decline end] do
+      assert Options.run_options(policy: Policy, questions: true, question_responder: bad) ==
+               {:error, {:invalid_option, :question_responder}}
+    end
+
+    assert Options.run_options(policy: Policy, question_responder: callback) ==
+             {:error, {:invalid_option, :question_responder}}
+
+    assert Options.run_options(policy: Policy, questions: false, question_responder: callback) ==
+             {:error, {:invalid_option, :question_responder}}
+
+    assert Options.run_options(options ++ [question_responder: callback]) ==
+             {:error, {:invalid_option, :duplicate_key}}
+
+    assert Options.run_options(options ++ [unknown: nil]) ==
+             {:error, {:invalid_option, :unknown_key}}
+
+    assert Options.ask_options([question_responder: callback], 42) ==
+             {:error, {:invalid_option, :unknown_key}}
+  end
+
   test "trace is a closed startup map, validated even when disabled" do
     assert {:ok, selected} = Options.parse(policy: Policy, trace: %{"enabled" => true})
     assert selected.trace.enabled
