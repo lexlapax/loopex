@@ -18,7 +18,11 @@ defmodule LoopexCli.ChatDriver do
   or second interrupt, an unknown result returns while this private owner retains
   any outstanding monitors, without a further runtime result route.
   The host calls close only after composition and credential cleanup, so a
-  closing record cannot precede those proofs. Configuration, maintenance,
+  closing record cannot precede those proofs. Status reads committed settings
+  and runtime trace counters through the command worker. Its continuation
+  warning requires an exact confirmed configuration cache. Active maintenance
+  and completed compact observations await the live episode integration.
+  Configuration, maintenance,
   tracing and process-signal startup are joined by the outer command host.
   """
 
@@ -54,7 +58,9 @@ defmodule LoopexCli.ChatDriver do
   match the session; it sizes cancellation before the first status reply.
   The command holder resolves configure changes
   against its last confirmed candidate; refusal never updates that cache.
-  Only fresh prompts
+  Optional status_policy supplies the trusted wrapper's closed inspection
+  provenance; ordinary prepared configuration uses the existing policy registry
+  identity. Neither value grants command authority. Only fresh prompts
   receive those bounds; follow-ups inherit their active run through Core. The creating caller is monitored even on a normal exit.
   """
   def start_link(runtime, session_id, input, output, options \\ []) do
@@ -138,6 +144,7 @@ defmodule LoopexCli.ChatDriver do
       mode: Keyword.get(options, :mode, :pipe),
       default_bounds: Keyword.get(options, :bounds),
       configuration: Keyword.get(options, :configuration),
+      status_policy: Keyword.get(options, :status_policy),
       writer: writer,
       facade: facade,
       workers: %{},
@@ -413,6 +420,85 @@ defmodule LoopexCli.ChatDriver do
     end
   end
 
+  # Concept: status combines committed session values with this host's choices.
+  # Technical depth: only the command worker performs facade reads. The retained
+  # mapping cache must name the public configuration version before it can supply
+  # a continuation warning; an external configure cannot silently reuse it.
+  defp inspect_status(state) do
+    with {:ok, status} <- state.facade.(Loopex, :session_status, [state.runtime, state.session]),
+         {:ok, trace} <- inspected_trace(state),
+         {:ok, maintenance} <- inspected_maintenance(state.configuration, status.configuration),
+         policy when is_map(policy) <- inspected_policy(state) do
+      configuration = status.configuration || %{}
+
+      {:ok,
+       %{
+         run_id: status.active_run_id,
+         state: status.status,
+         configuration_version: configuration["configuration_version"],
+         model: configuration["model"],
+         reasoning: configuration["reasoning"],
+         bounds: status.active_bounds,
+         interaction_id:
+           if(status.open_interaction, do: status.open_interaction["interaction_id"]),
+         trace: trace,
+         maintenance: maintenance,
+         policy: policy
+       }}
+    else
+      _ -> {:error, :chat_status_unavailable}
+    end
+  end
+
+  defp inspected_trace(state) do
+    case state.facade.(Loopex, :trace_status, [state.runtime]) do
+      {:ok, %{emitted: emitted, dropped: dropped}} ->
+        {:ok, %{enabled: true, emitted: emitted, dropped: dropped}}
+
+      {:error, :no_trace_session} ->
+        {:ok, %{enabled: false, emitted: 0, dropped: 0}}
+
+      _ ->
+        {:error, :chat_status_unavailable}
+    end
+  end
+
+  defp inspected_maintenance(nil, nil),
+    do: {:ok, %{configured_model: nil, active_model: nil, warning: nil, last_compact: nil}}
+
+  defp inspected_maintenance(%{selection: selection}, public) when is_map(public) do
+    captured = selection.configuration
+
+    if Loopex.Runtime.SessionConfiguration.public_view(captured) == public do
+      configured = if selection.maintenance_model, do: selection.maintenance_model["model"]
+
+      warning =
+        if captured["provider_mapping"]["continuation_required"] and configured == nil,
+          do: :maintenance_unconfigured
+
+      {:ok,
+       %{configured_model: configured, active_model: nil, warning: warning, last_compact: nil}}
+    else
+      {:error, :chat_status_unavailable}
+    end
+  end
+
+  defp inspected_maintenance(_, _), do: {:error, :chat_status_unavailable}
+
+  defp inspected_policy(%{status_policy: policy}) when is_map(policy), do: policy
+
+  defp inspected_policy(%{configuration: %{selection: %{profile: %{"policy" => name}}}}) do
+    case Map.fetch(LoopexCli.AskOptions.policy_profiles(), name) do
+      {:ok, module} ->
+        %{origin: :registry, id: inspect(module), revision: "0.2.0", fixture_manifest_digest: nil}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp inspected_policy(_), do: nil
+
   defp command_loop(parent, ref, attachment, state) do
     receive do
       {^parent, ^ref, :configure, command} ->
@@ -435,6 +521,10 @@ defmodule LoopexCli.ChatDriver do
            state.facade.(Loopex, :session_status, [state.runtime, state.session])}
         )
 
+        command_loop(parent, ref, attachment, state)
+
+      {^parent, ^ref, :inspect_status} ->
+        send(parent, {self(), ref, :reply, inspect_status(state)})
         command_loop(parent, ref, attachment, state)
 
       {^parent, ^ref, :observe, id} ->
@@ -515,6 +605,11 @@ defmodule LoopexCli.ChatDriver do
     id = :crypto.strong_rand_bytes(24)
 
     case action do
+      :status ->
+        state = acknowledge(state, id, :admitted, :accepted)
+        send_worker(state, :command, {:inspect_status})
+        %{state | pending: :inspect_status}
+
       :wait ->
         state = acknowledge(state, id, :admitted, :accepted)
         ask_status(%{state | barrier: state.sequence})
@@ -657,6 +752,21 @@ defmodule LoopexCli.ChatDriver do
     state = %{state | pending: nil, status: status}
     state = consume_event(state)
     check_barrier(state)
+  end
+
+  defp command_reply(%{pending: :inspect_status} = state, {:ok, fields}) do
+    state
+    |> Map.put(:pending, nil)
+    |> checked_emit(
+      :status,
+      Map.merge(fields, %{input_sequence: state.sequence, session_id: state.session})
+    )
+    |> consume_event()
+    |> after_command()
+  end
+
+  defp command_reply(%{pending: :inspect_status} = state, _) do
+    state |> Map.put(:pending, nil) |> error(:chat_status_unavailable) |> local_refusal()
   end
 
   defp command_reply(%{pending: :observe} = state, {:ok, {:committed, :admitted, _, _}}),

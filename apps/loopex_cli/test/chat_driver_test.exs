@@ -7,6 +7,223 @@ defmodule LoopexCli.ChatDriverTest do
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
 
+  test "a second interrupt ends a blocked status read under the first captured cutoff" do
+    prepared = prepared_configuration()
+    fixture = start_fixture([], model: prepared.selection.configuration["model"])
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    {:ok, input} = StringIO.open("/status\nnever read\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+    test = self()
+
+    facade = fn
+      Loopex, :trace_status, [_runtime] ->
+        send(test, {:blocked_status, self()})
+        receive do: (:release -> {:error, :no_trace_session})
+
+      module, function, args ->
+        apply(module, function, args)
+    end
+
+    {host, driver} =
+      start_host(fixture.runtime, session, input, output, configuration: prepared, facade: facade)
+
+    assert_receive {:blocked_status, worker}
+    monitor = Process.monitor(worker)
+    assert {:monitored_by, holders} = Process.info(worker, :monitored_by)
+    assert self() in holders and driver in holders
+    ChatDriver.interrupt(driver)
+    captured = :sys.get_state(driver).deadline
+    assert is_integer(captured)
+    ChatDriver.interrupt(driver)
+    assert_receive {:provisional, ^host, %{exit_code: 1, cleanup: :unknown}}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}
+    assert :sys.get_state(driver).deadline == captured
+    assert {"never read\n", ""} = StringIO.contents(input)
+    assert Loopex.stop(fixture.runtime) == :ok
+    send(host, {:close, :confirmed})
+    assert_receive {:closed, ^host, 1}
+    {_, transcript} = StringIO.contents(output)
+    refute Enum.any?(records(transcript), &(&1["event"] == "status"))
+    assert List.last(records(transcript))["cleanup"] == "unknown"
+  end
+
+  test "status follows confirmed configure and warns from the retained continuation mapping" do
+    prepared = prepared_configuration()
+    fixture = start_fixture([], model: prepared.selection.configuration["model"])
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    {:ok, input} =
+      StringIO.open("/configure {\"reasoning\":\"high\",\"max_tokens\":8192}\n/status\n/quit\n",
+        encoding: :latin1
+      )
+
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output, configuration: prepared)
+
+    assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 0
+    {_, transcript} = StringIO.contents(output)
+    status = Enum.find(records(transcript), &(&1["event"] == "status"))
+    assert status["configuration_version"] == "2"
+    assert status["reasoning"] == "high"
+    assert status["maintenance"]["warning"] == "maintenance_unconfigured"
+    assert status["maintenance"]["configured_model"] == nil
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+  end
+
+  test "status acknowledges before its closed committed projection and preserves two prompts" do
+    prepared = prepared_configuration()
+
+    fixture =
+      start_fixture([%{text: "first", calls: []}, %{text: "second", calls: []}],
+        model: prepared.selection.configuration["model"]
+      )
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    {:ok, input} =
+      StringIO.open("/status\nfirst\n/wait\n/status\nsecond\n/wait\n/quit\n", encoding: :latin1)
+
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output,
+        configuration: prepared,
+        bounds: %{max_turns: 8, deadline_ms: 1000, token_budget: 10000}
+      )
+
+    assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 0
+    {_, transcript} = StringIO.contents(output)
+    controls = records(transcript)
+    statuses = Enum.filter(controls, &(&1["event"] == "status"))
+    assert length(statuses) == 2
+
+    for status <- statuses do
+      assert status["configuration_version"] == "1"
+      assert status["model"] == prepared.selection.configuration["model"]
+      assert status["reasoning"] == "default"
+      assert status["bounds"] == nil
+      assert status["run_id"] == nil
+      assert status["trace"] == %{"enabled" => false, "emitted" => "0", "dropped" => "0"}
+
+      assert status["policy"] == %{
+               "origin" => "registry",
+               "id" => "LoopexCli.Policy.AllowAll",
+               "revision" => "0.2.0",
+               "fixture_manifest_digest" => nil
+             }
+
+      index = Enum.find_index(controls, &(&1 == status))
+      assert Enum.at(controls, index - 1)["event"] == "input"
+      assert Enum.at(controls, index - 1)["input_sequence"] == status["input_sequence"]
+    end
+
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 2
+    refute transcript =~ "M7_CHAT_DRIVER_SLOT"
+    refute transcript =~ "model_capabilities"
+    refute transcript =~ "provider_mapping"
+  end
+
+  test "status reads live trace counters separately and excludes private trace fields" do
+    prepared = prepared_configuration()
+    fixture = start_fixture([], model: prepared.selection.configuration["model"])
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    {:ok, input} = StringIO.open("/status\n/quit\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    facade = fn
+      Loopex, :trace_status, [_runtime] ->
+        {:ok, %{emitted: 9_007_199_254_740_993, dropped: 2, sink: "private-trace-canary"}}
+
+      module, function, args ->
+        apply(module, function, args)
+    end
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output,
+        configuration: prepared,
+        facade: facade
+      )
+
+    assert %{exit_code: 0} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 0
+    {_, transcript} = StringIO.contents(output)
+    status = Enum.find(records(transcript), &(&1["event"] == "status"))
+
+    assert status["trace"] == %{
+             "enabled" => true,
+             "emitted" => "9007199254740993",
+             "dropped" => "2"
+           }
+
+    refute transcript =~ "private-trace-canary"
+  end
+
+  test "status refuses an unobserved external configuration instead of reusing stale mapping" do
+    prepared = prepared_configuration()
+    fixture = start_fixture([], model: prepared.selection.configuration["model"])
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session)
+
+    {:ok, changes, candidate} =
+      LoopexCli.ChatConfiguration.update(prepared, %{"max_tokens" => 1200})
+
+    assert {:accepted, "outside"} =
+             Loopex.command_with_configuration(
+               attachment,
+               %{
+                 type: :configure,
+                 command_id: "outside",
+                 changes: changes
+               },
+               candidate
+             )
+
+    {:ok, input} = StringIO.open("/status\n/quit\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output, configuration: prepared)
+
+    assert %{exit_code: 1, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 1
+    {_, transcript} = StringIO.contents(output)
+    refute Enum.any?(records(transcript), &(&1["event"] == "status"))
+    assert Enum.any?(records(transcript), &(&1["code"] == "chat_status_unavailable"))
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
+    assert status.configuration["configuration_version"] == 2
+  end
+
   test "new chat stages captured workspace facts and every selected immutable tool schema" do
     for profile <- ~w(none coding read-only) do
       prepared = prepared_configuration(profile)

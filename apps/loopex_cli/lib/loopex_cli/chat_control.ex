@@ -19,6 +19,7 @@ defmodule LoopexCli.ChatControl do
 
   alias LoopexProtocol.{Frame, Wire}
   alias LoopexProtocol.Session.Outcome
+  alias LoopexProtocol.Session.CompactResult
 
   @record_bytes 65_536
   @u64_max 18_446_744_073_709_551_615
@@ -36,7 +37,21 @@ defmodule LoopexCli.ChatControl do
     ],
     error: [:input_sequence, :code],
     wait: [:input_sequence, :state, :session_id, :run_id, :interaction_id, :command_id, :outcome],
-    closing: [:exit_code, :cleanup, :last_outcome]
+    closing: [:exit_code, :cleanup, :last_outcome],
+    status: [
+      :input_sequence,
+      :session_id,
+      :run_id,
+      :state,
+      :configuration_version,
+      :model,
+      :reasoning,
+      :bounds,
+      :interaction_id,
+      :trace,
+      :maintenance,
+      :policy
+    ]
   }
 
   @doc """
@@ -52,7 +67,7 @@ defmodule LoopexCli.ChatControl do
   perform transport-failure cleanup for that refusal. This function neither
   acknowledges a command nor establishes the truth of the supplied fields.
   """
-  @spec encode(:input | :question | :error | :wait | :closing, term()) ::
+  @spec encode(:input | :question | :error | :wait | :closing | :status, term()) ::
           {:ok, binary()}
           | {:error, :invalid_control_record | :control_record_too_large}
   def encode(event, fields) when is_map(fields) and not is_struct(fields) do
@@ -68,6 +83,41 @@ defmodule LoopexCli.ChatControl do
   end
 
   def encode(_, _), do: {:error, :invalid_control_record}
+
+  defp project(:status, fields) do
+    with {:ok, sequence} <- quantity(fields.input_sequence, false),
+         {:ok, session} <- identity(fields.session_id, 256),
+         {:ok, run} <- nullable_identity(fields.run_id),
+         true <- fields.state == :active,
+         {:ok, version} <- integer_quantity(fields.configuration_version, true),
+         true <- nullable_text?(fields.model, @record_bytes),
+         true <- fields.reasoning in [nil, "default", "none", "low", "medium", "high"],
+         true <- fields.configuration_version == nil == (fields.model == nil),
+         true <- fields.model == nil == (fields.reasoning == nil),
+         {:ok, bounds} <- status_bounds(fields.bounds),
+         true <- fields.run_id != nil or fields.bounds == nil,
+         {:ok, interaction} <- nullable_identity(fields.interaction_id),
+         true <- fields.interaction_id == nil or fields.run_id != nil,
+         {:ok, trace} <- status_trace(fields.trace),
+         {:ok, maintenance} <- status_maintenance(fields.maintenance),
+         {:ok, policy} <- status_policy(fields.policy) do
+      {:ok,
+       %{
+         "input_sequence" => sequence,
+         "session_id" => session,
+         "run_id" => run,
+         "state" => "active",
+         "configuration_version" => version,
+         "model" => fields.model,
+         "reasoning" => fields.reasoning,
+         "bounds" => bounds,
+         "interaction_id" => interaction,
+         "trace" => trace,
+         "maintenance" => maintenance,
+         "policy" => policy
+       }}
+    end
+  end
 
   defp project(:input, fields) do
     with {:ok, sequence} <- quantity(fields.input_sequence, false),
@@ -151,6 +201,108 @@ defmodule LoopexCli.ChatControl do
       _ -> :error
     end
   end
+
+  defp status_bounds(nil), do: {:ok, nil}
+
+  defp status_bounds(bounds) do
+    with true <- closed?(bounds, [:max_turns, :token_budget, :deadline_ms, :deadline]),
+         {:ok, turns} <- integer_quantity(bounds.max_turns, true),
+         {:ok, tokens} <- integer_quantity(bounds.token_budget, true),
+         {:ok, duration} <- quantity(bounds.deadline_ms, true),
+         {:ok, cutoff} <- cutoff_quantity(bounds.deadline),
+         true <- duration == nil == (cutoff == nil) do
+      {:ok,
+       %{
+         "max_turns" => turns,
+         "token_budget" => tokens,
+         "deadline_ms" => duration,
+         "deadline" => cutoff
+       }}
+    end
+  end
+
+  defp status_trace(trace) do
+    with true <- closed?(trace, [:enabled, :emitted, :dropped]),
+         true <- is_boolean(trace.enabled),
+         true <- nonnegative?(trace.emitted) and nonnegative?(trace.dropped),
+         true <- trace.enabled or (trace.emitted == 0 and trace.dropped == 0) do
+      {:ok,
+       %{
+         "enabled" => trace.enabled,
+         "emitted" => Integer.to_string(trace.emitted),
+         "dropped" => Integer.to_string(trace.dropped)
+       }}
+    end
+  end
+
+  defp status_maintenance(maintenance) do
+    with true <- closed?(maintenance, [:configured_model, :active_model, :warning, :last_compact]),
+         true <- nullable_text?(maintenance.configured_model, @record_bytes),
+         true <- nullable_text?(maintenance.active_model, @record_bytes),
+         true <- maintenance.warning in [nil, :maintenance_unconfigured],
+         true <- maintenance.warning == nil or maintenance.configured_model == nil,
+         {:ok, last} <- last_compact(maintenance.last_compact) do
+      {:ok,
+       %{
+         "configured_model" => maintenance.configured_model,
+         "active_model" => maintenance.active_model,
+         "warning" => if(maintenance.warning, do: Atom.to_string(maintenance.warning)),
+         "last_compact" => last
+       }}
+    end
+  end
+
+  defp last_compact(nil), do: {:ok, nil}
+
+  defp last_compact(last) do
+    with true <- closed?(last, [:episode_id, :command_id, :result]),
+         {:ok, episode} <- identity(last.episode_id),
+         {:ok, command} <- identity(last.command_id),
+         {:ok, result} <- CompactResult.encode_wire(last.result) do
+      {:ok, %{"episode_id" => episode, "command_id" => command, "result" => result}}
+    end
+  end
+
+  defp status_policy(policy) do
+    with true <- closed?(policy, [:origin, :id, :revision, :fixture_manifest_digest]),
+         true <- policy.origin in [:registry, :harness],
+         true <- text?(policy.id, @record_bytes) and text?(policy.revision, @record_bytes),
+         true <- policy_digest?(policy.origin, policy.fixture_manifest_digest) do
+      {:ok,
+       %{
+         "origin" => Atom.to_string(policy.origin),
+         "id" => policy.id,
+         "revision" => policy.revision,
+         "fixture_manifest_digest" => policy.fixture_manifest_digest
+       }}
+    end
+  end
+
+  defp policy_digest?(:registry, nil), do: true
+
+  defp policy_digest?(:harness, value) when is_binary(value),
+    do: Regex.match?(~r/\A[0-9a-f]{64}\z/, value)
+
+  defp policy_digest?(_, _), do: false
+
+  defp closed?(value, keys),
+    do: is_map(value) and not is_struct(value) and Enum.sort(Map.keys(value)) == Enum.sort(keys)
+
+  defp nullable_text?(nil, _), do: true
+  defp nullable_text?(value, limit), do: text?(value, limit)
+  defp integer_quantity(nil, true), do: {:ok, nil}
+
+  defp integer_quantity(value, _) when is_integer(value) and value > 0,
+    do: {:ok, Integer.to_string(value)}
+
+  defp integer_quantity(_, _), do: :error
+  defp cutoff_quantity(nil), do: {:ok, nil}
+
+  defp cutoff_quantity(value) when is_integer(value) and value >= 0 and value <= @u64_max,
+    do: {:ok, Integer.to_string(value)}
+
+  defp cutoff_quantity(_), do: :error
+  defp nonnegative?(value), do: is_integer(value) and value >= 0
 
   defp wait_outcome(%{
          state: :settled,

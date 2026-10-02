@@ -99,6 +99,68 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: ordered private-driver `/status` now acknowledges its input before
+  reading public session status and runtime trace counters through the command
+  worker. It reports exact committed model/version/reasoning, active bounds,
+  opaque interaction identities and closed policy/trace/maintenance branches.
+  Its continuation warning uses only a confirmed capture matching the complete
+  public configuration view; an external configuration change refuses status
+  rather than using stale metadata. The command remains responsive to signals
+  while either facade read blocks. A second interrupt returns unknown cleanup,
+  joins the blocked worker and preserves the first captured cutoff. No later
+  input is consumed. Ordinary status derives policy identity from the existing
+  explicit registry selection; the trusted wrapper can supply its closed
+  inspection provenance without granting command authority.
+  The shared protocol compact-result codec implements ADR 0043's complete
+  standalone result/failure/usage union, exact accounting relation and opaque
+  checkpoint encoding. Status can encode the distinct configured/active models
+  and completed compact payload. Live maintenance episodes/checkpoints are still
+  absent: the current driver truthfully has no active episode or completed
+  compact result. Their later owner projection and the coordinated schemas,
+  literal vectors and independent consumers remain in T05/T07. Public chat
+  command startup and T06's complete integrated workflow remain open.
+  Focused chat/startup/resume/installed-signal checks passed 80 cases on each
+  supported pair, in 20.2 current and 19.5 floor seconds. Protocol result/outcome
+  checks passed 12 cases on each pair with the existing Node case excluded.
+  Final boundary review then preserved the deadline's nonnegative-u64 domain,
+  including zero; the complete two control files passed 19 cases on each pair
+  in 0.3 seconds. No timeout, retry, cleanup assertion or check was weakened.
+  Complete outputs and SHA-256 digests:
+  - `/private/tmp/loopex-m7-status-chat-current-v6.log`,
+    `20df7022091f350ce92423d7b268d565e97286f667e16e6fa4789e42d01001b7`.
+  - `/private/tmp/loopex-m7-status-chat-floor-final.log`,
+    `8d510473ef91ab30df8f406d6dd22db9f2a576b7208b3b559b9527fd88b3ee94`.
+  - `/private/tmp/loopex-m7-status-protocol-current-final.log`,
+    `329643959c95072e678688ad0720e482713d823defe84f4c425592abd88dc122`.
+  - `/private/tmp/loopex-m7-status-protocol-floor-final.log`,
+    `f874f448cec5e9bee52be1d86a1f985800b8a71fb8b8a2ebfc314e08e5a39e9b`.
+  - `/private/tmp/loopex-m7-status-boundary-current-final.log`,
+    `e992c9749a072077db64aeb00b47b628bd40c3b9def7869727408f7cd447af05`.
+  - `/private/tmp/loopex-m7-status-boundary-floor-final.log`,
+    `c816ea6d04063c0c90cad460efbc68e23ae1a5419e8e5606e201d2c8db7d3b24`.
+  Formatting, warning-free compilation, documentation ordering, dependency
+  direction and status gates passed. Complete output:
+  `/private/tmp/loopex-m7-status-gates-final.log`, SHA-256
+  `656622f5b9f816d6ec32577c187bbafc8f3857e1a336c7473f035ee5279cc04e`.
+  Failed drafts remain failed evidence: control v1 passed its encoded LF into
+  the payload decoder; driver v2 called the wrong test facade method; v3's high
+  reasoning fixture omitted its required output reserve. They were corrected
+  without weakening admission. Hashes respectively:
+  `cd6b005e57fab697888dc8a34cc5bb6e3dfc5bfd735e859df70ad65a460a4aff`,
+  `6134dfd5a83d563f51d0b40545b807dc9df340cfa23e14117ae332dbcad8e0de`,
+  `80ae22a1142390a1bfcb504dacc8e2c64a228fe8ac3939326ca5fe45a3f42511`.
+  Current-final's 80 passing cases had a clause-grouping compile warning and
+  are not warning-free proof: log SHA-256
+  `495fcda8c68ef0d4eeb5732c5025fd82f69a2fdea61f4aeaf8f0d1e5c018d49d`.
+  Grouped source passed explicit warning-free compilation before current v6
+  and floor verification. The pre-stage dependency gate refused untracked
+  source; staged ordinary blobs passed the gate. No full fast check has run
+  on this status candidate yet. The earlier 15bc check predates guarded
+  activation and this status integration. No shell check or agent remains live
+  at focused-proof completion. The next work is public host startup/cleanup,
+  with unresolved resume startup facts kept separate from the three approvals
+  already recorded below. No new maintainer question is pending.
+
 - Done: the full fast check passed once on exact current-pair integration
   candidate `15bcaf73b6877cf30581a842ae775a2482da1604` in 935 seconds. All
   eleven application suites and repository gates passed, with prescribed
@@ -4838,6 +4900,8 @@ or check was relaxed.
 - [ ] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
+
+- [x] Join ordered status to public session/trace reads and the confirmed host capture; implement closed nested status and standalone compact-result codecs with exact quantities, private-data refusal, byte limits, stale-cache refusal and blocked-read cancellation proof on both toolchains. Public host entry, live maintenance observations and coordinated independent consumer/schema proof remain open.
 
 - [x] Join prepared chat installation to the existing acknowledged holder and manager guard; prove holder-only activation/abandonment, driver-owned abort fencing, exact duplicate preservation and fail-closed transport loss on both toolchains. Public host startup checks and composition remain pending.
 
