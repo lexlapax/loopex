@@ -99,6 +99,48 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the host configuration owner now has separate resume preflight and
+  prepared-owner comparison stages. Preflight validates the authored file,
+  flags, paths and credential-reference forms without reading prompt files,
+  model catalogs or credentials. The capability holder then reads the approved
+  four-member retained capture through the public facade. Absent model flags
+  do not consult current model metadata; matching aliases do not replace saved
+  capabilities. Numeric, cleanup and tool-profile conflicts refuse. Omitted
+  instruction files and helper defaults are ignored; only explicit bounded
+  prompt sections are compared. New-run bounds and explicitly selected future
+  maintenance remain invocation settings. The returned ordinary-session
+  profile exposes retained values with committed origins, and subsequent
+  configure preparation uses its exact frozen definitions and latest settings.
+
+  Every returned post-preparation refusal attempts abandonment. Failed
+  abandonment retains both the original refusal and owner uncertainty. Tests
+  use real Core owners, including empty-registry restart, confirmed configure,
+  all seven setting-conflict routes, missing provider route, changed/missing/
+  oversized prompt files, malformed preparation and holder-loss uncertainty.
+  They also prove unchanged records, no model/executor dispatch, mandatory
+  authored bounds, ignored edited defaults and an untouched credential canary.
+  The complete resume, creation/configuration and chat driver files pass 41
+  cases on each pair: 21.2 seconds current and 20.8 floor, warnings as errors.
+  `/private/tmp/loopex-m7-resume-configuration-current-v3.log`, SHA-256
+  `78fce6323f18f59e4f6918783b84650e6abab363df7b1717aae1d57628baeb99`;
+  `/private/tmp/loopex-m7-resume-configuration-floor-v2.log`, SHA-256
+  `cea35fb2005232bb4b35591319fe475ddb717eec72c5e07fe429cbb683b83efd`.
+  The first test draft failed the unchanged schema because it combined enabled
+  helpers with tools none. Its retained output is
+  `/private/tmp/loopex-m7-resume-configuration-current-v1.log`, SHA-256
+  `4093a58af04bc350dfff8fe9bd40a1bf813de12cd5d460edce76c71bf3058e76`.
+  The fixture now selects a valid edited helper-enabled coding profile while
+  the saved read-only generation stays unchanged. An initial guard-time
+  Access.get compilation error was corrected before any case executed.
+  No assertion, bound, route or schema was weakened.
+
+  This completes configuration preparation only. Public chat startup, prepared
+  capability handoff/activation, workspace and pending-policy checks, admitted
+  work routes, legacy migration, helper bindings, signals and effective-value
+  output remain pending; no original aggregate item closes here. The separate
+  full check currently runs on repair commit
+  `c7d855f778a6ef29a8787b5af4e2ef076100e05a` and does not include this child.
+
 - Done: the full current fast check on
   `410911990c021dcd6fcfde33a635c158834bacde` exited 1. Its last progress sample
   was 1,370 seconds; no final total duration was emitted after suite failure.
@@ -4449,6 +4491,7 @@ or check was relaxed.
 - [x] Expose the accepted committed configuration allowlist and current active-run bounds through existing local session status; prove initial/configured/restarted values, unresolved legacy and settled nulls, private-data exclusion, arbitrary turn/token counts, the exact staged absolute cutoff and the unchanged historical wire allowlist on both supported toolchains. Authored absolute ceilings, new generation snapshots and live chat integration remain pending.
 - [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.
 - [x] Expose maintainer-selected exact prepared genesis through the public creation facade; preserve legacy omission, conflict identity, malformed-input refusal and shared v2/v3 validation, and prove real durable chat creation/restart on both supported toolchains.
+- [x] Separate resume file preflight from capability-held ordinary-session configuration preparation; preserve exact retained settings and committed origins, compare explicit flags, abandon on returned refusal, retain cleanup uncertainty and prove restart/latest configure/route/instruction/credential behavior on both pairs. Public startup, workspace/pending-policy checks, legacy migration and helper bindings remain pending.
 
 ## T07 — Implement automatic and explicit compaction
 

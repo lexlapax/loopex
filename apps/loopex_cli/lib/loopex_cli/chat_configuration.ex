@@ -14,8 +14,9 @@ defmodule LoopexCli.ChatConfiguration do
   Configured file reads are limited to the selected configuration and prompts;
   model resolution may load trusted packaged catalog metadata. This stage does
   no environment lookup, resource discovery, credential resolution or startup.
-  Resume and enabled delegation require their own retained-state preparation;
-  until those paths are joined they refuse here rather than changing meaning.
+  Resume has a separate configuration preparation path using the capability
+  holder's retained read. Activation, workspace/pending-policy checks, legacy
+  migration and enabled delegation remain outer-host integration obligations.
   """
 
   alias LoopexCli.{ConfigFile, ConfigOptions, ConfigSelection, SessionInstructions}
@@ -81,6 +82,267 @@ defmodule LoopexCli.ChatConfiguration do
   @doc """
   ## Concept
 
+  Validate a resume invocation before acquiring credentials or a session owner.
+
+  ## Technical depth
+
+  The selected file must retain its required authored bounds. Composition here
+  supplies paths, routes, new-run bounds and host-local options only; file
+  session defaults are not a recovered configuration. This stage reads no
+  instruction file, model catalog or credential. The caller subsequently
+  acquires a prepared owner and presents this result to resume/2.
+  """
+  @spec load_resume(term(), term(), term()) :: {:ok, map()} | {:error, term()}
+  def load_resume(argv, cwd, home) do
+    with {:ok, %{command: :chat, resume: session} = parsed} when is_binary(session) <-
+           ConfigOptions.parse(argv),
+         {:ok, file} <- ConfigFile.load(parsed.config, cwd),
+         {:ok, selection} <- ConfigSelection.compose(file, %{parsed | resume: nil}, cwd, home),
+         :ok <- required_paths(selection.profile),
+         {:ok, _} <- ProviderBindings.validate(selection.profile["providers"]) do
+      {:ok, %{selection: selection, flags: parsed.overrides, resume_session_id: session}}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_chat_resume_invocation}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Prepare chat settings from an ordinary session's exact retained configuration.
+  Refusal gives up the prepared owner before returning to the operator.
+
+  ## Technical depth
+
+  The calling process must hold the unspent activation. File defaults never
+  replace retained model metadata, instructions, tools or cleanup grace. Only
+  explicit flags are compared, and a matching model alias is resolved without
+  replacing captured capabilities. Absent model flags consult no current model
+  catalog. Explicit prompt flags read only those bounded selected sections;
+  omitted prompt files are never reopened. New-run bounds and separately
+  resolved maintenance selection stay invocation settings. The result spends
+  no activation and dispatches no work. Outer startup still validates workspace,
+  pending policy and admitted-work routes, installs cancellation, then activates.
+  Legacy migration and helper bindings refuse until their separate paths exist.
+  Failed abandonment reports the original refusal and cleanup uncertainty.
+  """
+  @spec resume(term(), Loopex.ResumeActivation.t()) :: {:ok, map()} | {:error, term()}
+  def resume(invocation, activation) do
+    case resume_configuration(invocation, activation) do
+      {:ok, _} = result ->
+        result
+
+      {:error, reason} ->
+        case Loopex.abandon_resume(activation) do
+          :ok ->
+            {:error, reason}
+
+          {:error, cleanup} ->
+            {:error, {:resume_configuration_owner_unconfirmed, reason, cleanup}}
+        end
+    end
+  end
+
+  defp resume_configuration(
+         %{selection: selection, flags: flags, resume_session_id: session},
+         activation
+       )
+       when is_map(flags) and is_binary(session) do
+    with {:ok, retained} <- Loopex.prepared_session_configuration(activation),
+         %{"definitions" => definitions} <- retained.tool_selection,
+         configuration when is_map(configuration) <- retained.configuration,
+         :ok <- SessionConfiguration.validate(configuration, definitions),
+         :ok <- resume_grace(flags, retained.cleanup_grace_ms),
+         :ok <- resume_limits(flags, configuration),
+         :ok <- resume_tools(flags, definitions),
+         :ok <- resume_model(flags, configuration, definitions, selection.profile["providers"]),
+         :ok <- resume_instructions(flags, selection.profile, configuration["instructions"]),
+         {:ok, _} <-
+           DurableOptions.resolve(
+             model: configuration["model"],
+             provider_bindings: selection.profile["providers"],
+             active_tools: []
+           ),
+         {:ok, maintenance} <-
+           ProviderBindings.resolve_maintenance_model(
+             get_in(selection.profile, ["maintenance", "model"]),
+             selection.profile["providers"]
+           ) do
+      origins =
+        Enum.reduce(~w(model reasoning max_tokens context_token_budget system_class_tokens
+                               instructions tools cleanup_grace_ms), selection.origins, fn key,
+                                                                                           origins ->
+          pointer = "/session/" <> key
+
+          origins =
+            Map.reject(origins, fn {name, _} ->
+              name == pointer or String.starts_with?(name, pointer <> "/")
+            end)
+
+          Map.put(origins, pointer, "committed")
+        end)
+
+      ids = Enum.sort(Enum.map(definitions, & &1["tool_id"]))
+
+      profile_name =
+        Enum.find_value(@profiles, "retained", fn {name, tools} ->
+          if Enum.sort(tools) == ids, do: name
+        end)
+
+      session_profile =
+        selection.profile["session"]
+        |> Map.drop(~w(instructions skill_dirs))
+        |> Map.merge(
+          Map.take(
+            configuration,
+            ~w(model reasoning max_tokens context_token_budget system_class_tokens)
+          )
+        )
+        |> Map.put("cleanup_grace_ms", retained.cleanup_grace_ms)
+        |> Map.put("tools", profile_name)
+
+      profile =
+        selection.profile
+        |> Map.put("session", session_profile)
+        |> Map.put("roles", %{})
+        |> Map.put("delegation", %{"enabled" => false, "roles" => []})
+
+      origins =
+        origins
+        |> Map.reject(fn {pointer, _} ->
+          pointer in ["/roles", "/delegation"] or String.starts_with?(pointer, "/roles/") or
+            String.starts_with?(pointer, "/delegation/") or
+            pointer == "/session/skill_dirs" or
+            String.starts_with?(pointer, "/session/skill_dirs/")
+        end)
+        |> Map.put("/roles", "committed")
+        |> Map.put("/delegation/enabled", "committed")
+        |> Map.put("/delegation/roles", "committed")
+
+      {:ok,
+       %{
+         selection:
+           selection
+           |> Map.put(:profile, profile)
+           |> Map.put(:configuration, configuration)
+           |> Map.put(:maintenance_model, maintenance)
+           |> Map.put(:origins, origins),
+         retained: retained,
+         resume_session_id: session,
+         active_tools: Enum.map(definitions, & &1["tool_id"])
+       }}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :legacy_chat_resume_configuration_unavailable}
+    end
+  end
+
+  defp resume_configuration(_, _), do: {:error, :invalid_chat_resume_invocation}
+
+  defp resume_grace(flags, grace), do: agrees(flags, "cleanup-grace-ms", grace)
+
+  defp resume_limits(flags, configuration) do
+    Enum.reduce_while(
+      [
+        {"reasoning", "reasoning"},
+        {"max-tokens", "max_tokens"},
+        {"context-token-budget", "context_token_budget"},
+        {"system-class-tokens", "system_class_tokens"}
+      ],
+      :ok,
+      fn {flag, key}, :ok ->
+        case agrees(flags, flag, configuration[key]) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end
+    )
+  end
+
+  defp resume_tools(flags, definitions) do
+    ids = Enum.sort(Enum.map(definitions, & &1["tool_id"]))
+
+    cond do
+      "loopex.task" in ids ->
+        {:error, :chat_delegation_unavailable}
+
+      Map.has_key?(flags, "skill-dir") ->
+        {:error, {:chat_resume_immutable_catalog, "/flags/skill-dir"}}
+
+      Map.has_key?(flags, "tools") and Enum.sort(Map.fetch!(@profiles, flags["tools"])) != ids ->
+        {:error, {:chat_resume_configuration_conflict, "/flags/tools"}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp resume_model(flags, %{"model" => retained_model} = configuration, definitions, bindings) do
+    case Map.fetch(flags, "model") do
+      :error ->
+        :ok
+
+      {:ok, ^retained_model} ->
+        :ok
+
+      {:ok, model} ->
+        declaration =
+          configuration
+          |> Map.take(
+            ~w(reasoning max_tokens context_token_budget system_class_tokens instructions configuration_version)
+          )
+          |> Map.put("model", model)
+
+        with {:ok, resolved} <-
+               ProviderBindings.resolve_configuration(declaration, bindings, definitions),
+             do: agrees(%{"model" => resolved["model"]}, "model", configuration["model"])
+    end
+  end
+
+  defp resume_instructions(flags, profile, instructions) do
+    Enum.reduce_while(
+      [
+        {"system-prompt-file", "system_file", "base"},
+        {"append-system-prompt-file", "append_file", "appendix"}
+      ],
+      :ok,
+      fn {flag, option, section}, :ok ->
+        if Map.has_key?(flags, flag) do
+          path = profile["session"]["instructions"][option]
+
+          case SessionInstructions.capture(
+                 profile["paths"]["workspace"],
+                 profile["session"]["tools"],
+                 %{option => path}
+               ) do
+            {:ok, captured} ->
+              case agrees(%{flag => captured[section]}, flag, instructions[section]) do
+                :ok -> {:cont, :ok}
+                error -> {:halt, error}
+              end
+
+            error ->
+              {:halt, error}
+          end
+        else
+          {:cont, :ok}
+        end
+      end
+    )
+  end
+
+  defp agrees(flags, flag, retained) do
+    case Map.fetch(flags, flag) do
+      :error -> :ok
+      {:ok, ^retained} -> :ok
+      {:ok, _} -> {:error, {:chat_resume_configuration_conflict, "/flags/" <> flag}}
+    end
+  end
+
+  @doc """
+  ## Concept
+
   Prepare an explicit conversation configuration change against the host's
   last confirmed settings, using its admitted routes and immutable tools.
 
@@ -96,13 +358,11 @@ defmodule LoopexCli.ChatConfiguration do
   """
   @spec update(term(), term()) :: {:ok, map(), map()} | {:error, term()}
   def update(
-        %{
-          selection: %{configuration: current, profile: %{"providers" => bindings}},
-          genesis: %{"tool_selection" => %{"definitions" => definitions}}
-        },
+        %{selection: %{configuration: current, profile: %{"providers" => bindings}}} = prepared,
         changes
       ) do
-    with :ok <- SessionConfiguration.validate_update(changes),
+    with {:ok, definitions} <- configuration_definitions(prepared),
+         :ok <- SessionConfiguration.validate_update(changes),
          :ok <- SessionConfiguration.validate(current, definitions),
          declaration <-
            current
@@ -126,6 +386,16 @@ defmodule LoopexCli.ChatConfiguration do
   end
 
   def update(_, _), do: {:error, :invalid_session_configuration}
+
+  defp configuration_definitions(%{
+         genesis: %{"tool_selection" => %{"definitions" => definitions}}
+       }),
+       do: {:ok, definitions}
+
+  defp configuration_definitions(%{retained: %{tool_selection: %{"definitions" => definitions}}}),
+    do: {:ok, definitions}
+
+  defp configuration_definitions(_), do: {:error, :invalid_session_configuration}
 
   defp explicit_ceiling(declaration, current, key) do
     if current["budget_origins"][key] == "explicit",
