@@ -228,7 +228,7 @@ claiming that the run finished.
 | Project skills | `resource_catalog/2`, `read_resource/3` |
 | Artifacts | `open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` |
 | Diagnostics | `trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` |
-| Recovery | `reconciliation_query/1`, `reconcile/2`, `prepare_resume_session/3`, `prepare_resume_known_session/4`, `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3` |
+| Recovery | `reconciliation_query/1`, `reconcile/2`, `prepare_resume_session/3`, `prepare_resume_known_session/4`, `prepared_session_configuration/1`, `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3` |
 
 `create_session/3` and `resume_session/3` require a `:command_id`; an exact
 re-presentation returns the retained result, and changed content under the same
@@ -821,6 +821,15 @@ unspent authority. Only the current holder may activate, abandon, or transfer
 the capability; `activate_resume/1` and `abandon_resume/1` wait for the
 coordinator's answer, because a caller that stopped waiting cannot withdraw a
 request the owner already received.
+
+Before activation, `prepared_session_configuration/1` lets the current unspent
+capability holder read the exact retained configuration, immutable tool selection,
+policy-defer mode and cleanup grace. Captured instruction bytes are available to
+this trusted host caller; ordinary status still exposes only their version and
+digest. Legacy v2 configuration and selection remain nil. The read changes no
+session fact and schedules no work. Transferring the capability revokes the former
+holder's access; abandonment, activation, abort and supersession refuse later
+reads through the same holder and current-owner checks.
 
 Activating a prepared owner is the host's statement that the process which
 dispatched the last effect is gone, so the coordinator settles that effect

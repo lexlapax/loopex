@@ -324,10 +324,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
       when is_pid(coordinator) and is_map(owner) and is_map(response),
       do: safe_call(coordinator, {:reconcile, owner, response}, :infinity)
 
-  # Concept: the three answers a prepared owner's capability can be given, asked
-  # by the holder itself rather than on its behalf.
+  # Concept: prepared-capability operations come from the holder itself,
+  # including inspection of the retained host capture.
   #
-  # Technical depth: all three are called from the holder's own process, so the
+  # Technical depth: all operations are called from the holder's own process, so the
   # coordinator compares the caller in `from` against the holder it currently
   # records. Routing any of them through a helper process would make the holder
   # rule unenforceable, because the coordinator would then only ever see the
@@ -348,6 +348,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   def activate_resume(coordinator, owner, capability)
       when is_pid(coordinator) and is_map(owner) and is_reference(capability),
       do: safe_call(coordinator, {:activate_resume, owner, capability}, :infinity)
+
+  @doc false
+  @spec prepared_configuration(pid(), owner(), reference()) :: {:ok, map()} | {:error, term()}
+  def prepared_configuration(coordinator, owner, capability)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability),
+      do: safe_call(coordinator, {:prepared_configuration, owner, capability}, :infinity)
 
   @doc false
   @spec abandon_resume(pid(), owner(), reference()) :: :ok | {:error, term()}
@@ -712,6 +718,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
       if ready_current?(state, supplied_owner),
         do: inspect_resource(state, request),
         else: {:error, :session_unavailable}
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:prepared_configuration, supplied_owner, capability}, {caller, _tag}, state) do
+    reply =
+      with {:ok, _prepared} <- prepared_holder(state, supplied_owner, capability, caller) do
+        capture = %{
+          configuration: state.durable.configuration,
+          tool_selection: state.durable.tool_selection,
+          policy_defer_mode: state.durable.policy_defer_mode,
+          cleanup_grace_ms: state.durable.cleanup_grace_ms
+        }
+
+        with {:ok, _bytes} <- Store.admit_bounded(capture), do: {:ok, capture}
+      end
 
     {:reply, reply, state}
   end

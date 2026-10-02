@@ -594,6 +594,38 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Reads the exact retained host configuration before a prepared resume starts.
+  The trusted capability holder can compare resume flags and prepare later
+  configuration changes without reopening instruction files or tool catalogs.
+
+  ## Technical depth
+
+  Only the current holder of the unspent activation, under the current-owner
+  fence, receives this closed four-member map. Configuration and immutable tool
+  selection retain their complete captured bytes; legacy v2 values remain nil.
+  Policy-defer mode and cleanup grace come from the recovered session. The data
+  passes the existing Store plain-data and 65,536-byte admission, returning its
+  named structural/size refusal if the combined capture cannot fit. It contains no credentials,
+  private provider continuation or runtime handles. This local read spends no
+  capability, changes no session fact, commits nothing and dispatches no work.
+  Transfer revokes the previous holder's access; activation, abandonment, abort
+  and supersession retain their existing named refusals. Malformed input returns
+  `invalid_resume_activation`. Public status and wire projections are unchanged.
+  """
+  @spec prepared_session_configuration(ResumeActivation.t()) ::
+          {:ok,
+           %{
+             configuration: map() | nil,
+             tool_selection: map() | nil,
+             policy_defer_mode: binary(),
+             cleanup_grace_ms: pos_integer()
+           }}
+          | {:error, term()}
+  def prepared_session_configuration(activation), do: ResumeActivation.configuration(activation)
+
+  @doc """
+  ## Concept
+
   Lets a prepared owner resume its recovered work, once.
 
   ## Technical depth

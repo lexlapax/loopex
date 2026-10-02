@@ -96,6 +96,38 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: the approved `Loopex.prepared_session_configuration/1` read routes through
+  ResumeActivation to the serial owner's existing capability-holder/current-owner
+  fence. It returns the exact four retained fields without activation, mutation
+  or dispatch. Tests prove configured captures and immutable definitions after
+  restart with an empty tool registry and changed defaults, legacy nils and grace,
+  repeated read without spending, transfer and former-holder refusal, activation,
+  abandonment, abort fencing, supersession, malformed input and an actual recovered
+  pending prompt remaining paused. Public status still excludes instruction bytes.
+  The complete returned capture also passes Store plain-data/65,536-byte
+  admission before exposure. Forty-five affected cases pass with warnings as
+  errors: current 6.9 seconds, floor 6.7 seconds. Complete outputs:
+  `/private/tmp/loopex-m7-prepared-read-current-v4.log`, SHA-256
+  `e2e0f6dfa439ebc12fa212f3c978f6c398c610eb5eccb907019cf8e711604ede`;
+  `/private/tmp/loopex-m7-prepared-read-floor-v4.log`, SHA-256
+  `d68bf756cc076f774725ecd9554ededa3dd8a2b225ac4c92164695ea2ff180d1`.
+  Compilation, formatting, documentation, dependency direction, status and diff
+  gates pass; complete output `/private/tmp/loopex-m7-prepared-read-final-gates.log`,
+  SHA-256 `e94ef0d5c1628a81103feb85e7360d04c6e9113bd19d545ff3b901d6e4a56ffa`.
+  Failed fixture drafts remain under `/private/tmp/loopex-m7-prepared-read-<pair>-v1.log`
+  and `-v2.log`. V1 used the wrong update arity and expected an idle abort to admit
+  rather than refuse while fencing; V2 held a v2 prompt kind for a v3 session.
+  Production validation and time bounds were unchanged. Their SHA-256 digests are
+  current v1 `588a460de37218ab6acf1c1b873d9f2ad3bc501211e18a09b6c0a63b6d858388`,
+  floor v1 `9e828ceb8b9c9089c0f1b01e2b0ba31fccde0b29dd621947b31db15717fc8bb3`,
+  current v2 `99b77b37eba27fc2fe10887521f1a35bca94bbbca4aa1aab464dfb25105d43c7`,
+  floor v2 `336cccb4374779af614061d70c7c001a2391f60af232bc8843ec2374c05f6aee`.
+  One added T06 item closes. Original tally remains 44 done / 142 remaining;
+  added tally is 134 done / 10 remaining. Built-command resume remains open.
+  The preceding workspace proof's formatting/docs/status gates are retained at
+  `/private/tmp/loopex-m7-workspace-proof-gates.log`, SHA-256
+  `75cefbf9338a87b5318d6c5ddd5dbe95ae26bed6fcc50cc26360fb624cc4f398`.
+
 - Maintainer decisions, 2026-10-02: the maintainer answered "1. approverd.
   2. approved. 3. approved." to the three pending recommendations. Implementation
   is authorized for the capability-scoped public prepared-resume read, versioned
@@ -4092,7 +4124,7 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, captured invocation bounds and queued-run inheritance, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
-- [ ] Resolve the prepared-recovery configuration-read boundary, then expose its exact retained host capture under capability ownership and prove refusal/fencing without activation or dispatch.
+- [x] Resolve the prepared-recovery configuration-read boundary, then expose its exact retained host capture under capability ownership and prove refusal/fencing without activation or dispatch.
 
 - [x] Expose the accepted committed configuration allowlist and current active-run bounds through existing local session status; prove initial/configured/restarted values, unresolved legacy and settled nulls, private-data exclusion, arbitrary turn/token counts, the exact staged absolute cutoff and the unchanged historical wire allowlist on both supported toolchains. Authored absolute ceilings, new generation snapshots and live chat integration remain pending.
 - [x] Prepare exact new-chat configuration, instructions and immutable tools before credentials; wire opt-in question definitions through durable constructors and prove prepared genesis creation/restart on both toolchains.
