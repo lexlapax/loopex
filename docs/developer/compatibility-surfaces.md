@@ -269,6 +269,13 @@ rollback. `LoopexComposition.ResourcePacks.read_directories/2` turns up to
 four named project or user skill directories into the existing manifest path;
 the project copy wins a shared name. The ephemeral composition instead uses a
 memory Store and an in-VM model edge and has no recovery or artifact store.
+The M7 source adds optional ephemeral `:trace` startup under
+[ADR 0049](../adr/0049-explicit-host-configuration.md#concept). Omission or a
+disabled map preserves startup without diagnostic actors. Invalid maps refuse
+before composition effects; requested trace startup and cleanup failures are
+reported through the existing startup/cleanup results. This experimental
+extension supplies no runtime reference or per-prompt trace mutation through
+the opaque session handle.
 
 **Operator command.** The subcommands are `ask`, `run`, `sessions`, `resume`,
 `attach`, `cancel`, `artifact`, `skill`, and `daemon`; leading `-p` aliases

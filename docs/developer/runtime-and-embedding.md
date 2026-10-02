@@ -29,7 +29,7 @@ What an embedder can do through the facade or a profile entrypoint:
   sees;
 - read a durable artifact back in bounded, verified chunks;
 - observe the runtime with a trace session and telemetry spans, without
-  editing source; and
+  editing source, including opt-in startup tracing for an ephemeral session; and
 - recover a durable session after its process died, including one whose last
   effect has an unknown outcome.
 
@@ -250,6 +250,14 @@ process borrows the handle. This API uses the same kernel and policy port as the
 durable facade, but stores session truth only in memory. VM loss ends it, with
 no resume or migration to the durable profile.
 
+An ephemeral host may request a trace at session startup. Its private owner
+starts diagnostic delivery to stderr and keeps the trace across successive
+prompts, until the session stops. The opaque session handle grants no runtime
+trace controls. An explicitly requested trace that cannot start refuses and
+unwinds startup; cleanup uncertainty is reported through the existing session
+cleanup result. [ADR 0049](../adr/0049-explicit-host-configuration.md#concept)
+adds this optional startup control to the existing embedding contract.
+
 These snippets assume that `MyHost.ReadOnly` is loaded. The
 [runnable embedded example](getting-started-technical.md#technical-getting-started-embedding)
 defines the policy module.
@@ -323,6 +331,46 @@ or user skill directories. `:cwd` defaults to the current working directory;
 `:max_steps`, `:deadline_ms`, `:max_tokens`, `:context_token_budget`, `:timeout`
 and `:base_url` set the remaining per-session choices. Only `:timeout` may be
 overridden on an individual `ask/3`.
+
+Optional `:trace` is a closed map with binary keys. `"enabled"` defaults to
+false; `"level"` is `"calls"`, `"returns"` or `"arguments"`, defaulting to
+`"calls"`. `"modules"` accepts compiled trusted module names or the
+`"Loopex.*"` and `"LoopexProtocol.*"` selectors. The optional positive
+`"max_entry_bytes"`, `"max_entries_per_second"` and `"max_queue_entries"`
+limits can lower the existing ceilings of 4,096, 2,000 and 8,192 respectively.
+Validation applies even when disabled. Unknown keys, explicit nil, arbitrary
+sinks, callbacks and runtime references return `{:error, {:invalid_option,
+:trace}}` before startup effects. For example:
+
+```elixir
+{:ok, session} =
+  LoopexComposition.Ephemeral.start_session(
+    policy: MyHost.ReadOnly,
+    model: "ollama:llama3.2",
+    tools: :read_only,
+    cwd: File.cwd!(),
+    trace: %{
+      "enabled" => true,
+      "level" => "calls",
+      "modules" => ["Loopex.Runtime.Control"],
+      "max_entry_bytes" => 1_024
+    }
+  )
+
+:ok = LoopexComposition.Ephemeral.stop_session(session)
+```
+
+The owner registers the diagnostic drain and its private writer supervisor
+before connecting the runtime sink, then activates tracing after capability
+binding and before dispatch. Diagnostic output is independent of returned
+model results. Its pending output queue holds at most 256 entries plus one
+active writer; observed mailbox growth remains a separate best-effort measure.
+Stop seals delivery, accounts discarded and unconfirmed writes, joins the
+captured writer and supervisor, and requires every registered process to end
+before acknowledging cleanup. A lost diagnostic certificate remains unproved
+on a later stop attempt. The session's existing cleanup deadline governs this
+work. [ADR 0049's trace mechanics](../adr/0049-explicit-host-configuration-technical.md#technical-depth)
+state the selection, delivery and cleanup rules.
 
 A completed run returns `{:ok, observation}` with bounded text, tool history,
 profile and skill-shadow information. Failed, bounded, unknown and cancelled

@@ -91,13 +91,13 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
-- Running: the full fast check of exact candidate
-  `a47022cfcfdcc5f62c72654705e90a7d91a6cebb` is retained at
-  `/private/tmp/loopex-m7-a47022cf-fast-check.log` in the isolated managed
-  `m7-trace-check` checkout. Composition has finished RED with 432 passed,
-  one failed startup-protocol test and one existing exclusion. The other ten
-  application suites are still running; the complete output digest and final
-  exit status remain pending. Do not rerun that unchanged candidate as a pass.
+- Done: the full fast check of exact candidate
+  `a47022cfcfdcc5f62c72654705e90a7d91a6cebb` finished with exit 1.
+  Ten application suites passed; composition had one failed startup-protocol
+  test. Overall: 3,131 passed, one failed, 34 existing exclusions. Complete
+  immutable output: `/private/tmp/loopex-m7-a47022cf-fast-check.log`, SHA-256
+  `9fb778469308260c3ac96d48b85ace0b4bf18ce4d6277187eebeeabac333b257`.
+  This is failed evidence. Do not rerun that unchanged candidate as a pass.
   The failure is in the direct SessionRoot protocol fixture, outside the initial
   filename-based focused selection. Its sequence still expected runtime_holder
   immediately after trace_handle. The repair explicitly grants and acknowledges
@@ -109,9 +109,18 @@ did not resolve them. No paid provider calls were made during this check.
   `/private/tmp/loopex-m7-root-trace-order-floor-20261002.log`, SHA-256
   `b582eae86fe79a5ccefb94541268384b61c45fb77c525c7d09d44b9bd4edc79c`.
   This completes one added T16 subtask: original counts stay 28 done / 158
-  remaining; added counts are 95 done / 11 remaining. Run the new committed
-  repaired candidate once after the first check reaches its terminal result.
-  Retain the first complete log before archiving its worktree.
+  remaining; added counts are 95 done / 11 remaining. The repair is committed
+  and pushed as `d3097cf528d7d9374364da1ec88ddb89d3adc304`. Embedding and
+  compatibility pages now describe the opt-in trace startup, closed selection,
+  process inventory and cleanup contract. The documentation status check first
+  found a nonexistent ADR tracing fragment; the corrected link uses its exact
+  technical-depth anchor. Failed documentation output:
+  `/private/tmp/loopex-m7-ephemeral-trace-status-20261002.log`, SHA-256
+  `18a4457eabe322f31a4fd3a2c0e359b35eafbdc49fbea028c0cf5ba0eaa36b20`.
+  Next: run the full fast check once on the committed repair plus documentation
+  candidate, retaining its exact SHA and complete output. No new product-source
+  changes remain uncommitted. CLI ask's trace flags/owner integration is next;
+  they must cover both existing profiles before the flag vocabulary is exposed.
 - Done: T12's optional ephemeral trace lifecycle is integrated. The closed trace
   map validates before preflight effects. Enabled startup grants and registers
   the diagnostic drain and its private writer supervisor before binding and
@@ -150,8 +159,8 @@ did not resolve them. No paid provider calls were made during this check.
   `/private/tmp/loopex-m7-ephemeral-trace-first-20261002.log`, SHA-256
   `2697782ba841271f4a225dbfc4cd5500750aef6db2913318f2bcd1e9df103cef`.
   No required check, timeout or cleanup proof was weakened. The first full
-  check of the committed integration is running with the protocol-fixture
-  failure and verified repair recorded above.
+  check of the committed integration failed on the protocol fixture; the
+  complete failed output and verified repair are recorded above.
 - Done: trace selector resolution now lives in composition and both CLI
   configuration callers use that same compiled trusted-module inventory.
   A shared pure validator translates the accepted binary-keyed host trace map
