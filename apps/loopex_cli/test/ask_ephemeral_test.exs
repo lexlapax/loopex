@@ -3,6 +3,58 @@ defmodule LoopexCli.AskEphemeralTest do
 
   alias LoopexCli.Ask
 
+  test "trace selection reaches the embedded startup without a runtime escape" do
+    assert %{status: 0, stderr: "ending completed\n"} =
+             Ask.run(
+               [
+                 "ask",
+                 "--policy=allow-all",
+                 "--trace",
+                 "--trace-level=returns",
+                 "--trace-module=Loopex.*",
+                 "hello"
+               ],
+               seams()
+             )
+
+    assert_receive {:session_started, selected}
+
+    assert selected[:trace] == %{
+             "enabled" => true,
+             "level" => "returns",
+             "modules" => ["Loopex.*"]
+           }
+  end
+
+  test "invalid disabled trace refuses before workspace, signal or session effects" do
+    assert Ask.run(
+             ["ask", "--policy=allow-all", "--no-trace", "--trace-max-entry-bytes=4097"],
+             seams(
+               cwd: fn -> flunk("cwd read") end,
+               resolve_path: fn _ -> flunk("workspace resolved") end,
+               directory_identity: fn _ -> flunk("workspace inspected") end,
+               discard_credential: fn -> flunk("credential touched") end,
+               start_application: fn -> flunk("application started") end,
+               install_interrupt: fn _, _ -> flunk("signal installed") end,
+               start_session: fn _ -> flunk("session started") end
+             )
+           ) ==
+             LoopexCli.AskResult.diagnostic(:invalid_trace_configuration)
+  end
+
+  test "requested trace startup failure stays a fixed refusal and retires the handler" do
+    assert Ask.run(
+             ["ask", "--policy=allow-all", "--trace", "hello"],
+             seams(
+               start_session: fn _ -> {:error, {:composition, :trace_start_failed}} end,
+               ask: fn _, _ -> flunk("untraced question") end
+             )
+           ) ==
+             LoopexCli.AskResult.diagnostic(:trace_start_failed)
+
+    assert_receive :handler_finished
+  end
+
   test "both command spellings run one embedded session and render only after stop and finish" do
     for command <- ["ask", "-p"] do
       parent = self()

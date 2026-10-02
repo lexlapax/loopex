@@ -26,6 +26,8 @@ defmodule LoopexCli.AskResult do
     :invalid_skills,
     :invalid_max_steps,
     :invalid_deadline,
+    :invalid_trace_configuration,
+    :trace_start_failed,
     :policy_required,
     :invalid_policy,
     :workspace_unusable,

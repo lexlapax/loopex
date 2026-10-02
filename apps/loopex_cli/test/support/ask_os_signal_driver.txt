@@ -19,6 +19,7 @@ defmodule LoopexCli.AskOSSignalDriver do
     scenario = System.fetch_env!("LOOPEX_SIGNAL_SCENARIO")
     port = System.fetch_env!("LOOPEX_SIGNAL_PORT") |> String.to_integer()
     workspace = System.fetch_env!("LOOPEX_SIGNAL_WORKSPACE")
+    trace? = System.get_env("LOOPEX_SIGNAL_TRACE") == "1"
 
     {:ok, socket} =
       :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false, packet: 4], 5_000)
@@ -56,6 +57,13 @@ defmodule LoopexCli.AskOSSignalDriver do
                 model: "ollama:loopex-signal-fixture"
               )
             )
+
+          if trace? do
+            {:ok, {:loopex_ephemeral_session, owner, _cell}} = result
+            registered = :sys.get_state(owner).startup.registered
+            {:ok, _status} = Loopex.trace_status(registered.runtime)
+            Process.put(:signal_trace_owned, [registered.diagnostics, registered.diagnostic_supervisor])
+          end
 
           if scenario in ["pregrant", "postgrant"] do
             {:ok, {:loopex_ephemeral_session, owner, _cell}} = result
@@ -119,13 +127,16 @@ defmodule LoopexCli.AskOSSignalDriver do
 
         result = if scenario in ["double", "backstop"], do: :ok, else: Ephemeral.stop_session(session)
         send_control(socket, {:stop_returned, result})
+        if trace?,
+          do: send_control(socket, {:trace_joined, Enum.all?(Process.get(:signal_trace_owned), &(not Process.alive?(&1)))})
         result
       end
     ]
 
     result =
       Ask.run(
-        ["ask", "--policy", "allow-all", "--tools", "none", "--cwd", workspace, "hello"],
+        ["ask", "--policy", "allow-all", "--tools", "none", "--cwd", workspace, "hello"] ++
+          if(trace?, do: ["--trace"], else: []),
         seams
       )
 

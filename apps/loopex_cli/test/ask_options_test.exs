@@ -2,6 +2,76 @@ defmodule LoopexCli.AskOptionsTest do
   use ExUnit.Case, async: true
   alias LoopexCli.AskOptions
 
+  test "trace flags share the closed startup map across aliases and profiles" do
+    for command <- ["ask", "-p"], root <- [[], ["--state-root=/durable"]] do
+      assert {:ok, options} =
+               AskOptions.parse([
+                 command,
+                 "--policy=allow-all",
+                 "--trace",
+                 "--trace-level=returns",
+                 "--trace-module=Loopex.*",
+                 "--trace-module",
+                 "LoopexProtocol.*",
+                 "--trace-max-entry-bytes=123",
+                 "--trace-max-entries-per-second",
+                 "17",
+                 "--trace-max-queue-entries=9",
+                 "prompt" | root
+               ])
+
+      assert options.trace == %{
+               "enabled" => true,
+               "level" => "returns",
+               "modules" => ["Loopex.*", "LoopexProtocol.*"],
+               "max_entry_bytes" => 123,
+               "max_entries_per_second" => 17,
+               "max_queue_entries" => 9
+             }
+
+      assert options.words == ["prompt"]
+    end
+
+    assert {:ok, %{trace: %{"enabled" => false}}} =
+             AskOptions.parse(["ask", "--policy=allow-all", "--no-trace", "prompt"])
+
+    assert {:ok, %{trace: %{"level" => "calls"}}} =
+             AskOptions.parse(["ask", "--policy=allow-all", "--trace-level=calls"])
+  end
+
+  test "trace controls reject conflicts, unsupported selectors and limits even when disabled" do
+    structural = [
+      ["--trace", "--no-trace"],
+      ["--no-trace", "--trace"],
+      ["--trace", "--trace"],
+      ["--trace=true"],
+      ["--no-trace=false"],
+      ["--trace-level=calls", "--trace-level=returns"]
+    ]
+
+    for flags <- structural do
+      assert AskOptions.parse(["ask", "--policy=allow-all" | flags]) ==
+               {:error, :invalid_arguments}
+    end
+
+    invalid = [
+      ["--trace-level=bad"],
+      ["--trace-module=Unknown.Secret"],
+      ["--trace-module=LoopexCli.*"],
+      ["--trace-max-entry-bytes=4097"],
+      ["--trace-max-entries-per-second=2001"],
+      ["--trace-max-queue-entries=8193"],
+      ["--trace-max-entry-bytes=01"],
+      ["--trace-max-entry-bytes=0"],
+      Enum.flat_map(1..65, fn _ -> ["--trace-module=Loopex.*"] end)
+    ]
+
+    for flags <- invalid, enabled <- ["--trace", "--no-trace"] do
+      assert AskOptions.parse(["ask", "--policy=allow-all", enabled | flags]) ==
+               {:error, :invalid_trace_configuration}
+    end
+  end
+
   test "ask and -p share one parsed default shape without starting a stack" do
     for command <- ["ask", "-p"] do
       assert {:ok, options} = AskOptions.parse([command, "--policy", "allow-all", "hello"])
@@ -17,6 +87,7 @@ defmodule LoopexCli.AskOptionsTest do
                skills: [],
                max_steps: nil,
                deadline_ms: nil,
+               trace: nil,
                words: ["hello"]
              }
     end
@@ -79,6 +150,7 @@ defmodule LoopexCli.AskOptionsTest do
              skills: ["one", "two"],
              max_steps: 42,
              deadline_ms: 77,
+             trace: nil,
              words: ["first", "-single", "--model=positional", "", "end"]
            }
   end

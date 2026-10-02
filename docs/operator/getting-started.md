@@ -164,6 +164,11 @@ commands. `--model`, `--tools`,
 tool preset, named skill directories and bounds. The command does not silently
 discover a home or project skill.
 
+Add `--trace` to inspect this command's runtime on standard error while keeping
+JSON standard output separate. The same option works with durable
+`ask --state-root`. Scope, levels, lowered limits and cleanup behavior are
+described in [trace sessions](observability.md#operator-observability-procedure).
+
 When `ask` receives an unproved cleanup report and no public run observation
 exists, it emits no JSON result and names the pending obligation on standard
 error. A retained terminal ending or partial no-ending snapshot may still

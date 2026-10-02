@@ -138,23 +138,15 @@ defmodule LoopexCli.ChatOutputTest do
 
   test "abrupt writer loss still kills its linked IO worker" do
     device = device()
-    test = self()
-
-    owner =
-      spawn(fn ->
-        Process.flag(:trap_exit, true)
-        {:ok, writer} = ChatOutput.start_link(device)
-        :ok = ChatOutput.write(writer, :text, "blocked")
-        send(test, {:writer, writer})
-        receive do: (:stop -> :ok)
-      end)
-
-    assert_receive {:writer, writer}
+    {:ok, writer} = ChatOutput.start_link(device)
+    Process.unlink(writer)
+    writer_monitor = Process.monitor(writer)
+    assert :ok = ChatOutput.write(writer, :text, "blocked")
     assert_receive {:device_write, worker, "blocked"}
     worker_monitor = Process.monitor(worker)
     Process.exit(writer, :kill)
+    assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :killed}
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}
-    send(owner, :stop)
   end
 
   test "owner exit joins blocked IO, and another process cannot enqueue output" do

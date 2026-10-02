@@ -285,7 +285,7 @@ one more subcommand is observable and withdrawing one is breaking:
 
 | Subcommand | Flags |
 | --- | --- |
-| `ask`, `-p` | `--model`, `--output text\|json`, repeatable `--skill-dir` (up to four), `--tools none\|coding\|read-only`, required `--policy`, `--cwd`, `--max-steps`, `--deadline-ms`, `--state-root` |
+| `ask`, `-p` | `--model`, `--output text\|json`, repeatable `--skill-dir` (up to four), `--tools none\|coding\|read-only`, required `--policy`, `--cwd`, `--max-steps`, `--deadline-ms`, `--state-root`, `--trace`, `--no-trace`, `--trace-level`, repeatable `--trace-module`, `--trace-max-entry-bytes`, `--trace-max-entries-per-second`, `--trace-max-queue-entries` |
 | `run` | `--policy`, `--state-root`, `--workspace`, `--steer`, `--follow-up`, `--cleanup-grace-ms`, `--context-token-budget`, `--skill`, `--skill-resource` |
 | `resume`, `cancel` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |
 | `sessions`, `artifact` | `--state-root` |

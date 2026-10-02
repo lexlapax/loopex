@@ -8,6 +8,187 @@ defmodule LoopexCli.DurableAskWorkflowTest do
   @cwd "/tmp/loopex-ask-workspace"
   @root "/tmp/loopex-ask-state"
 
+  test "trace activates before create and its owned drain is gone before rendering" do
+    caller = self()
+
+    {seams, calls} =
+      harness(&completed_events/1,
+        trace_hook: fn consumer, configuration ->
+          assert {:ok, owned} = LoopexComposition.DiagnosticConsumer.owned_processes(consumer)
+          send(caller, {:trace_owned, owned})
+          assert configuration.sink == :diagnostics
+          assert configuration.level == :returns
+          {:ok, %{active: true}}
+        end
+      )
+
+    selected = Map.put(options(), :trace, %{"enabled" => true, "level" => "returns"})
+
+    assert %{status: 0, stderr: "", stdout: stdout} =
+             DurableAsk.run(selected, @cwd, "prompt", seams)
+
+    assert %{"outcome" => "completed"} = JSON.decode!(String.trim_trailing(stdout, "\n"))
+    assert_receive {:trace_owned, owned}
+    Enum.each(owned, &refute(Process.alive?(&1)))
+    observed = Agent.get(calls, & &1.calls)
+
+    assert ordered?(observed, [
+             :with_runtime,
+             :trace,
+             :create,
+             :prompt,
+             :callback_return,
+             :credential_release,
+             :placement_release
+           ])
+
+    assert Agent.get(calls, & &1.composition)[:cleanup_grace_ms] == 5_000
+  end
+
+  test "disabled trace keeps the ordinary ownership and calls no trace API" do
+    {seams, calls} = harness(&completed_events/1)
+    selected = Map.put(options(), :trace, %{"enabled" => false, "level" => "arguments"})
+    assert %{status: 0} = DurableAsk.run(selected, @cwd, "prompt", seams)
+    refute :trace in Agent.get(calls, & &1.calls)
+    refute Keyword.has_key?(Agent.get(calls, & &1.composition), :diagnostics_to)
+  end
+
+  test "requested trace failure joins its drain and creates no untraced session" do
+    caller = self()
+
+    {seams, calls} =
+      harness(&completed_events/1,
+        trace_hook: fn consumer, _ ->
+          {:ok, owned} = LoopexComposition.DiagnosticConsumer.owned_processes(consumer)
+          send(caller, {:trace_owned, owned})
+          {:error, :refused}
+        end
+      )
+
+    assert DurableAsk.run(Map.put(options(), :trace, %{"enabled" => true}), @cwd, "prompt", seams) ==
+             LoopexCli.AskResult.diagnostic(:trace_start_failed)
+
+    assert_receive {:trace_owned, owned}
+    Enum.each(owned, &refute(Process.alive?(&1)))
+    refute :create in Agent.get(calls, & &1.calls)
+
+    assert ordered?(Agent.get(calls, & &1.calls), [
+             :trace,
+             :callback_return,
+             :credential_release,
+             :placement_release
+           ])
+  end
+
+  test "a stalled stderr writer is reaped without entering JSON stdout" do
+    caller = self()
+
+    device =
+      spawn(fn ->
+        receive do
+          {:io_request, writer, _reply, _request} ->
+            send(caller, {:stalled_trace_writer, writer})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    on_exit(fn -> Process.exit(device, :kill) end)
+
+    {seams, _calls} =
+      harness(&completed_events/1,
+        trace_hook: fn consumer, _ ->
+          send(
+            consumer,
+            {:loopex_diagnostic, %{"kind" => "trace_call", "message" => "trace-only-secret"}}
+          )
+
+          assert_receive {:stalled_trace_writer, writer}
+          send(caller, {:captured_trace_writer, writer})
+          {:ok, %{active: true}}
+        end
+      )
+
+    selected = Map.put(options(), :trace, %{"enabled" => true})
+
+    assert %{status: 0, stderr: "", stdout: stdout} =
+             DurableAsk.run(
+               selected,
+               @cwd,
+               "prompt",
+               Keyword.put(seams, :diagnostic_device, device)
+             )
+
+    assert_receive {:captured_trace_writer, writer}
+    refute Process.alive?(writer)
+    refute String.contains?(stdout, "trace-only-secret")
+    assert %{"outcome" => "completed"} = JSON.decode!(String.trim_trailing(stdout, "\n"))
+  end
+
+  test "composition startup refusal still joins the prestarted diagnostic actors" do
+    caller = self()
+    {seams, _calls} = harness(&completed_events/1)
+
+    with_runtime = fn selected, _callback ->
+      consumer = selected[:diagnostics_to]
+      {:ok, owned} = LoopexComposition.DiagnosticConsumer.owned_processes(consumer)
+      send(caller, {:trace_owned, owned})
+      {:error, :unavailable}
+    end
+
+    assert DurableAsk.run(
+             Map.put(options(), :trace, %{"enabled" => true}),
+             @cwd,
+             "prompt",
+             Keyword.put(seams, :with_runtime, with_runtime)
+           ) ==
+             LoopexCli.AskResult.diagnostic(:composition_unavailable)
+
+    assert_receive {:trace_owned, owned}
+    Enum.each(owned, &refute(Process.alive?(&1)))
+  end
+
+  test "composition cleanup uncertainty overrides the traced answer after diagnostic join" do
+    caller = self()
+
+    {seams, _calls} =
+      harness(&completed_events/1,
+        cleanup_replacement: true,
+        trace_hook: fn consumer, _ ->
+          {:ok, owned} = LoopexComposition.DiagnosticConsumer.owned_processes(consumer)
+          send(caller, {:trace_owned, owned})
+          {:ok, %{active: true}}
+        end
+      )
+
+    assert DurableAsk.run(Map.put(options(), :trace, %{"enabled" => true}), @cwd, "prompt", seams) ==
+             LoopexCli.AskResult.diagnostic(:runtime_cleanup_unconfirmed)
+
+    assert_receive {:trace_owned, owned}
+    Enum.each(owned, &refute(Process.alive?(&1)))
+  end
+
+  test "a lost diagnostic drain never certifies successful command cleanup" do
+    caller = self()
+
+    {seams, _calls} =
+      harness(&completed_events/1,
+        trace_hook: fn consumer, _ ->
+          {:ok, owned} = LoopexComposition.DiagnosticConsumer.owned_processes(consumer)
+          monitor = Process.monitor(consumer)
+          Process.exit(consumer, :kill)
+          assert_receive {:DOWN, ^monitor, :process, ^consumer, :killed}
+          send(caller, {:trace_owned, owned})
+          {:ok, %{active: true}}
+        end
+      )
+
+    assert DurableAsk.run(Map.put(options(), :trace, %{"enabled" => true}), @cwd, "prompt", seams) ==
+             LoopexCli.AskResult.diagnostic(:runtime_cleanup_unconfirmed)
+
+    assert_receive {:trace_owned, owned}
+    Enum.each(owned, &refute(Process.alive?(&1)))
+  end
+
   test "reader spawn failure restores the callback trap-exit flag" do
     previous = Process.flag(:trap_exit, false)
 
@@ -901,6 +1082,11 @@ defmodule LoopexCli.DurableAskWorkflowTest do
         record.(:create)
         assert String.match?(id, ~r/\Acli-[0-9a-f]{32}\z/)
         Keyword.get(overrides, :create, {:ok, "session-1"})
+
+      Loopex, :trace, [:runtime, configuration] ->
+        record.(:trace)
+        consumer = Agent.get(calls, & &1.composition)[:diagnostics_to]
+        Keyword.fetch!(overrides, :trace_hook).(consumer, configuration)
 
       Loopex, :track_session, [@root, "session-1", "placement-1"] ->
         record.(:track)

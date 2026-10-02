@@ -63,6 +63,45 @@ defmodule LoopexCli.AskIntegrationTest do
     assert :gen_event.which_handlers(:erl_signal_server) == [:erl_signal_handler]
   end
 
+  test "startup trace reaches stderr while a real command keeps JSON stdout clean" do
+    workspace = temporary_workspace()
+    {port, _server} = start_server("traced command answer")
+    caller = self()
+
+    stderr =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        result =
+          Ask.run(
+            [
+              "ask",
+              "one question",
+              "--policy=allow-all",
+              "--model=ollama:llama3.2",
+              "--tools=none",
+              "--cwd",
+              workspace,
+              "--output=json",
+              "--trace",
+              "--trace-module=Loopex.*"
+            ],
+            command_seams(port)
+          )
+
+        send(caller, {:traced_command_result, result})
+      end)
+
+    assert_receive {:traced_command_result, %{status: 0, stderr: "", stdout: stdout}}
+    assert_receive {:model_request, _request}, 15_000
+    assert [encoded, ""] = String.split(stdout, "\n")
+
+    assert %{"text" => "traced command answer", "cleanup" => %{"proved" => true}} =
+             JSON.decode!(encoded)
+
+    assert stderr =~ "trace_call"
+    refute stdout =~ "trace_call"
+    assert :gen_event.which_handlers(:erl_signal_server) == [:erl_signal_handler]
+  end
+
   test "a signal stops an in-flight real model call before the command emits an answer", %{
     manager: manager
   } do

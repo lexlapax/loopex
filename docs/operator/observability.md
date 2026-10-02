@@ -21,10 +21,11 @@ project resource contains can start, change or stop either one.
 
 Constraints: both are reached only by a host that holds the runtime reference —
 an embedding program, or code running inside the same VM as the runtime. The
-`loopex` command, the daemon and the app server expose no trace command and no
-telemetry output of their own; to see what a session did from those surfaces,
-read its durable events (see [how a run works](how-a-run-works.md#concept)) or,
-under a daemon, its status (see [listing and status](daemon.md#operator-daemon-listing)).
+`loopex ask` owner can enable its own runtime trace at startup and send
+diagnostics to standard error. The daemon and app server expose no trace
+command or telemetry output. Read durable events to see what a session did
+(see [how a run works](how-a-run-works.md#concept)) or, under a daemon, its status
+(see [listing and status](daemon.md#operator-daemon-listing)).
 
 Developer contract: [Observability for developers](../developer/observability.md#concept).
 Starting the runtime a host observes: [Runtime operations](runtime.md#concept).
@@ -38,6 +39,39 @@ project resource or protocol request reaches it.
 
 <a id="operator-observability-procedure"></a>
 ### Start, check and stop a trace
+
+For a standalone question, select tracing before the command starts:
+
+```bash
+loopex ask --policy shell-allowlist --model ollama:llama3.2 \
+  --tools none --output json --trace --trace-level returns \
+  --trace-module 'Loopex.*' 'Explain the session lifecycle'
+```
+
+The same flags apply to durable `ask --state-root DIR`. Trace entries go to
+standard error; JSON standard output remains one result object. Explicit trace
+startup failure refuses the question. Command completion, failure and signals
+stop its trace and diagnostic actors before confirmed cleanup. A lost cleanup
+proof remains a lifecycle failure.
+
+`--trace` enables tracing and `--no-trace` disables it. Supplying both, repeating
+a scalar flag or assigning a Boolean flag a value refuses. Optional
+`--trace-level calls|returns|arguments`, repeatable `--trace-module` and
+`--trace-max-entry-bytes`, `--trace-max-entries-per-second`,
+`--trace-max-queue-entries` configure the trace. Configuration flags alone leave
+tracing disabled, and invalid selections refuse even when disabled. Modules
+default to `Loopex.*` and `LoopexProtocol.*`; at most 64 selectors of 128 bytes
+each may name those wildcards or exact trusted compiled modules. Limits use
+positive decimal integers and may only lower the ceilings below. `run`,
+`resume`, `cancel` and non-owning commands refuse these flags.
+
+The diagnostic drain retains at most 256 pending entries and one active writer.
+Its mailbox follows the runtime's best-effort sink contract; blocked stderr can
+cause entries to be dropped. Closing discards queued entries and joins the
+writer within the captured cleanup grace. An unacknowledged write is delivery
+unconfirmed. Diagnostics are separate from model answers and durable events.
+
+An embedding host can start, observe and stop its runtime trace directly:
 
 ```elixir
 {:ok, _status} = Loopex.trace(runtime, %{level: :returns})

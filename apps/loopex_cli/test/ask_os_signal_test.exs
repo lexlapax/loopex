@@ -103,6 +103,21 @@ defmodule LoopexCli.AskOSSignalTest do
     refute output =~ "signal answer"
   end
 
+  test "an OS signal joins the startup-enabled trace and diagnostic actors", fixture do
+    state = start_case(fixture, "stop", true)
+    assert_control(state.socket, :ask_enter)
+    assert_control(state.socket, :stop_enter)
+    signal(state, "TERM", :child)
+    assert_control(state.socket, {:phase, :stopping})
+    release(state.socket)
+    assert_control(state.socket, {:stop_returned, :ok})
+    assert_control(state.socket, {:trace_joined, true})
+    assert_restored_handlers(state.socket)
+    assert {:result, %{status: 130, stdout: ""}} = receive_control(state.socket)
+    assert {130, output} = await_exit(state.port, 10_000)
+    refute output =~ "signal answer"
+  end
+
   test "a real signal after owner registration but before grant starts no prompt", fixture do
     state = start_case(fixture, "pregrant")
     assert_control(state.socket, :ask_enter)
@@ -174,7 +189,7 @@ defmodule LoopexCli.AskOSSignalTest do
     assert {:error, :closed} = :gen_tcp.recv(state.socket, 0, 1_000)
   end
 
-  defp start_case(fixture, scenario) do
+  defp start_case(fixture, scenario, trace? \\ false) do
     workspace = Path.join(fixture.root, "workspace-#{System.unique_integer([:positive])}")
     File.mkdir!(workspace)
     stderr_path = Path.join(workspace, "stderr")
@@ -194,6 +209,7 @@ defmodule LoopexCli.AskOSSignalTest do
         env: [
           {~c"LOOPEX_ESCRIPT", String.to_charlist(fixture.stand_in)},
           {~c"LOOPEX_SIGNAL_SCENARIO", String.to_charlist(scenario)},
+          {~c"LOOPEX_SIGNAL_TRACE", if(trace?, do: ~c"1", else: ~c"0")},
           {~c"LOOPEX_SIGNAL_PORT", Integer.to_charlist(control_port)},
           {~c"LOOPEX_SIGNAL_WORKSPACE", String.to_charlist(workspace)},
           {~c"LOOPEX_SIGNAL_STDERR", String.to_charlist(stderr_path)},

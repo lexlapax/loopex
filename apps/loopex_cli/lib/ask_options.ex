@@ -10,10 +10,13 @@ defmodule LoopexCli.AskOptions do
   The returned private map keeps raw positional words for the runner to validate
   after cwd resolution. A nil optional member means its flag was omitted; the
   runner leaves that profile's own default in charge. Failure returns only a
-  fixed diagnostic atom, never caller bytes.
+  fixed diagnostic atom, never caller bytes. Trace flags produce the shared
+  closed startup map; disabled selections still validate before host effects.
   """
 
-  @flags ~w(model output skill-dir tools policy cwd max-steps deadline-ms state-root)
+  @trace ~w(trace no-trace trace-level trace-module trace-max-entry-bytes
+            trace-max-entries-per-second trace-max-queue-entries)
+  @flags ~w(model output skill-dir tools policy cwd max-steps deadline-ms state-root) ++ @trace
   @uint64_max 18_446_744_073_709_551_615
   @policies %{
     "allow-all" => LoopexCli.Policy.AllowAll,
@@ -47,7 +50,8 @@ defmodule LoopexCli.AskOptions do
          :ok <- skills(Map.get(flags, "skill-dir", [])),
          {:ok, max_steps} <- positive(Map.get(flags, "max-steps"), :invalid_max_steps),
          {:ok, deadline_ms} <- positive(Map.get(flags, "deadline-ms"), :invalid_deadline),
-         {:ok, policy} <- policy(Map.get(flags, "policy")) do
+         {:ok, policy} <- policy(Map.get(flags, "policy")),
+         {:ok, trace} <- trace(flags) do
       {:ok,
        %{
          profile: if(Map.has_key?(flags, "state-root"), do: :durable, else: :ephemeral),
@@ -60,6 +64,7 @@ defmodule LoopexCli.AskOptions do
          skills: Map.get(flags, "skill-dir", []),
          max_steps: max_steps,
          deadline_ms: deadline_ms,
+         trace: trace,
          words: words
        }}
     end
@@ -77,12 +82,17 @@ defmodule LoopexCli.AskOptions do
 
   defp scan(["--" <> raw | rest], flags, words) do
     case String.split(raw, "=", parts: 2) do
-      [key, value] ->
+      [key, value] when key not in ["trace", "no-trace"] ->
         with :ok <- admit(key, flags),
              true <- value != "" do
           scan(rest, put(flags, key, value), words)
         else
           _ -> {:error, :invalid_arguments}
+        end
+
+      [key] when key in ["trace", "no-trace"] ->
+        with :ok <- admit(key, flags) do
+          scan(rest, Map.put(flags, "trace", key == "trace"), words)
         end
 
       [key] ->
@@ -93,6 +103,9 @@ defmodule LoopexCli.AskOptions do
         else
           _ -> {:error, :invalid_arguments}
         end
+
+      _ ->
+        {:error, :invalid_arguments}
     end
   end
 
@@ -102,13 +115,16 @@ defmodule LoopexCli.AskOptions do
   defp scan(_, _, _), do: {:error, :invalid_arguments}
 
   defp admit(key, flags) do
-    if key in @flags and (key == "skill-dir" or not Map.has_key?(flags, key)),
-      do: :ok,
-      else: {:error, :invalid_arguments}
+    canonical = if key == "no-trace", do: "trace", else: key
+
+    if key in @flags and
+         (key in ["skill-dir", "trace-module"] or not Map.has_key?(flags, canonical)),
+       do: :ok,
+       else: {:error, :invalid_arguments}
   end
 
-  defp put(flags, "skill-dir", value),
-    do: Map.update(flags, "skill-dir", [value], &(&1 ++ [value]))
+  defp put(flags, key, value) when key in ["skill-dir", "trace-module"],
+    do: Map.update(flags, key, [value], &(&1 ++ [value]))
 
   defp put(flags, key, value), do: Map.put(flags, key, value)
   defp proper_binary_list?([]), do: true
@@ -185,5 +201,44 @@ defmodule LoopexCli.AskOptions do
       {:ok, module} -> {:ok, module}
       :error -> {:error, :invalid_policy}
     end
+  end
+
+  defp trace(flags) do
+    selected = Map.take(flags, @trace)
+
+    if selected == %{} do
+      {:ok, nil}
+    else
+      with {:ok, values} <- trace_values(selected),
+           {:ok, _normalized} <- LoopexComposition.TraceConfiguration.validate(values) do
+        {:ok, values}
+      else
+        _ -> {:error, :invalid_trace_configuration}
+      end
+    end
+  end
+
+  defp trace_values(flags) do
+    Enum.reduce_while(flags, {:ok, %{}}, fn {key, value}, {:ok, values} ->
+      {field, admitted} =
+        case key do
+          "trace" ->
+            {"enabled", {:ok, value}}
+
+          "trace-level" ->
+            {"level", {:ok, value}}
+
+          "trace-module" ->
+            {"modules", {:ok, value}}
+
+          "trace-" <> limit ->
+            {String.replace(limit, "-", "_"), positive(value, :invalid_trace_configuration)}
+        end
+
+      case admitted do
+        {:ok, value} -> {:cont, {:ok, Map.put(values, field, value)}}
+        error -> {:halt, error}
+      end
+    end)
   end
 end

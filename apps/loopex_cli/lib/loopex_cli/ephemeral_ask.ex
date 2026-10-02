@@ -130,7 +130,8 @@ defmodule LoopexCli.EphemeralAsk do
     [policy: options.policy, cwd: cwd, tools: options.tools, skills: options.skills] ++
       optional(:model, options.model) ++
       optional(:max_steps, options.max_steps) ++
-      optional(:deadline_ms, options.deadline_ms)
+      optional(:deadline_ms, options.deadline_ms) ++
+      optional(:trace, Map.get(options, :trace))
   end
 
   defp optional(_key, nil), do: []
@@ -478,6 +479,8 @@ defmodule LoopexCli.EphemeralAsk do
   end
 
   defp startup_code({:session_create, :failed}), do: :session_create_failed
+  defp startup_code({:invalid_option, :trace}), do: :invalid_trace_configuration
+  defp startup_code({:composition, :trace_start_failed}), do: :trace_start_failed
   defp startup_code({:client_start, :failed}), do: :session_tracking_failed
   defp startup_code({:attach, :failed}), do: :attachment_failed
   defp startup_code({:resource_admission, :failed}), do: :resource_admission_failed

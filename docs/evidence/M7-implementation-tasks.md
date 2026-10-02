@@ -91,31 +91,85 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
-- Running: the second full fast check is executing once from clean exact
-  candidate `1d384b803c3a7fe2c836c7c47cbefbbf0d4c30b5` in the managed
-  `m7-trace-check` checkout. Complete output is being retained at
-  `/private/tmp/loopex-m7-1d384b80-fast-check.log`; final exit and digest are
-  pending. The startup-protocol repair passed. Composition instead exposed a
-  diagnostic pressure-test scheduling race: after resuming a 6,000-message
-  mailbox, the test expected its newly scheduled IO worker to reach the fake
-  device within ExUnit's implicit 100 ms. No product latency guarantee supported
-  that pressure-dependent scheduling assumption. The repair establishes the
-  real blocked writer before suspension and flooding, preserving the original
-  100-ms receive timeout, all 6,000 queued messages, the mailbox observation,
-  exact 256 pending entries and one active writer. Counts include the primed
-  entry: 5,744 immediate drops, then 6,000 total drops and one unconfirmed write
-  after joined close. No timeout or capacity assertion is widened. The complete
-  diagnostic and root startup files pass together on both pairs, 20 tests in
-  2.2 seconds each. Outputs:
+- Done: CLI `ask` and `-p` now accept the closed trace controls for both
+  profiles. Invalid disabled selections refuse before workspace, application,
+  signal or credential effects. Ephemeral ask forwards the startup map to its
+  existing private owner. Durable ask owns the shared consumer, binds it through
+  existing diagnostics_to, activates the existing runtime trace before session
+  creation, and seals diagnostics before composition teardown. One captured
+  cutoff covers the certificate and all captured actor DOWN proofs. Missing
+  proof discards the provisional answer as runtime_cleanup_unconfirmed.
+  Startup failure refuses instead of dispatching an untraced question. The
+  standalone owner captures the existing 5,000-ms default and forwards that
+  same grace to composition. No new runtime contract or sink is introduced.
+  Real local HTTP and separate-VM OS-signal witnesses prove stderr separation
+  and owned actor joins. Chat/file/daemon driver integration remains open.
+  This completes one added T10 subtask, no original item.
+  Current: the broad affected selection passed 141 tests in 48.5 seconds;
+  the final signal file passed eight tests in 21.9 seconds. Floor: the complete
+  final selection passed 140 tests in 48.8 seconds. Its two fewer tty-handler
+  cases are the existing conditional tests for prim_tty_sighandler, absent on
+  OTP 27; the current broad selection preceded the one added signal case.
+  Complete retained outputs:
+  `/private/tmp/loopex-m7-ask-trace-current-20261002.log`, SHA-256
+  `34543fb8961dd85f7800c7ed886901f3bced368796af30499010e086c99dca41`;
+  `/private/tmp/loopex-m7-ask-trace-os-current-20261002.log`, SHA-256
+  `39ded3a398fd6c72fb414fae570c36934f0e91c07bca8bea65a0c28c193b8cf6`;
+  `/private/tmp/loopex-m7-ask-trace-floor-20261002.log`, SHA-256
+  `ab6232908ecb3f52c8450fa438f345acceb55214a9e72be1a736a2e68af1004b`.
+  The final ephemeral ask file also passes 22 tests in 1.1 seconds per pair,
+  with no-effects assertions bound to the actual cwd, path, identity, credential
+  and application seams. Outputs:
+  `/private/tmp/loopex-m7-ask-trace-preflight-current-20261002.log`, SHA-256
+  `f1ac8827509aaa34ea0dab9ea0ad3370021c8fe8c4bd2a1717188b2fad323929`;
+  `/private/tmp/loopex-m7-ask-trace-preflight-floor-20261002.log`, SHA-256
+  `fcb8861ff0fc5b0dc8d0521a5aace16314b3043eb520898502cc609d1e5fb9d8`.
+  The first new-case run failed one test because its text-mode fixture expected
+  empty stderr instead of the existing ending line. Corrected the assertion;
+  no product behavior, deadline or bound changed. Failure output:
+  `/private/tmp/loopex-m7-ask-trace-first-20261002.log`, SHA-256
+  `ba722291f90ae2bb507340346209adc86cee46c53a4dcb32af4b0f00d6c2f55a`.
+  Compilation, formatting, documentation ordering, status and dependency gates
+  passed. No paid provider calls or live agents were used.
+- Done: the full fast check on exact pressure-repair candidate
+  `c226cef735c8b9e605690c1f69115dcec59e5270` exited 1. Ten application suites
+  passed; CLI failed one chat-output startup fixture. Overall: 3,131 passed,
+  one failed and 34 existing exclusions. Complete immutable output:
+  `/private/tmp/loopex-m7-c226cef7-fast-check.log`, SHA-256
+  `204a130b6d4c20d46b8ab18e202deaaa9c00f6fcd409fac1adbd1d695ca5c76e`.
+  This is failed evidence. The abrupt writer-loss fixture expected an unrelated
+  spawned host to complete startup and write admission within 100 ms. Its
+  replacement uses the test itself as the live host, starts the writer through
+  its synchronous API and unlinks only the host-to-writer edge before killing
+  the writer. The writer-to-IO-worker link remains intact. It now proves both
+  exact killed DOWNs, retaining the original receive timeouts. No product
+  latency, capacity, retry or cleanup assertion is weakened. The complete
+  output and signal files passed together on the current pair, 19 tests in
+  25.8 seconds; the complete output file passed on the floor pair, 11 tests in
+  5.4 seconds. Retained outputs:
+  `/private/tmp/loopex-m7-chat-writer-current-20261002.log`, SHA-256
+  `f7fb37429382eff6337f127b3cdd336bf3811f471448604856349eca9a0a8b92`;
+  `/private/tmp/loopex-m7-chat-writer-floor-20261002.log`, SHA-256
+  `0edaa6b25216e11fa1fb11b6dfd46f7f53dbc92387bce0ffc3ef03351490e0dc`.
+  This completes one added T16 repair. Original totals remain 28 done / 158
+  remaining; added totals are 98 done / 11 remaining. Commit and push this
+  checkpoint, then run that new clean candidate once in the managed
+  m7-trace-check checkout. Do not rerun c226cef7 unchanged as a pass.
+- Done: the preceding full fast check on exact candidate
+  `1d384b803c3a7fe2c836c7c47cbefbbf0d4c30b5` also exited 1. It passed 3,131
+  tests, failed the diagnostic pressure fixture and retained 34 existing
+  exclusions. Complete immutable output:
+  `/private/tmp/loopex-m7-1d384b80-fast-check.log`, SHA-256
+  `bcab6b181858c44a153c68037f66b17c5a30805a87c1bc9b5e0754b902217040`.
+  The committed c226cef7 repair primes the real blocked writer before the
+  6,000-message pressure, preserving 100-ms receive bounds, exactly 256 pending
+  entries, one writer, 5,744 immediate drops and 6,000 final drops with one
+  unconfirmed write. Both affected files passed 20 tests in 2.2 seconds on each
+  pair. Outputs:
   `/private/tmp/loopex-m7-diagnostic-pressure-pair-current-20261002.log`, SHA-256
   `2b733524f4f689e44e14b03a1f5b6a8068a934428239e8e406f36167cb4c155f`;
   `/private/tmp/loopex-m7-diagnostic-pressure-floor-20261002.log`, SHA-256
   `a70a22885c250d0cad32050ada7f4d20c136563273faed3e0d9f1f7567080d2d`.
-  This completes one added T16 repair: original totals remain 28 done / 158
-  remaining; added totals are 96 done / 11 remaining. Wait for the second
-  check's terminal result, retain its complete immutable output and digest,
-  then run the new committed pressure-repair candidate once. Do not rerun the
-  unchanged failed candidate as a pass. No agents are running.
 - Done: the full fast check of exact candidate
   `a47022cfcfdcc5f62c72654705e90a7d91a6cebb` finished with exit 1.
   Ten application suites passed; composition had one failed startup-protocol
@@ -2751,6 +2805,7 @@ or check was relaxed.
 - [x] Encode closed input, question and error records with exact branch fields, producer-specific choices, opaque identities and the inclusive 65,536-byte cap; prove hostile content cannot forge a second record, legacy oversize refuses without truncation and output drains unchanged on both toolchains. Wait, status, closing and driver integration remain pending.
 - [x] Implement the shared independently draining diagnostic consumer with a 256-entry pending queue, one supervised writer, separate trace/ordinary delivery/drop/unconfirmed counters and captured cleanup bounds; prove observed mailbox growth separately, redaction, stalled/broken IO and owner/drain/supervisor loss on both toolchains. Host startup and trace integration remain pending.
 - [x] Share trusted-module selector resolution between CLI and composition, and validate the accepted closed host trace map into diagnostics-only runtime configuration; prove disabled-field validation, exact lowered ceilings, no atom creation or application startup, and unchanged CLI configuration behavior on both toolchains. Owning startup/teardown remains pending.
+- [x] Join explicit trace flags to both ask profiles, activate durable tracing before session creation and forward ephemeral startup selection; prove disabled validation, startup refusal, diagnostic actor joins, lost cleanup proof, stalled stderr, real local HTTP JSON separation and a separate-VM trace-enabled OS signal on both toolchains. Chat/file/daemon integration remains pending.
 
 ## T11 — Implement specialized read-only helpers
 
@@ -2862,6 +2917,7 @@ or check was relaxed.
 - [x] Make the owner-group supervisor-report test establish and restore its Logger application lifetime; prove the original failure-report assertions from isolated Core on both toolchains.
 - [x] Update the direct SessionRoot startup protocol proof for granted diagnostics and trace activation; preserve exact acknowledgements, wrong-reference refusal and original time bounds on both toolchains.
 - [x] Establish an actual blocked diagnostic writer before mailbox pressure; preserve the 6,000-message observation, exact queue/writer/drop accounting and unchanged receive/cleanup timeouts on both toolchains.
+- [x] Remove the spawned-host startup scheduling assumption from the abrupt chat-writer-loss fixture; retain unchanged receive timeouts and prove both exact writer and linked IO-worker killed DOWNs on both toolchains.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
 - [ ] Investigate the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain an explicit lifecycle witness.
 

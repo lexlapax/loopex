@@ -12,10 +12,15 @@ defmodule LoopexCli.DurableAsk do
   without a second implementation of the workflow. The production path calls
   the released facade and composition directly. Only a result returned after
   runtime cleanup, credential-plane release and placement release is rendered.
+  Explicit tracing starts before session creation, uses the shared stderr
+  consumer and seals delivery before composition teardown. The consumer's
+  certificate and every captured process DOWN must arrive within the original
+  cleanup cutoff; missing proof discards the provisional answer.
   """
 
   alias LoopexCli.AskResult
   alias LoopexCli.DurableAsk.FollowReader
+  alias LoopexComposition.{DiagnosticConsumer, TraceConfiguration}
 
   @uint64_max 18_446_744_073_709_551_615
   @default_deadline_ms 600_000
@@ -89,7 +94,7 @@ defmodule LoopexCli.DurableAsk do
                    composition_options =
                      composition_options(options, cwd, resources.manifest, placement, plane, deps)
 
-                   deps.with_runtime.(composition_options, fn runtime ->
+                   with_diagnostics(options, composition_options, deps, fn runtime ->
                      callback(runtime, options, cwd, prompt, resources, placement, deps)
                    end)
                  end) do
@@ -109,6 +114,139 @@ defmodule LoopexCli.DurableAsk do
   end
 
   defp execute(_, _, _, _), do: {:diagnostic, :command_failed}
+
+  # Concept: durable ask owns its diagnostic delivery separately from results.
+  # Technical depth: activation precedes session creation; close seals the drain
+  # before composition teardown and joins every captured actor under one cutoff.
+  defp with_diagnostics(options, composition_options, deps, callback) do
+    case Map.get(options, :trace) do
+      nil -> deps.with_runtime.(composition_options, callback)
+      trace -> traced_runtime(trace, composition_options, deps, callback)
+    end
+  end
+
+  defp traced_runtime(trace, options, deps, callback) do
+    case TraceConfiguration.validate(trace) do
+      {:ok, %{enabled: false}} ->
+        deps.with_runtime.(options, callback)
+
+      {:ok, %{enabled: true, configuration: configuration}} ->
+        grace = Loopex.Executor.default_cleanup_grace_ms()
+
+        case start_diagnostics(Map.get(deps, :diagnostic_device, :stderr), grace) do
+          {:ok, consumer} ->
+            own_diagnostics(consumer, grace, configuration, options, deps, callback)
+
+          _ ->
+            {:diagnostic, :composition_unavailable}
+        end
+
+      _ ->
+        {:diagnostic, :invalid_trace_configuration}
+    end
+  end
+
+  defp start_diagnostics(device, grace) do
+    previous = Process.flag(:trap_exit, true)
+
+    try do
+      case DiagnosticConsumer.start_link(device, grace) do
+        {:ok, consumer} = started ->
+          Process.unlink(consumer)
+          started
+
+        refusal ->
+          refusal
+      end
+    after
+      Process.flag(:trap_exit, previous)
+    end
+  end
+
+  defp own_diagnostics(consumer, grace, configuration, options, deps, callback) do
+    monitors = %{consumer => Process.monitor(consumer)}
+    tag = make_ref()
+
+    result =
+      protected(fn ->
+        deps.with_runtime.(
+          options ++ [diagnostics_to: consumer, cleanup_grace_ms: grace],
+          fn runtime ->
+            try do
+              case facade(deps, Loopex, :trace, [runtime, configuration]) do
+                {:ok, %{} = _status} -> callback.(runtime)
+                _ -> {:diagnostic, :trace_start_failed}
+              end
+            after
+              send(self(), {tag, close_diagnostics(consumer, grace, monitors)})
+            end
+          end
+        )
+      end)
+
+    closing =
+      receive do
+        {^tag, closing} -> closing
+      after
+        0 -> close_diagnostics(consumer, grace, monitors)
+      end
+
+    if join_diagnostics(consumer, closing) do
+      case result do
+        {:ok, result} -> result
+        :failed -> {:diagnostic, :composition_unavailable}
+      end
+    else
+      {:diagnostic, :runtime_cleanup_unconfirmed}
+    end
+  end
+
+  defp monitor_diagnostics(pids, monitors) do
+    Enum.reduce(pids, monitors, fn pid, monitors ->
+      if Map.has_key?(monitors, pid),
+        do: monitors,
+        else: Map.put(monitors, pid, Process.monitor(pid))
+    end)
+  end
+
+  defp close_diagnostics(consumer, grace, monitors) do
+    deadline = System.monotonic_time(:millisecond) + grace
+    reference = make_ref()
+
+    case DiagnosticConsumer.begin_close(consumer, reference, deadline) do
+      {:ok, owned} -> {reference, deadline, monitor_diagnostics(owned, monitors)}
+      _ -> {reference, deadline, monitors}
+    end
+  end
+
+  defp join_diagnostics(consumer, {reference, deadline, monitors}) do
+    joined = await_diagnostics(consumer, reference, deadline, monitors, false)
+    Enum.each(monitors, fn {_pid, monitor} -> Process.demonitor(monitor, [:flush]) end)
+    joined
+  end
+
+  defp await_diagnostics(_consumer, _reference, deadline, monitors, true)
+       when map_size(monitors) == 0,
+       do: System.monotonic_time(:millisecond) <= deadline
+
+  defp await_diagnostics(consumer, reference, deadline, monitors, certified) do
+    receive do
+      {:diagnostic_consumer_closed, ^consumer, ^reference, {:ok, _counts}} ->
+        await_diagnostics(consumer, reference, deadline, monitors, true)
+
+      {:diagnostic_consumer_closed, ^consumer, ^reference, _unproved} ->
+        false
+
+      {:DOWN, monitor, :process, pid, _reason} when is_map_key(monitors, pid) ->
+        if monitors[pid] == monitor do
+          await_diagnostics(consumer, reference, deadline, Map.delete(monitors, pid), certified)
+        else
+          await_diagnostics(consumer, reference, deadline, monitors, certified)
+        end
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) -> false
+    end
+  end
 
   defp read_directories(skills, cwd, deps) do
     case protected(fn -> deps.read_directories.(skills, workspace: cwd) end) do
