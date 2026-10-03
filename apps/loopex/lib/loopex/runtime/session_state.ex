@@ -1176,6 +1176,15 @@ defmodule Loopex.Runtime.SessionState do
 
   defp maintenance_request_capacity(state, episode) do
     run = episode["run_id"]
+    {_bounds, charged} = accounting(state, run)
+
+    if maintenance_parent_call_units(state, run) < episode["bounds"]["max_turns"] and
+         episode["bounds"]["token_budget"] - charged.tokens >= 1_024,
+       do: :ok,
+       else: {:error, :maintenance_bounds_exhausted}
+  end
+
+  defp maintenance_parent_call_units(state, run) do
     ordinary = next_turn_number(state.pending_work[run]) - 1
 
     maintenance =
@@ -1184,12 +1193,7 @@ defmodule Loopex.Runtime.SessionState do
       |> Enum.filter(&(&1["run_id"] == run))
       |> Enum.reduce(0, &(&1["attempts"] + &2))
 
-    {_bounds, charged} = accounting(state, run)
-
-    if ordinary + maintenance < episode["bounds"]["max_turns"] and
-         episode["bounds"]["token_budget"] - charged.tokens >= 1_024,
-       do: :ok,
-       else: {:error, :maintenance_bounds_exhausted}
+    ordinary + maintenance
   end
 
   defp maintenance_instruction_budget(episode) do
@@ -2380,6 +2384,221 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: summary settlement uses the same transport and accounting truth.
+  # Technical depth: successful output remains checkpoint-pending, with no
+  # ordinary assistant or parent ending. A failed summary defers its effects to
+  # the consecutive parent terminal; the episode terminal leads that transaction.
+  @doc false
+  def propose_maintenance_attempt_settled(state, outcome) do
+    with %{"stage" => "model_attempt_open"} = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         request = episode["request"],
+         work = %{request: request, model_termination: episode["model_termination"]},
+         termination = maintenance_attempt_termination(state, episode, outcome),
+         {result, conversation, usage} = attempt_result(work, outcome, termination, false),
+         transport = attempt_transport(outcome),
+         next = attempt_next(transport, termination, result, episode["model_attempt"]),
+         record =
+           Map.merge(maintenance_attempt_identity(episode), %{
+             :kind => "maintenance_attempt_settled_v3",
+             "transport" => transport,
+             "termination" => termination,
+             "conversation" => conversation,
+             "next" => if(next == "continue", do: "terminal", else: next),
+             "result" => result,
+             "accounting" => attempt_accounting(transport, usage)
+           }),
+         {:ok, record} <- fit_attempt_settlement(record),
+         {:ok, _preview, _events} <- apply_internal_record(state, record) do
+      records =
+        if maintenance_failed_settlement?(record),
+          do: [record, maintenance_attempt_terminal(state, episode, record)],
+          else: [record]
+
+      internal_proposal(
+        state,
+        episode["operation_id"] <>
+          ":settle:" <>
+          Integer.to_string(episode["model_attempt"]),
+        records
+      )
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :no_open_maintenance_attempt}
+    end
+  end
+
+  @doc false
+  def propose_maintenance_attempt_open(state) do
+    with %{"stage" => "model_retry_permitted", "next_attempt" => 2} = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <- is_nil(state.aborting),
+         true <- episode["attempts"] < episode["bounds"]["max_attempts"],
+         :ok <- maintenance_request_capacity(state, episode),
+         {:ok, opened} <-
+           ProviderAttempt.opened_record(%{
+             episode_id: episode["episode_id"],
+             summary_ordinal: episode["summary_ordinal"],
+             purpose: "compaction",
+             operation_id: episode["operation_id"],
+             attempt: 2,
+             staged_request_digest: episode["request"].staged_request_digest
+           }) do
+      internal_proposal(state, episode["operation_id"] <> ":retry", opened)
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :no_retry_permitted}
+    end
+  end
+
+  @doc false
+  def propose_maintenance_termination(state, observed) do
+    with %{"stage" => "model_attempt_open", "model_termination" => nil} = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <- is_nil(state.aborting),
+         true <-
+           is_integer(observed) and observed >= episode["request"].deadline and
+             observed <= @uint64_max do
+      row =
+        Map.merge(maintenance_attempt_identity(episode), %{
+          :kind => "maintenance_termination_admitted_v1",
+          "cause" => "deadline",
+          "deadline" => episode["request"].deadline,
+          "observed" => observed
+        })
+
+      internal_proposal(state, episode["operation_id"] <> ":deadline", row)
+    else
+      _ -> {:error, :no_open_maintenance_attempt}
+    end
+  end
+
+  defp maintenance_attempt_identity(episode) do
+    %{
+      "episode_id" => episode["episode_id"],
+      "summary_ordinal" => episode["summary_ordinal"],
+      "purpose" => "compaction",
+      "operation_id" => episode["operation_id"],
+      "attempt" => episode["model_attempt"],
+      "staged_request_digest" => episode["request"].staged_request_digest
+    }
+  end
+
+  defp maintenance_attempt_termination(state, episode, outcome) do
+    run = episode["run_id"]
+
+    cond do
+      episode["model_termination"] in ["abort", "deadline"] -> episode["model_termination"]
+      match?(%{run_id: ^run}, state.aborting) -> "abort"
+      outcome == :owner_loss -> "owner_loss"
+      true -> nil
+    end
+  end
+
+  defp maintenance_summary(%{
+         "conversation" => "canonical",
+         "result" => %{"kind" => "reply", "reply" => reply}
+       }),
+       do: Loopex.Runtime.CompactionSummary.from_reply(reply)
+
+  defp maintenance_summary(_), do: {:error, :model_call_failed}
+
+  defp maintenance_failed_settlement?(%{"next" => "retry"}), do: false
+
+  defp maintenance_failed_settlement?(record),
+    do: not match?({:ok, _}, maintenance_summary(record))
+
+  defp maintenance_summary_failure(cause) do
+    %{
+      "version" => 2,
+      "category" => "context_preparation_failed",
+      "retryable" => false,
+      "measurement_scope" => nil,
+      "cause" => Atom.to_string(cause)
+    }
+  end
+
+  defp maintenance_attempt_terminal(state, episode, record) do
+    run = episode["run_id"]
+
+    case {record["termination"], maintenance_summary(record)} do
+      {nil, {:error, cause}}
+      when cause in [:maintenance_summary_invalid, :maintenance_summary_incomplete] ->
+        run_terminal_record(state, run, "failed", %{})
+        |> Map.put("failure", maintenance_summary_failure(cause))
+
+      _ ->
+        terminal = attempt_terminal_record(state, run, record)
+
+        if record["termination"] == "deadline" do
+          {charged_state, _episode} = charge_maintenance_settlement(state, episode, record)
+          {_bounds, charged} = accounting(charged_state, run)
+
+          terminal
+          |> Map.put("outcome", "bound_reached")
+          |> Map.put("accounting_source", charged.source && Atom.to_string(charged.source))
+        else
+          terminal
+        end
+    end
+  end
+
+  defp charge_maintenance_settlement(state, episode, record) do
+    run = episode["run_id"]
+    {_bounds, prior} = accounting(state, run)
+    next = apply_attempt_accounting(state, run, record["accounting"])
+    {_bounds, charged} = accounting(next, run)
+    charge = charged.tokens - prior.tokens
+    usage = episode["usage"]
+
+    usage =
+      usage
+      |> Map.update!("attempts", &(&1 + 1))
+      |> Map.update!("total_tokens", &(&1 + charge))
+
+    usage =
+      case record["accounting"]["source"] do
+        "reported" -> Map.update!(usage, "reported_tokens", &(&1 + charge))
+        "estimated" -> Map.update!(usage, "estimated_tokens", &(&1 + charge))
+        "none" -> usage
+      end
+
+    episode = episode |> Map.put("usage", usage) |> Map.put("settlement", record)
+    {put_in(next.maintenance_episodes[episode["episode_id"]], episode), episode}
+  end
+
+  # Concept: failed summary accounting and its parent ending become visible together.
+  # Technical depth: the exact deferred settlement determines the terminal and
+  # any summary-failure projection. No supplied terminal may alter the reason,
+  # usage, deadline or winning termination. The leading episode marker is
+  # checked after these same charges apply, so it cannot invent usage either.
+  defp complete_pending_maintenance_settlement(state, terminal) do
+    case state.maintenance_episodes[state.active_maintenance] do
+      %{"stage" => "settlement_pending_terminal", "settlement" => record} = episode ->
+        if terminal == maintenance_attempt_terminal(state, episode, record) do
+          {next, episode} = charge_maintenance_settlement(state, episode, record)
+          episode = Map.put(episode, "stage", "settling")
+          next = put_in(next.maintenance_episodes[state.active_maintenance], episode)
+
+          next =
+            case terminal["failure"] do
+              %{} = failure ->
+                %{next | context_refusal: %{run_id: episode["run_id"], failure: failure}}
+
+              _ ->
+                next
+            end
+
+          {:ok, next}
+        else
+          {:error, :invalid_maintenance_settlement_pair}
+        end
+
+      _ ->
+        {:ok, state}
+    end
+  end
+
   defp attempt_settlement_records(state, run_id, %{"next" => "terminal"} = settlement) do
     with {:ok, [terminal]} <-
            admit_attempt_items(:record, [attempt_terminal_record(state, run_id, settlement)]) do
@@ -3443,7 +3662,11 @@ defmodule Loopex.Runtime.SessionState do
     Enum.find_value(state.pending_work, fn
       {_run_id, %{stage: "model_attempt_pending_terminal", settlement: settlement}} -> settlement
       _other -> nil
-    end)
+    end) ||
+      case state.maintenance_episodes[state.active_maintenance] do
+        %{"stage" => "settlement_pending_terminal", "settlement" => settlement} -> settlement
+        _ -> nil
+      end
   end
 
   defp complete_attempt_pair(state) do
@@ -3608,6 +3831,8 @@ defmodule Loopex.Runtime.SessionState do
               "maintenance_episode_terminal_v1",
               "maintenance_request_committed_v1",
               "maintenance_attempt_opened_v1",
+              "maintenance_attempt_settled_v3",
+              "maintenance_termination_admitted_v1",
               "tool_result_reference_prepared",
               "tool_result_preparation_failed_v1",
               "outcome_unknown_committed",
@@ -4022,7 +4247,9 @@ defmodule Loopex.Runtime.SessionState do
 
       {:ok, {:accepted, command_id}, active_run_id, state.pending_work,
        state.expected_events ++ queue_events,
-       Map.put(patch, :aborting, %{run_id: active_run_id, command_id: command_id})}
+       patch
+       |> retain_maintenance_abort(state, active_run_id)
+       |> Map.put(:aborting, %{run_id: active_run_id, command_id: command_id})}
     else
       _other -> {:error, :invalid_abort_record}
     end
@@ -4251,7 +4478,8 @@ defmodule Loopex.Runtime.SessionState do
         "run_terminal_committed",
         "context_admission_refused_v2",
         "deadline_staging_failed_v1",
-        "model_attempt_settled_v3"
+        "model_attempt_settled_v3",
+        "maintenance_attempt_settled_v3"
       ]
 
   defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :run_terminal}}, kind),
@@ -4379,7 +4607,8 @@ defmodule Loopex.Runtime.SessionState do
   defp maintenance_terminal_prefix(state, records, observed_at) do
     case List.last(records) do
       %{kind: "run_terminal_committed"} = terminal ->
-        with {:ok, result} <- maintenance_run_result(state, terminal) do
+        with {:ok, preview} <- maintenance_ending_preview(state, records),
+             {:ok, result} <- maintenance_run_result(preview, terminal) do
           prefix = %{
             :kind => "maintenance_episode_terminal_v1",
             "episode_id" => state.active_maintenance,
@@ -4392,6 +4621,36 @@ defmodule Loopex.Runtime.SessionState do
 
       _ ->
         {:ok, records}
+    end
+  end
+
+  defp maintenance_ending_preview(state, [
+         %{kind: "maintenance_attempt_settled_v3"} = record,
+         terminal
+       ]) do
+    with {:ok, next, []} <- apply_internal_record(state, record),
+         {:ok, next} <- complete_pending_maintenance_settlement(next, terminal) do
+      {:ok, next}
+    end
+  end
+
+  defp maintenance_ending_preview(state, _records), do: {:ok, state}
+
+  defp retain_maintenance_abort(patch, state, run) do
+    case state.maintenance_episodes[state.active_maintenance] do
+      %{"run_id" => ^run, "stage" => "model_attempt_open", "model_termination" => nil} = episode ->
+        Map.put(
+          patch,
+          :maintenance_episodes,
+          Map.put(
+            state.maintenance_episodes,
+            state.active_maintenance,
+            Map.put(episode, "model_termination", "abort")
+          )
+        )
+
+      _ ->
+        patch
     end
   end
 
@@ -4440,7 +4699,7 @@ defmodule Loopex.Runtime.SessionState do
 
         "max_turns" ->
           terminal["declared_limit"] == declared.max_turns and
-            observed == get_in(state.pending_work, [run_id, :turn_number]) and
+            observed == maintenance_parent_call_units(state, run_id) and
             observed >= declared.max_turns
 
         _ ->
@@ -4745,40 +5004,76 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(state, %{kind: "maintenance_attempt_opened_v1"} = record) do
-    with :ok <- ProviderAttempt.validate_opened(record),
-         %{
-           "stage" => "request_pending_attempt_open",
-           "attempts" => 0,
-           "staged" => %{request: request, record: staged}
-         } = episode <-
-           state.maintenance_episodes[state.active_maintenance],
-         true <-
-           record["attempt"] == 1 and record["purpose"] == "compaction" and
-             record["episode_id"] == state.active_maintenance and
-             record["summary_ordinal"] == episode["summary_ordinal"] and
-             record["operation_id"] == staged["operation_id"] and
-             record["staged_request_digest"] == request.staged_request_digest do
-      episode =
-        episode
-        |> Map.delete("staged")
-        |> Map.merge(%{
-          "stage" => "model_attempt_open",
-          "attempts" => 1,
-          "request" => request,
-          "request_context_receipt" => staged["context_receipt"],
-          "covered_range" => staged["covered_range"],
-          "source_digest" => staged["source_digest"],
-          "source_excerpted" => staged["source_excerpted"],
-          "operation_id" => staged["operation_id"],
-          "model_attempt" => 1,
-          "model_termination" => nil
-        })
+    case state.maintenance_episodes[state.active_maintenance] do
+      %{"stage" => "model_retry_permitted"} = episode ->
+        open_maintenance_retry(state, episode, record)
 
-      next = put_in(state.maintenance_episodes[state.active_maintenance], episode)
-      next = %{next | deadlines: Map.put_new(next.deadlines, episode["run_id"], request.deadline)}
-      {:ok, next, []}
+      _ ->
+        open_first_maintenance_attempt(state, record)
+    end
+  end
+
+  defp apply_internal_record(state, %{kind: "maintenance_termination_admitted_v1"} = record) do
+    with :ok <- ProviderAttempt.validate_termination(record),
+         %{"stage" => "model_attempt_open", "model_termination" => nil} = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <- is_nil(state.aborting),
+         true <-
+           Map.take(record, Map.keys(maintenance_attempt_identity(episode))) ==
+             maintenance_attempt_identity(episode),
+         true <- record["deadline"] == episode["request"].deadline do
+      {:ok,
+       put_in(
+         state.maintenance_episodes[state.active_maintenance]["model_termination"],
+         "deadline"
+       ), []}
     else
-      _ -> {:error, :invalid_maintenance_attempt_open_transition}
+      _ -> {:error, :invalid_maintenance_termination_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{kind: "maintenance_attempt_settled_v3"} = record) do
+    with %{"stage" => "model_attempt_open"} = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         :ok <- ProviderAttempt.validate_settled(record, episode["request"], false),
+         true <-
+           Map.take(record, Map.keys(maintenance_attempt_identity(episode))) ==
+             maintenance_attempt_identity(episode),
+         true <-
+           record["termination"] ==
+             maintenance_attempt_termination(
+               state,
+               episode,
+               if(record["termination"] == "owner_loss", do: :owner_loss, else: nil)
+             ) do
+      cond do
+        record["next"] == "retry" ->
+          {next, episode} = charge_maintenance_settlement(state, episode, record)
+
+          episode =
+            episode |> Map.put("stage", "model_retry_permitted") |> Map.put("next_attempt", 2)
+
+          {:ok, put_in(next.maintenance_episodes[state.active_maintenance], episode), []}
+
+        maintenance_failed_settlement?(record) ->
+          episode =
+            episode
+            |> Map.put("stage", "settlement_pending_terminal")
+            |> Map.put("settlement", record)
+
+          {:ok, put_in(state.maintenance_episodes[state.active_maintenance], episode), []}
+
+        true ->
+          {:ok, summary} = maintenance_summary(record)
+          {next, episode} = charge_maintenance_settlement(state, episode, record)
+
+          episode =
+            episode |> Map.put("stage", "checkpoint_pending") |> Map.put("summary", summary)
+
+          {:ok, put_in(next.maintenance_episodes[state.active_maintenance], episode), []}
+      end
+    else
+      _ -> {:error, :invalid_maintenance_settlement_transition}
     end
   end
 
@@ -5278,7 +5573,8 @@ defmodule Loopex.Runtime.SessionState do
     # settlement to its consecutive terminal row, so this is where the deferred
     # accounting, conversation, and stage transition are applied. A terminal
     # arriving against any other stage is the ordinary ending it always was.
-    with {:ok, state, work, settled_events} <- complete_pending_terminal(state, run_id, record),
+    with {:ok, state} <- complete_pending_maintenance_settlement(state, record),
+         {:ok, state, work, settled_events} <- complete_pending_terminal(state, run_id, record),
          %{stage: stage} <- work,
          true <-
            outcome in ["completed", "bound_reached", "outcome_unknown", "cancelled", "failed"],
@@ -6187,6 +6483,70 @@ defmodule Loopex.Runtime.SessionState do
       event_id: stable_id("event-steer", session_id, command_id),
       kind: "steer.resolved"
     }
+  end
+
+  # Concept: only a committed not-sent verdict permits a second summary attempt.
+  # Technical depth: retry consumes the retained allowance, parent capacity and
+  # episode attempt count while reusing the exact operation and request bytes.
+  defp open_maintenance_retry(state, episode, record) do
+    with :ok <- ProviderAttempt.validate_opened(record),
+         true <-
+           Map.delete(record, :kind) ==
+             Map.put(maintenance_attempt_identity(episode), "attempt", 2),
+         true <- is_nil(state.aborting) and is_nil(episode["model_termination"]),
+         true <- episode["attempts"] < episode["bounds"]["max_attempts"],
+         :ok <- maintenance_request_capacity(state, episode) do
+      episode =
+        episode
+        |> Map.delete("next_attempt")
+        |> Map.merge(%{
+          "stage" => "model_attempt_open",
+          "model_attempt" => 2,
+          "attempts" => episode["attempts"] + 1
+        })
+
+      {:ok, put_in(state.maintenance_episodes[state.active_maintenance], episode), []}
+    else
+      _ -> {:error, :invalid_maintenance_attempt_open_transition}
+    end
+  end
+
+  defp open_first_maintenance_attempt(state, record) do
+    with :ok <- ProviderAttempt.validate_opened(record),
+         %{
+           "stage" => "request_pending_attempt_open",
+           "attempts" => 0,
+           "staged" => %{request: request, record: staged}
+         } = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <-
+           record["attempt"] == 1 and record["purpose"] == "compaction" and
+             record["episode_id"] == state.active_maintenance and
+             record["summary_ordinal"] == episode["summary_ordinal"] and
+             record["operation_id"] == staged["operation_id"] and
+             record["staged_request_digest"] == request.staged_request_digest do
+      episode =
+        episode
+        |> Map.delete("staged")
+        |> Map.merge(%{
+          "stage" => "model_attempt_open",
+          "attempts" => 1,
+          "request" => request,
+          "request_context_receipt" => staged["context_receipt"],
+          "covered_range" => staged["covered_range"],
+          "source_digest" => staged["source_digest"],
+          "source_excerpted" => staged["source_excerpted"],
+          "operation_id" => staged["operation_id"],
+          "model_attempt" => 1,
+          "model_termination" => nil
+        })
+
+      next = put_in(state.maintenance_episodes[state.active_maintenance], episode)
+      next = %{next | deadlines: Map.put_new(next.deadlines, episode["run_id"], request.deadline)}
+      {:ok, next, []}
+    else
+      _ -> {:error, :invalid_maintenance_attempt_open_transition}
+    end
   end
 
   # Concept: opening the attempt promotes everything the request row deferred.

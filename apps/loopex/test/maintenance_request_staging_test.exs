@@ -343,6 +343,406 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     assert {:error, :maintenance_not_quiescent} == propose(state, 1)
   end
 
+  test "successful maintenance settlement charges once without ordinary conversation or events" do
+    {state, history, events} = opened()
+    episode_id = state.active_maintenance
+    run = state.active_run_id
+    request = state.maintenance_episodes[episode_id]["request"]
+
+    for usage <- [%{input_tokens: 37, output_tokens: 19}, %{}] do
+      raw = %{summary_reply(request) | usage: usage}
+
+      assert {:ok, proposal} =
+               SessionState.propose_maintenance_attempt_settled(state, {:reply, raw})
+
+      assert [row] = proposal.records
+      assert row.kind == "maintenance_attempt_settled_v3"
+      assert proposal.events == []
+      {next, rows, all_events} = commit(state, proposal, events)
+      expected = if usage == %{}, do: 10_000, else: 56
+      source = if usage == %{}, do: :estimated, else: :reported
+      assert next.charged[run] == %{tokens: expected, source: source}
+      episode = next.maintenance_episodes[episode_id]
+      assert episode["stage"] == "checkpoint_pending"
+      assert episode["usage"]["attempts"] == 1
+      assert episode["usage"]["total_tokens"] == expected
+      assert episode["usage"][Atom.to_string(source) <> "_tokens"] == expected
+      assert episode["summary"] == summary_output()
+      assert episode["checkpoint_id"] == nil
+      assert next.pending_work == state.pending_work
+      assert next.conversation == state.conversation
+
+      assert {:ok, recovered} =
+               SessionState.recover(state.session_id, history ++ rows, all_events)
+
+      assert recovered.maintenance_episodes == next.maintenance_episodes
+      assert recovered.charged == next.charged
+
+      assert {:error, :no_open_maintenance_attempt} =
+               SessionState.propose_maintenance_attempt_settled(next, {:reply, raw})
+
+      assert {:error, _} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ restamp(state, rows ++ rows),
+                 all_events
+               )
+
+      for forged <- [
+            Map.put(row, "extra", true),
+            Map.put(row, "attempt", 2),
+            Map.put(row, "staged_request_digest", "wrong"),
+            put_in(row, ["accounting", "input_tokens"], 38)
+          ] do
+        assert {:error, _} =
+                 SessionState.recover(
+                   state.session_id,
+                   history ++ restamp(state, [%{hd(rows) | payload: forged}]),
+                   all_events
+                 )
+      end
+    end
+  end
+
+  test "invalid or incomplete summaries retain reported usage and end the parent atomically" do
+    {state, history, events} = opened()
+    episode_id = state.active_maintenance
+    request = state.maintenance_episodes[episode_id]["request"]
+    raw = summary_reply(request)
+
+    for {reply, cause} <- [
+          {%{raw | completion: "limit"}, "maintenance_summary_incomplete"},
+          {%{raw | completion: "unknown"}, "maintenance_summary_incomplete"},
+          {Map.drop(raw, [:completion, :continuation]), "maintenance_summary_incomplete"},
+          {%{raw | text: "{}"}, "maintenance_summary_invalid"},
+          {%{raw | text: summary_json(Map.put(summary_output(), "extra", true))},
+           "maintenance_summary_invalid"},
+          {%{
+             raw
+             | text: summary_json(%{summary_output() | "summary" => String.duplicate("x", 4095)})
+           }, "maintenance_summary_invalid"},
+          {%{raw | tool_calls: [%{id: "call", name: "forbidden", arguments: %{}}]},
+           "maintenance_summary_invalid"}
+        ] do
+      assert {:ok, proposal} =
+               SessionState.propose_maintenance_attempt_settled(state, {:reply, reply})
+
+      assert [prefix, settlement, terminal] = proposal.records
+      assert prefix.kind == "maintenance_episode_terminal_v1"
+      assert settlement.kind == "maintenance_attempt_settled_v3"
+
+      assert settlement["accounting"] == %{
+               "source" => "reported",
+               "input_tokens" => 37,
+               "output_tokens" => 19
+             }
+
+      assert terminal["failure"]["cause"] == cause
+      assert prefix["result"]["usage"]["total_tokens"] == 56
+      {next, rows, all_events} = commit(state, proposal, events)
+      assert next.active_run_id == nil
+      assert next.active_maintenance == nil
+      assert next.charged[state.active_run_id] == %{tokens: 56, source: :reported}
+      assert next.conversation == state.conversation
+      assert next.maintenance_episodes[episode_id]["usage"]["attempts"] == 1
+
+      assert {:ok, recovered} =
+               SessionState.recover(state.session_id, history ++ rows, all_events)
+
+      assert recovered.charged == next.charged
+      assert recovered.maintenance_episodes == next.maintenance_episodes
+
+      for broken <- [
+            Enum.take(rows, 1),
+            Enum.take(rows, 2),
+            Enum.drop(rows, 1),
+            put_in(rows, [Access.at(0), :payload, "result", "usage", "total_tokens"], 57),
+            put_in(
+              rows,
+              [Access.at(2), :payload, "failure", "cause"],
+              "maintenance_summary_incomplete_changed"
+            )
+          ] do
+        assert {:error, _} =
+                 SessionState.recover(
+                   state.session_id,
+                   history ++ restamp(state, broken),
+                   all_events
+                 )
+      end
+    end
+  end
+
+  test "only a proven not-dispatched first attempt permits the exact retained retry" do
+    {state, history, events} = opened()
+    episode_id = state.active_maintenance
+    request = state.maintenance_episodes[episode_id]["request"]
+    assert {:ok, first} = SessionState.propose_maintenance_attempt_settled(state, :not_dispatched)
+    assert [row] = first.records
+    assert row["next"] == "retry"
+    {retry, rows, events} = commit(state, first, events)
+    history = history ++ rows
+    assert retry.maintenance_episodes[episode_id]["usage"]["attempts"] == 1
+    assert retry.maintenance_episodes[episode_id]["usage"]["total_tokens"] == 0
+    assert retry.charged == state.charged
+    assert {:ok, second} = SessionState.propose_maintenance_attempt_open(retry)
+    {second, rows, events} = commit(retry, second, events)
+    history = history ++ rows
+    assert second.maintenance_episodes[episode_id]["request"] == request
+    assert second.deadlines == state.deadlines
+    assert second.pending_work == state.pending_work
+
+    for outcome <- [:not_dispatched, {:reply, summary_reply(request)}] do
+      assert {:ok, final} = SessionState.propose_maintenance_attempt_settled(second, outcome)
+      {next, rows, all_events} = commit(second, final, events)
+      assert next.maintenance_episodes[episode_id]["usage"]["attempts"] == 2
+      assert next.maintenance_episodes[episode_id]["attempts"] == 2
+
+      assert next.maintenance_episodes[episode_id]["usage"]["total_tokens"] ==
+               if(outcome == :not_dispatched, do: 0, else: 56)
+
+      assert {:error, :no_retry_permitted} = SessionState.propose_maintenance_attempt_open(next)
+
+      assert {:ok, recovered} =
+               SessionState.recover(state.session_id, history ++ rows, all_events)
+
+      assert recovered.maintenance_episodes == next.maintenance_episodes
+    end
+
+    {limited, _, limited_events} = admitted(["old"], max_turns: 1)
+    {:ok, staged} = propose(limited, 1)
+    {limited, _, limited_events} = commit(limited, staged, limited_events)
+    {:ok, not_sent} = SessionState.propose_maintenance_attempt_settled(limited, :not_dispatched)
+    {limited, _, _} = commit(limited, not_sent, limited_events)
+
+    assert {:error, :maintenance_bounds_exhausted} =
+             SessionState.propose_maintenance_attempt_open(limited)
+  end
+
+  test "the first admitted abort or deadline wins while late replies retain usage only" do
+    {state, history, events} = opened()
+    episode_id = state.active_maintenance
+    request = state.maintenance_episodes[episode_id]["request"]
+
+    for order <- [:deadline_first, :abort_first] do
+      {terminated, history, events} =
+        if order == :deadline_first do
+          assert {:ok, deadline} =
+                   SessionState.propose_maintenance_termination(state, request.deadline)
+
+          {next, rows, events} = commit(state, deadline, events)
+          {next, history ++ rows, events}
+        else
+          {state, history, events}
+        end
+
+      assert {:ok, abort} =
+               SessionState.propose(terminated, %{
+                 type: :abort,
+                 command_id: "late-abort",
+                 run_id: state.active_run_id
+               })
+
+      {terminated, rows, events} = commit(terminated, abort, events)
+      history = history ++ rows
+      winner = if order == :deadline_first, do: "deadline", else: "abort"
+      assert terminated.maintenance_episodes[episode_id]["model_termination"] == winner
+
+      assert {:error, :no_open_maintenance_attempt} =
+               SessionState.propose_maintenance_termination(terminated, request.deadline + 1)
+
+      for outcome <- [{:reply, summary_reply(request)}, :owner_loss] do
+        assert {:ok, proposal} =
+                 SessionState.propose_maintenance_attempt_settled(terminated, outcome)
+
+        assert [prefix, settlement, terminal] = proposal.records
+        assert settlement["termination"] == winner
+
+        assert settlement["conversation"] ==
+                 if(outcome == :owner_loss, do: "none", else: "evidence_only")
+
+        assert terminal["outcome"] ==
+                 if(winner == "deadline", do: "bound_reached", else: "cancelled")
+
+        assert prefix["result"]["checkpoint_id"] == nil
+        {next, rows, all_events} = commit(terminated, proposal, events)
+        assert next.conversation == state.conversation
+
+        assert {:ok, recovered} =
+                 SessionState.recover(state.session_id, history ++ rows, all_events)
+
+        assert recovered.maintenance_episodes == next.maintenance_episodes
+        assert recovered.charged == next.charged
+      end
+    end
+  end
+
+  test "owner loss and malformed replies charge the remaining allowance without retry or checkpoint" do
+    {state, history, events} = opened()
+    episode_id = state.active_maintenance
+    request = state.maintenance_episodes[episode_id]["request"]
+
+    for outcome <- [:owner_loss, {:reply, Map.put(summary_reply(request), :extra, true)}] do
+      assert {:ok, proposal} = SessionState.propose_maintenance_attempt_settled(state, outcome)
+      assert [prefix, settlement, _terminal] = proposal.records
+      assert settlement["accounting"]["source"] == "estimated"
+      assert prefix["result"]["usage"]["estimated_tokens"] == 10_000
+      {next, rows, all_events} = commit(state, proposal, events)
+      assert next.charged[state.active_run_id] == %{tokens: 10_000, source: :estimated}
+      assert next.maintenance_episodes[episode_id]["checkpoint_id"] == nil
+
+      assert {:ok, recovered} =
+               SessionState.recover(state.session_id, history ++ rows, all_events)
+
+      assert recovered.charged == next.charged
+      assert {:error, :no_retry_permitted} = SessionState.propose_maintenance_attempt_open(next)
+    end
+  end
+
+  test "validated replies compacted at the settlement depth limit preserve exact usage" do
+    {state, history, events} = opened()
+    request = state.maintenance_episodes[state.active_maintenance]["request"]
+    arguments = Enum.reduce(1..8, %{}, fn _, inner -> %{"nested" => inner} end)
+
+    raw = %{
+      summary_reply(request)
+      | tool_calls: [%{id: "deep", name: "forbidden", arguments: arguments}]
+    }
+
+    assert {:ok, _canonical} = Loopex.Runtime.ProviderAttempt.canonical_reply(raw, request, false)
+
+    assert {:ok, proposal} =
+             SessionState.propose_maintenance_attempt_settled(state, {:reply, raw})
+
+    assert [prefix, settlement, terminal] = proposal.records
+    evidence = settlement["result"]["accounting_evidence"]
+    assert evidence["kind"] == "validated_reply_compaction_v1"
+    assert evidence["dimension"] == "record_depth"
+    assert evidence["observed"] == 13
+    assert evidence["limit"] == 12
+    assert evidence["usage"]["input_tokens"] == 37
+    assert settlement["accounting"]["source"] == "reported"
+    assert terminal["reason"] == "unreadable_model_answer"
+    assert prefix["result"]["usage"]["reported_tokens"] == 56
+    {next, rows, all_events} = commit(state, proposal, events)
+    assert next.charged[state.active_run_id] == %{tokens: 56, source: :reported}
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history ++ rows, all_events)
+    assert recovered.charged == next.charged
+  end
+
+  test "an interrupted failed settlement cannot charge or admit unrelated commands or owner succession" do
+    {state, history, events} = opened()
+    request = state.maintenance_episodes[state.active_maintenance]["request"]
+
+    assert {:ok, proposal} =
+             SessionState.propose_maintenance_attempt_settled(
+               state,
+               {:reply, %{summary_reply(request) | text: "{}"}}
+             )
+
+    {_next, [prefix, settlement, terminal], all_events} = commit(state, proposal, events)
+
+    {:ok, steer} =
+      SessionState.propose(state, %{
+        type: :steer,
+        command_id: "interrupt",
+        run_id: state.active_run_id,
+        content: "later"
+      })
+
+    {_next, [command], _} = commit(state, steer, events)
+    advance = owner_advance(state)
+
+    for inserted <- [command, advance, settlement] do
+      assert {:error, _} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ restamp(state, [prefix, settlement, inserted, terminal]),
+                 all_events
+               )
+    end
+
+    assert {:error, _} =
+             SessionState.recover(
+               state.session_id,
+               history ++ restamp(state, [settlement]),
+               events
+             )
+  end
+
+  test "a succeeding owner recovers the exact open request and settles its lost attempt once" do
+    {state, history, events} = opened()
+    [advance] = restamp(state, [owner_advance(state)])
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history ++ [advance], events)
+    assert recovered.owner_epoch == 2
+    assert recovered.maintenance_episodes == state.maintenance_episodes
+
+    assert {:ok, proposal} =
+             SessionState.propose_maintenance_attempt_settled(recovered, :owner_loss)
+
+    {next, rows, all_events} = commit(recovered, proposal, events)
+    assert next.active_maintenance == nil
+    assert next.charged[state.active_run_id] == %{tokens: 10_000, source: :estimated}
+
+    assert {:ok, replay} =
+             SessionState.recover(state.session_id, history ++ [advance] ++ rows, all_events)
+
+    assert replay.maintenance_episodes == next.maintenance_episodes
+
+    assert {:error, :no_open_maintenance_attempt} =
+             SessionState.propose_maintenance_attempt_settled(replay, :owner_loss)
+  end
+
+  defp owner_advance(state) do
+    %{
+      journal_version: state.journal_version + 1,
+      owner_epoch: 2,
+      owner_incarnation_id: "next",
+      payload: %{
+        :kind => "owner_advanced",
+        "prior_owner_epoch" => 1,
+        "owner_epoch" => 2,
+        "owner_incarnation_id" => "next",
+        "owner_transaction_id" => "next-tx"
+      }
+    }
+  end
+
+  defp opened do
+    {state, history, events} = admitted(["old fact"])
+    {:ok, proposal} = propose(state, 1)
+    {state, rows, events} = commit(state, proposal, events)
+    {state, history ++ rows, events}
+  end
+
+  defp summary_output,
+    do: %{
+      "summary" => "Retained facts 猫",
+      "carry_forward" => %{"files_read" => ["lib/a.ex"], "files_changed" => []}
+    }
+
+  defp summary_json(value) do
+    {:ok, bytes} = Frame.encode(%{"v" => value})
+    bytes = IO.iodata_to_binary(bytes)
+    binary_part(bytes, 5, byte_size(bytes) - 7)
+  end
+
+  defp summary_reply(request) do
+    %{
+      text: summary_json(summary_output()),
+      identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+      usage: %{input_tokens: 37, output_tokens: 19},
+      tool_calls: [],
+      delta_count: 0,
+      streamed: false,
+      provider_response_id: nil,
+      canonical_request_bytes: request.canonical_request_bytes,
+      staged_request_digest: request.staged_request_digest,
+      completion: "natural",
+      continuation: nil
+    }
+  end
+
   defp admitted(texts, options \\ []) do
     configuration =
       Map.put(
@@ -432,7 +832,7 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
       SessionState.propose(
         state,
         %{type: :prompt, command_id: "current", content: "protected"},
-        bounds()
+        Map.put(bounds(), :max_turns, Keyword.get(options, :max_turns, 8))
       )
 
     {state, rows, events} = commit(state, prompt, events)

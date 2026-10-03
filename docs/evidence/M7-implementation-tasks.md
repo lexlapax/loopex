@@ -325,6 +325,47 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: join maintenance settlement to the durable episode reducer. Successful
+  natural summaries retain bounded output pending checkpoint admission, charge
+  reported or remaining-allowance usage once, and leave ordinary conversation,
+  pending work and public events untouched. Invalid/incomplete summaries and
+  lost or unreadable attempts settle with a leading episode terminal and exact
+  consecutive parent ending. Replay refuses incomplete or interrupted endings,
+  changed identities, usage or failures, and duplicate settlement. A proven
+  not-dispatched first attempt permits one exact-request retry; each opened
+  attempt consumes the captured parent call allowance. The first admitted
+  abort/deadline wins, including a later abort and late reported evidence.
+  Validated replies exceeding settlement depth retain actual reported usage
+  through the existing bounded compaction provenance. Successor replay retains
+  the request and settles owner loss without retry or a checkpoint.
+
+  The eleven-file selection passed 118 tests on both supported pairs.
+  Current: 3.7 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-settlement-current-dev3.log`, SHA-256
+  `be4417ac2f7cd384ac3ab2cf86af4980a71fb2cf7e2d9bf229c2da23e0ac1ec0`.
+  Floor: 6.4 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-settlement-floor-v1.log`, SHA-256
+  `0c6fc176cc1f25ebc2d45e1446812a446d9792d48f61f54f63109eda453c6dc5`.
+  The first development run retained two fixture failures: the accounting row
+  has input/output fields rather than total_tokens, and changing current bounds
+  cannot replace the episode's captured limits. Corrected fixtures use the
+  existing schema and capture a one-call parent before episode admission.
+  No production change was needed for those failures; the corrected selection
+  passed 115 tests before adding depth, interruption and successor witnesses.
+  Formatting, warning-free compilation, dependency direction, bootstrap
+  structure/status, compiled documentation and diff gates passed in 23.3
+  measured seconds. Complete output:
+  `/private/tmp/loopex-m7-maintenance-settlement-gates-v1.log`, SHA-256
+  `59c3c0aee24493ff5d7d0229ea93cc1d5e01f6130fb10c758222d5b66f70d041`.
+  All test handles are terminal and collected. This closes one added reducer
+  subtask; live provider dispatch/cleanup, minimum-tail selection, checkpoints,
+  automatic triggering and standalone compact remain open. No original T07
+  checkbox closes, and no full fast, provider, release or closure proof is
+  claimed. No agents or maintainer decisions are pending; the goal stays active.
+  T01–T19 counts are original 51 done / 122 todo / 6 retired and added
+  177 done / 9 todo. T00–T19 counts are original 51 / 128 / 7 and added 181 / 10.
+
+
 - Done: correct maintenance request capacity to read the existing run-accounting
   `{tokens, source}` shape through `SessionState.accounting/2`. The preceding
   staging change used `total_tokens`, so an already-charged parent could raise
@@ -6273,6 +6314,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Join maintenance settlement to durable episode accounting and strict replay, retaining natural bounded summaries pending checkpoints, atomically ending invalid/incomplete or lost attempts, enforcing one exact not-dispatched retry and captured parent capacity, preserving the first abort/deadline and late usage evidence, and proving depth compaction, duplicate/interrupted endings and successor recovery on both supported toolchains. Live dispatch/cleanup, checkpoint transactions and later prefixes remain open.
 
 - [x] Join owner-selected maintenance sources to exact whole-record receipt preflight and consecutive request/attempt-open replay, binding captured original-record provenance, strict system and input limits, resource headers, clocks and protected units. Verify streaming projection, rejection of partial/substituted history and complete-original integrity on both toolchains. Tail policy, automatic triggering, live dispatch, settlement, checkpoints and standalone compact remain open.
 

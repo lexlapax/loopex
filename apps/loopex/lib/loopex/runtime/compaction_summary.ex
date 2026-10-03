@@ -39,6 +39,14 @@ defmodule Loopex.Runtime.CompactionSummary do
     end
   end
 
+  # Concept: replay validates summary output from the exact admitted reply.
+  # Technical depth: the owner first validates the closed v3 settlement against
+  # its captured request. This shares live output validation without rebuilding
+  # a raw callback, consulting a provider or changing retained usage.
+  @doc false
+  @spec from_reply(map()) :: {:ok, map()} | {:error, atom()}
+  def from_reply(reply), do: output(reply)
+
   # Concept: termination classification wins even when the output looks useful.
   # Technical depth: the canonical boundary supplies completion after admitting
   # every raw field. Parsing occurs only for natural completion with no calls.
