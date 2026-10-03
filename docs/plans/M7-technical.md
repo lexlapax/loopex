@@ -1699,6 +1699,11 @@ source boundary derives the same run deadline that request staging would use;
 later boundaries preserve the useful checkpoint. Replay remeasures the exact
 protected candidate and a live resumed owner commits only the adjacent ending.
 The updated 91-test current/floor results are indexed in the checklist.
+Captured summarizer instructions that reach their parent system ceiling now
+produce a measured maintenance-scope v2 refusal before source traversal. The
+single frozen system descriptor fixes its count, estimate and digest; replay
+rederives them without provider work. A live automatic ending and both-pair
+92-test maintenance selection pass are indexed in the checklist.
 This is not a complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt

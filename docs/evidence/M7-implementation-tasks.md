@@ -325,6 +325,22 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: turn the captured summarizer system-limit refusal into the accepted
+  measured v2 `maintenance` scope before source traversal. Its single exact
+  system descriptor supplies the count, estimate and ordered digest; replay
+  recomputes those values from the frozen instruction capture. A live automatic
+  overflow commits the episode/refusal/parent ending without source request,
+  model dispatch or executor job. All 92 maintenance staging and recovery
+  tests pass on both supported pairs. Complete outputs:
+  `/private/tmp/loopex-m7-maintenance-system-current.log`, SHA-256
+  `4ee442351711a60f512b5b7772459bc0792f717543699263a4c9575779aa37b7`;
+  `/private/tmp/loopex-m7-maintenance-system-floor.log`, SHA-256
+  `ac9dc607849a7685128d296127fc44cbfb9e14e7b1b95114087e65c97d3e3165`.
+  This closes one added T07 subtask. T01–T19 originals stay 51 done /
+  122 todo / 6 retired; added subtasks become 188 done / 9 todo. Including
+  T00: originals 51 / 128 / 7 and added 192 / 10. Other source failures,
+  worker-fault joins, thinking triggers and standalone compact remain open.
+
 - Done: retain a measured numeric v2 refusal when a protected ordinary tail
   remains too large after a useful checkpoint or at an already-admitted first
   source boundary. The worker remeasures the exact protected candidate with
@@ -7060,6 +7076,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Commit and replay the exact maintenance-scope numeric v2 refusal when frozen summarizer instructions reach the captured system ceiling before source traversal; prove one system descriptor and live automatic no-dispatch recovery on both supported toolchains.
 
 - [x] Retain an exact numeric v2 refusal for an irreducible protected ordinary tail at initial or later source preparation, including prior checkpoint, frozen inputs, derived first deadline and live owner replay on both supported toolchains; preserve source-worker fault and other preparation endings as open work.
 

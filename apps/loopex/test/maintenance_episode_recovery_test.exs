@@ -923,6 +923,56 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     stop_and_join(successor, session)
   end
 
+  test "a live automatic episode refuses an oversized maintenance system message before source dispatch" do
+    body = String.duplicate("i", 2_048)
+
+    ceiling =
+      Loopex.Bounds.estimate(
+        LoopexProtocol.Canonical.encode(%{
+          "role" => "system",
+          "content" => "summary.v1: " <> body
+        })
+      )
+
+    {fixture, session, run_id, configuration} =
+      retained_automatic_prompt("retained", system_class_tokens: ceiling)
+
+    selection = %{
+      "model" => configuration["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{
+        configuration["model_capabilities"]
+        | "reasoning_levels" => ["none"]
+      },
+      "provider_mapping" => %{configuration["provider_mapping"] | "thinking_disabled" => true}
+    }
+
+    successor =
+      start(
+        store: fixture.store,
+        tools: [],
+        maintenance_model: selection,
+        maintenance_instructions: %{"version" => "summary.v1", "body" => body},
+        script: []
+      )
+
+    assert {:ok, ^session} =
+             Loopex.resume_session(successor.runtime, session, command_id: "resume-system-limit")
+
+    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    assert [episode] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
+    assert [refusal] = Enum.filter(rows, &(&1.payload.kind == "context_admission_refused_v2"))
+    assert refusal.payload["episode_id"] == episode.payload["episode_id"]
+    assert refusal.payload["failure"]["measurement_scope"] == "maintenance"
+    assert refusal.payload["failure"]["dimension"] == "system_class_tokens"
+    assert refusal.payload["failure"]["observed"] == ceiling
+    refute Enum.any?(rows, &(&1.payload.kind == "maintenance_request_committed_v1"))
+    assert AgentLoopTestModel.dispatched(successor.model) == []
+    assert Agent.get(successor.executor, & &1.jobs) == []
+    assert {:ok, _} = SessionState.recover(session, rows, Fixture.events(successor, session))
+    stop_and_join(successor, session)
+  end
+
   test "an irreducible current prompt keeps its measured ordinary refusal" do
     {fixture, session, run_id, _configuration} =
       retained_automatic_prompt(String.duplicate("p", 20_000))
@@ -968,7 +1018,11 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       |> Map.put("context_token_budget", Keyword.get(options, :context_token_budget, 4_000))
       |> Map.put(
         "system_class_tokens",
-        min(2_048, Keyword.get(options, :context_token_budget, 4_000))
+        Keyword.get(
+          options,
+          :system_class_tokens,
+          min(2_048, Keyword.get(options, :context_token_budget, 4_000))
+        )
       )
       |> Map.update!("budget_origins", &Map.put(&1, "context_token_budget", "explicit"))
 

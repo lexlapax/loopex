@@ -1275,6 +1275,25 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp maintenance_source_numeric_refusal(state, now, check) do
+    case state.maintenance_episodes[state.active_maintenance] do
+      %{} = episode ->
+        case maintenance_instruction_budget(episode) do
+          {:refused, %{} = measurement} ->
+            maintenance_system_numeric_refusal(state, episode, now, check, measurement)
+
+          :ok ->
+            ordinary_source_numeric_refusal(state, now, check)
+
+          {:error, _} = error ->
+            error
+        end
+
+      _ ->
+        {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp ordinary_source_numeric_refusal(state, now, check) do
     with {:ok, episode, measurement} <- maintenance_source_numeric_measurement(state, now, check),
          {:refused, failure} <- measurement.admission,
          work = state.pending_work[episode["run_id"]],
@@ -1293,12 +1312,70 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: an overlarge captured summarizer system message is a maintenance
+  # measurement even though no source bytes have been traversed.
+  # Technical depth: its sole descriptor is the exact captured system message.
+  # The receipt's digest and cost come from that descriptor; a second source
+  # projection would invent data after the accepted preflight-order refusal.
+  defp maintenance_system_numeric_refusal(state, episode, now, check, raw) do
+    capture = episode["maintenance_configuration"]
+    instructions = capture["instructions"]
+    system = %{"role" => "system", "content" => instructions["rendered_bytes"]}
+
+    request = %{
+      messages: [system],
+      tools: [],
+      continuation: nil,
+      model: capture["selection"]["model"]
+    }
+
+    project = %{
+      "class" => "project_resource",
+      "receipt_revision" => 2,
+      "disposition" => "not_evaluated_required_failure",
+      "detail" => nil
+    }
+
+    with {:refused, ^raw} <- selected_maintenance_source_result(state, now, check),
+         {:ok, receipt} <-
+           reference_context_receipt(
+             request,
+             [context_source(SessionConfiguration.instruction_source(capture), "system")],
+             project,
+             capture["context_token_budget"],
+             nil
+           ),
+         true <- receipt["provider_estimated_tokens"] == raw["observed"],
+         work = state.pending_work[episode["run_id"]],
+         compact =
+           compact_refusal(
+             receipt,
+             raw,
+             work,
+             next_turn_number(work),
+             %{system: 1, session: 0, steer: 0, tools: 0, project: 0, resources: 0}
+           ),
+         refusal = configured_refusal(compact, episode["configuration_version"]),
+         refusal =
+           refusal
+           |> put_in(["failure", "measurement_scope"], "maintenance")
+           |> Map.put("measurement_scope", "maintenance")
+           |> Map.put("episode_id", episode["episode_id"]),
+         :ok <- check.() do
+      {:ok, refusal}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
   defp maintenance_source_numeric_measurement(state, now, check) do
     episode = state.maintenance_episodes[state.active_maintenance]
 
     with %{"stage" => stage, "run_id" => run_id} <- episode,
          true <- stage in ["source_preparation", "checkpoint_committed"],
          true <- episode["attempts"] < episode["bounds"]["max_attempts"],
+         :ok <- maintenance_instruction_budget(episode),
          {:refused, %{} = raw} <- selected_maintenance_source_result(state, now, check),
          {:ok, units} <- compaction_units(state, run_id),
          tail = Enum.drop_while(units, &(not &1.protected?)),

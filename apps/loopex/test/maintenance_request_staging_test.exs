@@ -1612,7 +1612,11 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
         Canonical.encode(%{"role" => "system", "content" => "summary.v1: " <> body})
       )
 
-    {state, _, _} = admitted(["old"], system_class_tokens: ceiling, maintenance_body: body)
+    {state, history, events} =
+      admitted([String.duplicate("o", 30_000)],
+        system_class_tokens: ceiling,
+        maintenance_body: body
+      )
 
     assert {:refused, refusal} =
              SessionState.preflight_maintenance_request(state, 1, 1_001, fn ->
@@ -1623,6 +1627,27 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     assert refusal["limit"] == ceiling
     assert refusal["observed"] == ceiling
     assert refusal["record_byte_cost"] == nil
+
+    assert {:ok, proposal} =
+             SessionState.propose_selected_maintenance_request(state, 1_001, fn -> :ok end)
+
+    assert [episode_terminal, numeric, terminal] = proposal.records
+    assert episode_terminal["result"]["failure"] == numeric["failure"]
+    assert numeric["failure"]["measurement_scope"] == "maintenance"
+    assert numeric["failure"]["dimension"] == "system_class_tokens"
+    assert numeric["failure"]["observed"] == ceiling
+    assert numeric["provider_estimated_tokens"] == ceiling
+    assert numeric["system_message_count"] == 1
+    assert numeric["session_message_count"] == 0
+    assert numeric["ordered_descriptor_digest"] != nil
+    assert numeric["episode_id"] == state.active_maintenance
+    assert terminal["failure"] == numeric["failure"]
+
+    {next, rows, events} = commit(state, proposal, events)
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, events)
+
+    altered = update_in(rows, [Access.at(1), :payload, "provider_estimated_tokens"], &(&1 + 1))
+    assert {:error, _} = SessionState.recover(state.session_id, history ++ altered, events)
 
     {state, history, events} = admitted(["old"], resources: true)
     assert {:ok, candidate} = preflight(state, 1)
