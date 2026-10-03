@@ -350,6 +350,38 @@ defmodule Loopex.EffectIntentsQueryTest do
       assert {:error, :invalid_history} = scan_result(runtime, session)
     end
 
+    {:ok, ended} = SessionState.propose_maintenance_attempt_settled(opened, :owner_loss, 2_000)
+
+    {completed, completed_records, completed_events} =
+      retain(opened, ended, staged_records, staged_events)
+
+    assert {:ok, ^completed} = SessionState.recover(session, completed_records, completed_events)
+    assert List.last(ended.records)["result"]["cleanup"] == "unknown"
+    assert List.last(ended.records)["result"]["usage"]["attempts"] == 1
+    assert List.last(ended.records)["result"]["usage"]["estimated_tokens"] == 32_768
+    install_history(reference, completed_records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert length(pages) == length(completed_records)
+    assert Enum.all?(pages, &(&1.rows == []))
+    assert List.last(pages).scanned_through == length(completed_records)
+    assert List.last(pages).next_cursor == nil
+    refute_receive {:forbidden_store_call, _}, 0
+
+    for transform <- [
+          &Map.put(&1, "observed_at", nil),
+          &put_in(&1, ["result", "usage", "attempts"], 0),
+          &put_in(&1, ["result", "usage", "total_tokens"], 0),
+          &put_in(&1, ["result", "usage", "estimated_tokens"], -1),
+          &put_in(&1, ["result", "disposition"], "unchanged")
+        ] do
+      install_history(
+        reference,
+        change_payload(completed_records, "compact_command_completed_v1", transform)
+      )
+
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+
     for transform <- [
           &Map.put(&1, "run_id", "invented"),
           &Map.put(&1, "preparation_deadline", 61_000),

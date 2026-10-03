@@ -510,18 +510,22 @@ defmodule Loopex.Runtime.EffectIntents do
     end
   end
 
-  # Concept: an undispatched compact adds completion evidence without an effect.
-  # Technical depth: this bounded reader validates the closed native result and
-  # zero accounting; full replay proves the preceding command and empty fit.
+  # Concept: compact completion adds command evidence without an executor effect.
+  # Technical depth: the bounded reader validates the current closed result and
+  # clock. Undispatched completion still requires zero usage and confirmed cleanup;
+  # full replay proves attempt spending, winning failure and terminal adjacency.
   defp neutral_values?(%{payload: %{kind: "compact_command_completed_v1"} = payload}) do
     result = payload["result"]
 
     identifier?(payload["episode_id"]) and identifier?(payload["command_id"]) and
       (is_nil(payload["observed_at"]) or version?(payload["observed_at"])) and
       match?({:ok, _}, LoopexProtocol.Session.CompactResult.encode_wire(result)) and
-      result["disposition"] in ~w(unchanged failed) and is_nil(result["checkpoint_id"]) and
-      result["cleanup"] == "confirmed" and result["usage"]["attempts"] == 0 and
-      result["usage"]["total_tokens"] == 0 and zero_attempt_completion_clock?(payload)
+      result["disposition"] in ~w(unchanged failed) and
+      ((result["usage"]["attempts"] == 0 and is_nil(result["checkpoint_id"]) and
+          result["cleanup"] == "confirmed" and result["usage"]["total_tokens"] == 0 and
+          zero_attempt_completion_clock?(payload)) or
+         (result["disposition"] == "failed" and result["usage"]["attempts"] > 0 and
+            version?(payload["observed_at"])))
   end
 
   defp neutral_values?(%{payload: %{kind: "maintenance_request_committed_v1"} = payload}) do

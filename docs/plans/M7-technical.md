@@ -1831,8 +1831,8 @@ checkpoint or unknown cleanup in that undispatched completion generation.
 All three Store uncertainty phases retain one capture, fixed deadline, result
 and public event across exact owner succession; duplicate lookup preserves the
 completed result. The task checklist retains both supported-pair results and
-the Core/static development runs. No standalone summary dispatch, spending,
-checkpoint completion, snapshot or complete runtime-cleanup claim is made.
+the Core/static development runs. Live standalone summary dispatch, successful
+checkpoint completion, snapshots and complete runtime cleanup remain open.
 
 Standalone source proposals now reuse the shared encoder and fixed-point Store
 measurement under their actual command and whole-session scope. The adjacent
@@ -1843,6 +1843,19 @@ only when the covered and eligible counts match. Both supported-pair tests prove
 exact replay, incomplete/forged pair refusal, oversized-unit excerpt selection,
 fixed reserve and cancellation. Live dispatch and settlement/checkpoint adoption
 are still open; the task checklist retains the complete development outputs.
+
+Standalone settlement now uses the existing maintenance attempt kinds and its
+captured episode allowance. Reported usage retains exact overshoot; dispatched
+failures and unreadable replies conservatively charge the remaining allowance.
+Not-dispatched settlement charges no tokens and permits only the existing single
+retry within the captured attempt ceiling. Failed attempts commit the episode
+terminal first, then settlement and compact completion together. Full replay
+rederives the result, preserves winning termination and rejects incomplete or
+substituted pairs. Unknown owner-loss cleanup remains unknown. Cancellation or
+expiry after a settled retry/summary retains usage without another settlement.
+The bounded reader validates spent failures without effects. Both-pair tests
+cover these reducers/readers; live standalone dispatch, successful checkpoint
+completion, snapshots and runtime cleanup integration remain open.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.

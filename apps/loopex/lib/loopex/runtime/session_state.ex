@@ -1290,17 +1290,36 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  # Concept: undispatched compact failures complete without inventing a run.
-  # Technical depth: ADR 0043 retains zero usage and confirmed cleanup before a
-  # provider attempt. A captured episode requires its leading terminal in the
-  # same transaction. Missing host settings are owner observations after a
-  # measured eligible range; numeric refusals and deadline limits are rederived.
+  # Concept: compact failures complete their actual command without a run.
+  # Technical depth: ADR 0043 retains zero usage before a provider attempt and
+  # exact settled usage afterward. Captured episodes require the leading terminal
+  # in the same transaction; the winning failure is rederived from the retained
+  # settlement, actual abort, clock and limits. Nothing settles an open attempt.
   @doc false
   def propose_standalone_compact_failure(state, failure, clock, check \\ fn -> :ok end) do
-    with {:ok, record} <- zero_attempt_compact_failure_record(state, failure, clock, check),
+    with {:ok, record} <- standalone_compact_failure_record(state, failure, clock, check),
          {:ok, proposal} <- internal_proposal(state, record["episode_id"] <> ":completed", record),
          :ok <- check.() do
       {:ok, proposal}
+    end
+  end
+
+  defp standalone_compact_failure_record(state, failure, clock, check) do
+    case state.maintenance_episodes[state.active_maintenance] do
+      %{"attempts" => attempts, kind: "standalone_maintenance_episode_admitted_v1"}
+      when attempts > 0 ->
+        with :ok <- check.(),
+             {:ok, record} <- standalone_settlement_completion_record(state, clock),
+             true <- record["result"]["failure"] == failure,
+             :ok <- check.() do
+          {:ok, record}
+        else
+          {:error, _} = error -> error
+          _ -> {:error, :invalid_compact_completion_transition}
+        end
+
+      _ ->
+        zero_attempt_compact_failure_record(state, failure, clock, check)
     end
   end
 
@@ -4130,10 +4149,11 @@ defmodule Loopex.Runtime.SessionState do
 
   # Concept: summary settlement uses the same transport and accounting truth.
   # Technical depth: successful output remains checkpoint-pending, with no
-  # ordinary assistant or parent ending. A failed summary defers its effects to
-  # the consecutive parent terminal; the episode terminal leads that transaction.
+  # ordinary assistant. A failed summary defers its effects to the consecutive
+  # run terminal or standalone completion; the episode terminal leads that
+  # transaction. Standalone endings use the supplied owner's observed clock.
   @doc false
-  def propose_maintenance_attempt_settled(state, outcome) do
+  def propose_maintenance_attempt_settled(state, outcome, observed_at \\ nil) do
     with %{"stage" => "model_attempt_open"} = episode <-
            state.maintenance_episodes[state.active_maintenance],
          request = episode["request"],
@@ -4153,12 +4173,9 @@ defmodule Loopex.Runtime.SessionState do
              "accounting" => attempt_accounting(transport, usage)
            }),
          {:ok, record} <- fit_attempt_settlement(record),
-         {:ok, _preview, _events} <- apply_internal_record(state, record) do
-      records =
-        if maintenance_failed_settlement?(record),
-          do: [record, maintenance_attempt_terminal(state, episode, record)],
-          else: [record]
-
+         {:ok, preview, _events} <- apply_internal_record(state, record),
+         {:ok, records} <-
+           maintenance_settlement_records(state, episode, record, preview, observed_at) do
       internal_proposal(
         state,
         episode["operation_id"] <>
@@ -4172,11 +4189,158 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp maintenance_settlement_records(
+         _state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"},
+         record,
+         preview,
+         observed_at
+       ) do
+    episode = preview.maintenance_episodes[preview.active_maintenance]
+
+    case standalone_settlement_failure(preview, episode, observed_at) do
+      nil ->
+        {:ok, [record]}
+
+      _ ->
+        with {:ok, completed} <- standalone_settlement_completion_record(preview, observed_at),
+             do: {:ok, [record, completed]}
+    end
+  end
+
+  defp maintenance_settlement_records(state, episode, record, _preview, _observed_at) do
+    {:ok,
+     if(maintenance_failed_settlement?(record),
+       do: [record, maintenance_attempt_terminal(state, episode, record)],
+       else: [record]
+     )}
+  end
+
+  # Concept: standalone settlement spends its own allowance and completes its command.
+  # Technical depth: the preceding attempt fixes cancellation, deadline and provider
+  # failure. Failed settlements defer charging until the terminal/completion pair;
+  # readable summary failures and exhausted retry allowances use already retained
+  # charges. Replay derives this exact result and never charges a run or settles twice.
+  defp standalone_settlement_completion_record(state, observed_at) do
+    with %{} = pending <- state.pending_compact,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <-
+           episode["command_id"] == pending["command_id"] and
+             episode["episode_id"] == pending["episode_id"],
+         true <-
+           episode["stage"] in [
+             "settlement_pending_terminal",
+             "model_retry_permitted",
+             "checkpoint_pending"
+           ],
+         true <-
+           is_integer(observed_at) and observed_at >= episode["request_staged_at"] and
+             observed_at <= @uint64_max,
+         {_preview, charged} = standalone_settlement_charge(state, episode),
+         %{} = failure <- standalone_settlement_failure(state, charged, observed_at),
+         true <- failure["bound"] != "deadline_ms" or observed_at >= episode["deadline"],
+         result = %{
+           "disposition" => "failed",
+           "checkpoint_id" => episode["checkpoint_id"],
+           "failure" => failure,
+           "usage" => charged["usage"],
+           "cleanup" =>
+             if(episode["settlement"]["termination"] == "owner_loss",
+               do: "unknown",
+               else: "confirmed"
+             )
+         },
+         {:ok, _} <- LoopexProtocol.Session.CompactResult.encode_wire(result) do
+      {:ok,
+       %{
+         :kind => "compact_command_completed_v1",
+         "command_id" => pending["command_id"],
+         "episode_id" => pending["episode_id"],
+         "observed_at" => observed_at,
+         "result" => result
+       }}
+    else
+      _ -> {:error, :invalid_compact_completion_transition}
+    end
+  end
+
+  defp standalone_settlement_charge(state, %{"stage" => "settlement_pending_terminal"} = episode),
+    do: charge_maintenance_settlement(state, episode, episode["settlement"])
+
+  defp standalone_settlement_charge(state, episode), do: {state, episode}
+
+  defp standalone_settlement_failure(state, episode, observed_at) do
+    record = episode["settlement"]
+
+    cond do
+      record["termination"] == "abort" ->
+        %{"category" => "cancelled", "retryable" => false}
+
+      record["termination"] == "deadline" ->
+        standalone_bound_failure(episode, "deadline_ms", observed_at, episode["deadline"])
+
+      record["termination"] == "owner_loss" or
+          (record["result"]["kind"] == "error" and record["next"] != "retry") ->
+        %{"category" => "model_call_failed", "retryable" => false}
+
+      episode["stage"] != "settlement_pending_terminal" and maintenance_abort?(state, episode) ->
+        %{"category" => "cancelled", "retryable" => false}
+
+      episode["stage"] != "settlement_pending_terminal" and is_integer(observed_at) and
+          observed_at >= episode["deadline"] ->
+        standalone_bound_failure(episode, "deadline_ms", observed_at, episode["deadline"])
+
+      is_binary(episode["summary_failure"]) ->
+        %{
+          "version" => 2,
+          "category" => "context_preparation_failed",
+          "retryable" => false,
+          "measurement_scope" => nil,
+          "cause" => episode["summary_failure"]
+        }
+
+      episode["stage"] == "model_retry_permitted" and
+          episode["attempts"] >= episode["bounds"]["max_attempts"] ->
+        standalone_bound_failure(
+          episode,
+          "max_attempts",
+          episode["attempts"],
+          episode["bounds"]["max_attempts"]
+        )
+
+      episode["stage"] == "checkpoint_pending" and
+          episode["usage"]["total_tokens"] >= episode["bounds"]["token_budget"] ->
+        standalone_bound_failure(
+          episode,
+          "token_budget",
+          episode["usage"]["total_tokens"],
+          episode["bounds"]["token_budget"]
+        )
+
+      true ->
+        nil
+    end
+  end
+
+  defp standalone_bound_failure(episode, bound, observed, declared) do
+    source = if(bound == "max_attempts", do: nil, else: episode["accounting_source"])
+
+    %{
+      "category" => "bound_reached",
+      "retryable" => false,
+      "bound" => bound,
+      "observed" => observed,
+      "declared_limit" => declared,
+      "accounting_source" => source
+    }
+  end
+
   @doc false
   def propose_maintenance_attempt_open(state) do
     with %{"stage" => "model_retry_permitted", "next_attempt" => 2} = episode <-
            state.maintenance_episodes[state.active_maintenance],
-         true <- is_nil(state.aborting),
+         true <- not maintenance_abort?(state, episode),
          true <- episode["attempts"] < episode["bounds"]["max_attempts"],
          :ok <- maintenance_request_capacity(state, episode),
          {:ok, opened} <-
@@ -4199,7 +4363,7 @@ defmodule Loopex.Runtime.SessionState do
   def propose_maintenance_termination(state, observed) do
     with %{"stage" => "model_attempt_open", "model_termination" => nil} = episode <-
            state.maintenance_episodes[state.active_maintenance],
-         true <- is_nil(state.aborting),
+         true <- not maintenance_abort?(state, episode),
          true <-
            is_integer(observed) and observed >= episode["request"].deadline and
              observed <= @uint64_max do
@@ -4229,14 +4393,26 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp maintenance_attempt_termination(state, episode, outcome) do
-    run = episode["run_id"]
-
     cond do
       episode["model_termination"] in ["abort", "deadline"] -> episode["model_termination"]
-      match?(%{run_id: ^run}, state.aborting) -> "abort"
+      maintenance_abort?(state, episode) -> "abort"
       outcome == :owner_loss -> "owner_loss"
       true -> nil
     end
+  end
+
+  defp maintenance_abort?(state, %{kind: "standalone_maintenance_episode_admitted_v1"} = episode) do
+    id = episode["episode_id"]
+
+    match?(
+      %{"episode_id" => ^id, "abort_command_id" => abort} when is_binary(abort),
+      state.pending_compact
+    )
+  end
+
+  defp maintenance_abort?(state, episode) do
+    run = episode["run_id"]
+    match?(%{run_id: ^run}, state.aborting)
   end
 
   defp maintenance_summary(%{
@@ -4274,11 +4450,29 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp charge_maintenance_settlement(state, episode, record) do
-    run = episode["run_id"]
-    {_bounds, prior} = accounting(state, run)
-    next = apply_attempt_accounting(state, run, record["accounting"])
-    {_bounds, charged} = accounting(next, run)
-    charge = charged.tokens - prior.tokens
+    {next, charge} =
+      if maintenance_scope(episode) == :session do
+        charge =
+          case record["accounting"] do
+            %{"source" => "none"} ->
+              0
+
+            %{"source" => "reported", "input_tokens" => input, "output_tokens" => output} ->
+              input + output
+
+            %{"source" => "estimated"} ->
+              max(episode["bounds"]["token_budget"] - episode["usage"]["total_tokens"], 0)
+          end
+
+        {state, charge}
+      else
+        run = episode["run_id"]
+        {_bounds, prior} = accounting(state, run)
+        next = apply_attempt_accounting(state, run, record["accounting"])
+        {_bounds, charged} = accounting(next, run)
+        {next, charged.tokens - prior.tokens}
+      end
+
     usage = episode["usage"]
 
     usage =
@@ -4294,6 +4488,20 @@ defmodule Loopex.Runtime.SessionState do
       end
 
     episode = episode |> Map.put("usage", usage) |> Map.put("settlement", record)
+
+    episode =
+      if maintenance_scope(episode) == :session do
+        source = record["accounting"]["source"]
+
+        Map.put(
+          episode,
+          "accounting_source",
+          if(source == "none", do: episode["accounting_source"], else: source)
+        )
+      else
+        episode
+      end
+
     {put_in(next.maintenance_episodes[episode["episode_id"]], episode), episode}
   end
 
@@ -5429,7 +5637,8 @@ defmodule Loopex.Runtime.SessionState do
       not maintenance_terminal_tail?(state, kind) ->
         {:error, :incomplete_maintenance_terminal_transaction}
 
-      is_nil(pending_attempt_settlement(state)) or kind == "run_terminal_committed" ->
+      is_nil(pending_attempt_settlement(state)) or kind == "run_terminal_committed" or
+          (kind == "compact_command_completed_v1" and is_map(state.pending_compact)) ->
         replay_admitted_record(state, record)
 
       true ->
@@ -6396,6 +6605,9 @@ defmodule Loopex.Runtime.SessionState do
   defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :run_terminal}}, kind),
     do: kind == "run_terminal_committed"
 
+  defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :compact_settlement}}, kind),
+    do: kind == "maintenance_attempt_settled_v3"
+
   defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :compact_terminal}}, kind),
     do: kind == "compact_command_completed_v1"
 
@@ -6422,6 +6634,9 @@ defmodule Loopex.Runtime.SessionState do
           case {state.maintenance_terminal, next.maintenance_terminal, kind} do
             {%{next: :ending}, %{} = marker, kind} when kind != "run_terminal_committed" ->
               %{next | maintenance_terminal: %{marker | next: :run_terminal}}
+
+            {%{next: :compact_settlement}, %{} = marker, "maintenance_attempt_settled_v3"} ->
+              %{next | maintenance_terminal: %{marker | next: :compact_terminal}}
 
             _ ->
               next
@@ -6518,32 +6733,49 @@ defmodule Loopex.Runtime.SessionState do
     end)
   end
 
-  defp compact_completion_record(state, %{"result" => %{"disposition" => "unchanged"}} = record),
-    do: unchanged_compact_record(state, record["observed_at"], fn -> :ok end)
+  defp compact_completion_record(%{pending_compact: %{}} = state, record)
+       when record.kind == "compact_command_completed_v1" do
+    case state.maintenance_episodes[state.active_maintenance] do
+      %{"attempts" => attempts} when attempts > 0 ->
+        standalone_settlement_completion_record(state, record["observed_at"])
 
-  defp compact_completion_record(
+      _ ->
+        compact_zero_attempt_completion_record(state, record)
+    end
+  end
+
+  defp compact_completion_record(_, _), do: {:error, :invalid_compact_completion_transition}
+
+  defp compact_zero_attempt_completion_record(
+         state,
+         %{"result" => %{"disposition" => "unchanged"}} = record
+       ),
+       do: unchanged_compact_record(state, record["observed_at"], fn -> :ok end)
+
+  defp compact_zero_attempt_completion_record(
          state,
          %{"result" => %{"disposition" => "failed", "failure" => failure}} = record
        ),
        do:
          zero_attempt_compact_failure_record(state, failure, record["observed_at"], fn -> :ok end)
 
-  defp compact_completion_record(_, _), do: {:error, :invalid_compact_completion_transition}
+  defp compact_zero_attempt_completion_record(_, _),
+    do: {:error, :invalid_compact_completion_transition}
 
-  defp complete_standalone_zero_attempt_episode(
+  defp complete_standalone_episode(
          %{active_maintenance: nil, maintenance_terminal: nil} = state,
          _
        ),
        do: {:ok, state}
 
-  defp complete_standalone_zero_attempt_episode(state, record) do
+  defp complete_standalone_episode(state, record) do
     with %{episode_id: id, result: result, observed_at: clock, next: :compact_terminal} <-
            state.maintenance_terminal,
          true <-
            id == record["episode_id"] and result == record["result"] and
              clock == record["observed_at"] do
-      episode =
-        state.maintenance_episodes[id] |> Map.put("stage", "settled") |> Map.put("result", result)
+      {state, episode} = standalone_settlement_charge(state, state.maintenance_episodes[id])
+      episode = episode |> Map.put("stage", "settled") |> Map.put("result", result)
 
       {:ok,
        %{
@@ -6981,10 +7213,11 @@ defmodule Loopex.Runtime.SessionState do
         result: result,
         observed_at: record["observed_at"],
         next:
-          if(Map.has_key?(state.maintenance_episodes[state.active_maintenance], "command_id"),
-            do: :compact_terminal,
-            else: :ending
-          )
+          case state.maintenance_episodes[state.active_maintenance] do
+            %{"command_id" => _, "stage" => "model_attempt_open"} -> :compact_settlement
+            %{"command_id" => _} -> :compact_terminal
+            _ -> :ending
+          end
       }
 
       {:ok, %{state | maintenance_terminal: marker}, []}
@@ -7105,7 +7338,7 @@ defmodule Loopex.Runtime.SessionState do
          command_id = record["command_id"],
          %{} = binding <- state.commands[command_id],
          false <- Map.has_key?(binding, :result),
-         {:ok, state} <- complete_standalone_zero_attempt_episode(state, record) do
+         {:ok, state} <- complete_standalone_episode(state, record) do
       completed = Map.take(record, ~w(episode_id command_id result))
 
       event =
@@ -7172,7 +7405,7 @@ defmodule Loopex.Runtime.SessionState do
     with :ok <- ProviderAttempt.validate_termination(record),
          %{"stage" => "model_attempt_open", "model_termination" => nil} = episode <-
            state.maintenance_episodes[state.active_maintenance],
-         true <- is_nil(state.aborting),
+         true <- not maintenance_abort?(state, episode),
          true <-
            Map.take(record, Map.keys(maintenance_attempt_identity(episode))) ==
              maintenance_attempt_identity(episode),
@@ -8659,7 +8892,7 @@ defmodule Loopex.Runtime.SessionState do
          true <-
            Map.delete(record, :kind) ==
              Map.put(maintenance_attempt_identity(episode), "attempt", 2),
-         true <- is_nil(state.aborting) and is_nil(episode["model_termination"]),
+         true <- not maintenance_abort?(state, episode) and is_nil(episode["model_termination"]),
          true <- episode["attempts"] < episode["bounds"]["max_attempts"],
          :ok <- maintenance_request_capacity(state, episode) do
       episode =

@@ -325,6 +325,74 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: standalone maintenance settlement now spends the captured episode's own
+  allowance, without changing run accounting, pending work or deadlines. Readable
+  usage is charged exactly once, including reported overshoot; unreadable replies
+  and dispatched failures conservatively charge the remaining declared allowance.
+  A not-dispatched attempt consumes only attempt capacity and permits the same
+  request's single retry while the episode ceiling allows it. Reaching that ceiling
+  closes with the exact max-attempts bound. Successful readable summaries remain
+  checkpoint-pending. Incomplete/invalid summaries close with their accepted cause;
+  unreadable replies retain model-call failure and no invented reported usage.
+  Failed attempt transactions lead with the episode terminal, then settlement and
+  compact completion. Replay authenticates the exact retained result, winning
+  cancellation/deadline/provider failure, usage and cleanup, and rejects missing
+  rows, rehashed result substitutions and duplicate completion. Owner loss retains
+  unknown cleanup. Post-settlement retry/checkpoint cancellation and fixed-cutoff
+  expiry complete without another settlement or charge. The bounded reader accepts
+  closed spent failures, rejects malformed accounting/clock/disposition, and emits
+  no executor effects. Current/floor nine-file selections pass 268 cases with two
+  existing exclusions in 15.6 and 15.2 seconds. These are reducer/reader development
+  proofs; live standalone dispatch, checkpoint completion, snapshots and cleanup
+  integration remain open. No required check or product bound changed.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-settlement-focused-current-v1.log` | PASS, 268 cases, two excluded | `dbb91cd04310e3c284eee6f9ba9de03080607dacaf3a3316af5aff2fc80f1f06` |
+  | `/private/tmp/loopex-m7-standalone-settlement-focused-floor-v1.log` | PASS, 268 cases, two excluded | `d5e21eae800a9972f2d437e50ecb7ed26d14c0f0f656c372033de4aa8da702f8` |
+
+  Development failures stay failed. The initial duplicate-result fixture expected
+  a proposal instead of the reducer's existing replayed result and also produced
+  a type warning; correcting the fixture restored its exact result assertion.
+  A later map pattern placed a binary key after keyword syntax and failed
+  compilation; reordering the keys repaired syntax without changing behavior.
+  Complete outputs are retained read-only outside the repository:
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-settlement-current-v1.log` | FAIL, 104/105 cases, two excluded; fixture expectation and type warning | `91134d352aea324fcb5dce566e4215a59917125ca272ef20bfd16616108290d3` |
+  | `/private/tmp/loopex-m7-standalone-settlement-current-v2.log` | PASS, 127 cases, two excluded, 9.2 seconds | `3bf5c0940ca39cf456f27ff061f65c46e8c99d1827a5a5c2fb98eb74c719c549` |
+  | `/private/tmp/loopex-m7-standalone-settlement-current-v3.log` | FAIL, compilation syntax | `d23df431c166d57425d208ad6b42f288cd18b2f9c0305326be2d8ccbcabcc644` |
+  | `/private/tmp/loopex-m7-standalone-settlement-current-v4.log` | PASS, 131 cases, two excluded, 9.2 seconds | `a94559e8a1bb4877d391519dd5ba88161251d9a8204531bb994c449c06ec0376` |
+
+  T01–T19 originals remain 54 done / 119 todo / 6 retired. Added subtasks are
+  205 done / 9 todo, including T07's 38 done / 1 todo. Both earlier maintainer
+  decisions remain pending. Next join standalone checkpoint continuation and
+  the live dispatch/settlement workflow under the actual compact identity.
+
+  The complete current Core suite passes 1,190 cases with eight existing
+  exclusions in 215.3 seconds. Compilation without warnings, formatting,
+  bootstrap/status, compiled documentation, dependency direction and version
+  train also pass. Complete outputs are retained read-only:
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-settlement-core-current-v1.log` | PASS, 1,190 cases, eight excluded | `d1ae706ead8afeb4bd7a33658ee0c30c2bb697d68abe3e4810143144c9a6f1a6` |
+  | `/private/tmp/loopex-m7-standalone-settlement-static-v1.log` | PASS, compile/format/bootstrap/docs/dependencies/version | `035a294b6c953811856e60b09690672f2d39c0d19f9161478842a148486fb816` |
+
+  The static run precedes adding its own digest and this Core result to the
+  evidence entry. Bootstrap/status and compiled documentation are checked after
+  this metadata backfill and pass. Complete output is retained read-only at
+  `/private/tmp/loopex-m7-standalone-settlement-final-docs-v1.log`, SHA-256
+  `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8`.
+  This final reference is appended after that check. No production or test
+  changes follow these runs. All check handles are terminal and collected;
+  no agents are running. Next implement standalone checkpoint substitution,
+  continuation and successful completion, then join actual provider dispatch
+  and the retained settlement path in the live owner. The integrated workflow
+  subtask remains open. The next clean integration candidate's full fast check,
+  real-provider lanes and closure matrix remain required.
+
 - Done: standalone captured source selection now reuses the maintenance source
   encoder, fixed-point Store sizing and adjacent request/open proposal. The actual
   compact command and idle session bind its whole-session selection. Its admitted
@@ -7746,6 +7814,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Charge standalone settlements against captured episode allowances, retain exact reported/conservative usage and bounded not-dispatched retry, and complete failed attempts with the leading episode terminal plus settlement/completion pair; prove summary refusal, unreadable replies, owner-loss cleanup, cancellation/deadline precedence, post-settlement endings, duplicate results, strict replay and bounded private coverage on both toolchains. Live dispatch, checkpoints, snapshots and complete cleanup remain open.
 
 - [x] Reuse captured whole-session source selection, exact source/receipt sizing and the adjacent maintenance request/open pair for standalone commands; retain the immutable cutoff and actual command identity, add no run accounting/deadline, and prove excerpt selection, strict replay, cancellation and bounded private coverage on both toolchains. Live dispatch, settlement and checkpoint completion remain open.
 
