@@ -325,6 +325,45 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: add the run-owned exhausted-episode reducer for four physical
+  maintenance attempts whose current partial checkpoint still fails ordinary
+  limits. It recomputes the last minimum ordinary candidate and retains the
+  exact numeric refusal between episode and failed parent terminals in one
+  proposal, preserving the useful checkpoint, original facts and once-only
+  168-token charge. Four attempts remain episode evidence rather than an
+  invented parent attempt bound. Abort and deadline win before measurement.
+  Replay rejects altered estimates, descriptor counts, digests and clocks. It
+  also rejects removal of the episode identity: ordinary numeric refusals now
+  require no active maintenance, so they cannot bypass episode recomputation.
+  The coordinator joins the existing fenced ending path; live exhaustion fault
+  injection, further summary dispatch and automatic/explicit workflows remain
+  open. This closes one added reducer subtask only. T01–T19 originals remain
+  51 done / 122 todo / 6 retired; added totals become 183 done / 9 todo.
+  Including T00, originals remain 51 / 128 / 7 and added totals are 187 / 10.
+
+  Twenty-file focused selection: 282 Core tests and seven composition tests
+  pass on each supported pair; one existing Core long-bound exclusion remains.
+  Current: 17.4 measured seconds,
+  `/private/tmp/loopex-m7-exhaustion-current-dev2.log`, SHA-256
+  `c6c78abfc3a2f1a41517d29aac1a924548cf0111c9571868f994a4e4910f5886`.
+  Floor: 18.3 measured seconds,
+  `/private/tmp/loopex-m7-exhaustion-floor-v1.log`, SHA-256
+  `a0e23cd8735a8712a4a00fe0186bbdc082aff98d626617c44226aaf0a54746e9`.
+  The failed current development output is retained:
+  `/private/tmp/loopex-m7-exhaustion-current-dev1.log`, SHA-256
+  `7229236f33aa29985a4c66224f8e87415cb7b71ac984aa6eb5b88625b74dfc7f`.
+  Its episode-identity mutation exposed the bypass above; the validator was
+  strengthened without weakening the test. Focused handles 6896 and 57970 are
+  terminal and collected. No question, decision or agent is pending.
+
+  Formatting, warning-free compilation, dependency direction, bootstrap/status,
+  documentation and diff gates passed in 23.9 measured seconds:
+  `/private/tmp/loopex-m7-exhaustion-gates-v1.log`, SHA-256
+  `81a48edc0ffa2bfba65ccd46a571e5a024a0b309ae3668d0a97505e4da00741f`.
+  Gate handle 33318 is terminal and collected. Next verify the live exhausted
+  successor across all three Store uncertainty phases, then join bounded source
+  preparation and new summary dispatch/cleanup to the serial owner.
+
 - Done: extend the run-owned ordinary-limit reducer and private history reader
   across further raw prefixes. Each next request includes the exact prior
   checkpoint, derives a new summary ordinal and operation identity, retains the
@@ -6818,6 +6857,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Add and independently replay the run-owned four-physical-attempt exhaustion proposal, preserving useful partial checkpoints, original facts and once-only spending while retaining the last minimum ordinary numeric refusal and exact episode/refusal/parent ordering. Prove abort/deadline precedence and reject changed measurements, clocks and stripped episode identity on both toolchains. Live exhaustion recovery under Store faults and new summary dispatch remain open.
 
 - [x] Extend run-owned ordinary-limit requests and checkpoints across contiguous new raw prefixes with the exact prior checkpoint, cumulative original-record digest, separate consumed range, inherited omission, fixed capture/deadline, ordinal/operation separation, usage-once accounting and physical four-attempt limit; prove fitted-cycle refusal, later non-progress retaining the prior checkpoint, tamper rejection and bounded private traversal on both toolchains. Live dispatch and exhausted-episode endings remain open.
 

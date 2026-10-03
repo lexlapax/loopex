@@ -1096,6 +1096,78 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
              SessionState.propose_maintenance_request(aborted, 1, 2_008, fn ->
                flunk("cancelled parent entered exhausted-episode preparation")
              end)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.propose_maintenance_exhaustion(aborted, 2_008, fn ->
+               flunk("cancelled parent entered exhaustion measurement")
+             end)
+
+    assert {:error, :run_deadline_reached} =
+             SessionState.propose_maintenance_exhaustion(state, 61_001, fn ->
+               flunk("elapsed parent entered exhaustion measurement")
+             end)
+
+    assert {:ok, ending} =
+             SessionState.propose_maintenance_exhaustion(state, 2_008, fn -> :ok end)
+
+    assert [prefix, refusal, terminal] = ending.records
+    assert prefix["result"]["checkpoint_id"] == state.active_checkpoint
+    assert prefix["result"]["usage"]["attempts"] == 4
+    assert prefix["result"]["usage"]["total_tokens"] == 168
+    assert prefix["result"]["failure"] == refusal["failure"]
+    assert refusal["episode_id"] == state.active_maintenance
+    assert refusal["projection_state"] == "measured"
+    assert refusal["measurement_scope"] == "ordinary"
+    assert refusal["failure"]["category"] == "context_budget_exceeded"
+    assert refusal["failure"]["dimension"] == "context_tokens"
+    assert refusal["failure"]["limit"] == 4_000
+    assert refusal["failure"]["hard_limit"] == 4_000
+    assert refusal["failure"]["observed"] == refusal["provider_estimated_tokens"]
+    assert refusal["provider_estimated_tokens"] > 4_000
+    assert refusal["system_message_count"] == 1
+    assert refusal["session_message_count"] == 3
+    assert terminal["outcome"] == "failed"
+    assert terminal["failure"] == refusal["failure"]
+    assert {:ok, ^refusal, bytes} = Store.normalize_and_measure_item(:record, refusal)
+    assert bytes == byte_size(:erlang.term_to_binary(refusal, [:deterministic]))
+
+    {next, [prefix_row, refusal_row, terminal_row] = rows, all_events} =
+      commit(state, ending, events)
+
+    assert next.active_maintenance == nil
+    assert next.active_run_id == nil
+    assert next.active_checkpoint == state.active_checkpoint
+    assert next.checkpoints == state.checkpoints
+    assert next.conversation == state.conversation
+    assert next.charged == state.charged
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, all_events)
+
+    for {field, value} <- [
+          {"provider_estimated_tokens", 0},
+          {"episode_id", nil},
+          {"session_message_count", 0},
+          {"ordered_descriptor_digest", String.duplicate("0", 64)}
+        ] do
+      altered = %{refusal_row | payload: Map.put(refusal_row.payload, field, value)}
+
+      assert {:error, :invalid_context_refusal} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ [prefix_row, altered, terminal_row],
+                 all_events
+               )
+    end
+
+    for observed <- [nil, 1_000, 61_001] do
+      altered = %{prefix_row | payload: Map.put(prefix_row.payload, "observed_at", observed)}
+
+      assert {:error, _} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ [altered, refusal_row, terminal_row],
+                 all_events
+               )
+    end
   end
 
   defp pending_checkpoint(old, options \\ []) do

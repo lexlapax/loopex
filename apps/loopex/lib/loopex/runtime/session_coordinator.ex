@@ -3489,6 +3489,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  defp commit_checkpoint_phase(state, work, {:error, {:checkpoint_requires_more_progress, _}}) do
+    episode = state.durable.maintenance_episodes[state.durable.active_maintenance]
+
+    if episode["attempts"] == episode["bounds"]["max_attempts"] do
+      result =
+        SessionState.propose_maintenance_exhaustion(
+          state.durable,
+          System.system_time(:millisecond),
+          checkpoint_clock_check(state, work.run_id)
+        )
+
+      commit_checkpoint_phase(state, work, result)
+    else
+      {:stop, {:maintenance_checkpoint_failed, :checkpoint_requires_dispatch}, state}
+    end
+  end
+
   defp commit_checkpoint_phase(state, _work, {:error, reason}),
     do: {:stop, {:maintenance_checkpoint_failed, reason}, state}
 

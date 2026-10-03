@@ -1662,7 +1662,12 @@ separate consumed and cumulative coverage, original-record integrity digests and
 inherited omission. New ordinals preserve the original capture and deadline;
 physical retries spend the four-attempt ceiling, and later non-progress retains
 the useful prior checkpoint. Fitted substitutions refuse summary-only cycles.
-Automatic triggering, new summary dispatch/cleanup, exhausted-episode endings,
+The exhausted-episode reducer now rebuilds the last minimum ordinary candidate
+and retains its numeric refusal with episode and parent endings, preserving
+useful partial checkpoints and settled usage. Replay refuses altered measurements
+and removal of the episode identity; ordinary refusals require no active
+maintenance. Abort/deadline precedence and current-format replay pass both pairs.
+Automatic triggering, new summary dispatch/cleanup, exhaustion fault recovery,
 thinking/rendering triggers and standalone compact remain open. The full fast
 check passes on d0dd8ec6 through shared ordinary staging/tail measurement; both
 supported pairs pass the later focused checkpoint reducer/reader selection.

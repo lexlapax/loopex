@@ -1702,6 +1702,28 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp maintenance_checkpoint_completion_record(state, now, check) do
+    with {:ok, episode, measurement} <- committed_checkpoint_measurement(state, now, check),
+         {:ok, _} <- measurement.admission do
+      {:ok,
+       %{
+         :kind => "maintenance_episode_terminal_v1",
+         "episode_id" => episode["episode_id"],
+         "observed_at" => now,
+         "result" => %{
+           "disposition" => "checkpointed",
+           "checkpoint_id" => episode["checkpoint_id"],
+           "failure" => nil,
+           "usage" => episode["usage"],
+           "cleanup" => "confirmed"
+         }
+       }}
+    else
+      {:refused, refusal} -> {:error, {:checkpoint_requires_more_progress, refusal}}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp committed_checkpoint_measurement(state, now, check) do
     with %{"stage" => "checkpoint_committed", "checkpoint_id" => id} = episode <-
            state.maintenance_episodes[state.active_maintenance],
          true <- id == state.active_checkpoint and episode["run_id"] == state.active_run_id,
@@ -1727,26 +1749,61 @@ defmodule Loopex.Runtime.SessionState do
          header = Loopex.Runtime.ResourceContext.initial_header(staging.resources),
          header = if(header, do: Map.put(header, "status", "retained_content_missing"), else: nil),
          {:ok, measurement} <-
-           checkpoint_projection_measurement(state, staging, project, header, check),
-         {:ok, _} <- measurement.admission do
-      {:ok,
-       %{
-         :kind => "maintenance_episode_terminal_v1",
-         "episode_id" => episode["episode_id"],
-         "observed_at" => now,
-         "result" => %{
-           "disposition" => "checkpointed",
-           "checkpoint_id" => id,
-           "failure" => nil,
-           "usage" => episode["usage"],
-           "cleanup" => "confirmed"
-         }
-       }}
+           checkpoint_projection_measurement(state, staging, project, header, check) do
+      {:ok, episode, measurement}
     else
-      {:refused, refusal} -> {:error, {:checkpoint_requires_more_progress, refusal}}
       {:error, _} = error -> error
       false -> pending_checkpoint_refusal(state, now)
       _ -> {:error, :no_committed_maintenance_checkpoint}
+    end
+  end
+
+  # Concept: an exhausted episode retains partial checkpoints and its actual context failure.
+  # Technical depth: four physical attempts are episode evidence, not a parent
+  # attempt bound. Rebuild the last minimum ordinary candidate and retain its
+  # measured refusal between the episode and parent terminals in one transaction.
+  # Replay authenticates the ledger, current projection and captured clock again.
+  @doc false
+  @spec propose_maintenance_exhaustion(t(), integer(), function()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_maintenance_exhaustion(state, now, check) when is_function(check, 0) do
+    with {:ok, refusal} <- maintenance_exhaustion_refusal(state, now, check),
+         {:ok, _} <- Store.admit_bounded(refusal),
+         terminal =
+           state
+           |> run_terminal_record(refusal["run_id"], "failed", %{})
+           |> Map.put("failure", context_failure(refusal)),
+         {:ok, proposal} <-
+           build_internal_proposal(
+             state,
+             state.active_maintenance <> ":exhausted",
+             [refusal, terminal],
+             now
+           ),
+         :ok <- check.() do
+      {:ok, proposal}
+    end
+  end
+
+  defp maintenance_exhaustion_refusal(state, now, check) do
+    with {:ok, episode, measurement} <- committed_checkpoint_measurement(state, now, check),
+         true <- episode["attempts"] == episode["bounds"]["max_attempts"],
+         {:refused, failure} <- measurement.admission,
+         work = state.pending_work[episode["run_id"]],
+         {:refused, refusal} <-
+           context_refusal_result(
+             state,
+             measurement.record,
+             failure,
+             work,
+             next_turn_number(work)
+           ) do
+      {:ok, Map.put(refusal, "episode_id", episode["episode_id"])}
+    else
+      false -> {:error, :maintenance_episode_not_exhausted}
+      {:ok, _} -> {:error, :maintenance_targets_fit}
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_context_refusal}
     end
   end
 
@@ -5491,6 +5548,12 @@ defmodule Loopex.Runtime.SessionState do
         episode["stage"] == "checkpoint_pending" and
           observed >= episode["request_staged_at"] and is_integer(deadline) and
           observed < deadline
+
+      %{"outcome" => "failed", "failure" => %{"category" => "context_budget_exceeded"}} ->
+        episode["stage"] == "checkpoint_committed" and
+          episode["attempts"] == episode["bounds"]["max_attempts"] and
+          observed >= state.checkpoints[episode["checkpoint_id"]]["committed_at"] and
+          is_integer(deadline) and observed < deadline
 
       %{"outcome" => "bound_reached", "bound" => "deadline"} ->
         is_integer(deadline) and deadline <= episode["preparation_deadline"] and
@@ -10354,6 +10417,24 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp validate_context_refusal(
+         state,
+         %{
+           :kind => "context_admission_refused_v2",
+           "episode_id" => episode,
+           "failure" => %{"category" => "context_budget_exceeded"}
+         } = refusal
+       )
+       when is_binary(episode) do
+    with %{observed_at: now} <- state.maintenance_terminal,
+         {:ok, expected} <- maintenance_exhaustion_refusal(state, now, fn -> :ok end),
+         true <- refusal == expected do
+      :ok
+    else
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
   defp validate_context_refusal(state, %{kind: "context_admission_refused_v2"} = refusal) do
     run_id = refusal["run_id"]
     configuration = run_configuration(state, run_id)
@@ -10367,6 +10448,7 @@ defmodule Loopex.Runtime.SessionState do
          true <- valid_v2_descriptor_counts?(refusal),
          true <- is_map(configuration),
          true <- refusal["configuration_version"] == configuration["configuration_version"],
+         true <- is_nil(state.active_maintenance),
          true <- is_nil(refusal["episode_id"]) and is_nil(refusal["targets"]),
          true <-
            refusal["projection_state"] == "measured" and
