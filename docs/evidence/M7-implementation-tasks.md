@@ -325,6 +325,20 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: close the CLI signal fixture's process-lifetime gap. Every normal and
+  interrupted case now checks the exact launcher and child-VM PIDs after the
+  wrapper's observed exit; a failing startup case checks the same joins. If an
+  assertion stops before that observation, fixture teardown targets both
+  captured PIDs and requires their exit, rather than relying on a later manual
+  process sweep. All nine cases pass on both supported pairs, and the post-run
+  task-owned process scan is empty. Complete outputs:
+  `/private/tmp/loopex-m7-ask-os-signal-joins-current-final.log`, SHA-256
+  `ff2f361ef8bb58aa6894b2a4a1c68dd82ae1dcf137124cc057bd3577dfef5c67`;
+  `/private/tmp/loopex-m7-ask-os-signal-joins-floor-final.log`, SHA-256
+  `85ec1794d24a4f8c68209612db591e57090bf81ec6c8cc9775a34052c9f65da1`.
+  This closes one added T16 subtask; the original integration check remains
+  open until the current candidate is verified.
+
 - Done: pin the exact runtime `model_tool` question-event payload shape in a
   standalone, explicitly unserved schema. Live text, choice and decline paths
   assert pending and terminal fields, conditional choice identity, admitted
@@ -7452,7 +7466,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Investigate and repair the CLI signal fixture's leaked process trees observed at the 2026-10-02 restart checkpoint; prove exact wrapper/VM joins for normal, interrupted and failing fixture exits without relying on manual cleanup.
+- [x] Investigate and repair the CLI signal fixture's leaked process trees observed at the 2026-10-02 restart checkpoint; prove exact wrapper/VM joins for normal, interrupted and failing fixture exits without relying on manual cleanup.
 
 - [x] Run the public-chat host and shared diagnostic-lifetime integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 

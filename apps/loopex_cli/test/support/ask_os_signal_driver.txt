@@ -47,6 +47,11 @@ defmodule LoopexCli.AskOSSignalDriver do
           await_release(socket)
         end
 
+        if scenario == "failure" do
+          send_control(socket, :startup_enter)
+          throw(:fixture_failure)
+        end
+
         if scenario in ["double", "backstop"] do
           {:ok, :fixture_session}
         else

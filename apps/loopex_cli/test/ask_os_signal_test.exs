@@ -65,7 +65,7 @@ defmodule LoopexCli.AskOSSignalTest do
       assert_control(state.socket, {:stop_returned, :ok})
       assert_restored_handlers(state.socket)
       assert {:result, %{status: 130, stdout: ""}} = receive_control(state.socket)
-      assert {130, output} = await_exit(state.port, 10_000)
+      assert {130, output} = await_exit(state, 10_000)
       refute output =~ "signal answer"
     end
   end
@@ -83,7 +83,7 @@ defmodule LoopexCli.AskOSSignalTest do
     assert {:result, %{status: 130, stdout: "", stderr: "ending completed\n"}} =
              receive_control(state.socket)
 
-    assert {130, output} = await_exit(state.port, 10_000)
+    assert {130, output} = await_exit(state, 10_000)
     refute output =~ "signal answer"
   end
 
@@ -99,7 +99,7 @@ defmodule LoopexCli.AskOSSignalTest do
     assert_control(state.socket, {:stop_returned, :ok})
     assert_restored_handlers(state.socket)
     assert {:result, %{status: 130, stdout: "", stderr: ""}} = receive_control(state.socket)
-    assert {130, output} = await_exit(state.port, 10_000)
+    assert {130, output} = await_exit(state, 10_000)
     refute output =~ "signal answer"
   end
 
@@ -114,7 +114,7 @@ defmodule LoopexCli.AskOSSignalTest do
     assert_control(state.socket, {:trace_joined, true})
     assert_restored_handlers(state.socket)
     assert {:result, %{status: 130, stdout: ""}} = receive_control(state.socket)
-    assert {130, output} = await_exit(state.port, 10_000)
+    assert {130, output} = await_exit(state, 10_000)
     refute output =~ "signal answer"
   end
 
@@ -130,7 +130,7 @@ defmodule LoopexCli.AskOSSignalTest do
     assert_control(state.socket, {:stop_returned, :ok})
     assert_restored_handlers(state.socket)
     assert {:result, %{status: 130, stdout: "", stderr: ""}} = receive_control(state.socket)
-    assert {130, output} = await_exit(state.port, 10_000)
+    assert {130, output} = await_exit(state, 10_000)
     assert output == ""
     assert File.read!(state.stderr_path) == ""
   end
@@ -155,7 +155,7 @@ defmodule LoopexCli.AskOSSignalTest do
     assert {:result, %{status: 130, stdout: "", stderr: "ending cancelled\n"}} =
              receive_control(state.socket)
 
-    assert {130, output} = await_exit(state.port, 10_000)
+    assert {130, output} = await_exit(state, 10_000)
     assert output == ""
     assert File.read!(state.stderr_path) == "ending cancelled\n"
   end
@@ -167,7 +167,7 @@ defmodule LoopexCli.AskOSSignalTest do
     signal(state, "TERM", :child)
     assert_control(state.socket, {:phase, :stopping})
     signal(state, "HUP", :child)
-    assert {130, output} = await_exit(state.port, 10_000)
+    assert {130, output} = await_exit(state, 10_000)
     assert output == ""
     assert File.read!(state.stderr_path) =~ "stopping did not finish in time"
     assert {:error, :closed} = :gen_tcp.recv(state.socket, 0, 1_000)
@@ -180,13 +180,21 @@ defmodule LoopexCli.AskOSSignalTest do
     started = System.monotonic_time(:millisecond)
     signal(state, "TERM", :child)
     assert_control(state.socket, {:phase, :stopping})
-    assert {130, output} = await_exit(state.port, 15_000)
+    assert {130, output} = await_exit(state, 15_000)
     elapsed = System.monotonic_time(:millisecond) - started
     assert elapsed >= 9_500
     assert elapsed < 14_000
     assert output == ""
     assert File.read!(state.stderr_path) =~ "stopping did not finish in time"
     assert {:error, :closed} = :gen_tcp.recv(state.socket, 0, 1_000)
+  end
+
+  test "a failed ask joins its launcher and child VM", fixture do
+    state = start_case(fixture, "failure")
+    assert_control(state.socket, :startup_enter)
+    assert_restored_handlers(state.socket)
+    assert {:result, %{status: 1, stdout: ""}} = receive_control(state.socket)
+    assert {1, ""} = await_exit(state, 10_000)
   end
 
   defp start_case(fixture, scenario, trace? \\ false) do
@@ -238,6 +246,21 @@ defmodule LoopexCli.AskOSSignalTest do
     on_exit(fn -> :gen_tcp.close(socket) end)
     assert {:pid, child_pid} = receive_control(socket)
     assert Regex.match?(~r/^\d+$/, child_pid)
+
+    on_exit(fn ->
+      # A failed assertion can stop the test before await_exit observes the
+      # wrapper's wait. Retire the exact VM and launcher before fixture cleanup.
+      for pid <- [child_pid, Integer.to_string(launcher_pid)] do
+        if os_process_alive?(pid) do
+          _ = System.cmd("/bin/kill", ["-TERM", pid], stderr_to_stdout: true)
+        end
+      end
+
+      for pid <- [child_pid, Integer.to_string(launcher_pid)] do
+        assert_process_gone(pid, System.monotonic_time(:millisecond) + 2_000)
+      end
+    end)
+
     assert_control(socket, {:manager_before, true})
     assert {:handlers_before, handlers} = receive_control(socket)
 
@@ -280,19 +303,41 @@ defmodule LoopexCli.AskOSSignalTest do
     :erlang.binary_to_term(bytes, [:safe])
   end
 
-  defp await_exit(port, timeout) do
-    await_exit(port, "", System.monotonic_time(:millisecond) + timeout)
+  defp await_exit(state, timeout) do
+    result = await_port_exit(state.port, "", System.monotonic_time(:millisecond) + timeout)
+    assert_process_gone(state.child_pid, System.monotonic_time(:millisecond) + 2_000)
+
+    assert_process_gone(
+      Integer.to_string(state.launcher_pid),
+      System.monotonic_time(:millisecond) + 2_000
+    )
+
+    result
   end
 
-  defp await_exit(port, output, deadline) do
+  defp await_port_exit(port, output, deadline) do
     remaining = max(0, deadline - System.monotonic_time(:millisecond))
 
     receive do
-      {^port, {:data, bytes}} -> await_exit(port, output <> bytes, deadline)
+      {^port, {:data, bytes}} -> await_port_exit(port, output <> bytes, deadline)
       {^port, {:exit_status, status}} -> {status, output}
     after
       remaining -> flunk("ask child did not exit after OS signal")
     end
+  end
+
+  defp assert_process_gone(pid, deadline) do
+    if os_process_alive?(pid) and System.monotonic_time(:millisecond) < deadline do
+      Process.sleep(10)
+      assert_process_gone(pid, deadline)
+    else
+      refute os_process_alive?(pid), "fixture process #{pid} remains alive"
+    end
+  end
+
+  defp os_process_alive?(pid) do
+    {_output, status} = System.cmd("/bin/kill", ["-0", pid], stderr_to_stdout: true)
+    status == 0
   end
 
   defp shell_quote(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
