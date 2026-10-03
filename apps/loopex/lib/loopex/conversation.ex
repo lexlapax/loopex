@@ -218,6 +218,85 @@ defmodule Loopex.Conversation do
 
   def compaction_units(_, _, _, _), do: {:error, :context_projection_invalid}
 
+  # Concept: maintenance covers a prefix and retains one contiguous tail.
+  # Technical depth: units come from compaction_units/4. The owner measures each
+  # suffix at q=0 with fixed instructions, metadata and prior checkpoint,
+  # excluding removable optional resources. Its callback returns {:ok, tokens}
+  # only when that complete candidate fits its captured limits/targets and
+  # rendering contract. Tokens measure tail preference, not the fixed inputs.
+  # {:refused, reason} means sizing/rendering refusal; {:error, cause} preserves
+  # interruption or projection failure. Released units cannot grow back into
+  # this selection. Explicit origin releases every unprotected terminal unit.
+  @doc false
+  @spec compaction_tail([map()], :automatic | :explicit, function()) ::
+          {:ok, map()} | {:refused, term()} | {:error, term()}
+  def compaction_tail(units, origin, fit)
+      when is_list(units) and origin in [:automatic, :explicit] and is_function(fit, 1) do
+    protected = Enum.find_index(units, & &1.protected?) || length(units)
+
+    newest =
+      units
+      |> Enum.with_index()
+      |> Enum.reverse()
+      |> Enum.find_value(protected, fn {unit, index} ->
+        if unit.kind == :assistant_group and unit.complete?, do: index
+      end)
+
+    minimum = min(protected, newest)
+    start = if origin == :explicit, do: protected, else: minimum
+
+    with {:ok, cut, tokens} <- fit_minimum_tail(units, start, protected, fit),
+         released = cut - minimum,
+         {:ok, cut, tokens} <-
+           maybe_grow_compaction_tail(units, origin, released, cut, tokens, fit) do
+      {:ok,
+       %{
+         eligible_unit_count: cut,
+         retained_tail: Enum.drop(units, cut),
+         released_unit_count: released,
+         tail_tokens: tokens
+       }}
+    end
+  end
+
+  defp maybe_grow_compaction_tail(units, :automatic, 0, cut, tokens, fit),
+    do: grow_compaction_tail(units, cut, tokens, fit)
+
+  defp maybe_grow_compaction_tail(_units, _origin, _released, cut, tokens, _fit),
+    do: {:ok, cut, tokens}
+
+  defp fit_minimum_tail(units, cut, protected, fit) do
+    case fit.(Enum.drop(units, cut)) do
+      {:ok, tokens} when is_integer(tokens) and tokens >= 0 -> {:ok, cut, tokens}
+      {:refused, _} when cut < protected -> fit_minimum_tail(units, cut + 1, protected, fit)
+      {:refused, _} = refusal -> refusal
+      {:error, _} = error -> error
+      _ -> {:error, :context_projection_invalid}
+    end
+  end
+
+  defp grow_compaction_tail(_units, 0, tokens, _fit), do: {:ok, 0, tokens}
+  defp grow_compaction_tail(_units, cut, tokens, _fit) when tokens > 2_048, do: {:ok, cut, tokens}
+
+  defp grow_compaction_tail(units, cut, tokens, fit) do
+    case fit.(Enum.drop(units, cut - 1)) do
+      {:ok, next_tokens} when is_integer(next_tokens) and next_tokens in 0..2_048 ->
+        grow_compaction_tail(units, cut - 1, next_tokens, fit)
+
+      {:ok, next_tokens} when is_integer(next_tokens) and next_tokens > 2_048 ->
+        {:ok, cut, tokens}
+
+      {:refused, _} ->
+        {:ok, cut, tokens}
+
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error, :context_projection_invalid}
+    end
+  end
+
   defp run_units(elements) do
     results =
       elements

@@ -325,6 +325,44 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: select the retained compaction tail through whole-candidate fit probes.
+  Validated units remain contiguous; terminal units release oldest-first and
+  cannot grow back in the same selection. Explicit origin releases every
+  unprotected terminal unit. Automatic origin grows an unreleased tail backward
+  only while whole-request admission/rendering fits and tail cost stays at or
+  below 2,048 tokens. A mandatory tail above that preference remains valid when
+  hard limits fit. Protected/frozen units never release; empty history still
+  probes fixed required inputs. Callback interruption and projection failures
+  remain failures. These pure selection tests use controlled fit observations;
+  the exact owner measurement, captured rendering offender, prior-checkpoint
+  substitution and live automatic trigger remain open. No original T07 row is
+  closed. One added selection subtask is complete.
+
+  The twelve-file selection passed 163 tests on each supported pair. Current:
+  4.3 measured runner seconds,
+  `/private/tmp/loopex-m7-compaction-tail-current-dev1.log`, SHA-256
+  `108e6b403e3d10ad2240ce54037864c04a218caa8cde6e187736223dbb529255`.
+  Floor: 4.9 measured runner seconds,
+  `/private/tmp/loopex-m7-compaction-tail-floor-v1.log`, SHA-256
+  `738f710d2ec0b6535421609e9b330702ae57eb0a31255d10c73c87466b1bb282`.
+  Formatting, warning-free compilation, dependency direction, structure/status,
+  compiled documentation and diff gates passed in 21.6 measured seconds:
+  `/private/tmp/loopex-m7-compaction-tail-gates-v1.log`, SHA-256
+  `15ef7ffcc9f7aaa1f085c1fba5cc19ace633dbd84efa673ba9759b1943b43866`.
+  All handles are terminal and collected. No decision or agent is pending;
+  implementation continues on m7 with the goal active.
+
+- Done: the full fast check ran once on clean integration candidate
+  `e80116c1a69ad11f714d73585429f80d16a0b17f` and passed all eleven application
+  suites in 1,383.5 measured runner seconds. Core passed 1,010 tests; the other
+  suites retained their required cases and existing exclusions. Complete output:
+  `/private/tmp/loopex-m7-e80116c1-fast-check.log`, SHA-256
+  `aeb493b2b85b8bd4bec753a35e9b273f6ca15f698247271b69e70ef87c7faa65`.
+  This proves that integrated revision, including maintenance settlement and
+  owner recovery. It does not prove unfinished M7 outcomes, later source edits,
+  the floor closure check or the release matrix. The check handle is terminal
+  and collected; do not repeat this candidate as a pass.
+
 - Done: join retained maintenance endings to the live serial session owner.
   Successors settle inherited open summary attempts conservatively without
   redispatch, finish retained invalid/incomplete summaries through the required
@@ -6391,6 +6429,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Select a contiguous retained tail from validated complete units, releasing terminal units oldest-first, preserving protected and frozen units, releasing all eligible units for explicit origin, and growing only unreleased tails within the 2,048-token preference and whole-request fit callback. Prove irreducible refusal, rendering refusal, exact preference, mandatory oversized tail, interruption and fixed-input measurement for empty history on both toolchains. Exact owner request measurement, captured rendering offender and live automatic triggering remain open.
 
 - [x] Join maintenance settlement to durable episode accounting and strict replay, retaining natural bounded summaries pending checkpoints, atomically ending invalid/incomplete or lost attempts, enforcing one exact not-dispatched retry and captured parent capacity, preserving the first abort/deadline and late usage evidence, and proving depth compaction, duplicate/interrupted endings and successor recovery on both supported toolchains. Join the live owner recovery path for lost attempts and retained summary failures, with all three commit-uncertainty phases, exact joins, no redispatch and unchanged conversation. New summary dispatch/cleanup, checkpoint transactions and later prefixes remain open.
 

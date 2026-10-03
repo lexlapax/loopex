@@ -1628,11 +1628,20 @@ one proposal. A partial or interrupted pair cannot complete recovery or spend
 an attempt; the open row alone commits the first request deadline and increments
 the episode attempt counter without an ordinary turn or assistant message.
 Captured parent capacity, preparation expiry, cancellation and protected-unit
-checks refuse before intent. The eligible tail cut is still supplied by the
-future ordinary-request selector; minimum-tail release, optional tail growth,
-automatic triggering, live worker dispatch/cleanup, summary settlement,
-checkpoints and standalone compact remain open. This boundary is not a complete
-T07 workflow proof.
+checks refuse before intent. A pure tail selector now releases terminal units
+oldest-first through complete-candidate fit probes, preserves protected units,
+releases all eligible units for explicit origin, and grows only unreleased tails
+within the 2,048-token preference. Exact ordinary-request measurement, captured
+rendering offenders and prior-checkpoint substitution still need the owner join.
+Maintenance settlement now retains valid summaries pending checkpoints, charges
+exact or conservative usage once, preserves abort/deadline precedence and permits
+only the one exact not-dispatched retry. Live successors finish inherited lost
+attempts and invalid/incomplete summaries without redispatch, including all
+three Store uncertainty phases and exact owner joins. Automatic triggering, new
+summary dispatch/cleanup, successful checkpoint commits and standalone compact
+remain open. The full fast check passes on e80116c1 before the tail-selector
+change; both supported pairs pass the focused selection after it. This is not a
+complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.

@@ -83,6 +83,157 @@ defmodule Loopex.ConversationTest do
     assert c.protected?
   end
 
+  test "minimum tail releases terminal groups and later inputs oldest-first without regrowth" do
+    old = [user("old"), assistant(1, [], "answer"), %{user("later") | command_id: "later"}]
+    current = %{user("protected") | run_id: "r2", command_id: "current"}
+
+    assert {:ok, [group, trailing, protected] = units} =
+             Conversation.compaction_units(old ++ [current], "r2", ["r1"], [])
+
+    observer = self()
+
+    fit = fn tail ->
+      send(observer, {:measured_tail, tail})
+      if tail == [protected], do: {:ok, 17}, else: {:refused, :context_record_bytes}
+    end
+
+    assert {:ok, selected} = Conversation.compaction_tail(units, :automatic, fit)
+
+    assert selected == %{
+             eligible_unit_count: 2,
+             retained_tail: [protected],
+             released_unit_count: 2,
+             tail_tokens: 17
+           }
+
+    assert_receive {:measured_tail, [^group, ^trailing, ^protected]}
+    assert_receive {:measured_tail, [^trailing, ^protected]}
+    assert_receive {:measured_tail, [^protected]}
+    refute_received {:measured_tail, _}
+  end
+
+  test "explicit selection releases all terminal units even when the current candidate fits" do
+    units = tail_units()
+    protected = List.last(units)
+    observer = self()
+
+    fit = fn tail ->
+      send(observer, {:explicit_tail, tail})
+      {:ok, 1}
+    end
+
+    assert {:ok, selected} = Conversation.compaction_tail(units, :explicit, fit)
+    assert selected.eligible_unit_count == 3
+    assert selected.retained_tail == [protected]
+    assert_receive {:explicit_tail, [^protected]}
+    refute_received {:explicit_tail, _}
+  end
+
+  test "optional growth keeps complete units up to the exact token preference" do
+    units = tail_units()
+    fit = fn tail -> {:ok, length(tail) * 512} end
+    assert {:ok, selected} = Conversation.compaction_tail(units, :automatic, fit)
+    assert selected.eligible_unit_count == 0
+    assert selected.retained_tail == units
+    assert selected.tail_tokens == 2_048
+    assert selected.released_unit_count == 0
+    fit = fn tail -> {:ok, length(tail) * 513} end
+    assert {:ok, selected} = Conversation.compaction_tail(units, :automatic, fit)
+    assert selected.eligible_unit_count == 1
+    assert selected.retained_tail == Enum.drop(units, 1)
+    assert selected.tail_tokens == 1_539
+  end
+
+  test "optional growth stops at a complete-request or rendering refusal" do
+    units = tail_units()
+
+    for reason <- [:context_record_bytes, :canonical_history_rendering_unsupported] do
+      fit = fn tail -> if length(tail) <= 2, do: {:ok, 7}, else: {:refused, reason} end
+      assert {:ok, selected} = Conversation.compaction_tail(units, :automatic, fit)
+      assert selected.eligible_unit_count == 2
+      assert selected.retained_tail == Enum.drop(units, 2)
+    end
+  end
+
+  test "protected units never release and terminal units beyond them cannot cross the cut" do
+    elements = Enum.flat_map(tail_units(), & &1.elements)
+
+    assert {:ok, units} =
+             Conversation.compaction_units(elements, "r2", ["r1"], [
+               %{"kind" => "session_assistant", "run_id" => "r1", "turn" => 2}
+             ])
+
+    observer = self()
+
+    fit = fn tail ->
+      send(observer, {:protected_tail, tail})
+      {:refused, :irreducible}
+    end
+
+    assert {:refused, :irreducible} = Conversation.compaction_tail(units, :automatic, fit)
+    assert_receive {:protected_tail, tail}
+    assert tail == Enum.drop(units, 1)
+    refute_received {:protected_tail, _}
+  end
+
+  test "interruption survives required release and optional growth without selecting a fallback" do
+    units = tail_units()
+
+    assert {:error, :cancelled} =
+             Conversation.compaction_tail(units, :automatic, fn _ -> {:error, :cancelled} end)
+
+    fit = fn tail ->
+      if length(tail) <= 2, do: {:ok, 1}, else: {:error, :compaction_preparation_deadline}
+    end
+
+    assert {:error, :compaction_preparation_deadline} =
+             Conversation.compaction_tail(units, :automatic, fit)
+
+    assert {:error, :context_projection_invalid} =
+             Conversation.compaction_tail(units, :automatic, fn _ -> {:ok, -1} end)
+  end
+
+  test "the mandatory newest group may exceed preference while still fitting hard limits" do
+    units = tail_units()
+    observer = self()
+
+    fit = fn tail ->
+      send(observer, {:large_minimum, tail})
+      {:ok, 2_049}
+    end
+
+    assert {:ok, selected} = Conversation.compaction_tail(units, :automatic, fit)
+    assert selected.eligible_unit_count == 2
+    assert selected.retained_tail == Enum.drop(units, 2)
+    assert selected.tail_tokens == 2_049
+    assert_receive {:large_minimum, _tail}
+    refute_received {:large_minimum, _}
+  end
+
+  test "empty history still measures fixed required inputs and cannot hide an irreducible refusal" do
+    assert {:refused, :system_class_tokens} =
+             Conversation.compaction_tail([], :automatic, fn [] ->
+               {:refused, :system_class_tokens}
+             end)
+
+    assert {:ok,
+            %{eligible_unit_count: 0, retained_tail: [], released_unit_count: 0, tail_tokens: 0}} =
+             Conversation.compaction_tail([], :explicit, fn [] -> {:ok, 0} end)
+  end
+
+  defp tail_units do
+    elements = [
+      user("old"),
+      assistant(1, [], "first"),
+      assistant(2, [], "middle"),
+      assistant(3, [], "newest"),
+      %{user("current") | run_id: "r2", command_id: "current"}
+    ]
+
+    {:ok, units} = Conversation.compaction_units(elements, "r2", ["r1"], [])
+    units
+  end
+
   test "all current-run groups and trailing inputs remain protected" do
     elements = [
       user("go"),
