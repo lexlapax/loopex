@@ -1738,6 +1738,21 @@ the closure matrix. Rendering-trigger capture, remaining preparation errors,
 standalone compact and the real long-conversation proof remain open.
 This is not a complete T07 workflow proof.
 
+Standalone command admission now retains only its explicit three-field bounds
+and command-derived episode identity, without a clock, prompt, run or episode
+capture. Duplicate-first input fences and episode-bound abort replay through
+owner succession. The live paused-owner cases resolve all three Store
+uncertainty phases once; bounded private coverage reports no effect or completed
+checkpoint. The seven-file selection passes 172 cases on both pairs after the
+expiry repair recorded in the task checklist. Standalone episode capture,
+source/dispatch/spending, checkpoints, completed result/snapshot, abort cleanup
+and runtime quiescence remain open. This proves command admission only.
+The existing question-deadline test now also proves that an early timer notice
+cannot settle before its retained wall-clock cutoff. The handler re-arms against
+the same instant, preserving the original real two-second bound and complete
+ending/replay assertions. The task checklist retains the deterministic red run,
+the earlier failed floor selection and subsequent focused evidence separately.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

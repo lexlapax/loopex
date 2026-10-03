@@ -325,6 +325,70 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: standalone compact command admission and replay now retain the closed
+  explicit attempt/deadline/token declaration and command-derived episode ID
+  without a clock, prompt, run, episode capture or provider dispatch. The owner
+  bypasses ordinary run-bound resolution and command-clock sampling. Duplicate
+  lookup precedes the fresh-input maintenance fence; abort binds to the pending
+  compact identity and preserves the first cancellation. Replay rejects altered
+  declarations, digests, identities, extra fields and ordinary accepted commands
+  across the pending fence. The bounded private reader advances these neutral
+  records without reporting an effect or completion. Live paused-owner cases
+  resolve all three Store uncertainty phases exactly once, join predecessors,
+  and preserve bounds/cancellation through public prepared succession. The
+  seven-file selection passes 172 tests with two existing long-bound exclusions
+  on both supported pairs after the separately recorded expiry repair below:
+  current `/private/tmp/loopex-m7-compact-admission-current-v3.log`, 61.9 seconds,
+  SHA-256 `33a0cd0ea334c2447dec3d33e5f4319b9b8129a5419f30e3d5e3b129edcaa84e`;
+  floor `/private/tmp/loopex-m7-compact-admission-floor-v2.log`, 61.7 seconds,
+  SHA-256 `e58e1978f2707ee99bd025d51a79b63af183314a0a30e4d6f51c60c45ace84ef`.
+  The current command additionally named a nonexistent interaction-test path;
+  Mix reported that unmatched path in other applications. Its actual Core
+  selection and result are the seven files above, not policy-interaction proof.
+  That separate complete suite is retained below. Episode configuration/clock
+  capture, source work, dispatch, spending, checkpoint/completion, `last_compact`,
+  abort cleanup and runtime quiescence remain required standalone integration.
+  This closes one added T07 admission subtask, not an original whole-workflow row.
+  Warning-free compilation, formatting, bootstrap/status, documentation ordering
+  and dependency direction pass; complete output
+  `/private/tmp/loopex-m7-compact-admission-static.log`, SHA-256
+  `3d5ab936a878b4988863d393aa9b7ace855c778a1f4a77699046a9947f3d0c0f`.
+  Next, retain one full fast check of the clean committed integration candidate;
+  the preceding `1022eea7` result does not cover these new source bytes.
+
+- Done: investigating a floor question-deadline failure exposed a reproducible
+  premature-expiry defect. An early timer notification killed the owner with
+  `interaction_resolution_failed / invalid_model_question_transition`. The
+  handler now compares wall time to the retained cutoff and re-arms against that
+  same instant when early. The existing live deadline test sends an early
+  notification, proves the owner keeps the question pending, then requires its
+  original real two-second expiry, exactly one settlement/ending, no second
+  dispatch and current replay. No bound, observation timeout or assertion was
+  weakened. Its red run is `/private/tmp/loopex-m7-question-early-timer-red.log`,
+  SHA-256 `a92f04f469c16f8a7bbd863ac279197872ba37d97cea1c98dcbad95f930a7c5f`.
+  The original floor selection remains failed evidence: 171 passed, one failed,
+  two excluded, 64.2 seconds; `/private/tmp/loopex-m7-compact-admission-floor-final.log`,
+  SHA-256 `a2af52ed7b16cab6de74c84db141a543435139737d3d037ab272bdde574ce758`.
+  Its redacted log does not establish that exact original exit cause. Ten
+  separate runtime-traced, owner-monitored diagnostic executions did not
+  reproduce it and do not replace the failure:
+  `/private/tmp/loopex-m7-question-deadline-diagnostic-floor.log`, SHA-256
+  `76a87169aa9103c478ab08a05f48fbc033f189709d51952690a54a87f1918452`.
+  The corrected-source focused selections above pass. Before this repair, the
+  complete Core suite passed 1,117 tests, eight existing exclusions, in
+  210.4 seconds: `/private/tmp/loopex-m7-compact-admission-core.log`, SHA-256
+  `6ee323ee28364b88c3559be9753c5c3c495d72122b049ee970c5de2518d5006a`.
+  That earlier run is not a whole-Core proof of the later expiry repair.
+  The complete policy-interaction suite additionally passes 19 tests on each
+  pair in 9.0 seconds: `/private/tmp/loopex-m7-compact-interactions-current.log`,
+  SHA-256 `3e606e991476d6d3fa4eb6e6950d2aed12df72f58b63cb86c2ad66ce26d7ada7`;
+  `/private/tmp/loopex-m7-compact-interactions-floor.log`, SHA-256
+  `ece23343a54d264e5c5bfd8dc1748b99ce1825a6add8faf9473893f3eb9cb60f`.
+  Original T01–T19 counts remain 54 done / 119 todo / 6 retired. After these
+  added T07 and T16 subtasks, added counts are 198 done / 8 todo. T07 is
+  original 2 done / 9 todo and added 31 done / 0 todo. The pending stalled-stderr
+  scheduling cutoff and small maintenance reply-reserve decisions stay open.
+
 - Done: retain the full fast check of clean implementation commit
   `1022eea77a626b27f6e4c2b3461f3fbe29d11bf0`. It passes every gate and all
   eleven application suites: 3,573 tests passed, 39 expected exclusions,
@@ -7310,6 +7374,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Admit and replay the standalone compact command without a clock, prompt or run; retain closed explicit bounds and exact episode identity, duplicate-first mutation fences and abort binding, traverse bounded private history, and prove all three live Store uncertainty phases plus paused owner succession on both toolchains. Standalone episode capture, execution, completion, snapshot and cleanup integration remain open.
+
 - [x] Enforce captured thinking headroom throughout new ordinary staging, excerpt/optional allocation, tail selection and checkpoint completion; retain exact episode targets and v2 refusals, reject forged current replay, keep open exchanges under hard ceilings with immutable prefixes, and prove live target-aware preparation, initial no-dispatch refusal, optional withholding and open-exchange reserve spending on both toolchains. Rendering-trigger capture, standalone compaction and real-provider evidence remain open.
 
 - [x] Hold initial and later maintenance source workers through their captured live production cutoffs without clock or timer replacement; join the exact worker, retain the preparation-failure versus committed run-deadline distinction, preserve checkpoints/raw facts/usage and prove one ending with no dispatch on both toolchains. Keep these cases in the existing long-bound release lane.
@@ -7618,6 +7684,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Reject premature interaction expiry by rechecking the retained wall-clock cutoff and re-arming against the same instant; reproduce the owner-exit defect before the fix and strengthen the existing live deadline test without changing its real two-second bound, completion cutoff, single settlement/ending, replay or no-redispatch proof.
 
 - [x] Investigate and repair the CLI signal fixture's leaked process trees observed at the 2026-10-02 restart checkpoint; prove exact wrapper/VM joins for normal, interrupted and failing fixture exits without relying on manual cleanup.
 

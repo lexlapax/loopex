@@ -210,6 +210,53 @@ defmodule Loopex.EffectIntentsQueryTest do
     refute_receive {:forbidden_store_call, _}, 0
   end
 
+  test "compact admission, fences and episode-bound abort advance private coverage without effect rows",
+       context do
+    %{runtime: runtime, session: session, reference: reference, records: original} = context
+    history = Enum.take(original, 2)
+    history = List.update_at(history, 0, &%{&1 | payload: Genesis.genesis([])})
+    {:ok, state} = SessionState.recover(session, history, [])
+    bounds = %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+
+    commands = [
+      %{type: :compact, command_id: "compact", bounds: bounds},
+      %{type: :compact, command_id: "compact-fenced", bounds: bounds},
+      %{type: :configure, command_id: "configure-fenced", changes: %{"max_tokens" => 32}},
+      %{type: :abort, command_id: "compact-abort"}
+    ]
+
+    {state, records, []} =
+      Enum.reduce(commands, {state, history, []}, fn command, {state, rows, events} ->
+        {:ok, proposal} = SessionState.propose(state, command)
+        retain(state, proposal, rows, events)
+      end)
+
+    assert {:ok, replay} = SessionState.recover(session, records, [])
+    assert replay.pending_compact == state.pending_compact
+    install_history(reference, records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert length(pages) == length(records)
+    assert List.last(pages).next_cursor == nil
+    assert List.last(pages).scanned_through == length(records)
+    assert Enum.all?(pages, &(&1.rows == []))
+    refute_receive {:forbidden_store_call, _}, 0
+
+    for {kind, transform} <- [
+          {"compact_command_admitted_v1", &put_in(&1, ["bounds", "max_attempts"], 5)},
+          {"compact_command_admitted_v1", &put_in(&1, ["bounds", "token_budget"], "32768")},
+          {"compact_command_admitted_v1", &Map.put(&1, "admitted_at", 1_000)},
+          {"compact_command_admitted_v1", &Map.put(&1, "command_type", "prompt")},
+          {"compact_command_admitted_v1",
+           &Map.put(&1, "admission", "rejected_maintenance_active")},
+          {"compact_abort_admitted_v1", &Map.put(&1, "episode_id", nil)},
+          {"compact_abort_admitted_v1", &Map.put(&1, "compact_command_id", nil)},
+          {"compact_abort_admitted_v1", &Map.put(&1, "run_id", "invented")}
+        ] do
+      install_history(reference, change_payload(records, kind, transform))
+      assert {:error, :invalid_history} = Runtime.effect_intents(runtime, session, nil, 16)
+    end
+  end
+
   test "later appends stay outside a captured cut and resume verifies the retained boundary",
        context do
     %{

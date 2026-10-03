@@ -45,6 +45,8 @@ defmodule Loopex.Runtime.EffectIntents do
     "prompt_admitted_v3" => {@prompt_keys ++ ~w(configuration_version), []},
     "session_configuration_admitted_v1" =>
       {@command_keys ++ ~w(changes prior_configuration_version configuration), []},
+    "compact_command_admitted_v1" => {@command_keys ++ ~w(bounds episode_id), []},
+    "compact_abort_admitted_v1" => {@command_keys ++ ~w(compact_command_id episode_id), []},
     "command_admission_refused_v1" =>
       {@command_keys ++ ~w(dimension candidate observed limit), []},
     "resource_command_v1" => {~w(command command_digest disposition resolved), []},
@@ -375,6 +377,10 @@ defmodule Loopex.Runtime.EffectIntents do
         {"accepted", "interaction_answer"} ->
           ~w(interaction_id choice_id answer_digest)
 
+        {"rejected_maintenance_active", type}
+        when type in ~w(prompt steer follow_up configure compact interaction_answer) ->
+          []
+
         {"rejected_" <> _, type}
         when type in ~w(prompt steer follow_up abort interaction_answer) ->
           []
@@ -392,6 +398,25 @@ defmodule Loopex.Runtime.EffectIntents do
       payload["prior_owner_epoch"] == record.owner_epoch - 1 and
       payload["owner_incarnation_id"] == record.owner_incarnation_id and
       identifier?(payload["owner_transaction_id"])
+  end
+
+  # Concept: private coverage can cross a clock-free compact admission without
+  # presenting it as an effect or claiming a completed checkpoint.
+  # Technical depth: these local checks enforce closed current fields and the
+  # explicit compact declaration. Session replay additionally joins the digest,
+  # episode identity, pending slot and abort to their original command.
+  defp neutral_values?(%{payload: %{kind: "compact_command_admitted_v1"} = payload}) do
+    identifier?(payload["command_id"]) and digest?(payload["command_digest"]) and
+      payload["command_type"] == "compact" and
+      payload["admission"] in ~w(accepted rejected_run_active) and
+      identifier?(payload["episode_id"]) and
+      SessionState.normalize_compact_bounds(payload["bounds"]) == {:ok, payload["bounds"]}
+  end
+
+  defp neutral_values?(%{payload: %{kind: "compact_abort_admitted_v1"} = payload}) do
+    identifier?(payload["command_id"]) and digest?(payload["command_digest"]) and
+      payload["command_type"] == "abort" and payload["admission"] == "accepted" and
+      identifier?(payload["compact_command_id"]) and identifier?(payload["episode_id"])
   end
 
   defp neutral_values?(%{payload: %{kind: kind} = payload})

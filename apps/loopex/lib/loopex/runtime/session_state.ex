@@ -217,6 +217,7 @@ defmodule Loopex.Runtime.SessionState do
           maintenance_episodes: map(),
           active_maintenance: binary() | nil,
           maintenance_terminal: map() | nil,
+          pending_compact: map() | nil,
           prepared_tool_results: map(),
           run_order: [binary()],
           bounds: map(),
@@ -273,6 +274,11 @@ defmodule Loopex.Runtime.SessionState do
             maintenance_episodes: %{},
             active_maintenance: nil,
             maintenance_terminal: nil,
+            # Concept: a standalone compact owns a command, never a run.
+            # Technical depth: admission retains only identity and explicit
+            # bounds. Episode capture reads its clock later; this slot fences
+            # fresh mutation and survives owner succession before that capture.
+            pending_compact: nil,
             prepared_tool_results: %{},
             run_order: [],
             bounds: %{},
@@ -4248,6 +4254,63 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: explicit maintenance cannot queue unrelated session mutation.
+  # Technical depth: duplicate lookup precedes these clauses. Pending command
+  # admission already owns the slot before an episode has a captured clock.
+  defp propose_new(%{pending_compact: pending} = state, %{type: :abort} = command, digest)
+       when is_map(pending) do
+    record = %{
+      :kind => "compact_abort_admitted_v1",
+      "command_id" => command.command_id,
+      "command_digest" => digest,
+      "command_type" => "abort",
+      "admission" => "accepted",
+      "compact_command_id" => pending["command_id"],
+      "episode_id" => pending["episode_id"]
+    }
+
+    admitted_proposal(
+      state,
+      command,
+      digest,
+      "abort",
+      record,
+      [],
+      {:accepted, command.command_id}
+    )
+  end
+
+  defp propose_new(%{pending_compact: pending} = state, command, digest)
+       when is_map(pending) do
+    refusal(
+      state,
+      command,
+      digest,
+      Atom.to_string(command.type),
+      "rejected_maintenance_active",
+      :maintenance_active
+    )
+  end
+
+  defp propose_new(state, %{type: :compact} = command, digest) do
+    admission = if is_nil(state.active_run_id), do: "accepted", else: "rejected_run_active"
+
+    reply =
+      if admission == "accepted", do: {:accepted, command.command_id}, else: {:error, :run_active}
+
+    record = %{
+      :kind => "compact_command_admitted_v1",
+      "command_id" => command.command_id,
+      "command_digest" => digest,
+      "command_type" => "compact",
+      "admission" => admission,
+      "bounds" => command.bounds,
+      "episode_id" => stable_id("compact", state.session_id, command.command_id)
+    }
+
+    admitted_proposal(state, command, digest, "compact", record, [], reply)
+  end
+
   # Concept: configuration changes retain one candidate or one unchanged refusal.
   # Technical depth: host preparation is separate from authored command bytes.
   # Duplicate lookup has already happened; replay rederives the candidate from
@@ -4675,7 +4738,10 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp admitted_proposal(state, command, digest, type, record, events, reply, candidates \\ nil) do
-    run_id = Map.get(record, "run_id") || promoted_run_id(state, command)
+    run_id =
+      if type == "compact" or record.kind == "compact_abort_admitted_v1",
+        do: nil,
+        else: Map.get(record, "run_id") || promoted_run_id(state, command)
 
     case preflight_command(state, record, candidates || events, run_id) do
       :ok ->
@@ -4853,6 +4919,8 @@ defmodule Loopex.Runtime.SessionState do
               "prompt_admitted_v3",
               "model_question_response_admitted_v2",
               "session_configuration_admitted_v1",
+              "compact_command_admitted_v1",
+              "compact_abort_admitted_v1",
               "command_admission_refused_v1"
             ] do
     # Technical depth: a pending refusal marker admits exactly one next row, and
@@ -4960,6 +5028,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, command_type} <- record_binary(record, "command_type"),
          {:ok, admission} <- record_binary(record, "admission"),
          false <- Map.has_key?(state.commands, command_id),
+         true <- admissible_pending_compact_command?(state, record),
          {:ok, record_source} <- original_record_source(record, state.journal_version + 1),
          {:ok, reply, active_run_id, pending_work, expected_events, patch} <-
            command_effect(state, record, command_type, admission, command_id) do
@@ -4991,10 +5060,18 @@ defmodule Loopex.Runtime.SessionState do
 
       retain_conversation_record_sources(state, next, record_source)
     else
+      false -> {:error, :invalid_standalone_compact_transition}
       true -> {:error, :duplicate_command_record}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp admissible_pending_compact_command?(%{pending_compact: nil}, _record), do: true
+
+  defp admissible_pending_compact_command?(_state, %{kind: "compact_abort_admitted_v1"}), do: true
+
+  defp admissible_pending_compact_command?(_state, record),
+    do: record.kind == "command_admitted" and record["admission"] == "rejected_maintenance_active"
 
   # Concept: an accepted prompt must carry the ceiling its run committed.
   #
@@ -5022,6 +5099,12 @@ defmodule Loopex.Runtime.SessionState do
 
   defp admissible_command_kind?("session_configuration_admitted_v1", record),
     do: record["command_type"] == "configure"
+
+  defp admissible_command_kind?("compact_command_admitted_v1", record),
+    do: record["command_type"] == "compact"
+
+  defp admissible_command_kind?("compact_abort_admitted_v1", record),
+    do: record["command_type"] == "abort" and record["admission"] == "accepted"
 
   defp admissible_command_kind?("prompt_admitted_v2", record),
     do: record["command_type"] == "prompt" and record["admission"] == "accepted"
@@ -5054,6 +5137,118 @@ defmodule Loopex.Runtime.SessionState do
         deadline_private_terminal deadline_public_finish)
 
   defp valid_refused_candidate?(_dimension, _candidate), do: false
+
+  # Concept: accepted compact admission records no clock, prompt or run.
+  # Technical depth: replay reconstructs the exact bounded command preimage and
+  # idempotency digest. The pending slot alone is dispatch-inert and captures no
+  # host model or instruction settings before episode admission.
+  defp command_effect(
+         state,
+         %{kind: "compact_command_admitted_v1"} = record,
+         "compact",
+         admission,
+         command_id
+       ) do
+    with true <-
+           closed_history_map?(record, [
+             :kind,
+             "command_id",
+             "command_digest",
+             "command_type",
+             "admission",
+             "bounds",
+             "episode_id"
+           ]),
+         {:ok, bounds} <- normalize_compact_bounds(record["bounds"]),
+         true <- bounds == record["bounds"],
+         {:ok, digest} <-
+           command_digest(%{type: :compact, command_id: command_id, bounds: bounds}),
+         true <- record["command_digest"] == digest,
+         true <- record["episode_id"] == stable_id("compact", state.session_id, command_id) do
+      case {admission, state.active_run_id} do
+        {"accepted", nil} ->
+          with true <- state.pending_work == %{} and is_nil(state.active_maintenance),
+               true <-
+                 is_nil(state.aborting) and is_nil(state.open_interaction) and
+                   is_nil(state.follow_up) do
+            pending = %{
+              "command_id" => command_id,
+              "episode_id" => record["episode_id"],
+              "bounds" => bounds,
+              "abort_command_id" => nil
+            }
+
+            {:ok, {:accepted, command_id}, nil, state.pending_work, state.expected_events,
+             %{pending_compact: pending}}
+          else
+            _ -> {:error, :invalid_standalone_compact_transition}
+          end
+
+        {"rejected_run_active", run} when is_binary(run) ->
+          {:ok, {:error, :run_active}, run, state.pending_work, state.expected_events, %{}}
+
+        _ ->
+          {:error, :invalid_standalone_compact_transition}
+      end
+    else
+      _ -> {:error, :invalid_standalone_compact_transition}
+    end
+  end
+
+  defp command_effect(
+         %{pending_compact: pending} = state,
+         %{kind: "compact_abort_admitted_v1"} = record,
+         "abort",
+         "accepted",
+         command_id
+       )
+       when is_map(pending) do
+    with true <-
+           closed_history_map?(record, [
+             :kind,
+             "command_id",
+             "command_digest",
+             "command_type",
+             "admission",
+             "compact_command_id",
+             "episode_id"
+           ]),
+         {:ok, digest} <- command_digest(%{type: :abort, command_id: command_id}),
+         true <- record["command_digest"] == digest,
+         true <- record["compact_command_id"] == pending["command_id"],
+         true <- record["episode_id"] == pending["episode_id"] do
+      pending =
+        if is_nil(pending["abort_command_id"]),
+          do: Map.put(pending, "abort_command_id", command_id),
+          else: pending
+
+      {:ok, {:accepted, command_id}, nil, state.pending_work, state.expected_events,
+       %{pending_compact: pending}}
+    else
+      _ -> {:error, :invalid_standalone_compact_transition}
+    end
+  end
+
+  defp command_effect(
+         %{pending_compact: pending} = state,
+         record,
+         type,
+         "rejected_maintenance_active",
+         _command_id
+       )
+       when is_map(pending) and
+              type in ~w(prompt steer follow_up configure compact interaction_answer) do
+    if closed_history_map?(record, [
+         :kind,
+         "command_id",
+         "command_digest",
+         "command_type",
+         "admission"
+       ]),
+       do:
+         {:ok, {:error, :maintenance_active}, nil, state.pending_work, state.expected_events, %{}},
+       else: {:error, :invalid_standalone_compact_transition}
+  end
 
   defp command_effect(
          %{active_run_id: nil} = state,
@@ -5391,6 +5586,7 @@ defmodule Loopex.Runtime.SessionState do
   defp configuration_settled?(state) do
     is_nil(state.active_run_id) and state.pending_work == %{} and is_nil(state.aborting) and
       is_nil(state.open_interaction) and is_nil(state.context_refusal) and is_nil(state.follow_up) and
+      is_nil(state.pending_compact) and
       not Enum.any?(state.conversation, fn {_run, elements} ->
         Enum.any?(elements, &(&1.kind == :tool_result and &1.outcome == :outcome_unknown))
       end)
@@ -9456,6 +9652,20 @@ defmodule Loopex.Runtime.SessionState do
     with {:ok, command_id} <- fetch_binary(command, :command_id),
          {:ok, type} <- fetch_type(command) do
       case type do
+        :compact ->
+          with true <- map_size(command) == 3,
+               true <-
+                 Enum.all?(
+                   Map.keys(command),
+                   &(&1 in [:type, "type", :command_id, "command_id", :bounds, "bounds"])
+                 ),
+               {:ok, bounds} <- fetch(command, :bounds),
+               {:ok, bounds} <- normalize_compact_bounds(bounds) do
+            {:ok, %{type: :compact, command_id: command_id, bounds: bounds}}
+          else
+            _ -> {:error, :invalid_command}
+          end
+
         :configure ->
           with true <- map_size(command) == 3,
                true <-
@@ -9552,6 +9762,9 @@ defmodule Loopex.Runtime.SessionState do
       {:ok, value} when value in [:configure, "configure"] ->
         {:ok, :configure}
 
+      {:ok, value} when value in [:compact, "compact"] ->
+        {:ok, :compact}
+
       {:ok, value} when value in [:abort, "abort"] ->
         {:ok, :abort}
 
@@ -9568,6 +9781,27 @@ defmodule Loopex.Runtime.SessionState do
         {:error, :invalid_command_type}
     end
   end
+
+  # Concept: explicit compact has its own finite declaration, without run bounds.
+  # Technical depth: admission and replay share the closed three-field schema.
+  # Atom/binary caller keys normalize to the same retained binary-key preimage;
+  # duplicate spellings, omissions, extra keys and narrowed/oversized values refuse.
+  @doc false
+  @spec normalize_compact_bounds(term()) :: {:ok, map()} | {:error, :invalid_compact_bounds}
+  def normalize_compact_bounds(bounds) when is_map(bounds) and map_size(bounds) == 3 do
+    with {:ok, attempts} <- fetch(bounds, :max_attempts),
+         {:ok, deadline} <- fetch(bounds, :deadline_ms),
+         {:ok, tokens} <- fetch(bounds, :token_budget),
+         true <- is_integer(attempts) and attempts in 1..4,
+         true <- is_integer(deadline) and deadline in 1..60_000,
+         true <- is_integer(tokens) and tokens in 1..32_768 do
+      {:ok, %{"max_attempts" => attempts, "deadline_ms" => deadline, "token_budget" => tokens}}
+    else
+      _ -> {:error, :invalid_compact_bounds}
+    end
+  end
+
+  def normalize_compact_bounds(_bounds), do: {:error, :invalid_compact_bounds}
 
   defp fetch_binary(command, key)
        when key in [:command_id, :run_id, :interaction_id, :choice_id] do

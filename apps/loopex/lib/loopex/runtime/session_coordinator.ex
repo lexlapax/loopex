@@ -1549,13 +1549,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # ordinary competing transitions ordered at the journal, and the first
   # committed one wins. A timer that fires for a question this owner no longer
   # holds open is exactly that race resolved elsewhere, so it changes nothing.
+  # Timer delay uses monotonic time while the retained cutoff uses wall time;
+  # an early notification re-arms against that same cutoff instead of proposing
+  # a premature settlement that replay would correctly refuse.
   defp handle_owner_info({:interaction_expired, interaction_id, run_id}, state) do
     state = cancel_interaction_expiry(state, interaction_id)
 
-    if state.durable.open_interaction == interaction_id do
-      resolve_interaction(state, interaction_id, run_id, "expired", "interaction_expired")
-    else
-      {:noreply, state}
+    case SessionState.open_interaction_record(state.durable) do
+      %{interaction_id: ^interaction_id} = interaction ->
+        if System.system_time(:millisecond) >= interaction.expires_at do
+          resolve_interaction(state, interaction_id, run_id, "expired", "interaction_expired")
+        else
+          {:noreply, arm_interaction_expiry(state, interaction)}
+        end
+
+      _resolved ->
+        {:noreply, state}
     end
   end
 
@@ -2604,12 +2613,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
       )
 
   defp commit_loop_command(state, command) do
-    {state, resolved} = resolve_command(state, command)
-
-    with {:ok, _declared} <- declared_bounds(resolved) do
-      propose_command(state, command, resolved)
+    # Concept: standalone maintenance owns no run and captures no clock at
+    # command admission.
+    # Technical depth: its explicit declaration is validated by the reducer.
+    # The same clock-free path fences fresh commands and binds abort after the
+    # pending compact slot commits, before host capture or episode dispatch.
+    if command_field(command, :type) in [:compact, "compact"] or
+         is_map(state.durable.pending_compact) do
+      commit_command_proposal(state, SessionState.propose(state.durable, command))
     else
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      {state, resolved} = resolve_command(state, command)
+
+      with {:ok, _declared} <- declared_bounds(resolved) do
+        propose_command(state, command, resolved)
+      else
+        {:error, reason} -> {:reply, {:error, reason}, state}
+      end
     end
   end
 

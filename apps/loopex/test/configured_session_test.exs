@@ -54,6 +54,106 @@ defmodule Loopex.ConfiguredSessionTest do
   alias LoopexProtocol.ToolDefinition
   alias LoopexProtocol.Canonical
 
+  for phase <- [
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @compact_phase phase
+    test "standalone compact admission resolves #{@compact_phase} once and survives paused owner succession" do
+      fixture = start(tools: [], script: [])
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create-compact",
+                 %{},
+                 genesis([])
+               )
+
+      kill_compact_admission_owner(fixture)
+
+      assert {:ok, {:prepared, _activation}} =
+               Loopex.prepare_resume_session(fixture.runtime, session, "prepare-compact")
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      bounds = %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+      command = %{type: :compact, command_id: "compact", bounds: bounds}
+
+      assert :ok =
+               Loopex.M1RuntimeTestStore.inject(
+                 fixture.store,
+                 {:session_journal_commit, @compact_phase}
+               )
+
+      assert {:error, :commit_unknown} = Loopex.command(attachment, command)
+      await_command_observation(attachment, "compact", {:committed, :admitted, :accepted, nil})
+      assert {:accepted, "compact"} = Loopex.command(attachment, command)
+
+      assert {:error, :maintenance_active} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "fenced",
+                 content: "never dispatch",
+                 bounds: %{max_turns: 0, deadline_ms: -1, token_budget: 0}
+               })
+
+      assert {:accepted, "compact-abort"} =
+               Loopex.command(attachment, %{type: :abort, command_id: "compact-abort"})
+
+      records = Fixture.records(fixture, session)
+      events = Fixture.events(fixture, session)
+      assert {:ok, retained} = SessionState.recover(session, records, events)
+      assert retained.pending_compact["bounds"] == bounds
+      assert retained.pending_compact["abort_command_id"] == "compact-abort"
+      assert retained.active_run_id == nil
+      assert retained.pending_work == %{}
+      assert retained.maintenance_episodes == %{}
+      assert Enum.count(records, &(&1.payload.kind == "compact_command_admitted_v1")) == 1
+      assert Enum.count(records, &(&1.payload.kind == "compact_abort_admitted_v1")) == 1
+
+      refute Enum.any?(
+               records,
+               &(&1.payload.kind in [
+                   "prompt_admitted_v3",
+                   "run_terminal_committed",
+                   "maintenance_episode_admitted_v1"
+                 ])
+             )
+
+      assert events == []
+      assert AgentLoopTestModel.dispatched(fixture.model) == []
+
+      kill_compact_admission_owner(fixture)
+
+      assert {:ok, {:prepared, activation}} =
+               Loopex.prepare_resume_session(fixture.runtime, session, "recover-compact")
+
+      assert {:ok, successor} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      assert {:accepted, "compact"} = Loopex.command(successor, command)
+
+      assert {:ok, replay} =
+               SessionState.recover(session, Fixture.records(fixture, session), events)
+
+      assert replay.owner_epoch > retained.owner_epoch
+      assert replay.pending_compact == retained.pending_compact
+      assert :ok = Loopex.abandon_resume(activation)
+      kill_compact_admission_owner(fixture)
+    end
+  end
+
+  # Concept: the admission witness stops at the paused owner's durable command
+  # and observes exact predecessor exit, without claiming episode completion.
+  # Technical depth: every killed owner is joined before preparing its successor;
+  # final cleanup leaves no live owner or dispatched worker in this fixture.
+  defp kill_compact_admission_owner(fixture) do
+    {:ok, children} = Runtime.children(fixture.runtime)
+    [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
+    monitor = Process.monitor(owner)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 5_000
+  end
+
   test "fresh optional project content cannot spend a new thinking exchange's reserve" do
     content = String.duplicate("p", 3_500)
 
@@ -2271,10 +2371,22 @@ defmodule Loopex.ConfiguredSessionTest do
 
     assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
 
+    {:ok, children} = Runtime.children(fixture.runtime)
+    [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
+
     assert {:accepted, "prompt"} =
              Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
 
     question = await_question(attachment)
+    # Concept: a timer notification cannot expire a still-live question before
+    # its captured absolute cutoff.
+    # Technical depth: timer delay is monotonic while expiry uses wall time.
+    # This early notification changes neither clock nor the original two-second
+    # bound. The same-sender owner read proves it was handled before the actual
+    # expiry, which must still publish exactly one settlement and run ending.
+    assert System.system_time(:millisecond) < question["expires_at"]
+    send(owner, {:interaction_expired, question["interaction_id"], question["run_id"]})
+    assert :sys.get_state(owner).durable.open_interaction == question["interaction_id"]
     events = finish(attachment)
     terminal = Enum.find(events, &(&1.kind == "run.finished"))
     assert terminal["outcome"] == "bound_reached"
