@@ -325,6 +325,35 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: correct maintenance request capacity to read the existing run-accounting
+  `{tokens, source}` shape through `SessionState.accounting/2`. The preceding
+  staging change used `total_tokens`, so an already-charged parent could raise
+  instead of checking its remaining 1,024-token reservation. Its direct fixture
+  had repeated that incorrect shape. The witness now uses the retained shape,
+  proves a charged parent with remaining capacity fits and a depleted parent
+  refuses, and preserves the existing ordinary accounting lifecycle selection.
+  No original or added checkbox changes from this correction.
+
+  The same ten-file selection passed 98 tests on both supported pairs.
+  Current: 5.9 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-staging-current-v2.log`, SHA-256
+  `a6d8a4ed53a9aeffb11fdc07f00ef4983b6bba986dd1392fb06bfc83350049f1`.
+  Floor: 6.2 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-staging-floor-v2.log`, SHA-256
+  `9b2b31d0d8d8e06eeccfc27da6cc4a1086173df7d0e604f14c4ebdf09738ee1c`.
+  Formatting, warning-free compilation, dependency direction, bootstrap
+  structure/status, compiled documentation and diff gates passed in 23.2
+  measured seconds. Complete output:
+  `/private/tmp/loopex-m7-maintenance-staging-gates-v2.log`, SHA-256
+  `29cbfba9d1b114240279dcb0da57d4d125cd7f0a2c5e726b88882554f8443d13`.
+  All handles are terminal and collected. No full fast, paid provider, release
+  or closure evidence is claimed. Next work remains the live T07 selection,
+  maintenance settlement/accounting, checkpoint and dispatch joins described
+  below. No agents or maintainer decisions are pending; the goal stays active.
+  T01–T19 counts remain original 51 done / 122 todo / 6 retired and added
+  176 done / 9 todo. T00–T19 counts remain original 51 / 128 / 7 and added
+  180 / 10.
+
 - Done: stage the owner-selected maintenance source as an exact receipt-bearing
   request with a consecutive, distinct maintenance attempt-open row. Bind the
   captured session version to the episode's actual journal position. Coverage

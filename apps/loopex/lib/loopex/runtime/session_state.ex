@@ -1184,10 +1184,10 @@ defmodule Loopex.Runtime.SessionState do
       |> Enum.filter(&(&1["run_id"] == run))
       |> Enum.reduce(0, &(&1["attempts"] + &2))
 
-    charged = state.charged[run] || %{total_tokens: 0}
+    {_bounds, charged} = accounting(state, run)
 
     if ordinary + maintenance < episode["bounds"]["max_turns"] and
-         episode["bounds"]["token_budget"] - charged.total_tokens >= 1_024,
+         episode["bounds"]["token_budget"] - charged.tokens >= 1_024,
        do: :ok,
        else: {:error, :maintenance_bounds_exhausted}
   end

@@ -209,13 +209,10 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     assert {:ok, record} = preflight(cutoff, 1)
     assert record["request"]["deadline"] == 3_000
 
-    spent =
-      put_in(state.charged[run], %{
-        reported_tokens: 9_000,
-        estimated_tokens: 0,
-        total_tokens: 9_000,
-        accounting_source: "reported"
-      })
+    already_charged = put_in(state.charged[run], %{tokens: 5, source: :reported})
+    assert {:ok, _} = preflight(already_charged, 1)
+
+    spent = put_in(state.charged[run], %{tokens: 9_000, source: :reported})
 
     assert {:error, :maintenance_bounds_exhausted} == preflight(spent, 1)
 
