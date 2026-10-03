@@ -1726,7 +1726,15 @@ retain their native prefix and use hard ceilings. Live cases prove initial
 no-dispatch refusal, optional project withholding, continued preparation after
 one hard-fitting checkpoint and reserve spending by an open exchange. All 207
 focused cases pass on both pairs; complete outputs and digests are indexed in
-the checklist. Rendering-trigger capture, remaining preparation errors,
+the checklist. The original native-prefix protection item is also proved:
+any frozen source protects its whole unit, projection preserves exact messages
+and ranges, and open continuation blocks maintenance admission. Live cases
+cover excerpts, project/resources, queued steer and owner restart. Forty-three
+Conversation/Lineage tests pass on the floor. The full current-pair fast check
+of `1022eea77a626b27f6e4c2b3461f3fbe29d11bf0` passes all eleven suites,
+3,573 tests with 39 expected exclusions, in 925 seconds; its complete output
+and digest are indexed in the checklist. This is integration evidence, not
+the closure matrix. Rendering-trigger capture, remaining preparation errors,
 standalone compact and the real long-conversation proof remain open.
 This is not a complete T07 workflow proof.
 

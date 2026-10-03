@@ -325,6 +325,38 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: retain the full fast check of clean implementation commit
+  `1022eea77a626b27f6e4c2b3461f3fbe29d11bf0`. It passes every gate and all
+  eleven application suites: 3,573 tests passed, 39 expected exclusions,
+  925 seconds. Complete command output:
+  `/private/tmp/loopex-m7-1022eea7-fast-check.log`, SHA-256
+  `665149b7c20cfbd43cbe9b6184033c59ca3a46e3e707debc14276db1e0aead94`.
+  This is one current-pair integration run, not the floor/fresh-source/provider
+  closure matrix. The previous failed candidate remains failed. A pass here
+  does not resolve the separately pending stalled-stderr fixture cutoff or
+  small maintenance reply-reserve decisions.
+
+- Done: audit and close original T07's open-exchange/native-prefix protection
+  item. Conversation selection protects the complete unit when any source is
+  frozen, including earlier terminal runs; unfinished/current units and open
+  interactions also block release. Lineage projection returns each frozen
+  message and source range unchanged even with zero remaining excerpt allowance.
+  Maintenance admission rejects an open continuation exchange. Live configured
+  cases retain exact source-bound native envelopes, tool excerpts, project and
+  resource inputs across rounds, queued steer and owner restart. The new live
+  headroom case spends the reserve under hard ceilings without changing its
+  prefix or opening maintenance. The exact implementation's full fast check
+  above covers the current-pair unit/projection/live cases. The final 207-case
+  floor selection covers the live/replay cases; the additional complete
+  Conversation/Lineage selection passes 43 tests on the floor in 0.2 seconds.
+  Complete output `/private/tmp/loopex-m7-native-prefix-protection-floor.log`,
+  SHA-256 `abeb8a705800124812136a2d631ac671cbc092292f49a9b21d383fbd1ccff13d`.
+  No source change or weaker test was needed for this audit. Original T01–T19
+  counts become 54 done / 119 todo / 6 retired; added counts stay 196 done /
+  8 todo. T07 is original 2 done / 9 todo, added 30 done / 0 todo. Standalone
+  compact, rendering-trigger capture, remaining preparation errors and real
+  long-conversation proof remain open. No agent or test process remains active.
+
 - Done: enforce the accepted `loopex.thinking_headroom.v1` targets throughout
   new ordinary-exchange staging, required/excerpt allocation, optional intake,
   ordinary tail measurement and checkpoint completion. Hard limits retain their
@@ -7265,7 +7297,7 @@ or check was relaxed.
 ### Original checklist
 
 - [x] Select complete eligible conversation groups.
-- [ ] Protect open exchanges and their complete native prefixes from compaction or re-rendering.
+- [x] Protect open exchanges and their complete native prefixes from compaction or re-rendering.
 - [ ] Have the owner select and encode bounded source excerpts; have the model produce the summary.
 - [ ] Capture maintenance model, route, instructions, deadlines, origin and targets before dispatch.
 - [ ] Distinguish missing summarizer configuration from invalid configuration.
