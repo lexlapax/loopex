@@ -8,9 +8,187 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.ConfiguredGenesisFixture, as: Genesis
   alias Loopex.Conversation
-  alias Loopex.Runtime.SessionState
+  alias Loopex.Runtime.{Instructions, SessionConfiguration, SessionState}
   alias Loopex.Store
   alias LoopexProtocol.{Canonical, ToolDefinition}
+
+  test "session scope includes all settled runs and preserves original tool groups and provenance" do
+    {fixture, session, attachment} =
+      start([
+        %{text: "working", calls: [call("write")]},
+        %{text: "first done", calls: []},
+        %{text: "second done", calls: []}
+      ])
+
+    {initial, _, _} = states(fixture, session)
+    assert SessionState.lineage_elements(initial, :session) == []
+    assert SessionState.compaction_units(initial, :session) == {:ok, []}
+    assert SessionState.projected_lineage(initial, :session, 0) == {:ok, [], nil}
+    assert {:ok, empty_candidate} = standalone_candidate(initial)
+    {:ok, instructions} = Instructions.render(initial.configuration["instructions"])
+    assert empty_candidate.request.messages == [%{"role" => "system", "content" => instructions}]
+    assert empty_candidate.request.continuation == nil
+    assert empty_candidate.request.deadline == 61_000
+
+    prompt(attachment)
+    finish(attachment)
+
+    assert {:accepted, "second"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "second",
+               content: "continue with the exact earlier result"
+             })
+
+    finish(attachment)
+    {live, replayed, rows} = states(fixture, session)
+    [first, second] = replayed.run_order
+
+    expected = SessionState.elements(replayed, first) ++ SessionState.elements(replayed, second)
+    assert SessionState.lineage_elements(live, :session) == expected
+    assert SessionState.lineage_elements(replayed, :session) == expected
+
+    assert SessionState.lineage_elements(replayed, first) ==
+             SessionState.elements(replayed, first)
+
+    assert SessionState.lineage_elements(replayed, "unadmitted") == []
+    assert {:ok, units} = SessionState.compaction_units(replayed, :session)
+    assert SessionState.compaction_units(live, :session) == {:ok, units}
+    assert Enum.flat_map(units, & &1.elements) == expected
+    refute Enum.any?(units, & &1.protected?)
+
+    assert [
+             %{
+               elements: [
+                 %{kind: :user_message},
+                 %{kind: :assistant_message},
+                 %{kind: :tool_result}
+               ]
+             },
+             %{elements: [%{kind: :assistant_message}]},
+             %{elements: [%{kind: :user_message}, %{kind: :assistant_message}]}
+           ] = units
+
+    assert {:ok, choice} = Conversation.compaction_tail(units, :explicit, fn [] -> {:ok, 0} end)
+    assert choice.eligible_unit_count == 3
+    assert choice.retained_tail == []
+    assert {:ok, expected_entries} = Conversation.lineage_entries(expected)
+    assert {:ok, ^expected_entries, nil} = SessionState.projected_lineage(replayed, :session, 0)
+    assert {:ok, candidate} = standalone_candidate(replayed)
+
+    assert candidate.request.messages ==
+             [hd(empty_candidate.request.messages) | Enum.map(expected_entries, &elem(&1, 1))]
+
+    assert candidate.request.model == replayed.configuration["model"]
+    assert candidate.request.sampling == SessionConfiguration.sampling(replayed.configuration)
+    assert candidate.request.tools == replayed.tool_selection["definitions"]
+    assert candidate.request.continuation == nil
+    assert candidate.receipt["continuation_cost"] == nil
+
+    assert candidate.receipt["context_token_budget"] ==
+             replayed.configuration["context_token_budget"]
+
+    assert candidate.receipt["record_byte_cost"] == 0
+
+    session_blocks =
+      Enum.filter(candidate.receipt["blocks"], &(&1["provenance_class"] == "session"))
+
+    assert Enum.map(session_blocks, & &1["source_reference"]) ==
+             Enum.map(expected_entries, &elem(&1, 0))
+
+    assert length(candidate.receipt["blocks"]) ==
+             1 + length(expected_entries) + length(candidate.request.tools)
+
+    refute Map.has_key?(candidate.request, :run_id)
+    refute Map.has_key?(candidate.request, :turn_id)
+    refute Map.has_key?(candidate.request, :scope)
+    assert Loopex.Model.validate_request(candidate.request) == :ok
+
+    for element <- expected do
+      source = Conversation.source_reference(element)
+      original = replayed.conversation_record_sources[source]
+      assert live.conversation_record_sources[source] == original
+      row = Enum.find(rows, &(&1.journal_version == original.journal_version))
+      assert_original(replayed, element, row)
+    end
+
+    # Concept: reading standalone history changes no durable session facts.
+    # Technical depth: the scope contains original run IDs only. No command,
+    # provider intent, maintenance record or accounting mutation is proposed.
+    assert replayed.active_run_id == nil
+    assert replayed.pending_compact == nil
+    assert replayed.maintenance_episodes == %{}
+    assert replayed.commands |> Map.keys() |> Enum.sort() == ["prompt", "second"]
+  end
+
+  test "session scope protects an unfinished latest run while retaining settled earlier history" do
+    {fixture, session, attachment} =
+      start([%{text: "first done", calls: []}, %{text: "held", calls: [], hold: self()}])
+
+    prompt(attachment)
+    finish(attachment)
+
+    assert {:accepted, "second"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "second",
+               content: "still in progress"
+             })
+
+    assert_receive {:holding, worker}, 5_000
+    {live, replayed, _} = states(fixture, session)
+    assert {:ok, [earlier, current]} = SessionState.compaction_units(replayed, :session)
+    refute earlier.protected?
+    assert current.protected?
+    assert current.run_id == replayed.active_run_id
+    assert SessionState.compaction_units(live, :session) == {:ok, [earlier, current]}
+    assert standalone_candidate(replayed) == {:error, :context_projection_invalid}
+
+    send(worker, :release)
+    finish(attachment)
+    {_live, settled, _} = states(fixture, session)
+    assert {:ok, [earlier, latest]} = SessionState.compaction_units(settled, :session)
+    refute earlier.protected?
+    refute latest.protected?
+    assert {:ok, _candidate} = standalone_candidate(settled)
+  end
+
+  test "standalone candidates reject invented run identity steer and optional intake" do
+    {fixture, session, _attachment} = start([])
+    {state, _, _} = states(fixture, session)
+    staging = standalone_staging(state)
+
+    for invalid <- [
+          Map.put(staging, :run_id, "invented"),
+          Map.put(staging, :run_id, nil),
+          Map.put(staging, :steer, %{command_id: "invented", content: "invented"}),
+          Map.delete(staging, :steer)
+        ] do
+      assert {:error, :context_projection_invalid} =
+               SessionState.reference_model_candidate(state, invalid, [], ordinary_project(), nil)
+    end
+
+    assert {:error, :context_projection_invalid} =
+             SessionState.reference_model_candidate(
+               state,
+               staging,
+               [{"optional resource", %{}}],
+               ordinary_project(),
+               nil
+             )
+
+    assert {:error, :context_projection_invalid} =
+             SessionState.reference_model_candidate(state, staging, [], ordinary_project(), %{})
+
+    for invalid <- [
+          %{state | pending_work: %{"unfinished" => %{}}},
+          %{state | open_interaction: "unfinished"},
+          %{state | aborting: "unfinished"},
+          %{state | follow_up: %{command_id: "unfinished"}}
+        ] do
+      assert standalone_candidate(invalid) == {:error, :context_projection_invalid}
+    end
+  end
 
   test "full settlement provenance includes private fields absent from canonical messages" do
     {fixture, session, attachment} = start([%{text: "answer", calls: []}])
@@ -260,6 +438,33 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
     {:ok, candidate} = SessionState.preflight_maintenance_request(state, 1, 1_001, fn -> :ok end)
     candidate
   end
+
+  defp standalone_candidate(state),
+    do:
+      SessionState.reference_model_candidate(
+        state,
+        standalone_staging(state),
+        [],
+        ordinary_project(),
+        nil
+      )
+
+  defp standalone_staging(state),
+    do: %{
+      scope: :session,
+      elements: SessionState.lineage_elements(state, :session),
+      steer: nil,
+      deadline: 61_000,
+      excerpt_allowance: 0
+    }
+
+  defp ordinary_project,
+    do: %{
+      "class" => "project_resource",
+      "receipt_revision" => 2,
+      "disposition" => "not_evaluated_required_failure",
+      "detail" => nil
+    }
 
   defp commit_local(proposal) do
     state = proposal.next

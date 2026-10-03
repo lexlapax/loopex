@@ -872,16 +872,21 @@ defmodule Loopex.Runtime.SessionState do
   @doc """
   ## Concept
 
-  The committed conversation through one admitted run, in session order.
+  The committed conversation through one admitted run or the whole session.
 
   ## Technical depth
 
   Admission and follow-up promotion append run identities during replay. This
   read includes earlier runs regardless of their terminal outcome, preserves
-  element order within each run, and never includes a later run. Per-run reads
-  remain available for accounting and legacy staged-request validation.
+  element order within each run, and never includes a later run. The internal
+  `:session` scope includes every admitted run in that same order for standalone
+  compaction, without creating a prompt or run. Per-run reads remain available
+  for accounting and staged-request validation.
   """
-  @spec lineage_elements(t(), binary()) :: [Conversation.element()]
+  @spec lineage_elements(t(), binary() | :session) :: [Conversation.element()]
+  def lineage_elements(%__MODULE__{} = state, :session),
+    do: Enum.flat_map(state.run_order, &elements(state, &1))
+
   def lineage_elements(%__MODULE__{} = state, run_id) do
     case Enum.split_while(state.run_order, &(&1 != run_id)) do
       {earlier, [^run_id | _later]} ->
@@ -896,7 +901,7 @@ defmodule Loopex.Runtime.SessionState do
   # Technical depth: run order and pending work come from validated replay;
   # absence of pending work alone cannot release a run with an open interaction.
   @doc false
-  @spec compaction_units(t(), binary()) ::
+  @spec compaction_units(t(), binary() | :session) ::
           {:ok, [map()]} | {:error, :context_projection_invalid}
   def compaction_units(%__MODULE__{} = state, run_id),
     do:
@@ -907,7 +912,7 @@ defmodule Loopex.Runtime.SessionState do
       )
 
   defp compaction_units_from(state, run_id, elements) do
-    if run_id in state.run_order do
+    if run_id == :session or run_id in state.run_order do
       interaction = open_interaction_record(state)
       interaction_run = interaction && interaction.run_id
 
@@ -928,7 +933,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   @doc false
-  @spec projected_lineage(t(), binary(), non_neg_integer(), list() | nil) ::
+  @spec projected_lineage(t(), binary() | :session, non_neg_integer(), list() | nil) ::
           {:ok, list(), map() | nil} | {:error, atom()}
   def projected_lineage(state, run_id, allowance, elements \\ nil) do
     binding = state.tool_selection && state.tool_selection["artifact_read"]
@@ -941,7 +946,7 @@ defmodule Loopex.Runtime.SessionState do
              ),
              binding,
              state.artifact_sources,
-             frozen_lineage(state, run_id),
+             frozen_lineage(state, if(run_id == :session, do: state.active_run_id, else: run_id)),
              allowance
            ),
          {:ok, checkpoint} <- checkpoint_entries(state) do
@@ -1648,20 +1653,21 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   # Concept: configured staging and compaction probes render the same request.
-  # Technical depth: the captured run configuration owns instructions, model,
-  # tools and sampling. Projection preserves frozen native messages and costs
-  # continuation through the shared receipt builder. This constructs plain
-  # candidate data only; admission and journal ownership remain separate.
+  # Technical depth: a run uses its captured configuration; a settled session
+  # probe uses the current committed configuration and whole canonical history.
+  # A session probe has no run, steer, continuation or optional resource intake.
+  # Both paths construct plain request/receipt data without admission or IO.
   @doc false
   @spec reference_model_candidate(t(), map(), list(), map(), map() | nil) ::
           {:ok, map()} | {:error, term()}
   def reference_model_candidate(state, staging, selected, project, header) do
-    with configuration when is_map(configuration) <- run_configuration(state, staging.run_id),
+    with {:ok, scope, configuration, budget} <-
+           reference_candidate_scope(state, staging, selected, header),
          {:ok, text} <- Instructions.render(configuration["instructions"]),
          {:ok, entries, projection} <-
            projected_lineage(
              state,
-             staging.run_id,
+             scope,
              Map.get(staging, :excerpt_allowance, 2_048),
              staging.elements
            ),
@@ -1674,12 +1680,16 @@ defmodule Loopex.Runtime.SessionState do
              Enum.map(entries, &elem(&1, 1)) ++
              if(steer, do: [%{"role" => "user", "content" => steer.content}], else: []),
          {:ok, continuation} <-
-           model_continuation(
-             state,
-             staging.run_id,
-             messages,
-             steer && steer.command_id,
-             projection
+           if(scope == :session,
+             do: {:ok, nil},
+             else:
+               model_continuation(
+                 state,
+                 scope,
+                 messages,
+                 steer && steer.command_id,
+                 projection
+               )
            ),
          {:ok, request} <-
            Loopex.Model.request(configuration["model"], messages,
@@ -1697,7 +1707,7 @@ defmodule Loopex.Runtime.SessionState do
                  context_source(
                    %{
                      "kind" => "session_steer",
-                     "run_id" => staging.run_id,
+                     "run_id" => scope,
                      "command_id" => steer.command_id
                    },
                    "session"
@@ -1710,7 +1720,7 @@ defmodule Loopex.Runtime.SessionState do
              request,
              sources,
              project,
-             context_token_budget(state, staging.run_id),
+             budget,
              header
            ) do
       {:ok, %{request: request, receipt: receipt, projection: projection}}
@@ -1719,6 +1729,33 @@ defmodule Loopex.Runtime.SessionState do
       {:error, _} = error -> error
     end
   end
+
+  # Concept: standalone measurement cannot borrow an unfinished run's settings.
+  # Technical depth: the explicit scope is transient and never enters a request
+  # or source reference. It permits no invented run ID, steer or fresh optional
+  # resource data; replayed terminal history retains its original provenance.
+  defp reference_candidate_scope(state, %{scope: :session, steer: nil} = staging, [], nil) do
+    if not Map.has_key?(staging, :run_id) and is_nil(state.active_run_id) and
+         state.pending_work == %{} and is_nil(state.open_interaction) and
+         is_nil(state.aborting) and is_nil(state.follow_up) and is_map(state.configuration) do
+      {:ok, :session, state.configuration, state.configuration["context_token_budget"]}
+    else
+      {:error, :context_projection_invalid}
+    end
+  end
+
+  defp reference_candidate_scope(_state, %{scope: :session}, _selected, _header),
+    do: {:error, :context_projection_invalid}
+
+  defp reference_candidate_scope(state, %{run_id: run_id}, _selected, _header)
+       when is_binary(run_id) do
+    case run_configuration(state, run_id) do
+      nil -> {:error, :invalid_session_configuration}
+      configuration -> {:ok, run_id, configuration, context_token_budget(state, run_id)}
+    end
+  end
+
+  defp reference_candidate_scope(_, _, _, _), do: {:error, :context_projection_invalid}
 
   defp replace_checkpoint_entries(entries, staging) do
     case Map.fetch(staging, :checkpoint_entries) do

@@ -337,6 +337,7 @@ defmodule Loopex.ConversationTest do
 
     assert {:ok, units} = SessionState.compaction_units(state, "r2")
     assert Enum.all?(units, & &1.protected?)
+    assert SessionState.compaction_units(state, :session) == {:ok, units}
     assert {:ok, [earlier]} = SessionState.compaction_units(state, "r1")
     assert earlier.protected?
     state = %{state | pending_work: %{}}
@@ -349,6 +350,8 @@ defmodule Loopex.ConversationTest do
     state = %{state | open_interaction: "i", interactions: %{"i" => %{run_id: "r1"}}}
     assert {:ok, [a, _]} = SessionState.compaction_units(state, "r2")
     assert a.protected?
+    assert {:ok, [session_a, _]} = SessionState.compaction_units(state, :session)
+    assert session_a.protected?
 
     assert SessionState.compaction_units(state, "missing") ==
              {:error, :context_projection_invalid}

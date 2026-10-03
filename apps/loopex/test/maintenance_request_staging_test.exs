@@ -557,6 +557,96 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     end
   end
 
+  test "standalone session scope reuses a retained checkpoint and includes later terminal inputs" do
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("old", 1_000), later_old_units: ["unsummarized middle"])
+
+    raw = SessionState.lineage_elements(state, :session)
+    originals = state.conversation_record_sources
+    run_order = state.run_order
+    {:ok, checkpoint} = SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+    {state, rows, events} = commit(state, checkpoint, events)
+    history = history ++ rows
+    checkpoint_id = state.active_checkpoint
+
+    {:ok, completion} =
+      SessionState.propose_maintenance_checkpoint_completion(state, 2_001, fn -> :ok end)
+
+    {state, rows, events} = commit(state, completion, events)
+    history = history ++ rows
+
+    {:ok, terminal} =
+      SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
+        reason: "model_call_failed"
+      })
+
+    {state, rows, events} = commit(state, terminal, events)
+    history = history ++ rows
+    assert state.active_run_id == nil
+    assert state.pending_work == %{}
+
+    {:ok, compact} =
+      SessionState.propose(state, %{
+        type: :compact,
+        command_id: "standalone",
+        bounds: %{max_attempts: 4, deadline_ms: 60_000, token_budget: 32_768}
+      })
+
+    {state, rows, events} = commit(state, compact, events)
+    history = history ++ rows
+    assert {:ok, ^state} = SessionState.recover(state.session_id, history, events)
+    assert state.run_order == run_order
+    assert state.conversation_record_sources == originals
+    assert SessionState.lineage_elements(state, :session) == raw
+    assert state.pending_compact["command_id"] == "standalone"
+
+    assert {:ok, units} = SessionState.compaction_units(state, :session)
+    assert Enum.map(units, & &1.kind) == [:inputs, :inputs]
+    assert Enum.flat_map(units, & &1.elements) == Enum.drop(raw, 1)
+    refute Enum.any?(units, & &1.protected?)
+
+    assert {:ok, selected} =
+             Loopex.Conversation.compaction_tail(units, :explicit, fn [] -> {:ok, 0} end)
+
+    assert selected.eligible_unit_count == 2
+    assert selected.retained_tail == []
+    assert {:ok, entries, nil} = SessionState.projected_lineage(state, :session, 0)
+
+    assert elem(hd(entries), 0) == %{
+             "kind" => "compaction_summary",
+             "checkpoint_id" => checkpoint_id
+           }
+
+    assert Enum.map(tl(entries), &elem(&1, 1)["content"]) ==
+             ["unsummarized middle", "protected"]
+
+    refute Enum.any?(tl(entries), fn {source, _} ->
+             MapSet.member?(state.compacted_sources, source)
+           end)
+
+    assert {:ok, candidate} =
+             SessionState.reference_model_candidate(
+               state,
+               %{
+                 scope: :session,
+                 elements: raw,
+                 steer: nil,
+                 deadline: 62_000,
+                 excerpt_allowance: 0
+               },
+               [],
+               ordinary_project(),
+               nil
+             )
+
+    assert tl(candidate.request.messages) == Enum.map(entries, &elem(&1, 1))
+    assert candidate.request.continuation == nil
+    assert candidate.request.deadline == 62_000
+
+    assert candidate.receipt["blocks"] |> Enum.at(1) |> Map.fetch!("source_reference") ==
+             elem(hd(entries), 0)
+  end
+
   test "checkpoint and event commit together while exact raw facts remain readable" do
     {state, history, events} =
       pending_checkpoint(String.duplicate("old", 1_000), later_old_units: ["unsummarized middle"])

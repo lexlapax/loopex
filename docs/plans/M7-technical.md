@@ -1759,6 +1759,19 @@ after the expiry repair. The immutable output and digest are indexed in the
 checklist. It does not establish standalone episode capture or execution and
 does not replace the closure matrix.
 
+Standalone probes now use an explicit transient session scope in the existing
+lineage, unit and projection paths. They include all original runs in order,
+substitute retained checkpoint coverage and protect unfinished/native work.
+The shared canonical request/receipt constructor uses current committed settings
+and a supplied absolute cutoff while admitting no invented run, steer,
+continuation or fresh optional intake. This constructs an unsized candidate;
+whole-record measurement and episode capture remain open. Original-record,
+checkpoint, native-prefix and configuration-restart tests pass on both pairs;
+the final source passes the complete current Core suite, 1,121 tests with eight
+existing exclusions in 215.2 seconds. The checklist retains all outputs and
+digests, including the corrected new receipt assertion's failed first run.
+This does not establish live standalone execution or completion.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

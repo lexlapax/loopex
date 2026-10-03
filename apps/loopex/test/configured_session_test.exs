@@ -732,6 +732,8 @@ defmodule Loopex.ConfiguredSessionTest do
     assert {:ok, entries, projection} =
              SessionState.projected_lineage(state, state.active_run_id, 0)
 
+    assert SessionState.projected_lineage(state, :session, 0) == {:ok, entries, projection}
+
     [old, appended] = for {_, %{"role" => "tool"} = message} <- entries, do: message
     assert old == Enum.find(second.messages, &(&1["role"] == "tool"))
     assert {:ok, notice} = LoopexProtocol.Frame.decode(appended["content"], 2_048)
@@ -1598,12 +1600,40 @@ defmodule Loopex.ConfiguredSessionTest do
 
     [first_run, second_run] = recovered.run_order
     assert {:ok, selection_units} = SessionState.compaction_units(recovered, second_run)
+    assert SessionState.compaction_units(recovered, :session) == {:ok, selection_units}
     assert Enum.map(selection_units, & &1.run_id) == [first_run, second_run]
     assert Enum.all?(selection_units, & &1.complete?)
     refute Enum.any?(selection_units, & &1.protected?)
     assert recovered.configuration == candidate
     assert SessionState.run_configuration(recovered, first_run) == initial
     assert SessionState.run_configuration(recovered, second_run) == candidate
+
+    assert {:ok, standalone} =
+             SessionState.reference_model_candidate(
+               recovered,
+               %{
+                 scope: :session,
+                 elements: SessionState.lineage_elements(recovered, :session),
+                 steer: nil,
+                 deadline: 61_000,
+                 excerpt_allowance: 0
+               },
+               [],
+               %{
+                 "class" => "project_resource",
+                 "receipt_revision" => 2,
+                 "disposition" => "not_evaluated_required_failure",
+                 "detail" => nil
+               },
+               nil
+             )
+
+    assert standalone.request.model == candidate["model"]
+    assert hd(standalone.request.messages)["content"] == rendered
+    assert standalone.request.sampling == SessionConfiguration.sampling(candidate)
+    assert standalone.receipt["context_token_budget"] == candidate["context_token_budget"]
+    assert standalone.request.continuation == nil
+    assert length(standalone.request.messages) == 5
     configured = Enum.filter(Fixture.events(fixture, session), &(&1.kind == "session.configured"))
     assert length(configured) == 1
     assert hd(configured)["configuration"] == SessionConfiguration.public_view(candidate)
@@ -1628,6 +1658,7 @@ defmodule Loopex.ConfiguredSessionTest do
              )
 
     assert SessionState.compaction_units(restarted_state, second_run) == {:ok, selection_units}
+    assert SessionState.compaction_units(restarted_state, :session) == {:ok, selection_units}
 
     assert {:ok, next_attachment} =
              Loopex.attach(restarted.runtime, session,

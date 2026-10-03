@@ -325,6 +325,49 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: standalone compaction can read the whole committed session through the
+  existing lineage, unit-selection and projection paths using a transient
+  `:session` scope. No new run, prompt or source identity is created. Selection
+  preserves original run order, complete tool/result groups, terminal input-only
+  units and protected unfinished/native work. Projection substitutes the retained
+  checkpoint while all original records, source bindings and raw facts remain
+  readable. The shared canonical request/receipt builder now accepts a settled
+  session probe with current committed configuration and a supplied absolute
+  cutoff; it rejects a run identity, steer, fresh optional intake or unfinished
+  work. Its receipt remains an unsized candidate until whole-record preflight;
+  this does not claim exact record-byte admission or provider dispatch. Existing
+  live tests prove native-prefix equality and changed current configuration
+  across restart; real journal recovery proves complete original provenance.
+  The six-file current selection passes 148 cases in 7.9 seconds, output
+  `/private/tmp/loopex-m7-standalone-scope-current-v4.log`, SHA-256
+  `0142cad80a0687cc25686830c69a67eb9e5ed0c81358f9338f7f69ae67ee89ad`.
+  The final floor selection adds the current-configuration probe assertions and
+  passes the same 148 cases in 8.1 seconds, output
+  `/private/tmp/loopex-m7-standalone-scope-floor-v3.log`, SHA-256
+  `dd1d8f239395f9e97e0efcd57b43959bdde99a9ea03bad0fa959c167777573ac`.
+  The complete current Core suite includes those final assertions and passes
+  1,121 tests with eight existing exclusions in 215.2 seconds, output
+  `/private/tmp/loopex-m7-standalone-scope-core-current.log`, SHA-256
+  `ddb86ddce2d6e1cb21a2f4e1fb8c7826947fe6ca747f7ebda15a05e4c892f7a4`.
+  Warning-free compilation, formatting, bootstrap/status, documentation ordering
+  and dependency/version gates pass, output
+  `/private/tmp/loopex-m7-standalone-scope-static.log`, SHA-256
+  `a7be3c4c1e8e2a264c44fe4d0ce761e0d7ff836b272c386187369dea2c366ae9`.
+  These development checks are not an exact-candidate full fast check or closure
+  matrix; the last complete fast check remains the preceding `9ab1ede3` source.
+  Its `mix cmd --app` wrapper printed CLI deprecation warnings; these are not
+  compilation warnings or a static-gate result. The earlier current selection
+  failed one new receipt assertion by treating required tool-definition
+  descriptors as session-history descriptors, output
+  `/private/tmp/loopex-m7-standalone-scope-current-v3.log`, SHA-256
+  `0e699f22511e089d7d25b0a2ec4954fea1040d1dd74fe6c639e9f4a61357d9aa`.
+  The corrected assertion separately proves the ordered session sources and
+  the required definition count; the failed output remains failed. Original
+  T01–T19 counts stay 54 done / 119 todo / 6 retired. Added counts become
+  199 done / 8 todo; T07 added is 32 done / 0 todo. Both pending decisions
+  remain unanswered. Standalone capture, whole-record measurement, execution,
+  completion/snapshot and cleanup remain next; no original workflow row closes.
+
 - Done: the clean integration commit
   `9ab1ede347484cc65f9f7a62678533eb66e43d1b` passes its one full current-pair
   fast check: all eleven application suites, 3,586 tests passed, 39 expected
@@ -7394,6 +7437,8 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [x] Admit and replay the standalone compact command without a clock, prompt or run; retain closed explicit bounds and exact episode identity, duplicate-first mutation fences and abort binding, traverse bounded private history, and prove all three live Store uncertainty phases plus paused owner succession on both toolchains. Standalone episode capture, execution, completion, snapshot and cleanup integration remain open.
+
+- [x] Read and select whole-session canonical history without an invented run; reuse checkpoint substitution and the shared request/receipt builder with current committed settings, reject unfinished work, steer and fresh optional intake, and prove original-record provenance, indivisible tool groups, terminal inputs, native-prefix equality and configuration restart on both toolchains. Whole-record measurement, episode capture and live standalone execution remain open.
 
 - [x] Enforce captured thinking headroom throughout new ordinary staging, excerpt/optional allocation, tail selection and checkpoint completion; retain exact episode targets and v2 refusals, reject forged current replay, keep open exchanges under hard ceilings with immutable prefixes, and prove live target-aware preparation, initial no-dispatch refusal, optional withholding and open-exchange reserve spending on both toolchains. Rendering-trigger capture, standalone compaction and real-provider evidence remain open.
 
