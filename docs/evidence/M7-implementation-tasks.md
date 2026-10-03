@@ -325,6 +325,18 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: pin the exact runtime `model_tool` question-event payload shape in a
+  standalone, explicitly unserved schema. Live text, choice and decline paths
+  assert pending and terminal fields, conditional choice identity, admitted
+  answer, sequence and private-field absence; an expiry path asserts its null
+  response fields. Three focused tests pass on both supported pairs. Complete
+  outputs: `/private/tmp/loopex-m7-question-event-current-v3.log`, SHA-256
+  `accb0ae67fea6d18ddfe0385107fdccd98ccc1ebfafbbd3ad0f6fed6098711f1`;
+  `/private/tmp/loopex-m7-question-event-floor.log`, SHA-256
+  `a7565c5dcc3967f5b42382bb2b7756036a72caa3d576a8cbc29c254b60d03602`.
+  This closes one added T09 subtask. It does not prove the coordinated /3-/4
+  wire codec, independent Node vectors or private pending/response decoders.
+
 - Done: audit and close original T03's instruction-test obligation. Core's
   capture, refusal, source/receipt and replay tests pass 70 cases on both
   supported pairs; the CLI's exact file/environment byte limits, long workspace
@@ -7242,6 +7254,8 @@ or check was relaxed.
 - [x] Prove recovery retains the actual pending question identity.
 
 ### Added implementation subtasks
+
+- [x] Pin exact runtime public model-question event fields, including conditional choice identity and expiry, in an explicitly unserved standalone payload schema on both supported toolchains.
 
 - [x] Remove pre-1.0 model-question response/settlement v1 replay and effect-index readers, reject those exact retired kinds, and retain current v2 answer/expiry/cancellation recovery on both supported toolchains.
 

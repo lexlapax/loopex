@@ -20,6 +20,12 @@ defmodule Loopex.ModelQuestionRecordsTest do
            |> File.read!()
            |> JSON.decode!()
 
+  @event_schema :loopex_protocol
+                |> :code.priv_dir()
+                |> Path.join("schema/model-question-events.v1.json")
+                |> File.read!()
+                |> JSON.decode!()
+
   for vector <- @vectors["vectors"] do
     @vector vector
 
@@ -64,6 +70,11 @@ defmodule Loopex.ModelQuestionRecordsTest do
       pending_row = Enum.find(records, &(&1.payload.kind == "model_question_requested_v1"))
       pending = pending_row.payload
 
+      assert @event_schema["runtime_exact_fields"] ==
+               ~w(answer choices command_digest command_id disposition event_id event_sequence expires_at interaction_id interaction_kind kind producer prompt run_id settlement_sequence status tool_call_id turn)
+
+      assert_model_question_event(requested, vector, pending, "pending")
+
       assert {:ok, state} = SessionState.recover(session, records, events)
       assert state.open_interaction == @vectors["interaction_id"]
 
@@ -90,6 +101,13 @@ defmodule Loopex.ModelQuestionRecordsTest do
         |> Enum.map(fn {event, sequence} ->
           Map.put(event, :event_sequence, sequence)
         end)
+
+      assert_model_question_event(
+        Enum.find(expiry_events, &(&1.kind == "interaction.expired")),
+        vector,
+        pending,
+        "expired"
+      )
 
       assert {:error, _} =
                SessionState.recover(
@@ -169,6 +187,7 @@ defmodule Loopex.ModelQuestionRecordsTest do
       assert_preimage(vector, "command", ["loopex_command_v1", normalized])
       assert {:accepted, "answer"} = Loopex.command(attachment, command)
       settled = await_event(attachment, "interaction." <> vector["disposition"])
+      assert_model_question_event(settled, vector, pending, vector["disposition"])
       await_event(attachment, "run.finished")
       records = Fixture.records(fixture, session)
       events = Fixture.events(fixture, session)
@@ -258,6 +277,72 @@ defmodule Loopex.ModelQuestionRecordsTest do
       assert settled["settlement_sequence"] == response_row.journal_version
       assert Agent.get(fixture.executor, & &1.jobs) == []
     end
+  end
+
+  defp assert_model_question_event(event, vector, pending, status) do
+    fields =
+      if status == "answered" and Map.has_key?(vector["answer"], "choice_id"),
+        do:
+          Enum.sort(
+            @event_schema["runtime_exact_fields"] ++
+              [@event_schema["terminal"]["choice_only_additional_field"]]
+          ),
+        else: @event_schema["runtime_exact_fields"]
+
+    assert Enum.sort(Enum.map(Map.keys(event), &to_string/1)) == fields
+
+    assert event["producer"] == "model_tool"
+    assert event["interaction_id"] == @vectors["interaction_id"]
+    assert event["run_id"] == @vectors["run_id"]
+    assert event["turn"] == @vectors["turn"]
+    assert event["tool_call_id"] == @vectors["tool_call_id"]
+    assert event["interaction_kind"] == vector["interaction_request"]["kind"]
+    assert event["prompt"] == vector["interaction_request"]["prompt"]
+    assert event["choices"] == vector["interaction_request"]["choices"]
+    assert event["expires_at"] == pending["expires_at"]
+    assert event["status"] == status
+    assert is_binary(event.event_id) and byte_size(event.event_id) in 1..256
+    assert is_integer(event.event_sequence) and event.event_sequence > 0
+
+    case status do
+      "pending" ->
+        assert event.kind == @event_schema["pending"]["kind"]
+        assert Enum.all?(@event_schema["pending"]["null_fields"], &is_nil(event[&1]))
+
+      disposition ->
+        assert event.kind == @event_schema["terminal"]["kind_by_disposition"][disposition]
+        assert event["disposition"] == disposition
+
+        assert is_integer(event["settlement_sequence"]) and
+                 event["settlement_sequence"] > 0
+
+        if disposition in ["expired", "cancelled"] do
+          assert event["command_id"] == nil
+          assert event["command_digest"] == nil
+          assert event["answer"] == nil
+        else
+          assert event["command_id"] == @vectors["command_id"]
+          assert event["command_digest"] == vector["command_digest"]
+
+          expected_answer =
+            case vector["answer"] do
+              %{"choice_id" => id} ->
+                choice = Enum.find(event["choices"], &(&1["id"] == id))
+                assert event["choice_id"] == id
+                %{"choice_id" => id, "label" => choice["label"]}
+
+              answer ->
+                answer
+            end
+
+          assert event["answer"] == expected_answer
+        end
+    end
+
+    refute Map.has_key?(event, "decision_ref")
+    refute Map.has_key?(event, "policy_request")
+    refute Map.has_key?(event, "provider_mapping")
+    refute Map.has_key?(event, "credential_ref")
   end
 
   defp assert_preimage(vector, name, term) do

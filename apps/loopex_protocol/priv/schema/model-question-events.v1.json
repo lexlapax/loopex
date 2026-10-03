@@ -1,0 +1,50 @@
+{
+  "format": "loopex.experimental.payload-contract/1",
+  "contract": "model_question_events",
+  "authority": "docs/adr/0045-model-originated-questions-technical.md",
+  "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+  "runtime_exact_fields": [
+    "answer",
+    "choices",
+    "command_digest",
+    "command_id",
+    "disposition",
+    "event_id",
+    "event_sequence",
+    "expires_at",
+    "interaction_id",
+    "interaction_kind",
+    "kind",
+    "producer",
+    "prompt",
+    "run_id",
+    "settlement_sequence",
+    "status",
+    "tool_call_id",
+    "turn"
+  ],
+  "pending": {
+    "kind": "interaction.requested",
+    "status": "pending",
+    "producer": "model_tool",
+    "interaction_kind": ["choice", "text"],
+    "null_fields": ["answer", "command_digest", "command_id", "disposition", "settlement_sequence"]
+  },
+  "terminal": {
+    "kind_by_disposition": {
+      "answered": "interaction.answered",
+      "declined": "interaction.declined",
+      "expired": "interaction.expired",
+      "cancelled": "interaction.cancelled"
+    },
+    "choice_only_additional_field": "choice_id",
+    "answer": "exact_admitted_text_choice_with_label_or_decline; null_on_expiry_or_cancellation",
+    "settlement_sequence": "positive_u64_committed_journal_version"
+  },
+  "wire_projection": {
+    "envelope": "event_id_and_event_sequence_outside_data",
+    "identities": "unpadded_base64url_of_original_opaque_bytes",
+    "quantities": "canonical_decimal_strings_without_javascript_narrowing",
+    "private_fields": "refuse"
+  }
+}
