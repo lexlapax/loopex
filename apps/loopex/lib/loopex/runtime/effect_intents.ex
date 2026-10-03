@@ -21,10 +21,13 @@ defmodule Loopex.Runtime.EffectIntents do
   """
 
   alias Loopex.Model
+  alias Loopex.Bounds
+  alias Loopex.Runtime.MaintenanceConfiguration
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionState
   alias Loopex.Store
+  alias LoopexProtocol.Session.CompactResult
 
   @uint64_max 18_446_744_073_709_551_615
   @page_bytes 1_114_112
@@ -55,11 +58,18 @@ defmodule Loopex.Runtime.EffectIntents do
     "context_admission_refused_v2" =>
       {(@refusal_keys -- ~w(category dimension observed limit)) ++
          ~w(failure configuration_version episode_id targets projection_state measurement_scope),
+       ~w(project_resource_count resource_pack_count)},
+    "maintenance_episode_admitted_v1" =>
+      {~w(episode_id run_id staging_turn_id trigger origin configuration_version maintenance_configuration bounds admitted_at preparation_deadline attempts summary_ordinal checkpoint_id usage),
        []},
+    "maintenance_request_committed_v1" =>
+      {~w(episode_id summary_ordinal purpose operation_id configuration_version captured_session_version strategy_revision eligible_unit_count covered_range source_digest source_excerpted staged_at staged_request_digest request context_receipt),
+       []},
+    "maintenance_episode_terminal_v1" => {~w(episode_id observed_at result), []},
     "deadline_staging_failed_v1" => {~w(run_id turn_id category), []},
     "run_terminal_committed" =>
       {~w(run_id outcome bound observed declared_limit accounting_source reconciliation_ref cleanup_grace_ms command_id),
-       ~w(reason)},
+       ~w(reason failure)},
     "interaction_requested_v1" =>
       {~w(interaction_id run_id turn tool_call_id interaction_request interaction_request_digest policy_request_digest round created_at expires_at policy_identity),
        ~w(decision_ref)},
@@ -386,6 +396,97 @@ defmodule Loopex.Runtime.EffectIntents do
 
   defp neutral_values?(%{payload: %{kind: kind} = payload})
        when kind in ~w(model_request_committed model_request_committed_v2 model_request_committed_resources_v1 model_request_committed_resources_v2) do
+    valid_request?(payload)
+  end
+
+  # Concept: private coverage passes maintenance without projecting effects.
+  # Technical depth: this bounded reader validates each closed row locally.
+  # Configuration and request constructors bind their own exact bytes; only
+  # full SessionState replay proves adjacency, range ownership and parent limits.
+  # A page never acquires an owner or reconstructs an unbounded session prefix.
+  defp neutral_values?(%{payload: %{kind: "maintenance_episode_admitted_v1"} = payload}) do
+    capture = payload["maintenance_configuration"]
+    bounds = payload["bounds"]
+
+    with %{"budget_origins" => %{"parent" => %{} = origins}} <- capture,
+         parent =
+           Map.take(capture, ~w(configuration_version context_token_budget system_class_tokens)),
+         :ok <-
+           MaintenanceConfiguration.validate_capture(
+             capture,
+             Map.put(parent, "budget_origins", origins)
+           ),
+         true <- capture["configuration_version"] == payload["configuration_version"],
+         true <- closed?(bounds, ~w(max_turns token_budget deadline_ms max_attempts run_deadline)),
+         {:ok, _} <-
+           Bounds.declare(%{
+             max_turns: bounds["max_turns"],
+             token_budget: bounds["token_budget"],
+             deadline_ms: bounds["deadline_ms"]
+           }) do
+      Enum.all?(~w(episode_id run_id staging_turn_id), &identifier?(payload[&1])) and
+        payload["trigger"] == "ordinary_limit" and payload["origin"] == "automatic" and
+        bounds["max_attempts"] == 4 and
+        (is_nil(bounds["run_deadline"]) or version?(bounds["run_deadline"])) and
+        version?(payload["admitted_at"]) and version?(payload["preparation_deadline"]) and
+        payload["preparation_deadline"] == payload["admitted_at"] + 60_000 and
+        payload["attempts"] == 0 and payload["summary_ordinal"] == 1 and
+        is_nil(payload["checkpoint_id"]) and
+        payload["usage"] == %{
+          "attempts" => 0,
+          "reported_tokens" => 0,
+          "estimated_tokens" => 0,
+          "total_tokens" => 0
+        }
+    else
+      _ -> false
+    end
+  end
+
+  defp neutral_values?(%{payload: %{kind: "maintenance_request_committed_v1"} = payload}) do
+    with true <- valid_request?(payload),
+         request = payload["request"],
+         [%{"role" => "system"}, %{"role" => "user", "content" => source}] <- request["messages"],
+         true <- is_binary(source) and byte_size(source) in 1..16_384,
+         true <- payload["source_digest"] == LoopexProtocol.Canonical.digest_bytes(source),
+         range = payload["covered_range"],
+         true <-
+           closed?(range, ~w(unit_count record_count source_count first last first_kept digest)) do
+      Enum.all?(~w(episode_id operation_id), &identifier?(payload[&1])) and
+        positive_version?(payload["summary_ordinal"]) and payload["purpose"] == "compaction" and
+        positive_version?(payload["configuration_version"]) and
+        positive_version?(payload["captured_session_version"]) and
+        payload["strategy_revision"] == 3 and positive_version?(payload["eligible_unit_count"]) and
+        positive_version?(range["unit_count"]) and
+        range["unit_count"] <= payload["eligible_unit_count"] and
+        positive_version?(range["record_count"]) and positive_version?(range["source_count"]) and
+        range["record_count"] <= range["source_count"] and digest?(range["digest"]) and
+        Enum.all?(~w(first last first_kept), &is_map(range[&1])) and
+        is_boolean(payload["source_excerpted"]) and version?(payload["staged_at"]) and
+        request["tools"] == [] and is_nil(request["continuation"]) and
+        request["sampling"]["max_tokens"] == 1_024 and request["sampling"]["reasoning"] == "none"
+    else
+      _ -> false
+    end
+  end
+
+  defp neutral_values?(%{payload: %{kind: "maintenance_episode_terminal_v1"} = payload}) do
+    identifier?(payload["episode_id"]) and
+      (is_nil(payload["observed_at"]) or version?(payload["observed_at"])) and
+      match?({:ok, _}, CompactResult.encode_wire(payload["result"]))
+  end
+
+  defp neutral_values?(%{payload: %{kind: "context_admission_refused_v2"} = payload}) do
+    case {Map.fetch(payload, "project_resource_count"), Map.fetch(payload, "resource_pack_count")} do
+      {:error, :error} -> true
+      {{:ok, project}, {:ok, resources}} -> version?(project) and version?(resources)
+      _ -> false
+    end
+  end
+
+  defp neutral_values?(_record), do: true
+
+  defp valid_request?(payload) do
     encoded = payload["request"]
 
     if closed?(encoded, Enum.map(@request_fields, &Atom.to_string/1)) do
@@ -397,8 +498,6 @@ defmodule Loopex.Runtime.EffectIntents do
       false
     end
   end
-
-  defp neutral_values?(_record), do: true
 
   defp closed?(map, required, optional \\ []),
     do:

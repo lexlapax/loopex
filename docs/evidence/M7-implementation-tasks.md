@@ -325,6 +325,42 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: private effect-history coverage now traverses current maintenance
+  admission, request and terminal records as neutral rows. It validates closed
+  shapes, captured configuration, canonical request/source bindings, spending
+  metadata and the existing compact-result codec without projecting executor
+  effects. Full SessionState replay remains responsible for cross-record
+  ordering, range ownership and original parent limits. Configured terminal
+  failures remain readable; optional project/resource refusal counts must travel
+  together. A complete reducer-produced current-format journal replays and
+  traverses every one-record page, including boundary-token resume, without
+  acquiring an owner or calling mutation/event callbacks. Malformed captures,
+  substituted request bytes, wrong range counts and terminal usage/causes refuse.
+  This extends T07's retained boundary work; all checkbox totals stay unchanged.
+  Question decoder/public-event vectors and the coordinated transports remain
+  open under T09.
+
+  The thirteen-file selection passed 176 tests on both supported pairs. Current:
+  4.8 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-history-current-dev2.log`, SHA-256
+  `a81c733bab76f5c6300207981cc03ff9e8ae702db7698b0b022b75719ce5a424`.
+  Floor: 6.1 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-history-floor-v1.log`, SHA-256
+  `f2412b68c67b7a6b50975f827e26d7aab962b0ce7fe92843efd4395fbf01aa3a`.
+  Formatting, warning-free compilation, dependency, structure/status,
+  documentation and diff gates passed in 21.5 measured seconds:
+  `/private/tmp/loopex-m7-maintenance-history-gates-v1.log`, SHA-256
+  `a49f0aa317a432b7164c2998674b72e77762096e294d3527271d8d947be80349`.
+  The first selection failed three fixture constructions because their canonical
+  reply used `{:ok, reply}` instead of the reducer's `{:reply, reply}` tag.
+  Correcting that input preserves all assertions and production settlement
+  behavior. Its failed output remains:
+  `/private/tmp/loopex-m7-maintenance-history-current-dev1.log`, SHA-256
+  `ab26a122b278cf8fc361c9e46796cb6b69785fd5048531edd0148eb5ab534677`.
+  All test/gate handles are terminal and collected. No agent or decision is
+  pending. The active goal continues on m7; successful live compaction remains
+  required.
+
 - Done: select the retained compaction tail through whole-candidate fit probes.
   Validated units remain contiguous; terminal units release oldest-first and
   cannot grow back in the same selection. Explicit origin releases every

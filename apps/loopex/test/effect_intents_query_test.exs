@@ -1,6 +1,7 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/m5_query_fault_store.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.EffectIntentsQueryTest do
   use ExUnit.Case, async: false
@@ -8,6 +9,8 @@ defmodule Loopex.EffectIntentsQueryTest do
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.Runtime
   alias Loopex.Store
+  alias Loopex.ConfiguredGenesisFixture, as: Genesis
+  alias Loopex.Runtime.{MaintenanceConfiguration, SessionState}
 
   defmodule ReadStore do
     @moduledoc false
@@ -565,6 +568,282 @@ defmodule Loopex.EffectIntentsQueryTest do
       Agent.update(reference, &%{&1 | records: records ++ changed})
       assert {:error, :invalid_history} = scan_result(runtime, session)
     end
+  end
+
+  test "complete retained maintenance history advances every page without activation or effects",
+       context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    {records, events} = maintenance_history(session)
+    assert {:ok, replayed} = SessionState.recover(session, records, events)
+    assert replayed.active_maintenance == nil
+    assert replayed.active_run_id == nil
+    install_history(reference, records)
+
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert length(pages) == length(records)
+    assert Enum.map(pages, & &1.scanned_through) == Enum.to_list(1..length(records))
+    assert Enum.all?(pages, &(&1.rows == []))
+    assert List.last(pages).next_cursor == nil
+    assert List.last(pages).through_version == length(records)
+
+    cursor = %{
+      version: 1,
+      runtime_id: "agent-loop-runtime",
+      session_id: session,
+      resume_after_version: List.last(pages).scanned_through,
+      prefix_token: List.last(pages).prefix_token
+    }
+
+    assert {:ok, %{rows: [], next_cursor: nil}} =
+             Runtime.effect_intents(runtime, session, cursor, 16)
+
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+  end
+
+  test "maintenance history refuses malformed captured rows and request byte substitutions",
+       context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    {records, _events} = maintenance_history(session)
+    install_history(reference, records)
+
+    for kind <-
+          ~w(maintenance_episode_admitted_v1 maintenance_request_committed_v1 maintenance_episode_terminal_v1),
+        transform <- [
+          fn row -> Map.put(row, "extra", true) end,
+          fn row -> Map.delete(row, "episode_id") end
+        ] do
+      changed = change_payload(records, kind, transform)
+      Agent.update(reference, &%{&1 | records: changed})
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+
+    for {kind, transform} <- [
+          {"maintenance_episode_admitted_v1", &Map.put(&1, "usage", %{})},
+          {"maintenance_episode_admitted_v1", &Map.put(&1, "preparation_deadline", 60_999)},
+          {"maintenance_episode_admitted_v1",
+           &put_in(&1, ["maintenance_configuration", "digest"], String.duplicate("0", 64))},
+          {"maintenance_episode_admitted_v1",
+           &put_in(&1, ["maintenance_configuration", "instructions"], nil)},
+          {"maintenance_request_committed_v1",
+           &Map.put(&1, "source_digest", String.duplicate("0", 64))},
+          {"maintenance_request_committed_v1",
+           &Map.put(&1, "staged_request_digest", String.duplicate("0", 64))},
+          {"maintenance_request_committed_v1",
+           &put_in(&1, ["request", "canonical_request_bytes"], "changed")},
+          {"maintenance_request_committed_v1", &Map.put(&1, "eligible_unit_count", 0)},
+          {"maintenance_request_committed_v1", &put_in(&1, ["covered_range", "extra"], true)},
+          {"maintenance_request_committed_v1", &put_in(&1, ["covered_range", "unit_count"], 2)},
+          {"maintenance_episode_terminal_v1",
+           &put_in(&1, ["result", "usage", "total_tokens"], 0)},
+          {"maintenance_episode_terminal_v1",
+           &put_in(&1, ["result", "failure", "cause"], "invented")}
+        ] do
+      Agent.update(reference, &%{&1 | records: change_payload(records, kind, transform)})
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+  end
+
+  test "configured refusal counts travel together and do not fabricate effect rows", context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    {records, _} = maintenance_history(session)
+    install_history(reference, records)
+
+    pair = fn row ->
+      Map.merge(row, %{"project_resource_count" => 0, "resource_pack_count" => 0})
+    end
+
+    valid = change_payload(records, "context_admission_refused_v2", pair)
+    Agent.update(reference, &%{&1 | records: valid})
+    assert :complete = scan_result(runtime, session)
+
+    for transform <- [
+          &Map.put(&1, "project_resource_count", 0),
+          &Map.put(&1, "resource_pack_count", 0),
+          &Map.merge(&1, %{"project_resource_count" => -1, "resource_pack_count" => 0}),
+          &Map.merge(&1, %{"project_resource_count" => 0, "resource_pack_count" => "0"})
+        ] do
+      Agent.update(
+        reference,
+        &%{&1 | records: change_payload(records, "context_admission_refused_v2", transform)}
+      )
+
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+  end
+
+  defp change_payload(records, kind, transform),
+    do:
+      Enum.map(records, fn row ->
+        if row.payload.kind == kind, do: %{row | payload: transform.(row.payload)}, else: row
+      end)
+
+  defp install_history(reference, records) do
+    {:ok, transaction} =
+      Store.create_session("agent-loop-runtime", "create-maintenance", hd(records).payload)
+
+    Agent.update(reference, fn state ->
+      %{
+        state
+        | records: records,
+          creation: %{
+            version: 1,
+            runtime_id: state.runtime,
+            command_id: "create-maintenance",
+            session_id: state.session,
+            genesis_version: 3,
+            canonical_create_digest:
+              Base.encode16(transaction.canonical_mutation_digest, case: :lower)
+          }
+      }
+    end)
+  end
+
+  defp maintenance_history(session) do
+    history = [
+      %{
+        journal_version: 1,
+        owner_epoch: 0,
+        owner_incarnation_id: nil,
+        payload: Genesis.genesis([])
+      },
+      %{
+        journal_version: 2,
+        owner_epoch: 1,
+        owner_incarnation_id: "owner",
+        payload: %{
+          :kind => "owner_advanced",
+          "prior_owner_epoch" => 0,
+          "owner_epoch" => 1,
+          "owner_incarnation_id" => "owner",
+          "owner_transaction_id" => "owner-tx"
+        }
+      }
+    ]
+
+    {:ok, state} = SessionState.recover(session, history, [])
+
+    bounds = %{
+      max_turns: 8,
+      token_budget: 10_000,
+      deadline_ms: 60_000,
+      context_token_budget: 8_192
+    }
+
+    {:ok, old} =
+      SessionState.propose(
+        state,
+        %{type: :prompt, command_id: "old", content: "old facts"},
+        bounds
+      )
+
+    {state, history, events} = retain(state, old, history, [])
+
+    {:ok, ended} =
+      SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
+        reason: "model_call_failed"
+      })
+
+    {state, history, events} = retain(state, ended, history, events)
+
+    {:ok, current} =
+      SessionState.propose(
+        state,
+        %{type: :prompt, command_id: "current", content: "protected"},
+        bounds
+      )
+
+    {state, history, events} = retain(state, current, history, events)
+    parent = state.configuration
+
+    selection = %{
+      "model" => parent["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{parent["model_capabilities"] | "reasoning_levels" => ["none"]},
+      "provider_mapping" => %{parent["provider_mapping"] | "thinking_disabled" => true}
+    }
+
+    {:ok, instructions} =
+      MaintenanceConfiguration.capture_instructions(%{
+        "version" => "summary.v1",
+        "body" => "Retain facts"
+      })
+
+    {:ok, admitted} =
+      SessionState.propose_maintenance_episode(
+        state,
+        state.active_run_id,
+        selection,
+        instructions,
+        1_000
+      )
+
+    {state, history, events} = retain(state, admitted, history, events)
+    {:ok, request} = SessionState.propose_maintenance_request(state, 1, 1_001, fn -> :ok end)
+    {state, history, events} = retain(state, request, history, events)
+    captured = state.maintenance_episodes[state.active_maintenance]["request"]
+
+    reply = %{
+      text: "invalid JSON",
+      identity: %{provider: "scripted", model: captured.model, endpoint: "in-process"},
+      usage: %{input_tokens: 37, output_tokens: 19},
+      tool_calls: [],
+      delta_count: 0,
+      streamed: false,
+      provider_response_id: nil,
+      canonical_request_bytes: captured.canonical_request_bytes,
+      staged_request_digest: captured.staged_request_digest,
+      completion: "natural",
+      continuation: nil
+    }
+
+    {:ok, settled} = SessionState.propose_maintenance_attempt_settled(state, {:reply, reply})
+    {state, history, events} = retain(state, settled, history, events)
+
+    {:ok, refused} =
+      SessionState.propose_context_preparation_failure(
+        state,
+        state.active_run_id,
+        :maintenance_summary_invalid
+      )
+
+    {_state, history, events} = retain(state, refused, history, events)
+    {history, events}
+  end
+
+  defp retain(state, proposal, history, events) do
+    rows =
+      proposal.records
+      |> Enum.with_index(state.journal_version + 1)
+      |> Enum.map(fn {payload, version} ->
+        %{
+          payload: payload,
+          journal_version: version,
+          owner_epoch: state.owner_epoch,
+          owner_incarnation_id: state.owner_incarnation_id
+        }
+      end)
+
+    added =
+      proposal.events
+      |> Enum.with_index(state.event_sequence + 1)
+      |> Enum.map(fn {event, sequence} -> Map.put(event, :event_sequence, sequence) end)
+
+    receipt = %{
+      journal_versions: %{
+        first: state.journal_version + 1,
+        last: state.journal_version + length(rows)
+      },
+      event_sequences:
+        if(added == [],
+          do: nil,
+          else: %{first: state.event_sequence + 1, last: state.event_sequence + length(added)}
+        )
+    }
+
+    {:ok, next} = SessionState.commit_proposal(proposal, receipt)
+    {next, history ++ rows, events ++ added}
   end
 
   test "Store-read timeout joins the blocked reader before answering", context do
