@@ -3,6 +3,13 @@
 <a id="concept"></a>
 ## Concept
 
+The [pre-1.0 maintainer override](agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+supersedes this inventory's older-reader, backward-read, migration and
+cross-version rollback promises. Current boundaries retain only their current
+contracts. Historical statements below describe their named revisions;
+current-format restart/replay, authority, uncertainty and backup/restore remain
+required. Compatibility-only archive and accounting probes have been removed.
+
 Every surface Loopex exposes is unfrozen. M6's new embedding and command
 contracts and the exact wire-protocol generations are experimental; the other
 reachable source interfaces in this inventory are described as unstable.
@@ -386,10 +393,8 @@ the root. Ownership acquisition may still write fenced administration before
 replay refuses, so an older reader is not promised zero writes; readiness and
 recovered work require successful replay through the committed head. Removing
 skill files, the app server, or the daemon does not downgrade a root that holds
-their records. The old-binary execution proof for accounting settlements is
-`scripts/provider-accounting-rollback.exs`, described in
-[DEVELOPMENT.md](../../DEVELOPMENT.md). A local executor ledger that a reader
-refuses is preserved, and the
+their records. The pre-1.0 current-contract rule retires the old-binary accounting
+probe. A local executor ledger that a reader refuses is preserved, and the
 [operator recovery procedure](../operator/tools-and-policy.md#operator-tools-reach)
 still requires positive cessation of every old effect authority, or the
 prescribed host reboot, before a fresh root is used.

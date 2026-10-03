@@ -105,6 +105,22 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: remove the separate M2 accounting rollback probe and its exclusive
+  foundation reader test, historical Git checkout/build, launch adaptation,
+  disposable old-root construction and old-reader resource vectors. Current
+  embedding/source-built CLI skill/tool/artifact workflows and current-format
+  recovery with changed or missing admitted snapshots remain in the suite.
+  The remaining five foundation cases passed on both supported toolchains in
+  48.8/56.9 measured seconds including VM startup:
+  - `/private/tmp/loopex-m7-pre1-foundation-current-v1.log`, SHA-256
+    `cafdf69e843ba1de4dcf0d16adcbb312f977f27fd5436566083b2953d0bb7d39`.
+  - `/private/tmp/loopex-m7-pre1-foundation-floor-v1.log`, SHA-256
+    `4a83b5a6f0c9c0856ed10b5ff8d52cc0921060a85128cccbded602693cf046d2`.
+  The removed old-reader case is retired proof, not a passing case. Original
+  tally remains 50 done / 129 todo / 7 retired; added tally is 155 done /
+  12 todo. No provider credential or paid call was used. Current product
+  genesis/receipt/tool-generation/API/protocol removal remains open.
+
 - Done: record the maintainer's pre-1.0 current-contract rule and retire the
   historical cross-version archive runner. Remove its eleven exclusive helpers,
   shell archive fixture and CLI archive-checker suite. Remove old-tag staging
@@ -5413,6 +5429,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Remove the obsolete M2 accounting probe and exclusive old-reader foundation scaffolding; retain both-pair proof of current embedding, CLI, artifact and recovery workflows.
 - [x] Remove the historical cross-version archive lane, its exclusive helpers and fixtures; refuse its retired selector before staging and prove current build/redaction/manifest checks on both supported toolchains.
 - [ ] Remove superseded record/API/protocol readers, tool generations, host fallbacks and compatibility-only fixtures; migrate current callers and retain one current contract at each boundary.
 - [ ] Prove current-format backup/restore and recovery with complete manifests, separate workspace state and exact nonredispatch of unresolved effects.
