@@ -117,6 +117,54 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Read the result of an exact creation command without activating its session
+  or replacing its retained settings with current host defaults.
+
+  ## Technical depth
+
+  The complete genesis must match the normalized original session options.
+  The runtime reads the Store's canonical command binding: changed genesis is
+  `conflict`, malformed input is `unexpected`, and unavailable Store evidence
+  is `store_unavailable`. Runtime loss remains `runtime_unavailable`. This
+  read creates no owner, changes no durable state and resolves no provider,
+  tool registry or credential. It grants no mutation authority.
+  """
+  @spec lookup_create_result(Runtime.t(), binary(), map(), map()) ::
+          {:ok, {:historical, binary()} | :absent | :conflict | :store_unavailable | :unexpected}
+          | {:error, :runtime_unavailable}
+  def lookup_create_result(runtime, command_id, session_options, genesis),
+    do: Runtime.lookup_create_result(runtime, command_id, session_options, genesis)
+
+  @doc """
+  ## Concept
+
+  Read a session's creating-command provenance or a captured runtime creation
+  cut without starting recovered work.
+
+  ## Technical depth
+
+  Closed selectors address a command, a session or a runtime page. Pages retain
+  their captured high-water ordinal and contain at most sixteen ordered rows;
+  only a nil next cursor proves coverage. Projections contain scoped IDs,
+  genesis version and canonical create digest, plus ordinals on page rows.
+  Missing Store support or malformed Store evidence is `store_unavailable`;
+  invalid selectors are `unexpected`. Runtime loss remains a runtime error.
+  This delegates to the existing bounded Store read and adds no Store callback.
+  """
+  @spec creation_provenance(Runtime.t(), map()) ::
+          {:ok,
+           {:historical, map()}
+           | {:page, map()}
+           | :absent
+           | :conflict
+           | :store_unavailable
+           | :unexpected}
+          | {:error, :runtime_unavailable}
+  def creation_provenance(runtime, selector), do: Runtime.creation_provenance(runtime, selector)
+
+  @doc """
+  ## Concept
+
   Resumes a durable session under a fresh Store-backed owner.
 
   ## Technical depth

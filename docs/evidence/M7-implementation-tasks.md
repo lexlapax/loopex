@@ -105,6 +105,29 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: expose the approved `Loopex.lookup_create_result/4` and
+  `Loopex.creation_provenance/2` wrappers over existing exact bounded reads.
+  Their Memory and reopened Local-store tests now use the public facade and
+  current v3 creation only, retiring the older-v2 positive-read loop and default
+  genesis inference comparison. Exact retained creation succeeds despite changed
+  runtime cleanup defaults; changed genesis conflicts and an absent command stays
+  absent. Command/session/page provenance agrees with the canonical create digest,
+  all Store bytes remain unchanged and no coordinator starts. Both supported
+  toolchains passed the two adapter cases in 1.3/2.7 measured seconds:
+  - `/private/tmp/loopex-m7-public-creation-reads-current-v1.log`, SHA-256
+    `7d85bf0561fd9633d16eba1f5f49ab7835139e779b0ea259edbb3c72c0f54c9a`.
+  - `/private/tmp/loopex-m7-public-creation-reads-floor-v1.log`, SHA-256
+    `3413677499e67e37e91aabe71d31656a437c3ef3337c963393d07cb1c48e7b5d`.
+  Original tally remains 50 done / 129 todo / 7 retired; added is 156 done /
+  12 todo. The broader holder-only startup read remains open. The daemon still
+  calls the old three-argument lookup, so removing that implementation joins
+  its current-genesis creation migration; no removal or proof is claimed yet.
+  The single full fast check on exact clean checkpoint
+  `46472d586aec11ddee30e349945d427ad208830d` is live in the verification checkout,
+  handle 17705, complete output `/private/tmp/loopex-m7-46472d58-fast-check.log`.
+  It predates these public-wrapper bytes; retain its digest only after terminal
+  completion and do not use it as proof of this later child.
+
 - Done: remove the separate M2 accounting rollback probe and its exclusive
   foundation reader test, historical Git checkout/build, launch adaptation,
   disposable old-root construction and old-reader resource vectors. Current
@@ -5163,6 +5186,8 @@ or check was relaxed.
 - [ ] Later retain the required attended multi-prompt proof.
 
 ### Added implementation subtasks
+
+- [x] Expose the approved exact-create/provenance public facade reads; retire older-generation positive-read scaffolding and prove unchanged Store bytes and zero activation through current-genesis Memory/Local recovery on both supported pairs.
 
 - [ ] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
 - [ ] Implement the approved new-chat physical workspace binding; require it for current-format chat resume and prove retained identity conflicts, symlink retargeting and physical replacement before activation. The superseded legacy-unbound exception and older-root migration are retired.

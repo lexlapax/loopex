@@ -223,12 +223,26 @@ claiming that the run finished.
 | --- | --- |
 | Runtime | `start_link/1`, `stop/1`, `version/0` |
 | Sessions | `create_session/3`, `resume_session/3`, `session_status/2` |
+| Creation evidence | `lookup_create_result/4`, `creation_provenance/2` |
 | Session directory | `state_root/0` (reads `LOOPEX_HOME`), `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, `resume_known_session/4` |
 | Attachment | `attach/2`, `attach/3`, `command/2`, `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`, `diagnostic/2` |
 | Project skills | `resource_catalog/2`, `read_resource/3` |
 | Artifacts | `open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` |
 | Diagnostics | `trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` |
 | Recovery | `reconciliation_query/1`, `reconcile/2`, `prepare_resume_session/3`, `prepare_resume_known_session/4`, `prepared_session_configuration/1`, `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3` |
+
+`lookup_create_result/4` takes the runtime, command ID, original session
+options and complete retained genesis. It compares the exact canonical Store
+binding without activating a coordinator or resolving current defaults,
+catalogs, tools or credentials. Its observations are `{:historical, session_id}`,
+`absent`, `conflict`, `store_unavailable` or `unexpected`, wrapped in `{:ok, ...}`;
+runtime loss returns `{:error, :runtime_unavailable}`.
+
+`creation_provenance/2` reads a closed command, session or runtime-page selector.
+A page contains at most sixteen creating-command projections and retains its
+first high-water ordinal; only a nil next cursor proves complete coverage.
+These public reads grant no mutation authority and add no Store callback.
+They were explicitly approved by the maintainer on 2026-10-02.
 
 `create_session/3` and `resume_session/3` require a `:command_id`; an exact
 re-presentation returns the retained result, and changed content under the same

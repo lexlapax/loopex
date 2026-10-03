@@ -292,13 +292,12 @@ defmodule Loopex.Runtime do
 
   ## Technical depth
 
-  ADR 0046's host-private recovery query validates the complete retained v2/v3
+  The public exact recovery query validates the complete retained
   genesis and requires its normalized options to equal `session_options`.
   Control constructs the exact Store transaction purely and reads its command
   binding. Changed genesis returns `:conflict`; malformed input is `:unexpected`.
   Store uncertainty stays `:store_unavailable`. No catalog, registered generation,
   provider route, coordinator activation or mutation is needed for this read.
-  The three-argument query retains its existing current-default behavior.
   """
   @spec lookup_create_result(t(), binary(), map(), map()) ::
           {:ok, {:historical, binary()} | :absent | :conflict | :store_unavailable | :unexpected}
