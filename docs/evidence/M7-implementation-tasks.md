@@ -107,6 +107,19 @@ did not resolve them. No paid provider calls were made during this check.
 
 
 
+- Running: the full current-pair integration check started once on exact clean
+  implementation `5036d2d9675483025fa3ab98c4431844d5b072cb`, including
+  request/receipt retirement and the recovered-policy pause/startup checks.
+  Detached verification worktree
+  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`; complete streaming output
+  `/private/tmp/loopex-m7-5036d2d9-fast-check.log`. The header binds the exact
+  SHA and `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`; the eventual footer records
+  terminal exit and measured duration. Live wrapper handle `88650` must be
+  collected before hashing. No result/digest is claimed while running; retain
+  any failure and do not rerun the same bytes. Primary-checkout changes after
+  that SHA are outside this proof. Original tally remains 50 done / 129 todo /
+  7 retired; added tally is 171 done / 10 todo, including this new check.
+
 - Done: join prepared chat resume to the exact retained policy-question
   identity/revision and every already-admitted model's provider route. The
   checks resolve no current catalog aliases or credentials, preserve captured
