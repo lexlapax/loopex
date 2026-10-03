@@ -674,6 +674,40 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Read retained startup facts before a prepared session starts. The trusted
+  holder can check host workspace, policy and routing selections against the
+  work already admitted by the session.
+
+  ## Technical depth
+
+  The closed capture contains exact genesis session_options, the unresolved
+  policy question's pending_policy_identity, and sorted unique admitted_models
+  and admitted_workspace_refs. Models come from admitted run configuration and
+  staged provider work; workspace references come from pending effect intents.
+  An answered policy question retains its binding until reevaluation resolves
+  it. Model-tool questions have no policy binding. Incomplete required facts
+  refuse as prepared_startup_unavailable; unrepresentable complete captures
+  refuse as prepared_startup_too_large under the 65,536-byte plain-data ceiling.
+  The current-holder, unspent-capability and current-owner fences are the same
+  as prepared_session_configuration/1. This read spends no activation, changes
+  no fact and dispatches no work. It contains no credentials, routing handles,
+  private continuation, processes, monitors or capabilities and supplies no
+  current host defaults. This local read is not a wire or diagnostic projection.
+  """
+  @spec prepared_session_startup(ResumeActivation.t()) ::
+          {:ok,
+           %{
+             session_options: map(),
+             pending_policy_identity: map() | nil,
+             admitted_models: [binary()],
+             admitted_workspace_refs: [binary()]
+           }}
+          | {:error, term()}
+  def prepared_session_startup(activation), do: ResumeActivation.startup(activation)
+
+  @doc """
+  ## Concept
+
   Lets a prepared owner resume its recovered work, once.
 
   ## Technical depth

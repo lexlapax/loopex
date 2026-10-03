@@ -356,6 +356,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
       do: safe_call(coordinator, {:prepared_configuration, owner, capability}, :infinity)
 
   @doc false
+  @spec prepared_startup(pid(), owner(), reference()) :: {:ok, map()} | {:error, term()}
+  def prepared_startup(coordinator, owner, capability)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability),
+      do: safe_call(coordinator, {:prepared_startup, owner, capability}, :infinity)
+
+  @doc false
   @spec abandon_resume(pid(), owner(), reference()) :: :ok | {:error, term()}
   def abandon_resume(coordinator, owner, capability)
       when is_pid(coordinator) and is_map(owner) and is_reference(capability),
@@ -733,6 +739,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
         }
 
         with {:ok, _bytes} <- Store.admit_bounded(capture), do: {:ok, capture}
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:prepared_startup, supplied_owner, capability}, {caller, _tag}, state) do
+    reply =
+      with {:ok, _prepared} <- prepared_holder(state, supplied_owner, capability, caller) do
+        SessionState.prepared_startup_capture(state.durable)
       end
 
     {:reply, reply, state}

@@ -229,7 +229,7 @@ claiming that the run finished.
 | Project skills | `resource_catalog/2`, `read_resource/3` |
 | Artifacts | `open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` |
 | Diagnostics | `trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` |
-| Recovery | `reconciliation_query/1`, `reconcile/2`, `prepare_resume_session/3`, `prepare_resume_known_session/4`, `prepared_session_configuration/1`, `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3` |
+| Recovery | `reconciliation_query/1`, `reconcile/2`, `prepare_resume_session/3`, `prepare_resume_known_session/4`, `prepared_session_configuration/1`, `prepared_session_startup/1`, `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3` |
 
 `lookup_create_result/4` takes the runtime, command ID, original session
 options and complete retained genesis. It compares the exact canonical Store
@@ -844,6 +844,24 @@ digest. Legacy v2 configuration and selection remain nil. The read changes no
 session fact and schedules no work. Transferring the capability revokes the former
 holder's access; abandonment, activation, abort and supersession refuse later
 reads through the same holder and current-owner checks.
+
+The separate `prepared_session_startup/1` read returns exactly four facts:
+`session_options`, `pending_policy_identity`, `admitted_models` and
+`admitted_workspace_refs`. Options are the exact normalized genesis options;
+Core does not interpret a host workspace binding as authority. Pending policy
+identity survives an admitted answer until policy reevaluation resolves the
+question. Model-tool questions have no policy binding. The sorted unique model
+identities come from admitted pending runs and staged provider work. Workspace
+identities come from pending effect intents; completed historical effects add
+neither a workspace nor a routing requirement. Current launch defaults supply
+none of these facts. Unknown or corrupt required capture returns
+`prepared_startup_unavailable`. The whole capture fits the same plain-data
+65,536-byte ceiling; an unrepresentable capture returns
+`prepared_startup_too_large`, without truncation. The read shares the existing
+holder/owner fences and neither spends activation nor mutates or dispatches
+work. It exposes no private continuation, credentials or routing handles and
+leaves the prepared configuration result unchanged. This separate public read
+was approved by the maintainer on 2026-10-02.
 
 Activating a prepared owner is the host's statement that the process which
 dispatched the last effect is gone, so the coordinator settles that effect

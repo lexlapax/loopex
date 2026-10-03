@@ -105,6 +105,53 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: implement the approved separate `prepared_session_startup/1` read.
+  Replay retains exact normalized genesis options. The serial owner reads those
+  options, unresolved policy identity including an answered question awaiting
+  reevaluation, pending admitted/staged model identities and pending effect
+  workspace identities. Arrays are sorted/unique; completed effects add no
+  startup requirement. Missing/corrupt required facts refuse without supplying
+  host defaults. The result contains no private continuation or authority
+  handles and shares the existing capability-holder/current-owner fences.
+  The full capture admits exactly 65,536 bytes and refuses one byte above;
+  there is no truncation. Existing prepared configuration stays four fields.
+  Restart with changed host defaults, both policy states, actual retained intent
+  before dispatch, nonholder/transfer/spent/abandoned/aborted/superseded reads,
+  corrupt required fields and private-continuation exclusion are proved. The
+  combined startup/configuration/v3-genesis suites passed 35 cases on each pair,
+  in 2.9/2.6 measured seconds including VM startup:
+  - `/private/tmp/loopex-m7-prepared-startup-current-v3.log`, SHA-256
+    `5f950beb73a75ed3e567bf4d2ebb2d4968bc3b4d9e3c3b1303fee37fd208fff1`.
+  - `/private/tmp/loopex-m7-prepared-startup-floor-v3.log`, SHA-256
+    `c37b80edd7cff35ee146520429f2ffd0d0fa07149a0b1f3d92fa15bb52f22831`.
+  The first run passed assertions but failed warnings-as-errors: its contextual
+  fixture omitted required decide/1. The fixture now implements that callback.
+  Failed output `/private/tmp/loopex-m7-prepared-startup-current-v1.log`, SHA-256
+  `6eadf9b6aafa9bf72c160bffdb9e0d4a3016ba9373e06a8bb28adfbbea8105cb`.
+  The intermediate successful current v2 run also emitted an unexpected
+  Task.Supervisor shutdown_error/noproc report while stopping answered policy
+  reevaluation. This remains the existing open T16 task, not a repaired defect:
+  `/private/tmp/loopex-m7-prepared-startup-current-v2.log`, SHA-256
+  `61ed26c7484f695e2b125d2b2a482831b37ba4e7351ecc25d118747f970159ad`.
+  Final fault-injection runs intentionally report killed coordinators; no
+  production diagnostics are suppressed. Public chat wiring, physical binding
+  and diagnostic settings admission remain open. Original tally remains
+  50 done / 129 todo / 7 retired; added tally is 158 done / 11 todo.
+
+- Done: the single full fast check on exact clean checkpoint
+  `46472d586aec11ddee30e349945d427ad208830d` exited 0 after 1,368.0 measured
+  seconds. All eleven application suites passed under the prescribed exclusions;
+  CLI passed 531 cases and the prior chat-output setup failure is absent on
+  these changed bytes. Complete output
+  `/private/tmp/loopex-m7-46472d58-fast-check.log`, SHA-256
+  `a1f3f4c7f5811b3a4b5de17713b70dde5ffb60d6a05eadb639dad3c08df99c32`.
+  Its terminal handle was collected before hashing. This proves its checkpoint,
+  not the later public-read or startup-read children. No check or agent is live.
+  The next integrated chat/startup candidate requires its own single fast check;
+  floor closure matrix, release proof and the remaining original outcomes stay
+  open. Next work is the approved current-chat physical workspace binding and
+  owner-only redacted settings path, then public command startup integration.
+
 - Done: expose the approved `Loopex.lookup_create_result/4` and
   `Loopex.creation_provenance/2` wrappers over existing exact bounded reads.
   Their Memory and reopened Local-store tests now use the public facade and
@@ -5189,7 +5236,7 @@ or check was relaxed.
 
 - [x] Expose the approved exact-create/provenance public facade reads; retire older-generation positive-read scaffolding and prove unchanged Store bytes and zero activation through current-genesis Memory/Local recovery on both supported pairs.
 
-- [ ] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
+- [x] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
 - [ ] Implement the approved new-chat physical workspace binding; require it for current-format chat resume and prove retained identity conflicts, symlink retargeting and physical replacement before activation. The superseded legacy-unbound exception and older-root migration are retired.
 
 - [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, captured invocation bounds and queued-run inheritance, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
@@ -5474,6 +5521,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Run the full fast check once on the clean committed pre-1.0 retirement and chat-output synchronization checkpoint; retain exact SHA and terminal output/digest without claiming later public/startup reads are covered.
 
 - [x] Acquire the owner-exit chat fixture writer synchronously before inducing loss; preserve exact DOWN reasons and receive deadlines, retaining failed parent evidence and both-pair focused proof.
 

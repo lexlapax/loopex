@@ -56,6 +56,14 @@ defmodule Loopex.ResumeActivation do
 
   def configuration(_activation), do: {:error, :invalid_resume_activation}
 
+  @doc false
+  @spec startup(t()) :: {:ok, map()} | {:error, term()}
+  def startup(%__MODULE__{coordinator: coordinator, owner: owner, capability: capability})
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability),
+      do: SessionCoordinator.prepared_startup(coordinator, owner, capability)
+
+  def startup(_activation), do: {:error, :invalid_resume_activation}
+
   @doc """
   ## Concept
 

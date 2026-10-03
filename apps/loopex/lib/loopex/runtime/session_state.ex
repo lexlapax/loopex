@@ -44,6 +44,8 @@ defmodule Loopex.Runtime.SessionState do
   or promotion, and `charged` accumulates that run's token charge with the
   source that produced it.
 
+  `session_options` retains the exact normalized genesis options, without
+  interpreting a host's workspace binding or treating it as authority.
   `configuration`, `tool_selection` and `policy_defer_mode` retain v3 genesis
   truth. V2 keeps nil configuration/selection and its historical admit mode;
   resolving its tool history or explicitly migrating a settled empty session
@@ -186,6 +188,7 @@ defmodule Loopex.Runtime.SessionState do
           owner_incarnation_id: binary() | nil,
           owner_transaction_id: binary() | nil,
           journal_version: non_neg_integer(),
+          session_options: map() | nil,
           configuration: map() | nil,
           tool_selection: map() | nil,
           policy_defer_mode: binary(),
@@ -221,6 +224,7 @@ defmodule Loopex.Runtime.SessionState do
             owner_incarnation_id: nil,
             owner_transaction_id: nil,
             journal_version: 0,
+            session_options: nil,
             configuration: nil,
             tool_selection: nil,
             policy_defer_mode: "admit",
@@ -709,6 +713,109 @@ defmodule Loopex.Runtime.SessionState do
     work
     |> Map.values()
     |> Enum.sort_by(&Map.fetch!(&1, :run_id))
+  end
+
+  # Concept: a prepared host compares retained startup facts before work starts.
+  # Technical depth: this is a plain projection of replayed options and work,
+  # excluding completed effects and current launch defaults. The coordinator
+  # must establish its holder/owner fence before returning this capture.
+  @doc false
+  @spec prepared_startup_capture(t()) :: {:ok, map()} | {:error, atom()}
+  def prepared_startup_capture(%__MODULE__{} = state) do
+    with true <- is_map(state.session_options) and not is_struct(state.session_options),
+         {:ok, policy} <- startup_policy(state),
+         {:ok, models, workspaces} <- startup_work(state) do
+      capture = %{
+        session_options: state.session_options,
+        pending_policy_identity: policy,
+        admitted_models: models |> Enum.uniq() |> Enum.sort(),
+        admitted_workspace_refs: workspaces |> Enum.uniq() |> Enum.sort()
+      }
+
+      case Store.admit_bounded(capture) do
+        {:ok, _bytes} -> {:ok, capture}
+        {:error, _unrepresentable} -> {:error, :prepared_startup_too_large}
+      end
+    else
+      _incomplete -> {:error, :prepared_startup_unavailable}
+    end
+  end
+
+  defp startup_policy(%{open_interaction: nil}), do: {:ok, nil}
+
+  defp startup_policy(%{interactions: interactions} = state) when is_map(interactions) do
+    case open_interaction_record(state) do
+      %{producer: "model_tool", policy_identity: nil, status: "pending"} ->
+        {:ok, nil}
+
+      %{policy_identity: %{"id" => id, "revision" => revision} = policy, status: status}
+      when status in ["pending", "answered"] and map_size(policy) == 2 ->
+        if startup_identity?(id, 256) and startup_identity?(revision, 256),
+          do: {:ok, policy},
+          else: :error
+
+      _unavailable ->
+        :error
+    end
+  end
+
+  defp startup_policy(_state), do: :error
+
+  defp startup_work(%{pending_work: work, run_configurations: configurations})
+       when is_map(work) and is_map(configurations) do
+    Enum.reduce_while(work, {:ok, [], []}, fn
+      {run, %{stage: stage} = pending}, {:ok, models, refs} when is_binary(stage) ->
+        with %{"model" => model} <- configurations[run],
+             true <- startup_identity?(model, 512),
+             {:ok, staged_models} <- startup_request_models(pending),
+             {:ok, workspace_refs} <- startup_workspace_refs(pending) do
+          {:cont, {:ok, [model | staged_models] ++ models, workspace_refs ++ refs}}
+        else
+          _unavailable -> {:halt, :error}
+        end
+
+      _unavailable, _acc ->
+        {:halt, :error}
+    end)
+  end
+
+  defp startup_work(_state), do: :error
+
+  defp startup_request_models(work) do
+    request =
+      case Map.fetch(work, :request) do
+        :error -> :absent
+        {:ok, %{model: model}} -> model
+        _invalid -> :invalid
+      end
+
+    staged =
+      case Map.fetch(work, :staged) do
+        :error -> :absent
+        {:ok, %{request: %{model: model}}} -> model
+        _invalid -> :invalid
+      end
+
+    models = Enum.reject([request, staged], &(&1 == :absent))
+
+    if Enum.all?(models, &startup_identity?(&1, 512)), do: {:ok, models}, else: :error
+  end
+
+  defp startup_workspace_refs(%{stage: "effect_dispatched", job: job, grant: grant})
+       when is_map(job) and is_map(grant) do
+    reference = Map.get(job, :workspace_ref)
+
+    if startup_identity?(reference, 256),
+      do: {:ok, [reference]},
+      else: :error
+  end
+
+  defp startup_workspace_refs(%{stage: "effect_dispatched"}), do: :error
+  defp startup_workspace_refs(_work), do: {:ok, []}
+
+  defp startup_identity?(value, limit) do
+    is_binary(value) and byte_size(value) in 1..limit and String.valid?(value) and
+      not String.contains?(value, <<0>>)
   end
 
   @doc """
@@ -2876,6 +2983,7 @@ defmodule Loopex.Runtime.SessionState do
            state
            | journal_version: 1,
              cleanup_grace_ms: grace,
+             session_options: genesis["options"],
              configuration: genesis["initial_configuration"],
              tool_selection: genesis["tool_selection"],
              policy_defer_mode: Map.get(genesis, "policy_defer_mode", "admit")
