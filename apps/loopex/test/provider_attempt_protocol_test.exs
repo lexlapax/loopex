@@ -5747,16 +5747,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         )
 
       expected =
-        cond do
-          not MapSet.member?(valid, cell) ->
-            {:error, :invalid_attempt_settlement}
-
-          result_tag == :unreadable and accounting_tag in [:reported_pair, :reported_other] ->
-            {:error, :ambiguous_legacy_provider_accounting}
-
-          true ->
-            :ok
-        end
+        if MapSet.member?(valid, cell), do: :ok, else: {:error, :invalid_attempt_settlement}
 
       assert ProviderAttempt.validate_settled(record) == expected,
              "settlement cell #{inspect(cell)} expected #{inspect(expected)}"
@@ -5795,9 +5786,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     combination_five =
       for attempt <- attempts,
           termination <- [nil, "abort", "deadline"],
-          accounting <- [:reported_pair, :reported_other, :estimated] do
-        {attempt, "dispatched_or_unknown", termination, :unreadable, "none", "terminal",
-         accounting}
+          {result, accounting} <- [
+            {:unreadable, :estimated},
+            {:unreadable_compacted, :reported_pair}
+          ] do
+        {attempt, "dispatched_or_unknown", termination, result, "none", "terminal", accounting}
       end
 
     MapSet.new(
@@ -5828,7 +5821,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       :reply_plain_reported,
       :reply_plain_bare,
       :failed,
-      :unreadable
+      :unreadable,
+      :unreadable_compacted
     ]
 
   defp settlement_accounting_tags, do: [:none, :reported_pair, :reported_other, :estimated]
@@ -5846,14 +5840,31 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       "next" => next,
       "result" => settlement_result(result_tag),
       "accounting" => settlement_accounting(tag),
-      "kind" => "model_attempt_settled_v1"
+      "kind" => "model_attempt_settled_v3"
     }
   end
 
   defp settlement_result(:failed), do: %{"kind" => "error", "category" => "model_call_failed"}
 
   defp settlement_result(:unreadable),
-    do: %{"kind" => "error", "category" => "unreadable_model_answer"}
+    do: %{
+      "kind" => "error",
+      "category" => "unreadable_model_answer",
+      "accounting_evidence" => %{"kind" => "none"}
+    }
+
+  defp settlement_result(:unreadable_compacted),
+    do: %{
+      "kind" => "error",
+      "category" => "unreadable_model_answer",
+      "accounting_evidence" => %{
+        "kind" => "validated_reply_compaction_v1",
+        "usage" => %{"status" => "reported", "input_tokens" => 3, "output_tokens" => 2},
+        "dimension" => "record_bytes",
+        "observed" => 65_537,
+        "limit" => 65_536
+      }
+    }
 
   defp settlement_result(tag) do
     calls =
@@ -5869,6 +5880,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     %{
       "kind" => "reply",
       "reply" => %{
+        "completion" => "unknown",
+        "continuation" => nil,
         "text" => "answer",
         "identity" => %{
           "provider" => "scripted",

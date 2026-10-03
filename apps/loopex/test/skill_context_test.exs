@@ -546,7 +546,7 @@ defmodule Loopex.SkillContextTest do
 
     before_restart = Fixture.records(context.fixture, context.session)
     assert Enum.count(before_restart, &(&1.payload.kind == "model_attempt_opened_v1")) == 1
-    refute Enum.any?(before_restart, &(&1.payload.kind == "model_attempt_settled_v1"))
+    refute Enum.any?(before_restart, &(&1.payload.kind == "model_attempt_settled_v3"))
 
     assert :ok = Loopex.stop(context.fixture.runtime)
     {:ok, store} = Store.new(Loopex.M1RuntimeTestStore, context.fixture.store)

@@ -140,7 +140,7 @@ defmodule Loopex.ConfiguredSessionTest do
                  Fixture.events(restarted, session)
                )
 
-      assert recovered.provider_settlement_version == 3
+      assert recovered.active_run_id == nil
       assert AgentLoopTestModel.dispatched(restarted.model) == []
       assert SessionState.run_configuration(recovered, hd(recovered.run_order)) == captured
     end
@@ -208,7 +208,7 @@ defmodule Loopex.ConfiguredSessionTest do
                  Fixture.events(fixture, session)
                )
 
-      assert recovered.provider_settlement_version == 3
+      assert recovered.active_run_id == nil
     end
   end
 

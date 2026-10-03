@@ -213,7 +213,6 @@ defmodule Loopex.Runtime.SessionState do
           resources: map() | nil,
           run_resources: map(),
           charged: map(),
-          provider_settlement_version: 1 | 2 | 3,
           interactions: map(),
           open_interaction: binary() | nil,
           expected_events: [map()]
@@ -267,7 +266,6 @@ defmodule Loopex.Runtime.SessionState do
             charged: %{},
             # ADRs 0021/0044 permit monotonic v1, v2, then v3 cutovers. This is
             # reconstructed from settled rows, never from runtime configuration.
-            provider_settlement_version: 1,
             # The cleanup period this session declares, which ADR 0009 makes a
             # session configuration value with a default rather than something
             # read back from whatever the hand happened to report. The run's
@@ -3103,8 +3101,6 @@ defmodule Loopex.Runtime.SessionState do
               "model_request_committed_resources_v1",
               "model_request_committed_resources_v2",
               "model_attempt_opened_v1",
-              "model_attempt_settled_v1",
-              "model_attempt_settled_v2",
               "model_attempt_settled_v3",
               "model_termination_admitted_v1",
               "effect_intent_committed",
@@ -3962,22 +3958,17 @@ defmodule Loopex.Runtime.SessionState do
   # complete in one row because neither ends the run.
   defp apply_internal_record(state, %{kind: kind} = record)
        when kind in [
-              "model_attempt_settled_v1",
-              "model_attempt_settled_v2",
               "model_attempt_settled_v3"
             ] do
     with :ok <- ProviderAttempt.validate_settled(record),
-         :ok <- settlement_version_order(state, kind),
          run_id = record["run_id"],
          %{stage: "model_attempt_open", request: request} = work <-
            Map.get(state.pending_work, run_id),
          true <- attempt_identity_matches?(record, run_id, work, request),
          :ok <- settlement_request_agrees?(state, record, run_id, request),
          true <- settlement_termination_agrees?(state, run_id, work, record) do
-      version = settlement_version(kind)
-
       apply_attempt_settlement(
-        %{state | provider_settlement_version: version},
+        state,
         run_id,
         work,
         record
@@ -5349,26 +5340,11 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp settlement_request_agrees?(_, _, _, _), do: :ok
-
   defp continuation_required?(state, run_id) do
     case run_configuration(state, run_id) do
       nil -> false
       configuration -> configuration["provider_mapping"]["continuation_required"]
     end
-  end
-
-  defp settlement_version("model_attempt_settled_v1"), do: 1
-  defp settlement_version("model_attempt_settled_v2"), do: 2
-  defp settlement_version("model_attempt_settled_v3"), do: 3
-
-  # Concept: committing a new settlement generation is a one-way session cutover.
-  # Technical depth: retries and error-only v3 settlements advance the same
-  # generation marker; v1/v2 remain readable only before that first v3 row.
-  defp settlement_version_order(%{provider_settlement_version: current}, kind) do
-    if settlement_version(kind) < current,
-      do: {:error, :provider_settlement_version_downgrade},
-      else: :ok
   end
 
   defp apply_attempt_settlement(state, run_id, work, %{"next" => "retry"} = record) do

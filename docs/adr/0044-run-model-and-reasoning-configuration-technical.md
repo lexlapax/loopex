@@ -489,18 +489,23 @@ process handle or arbitrary dependency metadata enters either form.
 
 `bounded_canonical_reply_v3` removes only the echoed `canonical_request_bytes`
 from v3, retaining its other ten fields exactly. `model_attempt_settled_v3`
-keeps the twelve outer fields and accepts that reply variant. ADR 0021 already
-owns v2; never reinterpret v2 records as carrying v3 replies. Preserve its
+keeps the twelve outer fields and accepts that reply variant. ADR 0021's
+historical v2 remains the source of the accounting provenance rule. Preserve its
 compact `accounting_evidence` member and closed relations under the new kind.
 M7 writes `model_attempt_settled_v3` for every newly committed ordinary
 settlement, including error-only, nil-continuation, unreadable and validated
 reply compaction. A maintenance settlement is ADR 0043's separate maintenance
 settlement kind; it carries the same v3 reply, result and accounting members
-under `episode_id` and summary ordinal. Historical v1/v2 kinds are read-only under their original validators, including
-when an older request later receives a new v3 settlement. This explicitly amends
-ADR 0021's v2-only writer clause. Within each session the first v3 settlement or maintenance settlement is
-a monotonic cutover: no later newly appended v1/v2 settlement is valid. Historical
-earlier versions remain readable; recovery validates that ordering.
+under `episode_id` and summary ordinal. This explicitly amends ADR 0021's
+v2-only writer clause. Under the maintainer's
+[pre-1.0 current-contract rule](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02),
+only `model_attempt_settled_v3` is admitted. Retired v1/v2 kinds refuse at the
+record decoder and in recovered private history, whether first or later in that
+history. Their validators, ambiguity-only accounting branches and monotonic
+cross-generation cutover state are removed. The v3 decoder directly validates
+all ten retained reply members, complete accounting evidence and verdict
+relations; current restart/replay and solicited effect reconciliation remain
+required. No old-root reader or automatic settlement migration is promised.
 An exact nine-member v2 adapter reply is still admissible when the staged
 request requires no continuation, including eligible legacy requests and maintenance requests. V2 requires all nine
 keys, including `provider_response_id` even when nil; an eight-key reply is

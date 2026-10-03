@@ -106,6 +106,51 @@ did not resolve them. No paid provider calls were made during this check.
 ## Current work
 
 
+
+- Done: retire provider settlement v1/v2 decoders, their legacy ambiguity-only
+  accounting branches and session cutover bookkeeping. The current v3 decoder
+  directly checks all retained reply members and complete accounting evidence.
+  Owner replay and effect-history projection admit only the current settlement
+  kind; old kinds refuse as invalid private history even at the start of a
+  history. The obsolete request-agreement bypass is removed. The exclusive M3
+  historical-reader interaction test, extraction/compiler/replay helpers,
+  legacy request/receipt rewrites and old revision constant are deleted under
+  the accepted pre-1.0 override. Current interaction, skill-context and exact
+  configured-session restart cases remain. The verdict matrix now names current
+  v3 error shapes and includes an independent positive compaction-evidence cell
+  with reported accounting, alongside ordinary unreadable estimated accounting.
+  ADR 0044 and the active plan pair record the same current-only settlement
+  decision. Other request/genesis/callback/API readers remain T15 work.
+  Focused checks passed with warnings as errors on both supported pairs:
+  153 settlement/accounting/configured/interaction/skill tests (37.8/37.6 measured
+  suite seconds), plus 8 effect-history query conformance/cleanup cases (1.7/1.7).
+  Formatting, warning-free compilation, documentation ordering and structure
+  gates passed. All terminal handles were collected before hashing outputs.
+  The b7a8f19e full fast check predates these bytes; the combined settings-report
+  and settlement retirement needs a new clean committed integration candidate.
+
+  | Check | Complete output | SHA-256 |
+  | --- | --- | --- |
+  | compile-v1 | `/private/tmp/loopex-m7-current-settlement-compile-v1.log` | `2b1d790e8c0fc0769aec74fefb9e6bfd7c5dea81dd8d964a5284eb4a8c42f406` |
+  | current-v1 | `/private/tmp/loopex-m7-current-settlement-current-v1.log` | `2c4e10c0c60937efc23a9ac50bf33f0626fce14ab815d8ab203d027497343516` |
+  | current-v2 | `/private/tmp/loopex-m7-current-settlement-current-v2.log` | `89d61db8ca4b91aca2d9f014dc4470ef03b58d03a9d3ca311dece2d7d68b081c` |
+  | current-v3 | `/private/tmp/loopex-m7-current-settlement-current-v3.log` | `3dc907660ffcdda65ca94eb14dbf65328881d74b5c1d93c58b7fd0df49def8fe` |
+  | floor-v1 | `/private/tmp/loopex-m7-current-settlement-floor-v1.log` | `770f0e8f799e602e7bc55652a0b482f48239f904f66314c2c82f0a0a9542a79d` |
+  | floor-v2 | `/private/tmp/loopex-m7-current-settlement-floor-v2.log` | `0e653ea3c4c572d7ccf11f4d597208d21222eb945a9b154dd9116c7e071c0b88` |
+  | query-current-v1 | `/private/tmp/loopex-m7-current-settlement-query-current-v1.log` | `fd53d00f760c6d499cacb9c7356bac26f2b1510b180fc674ffe40d4cd4d95e9d` |
+  | query-floor-v1 | `/private/tmp/loopex-m7-current-settlement-query-floor-v1.log` | `08cf42c66c79927a97e05394cd91b7cc2efa642903b6990cc40c0c9f5b24963c` |
+  | docs-v1 | `/private/tmp/loopex-m7-current-settlement-docs-v1.log` | `239ac08e330c92ee62e817282ab07e7339a120d7b26d08e79455fafaaccde797` |
+  | structure-v1 | `/private/tmp/loopex-m7-current-settlement-structure-v1.log` | `37be54b486f41ba1b4a94e64827fa6f918a73be4ada0051c7919cf120477290a` |
+
+  Current development v1 failed three stale expectations: retired-kind replay
+  now uses invalid_private_history, and the old ambiguity error/table no longer
+  describes current accounting evidence. Current v2 and floor v1 passed their
+  assertions but exited 1 on the leftover unused historical-reader revision
+  constant; they are failures, not passes. Final v3/floor v2 remove it and retain
+  all current verdict, accounting and replay obligations. The observed
+  Task.Supervisor shutdown_error/noproc diagnostic remains the open T16
+  investigation, including the development output here.
+
 - Done: the one full fast check on exact clean repair checkpoint
   `b7a8f19ed47d325b2e73a3c02fc7b08509856f96` completed with exit 0 in
   917.2 measured seconds. All eleven application suites passed with their
@@ -5705,6 +5750,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Remove provider settlement v1/v2 readers, legacy accounting branches, cutover state and exclusive historical-reader interaction fixtures; prove current v3 verdict/accounting/source/terminal/restart and effect-query obligations on both toolchains.
 - [x] Remove the obsolete M2 accounting probe and exclusive old-reader foundation scaffolding; retain both-pair proof of current embedding, CLI, artifact and recovery workflows.
 - [x] Remove the historical cross-version archive lane, its exclusive helpers and fixtures; refuse its retired selector before staging and prove current build/redaction/manifest checks on both supported toolchains.
 - [x] Retire shipped 1.0 read/search definitions, their capability/vector/dispatch support and default-selection shim; migrate current callers and fixtures, prove exact current identities, all tool subsets, retired-version refusal, inline/spill/range restart and unchanged path/budget/context/cleanup obligations on both supported pairs.
@@ -5727,6 +5773,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Run the combined owner-only settings-report and current-only settlement integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 - [x] Run the full fast check once on the clean committed current-only tool and prepared-chat binding checkpoint; retain exact SHA, terminal output, measured duration and SHA-256 without claiming later changes are covered.
 - [x] Migrate remaining executor/composition fixtures to current tool identities and remove their retired-generation positive cases; preserve retention, receipt, preflight and settlement bounds.
 - [x] Replace the trace rate-window comparison with fresh physical delivery from each prompt under the original receive allowance; preserve session identity and exact actor joins.
@@ -5823,7 +5870,7 @@ before a provider demonstration.
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers, live exact create, exact lookup and provenance queries implemented; helper host integration pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
 | Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound staging, bounded expansion, v1 nil-only compatibility and streamed/buffered native rendering implemented |
-| Model reply and settlement | ADR 0044 | Bounded reply v3; model_attempt_settled_v3; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |
+| Model reply and settlement | ADR 0044 | Bounded reply v3; current-only model_attempt_settled_v3; retired v1/v2 readers and cutover state; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Nine ordinary adapter mappings registered with both native transports, per-cell streaming/bound/disclosure and canonical terminal-history conformance; host integration, separate summarizer and live witnesses pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Core startup capture and durable/ephemeral instruction forwarding implemented; model routing, episode capture, checkpoint and compaction pending |
 | Question lifecycle | ADR 0045 | model_tool/policy_defer producer; bounded choice/text/decline; atomic disposition/result | Interaction; SessionState; SessionCoordinator; host responder | Durable Core lifecycle/replay, public ephemeral questions and joined one-call responder implemented; wire and attended evidence pending |

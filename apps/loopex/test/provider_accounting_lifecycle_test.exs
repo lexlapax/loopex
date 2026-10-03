@@ -79,7 +79,7 @@ defmodule Loopex.ProviderAccountingLifecycleTest do
     end
   end
 
-  test "a fresh prompt cannot reopen the legacy settlement allowance" do
+  test "a fresh prompt still refuses retired settlement records" do
     fixture = Fixture.start(script: [%{text: "one", calls: []}, %{text: "two", calls: []}])
     on_exit(fn -> Fixture.stop(fixture) end)
     {session, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "first run")
@@ -116,7 +116,7 @@ defmodule Loopex.ProviderAccountingLifecycleTest do
           else: record
       end)
 
-    assert {:error, :provider_settlement_version_downgrade} =
+    assert {:error, :invalid_private_history} =
              SessionState.recover(session, changed, events)
   end
 

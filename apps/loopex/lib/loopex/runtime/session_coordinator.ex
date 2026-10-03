@@ -6022,7 +6022,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # loss.
   #
   # The operation identity is the one `SessionState` commits into
-  # `model_attempt_opened_v1` and `model_attempt_settled_v1`, never a second
+  # `model_attempt_opened_v1` and `model_attempt_settled_v3`, never a second
   # derivation of the same run and turn. A separately derived identity produces
   # a different domain for the same attempt, and a consumer then cannot bind a
   # delta to the settlement that produced it.

@@ -240,7 +240,8 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
     assert :ok = ProviderAttempt.validate_settled(depth)
   end
 
-  test "legacy prefixes retain their original shapes and reject downgrades", c do
+  test "current retry and terminal histories refuse retired settlement generations at every position",
+       c do
     {:ok, first} =
       SessionState.propose_model_attempt_settled(c.state, c.work.run_id, :not_dispatched)
 
@@ -257,54 +258,36 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
 
     all = %{final | records: first.records ++ opened.records ++ final.records}
     assert {:ok, replayed} = replay_proposal(c, all)
-    assert replayed.provider_settlement_version == 3
 
-    mixed = %{all | records: [legacy_record(retry) | tl(all.records)]}
-    assert {:ok, _legacy_prefix} = replay_proposal(c, mixed)
-    v2 = %{all | records: Enum.map(all.records, &v2_record/1)}
-    assert {:ok, historical_v2} = replay_proposal(c, v2)
-    assert historical_v2.provider_settlement_version == 2
+    assert SessionState.accounting(replayed, c.work.run_id) ==
+             SessionState.accounting(final.next, c.work.run_id)
 
-    v2_downgrade = %{
-      v2
-      | records:
-          Enum.map(first.records, &v2_record/1) ++
-            opened.records ++ Enum.map(final.records, &legacy_record/1)
-    }
+    assert SessionState.elements(replayed, c.work.run_id) ==
+             SessionState.elements(final.next, c.work.run_id)
 
-    assert {:error, :provider_settlement_version_downgrade} = replay_proposal(c, v2_downgrade)
+    for retired <- [&v2_record/1, &legacy_record/1] do
+      assert {:error, :invalid_attempt_settlement} =
+               ProviderAttempt.validate_settled(retired.(retry))
 
-    legacy = %{all | records: Enum.map(all.records, &legacy_record/1)}
-    assert {:ok, old} = replay_proposal(c, legacy)
-    assert old.provider_settlement_version == 1
-
-    downgrade = %{
-      all
-      | records: first.records ++ opened.records ++ Enum.map(final.records, &legacy_record/1)
-    }
-
-    assert {:error, :provider_settlement_version_downgrade} = replay_proposal(c, downgrade)
+      for records <- [
+            Enum.map(all.records, retired),
+            [retired.(retry) | tl(all.records)],
+            first.records ++ opened.records ++ Enum.map(final.records, retired)
+          ] do
+        assert {:error, :invalid_private_history} =
+                 replay_proposal(c, %{all | records: records})
+      end
+    end
 
     for outcome <- [:owner_loss, {:reply, %{raw_reply(c, 7, 5) | streamed: true}}] do
       {:ok, proposal} =
         SessionState.propose_model_attempt_settled(c.state, c.work.run_id, outcome)
 
-      legacy = %{proposal | records: Enum.map(proposal.records, &legacy_record/1)}
-      assert {:ok, _old} = replay_proposal(c, legacy)
+      assert {:ok, recovered} = replay_proposal(c, proposal)
+
+      assert SessionState.accounting(recovered, c.work.run_id) ==
+               SessionState.accounting(proposal.next, c.work.run_id)
     end
-
-    ambiguous = %{
-      full_settlement(c, raw_reply(c, 7, 5))
-      | "conversation" => "none",
-        "result" => %{"kind" => "error", "category" => "unreadable_model_answer"},
-        kind: @v1
-    }
-
-    assert {:error, :ambiguous_legacy_provider_accounting} =
-             ProviderAttempt.validate_settled(ambiguous)
-
-    assert {:error, _unknown} =
-             ProviderAttempt.validate_settled(%{ambiguous | kind: "model_attempt_settled_v3"})
   end
 
   test "missing intervening duplicate reordered or mismatched terminal pairs never recover", c do
@@ -351,7 +334,6 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
 
     promoted = proposal
     assert {:ok, replayed} = replay_proposal(c, promoted)
-    assert replayed.provider_settlement_version == 3
 
     assert SessionState.elements(replayed, c.work.run_id) ==
              SessionState.elements(proposal.next, c.work.run_id)
@@ -371,43 +353,6 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
                    terminal
                  ]
              })
-  end
-
-  test "v3 cutover admits older prefixes but refuses every later v1 or v2 settlement", c do
-    {:ok, first} =
-      SessionState.propose_model_attempt_settled(c.state, c.work.run_id, :not_dispatched)
-
-    {:ok, opened} = SessionState.propose_model_attempt_open(first.next, c.work.run_id)
-
-    {:ok, final} =
-      SessionState.propose_model_attempt_settled(
-        opened.next,
-        c.work.run_id,
-        {:reply, raw_reply(c, 7, 5)}
-      )
-
-    for prefix <- [
-          Enum.map(first.records, &v2_record/1),
-          Enum.map(first.records, &legacy_record/1),
-          first.records
-        ] do
-      promoted = %{
-        final
-        | records: prefix ++ opened.records ++ final.records
-      }
-
-      assert {:ok, replayed} = replay_proposal(c, promoted)
-      assert replayed.provider_settlement_version == 3
-    end
-
-    for tail <- [Enum.map(final.records, &v2_record/1), Enum.map(final.records, &legacy_record/1)] do
-      downgraded = %{
-        final
-        | records: first.records ++ opened.records ++ tail
-      }
-
-      assert {:error, :provider_settlement_version_downgrade} = replay_proposal(c, downgraded)
-    end
   end
 
   defp v2_record(%{:kind => @v3, "result" => %{"kind" => "reply", "reply" => reply}} = record),

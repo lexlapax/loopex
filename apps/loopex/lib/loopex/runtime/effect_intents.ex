@@ -328,8 +328,7 @@ defmodule Loopex.Runtime.EffectIntents do
         "model_attempt_opened_v1" ->
           ProviderAttempt.validate_opened(payload) == :ok
 
-        kind
-        when kind in ~w(model_attempt_settled_v1 model_attempt_settled_v2 model_attempt_settled_v3) ->
+        "model_attempt_settled_v3" ->
           ProviderAttempt.validate_settled(payload) == :ok
 
         "model_termination_admitted_v1" ->

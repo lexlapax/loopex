@@ -35,9 +35,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
 
   @opened_kind "model_attempt_opened_v1"
-  @settled_v2_kind "model_attempt_settled_v2"
   @settled_v3_kind "model_attempt_settled_v3"
-  @legacy_settled_kind "model_attempt_settled_v1"
   @termination_kind "model_termination_admitted_v1"
 
   @opened_keys ["run_id", "turn_id", "operation_id", "attempt", "staged_request_digest"]
@@ -143,8 +141,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
 
   ## Technical depth
 
-  New settlements use v3, including retry and error-only verdicts. Historical
-  v1/v2 records remain readable through their original closed validators.
+  Settlements use only v3, including retry and error-only verdicts. Retired
+  generations refuse under the maintainer's pre-1.0 current-contract rule.
   """
   @spec settled_kind() :: binary()
   def settled_kind, do: @settled_v3_kind
@@ -299,12 +297,10 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_settled(map()) :: :ok | {:error, term()}
   def validate_settled(record) when is_map(record) do
-    with kind when kind in [@legacy_settled_kind, @settled_v2_kind, @settled_v3_kind] <-
-           Map.get(record, :kind, Map.get(record, "kind")),
+    with @settled_v3_kind <- Map.get(record, :kind, Map.get(record, "kind")),
          :ok <- exact_keys(record, @settled_keys),
          :ok <- validate_identity(record),
-         :ok <- validate_verdict(record, kind),
-         :ok <- legacy_accounting(record, kind) do
+         :ok <- validate_verdict(record, @settled_v3_kind) do
       :ok
     else
       {:error, reason} -> {:error, reason}
@@ -599,8 +595,14 @@ defmodule Loopex.Runtime.ProviderAttempt do
   defp validate_result(%{"kind" => "reply", "reply" => reply} = result, @settled_v3_kind)
        when map_size(result) == 2 and is_map(reply) and map_size(reply) == 10 do
     with :ok <- exact_keys(reply, @reply_keys ++ ~w(completion continuation)),
-         :ok <-
-           validate_result(%{result | "reply" => Map.take(reply, @reply_keys)}, @settled_v2_kind),
+         {:ok, _identity} <- reply_identity(Map.get(reply, "identity")),
+         {:ok, _calls} <- reply_tool_calls(Map.get(reply, "tool_calls")),
+         {:ok, _text} <- valid_text(Map.get(reply, "text")),
+         {:ok, count} <- reply_delta_count(Map.get(reply, "delta_count")),
+         {:ok, _streamed} <- reply_streamed(Map.get(reply, "streamed"), count),
+         {:ok, _response_id} <- reply_response_id(Map.get(reply, "provider_response_id")),
+         :ok <- validate_usage_shape(Map.get(reply, "usage")),
+         true <- lowercase_sha256?(Map.get(reply, "staged_request_digest")),
          true <- reply["completion"] in ~w(natural limit unknown) do
       case {reply["completion"], reply["continuation"]} do
         {_, nil} ->
@@ -617,33 +619,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
-  defp validate_result(%{"kind" => "reply", "reply" => reply} = result, kind)
-       when kind in [@legacy_settled_kind, @settled_v2_kind] and map_size(result) == 2 and
-              is_map(reply) and map_size(reply) == 8 do
-    with :ok <- exact_keys(reply, @reply_keys),
-         {:ok, _identity} <- reply_identity(Map.get(reply, "identity")),
-         {:ok, _calls} <- reply_tool_calls(Map.get(reply, "tool_calls")),
-         {:ok, _text} <- valid_text(Map.get(reply, "text")),
-         {:ok, count} <- reply_delta_count(Map.get(reply, "delta_count")),
-         {:ok, _streamed} <- reply_streamed(Map.get(reply, "streamed"), count),
-         {:ok, _response_id} <- reply_response_id(Map.get(reply, "provider_response_id")),
-         :ok <- validate_usage_shape(Map.get(reply, "usage")),
-         true <- lowercase_sha256?(Map.get(reply, "staged_request_digest")) do
-      :ok
-    else
-      {:error, reason} -> {:error, reason}
-      _other -> {:error, :invalid_attempt_settlement}
-    end
-  end
-
   defp validate_result(%{"kind" => "error", "category" => "model_call_failed"} = result, _kind)
-       when map_size(result) == 2,
-       do: :ok
-
-  defp validate_result(
-         %{"kind" => "error", "category" => "unreadable_model_answer"} = result,
-         @legacy_settled_kind
-       )
        when map_size(result) == 2,
        do: :ok
 
@@ -655,7 +631,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
          } = result,
          kind
        )
-       when kind in [@settled_v2_kind, @settled_v3_kind] and map_size(result) == 3,
+       when kind == @settled_v3_kind and map_size(result) == 3,
        do: validate_accounting_evidence(evidence)
 
   defp validate_result(_result, _kind), do: {:error, :invalid_attempt_settlement}
@@ -686,17 +662,6 @@ defmodule Loopex.Runtime.ProviderAttempt do
   end
 
   defp validate_accounting_evidence(_evidence), do: {:error, :invalid_attempt_settlement}
-
-  defp legacy_accounting(
-         %{
-           "result" => %{"kind" => "error", "category" => "unreadable_model_answer"},
-           "accounting" => %{"source" => "reported"}
-         },
-         @legacy_settled_kind
-       ),
-       do: {:error, :ambiguous_legacy_provider_accounting}
-
-  defp legacy_accounting(_record, _kind), do: :ok
 
   defp validate_usage_shape(
          %{"status" => "reported", "input_tokens" => i, "output_tokens" => o} = u
@@ -831,14 +796,6 @@ defmodule Loopex.Runtime.ProviderAttempt do
     {:ok, "none", "terminal", [source]}
   end
 
-  defp settlement_cell(_attempt, "dispatched_or_unknown", termination, %{
-         "kind" => "error",
-         "category" => "unreadable_model_answer"
-       })
-       when termination in [nil, "abort", "deadline"],
-       # Combination 5: an answer this runtime could not read or could not fit.
-       do: {:ok, "none", "terminal", ["reported", "estimated"]}
-
   defp settlement_cell(_attempt, _transport, _termination, _result),
     do: {:error, :invalid_attempt_settlement}
 
@@ -861,16 +818,6 @@ defmodule Loopex.Runtime.ProviderAttempt do
          accounting
        ),
        do: reported_matches?(%{"kind" => "reply", "reply" => %{"usage" => usage}}, accounting)
-
-  # Concept: legacy ambiguity is named separately from malformed history.
-  # Technical depth: only the exact two-key v1 result reaches this branch;
-  # `legacy_accounting/2` refuses it after validating the old combination.
-  defp reported_matches?(
-         %{"kind" => "error", "category" => "unreadable_model_answer"} = result,
-         _accounting
-       )
-       when map_size(result) == 2,
-       do: true
 
   defp reported_matches?(_result, _accounting), do: false
 

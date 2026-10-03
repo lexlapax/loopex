@@ -173,8 +173,10 @@ not invent progress text or expose private blocks to fill a silent interval.
 Technical depth: [Compatibility mechanics](0044-run-model-and-reasoning-configuration-technical.md#technical-adr-0044-compatibility).
 
 New configuration records/events, private continuation replies/settlements and
-snapshot fields require an M7 reader. Old requests and settlements keep their
-original meanings. Private continuation is retained in recovery state, never
+snapshot fields require an M7 reader. Provider settlements use only v3 under
+the maintainer's [pre-1.0 current-contract rule](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
+The v1/v2 readers and their cross-generation cutover bookkeeping are retired;
+current accounting, restart/replay and effect safety remain required. Private continuation is retained in recovery state, never
 in public configuration snapshots. A Model adapter must now return every
 version-2 reply member, including a nil response identity; an embedder's adapter
 that omits that formerly optional member has its replies refused as unreadable
