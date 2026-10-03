@@ -1183,6 +1183,42 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: a lost source worker ends its episode before any summary dispatch.
+  # Technical depth: worker loss is an owner observation, not a rederived
+  # history defect. Bind the existing unavailable cause to the exact eligible
+  # source phase and retained clock; replay validates those durable boundaries.
+  @doc false
+  @spec propose_maintenance_source_failure(t(), binary(), integer()) ::
+          {:ok, proposal()} | {:error, atom()}
+  def propose_maintenance_source_failure(state, run_id, now) do
+    with {:ok, episode} <- maintenance_source_episode(state, now, fn -> :ok end),
+         true <- episode["run_id"] == run_id do
+      refusal =
+        unavailable_context_refusal(
+          state,
+          run_id,
+          run_configuration(state, run_id),
+          next_turn_number(state.pending_work[run_id]),
+          "context_projection_invalid"
+        )
+
+      terminal =
+        state
+        |> run_terminal_record(run_id, "failed", %{})
+        |> Map.put("failure", context_failure(refusal))
+
+      build_internal_proposal(
+        state,
+        episode["episode_id"] <> ":source-failure",
+        [refusal, terminal],
+        now
+      )
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
   defp selected_maintenance_source_result(state, now, check) do
     with {:ok, episode} <- maintenance_source_episode(state, now, check),
          {:ok, deadline} <- maintenance_request_deadline(state, episode, now),
@@ -5804,6 +5840,12 @@ defmodule Loopex.Runtime.SessionState do
         episode["stage"] in ["source_preparation", "checkpoint_committed"] and
           maintenance_source_clock(state, episode, observed) == :ok
 
+      %{
+        "outcome" => "failed",
+        "failure" => %{"cause" => "context_projection_invalid"}
+      } ->
+        match?({:ok, _}, maintenance_source_episode(state, observed, fn -> :ok end))
+
       %{"outcome" => "failed", "failure" => %{"category" => "context_budget_exceeded"}} ->
         (episode["stage"] == "source_preparation" or
            (episode["stage"] == "checkpoint_committed" and
@@ -5824,7 +5866,8 @@ defmodule Loopex.Runtime.SessionState do
     do:
       get_in(terminal, ["failure", "cause"]) not in [
         "compaction_preparation_deadline",
-        "compaction_no_progress"
+        "compaction_no_progress",
+        "context_projection_invalid"
       ]
 
   # Concept: a recovered artifact job must name the original committed source.
@@ -10601,6 +10644,20 @@ defmodule Loopex.Runtime.SessionState do
          true <- run_id == state.active_run_id,
          {:error, :compaction_excerpt_budget_too_small} <-
            selected_maintenance_source_result(state, now, fn -> :ok end) do
+      :ok
+    else
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp validate_preparation_failure_cause(
+         %{maintenance_terminal: %{observed_at: observed}} = state,
+         run_id,
+         "context_projection_invalid"
+       )
+       when is_integer(observed) do
+    with {:ok, episode} <- maintenance_source_episode(state, observed, fn -> :ok end),
+         true <- episode["run_id"] == run_id do
       :ok
     else
       _ -> {:error, :invalid_context_refusal}

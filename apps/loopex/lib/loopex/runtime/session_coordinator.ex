@@ -3655,11 +3655,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
             finish_maintenance_preparation_cutoff(state, run_id, metadata)
 
           {:error, :context_projection_invalid} ->
-            commit_context_preparation_failure(state, run_id, :context_projection_invalid)
+            finish_maintenance_source_failure(state, run_id, metadata)
 
           other ->
             {:stop, {:maintenance_preparation_failed, other}, state}
         end
+    end
+  end
+
+  defp finish_maintenance_source_failure(state, run_id, metadata) do
+    case SessionState.propose_maintenance_source_failure(
+           state.durable,
+           run_id,
+           System.system_time(:millisecond)
+         ) do
+      {:ok, proposal} ->
+        with {:ok, next} <- commit_internal(disarm_deadline(state, run_id), proposal) do
+          send(self(), :advance_work)
+          {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
+        else
+          {:error, reason} -> {:stop, {:context_preparation_failed, reason}, state}
+        end
+
+      {:error, reason}
+      when reason in [:run_deadline_reached, :compaction_preparation_deadline] ->
+        finish_maintenance_preparation_cutoff(state, run_id, metadata)
+
+      {:error, reason} ->
+        {:stop, {:context_preparation_failed, reason}, state}
     end
   end
 

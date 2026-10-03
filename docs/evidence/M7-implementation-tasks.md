@@ -325,6 +325,28 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: end a lost maintenance source worker through the existing unavailable
+  `context_projection_invalid` refusal after its exact DOWN. The generic
+  ordinary-history refusal constructor previously rejected this observation
+  when retained history was valid, stopping the owner without an episode or
+  parent ending. The owner now binds that observation to the eligible source
+  phase and retained clock; replay rejects omitted, early and expired clocks
+  and a stripped episode prefix. Both initial and post-checkpoint source phases
+  pass all three Store uncertainty cases, once-only terminal recovery and held
+  worker cancellation, preserving checkpoints, raw facts and usage without
+  new provider or executor work. No record schema or public cause changes.
+  The deterministic failing reproduction is retained at
+  `/private/tmp/loopex-m7-maintenance-source-worker-red.log`, SHA-256
+  `f827a2c9355600f801d493633dde0eb5dee2950a7e0431b2b9c6499735db9126`.
+  The three focused files pass 117 tests on each supported pair. Complete
+  outputs: `/private/tmp/loopex-m7-maintenance-source-fault-current-final.log`,
+  SHA-256 `ab2208b10edf327cff44073708546a2137693aef0ca330e35ea4d7b6006f7e18`;
+  `/private/tmp/loopex-m7-maintenance-source-fault-floor-final.log`, SHA-256
+  `9ea04cf4e09e3bbb8bdc49d9eceae0266f6c9433540ce7e0b7f0caf1771df86b`.
+  This closes one added T07 subtask. Original T01–T19 counts remain
+  52 done / 121 todo / 6 retired; added counts become 193 done / 8 todo.
+  Live preparation cutoff, supersession and standalone compact remain open.
+
 - Done: close the CLI signal fixture's process-lifetime gap. Every normal and
   interrupted case now checks the exact launcher and child-VM PIDs after the
   wrapper's observed exit; a failing startup case checks the same joins. If an
@@ -7164,6 +7186,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Join lost maintenance source workers before committing the existing unavailable episode/refusal/parent ending; validate the eligible phase and retained clock on replay, prove initial and later source preparation across all three Store uncertainty phases plus held-worker cancellation on both toolchains, and preserve checkpoints, usage and raw facts without redispatch. Live cutoff, supersession and standalone compact remain open.
 
 - [x] Commit and replay the exact maintenance-scope numeric v2 refusal when frozen summarizer instructions reach the captured system ceiling before source traversal; prove one system descriptor and live automatic no-dispatch recovery on both supported toolchains.
 

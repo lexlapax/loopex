@@ -12,6 +12,183 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
   alias Loopex.Runtime.{MaintenanceConfiguration, SessionState}
   alias Loopex.Store
 
+  for mode <- [:source_pending, :checkpoint_more],
+      phase <- [
+        :none,
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @mode mode
+    @phase phase
+    test "a killed #{@mode} source worker joins before its #{@phase} unavailable ending" do
+      {fixture, session, episode} = retained_episode(@mode)
+      before = Fixture.records(fixture, session)
+      {:ok, original} = SessionState.recover(session, before, Fixture.events(fixture, session))
+      assert :ok = SessionState.preflight_run_history(original, episode["run_id"])
+      successor = start(store: fixture.store, tools: [], script: [])
+
+      {:ok, {:prepared, activation}} =
+        Loopex.prepare_resume_session(successor.runtime, session, "resume-killed-source")
+
+      {:ok, children} = Loopex.Runtime.children(successor.runtime)
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      coordinator_monitor = Process.monitor(coordinator)
+      workers = :sys.get_state(coordinator).owner_workers
+      hold_next_source_worker(workers)
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+      assert_receive {:held_maintenance_source_worker, worker}, 5_000
+
+      assert [{_reference, {:maintenance_preparation, run_id, ^worker, metadata}}] =
+               coordinator |> :sys.get_state() |> Map.fetch!(:in_flight) |> Map.to_list()
+
+      assert run_id == episode["run_id"]
+      assert metadata.journal_version == length(Fixture.records(successor, session))
+
+      unless @phase == :none do
+        :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
+      end
+
+      monitor = Process.monitor(worker)
+      Process.exit(worker, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 5_000
+
+      rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+      events = Fixture.events(successor, session)
+
+      if @phase == :recovery_representation do
+        assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator,
+                        {:context_preparation_failed, :commit_unknown}},
+                       5_000
+
+        assert {:ok, ^session} =
+                 Loopex.resume_session(successor.runtime, session,
+                   command_id: "resolve-source-failure"
+                 )
+
+        rows = Fixture.records(successor, session)
+        assert Enum.count(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1")) == 1
+        assert Fixture.events(successor, session) == events
+      else
+        refute_received {:DOWN, ^coordinator_monitor, :process, ^coordinator, _}
+        assert :sys.get_state(coordinator).in_flight == %{}
+      end
+
+      assert [ending, refusal, terminal] = Enum.take(rows, -3)
+      assert ending.payload.kind == "maintenance_episode_terminal_v1"
+      assert ending.payload["episode_id"] == episode["episode_id"]
+      assert refusal.payload.kind == "context_admission_refused_v2"
+      assert terminal.payload.kind == "run_terminal_committed"
+      assert terminal.payload["outcome"] == "failed"
+
+      assert terminal.payload["failure"] == %{
+               "version" => 2,
+               "category" => "context_preparation_failed",
+               "retryable" => false,
+               "measurement_scope" => nil,
+               "cause" => "context_projection_invalid"
+             }
+
+      assert ending.payload["result"]["failure"] == terminal.payload["failure"]
+      assert refusal.payload["failure"] == terminal.payload["failure"]
+
+      assert ending.payload["result"]["usage"] ==
+               original.maintenance_episodes[episode["episode_id"]]["usage"]
+
+      assert ending.payload["result"]["checkpoint_id"] == original.active_checkpoint
+      assert ending.payload["observed_at"] >= episode["admitted_at"]
+      assert ending.payload["observed_at"] < metadata.deadline
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+      assert Agent.get(successor.executor, & &1.jobs) == []
+
+      assert Enum.filter(rows, &(&1.payload.kind == "maintenance_request_committed_v1")) ==
+               Enum.filter(before, &(&1.payload.kind == "maintenance_request_committed_v1"))
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, rows, Fixture.events(successor, session))
+
+      assert recovered.active_maintenance == nil
+      assert recovered.active_run_id == nil
+      assert recovered.active_checkpoint == original.active_checkpoint
+      assert recovered.checkpoints == original.checkpoints
+      assert recovered.conversation == original.conversation
+      assert recovered.charged == original.charged
+
+      for changed <- [nil, episode["admitted_at"] - 1, metadata.deadline] do
+        altered =
+          Enum.map(rows, fn row ->
+            if row.journal_version == ending.journal_version,
+              do: put_in(row, [:payload, "observed_at"], changed),
+              else: row
+          end)
+
+        assert {:error, _} = SessionState.recover(session, altered, events)
+      end
+
+      assert {:error, _} =
+               SessionState.recover(session, List.delete(rows, ending), events)
+
+      stop_and_join(successor, session)
+    end
+  end
+
+  for mode <- [:source_pending, :checkpoint_more] do
+    @mode mode
+    test "abort joins the held #{@mode} source worker without replacing cancellation" do
+      {fixture, session, episode} = retained_episode(@mode)
+      before = Fixture.records(fixture, session)
+      {:ok, original} = SessionState.recover(session, before, Fixture.events(fixture, session))
+      successor = start(store: fixture.store, tools: [], script: [])
+
+      {:ok, {:prepared, activation}} =
+        Loopex.prepare_resume_session(successor.runtime, session, "resume-source-abort")
+
+      {:ok, attachment} = Loopex.attach(successor.runtime, session, after_event_sequence: 0)
+      {:ok, children} = Loopex.Runtime.children(successor.runtime)
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      hold_next_source_worker(:sys.get_state(coordinator).owner_workers)
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+      assert_receive {:held_maintenance_source_worker, worker}, 5_000
+
+      assert [{_, {:maintenance_preparation, _, ^worker, _}}] =
+               coordinator |> :sys.get_state() |> Map.fetch!(:in_flight) |> Map.to_list()
+
+      monitor = Process.monitor(worker)
+
+      assert {:accepted, "abort-held-source"} =
+               Loopex.command(attachment, %{type: :abort, command_id: "abort-held-source"})
+
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 5_000
+      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      assert [ending, terminal] = Enum.take(rows, -2)
+      assert ending.payload.kind == "maintenance_episode_terminal_v1"
+      assert terminal.payload.kind == "run_terminal_committed"
+      assert terminal.payload["outcome"] == "cancelled"
+      assert terminal.payload["command_id"] == "abort-held-source"
+
+      assert ending.payload["result"]["failure"] == %{
+               "category" => "cancelled",
+               "retryable" => false
+             }
+
+      assert ending.payload["result"]["checkpoint_id"] == original.active_checkpoint
+
+      assert ending.payload["result"]["usage"] ==
+               original.maintenance_episodes[episode["episode_id"]]["usage"]
+
+      refute Enum.any?(rows, &(&1.payload.kind == "context_admission_refused_v2"))
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+      assert Agent.get(successor.executor, & &1.jobs) == []
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, rows, Fixture.events(successor, session))
+
+      assert recovered.checkpoints == original.checkpoints
+      assert recovered.charged == original.charged
+      stop_and_join(successor, session)
+    end
+  end
+
   for phase <- [
         :before_linearization,
         :after_linearization_before_result,
@@ -1452,6 +1629,36 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     fixture = Fixture.start(options)
     on_exit(fn -> Fixture.stop(fixture) end)
     fixture
+  end
+
+  # Concept: the source worker is held before it can prepare evidence.
+  # Technical depth: the supervisor's synchronous debug hook suspends its exact
+  # new task before replying to async_nolink. The coordinator then registers the
+  # monitor while the worker is held; no scheduler race selects the fault PID.
+  defp hold_next_source_worker(supervisor) do
+    caller = self()
+
+    hook = fn
+      :armed, {:out, {:ok, worker}, _recipient, _state}, _extra when is_pid(worker) ->
+        true = :erlang.suspend_process(worker)
+        send(caller, {:held_maintenance_source_worker, worker})
+        :held
+
+      state, _event, _extra ->
+        state
+    end
+
+    assert :ok = :sys.install(supervisor, {hook, :armed})
+
+    on_exit(fn ->
+      if Process.alive?(supervisor) do
+        try do
+          :sys.remove(supervisor, hook)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+    end)
   end
 
   defp await_terminal(fixture, session, cutoff) do
