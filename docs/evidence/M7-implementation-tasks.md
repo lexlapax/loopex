@@ -29,7 +29,79 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
-## Restart checkpoint — 2026-10-02, maintenance admission
+## Restart checkpoint — 2026-10-03, maintenance endings
+
+The maintainer requested a safe stop, commit and push before restarting. Product
+implementation is committed and pushed on `m7` at
+`ff21bed908d7213026ed55ce4c04bfdda94ad5dd`; its documentation-only child is
+`007dfe94eee8d22c77b0bb95b4cbc84407909b34`. This checkpoint adds no product
+changes. M7 remains In progress. No agents or maintainer decisions are pending.
+Implementation is paused at this checkpoint for the requested restart. Resume
+the goal explicitly on `m7` from this checkpoint and Current work below.
+
+The exact-candidate full current-pair fast check passed all 11 application suites
+in 1,394.2 measured runner seconds, 1,394 reported check seconds. Complete output:
+`/private/tmp/loopex-m7-ff21bed9-fast-check.log`, SHA-256
+`4220dfb2af023b1ad8ecf88ae30f59e0fb6fa32eeea8f6aa0d6ab2b5752927d2`.
+Execution handle `53173` is terminal and collected. Do not poll or rerun it.
+The detached verification checkout remains clean at the tested implementation
+SHA. Focused current/floor and gate outputs and their inventory were rehashed;
+all matched the retained digests below. No floor full check, release check or
+milestone closure is claimed from this current-pair integration pass.
+Post-run process inspection found no remaining check runner, suite VM or CLI
+signal fixture matching the task-owned commands. The historical T16 leak
+investigation remains open; this inspection does not replace its required tests.
+
+T01–T19 originals: 51 done / 122 todo / 6 retired. Added subtasks:
+172 done / 9 todo. Including T00: originals 51 / 128 / 7; added 176 / 10.
+No checklist row changed during this stop. Run the checkbox reporter for the
+per-task and subtask status; historical progress text is not the tally source.
+
+First resume work is T07's live serial-owner integration. The ending/expiry
+implementation now preserves the leading episode terminal and adjacent run
+ending pair, rejects partial or forged transactions, settles expired first
+preparation and undispatched aborts, and reuses the existing owner commit fence.
+It does not yet invoke automatic episode admission from ordinary preflight,
+dispatch unexpired maintenance, charge maintenance attempts, commit checkpoints
+or implement standalone compact. Do not close the original T07 rows from the
+focused ending/recovery proof.
+
+The latest source/dispatch exploration was read-only. Resume from these existing
+boundaries:
+
+- `MaintenanceConfiguration.request/4` already builds the exact captured system
+  instruction and source user message, tools empty, continuation nil, reasoning
+  none and 1,024 output reservation. Its request has the existing nine Model port
+  fields; the port has no run or turn identity. A maintenance-specific journal
+  identity does not require a fictional run or a new Model port contract.
+- `SessionState.compaction_units/2`, `projected_lineage/4` and
+  `CompactionSource.select/4` supply eligible ordered units, bounded projection
+  and complete-prefix/excerpt selection. Selection must preflight the whole
+  maintenance request and honor the retained first-preparation clock.
+- ADR 0043 requires distinct maintenance request, attempt and settlement kinds
+  with episode identity, summary ordinal and compaction purpose. Ordinary
+  `ProviderAttempt.binding_from_opened/2` and
+  `Control.provider_position_binding/4` currently verify the ordinary opened
+  row read from the exact journal position. Extend that verified boundary for
+  the accepted maintenance identity; never accept an argument-only permit or
+  write the ordinary attempt kinds for maintenance.
+- Read ADR 0043's revision-4 source/receipt fields before constructing the
+  maintenance staging record. Each summary dispatch consumes parent model-call
+  and turn units and charges provider usage once. Retries preserve the summary
+  operation identity. Successful settlement remains checkpoint-pending and
+  cannot append an ordinary answer or complete the parent run. The current
+  ending-prefix factory copies episode usage; update it to include the ending
+  attempt's validated charge when settlement is added.
+
+Keep all approved current contracts and the pre-1.0 current-only disposition.
+Remaining work includes chat joins, helpers, protocol /3 and /4, superseded
+contract removal, fixture/attempt tracking and release evidence. T16 retains
+the 2,100-ms provider-launcher interrupted-wait defect, Task.Supervisor cleanup
+diagnostics and CLI signal-fixture process joins. No paid provider call was made
+for this checkpoint. Closure, merge to main, tags and publication remain
+separate maintainer decisions.
+
+## Historical restart checkpoint — 2026-10-02, maintenance admission
 
 Historical checkpoint. The goal resumed after this stop; Current work below
 records the active implementation and latest verification.
@@ -250,28 +322,28 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: full current-pair fast check on exact clean integration candidate
+- Done: full current-pair fast check on exact clean integration candidate
   `ff21bed908d7213026ed55ce4c04bfdda94ad5dd`, committed and pushed on `m7`.
-  It runs in `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`, detached at
-  that SHA, with `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. Unified execution handle
-  `53173` was confirmed live after the initial structure, compilation,
-  documentation and archive fixtures. Complete output is streaming to
-  `/private/tmp/loopex-m7-ff21bed9-fast-check.log`; final exit, measured duration
-  and SHA-256 are pending. Poll that same handle; do not restart because a wait
-  returns no output. Collect its terminal result before hashing the log or
-  claiming a pass. This entry changes documentation only after the tested
-  candidate. The implementation goal is active and M7 remains In progress.
+  It ran in `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`, detached at
+  that SHA, with `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. All 11 application
+  suites passed, exit 0, in 1,394.2 measured runner seconds. Complete output:
+  `/private/tmp/loopex-m7-ff21bed9-fast-check.log`, SHA-256
+  `4220dfb2af023b1ad8ecf88ae30f59e0fb6fa32eeea8f6aa0d6ab2b5752927d2`.
+  Unified execution handle `53173` is terminal and collected; do not poll or
+  restart it. This checkpoint changes documentation only after the tested
+  candidate. The implementation goal is paused for the maintainer's requested
+  restart, and M7 remains In progress. No agents or check handles are pending.
 
-- Active: T07 durable compaction. Admission, run-owned terminal ordering and
+- Next on resume: T07 durable compaction. Admission, run-owned terminal ordering and
   expired-preparation/undispatched-abort recovery are implemented. Next join the
   ordinary-limit trigger to bounded source selection, maintenance-specific
   request/attempt/settlement records and checkpoint commits. The not-yet-expired
   source-preparation dispatch path and its timer/worker joins remain open, along
   with standalone compact, automatic thinking headroom, usage-once accounting,
   checkpoint uncertainty and complete live recovery. No agents or decisions are
-  pending. Focused handles are terminal and collected. A new full integration
-  run will cover the committed ending/expiry candidate; the previous full check
-  still covers `9e976839`, not these later source bytes.
+  pending. All handles are terminal and collected. The full integration pass
+  above covers the committed ending/expiry candidate. Its source bytes need no
+  repeated full check; run once again after the next integration source change.
 
 - Done: implement `maintenance_episode_terminal_v1` as the leading row of a
   run-owned ending transaction. Its closed private fields are episode identity,
@@ -336,10 +408,9 @@ did not resolve them. No paid provider calls were made during this check.
   Final focused source digests and complete output inventory:
   `/private/tmp/loopex-m7-maintenance-endings-focused-evidence-v1.json`, SHA-256
   `ffbdd020e594c53067da2c94b595ca9c98ae73c6477da9e46e2ada9f49acec01`.
-  The next full fast check runs once from this committed integration candidate
-  in the existing detached verification checkout; its result is pending until
-  the process exits and the complete output is retained. No full-check pass for
-  the ending/expiry source is claimed from the earlier `9e976839` output.
+  The full fast check on this committed integration candidate passed as recorded
+  above. The earlier `9e976839` output remains historical evidence for its own
+  source bytes; the ending/expiry pass has its separate exact-SHA output.
 
 - Done: implement the closed `maintenance_episode_admitted_v1` reducer for an
   automatic ordinary-limit episode, bound to its run and next staging identity.
