@@ -1175,6 +1175,9 @@ defmodule Loopex.Runtime.SessionState do
       {:error, :compaction_excerpt_budget_too_small} ->
         propose_maintenance_source_refusal(state, now, check)
 
+      {:refused, %{} = _measurement} ->
+        propose_maintenance_source_numeric_refusal(state, now, check)
+
       result ->
         result
     end
@@ -1240,6 +1243,99 @@ defmodule Loopex.Runtime.SessionState do
            ),
          :ok <- check.() do
       {:ok, proposal}
+    end
+  end
+
+  # Concept: a protected ordinary tail that remains too large cannot be
+  # repaired by another summary.
+  # Technical depth: remeasure the exact minimum tail and retain its ordinary
+  # v2 dimensions and descriptor counts, bound to the active episode. Initial
+  # automatic admission already proved its protected tail fits, while
+  # explicit and recovered episodes may reach this boundary directly.
+  defp propose_maintenance_source_numeric_refusal(state, now, check) do
+    with {:ok, refusal} <- maintenance_source_numeric_refusal(state, now, check),
+         episode = state.maintenance_episodes[state.active_maintenance],
+         terminal =
+           state
+           |> run_terminal_record(episode["run_id"], "failed", %{})
+           |> Map.put("failure", context_failure(refusal)),
+         {:ok, proposal} <-
+           build_internal_proposal(
+             state,
+             episode["episode_id"] <> ":source-numeric-refusal",
+             [refusal, terminal],
+             now
+           ),
+         :ok <- check.() do
+      {:ok, proposal}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp maintenance_source_numeric_refusal(state, now, check) do
+    with {:ok, episode, measurement} <- maintenance_source_numeric_measurement(state, now, check),
+         {:refused, failure} <- measurement.admission,
+         work = state.pending_work[episode["run_id"]],
+         {:refused, refusal} <-
+           context_refusal_result(
+             state,
+             measurement.record,
+             failure,
+             work,
+             next_turn_number(work)
+           ) do
+      {:ok, Map.put(refusal, "episode_id", episode["episode_id"])}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp maintenance_source_numeric_measurement(state, now, check) do
+    episode = state.maintenance_episodes[state.active_maintenance]
+
+    with %{"stage" => stage, "run_id" => run_id} <- episode,
+         true <- stage in ["source_preparation", "checkpoint_committed"],
+         true <- episode["attempts"] < episode["bounds"]["max_attempts"],
+         {:refused, %{} = raw} <- selected_maintenance_source_result(state, now, check),
+         {:ok, units} <- compaction_units(state, run_id),
+         tail = Enum.drop_while(units, &(not &1.protected?)),
+         true <- tail != [],
+         {:ok, deadline} <- maintenance_request_deadline(state, episode, now),
+         staging = %{
+           run_id: run_id,
+           elements: Enum.flat_map(tail, & &1.elements),
+           steer: episode["ordinary_steer"],
+           resources: state.run_resources[run_id],
+           deadline: deadline,
+           excerpt_allowance: 0
+         },
+         {selected, project, header} <- protected_tail_inputs(state, run_id),
+         {:ok, measurement} <-
+           checkpoint_projection_measurement(state, staging, project, header, check, selected),
+         {:refused, ^raw} <- measurement.admission do
+      {:ok, episode, measurement}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp protected_tail_inputs(state, run_id) do
+    case frozen_context(state, run_id) do
+      nil ->
+        {[],
+         %{
+           "class" => "project_resource",
+           "receipt_revision" => 2,
+           "disposition" => "not_evaluated_required_failure",
+           "detail" => nil
+         }, Loopex.Runtime.ResourceContext.initial_header(state.run_resources[run_id])}
+
+      frozen ->
+        {frozen.selected, frozen.project, frozen.resources}
     end
   end
 
@@ -2014,9 +2110,9 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp checkpoint_projection_measurement(state, staging, project, header, check) do
+  defp checkpoint_projection_measurement(state, staging, project, header, check, selected \\ []) do
     with :ok <- check.(),
-         {:ok, candidate} <- reference_model_candidate(state, staging, [], project, header),
+         {:ok, candidate} <- reference_model_candidate(state, staging, selected, project, header),
          record =
            model_request_record(
              state,
@@ -5635,10 +5731,10 @@ defmodule Loopex.Runtime.SessionState do
           maintenance_source_clock(state, episode, observed) == :ok
 
       %{"outcome" => "failed", "failure" => %{"category" => "context_budget_exceeded"}} ->
-        episode["stage"] == "checkpoint_committed" and
-          episode["attempts"] == episode["bounds"]["max_attempts"] and
-          observed >= state.checkpoints[episode["checkpoint_id"]]["committed_at"] and
-          is_integer(deadline) and observed < deadline
+        (episode["stage"] == "source_preparation" or
+           (episode["stage"] == "checkpoint_committed" and
+              observed >= state.checkpoints[episode["checkpoint_id"]]["committed_at"])) and
+          maintenance_source_clock(state, episode, observed) == :ok
 
       %{"outcome" => "bound_reached", "bound" => "deadline"} ->
         is_integer(deadline) and deadline <= episode["preparation_deadline"] and
@@ -10545,7 +10641,13 @@ defmodule Loopex.Runtime.SessionState do
        )
        when is_binary(episode) do
     with %{observed_at: now} <- state.maintenance_terminal,
-         {:ok, expected} <- maintenance_exhaustion_refusal(state, now, fn -> :ok end),
+         %{"bounds" => %{} = bounds} = current <-
+           state.maintenance_episodes[state.active_maintenance],
+         {:ok, expected} <-
+           if(current["attempts"] == bounds["max_attempts"],
+             do: maintenance_exhaustion_refusal(state, now, fn -> :ok end),
+             else: maintenance_source_numeric_refusal(state, now, fn -> :ok end)
+           ),
          true <- refusal == expected do
       :ok
     else

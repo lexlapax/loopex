@@ -888,6 +888,41 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     stop_and_join(successor, session)
   end
 
+  test "a recovered checkpoint with an irreducible protected tail ends with its numeric refusal" do
+    {fixture, session, episode} = retained_episode(:checkpoint_source_numeric)
+    before = Fixture.records(fixture, session)
+    successor = start(store: fixture.store, script: [], tools: [], model: "changed:model")
+
+    assert {:ok, ^session} =
+             Loopex.resume_session(successor.runtime, session,
+               command_id: "resume-source-numeric"
+             )
+
+    rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+    assert Enum.count(rows, &(&1.payload.kind == "maintenance_request_committed_v1")) == 1
+    assert [ending] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+    assert ending.payload["result"]["checkpoint_id"] != nil
+    assert [refusal] = Enum.filter(rows, &(&1.payload.kind == "context_admission_refused_v2"))
+    assert refusal.payload["failure"]["dimension"] == "context_tokens"
+    assert refusal.payload["episode_id"] == episode["episode_id"]
+    assert length(rows) == length(before) + 4
+
+    assert Enum.map(Enum.take(rows, -3), & &1.payload.kind) == [
+             "maintenance_episode_terminal_v1",
+             "context_admission_refused_v2",
+             "run_terminal_committed"
+           ]
+
+    assert AgentLoopTestModel.dispatched(successor.model) == []
+    assert Agent.get(successor.executor, & &1.jobs) == []
+
+    assert {:ok, recovered} =
+             SessionState.recover(session, rows, Fixture.events(successor, session))
+
+    assert recovered.active_checkpoint == ending.payload["result"]["checkpoint_id"]
+    stop_and_join(successor, session)
+  end
+
   test "an irreducible current prompt keeps its measured ordinary refusal" do
     {fixture, session, run_id, _configuration} =
       retained_automatic_prompt(String.duplicate("p", 20_000))
@@ -998,7 +1033,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     fixture = start(script: [], tools: [])
 
     configuration =
-      if mode == :exhausted do
+      if mode in [:exhausted, :checkpoint_source_numeric] do
         Genesis.configuration(String.duplicate("s", 10_000))
         |> Map.put("system_class_tokens", 4_000)
         |> Map.put("context_token_budget", 4_000)
@@ -1042,6 +1077,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                     :exhausted,
                     :source_pending,
                     :checkpoint_more,
+                    :checkpoint_source_numeric,
                     :checkpoint_pending,
                     :checkpoint_committed,
                     :checkpoint_committed_aborted,
@@ -1053,9 +1089,14 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                   ],
                   do:
                     cond do
-                      mode == :exhausted -> String.duplicate("o", 10_000)
-                      mode in [:source_pending, :checkpoint_more] -> String.duplicate("o", 30_000)
-                      true -> String.duplicate("old", 1_000)
+                      mode == :exhausted ->
+                        String.duplicate("o", 10_000)
+
+                      mode in [:source_pending, :checkpoint_more, :checkpoint_source_numeric] ->
+                        String.duplicate("o", 30_000)
+
+                      true ->
+                        String.duplicate("old", 1_000)
                     end,
                   else: "original facts"
                 )
@@ -1192,6 +1233,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       if mode in [
            :exhausted,
            :checkpoint_more,
+           :checkpoint_source_numeric,
            :invalid,
            :incomplete,
            :invalid_aborted,
@@ -1213,11 +1255,16 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
           |> retained_summary_reply()
           |> Map.put(
             :text,
-            if(mode in [:invalid, :incomplete, :invalid_aborted, :invalid_expired],
-              do: "{}",
-              else:
+            cond do
+              mode in [:invalid, :incomplete, :invalid_aborted, :invalid_expired] ->
+                "{}"
+
+              mode == :checkpoint_source_numeric ->
+                ~s({"summary":"#{String.duplicate("g", 4_000)}","carry_forward":{"files_read":[],"files_changed":[]}})
+
+              true ->
                 ~s({"summary":"retained facts","carry_forward":{"files_read":[],"files_changed":[]}})
-            )
+            end
           )
           |> Map.put(
             :usage,
@@ -1238,6 +1285,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       if mode in [
            :exhausted,
            :checkpoint_more,
+           :checkpoint_source_numeric,
            :checkpoint_committed,
            :checkpoint_committed_aborted,
            :checkpoint_committed_expired

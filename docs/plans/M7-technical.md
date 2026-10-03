@@ -1693,6 +1693,12 @@ parent terminal commit together before provider intent. Replay reselects the
 frozen source at the retained clock. A live automatic case and pure replay
 mutation checks pass all 87 maintenance staging/recovery tests on both pairs;
 the current/floor complete outputs and digests are indexed in the task checklist.
+An already-admitted protected tail that cannot fit now retains its measured
+numeric v2 refusal, including token or record-byte observation. The first
+source boundary derives the same run deadline that request staging would use;
+later boundaries preserve the useful checkpoint. Replay remeasures the exact
+protected candidate and a live resumed owner commits only the adjacent ending.
+The updated 91-test current/floor results are indexed in the checklist.
 This is not a complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt

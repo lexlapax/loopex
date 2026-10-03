@@ -1192,12 +1192,23 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
 
     request = state.maintenance_episodes[state.active_maintenance]["request"]
 
+    reply =
+      case Keyword.fetch(options, :summary_text) do
+        {:ok, text} ->
+          request
+          |> summary_reply()
+          |> Map.put(:text, summary_json(%{summary_output() | "summary" => text}))
+
+        :error ->
+          summary_reply(request)
+      end
+
     {:ok, settled} =
       SessionState.propose_maintenance_attempt_settled(
         state,
         {:reply,
          Map.put(
-           summary_reply(request),
+           reply,
            :usage,
            Keyword.get(options, :usage, %{input_tokens: 37, output_tokens: 19})
          )}
@@ -1424,6 +1435,102 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
         ] do
       assert {:error, _} = SessionState.recover(state.session_id, history ++ changed, events)
     end
+  end
+
+  test "a useful checkpoint followed by an irreducible protected tail retains its measured refusal" do
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("o", 30_000),
+        later_old_units: ["later"],
+        ordinary_body: String.duplicate("s", 10_000),
+        system_class_tokens: 4_000,
+        context_token_budget: 4_000,
+        summary_text: String.duplicate("g", 4_000)
+      )
+
+    assert {:ok, checkpoint} =
+             SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    {state, rows, events} = commit(state, checkpoint, events)
+    history = history ++ rows
+    prior = state.active_checkpoint
+
+    assert {:error, {:checkpoint_requires_more_progress, _}} =
+             SessionState.propose_maintenance_checkpoint_completion(state, 2_001, fn -> :ok end)
+
+    assert {:ok, proposal} =
+             SessionState.propose_selected_maintenance_request(state, 2_001, fn -> :ok end)
+
+    assert [episode_terminal, refusal, terminal] = proposal.records
+    assert episode_terminal["result"]["checkpoint_id"] == prior
+    assert refusal["failure"]["category"] == "context_budget_exceeded"
+    assert refusal["failure"]["measurement_scope"] == "ordinary"
+    assert refusal["failure"]["dimension"] == "context_tokens"
+    assert refusal["episode_id"] == state.active_maintenance
+    assert refusal["projection_state"] == "measured"
+    assert terminal["failure"] == refusal["failure"]
+
+    {next, rows, events} = commit(state, proposal, events)
+    assert next.active_checkpoint == prior
+    assert next.checkpoints == state.checkpoints
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, events)
+
+    for changed <- [
+          update_in(rows, [Access.at(1), :payload, "failure", "observed"], &(&1 + 1)),
+          update_in(rows, [Access.at(1), :payload, "session_message_count"], &(&1 + 1)),
+          put_in(
+            rows,
+            [Access.at(0), :payload, "observed_at"],
+            state.deadlines[state.active_run_id]
+          )
+        ] do
+      assert {:error, _} = SessionState.recover(state.session_id, history ++ changed, events)
+    end
+  end
+
+  test "a protected record-byte overflow after a checkpoint keeps the exact measured dimension" do
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("o", 30_000),
+        later_old_units: ["later"],
+        current_content: String.duplicate("p", 33_000),
+        context_token_budget: 16_384
+      )
+
+    assert {:ok, checkpoint} =
+             SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    {state, rows, events} = commit(state, checkpoint, events)
+    history = history ++ rows
+
+    assert {:ok, proposal} =
+             SessionState.propose_selected_maintenance_request(state, 2_001, fn -> :ok end)
+
+    assert [_episode_terminal, refusal, _run_terminal] = proposal.records
+    assert refusal["failure"]["dimension"] == "context_record_bytes"
+    assert refusal["record_byte_cost"] == refusal["failure"]["observed"]
+    assert refusal["failure"]["observed"] > 65_536
+
+    {next, rows, events} = commit(state, proposal, events)
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, events)
+  end
+
+  test "an already admitted initial episode retains an irreducible protected numeric refusal" do
+    {state, history, events} =
+      admitted(["old"],
+        current_content: String.duplicate("p", 33_000),
+        context_token_budget: 16_384
+      )
+
+    assert {:ok, proposal} =
+             SessionState.propose_selected_maintenance_request(state, 1_001, fn -> :ok end)
+
+    assert [episode_terminal, refusal, terminal] = proposal.records
+    assert episode_terminal["result"]["checkpoint_id"] == nil
+    assert refusal["failure"]["dimension"] == "context_record_bytes"
+    assert refusal["episode_id"] == state.active_maintenance
+    assert terminal["failure"] == refusal["failure"]
+
+    {next, rows, events} = commit(state, proposal, events)
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, events)
   end
 
   test "captured clocks and spending prevent source intent while traversal errors survive" do

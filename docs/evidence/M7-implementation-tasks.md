@@ -325,6 +325,24 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: retain a measured numeric v2 refusal when a protected ordinary tail
+  remains too large after a useful checkpoint or at an already-admitted first
+  source boundary. The worker remeasures the exact protected candidate with
+  frozen project/resource inputs and the derived first-request deadline;
+  replay rederives its dimension, counts, digest, observation, episode and
+  clock. Current/floor tests cover token and record-byte overflow, prior
+  checkpoint retention, forged measurements and a live resumed owner that
+  commits only the episode/refusal/parent ending. All 91 maintenance staging
+  and recovery tests pass on each pair. Complete outputs:
+  `/private/tmp/loopex-m7-source-numeric-live-current.log`, SHA-256
+  `c0d96e4c0f688cab98e5fab9f457a640009413b7a6cc5af5719f8893433ce0da`;
+  `/private/tmp/loopex-m7-source-numeric-live-floor.log`, SHA-256
+  `b33030763509c14ed211bc1c7b7d0cd7468be9c63fcf0ac66228cfed78647b6e`.
+  This closes one added T07 subtask. T01–T19 originals remain 51 done /
+  122 todo / 6 retired; added subtasks become 187 done / 9 todo. Including
+  T00: originals 51 / 128 / 7 and added 191 / 10. Other source-preparation
+  errors, worker faults, thinking triggers and standalone compact remain open.
+
 - Done: make a source selector's irreducible excerpt failure a durable
   `compaction_excerpt_budget_too_small` ending. The pure worker proposes the
   episode terminal, unavailable v2 refusal and failed parent terminal together;
@@ -338,8 +356,8 @@ did not resolve them. No paid provider calls were made during this check.
   `49c070d7778f1aa9aeecc42e3a925b2fe292e0305e68c8be7998d1073dca06f2`.
   Initial unprivileged combined runs could not start Mix because its local TCP
   lock returned `:eperm`; the retained passing runs used the permitted test
-  sandbox. Numeric source-stage refusal, worker-fault joins and the other T07
-  outcomes remain open. This closes one added T07 subtask; T01–T19 originals
+  sandbox. Worker-fault joins and the other T07 outcomes remain open. This
+  closes one added T07 subtask; T01–T19 originals
   stay 51 done / 122 todo / 6 retired and added subtasks become 186 done /
   9 todo. Including T00: originals 51 / 128 / 7 and added 190 / 10.
 
@@ -7043,7 +7061,9 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Commit an irreducible bounded-source excerpt as the accepted named episode/refusal/parent ending before provider intent; rederive the frozen source and retained clock on replay, and prove a live automatic no-dispatch ending on both supported toolchains. Numeric source-stage refusals and worker-fault joins remain open.
+- [x] Retain an exact numeric v2 refusal for an irreducible protected ordinary tail at initial or later source preparation, including prior checkpoint, frozen inputs, derived first deadline and live owner replay on both supported toolchains; preserve source-worker fault and other preparation endings as open work.
+
+- [x] Commit an irreducible bounded-source excerpt as the accepted named episode/refusal/parent ending before provider intent; rederive the frozen source and retained clock on replay, and prove a live automatic no-dispatch ending on both supported toolchains. Worker-fault joins remain open.
 
 - [x] Admit a live automatic ordinary-limit episode from the measured v2 token/record-byte refusal only when a complete older unit can be released; capture the host summarizer and cutoff before source work, finish a real summary/checkpoint/ordinary continuation, and prove missing-summarizer and irreducible-current-prompt endings without provider or executor work on both supported pairs. Thinking/headroom, post-admission refusal faults and standalone compact remain open.
 
