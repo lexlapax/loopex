@@ -105,16 +105,58 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: the single full fast check for exact clean implementation checkpoint
-  `d7974fe1bdc79821eaf6c1a89be6a0ea98d09962` is executing in the existing
-  detached verification worktree
-  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Complete streamed output
-  is `/private/tmp/loopex-m7-d7974fe1-fast-check.log`. Its header binds the SHA;
-  its final runner footer will record exit and measured elapsed time. No result
-  or digest is claimed while the run is live. Collect terminal completion
-  before hashing, retain a failure if one occurs, and do not repeat the same
-  bytes to count a vanished failure as a pass. The primary `m7` checkout's
-  later administrative tracking edits do not change the tested bytes.
+- Failed: the single full fast check on exact clean checkpoint
+  `d7974fe1bdc79821eaf6c1a89be6a0ea98d09962` completed with exit 1 in
+  918.8 measured seconds. Complete output is
+  `/private/tmp/loopex-m7-d7974fe1-fast-check.log`, SHA-256
+  `8d3d212dab74351cab8218a0f1a2bd3f67e816acb16b703dafe91124ab804354`.
+  The terminal handle was collected before hashing. Composition had two failures:
+  retired tool expectations and a comparison of per-second trace counters as
+  cumulative counters. Executor had seven retired-generation fixture failures.
+  CLI had one stale full-inline model-result expectation. These results remain
+  failed evidence; the repaired bytes need their own committed integration check.
+  Eight other application suites passed. Repair work is tracked under T16.
+
+
+- Done: repair all ten failures from the d7974fe1 integration check without
+  restoring retired tool generations. Current executor fixture constructors use
+  the shipped exact declaration version; legacy positive branches are removed.
+  Receipt preflight, dishonest retention, complete-byte capture and shared
+  settlement allowances keep their original budgets and assertions. Composition
+  expects the current inventory. Its real trace test now requires a physically
+  delivered Control call with a source timestamp after each prompt's cutoff,
+  under one captured original 100 ms receive allowance per prompt. Rate-window
+  counter semantics, trace-session identity and exact owned-process joins remain
+  unchanged. The CLI receipt test creates explicit v3 genesis and uses the real
+  transfer/artifact store: all 16,384 source bytes survive retention and Store
+  commit, the public reference matches the receipt, and the model's complete
+  escaped message is at most 2,048 bytes with an exact receipt-text prefix.
+  The shared demonstration fixture accepts an optional artifact store; default
+  callers and the coding-task tests retain their existing behavior.
+  Focused checks passed with warnings as errors on both supported pairs:
+  composition 20 (6.0/6.0 measured suite seconds), executor 65 (35.4/35.5),
+  CLI receipt/coding workflow 6 plus two prescribed real-provider exclusions
+  (1.2/1.2). Formatting, documentation ordering and structure/status gates passed.
+  These focused passes do not replace a full fast check of the repaired commit.
+  All terminal handles were collected before hashing the complete outputs.
+
+  | Check | Complete output | SHA-256 |
+  | --- | --- | --- |
+  | composition-current-v1 | `/private/tmp/loopex-m7-integration-fixtures-composition-current-v1.log` | `6343c7b53504f4356b3f19a2f7a617e1f7c536c1f081ba5f490374f46ac17bef` |
+  | composition-floor-v1 | `/private/tmp/loopex-m7-integration-fixtures-composition-floor-v1.log` | `98ff4e4d9a83093b0abdf679334b580dbed5c715ecb22d700ec4818549350aaf` |
+  | executor_local-current-v1 | `/private/tmp/loopex-m7-integration-fixtures-executor_local-current-v1.log` | `b51b75f2e62a56ae2fd7edcd4a7f6ccad882707bc9db09087a64d972de4b0078` |
+  | executor_local-floor-v1 | `/private/tmp/loopex-m7-integration-fixtures-executor_local-floor-v1.log` | `2a2179c500e077440ec9785245f03b7d32dfaf0e5075d6aa0eeb12e1e1465bfa` |
+  | cli-current-v1 | `/private/tmp/loopex-m7-integration-fixtures-cli-current-v1.log` | `49442b08a0ed6eee4c1c828a84f372d2b49ffd38932bf9724e4c16407e4b852b` |
+  | cli-current-v2 | `/private/tmp/loopex-m7-integration-fixtures-cli-current-v2.log` | `e852e487b9123ef093db64b8c99a6f6208850632810895cdf6b76f7946861f16` |
+  | cli-current-v3 | `/private/tmp/loopex-m7-integration-fixtures-cli-current-v3.log` | `4f56d754687997539ca009ef65ea5f11cd9ce24db933bbee5f08d12afbe6d995` |
+  | cli-current-v4 | `/private/tmp/loopex-m7-integration-fixtures-cli-current-v4.log` | `c3b8935666dbd2e5dbd96c995636e5058d940dd4393187d6674c16cfdb324cd0` |
+  | cli-floor-v1 | `/private/tmp/loopex-m7-integration-fixtures-cli-floor-v1.log` | `8da99e93d0f58a6c05ff32268e75cae001a48fc546e9e1008db786739e3c6ff5` |
+  | structure | `/private/tmp/loopex-m7-integration-fixtures-structure.log` | `37be54b486f41ba1b4a94e64827fa6f918a73be4ada0051c7919cf120477290a` |
+
+  CLI development v1 failed on a wrong transfer-module reference; v2 failed
+  because the fixture still created old v2 genesis and bypassed the current
+  projection. Both failed outputs remain retained. Explicit current genesis
+  fixes the fixture's meaning rather than relaxing its byte ceiling.
 
 - Done: retire the shipped 1.0 read/grep/find/ls declarations and dispatch
   support, their canonical vectors, the nil legacy read-capability table row,
@@ -5632,7 +5674,11 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Run the full fast check once on the clean committed current-only tool and prepared-chat binding checkpoint; retain exact SHA, terminal output, measured duration and SHA-256 without claiming later changes are covered.
+- [x] Run the full fast check once on the clean committed current-only tool and prepared-chat binding checkpoint; retain exact SHA, terminal output, measured duration and SHA-256 without claiming later changes are covered.
+- [x] Migrate remaining executor/composition fixtures to current tool identities and remove their retired-generation positive cases; preserve retention, receipt, preflight and settlement bounds.
+- [x] Replace the trace rate-window comparison with fresh physical delivery from each prompt under the original receive allowance; preserve session identity and exact actor joins.
+- [x] Preserve the CLI exact-limit receipt/Store proof while checking the current bounded model projection.
+- [ ] Verify the integrated repair once on a new clean committed checkpoint and retain its complete output, exact SHA, measured duration and digest.
 - [x] Run the full fast check once on the clean committed pre-1.0 retirement and chat-output synchronization checkpoint; retain exact SHA and terminal output/digest without claiming later public/startup reads are covered.
 
 - [x] Acquire the owner-exit chat fixture writer synchronously before inducing loss; preserve exact DOWN reasons and receive deadlines, retaining failed parent evidence and both-pair focused proof.

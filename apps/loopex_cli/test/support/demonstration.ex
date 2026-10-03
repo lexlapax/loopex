@@ -47,13 +47,14 @@ defmodule LoopexCli.Demonstration do
 
     {:ok, adapter} = Store.Local.start_link(path: Path.join(state_root, "store.log"))
     {:ok, store} = Store.new(Store.Local, adapter)
-    {:ok, executor} = open_executor(state_root, workspace)
+    {:ok, executor} = open_executor(state_root, workspace, Keyword.get(options, :artifacts))
 
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: Keyword.get(options, :context_token_budget, 8_192),
         runtime_id: Keyword.get(options, :runtime_id, "demonstration"),
         store: store,
+        artifact_store: Keyword.get(options, :artifacts),
         policy: Keyword.get(options, :policy, LoopexCli.Policy.AllowAll),
         policy_identity:
           Keyword.get(options, :policy_identity, %{
@@ -154,7 +155,7 @@ defmodule LoopexCli.Demonstration do
     :ok
   end
 
-  defp open_executor(state_root, workspace) do
+  defp open_executor(state_root, workspace, artifacts) do
     lease_id = "workspace"
 
     {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: workspace, fencing_token: 1)
@@ -165,7 +166,8 @@ defmodule LoopexCli.Demonstration do
         epoch: 1,
         fencing_token: 1,
         workspace_leases: %{lease_id => lease},
-        ledger_root: Path.join(state_root, "receipts")
+        ledger_root: Path.join(state_root, "receipts"),
+        artifacts: artifacts
       )
 
     {:ok,

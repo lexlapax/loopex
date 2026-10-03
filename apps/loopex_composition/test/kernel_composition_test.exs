@@ -196,7 +196,7 @@ defmodule LoopexCompositionTest do
     runtime_defaults = Map.fetch!(defaults, Loopex)
 
     assert Keyword.fetch!(runtime_defaults, :active_tools) ==
-             [{"loopex.read", "1.0.0"}, "loopex.write", "loopex.edit", "loopex.bash"]
+             ["loopex.read", "loopex.write", "loopex.edit", "loopex.bash"]
 
     assert runtime_defaults
            |> Keyword.fetch!(:tools)
@@ -205,13 +205,9 @@ defmodule LoopexCompositionTest do
              [
                {"loopex.bash", "1.0.0"},
                {"loopex.edit", "1.0.0"},
-               {"loopex.find", "1.0.0"},
                {"loopex.find", "1.1.0"},
-               {"loopex.grep", "1.0.0"},
                {"loopex.grep", "1.1.0"},
-               {"loopex.ls", "1.0.0"},
                {"loopex.ls", "1.1.0"},
-               {"loopex.read", "1.0.0"},
                {"loopex.read", "1.1.0"},
                {"loopex.write", "1.0.0"}
              ]

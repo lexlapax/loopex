@@ -165,14 +165,15 @@ defmodule LoopexComposition.Ephemeral.TraceTest do
     startup = :sys.get_state(owner).startup
     runtime = startup.registered.runtime
     assert {:ok, first} = Loopex.trace_status(runtime)
-    assert {:ok, _} = Ephemeral.ask(session, "first")
-    assert {:ok, _} = Ephemeral.ask(session, "second")
+
+    for prompt <- ["first", "second"] do
+      cutoff = System.monotonic_time()
+      assert {:ok, _} = Ephemeral.ask(session, prompt)
+      assert_trace_write_after(cutoff, System.monotonic_time(:millisecond) + 100)
+    end
+
     assert {:ok, later} = Loopex.trace_status(runtime)
     assert Map.drop(later, [:emitted, :dropped]) == Map.drop(first, [:emitted, :dropped])
-    assert later.emitted > first.emitted
-    assert_receive {:device_write, _, bytes}
-    assert bytes =~ "trace_call"
-    assert bytes =~ "Loopex.Runtime.Control"
     monitors = Map.new(Map.keys(startup.process_monitors), &{&1, Process.monitor(&1)})
     assert :ok = Ephemeral.stop_session(session)
 
@@ -342,6 +343,29 @@ defmodule LoopexComposition.Ephemeral.TraceTest do
     refute Process.alive?(root)
     refute Process.alive?(runtime.supervisor)
     assert File.exists?(startup.owned_root.path)
+  end
+
+  # Concept: each prompt delivers a new physical trace entry.
+  # Technical depth: source timestamps exclude delayed startup entries. The
+  # original 100 ms receive allowance is captured once, never renewed while
+  # skipping old writes. Emitted/dropped status counts belong to rate windows.
+  defp assert_trace_write_after(cutoff, deadline) do
+    remaining = max(0, deadline - System.monotonic_time(:millisecond))
+
+    receive do
+      {:device_write, _, bytes} ->
+        timestamp = Regex.run(~r/"monotonic_native" => (-?\d+)/, bytes)
+
+        if bytes =~ "trace_call" and bytes =~ "Loopex.Runtime.Control" and
+             bytes =~ ~s("function" => "handle_call") and
+             match?([_, _], timestamp) and String.to_integer(List.last(timestamp)) >= cutoff do
+          :ok
+        else
+          assert_trace_write_after(cutoff, deadline)
+        end
+    after
+      remaining -> flunk("no fresh Control trace reached the diagnostic device for this prompt")
+    end
   end
 
   defp enabled, do: normalized(%{"enabled" => true, "modules" => ["Loopex.Runtime.Control"]})

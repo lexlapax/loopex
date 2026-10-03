@@ -152,7 +152,7 @@ defmodule Loopex.Executor.Local.ReceiptPublicationObservationTest do
                executor_identity: @identity,
                required_capabilities: [effect],
                tool_id: tool,
-               tool_version: "1.0.0",
+               tool_version: definition["tool_version"],
                effect_class: effect,
                validated_arguments: arguments,
                workspace_ref: "observed-workspace",

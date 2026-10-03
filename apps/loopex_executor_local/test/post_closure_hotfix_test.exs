@@ -1377,7 +1377,14 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
           executor_identity: "executor-local",
           required_capabilities: ["process"],
           tool_id: tool_id,
-          tool_version: "1.0.0",
+          tool_version:
+            case Enum.find(
+                   Loopex.Executor.Local.CodingTools.definitions(),
+                   &(&1["tool_id"] == tool_id)
+                 ) do
+              nil -> "1.0.0"
+              definition -> definition["tool_version"]
+            end,
           effect_class: effect_class_of(tool_id),
           validated_arguments: arguments,
           workspace_ref: "workspace",

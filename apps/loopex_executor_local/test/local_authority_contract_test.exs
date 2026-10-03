@@ -2113,7 +2113,14 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
           executor_identity: @identity,
           required_capabilities: [effect_class],
           tool_id: tool_id,
-          tool_version: "1.0.0",
+          tool_version:
+            case Enum.find(
+                   Loopex.Executor.Local.CodingTools.definitions(),
+                   &(&1["tool_id"] == tool_id)
+                 ) do
+              nil -> "1.0.0"
+              definition -> definition["tool_version"]
+            end,
           effect_class: effect_class,
           validated_arguments: arguments,
           workspace_ref: "workspace-contract",

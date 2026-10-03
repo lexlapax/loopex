@@ -244,7 +244,7 @@ defmodule Loopex.Executor.Local.ArtifactRetentionContractTest do
     assert length(ContractStore.calls(artifact_store)) == 2
   end
 
-  test "legacy jobs and explicit null capability retain their original inline bytes" do
+  test "current reads without projection or with null capability retain inline bytes" do
     root = workspace()
     content = String.duplicate("\"", 2_000)
     File.write!(Path.join(root, "large.txt"), content)
@@ -252,7 +252,6 @@ defmodule Loopex.Executor.Local.ArtifactRetentionContractTest do
     {executor, lease_id} = executor_for(root, artifact_store)
 
     for {version, policy} <- [
-          {"1.0.0", %{"retain" => true}},
           {"1.1.0", %{"retain" => true}},
           {"1.1.0", policy(identity(), nil)}
         ] do
@@ -368,7 +367,7 @@ defmodule Loopex.Executor.Local.ArtifactRetentionContractTest do
              })
   end
 
-  test "new searches with explicit null capability and legacy search jobs keep inline output" do
+  test "current searches with explicit null capability keep inline output" do
     root = workspace()
 
     for number <- 1..100,
@@ -381,7 +380,7 @@ defmodule Loopex.Executor.Local.ArtifactRetentionContractTest do
     {:completed, captured} = Loopex.Executor.Local.ReadOnlyTools.execute(root, arguments, 16_384)
     assert byte_size(captured) > 2_048
 
-    for {version, policy} <- [{"1.0.0", %{"retain" => true}}, {"1.1.0", policy(identity(), nil)}] do
+    for {version, policy} <- [{"1.1.0", policy(identity(), nil)}] do
       assert {:ok, receipt} =
                execute_read(executor, lease_id, identity(), %{
                  tool_id: "loopex.ls",
@@ -561,7 +560,7 @@ defmodule Loopex.Executor.Local.ArtifactRetentionContractTest do
           executor_identity: "executor-local",
           required_capabilities: ["process"],
           tool_id: "loopex.read",
-          tool_version: "1.0.0",
+          tool_version: "1.1.0",
           effect_class: "read_only",
           validated_arguments: %{"path" => "large.txt"},
           workspace_ref: "workspace",
