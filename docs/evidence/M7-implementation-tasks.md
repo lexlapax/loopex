@@ -325,6 +325,55 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: a settled first summary now has an exact pending-substitution probe.
+  It validates the unprotected whole-unit cut against complete original-record
+  coverage, renders owner-authenticated summary provenance and measures before
+  and after ordinary q=0 requests through their complete record fixed points.
+  Both record bytes and estimated tokens must strictly decrease. Progress may
+  remain above an ordinary hard limit; a larger summary refuses. Captured steer
+  stays fixed across later steer admission and owner succession. Cancellation,
+  abort, elapsed deadline and spent parent bounds prevent admission; observed
+  usage remains charged once. Actual unknown-usage settlement and the last
+  parent turn prove spent-bound refusal before projection begins. This constructs candidate data only: no checkpoint
+  record, publication, projection substitution or ordinary intent is committed.
+  Prior-checkpoint continuation, successful commitment, live recovery, captured
+  rendering triggers, thinking targets and standalone compact remain open.
+  This extends T07's completed summary-provenance subtask without changing totals.
+
+  The sixteen-file selection passed 219 tests on each supported pair. Current:
+  12.7 measured runner seconds,
+  `/private/tmp/loopex-m7-checkpoint-progress-current-dev4.log`, SHA-256
+  `d0492a538887b94e833bfbfbd246c53e7914d2abce0a8a899c6a60755edcf9f0`.
+  Floor: 13.1 measured runner seconds,
+  `/private/tmp/loopex-m7-checkpoint-progress-floor-v2.log`, SHA-256
+  `8062e54ac36aecc617d7a905db23ac572163828247477829add8deae9954cb9b`.
+  Formatting, warning-free compilation, dependency direction, structure/status,
+  documentation and diff gates passed in 23.6 measured seconds:
+  `/private/tmp/loopex-m7-checkpoint-progress-gates-v2.log`, SHA-256
+  `626e4df3235a9089086f18e837feffe880c2a6215735a1d7389ba6a34a2b6be3`.
+  The added successor test initially named a nonexistent owner_row helper;
+  using the existing exact owner_advance fixture fixes its construction without
+  changing production behavior or proof. That failed output remains in
+  `/private/tmp/loopex-m7-checkpoint-progress-current-dev2.log`, SHA-256
+  `1e84b5650d3e17aaa30b4d5b02b78fec27506ebaea74eb25eafd7fd5c1e71b5b`.
+  All focused handles are terminal and collected; no agent or decision is pending.
+
+- Done: full fast check on clean integration candidate
+  `d0dd8ec6aa139332d4225f4b72436f1f60bd4ba0`, once, with complete output and
+  exact revision retained. All eleven application suites pass, including 1,026
+  Core tests and 556 CLI tests, in 1,381.2 measured runner seconds. Output:
+  `/private/tmp/loopex-m7-d0dd8ec6-fast-check.log`, SHA-256
+  `5a5d627df88022cb8a4b0ed8d9ee2bc565b6d1659e805d8a34233de6a3d43ac3`.
+  The clean attached verification checkout stays at that tested candidate.
+  This covers the terminal-v2 codec, complete maintenance effect-history reader
+  and shared ordinary staging/tail measurement. Later pending-substitution
+  source changes are outside that full check and have their focused proof above.
+  It is not the floor closure run or release matrix, and unfinished M7 outcomes
+  remain open. The full check handle is terminal and collected; do not repeat
+  that candidate as a pass. The goal remains active on m7. Next join the retained
+  successful summary to checkpoint commitment/projection and exact owner/store
+  recovery before enabling new automatic summary dispatch.
+
 - Done: ordinary and maintenance staging share the reference receipt builder,
   using replay's canonical descriptors, tool projection, estimator and ordered
   digest. Configured live ordinary staging and the compaction-tail probe also
@@ -6568,7 +6617,7 @@ or check was relaxed.
 - [x] Stream exact source-v2 complete/excerpt encodings with bounded candidate/end buffers, full-list digest/count, fixed UTF-8-safe quota order, prior checkpoint reuse and traversal cancellation/deadline checks; pin independent byte, cap and numeric vectors.
 - [x] Admit whole maintenance callbacks, retain canonical usage on incomplete/invalid summaries, require natural completion first, and share closed summary/carry-forward validation with prior checkpoint reuse; prove escaping, size, shape and callback-generation boundaries.
 - [x] Select bounded complete source prefixes through owner-supplied whole-request preflight, enforce the revision-3 small-prefix/next-unit rule without fallback, and prove whole-unit coverage, exact threshold, quota order and cancellation before later reads.
-- [x] Capture owner-computed checkpoint summary provenance with inherited omission, share strict prior-data admission and pin exact canonical user rendering/source identity plus all nine native mappings in both transport modes on both toolchains.
+- [x] Capture owner-computed checkpoint summary provenance with inherited omission, share strict prior-data admission and pin exact canonical user rendering/source identity plus all nine native mappings in both transport modes on both toolchains. Prove exact first-checkpoint pending substitution and strict byte/token progress through shared ordinary staging, captured steer, owner succession, partial hard-limit progress, cancellation and deadline precedence; successful commitment and prior-checkpoint continuation remain open.
 - [x] Construct the accepted canonical thinking-off maintenance request from exact captured instructions and prepared source, with no tools/continuation and a fixed 1,024-token reserve; prove distinct configuration refusals, identity integrity and actual registered local-HTTP request bytes on both toolchains.
 
 ## T08 — Implement model selection and private thinking continuation

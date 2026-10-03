@@ -198,6 +198,194 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
       "detail" => nil
     }
 
+  test "pending checkpoint substitution proves strict exact progress from retained summary and originals" do
+    {state, history, events} = pending_checkpoint(String.duplicate("o", 3_000))
+
+    assert {:ok, candidate} =
+             SessionState.preflight_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    assert candidate.after.tokens < candidate.before.tokens
+    assert candidate.after.record_bytes < candidate.before.record_bytes
+    assert {:ok, _} = candidate.after.admission
+    assert candidate.prior_checkpoint_id == nil
+
+    assert candidate.covered_range ==
+             state.maintenance_episodes[state.active_maintenance]["covered_range"]
+
+    assert candidate.summary["covered_range_digest"] == candidate.covered_range["digest"]
+    assert candidate.summary["source_excerpted"] == false
+    assert candidate.after.request.messages |> Enum.at(1) == elem(candidate.entry, 1)
+
+    assert List.last(candidate.after.request.messages) == %{
+             "role" => "user",
+             "content" => "protected"
+           }
+
+    assert candidate.before.request.tools == candidate.after.request.tools
+    assert candidate.before.request.sampling == candidate.after.request.sampling
+    assert candidate.before.request.deadline == candidate.after.request.deadline
+    assert candidate.after.request.continuation == nil
+
+    for measurement <- [candidate.before, candidate.after] do
+      assert {:ok, normalized, size} =
+               Store.normalize_and_measure_item(:record, measurement.record)
+
+      assert normalized == measurement.record
+      assert size == measurement.record_bytes
+      assert size == measurement.record["context_receipt"]["record_byte_cost"]
+    end
+
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history, events)
+
+    assert {:ok, ^candidate} =
+             SessionState.preflight_maintenance_checkpoint(recovered, 2_000, fn -> :ok end)
+
+    assert recovered.charged[state.active_run_id] == %{tokens: 56, source: :reported}
+    assert recovered.maintenance_episodes[state.active_maintenance]["checkpoint_id"] == nil
+    assert recovered.conversation == state.conversation
+  end
+
+  test "pending substitution retains admission's steer across later input and owner succession" do
+    {state, history, events} = pending_checkpoint(String.duplicate("o", 3_000))
+
+    assert {:ok, original} =
+             SessionState.preflight_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    {:ok, steer} =
+      SessionState.propose(state, %{
+        type: :steer,
+        command_id: "after-summary",
+        run_id: state.active_run_id,
+        content: "Apply this at the next ordinary request"
+      })
+
+    {state, rows, events} = commit(state, steer, events)
+    owner = owner_advance(state)
+
+    assert {:ok, successor} =
+             SessionState.recover(state.session_id, history ++ rows ++ [owner], events)
+
+    assert successor.owner_epoch == 2
+
+    assert SessionState.pending_steer(successor, state.active_run_id).command_id ==
+             "after-summary"
+
+    assert successor.maintenance_episodes[state.active_maintenance]["ordinary_steer"] == nil
+
+    assert {:ok, ^original} =
+             SessionState.preflight_maintenance_checkpoint(successor, 2_000, fn -> :ok end)
+
+    refute Enum.any?(
+             original.after.request.messages,
+             &(&1["content"] == "Apply this at the next ordinary request")
+           )
+
+    assert successor.charged == state.charged
+  end
+
+  test "a usable summary which grows the projection refuses without hiding its settled charge" do
+    {state, history, events} = pending_checkpoint("small")
+
+    assert {:error, :compaction_no_progress} =
+             SessionState.preflight_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history, events)
+    assert recovered.charged[state.active_run_id].tokens == 56
+
+    assert recovered.maintenance_episodes[state.active_maintenance]["stage"] ==
+             "checkpoint_pending"
+  end
+
+  test "strict progressing substitution may remain above an ordinary hard limit" do
+    {state, _, _} =
+      pending_checkpoint(String.duplicate("o", 3_000),
+        current_content: String.duplicate("p", 33_000),
+        context_token_budget: 16_384
+      )
+
+    assert {:ok, candidate} =
+             SessionState.preflight_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    assert candidate.after.tokens < candidate.before.tokens
+    assert candidate.after.record_bytes < candidate.before.record_bytes
+    assert {:refused, refusal} = candidate.after.admission
+    assert refusal["dimension"] == "context_record_bytes"
+    assert refusal["observed"] == candidate.after.record_bytes
+    assert refusal["observed"] > 65_536
+  end
+
+  test "abort, elapsed deadline and cancellation win before checkpoint admission" do
+    {state, _, events} = pending_checkpoint(String.duplicate("o", 3_000))
+
+    assert {:error, :run_deadline_reached} =
+             SessionState.preflight_maintenance_checkpoint(
+               state,
+               61_001,
+               fn -> flunk("elapsed deadline entered projection") end
+             )
+
+    assert {:error, :cancelled} =
+             SessionState.preflight_maintenance_checkpoint(
+               state,
+               2_000,
+               fn -> {:error, :cancelled} end
+             )
+
+    assert {:ok, abort} =
+             SessionState.propose(state, %{
+               type: :abort,
+               command_id: "checkpoint-abort",
+               run_id: state.active_run_id
+             })
+
+    {aborted, _, _} = commit(state, abort, events)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.preflight_maintenance_checkpoint(
+               aborted,
+               2_000,
+               fn -> flunk("abort entered projection") end
+             )
+
+    assert aborted.charged == state.charged
+    assert aborted.conversation == state.conversation
+  end
+
+  test "settled summary spending cannot create a checkpoint after a parent bound wins" do
+    for options <- [[usage: %{}], [max_turns: 1]] do
+      {state, _, _} = pending_checkpoint(String.duplicate("o", 3_000), options)
+
+      assert {:error, :maintenance_bounds_exhausted} =
+               SessionState.preflight_maintenance_checkpoint(state, 2_000, fn ->
+                 flunk("spent parent bound entered checkpoint projection")
+               end)
+
+      assert state.maintenance_episodes[state.active_maintenance]["checkpoint_id"] == nil
+    end
+  end
+
+  defp pending_checkpoint(old, options \\ []) do
+    {state, history, events} = admitted([old], options)
+    {:ok, opened} = propose(state, 1)
+    {state, rows, events} = commit(state, opened, events)
+    history = history ++ rows
+    request = state.maintenance_episodes[state.active_maintenance]["request"]
+
+    {:ok, settled} =
+      SessionState.propose_maintenance_attempt_settled(
+        state,
+        {:reply,
+         Map.put(
+           summary_reply(request),
+           :usage,
+           Keyword.get(options, :usage, %{input_tokens: 37, output_tokens: 19})
+         )}
+      )
+
+    {state, rows, events} = commit(state, settled, events)
+    {state, history ++ rows, events}
+  end
+
   test "source staging binds originals, exact receipt and an adjacent attempt without ordinary work" do
     {state, history, events} = admitted(["early fact 猫", "another fact"])
     parent = state.active_run_id

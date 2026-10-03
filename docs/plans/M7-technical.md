@@ -1638,13 +1638,17 @@ cancellation. Thinking targets, captured rendering offenders, prior-checkpoint
 substitution and live triggering still need the owner join.
 Maintenance settlement now retains valid summaries pending checkpoints, charges
 exact or conservative usage once, preserves abort/deadline precedence and permits
-only the one exact not-dispatched retry. Live successors finish inherited lost
+only the one exact not-dispatched retry. The first-checkpoint pending-substitution
+probe authenticates original coverage, renders summary provenance and requires
+strictly lower exact ordinary record bytes and estimated tokens, preserving
+captured steer through owner succession. Its candidate data is not a committed
+checkpoint. Live successors finish inherited lost
 attempts and invalid/incomplete summaries without redispatch, including all
 three Store uncertainty phases and exact owner joins. Automatic triggering, new
 summary dispatch/cleanup, successful checkpoint commits and standalone compact
-remain open. The full fast check passes on e80116c1 before the tail-selector
-change; both supported pairs pass the focused selection after it. This is not a
-complete T07 workflow proof.
+remain open. The full fast check passes on d0dd8ec6 through shared ordinary
+staging/tail measurement; both supported pairs pass the later focused pending-
+substitution selection. This is not a complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.

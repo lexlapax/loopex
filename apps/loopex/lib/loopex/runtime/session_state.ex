@@ -1259,6 +1259,7 @@ defmodule Loopex.Runtime.SessionState do
              Map.get(staging, :excerpt_allowance, 2_048),
              staging.elements
            ),
+         entries = Map.get(staging, :checkpoint_entries, []) ++ entries,
          {blocks, sources} = Enum.unzip(selected),
          steer = staging.steer,
          messages =
@@ -1395,6 +1396,155 @@ defmodule Loopex.Runtime.SessionState do
       false -> {:error, :maintenance_not_quiescent}
       nil -> {:error, :invalid_session_configuration}
       {:error, _} = error -> error
+    end
+  end
+
+  # Concept: a valid summary becomes useful only after exact substitution proves progress.
+  # Technical depth: the pending reply is already settled and charged. This
+  # first-checkpoint probe authenticates its whole-unit cut against originals,
+  # renders the owner-computed summary provenance, and measures both ordinary
+  # q=0 candidates through the same complete record fixed point. It captures no
+  # public or journal fact and consumes no provider attempt. Partial progress
+  # can remain above ordinary hard limits; both bytes and tokens must decrease.
+  @doc false
+  @spec preflight_maintenance_checkpoint(t(), integer(), function()) ::
+          {:ok, map()} | {:error, term()}
+  def preflight_maintenance_checkpoint(state, now, check)
+      when is_function(check, 0) do
+    with %{
+           "stage" => "checkpoint_pending",
+           "summary" => summary,
+           "checkpoint_id" => nil,
+           "trigger" => "ordinary_limit"
+         } = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <- is_nil(state.aborting) and episode["run_id"] == state.active_run_id,
+         true <- is_integer(now) and now >= 0 and now <= @uint64_max,
+         true <- is_integer(state.deadlines[episode["run_id"]]),
+         true <- now < state.deadlines[episode["run_id"]],
+         :ok <- pending_checkpoint_capacity(state, episode),
+         :ok <- check.(),
+         {:ok, units} <- compaction_units(state, episode["run_id"]),
+         count = episode["covered_range"]["unit_count"],
+         true <- count > 0 and count <= length(Enum.take_while(units, &(not &1.protected?))),
+         {:ok, range} <- maintenance_covered_range(state, episode, units, count, check),
+         true <- range == episode["covered_range"],
+         {:ok, captured} <-
+           Loopex.Runtime.CompactionSummary.capture(
+             summary,
+             range["digest"],
+             nil,
+             episode["source_excerpted"]
+           ),
+         checkpoint_id =
+           stable_id("compaction-checkpoint", episode["episode_id"], episode["summary_ordinal"]),
+         {:ok, entry} <- Loopex.Runtime.CompactionSummary.project(checkpoint_id, captured),
+         staging = %{
+           run_id: episode["run_id"],
+           elements: Enum.flat_map(units, & &1.elements),
+           steer: episode["ordinary_steer"],
+           resources: state.run_resources[episode["run_id"]],
+           deadline: state.deadlines[episode["run_id"]],
+           excerpt_allowance: 0
+         },
+         project = %{
+           "class" => "project_resource",
+           "receipt_revision" => 2,
+           "disposition" => "not_evaluated_required_failure",
+           "detail" => nil
+         },
+         header = Loopex.Runtime.ResourceContext.initial_header(staging.resources),
+         header = if(header, do: Map.put(header, "status", "retained_content_missing"), else: nil),
+         {:ok, before} <-
+           checkpoint_projection_measurement(state, staging, project, header, check),
+         after_staging =
+           staging
+           |> Map.put(:elements, units |> Enum.drop(count) |> Enum.flat_map(& &1.elements))
+           |> Map.put(:checkpoint_entries, [entry]),
+         {:ok, after_value} <-
+           checkpoint_projection_measurement(state, after_staging, project, header, check),
+         true <-
+           after_value.record_bytes < before.record_bytes and
+             after_value.tokens < before.tokens,
+         :ok <- check.() do
+      {:ok,
+       %{
+         checkpoint_id: checkpoint_id,
+         prior_checkpoint_id: nil,
+         covered_range: range,
+         summary: captured,
+         entry: entry,
+         before: before,
+         after: after_value
+       }}
+    else
+      false -> pending_checkpoint_refusal(state, now)
+      {:error, _} = error -> error
+      _ -> {:error, :no_pending_maintenance_checkpoint}
+    end
+  end
+
+  defp pending_checkpoint_capacity(state, episode) do
+    {_bounds, charged} = accounting(state, episode["run_id"])
+
+    if charged.tokens < episode["bounds"]["token_budget"] and
+         maintenance_parent_call_units(state, episode["run_id"]) < episode["bounds"]["max_turns"],
+       do: :ok,
+       else: {:error, :maintenance_bounds_exhausted}
+  end
+
+  defp pending_checkpoint_refusal(state, now) do
+    episode = state.maintenance_episodes[state.active_maintenance]
+
+    cond do
+      not is_nil(state.aborting) ->
+        {:error, :maintenance_not_quiescent}
+
+      not is_integer(now) or now < 0 or now > @uint64_max ->
+        {:error, :clock_out_of_domain}
+
+      is_map(episode) and is_integer(state.deadlines[episode["run_id"]]) and
+          now >= state.deadlines[episode["run_id"]] ->
+        {:error, :run_deadline_reached}
+
+      true ->
+        {:error, :compaction_no_progress}
+    end
+  end
+
+  defp checkpoint_projection_measurement(state, staging, project, header, check) do
+    with :ok <- check.(),
+         {:ok, candidate} <- reference_model_candidate(state, staging, [], project, header),
+         record =
+           model_request_record(
+             state,
+             staging.run_id,
+             candidate.request,
+             [
+               context_receipt: candidate.receipt,
+               applied_steer: staging.steer && staging.steer.command_id,
+               lineage_projection: candidate.projection
+             ],
+             next_turn_number(state.pending_work[staging.run_id])
+           ),
+         {:ok, fixed} <- resolve_record_byte_cost(record),
+         :ok <- check.() do
+      fit = admit_context_candidate(fixed, state)
+
+      case fit do
+        {kind, _} when kind in [:ok, :refused] ->
+          {:ok,
+           %{
+             request: candidate.request,
+             record: fixed,
+             record_bytes: fixed["context_receipt"]["record_byte_cost"],
+             tokens: fixed["context_receipt"]["provider_estimated_tokens"],
+             admission: fit
+           }}
+
+        {:error, _} = error ->
+          error
+      end
     end
   end
 
@@ -5123,7 +5273,10 @@ defmodule Loopex.Runtime.SessionState do
                "estimated_tokens" => 0,
                "total_tokens" => 0
              } do
-      episode = Map.put(record, "stage", "source_preparation")
+      episode =
+        record
+        |> Map.put("stage", "source_preparation")
+        |> Map.put("ordinary_steer", pending_steer(state, run_id))
 
       {:ok,
        %{
