@@ -29,7 +29,10 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
-## Restart checkpoint — 2026-10-03, maintenance endings
+## Historical restart checkpoint — 2026-10-03, maintenance endings
+
+The maintainer resumed the implementation goal after restarting on 2026-10-03.
+Current work below records subsequent source changes and verification.
 
 The maintainer requested a safe stop, commit and push before restarting. Product
 implementation is committed and pushed on `m7` at
@@ -322,6 +325,50 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: extend the existing ProviderAttempt vocabulary and verified Control
+  permit boundary with `maintenance_attempt_opened_v1`. Its closed fields are
+  episode identity, positive unsigned summary ordinal, fixed compaction purpose,
+  operation identity, attempt and staged digest. No ordinary run/turn fields are
+  invented. Each logical operation keeps the two-attempt domain; the episode's
+  four-attempt spending gate still belongs to its forthcoming reducer. Record
+  and binding validation reject mixed scopes, missing/extra keys, unsupported
+  kinds, changed purpose and malformed identities. Control reconstructs the
+  binding from the exact current journal row before its one-use send. Its
+  retirement read recognizes the maintenance current-open identity too.
+  Effect-history scans validate these rows and advance coverage without adding
+  executor effects; malformed rows cannot be skipped.
+
+  The five-file focused selection passed 90 tests on each supported pair.
+  Current: 27.3 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-permit-current-v2.log`, SHA-256
+  `4e5878f74220f355afb70ff4864096775ee8a5185d6961430778db9a1cc670af`.
+  Floor: 28.0 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-permit-floor-v2.log`, SHA-256
+  `648a08e1324e005328504e665b89a3a31c2aa05972b1616ec566a3be9c41d97a`.
+  Complete outputs retain the exact source/test digests. The live boundary
+  fixture writes the open row through Store and acknowledges its actual receipt;
+  it supplies the private owner-call envelope and invokes no provider. It proves
+  exact-position refusal, changed identity refusal, elapsed deadline, one send,
+  repeated-spend refusal and process joins. It does not prove an episode/request
+  reducer or live compaction dispatch. The first three-case development run
+  failed two test assumptions about the existing 512-byte opaque identifier
+  bound and `deadline_elapsed` refusal; fixtures were corrected without changing
+  those production rules. The earlier five-file selection passed 89 per pair
+  before the additional effect-history witness.
+
+  Formatting, warning-free compilation, dependency direction, repository
+  structure/status, compiled documentation and diff checks passed in 21.9
+  measured seconds. Complete output:
+  `/private/tmp/loopex-m7-maintenance-permit-gates-v1.log`, SHA-256
+  `7e3c38e77eac27e5b3fbdb7eb03a962fceacdfed58abc627b122561cbadf832d`.
+
+  The goal is active on `m7`. T00–T19 original rows remain 51 done / 128 todo /
+  7 retired; added subtasks now have 177 done / 10 todo. T01–T19 alone retain
+  51 / 122 / 6 original rows and have 173 / 9 added subtasks. No agents,
+  decisions or focused check handles are pending. Next implement the bounded
+  maintenance request/attempt reducer and join source selection to the owner.
+  No new full fast-check pass is claimed for these permit source changes.
+
 - Done: full current-pair fast check on exact clean integration candidate
   `ff21bed908d7213026ed55ce4c04bfdda94ad5dd`, committed and pushed on `m7`.
   It ran in `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`, detached at
@@ -330,11 +377,10 @@ did not resolve them. No paid provider calls were made during this check.
   `/private/tmp/loopex-m7-ff21bed9-fast-check.log`, SHA-256
   `4220dfb2af023b1ad8ecf88ae30f59e0fb6fa32eeea8f6aa0d6ab2b5752927d2`.
   Unified execution handle `53173` is terminal and collected; do not poll or
-  restart it. This checkpoint changes documentation only after the tested
-  candidate. The implementation goal is paused for the maintainer's requested
-  restart, and M7 remains In progress. No agents or check handles are pending.
+  restart it. That run covers the ending/expiry implementation, before the
+  subsequent maintenance-permit source changes above. M7 remains In progress.
 
-- Next on resume: T07 durable compaction. Admission, run-owned terminal ordering and
+- Active: T07 durable compaction. Admission, run-owned terminal ordering and
   expired-preparation/undispatched-abort recovery are implemented. Next join the
   ordinary-limit trigger to bounded source selection, maintenance-specific
   request/attempt/settlement records and checkpoint commits. The not-yet-expired
@@ -6057,6 +6103,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Extend the existing provider-attempt open vocabulary, closed permit bindings, exact-position one-use Control send and effect-history coverage for distinct maintenance episode/summary identities; prove fabricated/mixed/changed identities, stale positions, deadlines, repeat sends and process joins on both toolchains. Episode/request reducer, four-attempt accounting and actual maintenance dispatch remain open.
 
 - [x] Commit run-owned episode terminal prefixes atomically with existing endings; validate the closed result, parent-bound observations, retained preparation clock, adjacency and complete replay; join live expired preparation and undispatched-abort recovery, including exact uncertainty/owner-exit/successor proof on both toolchains. Live triggering, summary attempt accounting, checkpoint faults and standalone endings remain open.
 

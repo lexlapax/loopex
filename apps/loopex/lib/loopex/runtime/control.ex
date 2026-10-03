@@ -1280,9 +1280,12 @@ defmodule Loopex.Runtime.Control do
     do: {:error, :invalid_settlement_range}
 
   defp current_provider_binding(session_id, %{payload: payload}) do
-    if record_kind(payload) == ProviderAttempt.opened_kind(),
-      do: ProviderAttempt.binding_from_opened(session_id, payload),
-      else: {:ok, nil}
+    if record_kind(payload) in [
+         ProviderAttempt.opened_kind(),
+         ProviderAttempt.maintenance_opened_kind()
+       ],
+       do: ProviderAttempt.binding_from_opened(session_id, payload),
+       else: {:ok, nil}
   end
 
   defp current_provider_binding(_session_id, _record),
@@ -3618,7 +3621,7 @@ defmodule Loopex.Runtime.Control do
   # one attempt under a second spelling. ADR 0018 requires "every identity
   # equals its registered state" before the spend, and the coordinator builds
   # this map from the committed attempt-open record, so Control admits exactly
-  # that closed six-member shape. The session member is then compared against
+  # the ordinary or maintenance closed identity. The session member is compared against
   # Control's own registered owner entry by the lookup below; the remaining
   # members name a journal position `authority` does not carry, which is why
   # their shape, not their value, is what Control can settle here.
@@ -3698,8 +3701,8 @@ defmodule Loopex.Runtime.Control do
   # the committed record, read here through the Store at exactly
   # `authority.journal_version` -- the position `provider_position_current/2`
   # has already proved is this session's current one, and the position each
-  # attempt-open commits at. The binding is admitted only when it equals the six
-  # members rebuilt from that row: the attempt-open record's five plus the
+  # attempt-open commits at. The binding is admitted only when it equals the
+  # closed ordinary or maintenance identity rebuilt from that row plus the
   # session it was read from. A row that is absent, of another kind, or
   # unreadable registers no identity, so it refuses; treating it as a pass is
   # the defect itself. Nothing has been sent at this point, so the coordinator

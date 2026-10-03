@@ -1602,6 +1602,16 @@ yet; not-yet-expired source dispatch, its worker/timer cleanup, automatic and
 standalone attempts, maintenance settlement/usage, checkpoint commits and complete
 abort/deadline precedence remain unproved.
 
+The existing ProviderAttempt and Control boundaries now admit a separate closed
+maintenance attempt-open identity: episode, summary ordinal, compaction purpose,
+operation, attempt and staged digest. Control rebuilds it from the exact current
+journal row before its one-use send; a supplied identity alone grants nothing.
+Effect-history scans validate these rows and advance coverage without fabricating
+executor effects. Both-pair focused tests cover mixed/changed identities, stale
+positions, deadlines, repeat sends and exact fixture process joins. This is the
+permit boundary, not a live episode/request reducer or summary dispatch proof;
+the episode-wide spending gate and maintenance settlements remain open.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

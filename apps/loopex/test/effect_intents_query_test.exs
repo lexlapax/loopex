@@ -470,6 +470,40 @@ defmodule Loopex.EffectIntentsQueryTest do
     end
   end
 
+  test "maintenance attempt opens advance coverage without inventing executor effects", context do
+    %{runtime: runtime, session: session, records: records, reference: reference} = context
+    before = all_pages(runtime, session, nil, 1, []) |> Enum.flat_map(& &1.rows)
+
+    {:ok, opened} =
+      Loopex.Runtime.ProviderAttempt.opened_record(%{
+        episode_id: "maintenance-episode",
+        summary_ordinal: 1,
+        purpose: "compaction",
+        operation_id: "summary-operation",
+        attempt: 1,
+        staged_request_digest: String.duplicate("d", 64)
+      })
+
+    last = List.last(records)
+    row = %{last | journal_version: last.journal_version + 1, payload: opened}
+    Agent.update(reference, &%{&1 | records: records ++ [row]})
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert Enum.flat_map(pages, & &1.rows) == before
+    assert List.last(pages).scanned_through == row.journal_version
+    assert List.last(pages).next_cursor == nil
+
+    for payload <- [
+          Map.put(opened, "extra", true),
+          Map.put(opened, "run_id", "fictional-run"),
+          Map.put(opened, "summary_ordinal", 0),
+          Map.put(opened, "purpose", "ordinary"),
+          Map.delete(opened, "episode_id")
+        ] do
+      Agent.update(reference, &%{&1 | records: records ++ [%{row | payload: payload}]})
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+  end
+
   test "Store-read timeout joins the blocked reader before answering", context do
     %{runtime: runtime, session: session, reference: reference} = context
     Agent.update(reference, &%{&1 | mode: :block})

@@ -325,7 +325,7 @@ defmodule Loopex.Runtime.EffectIntents do
   defp neutral(%{payload: %{kind: kind} = payload} = record) do
     valid =
       case kind do
-        "model_attempt_opened_v1" ->
+        kind when kind in ["model_attempt_opened_v1", "maintenance_attempt_opened_v1"] ->
           ProviderAttempt.validate_opened(payload) == :ok
 
         "model_attempt_settled_v3" ->

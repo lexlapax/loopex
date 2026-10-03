@@ -16,7 +16,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
   [ADR 0018](../../../../docs/adr/0018-provider-attempt-authority-and-recovery.md#concept)
   and its versioned accounting provenance in
   [ADR 0021](../../../../docs/adr/0021-compacted-provider-accounting-provenance.md#concept),
-  with M7's reply/continuation generation in
+  with maintenance identity in
+  [ADR 0043](../../../../docs/adr/0043-context-compaction-checkpoint.md#concept)
+  and M7's reply/continuation generation in
   [ADR 0044](../../../../docs/adr/0044-run-model-and-reasoning-configuration.md#concept).
 
   ## Technical depth
@@ -35,10 +37,19 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
 
   @opened_kind "model_attempt_opened_v1"
+  @maintenance_opened_kind "maintenance_attempt_opened_v1"
   @settled_v3_kind "model_attempt_settled_v3"
   @termination_kind "model_termination_admitted_v1"
 
   @opened_keys ["run_id", "turn_id", "operation_id", "attempt", "staged_request_digest"]
+  @maintenance_opened_keys [
+    "episode_id",
+    "summary_ordinal",
+    "purpose",
+    "operation_id",
+    "attempt",
+    "staged_request_digest"
+  ]
   @settled_keys [
     "run_id",
     "turn_id",
@@ -137,6 +148,20 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
+  Identify a provider attempt owned by a compaction episode.
+
+  ## Technical depth
+
+  ADR 0043 gives maintenance its own record kind, episode and summary ordinal.
+  Its fixed compaction purpose replaces ordinary run/turn identity; each logical
+  summary operation retains ADR 0018's two-attempt ceiling.
+  """
+  @spec maintenance_opened_kind() :: binary()
+  def maintenance_opened_kind, do: @maintenance_opened_kind
+
+  @doc """
+  ## Concept
+
   The current record kind for every newly settled ordinary attempt.
 
   ## Technical depth
@@ -162,23 +187,55 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
-  The exact six-key attempt-open record, which is the only dispatch authority a
-  provider attempt has.
+  The closed attempt-open record, which is the only dispatch authority a
+  provider attempt has, for an ordinary operation or a compaction summary.
 
   ## Technical depth
 
+  Ordinary rows have six keys; maintenance rows have seven, using episode,
+  summary ordinal and fixed compaction purpose in place of run and turn.
   Every member equals the current committed staged request. The caller supplies
   those values; this refuses anything that is not a bounded plain member of the
   declared domain rather than committing a record replay would later refuse.
   """
   @spec opened_record(map()) :: {:ok, map()} | {:error, term()}
-  def opened_record(%{
-        run_id: run_id,
-        turn_id: turn_id,
-        operation_id: operation_id,
-        attempt: attempt,
-        staged_request_digest: digest
-      }) do
+  def opened_record(
+        %{
+          episode_id: episode_id,
+          summary_ordinal: ordinal,
+          purpose: "compaction",
+          operation_id: operation_id,
+          attempt: attempt,
+          staged_request_digest: digest
+        } = identity
+      )
+      when not is_map_key(identity, :run_id) and not is_map_key(identity, :turn_id) do
+    record = %{
+      "episode_id" => episode_id,
+      "summary_ordinal" => ordinal,
+      "purpose" => "compaction",
+      "operation_id" => operation_id,
+      "attempt" => attempt,
+      "staged_request_digest" => digest,
+      kind: @maintenance_opened_kind
+    }
+
+    with :ok <- validate_maintenance_identity(record) do
+      {:ok, record}
+    end
+  end
+
+  def opened_record(
+        %{
+          run_id: run_id,
+          turn_id: turn_id,
+          operation_id: operation_id,
+          attempt: attempt,
+          staged_request_digest: digest
+        } = identity
+      )
+      when not is_map_key(identity, :episode_id) and not is_map_key(identity, :summary_ordinal) and
+             not is_map_key(identity, :purpose) do
     record = %{
       "run_id" => run_id,
       "turn_id" => turn_id,
@@ -193,6 +250,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
+  def opened_record(_identity), do: {:error, :invalid_attempt_identity}
+
   @doc """
   ## Concept
 
@@ -206,9 +265,19 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_opened(map()) :: :ok | {:error, term()}
   def validate_opened(record) when is_map(record) do
-    with :ok <- exact_keys(record, @opened_keys),
-         :ok <- validate_identity(record) do
-      :ok
+    case Map.get(record, :kind, Map.get(record, "kind")) do
+      @opened_kind ->
+        with :ok <- exact_keys(record, @opened_keys),
+             :ok <- validate_identity(record),
+             do: :ok
+
+      @maintenance_opened_kind ->
+        with :ok <- exact_keys(record, @maintenance_opened_keys),
+             :ok <- validate_maintenance_identity(record),
+             do: :ok
+
+      _ ->
+        {:error, :invalid_attempt_open}
     end
   end
 
@@ -217,9 +286,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
-  Whether a value is exactly the six-member identity one provider permit may
-  authorize: the attempt-open record's five members plus the session they
-  belong to.
+  Whether a value is exactly the identity one provider permit may authorize:
+  the attempt-open members plus the session they belong to.
 
   ## Technical depth
 
@@ -235,9 +303,13 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_binding(term()) :: :ok | {:error, term()}
   def validate_binding(binding) when is_map(binding) and not is_struct(binding) do
-    with :ok <- exact_keys(binding, ["session_id" | @opened_keys]),
+    maintenance? = Map.has_key?(binding, "purpose")
+    keys = if maintenance?, do: @maintenance_opened_keys, else: @opened_keys
+
+    with false <- Map.has_key?(binding, :kind) or Map.has_key?(binding, "kind"),
+         :ok <- exact_keys(binding, ["session_id" | keys]),
          true <- bounded_binary?(binding["session_id"]),
-         :ok <- validate_identity(binding) do
+         :ok <- validate_binding_identity(binding, maintenance?) do
       :ok
     else
       _other -> {:error, :invalid_provider_attempt_binding}
@@ -256,22 +328,26 @@ defmodule Loopex.Runtime.ProviderAttempt do
 
   ADR 0018 requires that "every identity equals its registered state" before
   Control spends an attempt, and the registered state of a run, turn, operation,
-  attempt and digest is the committed `model_attempt_opened_v1` row, never the
-  argument of the process asking for the permit. So the binding is rebuilt here
-  from that row's own five members plus the session it belongs to, and a caller's
+  attempt and digest is the committed attempt-open row, never the argument of
+  the process asking for the permit. The binding is rebuilt here from that
+  row's own closed identity plus the session it belongs to, and a caller's
   map is admitted only by equality with this one. The row is validated as the
   exact attempt-open record first, including its kind, so a row of any other
   kind standing at the same journal position names no binding at all rather than
   contributing whichever of these members it happens to carry. Every refusal is
   the binding refusal, because the only question asked here is which binding, if
-  any, this row registers.
+  any, this row registers. Maintenance rows use their distinct closed episode,
+  ordinal and purpose identity, under the same journal-position verification.
   """
   @spec binding_from_opened(term(), term()) :: {:ok, map()} | {:error, term()}
   def binding_from_opened(session_id, record)
       when is_binary(session_id) and is_map(record) and not is_struct(record) do
-    with @opened_kind <- Map.get(record, :kind, Map.get(record, "kind")),
+    kind = Map.get(record, :kind, Map.get(record, "kind"))
+    keys = if kind == @maintenance_opened_kind, do: @maintenance_opened_keys, else: @opened_keys
+
+    with true <- kind in [@opened_kind, @maintenance_opened_kind],
          :ok <- validate_opened(record),
-         binding = Map.put(Map.take(record, @opened_keys), "session_id", session_id),
+         binding = Map.put(Map.take(record, keys), "session_id", session_id),
          :ok <- validate_binding(binding) do
       {:ok, binding}
     else
@@ -830,6 +906,22 @@ defmodule Loopex.Runtime.ProviderAttempt do
       :ok
     else
       _other -> {:error, :invalid_attempt_identity}
+    end
+  end
+
+  defp validate_binding_identity(binding, true), do: validate_maintenance_identity(binding)
+  defp validate_binding_identity(binding, false), do: validate_identity(binding)
+
+  defp validate_maintenance_identity(record) do
+    with true <- bounded_binary?(record["episode_id"]),
+         true <- uint64?(record["summary_ordinal"]) and record["summary_ordinal"] > 0,
+         true <- record["purpose"] == "compaction",
+         true <- bounded_binary?(record["operation_id"]),
+         true <- record["attempt"] in 1..@attempt_limit,
+         true <- lowercase_sha256?(record["staged_request_digest"]) do
+      :ok
+    else
+      _ -> {:error, :invalid_attempt_identity}
     end
   end
 
