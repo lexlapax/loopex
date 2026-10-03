@@ -164,112 +164,121 @@ defmodule Loopex.ContextAdmissionTest do
   @max_item_cardinality 1_024
   @reference_tool_definitions [
     %{
-      "tool_id" => "loopex.read",
-      "tool_version" => "1.0.0",
-      "name" => "read",
-      "description" =>
-        "Read a UTF-8 text file beneath the workspace root. Returns bounded content and reports truncation.",
-      "parameter_schema" => %{
-        "type" => "object",
-        "properties" => %{
-          "path" => %{
-            "type" => "string",
-            "description" => "Path relative to the workspace root."
-          }
-        },
-        "required" => ["path"]
+      "budgets" => %{
+        "artifact_bytes" => 67_108_864,
+        "output_bytes" => 16384,
+        "wall_time_ms" => 30000
       },
-      "result_shape" => %{"content_type" => "text", "description" => "File contents."},
+      "description" =>
+        "Read a workspace text file, or an authorized artifact range. Artifact ranges require artifact_use, offset and length (at most 4096 bytes).",
       "effect_class" => "read_only",
       "idempotency_class" => "safe_retry",
-      "budgets" => %{
-        "wall_time_ms" => 30_000,
-        "output_bytes" => 16_384,
-        "artifact_bytes" => 8_388_608
-      }
-    },
-    %{
-      "tool_id" => "loopex.write",
-      "tool_version" => "1.0.0",
-      "name" => "write",
-      "description" =>
-        "Create or replace a file beneath the workspace root with the exact content given.",
+      "name" => "read",
       "parameter_schema" => %{
-        "type" => "object",
         "properties" => %{
+          "artifact_use" => %{
+            "description" => "Committed use:<sha256> reference.",
+            "type" => "string"
+          },
+          "length" => %{"description" => "1 to 4096 bytes.", "type" => "integer"},
+          "offset" => %{"description" => "Unsigned byte offset.", "type" => "integer"},
           "path" => %{
-            "type" => "string",
-            "description" => "Path relative to the workspace root."
-          },
-          "content" => %{"type" => "string", "description" => "Exact bytes to write."}
-        },
-        "required" => ["path", "content"]
-      },
-      "result_shape" => %{"content_type" => "text", "description" => "What was written."},
-      "effect_class" => "workspace_write",
-      "idempotency_class" => "safe_retry",
-      "budgets" => %{
-        "wall_time_ms" => 30_000,
-        "output_bytes" => 4_096,
-        "artifact_bytes" => 8_388_608
-      }
-    },
-    %{
-      "tool_id" => "loopex.edit",
-      "tool_version" => "1.0.0",
-      "name" => "edit",
-      "description" =>
-        "Replace one exact occurrence of a string in a file. Fails and reports what it found if the match is absent or ambiguous.",
-      "parameter_schema" => %{
-        "type" => "object",
-        "properties" => %{
-          "path" => %{
-            "type" => "string",
-            "description" => "Path relative to the workspace root."
-          },
-          "old" => %{"type" => "string", "description" => "Exact text to replace."},
-          "new" => %{"type" => "string", "description" => "Replacement text."}
-        },
-        "required" => ["path", "old", "new"]
-      },
-      "result_shape" => %{"content_type" => "text", "description" => "What changed."},
-      "effect_class" => "workspace_write",
-      "idempotency_class" => "never_blind_retry",
-      "budgets" => %{
-        "wall_time_ms" => 30_000,
-        "output_bytes" => 4_096,
-        "artifact_bytes" => 8_388_608
-      }
-    },
-    %{
-      "tool_id" => "loopex.bash",
-      "tool_version" => "1.0.0",
-      "name" => "bash",
-      "description" =>
-        "Run a command in the workspace. Supply argv for no shell interpretation, or command for an explicit shell.",
-      "parameter_schema" => %{
-        "type" => "object",
-        "properties" => %{
-          "argv" => %{
-            "type" => "array",
-            "items" => %{"type" => "string"},
-            "description" => "Program and arguments, run without a shell."
-          },
-          "command" => %{
-            "type" => "string",
-            "description" => "A raw shell command, interpreted by the shell."
+            "description" => "Path relative to the workspace root.",
+            "type" => "string"
           }
         },
-        "required" => []
+        "required" => [],
+        "type" => "object"
       },
-      "result_shape" => %{"content_type" => "text", "description" => "Combined output."},
+      "result_shape" => %{
+        "content_type" => "text",
+        "description" => "File content or a bounded JSON range with exact next offset and EOF."
+      },
+      "tool_id" => "loopex.read",
+      "tool_version" => "1.1.0"
+    },
+    %{
+      "budgets" => %{
+        "artifact_bytes" => 8_388_608,
+        "output_bytes" => 4096,
+        "wall_time_ms" => 30000
+      },
+      "description" =>
+        "Create or replace a file beneath the workspace root with the exact content given.",
+      "effect_class" => "workspace_write",
+      "idempotency_class" => "safe_retry",
+      "name" => "write",
+      "parameter_schema" => %{
+        "properties" => %{
+          "content" => %{"description" => "Exact bytes to write.", "type" => "string"},
+          "path" => %{
+            "description" => "Path relative to the workspace root.",
+            "type" => "string"
+          }
+        },
+        "required" => ["path", "content"],
+        "type" => "object"
+      },
+      "result_shape" => %{"content_type" => "text", "description" => "What was written."},
+      "tool_id" => "loopex.write",
+      "tool_version" => "1.0.0"
+    },
+    %{
+      "budgets" => %{
+        "artifact_bytes" => 8_388_608,
+        "output_bytes" => 4096,
+        "wall_time_ms" => 30000
+      },
+      "description" =>
+        "Replace one exact occurrence of a string in a file. Fails and reports what it found if the match is absent or ambiguous.",
+      "effect_class" => "workspace_write",
+      "idempotency_class" => "never_blind_retry",
+      "name" => "edit",
+      "parameter_schema" => %{
+        "properties" => %{
+          "new" => %{"description" => "Replacement text.", "type" => "string"},
+          "old" => %{"description" => "Exact text to replace.", "type" => "string"},
+          "path" => %{
+            "description" => "Path relative to the workspace root.",
+            "type" => "string"
+          }
+        },
+        "required" => ["path", "old", "new"],
+        "type" => "object"
+      },
+      "result_shape" => %{"content_type" => "text", "description" => "What changed."},
+      "tool_id" => "loopex.edit",
+      "tool_version" => "1.0.0"
+    },
+    %{
+      "budgets" => %{
+        "artifact_bytes" => 8_388_608,
+        "output_bytes" => 16384,
+        "wall_time_ms" => 120_000
+      },
+      "description" =>
+        "Run a command in the workspace. Supply argv for no shell interpretation, or command for an explicit shell.",
       "effect_class" => "process",
       "idempotency_class" => "never_blind_retry",
-      "budgets" => %{
-        "wall_time_ms" => 120_000,
-        "output_bytes" => 65_536,
-        "artifact_bytes" => 8_388_608
-      }
+      "name" => "bash",
+      "parameter_schema" => %{
+        "properties" => %{
+          "argv" => %{
+            "description" => "Program and arguments, run without a shell.",
+            "items" => %{"type" => "string"},
+            "type" => "array"
+          },
+          "command" => %{
+            "description" => "A raw shell command, interpreted by the shell.",
+            "type" => "string"
+          }
+        },
+        "required" => [],
+        "type" => "object"
+      },
+      "result_shape" => %{"content_type" => "text", "description" => "Combined output."},
+      "tool_id" => "loopex.bash",
+      "tool_version" => "1.0.0"
     }
   ]
   @context_receipt_keys ~w(
@@ -906,8 +915,8 @@ defmodule Loopex.ContextAdmissionTest do
       |> Enum.map(&Bounds.estimate/1)
       |> Enum.sum()
 
-    assert provider_bytes == 2_393
-    assert provider_tokens == 799
+    assert provider_bytes == 2_731
+    assert provider_tokens == 911
 
     retained_components =
       [
@@ -915,8 +924,8 @@ defmodule Loopex.ContextAdmissionTest do
         | Enum.map(definitions, &ToolDefinition.canonical_bytes/1)
       ]
 
-    assert Enum.sum(Enum.map(retained_components, &byte_size/1)) == 4_382
-    assert Enum.sum(Enum.map(retained_components, &Bounds.estimate/1)) == 1_462
+    assert Enum.sum(Enum.map(retained_components, &byte_size/1)) == 4_774
+    assert Enum.sum(Enum.map(retained_components, &Bounds.estimate/1)) == 1_593
 
     project_message = %{
       "role" => "user",
@@ -962,8 +971,8 @@ defmodule Loopex.ContextAdmissionTest do
     assert fixed_record == committed.payload
 
     canonical_definition_list = Canonical.encode(definitions)
-    assert byte_size(canonical_definition_list) == 3_530
-    assert Bounds.estimate(canonical_definition_list) == 1_177
+    assert byte_size(canonical_definition_list) == 3_922
+    assert Bounds.estimate(canonical_definition_list) == 1_308
 
     assert Enum.map(definitions, &ToolDefinition.generation/1) ==
              Enum.map(request.tools, &ToolDefinition.generation/1)
@@ -1693,7 +1702,20 @@ defmodule Loopex.ContextAdmissionTest do
   end
 
   test "context refusal promotion and recovery preserve the predecessor budget into its successor" do
-    [tool | _rest] = @reference_tool_definitions
+    # Concept: budget inheritance does not depend on a shipped read schema's size.
+    # Technical depth: a small host fixture keeps the original 700-token proof;
+    # the separate reference fixture above pins the current shipped declarations.
+    tool =
+      hd(@reference_tool_definitions)
+      |> Map.merge(%{
+        "tool_id" => "example.read",
+        "description" => "Read fixture text.",
+        "parameter_schema" => %{
+          "type" => "object",
+          "properties" => %{"path" => %{"type" => "string"}},
+          "required" => ["path"]
+        }
+      })
 
     fixture =
       start_fixture(

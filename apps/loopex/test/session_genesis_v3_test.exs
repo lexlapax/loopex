@@ -16,12 +16,12 @@ defmodule Loopex.Runtime.SessionGenesisV3Test do
       |> File.read!()
       |> JSON.decode!()
 
-    [legacy, range] = Enum.map(manifest["vectors"], & &1["definition"])
-    %{legacy: legacy, range: range}
+    [range] = Enum.map(manifest["vectors"], & &1["definition"])
+    %{ordinary: Map.put(range, "tool_id", "example.file"), range: range}
   end
 
   test "v3 resolve derives the capability and retained normalization is idempotent", fixture do
-    for definitions <- [[], [fixture.legacy], [fixture.range]], mode <- ["admit", "refuse"] do
+    for definitions <- [[], [fixture.ordinary], [fixture.range]], mode <- ["admit", "refuse"] do
       input = input(definitions, configuration(), mode)
       assert {:ok, genesis} = SessionGenesis.resolve(%{tenant: "a"}, input)
       assert genesis["options"] == %{"tenant" => "a"}
@@ -92,30 +92,33 @@ defmodule Loopex.Runtime.SessionGenesisV3Test do
   end
 
   test "tool names are a bijection to exact retained generations", fixture do
-    valid = input([fixture.legacy])
-    other = %{fixture.legacy | "tool_id" => "example.read", "name" => "other_read"}
+    valid = input([fixture.ordinary])
+    other = %{fixture.ordinary | "tool_id" => "example.read", "name" => "other_read"}
 
     for selection <- [
-          %{"definitions" => [fixture.legacy], "names" => %{}},
-          %{"definitions" => [], "names" => names([fixture.legacy])},
+          %{"definitions" => [fixture.ordinary], "names" => %{}},
+          %{"definitions" => [], "names" => names([fixture.ordinary])},
           %{
-            "definitions" => [fixture.legacy, fixture.legacy],
-            "names" => names([fixture.legacy])
+            "definitions" => [fixture.ordinary, fixture.ordinary],
+            "names" => names([fixture.ordinary])
           },
-          %{"definitions" => [fixture.legacy, fixture.range], "names" => names([fixture.range])},
-          %{"definitions" => [fixture.legacy], "names" => names([other])},
+          %{
+            "definitions" => [fixture.ordinary, fixture.range],
+            "names" => names([fixture.range])
+          },
+          %{"definitions" => [fixture.ordinary], "names" => names([other])},
           put_in(valid.tool_selection, ["names", "read", "tool_version"], "9.0.0"),
           put_in(valid.tool_selection, ["names", "read", "extra"], true),
           %{
-            "definitions" => [Map.put(fixture.legacy, "process", self())],
-            "names" => names([fixture.legacy])
+            "definitions" => [Map.put(fixture.ordinary, "process", self())],
+            "names" => names([fixture.ordinary])
           }
         ] do
       assert SessionGenesis.resolve(%{}, %{valid | tool_selection: selection}) ==
                {:error, :invalid_session_genesis}
     end
 
-    assert {:ok, _} = SessionGenesis.resolve(%{}, input([fixture.legacy, other]))
+    assert {:ok, _} = SessionGenesis.resolve(%{}, input([fixture.ordinary, other]))
   end
 
   test "initial resolution derives known budgets and rejoins exact v3 genesis", fixture do

@@ -4,15 +4,15 @@ defmodule Loopex.Executor.Local.SearchProjectionGenerationTest do
   alias Loopex.Executor.Local.CodingTools
   alias LoopexProtocol.ToolDefinition
 
-  test "old and M7 search definitions keep their literal canonical bytes and digests" do
+  test "current search definitions keep their literal canonical bytes and digests" do
     vectors =
       Path.expand("../../loopex/priv/vectors/search_projection.v1.json", __DIR__)
       |> File.read!()
       |> JSON.decode!()
       |> Map.fetch!("vectors")
 
-    assert length(vectors) == 6
-    actual = CodingTools.generations() |> Enum.map(&ToolDefinition.normalize/1)
+    assert length(vectors) == 3
+    actual = CodingTools.definitions() |> Enum.map(&ToolDefinition.normalize/1)
 
     for vector <- vectors do
       definition = vector["definition"]
@@ -25,15 +25,15 @@ defmodule Loopex.Executor.Local.SearchProjectionGenerationTest do
       assert ToolDefinition.definition_digest(definition) == vector["definition_digest"]
       assert definition["budgets"]["output_bytes"] == 16_384
 
-      assert definition["budgets"]["artifact_bytes"] ==
-               if(definition["tool_version"] == "1.0.0", do: 1, else: 16_384)
+      assert definition["budgets"]["artifact_bytes"] == 16_384
+      assert definition["tool_version"] == "1.1.0"
     end
 
-    legacy =
+    current =
       CodingTools.definitions()
       |> Enum.filter(&(&1["tool_id"] in ~w(loopex.grep loopex.find loopex.ls)))
 
-    assert length(legacy) == 3
-    assert Enum.all?(legacy, &(&1["tool_version"] == "1.0.0"))
+    assert length(current) == 3
+    assert Enum.all?(current, &(&1["tool_version"] == "1.1.0"))
   end
 end

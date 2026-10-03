@@ -363,7 +363,7 @@ defmodule Loopex.ConfiguredSessionTest do
   end
 
   test "native reuse freezes previously staged excerpt bytes and source ranges" do
-    [_, vector] =
+    [vector] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
       |> File.read!()
       |> JSON.decode!()
@@ -2682,7 +2682,7 @@ defmodule Loopex.ConfiguredSessionTest do
   end
 
   test "two prompts and restart stage captured host instructions, settings and tools" do
-    [_, range] =
+    [range] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
       |> File.read!()
       |> JSON.decode!()
@@ -2987,7 +2987,7 @@ defmodule Loopex.ConfiguredSessionTest do
   end
 
   test "role instruction claims cannot enable writable or nested helper tools in a read-only selection" do
-    [_, range] =
+    [range] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
       |> File.read!()
       |> JSON.decode!()

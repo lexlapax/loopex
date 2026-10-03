@@ -8,8 +8,13 @@ defmodule LoopexComposition.DurableOptionsTest do
   @uint64 18_446_744_073_709_551_615
   @ids ~w(loopex.read loopex.write loopex.edit loopex.bash loopex.grep loopex.find loopex.ls)
   @generations Enum.sort(
-                 Enum.map(@ids, &{&1, "1.0.0"}) ++
-                   Enum.map(~w(loopex.read loopex.grep loopex.find loopex.ls), &{&1, "1.1.0"})
+                 Enum.map(@ids, fn id ->
+                   {id,
+                    if(id in ~w(loopex.read loopex.grep loopex.find loopex.ls),
+                      do: "1.1.0",
+                      else: "1.0.0"
+                    )}
+                 end)
                )
 
   defmodule Policy do
@@ -220,20 +225,20 @@ defmodule LoopexComposition.DurableOptionsTest do
              LoopexComposition.start_edges(credential_plane: nil, model: "bad")
   end
 
-  test "all 128 active-id subsets retain their selection with pinned legacy read and search" do
+  test "all 128 active-id subsets retain their selection with current read and search" do
     subsets = Enum.reduce(@ids, [[]], fn id, sets -> sets ++ Enum.map(sets, &[id | &1]) end)
     assert length(subsets) == 128
 
     for entry <- @entries, ids <- subsets do
       options = capture(entry, active_tools: ids)
-      assert options[:active_tools] == legacy_selection(ids)
+      assert options[:active_tools] == ids
       definitions = Enum.map(options[:tools], &{&1["tool_id"], &1["tool_version"]})
 
       assert Enum.sort(definitions) ==
                if(ids == [], do: [], else: @generations)
 
       assert Enum.filter(options[:tools], &(&1["tool_id"] == "loopex.read"))
-             |> Enum.map(& &1["tool_version"]) == if(ids == [], do: [], else: ["1.0.0", "1.1.0"])
+             |> Enum.map(& &1["tool_version"]) == if(ids == [], do: [], else: ["1.1.0"])
     end
   end
 
@@ -242,7 +247,7 @@ defmodule LoopexComposition.DurableOptionsTest do
 
     for entry <- @entries, ids <- [["loopex.ask"], ["loopex.read", "loopex.ask"]] do
       options = capture(entry, active_tools: ids)
-      assert options[:active_tools] == legacy_selection(ids)
+      assert options[:active_tools] == ids
       assert Enum.filter(options[:tools], &(&1["tool_id"] == "loopex.ask")) == [question]
 
       assert options[:tools]
@@ -294,7 +299,7 @@ defmodule LoopexComposition.DurableOptionsTest do
     for entry <- @entries do
       defaults = capture(entry, [])
       assert defaults[:model].model == "anthropic:claude-haiku-4-5"
-      assert defaults[:active_tools] == legacy_selection(Enum.take(@ids, 4))
+      assert defaults[:active_tools] == Enum.take(@ids, 4)
       refute Keyword.has_key?(defaults, :bounds)
       refute Keyword.has_key?(defaults, :sampling)
       assert defaults[:policy_identity] == %{"id" => inspect(Policy), "revision" => "0.2.0"}
@@ -327,13 +332,6 @@ defmodule LoopexComposition.DurableOptionsTest do
       refute Keyword.has_key?(opts, :unknown)
       refute Keyword.has_key?(opts, :skills)
     end
-  end
-
-  defp legacy_selection(ids) do
-    Enum.map(ids, fn
-      id when id in ~w(loopex.read loopex.grep loopex.find loopex.ls) -> {id, "1.0.0"}
-      id -> id
-    end)
   end
 
   defp capture(entry, extra) do

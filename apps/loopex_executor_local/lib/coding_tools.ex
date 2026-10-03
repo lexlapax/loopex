@@ -62,28 +62,6 @@ defmodule Loopex.Executor.Local.CodingTools do
 
   @definitions [
     %{
-      "tool_id" => "loopex.read",
-      "tool_version" => "1.0.0",
-      "name" => "read",
-      "description" =>
-        "Read a UTF-8 text file beneath the workspace root. Returns bounded content and reports truncation.",
-      "parameter_schema" => %{
-        "type" => "object",
-        "properties" => %{
-          "path" => %{"type" => "string", "description" => "Path relative to the workspace root."}
-        },
-        "required" => ["path"]
-      },
-      "result_shape" => %{"content_type" => "text", "description" => "File contents."},
-      "effect_class" => "read_only",
-      "idempotency_class" => "safe_retry",
-      "budgets" => %{
-        "wall_time_ms" => 30_000,
-        "output_bytes" => @read_bytes,
-        "artifact_bytes" => 8_388_608
-      }
-    },
-    %{
       "tool_id" => "loopex.write",
       "tool_version" => "1.0.0",
       "name" => "write",
@@ -182,7 +160,7 @@ defmodule Loopex.Executor.Local.CodingTools do
                            ] do
                          %{
                            "tool_id" => "loopex." <> name,
-                           "tool_version" => "1.0.0",
+                           "tool_version" => "1.1.0",
                            "name" => name,
                            "description" =>
                              "Inspect workspace entries with bounded, encoded records.",
@@ -200,12 +178,12 @@ defmodule Loopex.Executor.Local.CodingTools do
                            "budgets" => %{
                              "wall_time_ms" => 30_000,
                              "output_bytes" => 16_384,
-                             "artifact_bytes" => 1
+                             "artifact_bytes" => 16_384
                            }
                          }
                        end)
 
-  @range_read %{
+  @read_definition %{
     "budgets" => %{
       "artifact_bytes" => 67_108_864,
       "output_bytes" => 16384,
@@ -237,15 +215,6 @@ defmodule Loopex.Executor.Local.CodingTools do
     "tool_version" => "1.1.0"
   }
 
-  # Concept: M7 search output can be retrieved from its complete captured bytes.
-  # Technical depth: new immutable generations raise only the artifact allowance
-  # to the existing capture ceiling; old definitions remain exact for dispatch.
-  @projection_search (for definition <- @search_definitions do
-                        definition
-                        |> Map.put("tool_version", "1.1.0")
-                        |> put_in(["budgets", "artifact_bytes"], 16_384)
-                      end)
-
   @doc """
   ## Concept
 
@@ -258,11 +227,7 @@ defmodule Loopex.Executor.Local.CodingTools do
   reserved identifier only through a runtime's configured tool set.
   """
   @spec definitions() :: [map()]
-  def definitions, do: @definitions ++ @search_definitions
-
-  @doc false
-  @spec generations() :: [map()]
-  def generations, do: definitions() ++ [@range_read] ++ @projection_search
+  def definitions, do: [@read_definition | @definitions] ++ @search_definitions
 
   @doc """
   ## Concept

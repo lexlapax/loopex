@@ -301,7 +301,7 @@ defmodule Loopex.Executor.Local do
     # Technical depth: validate the compiled definitions against Core's literal
     # table before starting an owner or opening its ledger. Each generation is
     # checked separately because the executor may retain coexisting versions.
-    if Enum.all?(CodingTools.generations(), fn definition ->
+    if Enum.all?(CodingTools.definitions(), fn definition ->
          match?({:ok, _}, Loopex.Runtime.ArtifactReadCapabilities.resolve([definition]))
        end) do
       GenServer.start_link(__MODULE__, options)
@@ -2968,7 +2968,7 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: retained jobs select their own generation even when newer tools coexist.
+  # Concept: retained jobs must name a supported exact generation before dispatch.
   # Technical depth: demonstration tools keep their fixed identities; coding
   # tools match both ID and version before their effect class is checked above.
   defp tool_generation(id, version) when id in [@write_tool, @wait_write_tool] do
@@ -2979,7 +2979,7 @@ defmodule Loopex.Executor.Local do
   end
 
   defp tool_generation(id, version) do
-    case Enum.find(CodingTools.generations(), fn definition ->
+    case Enum.find(CodingTools.definitions(), fn definition ->
            definition["tool_id"] == id and definition["tool_version"] == version
          end) do
       nil ->
@@ -3035,10 +3035,6 @@ defmodule Loopex.Executor.Local do
        })
        when is_integer(delay) and delay in 1..30_000,
        do: write_arguments(%{"relative_path" => path, "content" => content}, delay)
-
-  defp validate_arguments(%{coding: %{"tool_id" => "loopex.read"}}, %{"path" => path})
-       when is_binary(path),
-       do: {:ok, %{kind: :read, path: path}}
 
   defp validate_arguments(%{coding: %{"tool_id" => "loopex.write"}}, %{
          "path" => path,

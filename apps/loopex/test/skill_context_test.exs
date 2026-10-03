@@ -97,7 +97,7 @@ defmodule Loopex.SkillContextTest do
   end
 
   test "artifact excerpt allocation precedes whole optional resource admission" do
-    [_, vector] =
+    [vector] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
       |> File.read!()
       |> JSON.decode!()

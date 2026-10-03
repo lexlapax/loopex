@@ -41,7 +41,7 @@ defmodule Loopex.ArtifactReadAdmissionTest do
   setup do
     Process.register(self(), __MODULE__)
 
-    [_, range] =
+    [range] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
       |> File.read!()
       |> JSON.decode!()

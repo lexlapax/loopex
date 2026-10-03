@@ -45,8 +45,8 @@ freeze earlier result projections and context receipts; prepare new result
 references only for newly appended results, without revising the frozen prefix.
 
 **Retained output and model excerpts.** Cap each complete model-facing result
-from an executor-backed tool at 2,048 encoded JSON bytes, except legacy inline
-compatibility and explicitly requested artifact ranges below, using ADR 0042's
+from an executor-backed tool at 2,048 encoded JSON bytes, except inline results
+without retrieval and explicitly requested artifact ranges below, using ADR 0042's
 compact UTF-8 encoding recipe. Include normalized call ID, outcome,
 excerpt and reference notice. Revision 1 projects `use_locator`, object digest,
 object size, `excerpt_source: receipt_content`, excerpt byte range and explicit
@@ -71,10 +71,11 @@ exception changes neither the original answer nor its ordinary projection.
 `loopex.read` identity whose artifact capability is fixed by core. The revision-1
 capability table is the literal `Loopex.Runtime.ArtifactReadCapabilities` module,
 independent of host registries, files and runtime defaults. It contains exact
-supported triples and a null-capability entry for each supported legacy triple.
+supported triples for the current shipped 1.1.0 read definition. Absence of a
+selected `loopex.read` resolves separately to null; it is not a table entry.
 Core creation/registration validation and the reference executor loader reject
 a reference definition whose exact version/digest does not match that table. The projection integration owner
-pins the new `loopex.read` version and definition digest, legacy triples and byte
+pins the current `loopex.read` version and definition digest and byte
 vectors in phase 0, before phase 1 can create an M7 session.
 Capture the resolution in ADR 0044's closed `tool_selection.artifact_read`
 member, not an unspecified extra genesis field. It is null, or exactly
@@ -84,27 +85,24 @@ the exact artifact-capable literal entry. Other IDs, including a tool merely
 named `read`, gain no capability. SessionGenesis.resolve/2 takes tool selection without `artifact_read` and derives
 it from the exact definitions. SessionGenesis.normalize/1 takes complete genesis
 and compares the supplied binding against that derivation; a mismatch refuses. Public callers
-cannot supply `tool_selection` or `artifact_read`. Replay uses the same immutable
-literal table, without consulting the host registry. Legacy v2 selection
-reconstruction uses its retained exact definitions and the same literal legacy
-entries, resolving null for generations without support; it never rewrites old
-genesis or upgrades an old read generation by name. An unknown `loopex.read` generation refuses that selection; other tool IDs
+cannot substitute an `artifact_read` binding that disagrees with their exact
+genesis definitions. Replay uses the same immutable literal table, without
+consulting the host registry. An unknown `loopex.read` generation refuses that selection; other tool IDs
 resolve artifact_read to null and gain no retrieval support. Do not infer capability from a
-version prefix, advertised name or a guessed schema field. A legacy exact table
-entry without this capability follows the inline branch below. Changing the table
+version prefix, advertised name or a guessed schema field. Changing the table
 requires a new generation/admitted selection, never a replay-time reinterpretation.
 
-**Legacy inline compatibility.** For a session whose committed
-`tool_selection.artifact_read` is null, whether its frozen read generation is a
-legacy entry or no `loopex.read` is selected, preserve the existing inline result shape and
+**Inline results without retrieval.** For a current session whose committed
+`tool_selection.artifact_read` is null because no `loopex.read` is selected,
+preserve the existing inline result shape and
 the full committed `result.content`, with the normalized cross-run call identity
-and original outcome. This is a compatibility exception to the 2,048-byte
+and original outcome. This is the no-retrieval exception to the 2,048-byte
 excerpt cap, not permission to fetch or expand a retained artifact. It applies
 to every executor receipt of such a session, whichever generation produced it,
-including later runs after upgrade; no timestamp or new tool-set migration determines eligibility.
+including later runs; no timestamp determines eligibility.
 Only bytes already in the receipt are available. Existing truncation or spill
 notices remain explicit; this rule does not recover their omitted output or
-claim that an old tool gained artifact retrieval.
+claim that a tool without the frozen capability gained artifact retrieval.
 
 Treat this inline content as fixed during ordinary aggregate allocation. Apply
 all full-record, token, depth and cardinality checks, including both retained
@@ -122,15 +120,14 @@ spill path before receipt commitment; in a session whose `artifact_read` is null
 those generations spill only at their existing capture ceiling. In the non-null
 case, measure the complete encoded projection including its reference notice;
 crossing the projection bound triggers retention even
-when output remains below the tool's capture/output ceiling. New M7
-grep/find/ls generations need artifact allowances sufficient for their retained
-capture ceilings; their old one-byte artifact budget cannot implement this
-path. The phase-0 projection integration owner pins those versions/digests and
+when output remains below the tool's capture/output ceiling. Current 1.1.0
+grep/find/ls definitions retain a 16,384-byte artifact allowance matching their
+capture ceiling. The phase-0 projection integration owner pins those versions/digests and
 sets each artifact allowance at least to its retained capture ceiling, proving
 that exact maximum through spill and replay before session creation.
 In a session whose frozen read generation supports `artifact_use`, the
 `loopex.bash`, write and edit tools keep their existing generations: their inline
-results above the projection cap are legacy inline sources and use the bounded
+results above the projection cap are oversized inline sources and use the bounded
 preparation path below, including its per-episode source count.
 Do not lower capture limits merely to avoid retaining the promised source.
 Preserve the original terminal outcome,
@@ -139,12 +136,12 @@ existing size/cleanup limits still apply. Full output means all bytes actually
 retained by that tool under its existing limit, not unbounded process output.
 
 Where the frozen read generation supports artifact retrieval, bounded
-preparation for a legacy inline result without a usable reference may
+preparation for an oversized inline result without a usable reference may
 retain the exact UTF-8 bytes of committed `result.content`, with no added
 wrapper or newline, and append `tool_result_reference_prepared`,
 keyed by original receipt identity/digest and projection revision. Retain source
 provenance, full reference, encoded source size and digest; this does not recover
-bytes already lost by old truncation. Idempotent object/use retention converges.
+bytes already lost by truncation. Idempotent object/use retention converges.
 Resolve an ambiguous preparation commit by its preallocated transaction ID
 before staging or publication. Pure projection performs no reads or writes.
 Original receipts and committed model requests remain immutable.
@@ -156,7 +153,7 @@ encoded result remains at most 2,048 bytes. A shorter source saturates at its
 full length. Zero emits an empty excerpt with explicit omission when source
 content exists; it never omits the result or its required metadata. Binary
 descriptions, user/assistant/question content, call identities/generations,
-outcomes, legacy compatibility inline content, inline executor results at or
+outcomes, inline content without retrieval, inline executor results at or
 below the cap that have no usable reference, explicit artifact-range results
 and frozen native prefixes are fixed.
 An excerpt is eligible only with an already usable committed artifact reference.
@@ -265,7 +262,7 @@ digest. No digest is claimed to be a separate job/grant field. An unmatched
 version refuses; the first definition with that ID is insufficient. Its
 argument validator enforces the same closed model branches plus the required
 owner-only resolution on the artifact branch. The path branch forbids resolution.
-Legacy generations keep their own validators. The owner proves committed membership; a digest alone does
+Only current shipped read/search definitions are supported. The owner proves committed membership; a digest alone does
 not prove journal inclusion. Recovery reuses the journaled resolution.
 
 This explicitly extends ADR 0028 with one job-owned verified transfer window
@@ -283,7 +280,7 @@ on every job path; the executor owns these effects, not core.
 Return actual offset, byte count, next offset and EOF, without exposing transfer
 handles. This explicit retrieval has an 8,192-byte complete encoded JSON result
 cap, including the normalized call identity, outcome and object/range metadata.
-This is the larger artifact-read result cap, separate from the legacy inline
+This is the larger artifact-read result cap, separate from the no-retrieval inline
 compatibility exception. Length is
 an upper bound: choose the largest UTF-8-safe returned range no longer than the
 requested length that fits this larger encoded cap after metadata. A requested
@@ -357,7 +354,8 @@ Concept: [Observable consequences](0041-session-lineage-projection-and-context-b
   overflow and unchanged frozen prefixes;
   no omitted result, extra preparation allowance or shortened explicit range read.
 - Replay validates capabilities with the host registry unavailable or changed.
-  Coexisting read generations resolve by ID/version. Both-branch, extra-member,
+  Current exact read generation resolves by ID/version; superseded shipped
+  read/search versions refuse before effects. Both-branch, extra-member,
   injected-resolution, membership, offset-type, length-bound and
   offset-beyond-size errors fail identically before
   policy, including under a deferring policy; allowed jobs alone
@@ -368,9 +366,9 @@ Concept: [Observable consequences](0041-session-lineage-projection-and-context-b
   or failed range retrieval closes its transfer and preserves receipt truth.
   Mixed attachment/job transfer capacity, verification work, deadline and
   cumulative job-work edges reuse ADR 0028 conformance.
-- Legacy inline/spilled results preserve original receipts and staged bytes.
-  An old read generation reuses exact inline content above 2 KiB when the full
-  request fits; test fit/overflow edges, later old-generation receipts, restart
+- Current inline/spilled results preserve original receipts and staged bytes.
+  A session with no artifact-capable read tool keeps exact inline content when the full
+  request fits; test fit/overflow edges, later receipts, restart
   and frozen thinking prefixes. Assert no preparation write, implicit read
   capability or invented recovery of truncated/spilled bytes. Eligible compaction
   may make room; otherwise named refusal preserves the complete inline fact.
@@ -386,6 +384,7 @@ Concept: [Compatibility and rollback](0041-session-lineage-projection-and-contex
 Silently dropping the oldest N runs or tool-result bytes is rejected. Bounded
 excerpts carry explicit references to retained bytes; compaction is an explicit
 retained substitution. Version the prepared-reference record, read definition
-and projection revision together; preserve old read generations for recovery. Do not claim byte identity for newly staged
-legacy sessions after lineage expands; only already committed requests are
-immutable. Root-reader compatibility is covered by the M7 plan's matrix.
+and projection revision together. The maintainer's 2026-10-02 pre-1.0 rule
+retires old read/search definitions and root-reader/cross-version rollback
+obligations. Current restart reuses admitted exact bytes and definitions,
+refuses unsupported identities, and preserves uncertain-effect fencing.

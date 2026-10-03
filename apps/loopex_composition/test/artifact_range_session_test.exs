@@ -3,7 +3,6 @@ Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __D
 defmodule LoopexComposition.ArtifactRangeSessionTest do
   use ExUnit.Case, async: false
 
-  alias Loopex.Runtime
   alias Loopex.Runtime.SessionState
   alias Loopex.Executor.Local, as: Executor
   alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
@@ -61,7 +60,7 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     test "#{id} early spill retains full captured output through real Store restart" do
       id = unquote(id)
       arguments = unquote(Macro.escape(arguments))
-      fixture = fixture("1.1.0", true, id)
+      fixture = fixture("1.1.0", id)
 
       for number <- 1..300,
           do:
@@ -172,51 +171,49 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     end
   end
 
-  for captured <- [false, true] do
-    test "legacy read keeps complete inline content without objects or a host registry, captured=#{captured}" do
-      fixture = fixture("1.0.0", unquote(captured))
+  test "current read keeps a small result inline across empty-registry restart" do
+    fixture = fixture("1.1.0")
+    inline = String.duplicate("inline 猫\n", 64)
+    File.write!(Path.join(fixture.workspace, "source.txt"), inline)
 
-      assert {:ok, attachment} =
-               Loopex.attach(fixture.runtime, fixture.session, after_event_sequence: 0)
+    assert {:ok, attachment} =
+             Loopex.attach(fixture.runtime, fixture.session, after_event_sequence: 0)
 
-      assert List.last(run(attachment, "file", %{"path" => "source.txt"}))["outcome"] ==
-               "completed"
+    assert List.last(run(attachment, "file", %{"path" => "source.txt"}))["outcome"] == "completed"
+    [_, request] = Agent.get(fixture.observer, & &1)
+    message = Enum.find(request.messages, &(&1["role"] == "tool"))
+    assert {:ok, records} = Store.load_records(fixture.store, fixture.session, 0, 1_000)
+    [receipt] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
+    assert receipt.payload["receipt"]["artifacts"] == []
+    assert message["content"] == receipt.payload["receipt"]["output"]
+    assert message["content"] =~ inline
+    assert message["outcome"] == "completed"
+    File.rm_rf!(fixture.artifact_root)
 
-      [_, request] = Agent.get(fixture.observer, & &1)
-      message = Enum.find(request.messages, &(&1["role"] == "tool"))
-      assert byte_size(message["content"]) > 2_048
-      assert {:ok, records} = Store.load_records(fixture.store, fixture.session, 0, 1_000)
-      [receipt] = Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
-      assert message["content"] == receipt.payload["receipt"]["output"]
-      assert message["outcome"] == "completed"
-      File.rm_rf!(fixture.artifact_root)
+    {runtime, store, attachment} =
+      restart(
+        fixture.runtime,
+        fixture.path,
+        fixture.executor_options,
+        fixture.observer,
+        fixture.session,
+        fixture.workspace
+      )
 
-      {runtime, store, attachment} =
-        restart(
-          fixture.runtime,
-          fixture.path,
-          fixture.executor_options,
-          fixture.observer,
-          fixture.session,
-          fixture.workspace
-        )
-
-      assert List.last(run(attachment, "finish", %{"finish" => true}))["outcome"] == "completed"
-      requests = Agent.get(fixture.observer, & &1)
-      assert length(requests) == 3
-      assert message in List.last(requests).messages
-      assert {:ok, records} = Store.load_records(store, fixture.session, 0, 1_000)
-      assert {:ok, events} = Store.load_events(store, fixture.session, 0, 1_000)
-      assert {:ok, recovered} = SessionState.recover(fixture.session, records, events)
-      assert recovered.lineage_projection_revision == nil
-      refute Enum.any?(records, &Map.has_key?(&1.payload, "lineage_projection"))
-      refute File.exists?(fixture.artifact_root)
-      assert :ok = Loopex.stop(runtime)
-    end
+    assert List.last(run(attachment, "finish", %{"finish" => true}))["outcome"] == "completed"
+    requests = Agent.get(fixture.observer, & &1)
+    assert length(requests) == 3
+    assert message in List.last(requests).messages
+    assert {:ok, records} = Store.load_records(store, fixture.session, 0, 1_000)
+    assert {:ok, events} = Store.load_events(store, fixture.session, 0, 1_000)
+    assert {:ok, recovered} = SessionState.recover(fixture.session, records, events)
+    assert recovered.lineage_projection_revision == 1
+    refute File.exists?(fixture.artifact_root)
+    assert :ok = Loopex.stop(runtime)
   end
 
-  test "a prepared legacy inline result becomes readable after empty-registry restart" do
-    fixture = fixture("1.1.0", true, "loopex.bash")
+  test "a prepared oversized inline result becomes readable after empty-registry restart" do
+    fixture = fixture("1.1.0", "loopex.bash")
     full = String.duplicate("quoted \"line\" 猫\n", 200)
     assert byte_size(full) > 2_048 and byte_size(full) < 16_384
     File.write!(Path.join(fixture.workspace, "source.txt"), full)
@@ -312,7 +309,7 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     assert :ok = Loopex.stop(runtime)
   end
 
-  defp fixture(version, captured \\ true, search \\ nil) do
+  defp fixture(version, search \\ nil) do
     root =
       Path.join(System.tmp_dir!(), "loopex-range-session-#{System.unique_integer([:positive])}")
 
@@ -342,7 +339,7 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
 
     definition =
       Enum.find(
-        CodingTools.generations(),
+        CodingTools.definitions(),
         &(&1["tool_id"] == "loopex.read" and &1["tool_version"] == version)
       )
 
@@ -352,7 +349,7 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
         else: [
           definition,
           Enum.find(
-            CodingTools.generations(),
+            CodingTools.definitions(),
             &(&1["tool_id"] == search and
                 &1["tool_version"] == if(search == "loopex.bash", do: "1.0.0", else: "1.1.0"))
           )
@@ -361,16 +358,10 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     runtime = runtime(store, executor, observer, definitions, artifacts)
 
     created =
-      if captured do
-        Runtime.create_session_with_genesis(
-          runtime,
-          "create",
-          %{},
-          Loopex.ConfiguredGenesisFixture.genesis(definitions)
-        )
-      else
-        Loopex.create_session(runtime, %{}, command_id: "create")
-      end
+      Loopex.create_session(runtime, %{},
+        command_id: "create",
+        genesis: Loopex.ConfiguredGenesisFixture.genesis(definitions)
+      )
 
     assert {:ok, session} = created
 

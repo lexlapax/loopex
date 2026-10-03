@@ -148,12 +148,13 @@ defmodule Loopex.Executor.JobRequest do
       when map_size(context) == 3 and is_binary(id) ->
         map_size(policy) == 2 and policy["retain"] == true and
           Regex.match?(~r/\Alx_[0-9a-f]{48}\z/, id) and
-          binding in Map.values(Loopex.Runtime.ArtifactReadCapabilities.table())
+          (is_nil(binding) or
+             binding in Map.values(Loopex.Runtime.ArtifactReadCapabilities.table()))
 
       _invalid ->
         false
     end
   end
 
-  def valid_projection_policy?(_legacy), do: true
+  def valid_projection_policy?(_without_projection), do: true
 end

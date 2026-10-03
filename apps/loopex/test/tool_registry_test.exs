@@ -95,11 +95,14 @@ defmodule Loopex.ToolRegistryTest do
              ToolRegistry.resolve(runtime, "example.read", "2.0.0")
   end
 
-  test "reference read registrations retain both exact capability generations" do
-    [legacy, range] = read_generations()
-    runtime = start_runtime("read-capability-generations", tools: [range, legacy])
+  test "reference read registration admits only its current exact capability generation" do
+    [range] = read_generations()
+    runtime = start_runtime("read-capability-generations", tools: [range])
 
-    for definition <- [legacy, range] do
+    assert ToolRegistry.resolve(runtime, "loopex.read", "1.0.0") ==
+             {:error, :unknown_tool_generation}
+
+    for definition <- [range] do
       assert {:ok, entry} =
                ToolRegistry.resolve(runtime, "loopex.read", definition["tool_version"])
 

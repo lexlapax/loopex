@@ -1137,7 +1137,7 @@ defmodule Loopex.ArtifactRuntimeTest do
   end
 
   defp live_preparation_fixture(options) do
-    [_, range] =
+    [range] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
       |> File.read!()
       |> JSON.decode!()
@@ -1183,7 +1183,7 @@ defmodule Loopex.ArtifactRuntimeTest do
   end
 
   defp preparation_fixture do
-    [_, range] =
+    [range] =
       Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
       |> File.read!()
       |> JSON.decode!()

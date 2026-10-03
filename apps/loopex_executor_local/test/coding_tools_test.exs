@@ -599,6 +599,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     unique = System.unique_integer([:positive])
 
+    version =
+      case Enum.find(CodingTools.definitions(), &(&1["tool_id"] == tool_id)) do
+        nil -> "1.0.0"
+        definition -> definition["tool_version"]
+      end
+
+    normalized_call_id =
+      "lx_" <> binary_part(LoopexProtocol.Canonical.digest({"r1", "t1", "c#{unique}"}), 0, 48)
+
     job_fields =
       Map.merge(
         %{
@@ -615,7 +624,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           executor_identity: "executor-local",
           required_capabilities: ["process"],
           tool_id: tool_id,
-          tool_version: "1.0.0",
+          tool_version: version,
           effect_class: effect_class_of(tool_id),
           validated_arguments: arguments,
           workspace_ref: "workspace",
@@ -624,7 +633,13 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           resource_budgets: %{"max_output_bytes" => 65_536},
           idempotency_class: "never_blind_retry",
           fencing_token: @fence,
-          artifact_policy: %{"retain" => true},
+          artifact_policy:
+            Loopex.Executor.JobRequest.artifact_policy(
+              tool_id,
+              version,
+              nil,
+              normalized_call_id
+            ),
           output_policy: %{"capture" => true}
         },
         overrides

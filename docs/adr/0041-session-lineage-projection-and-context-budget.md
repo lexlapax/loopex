@@ -55,8 +55,8 @@ When an eligible older group cannot fit as complete summary source, ADR 0043
 permits marked excerpts with readable originals and retained omission provenance.
 This maintenance-only rule does not shorten ordinary question answers or grant
 artifact access. Compaction keeps those references retrievable; it
-does not fetch them implicitly. The maintainer selected an inline compatibility
-exception for a session with no artifact-capable read tool. Keep the full saved
+does not fetch them implicitly. A current session with no artifact-capable read
+tool keeps the full saved
 result content of every tool receipt in such a session when the complete request
 fits, including receipts from later runs. Eligible older history may compact; required content that still
 cannot fit refuses without truncation. This exception creates no preparation
@@ -89,15 +89,16 @@ Technical depth: [Compatibility mechanics](0041-session-lineage-projection-and-c
 
 Projection reads committed facts only. With artifact-capable frozen tools,
 a new prepared-reference record may
-retain exact legacy inline result bytes before projection, without rewriting
-receipts. New read, grep, find and ls generations and the projection revision
-preserve old dispatch definitions; the new search generations raise their
+retain exact oversized inline result bytes before projection, without rewriting
+receipts. Current read, grep, find and ls definitions and the projection revision
+bind the retained output; the current search definitions provide an
 artifact allowance so their retained output can be referenced. A session with no
 artifact-capable read tool keeps the inline form. Already staged requests retain exact bytes; newly staged requests
 may use the new excerpt/reference representation when their frozen tools can
-retrieve it. Older tools retain the bounded inline compatibility path above.
-Rollback may change later projection behavior; it cannot undo additional M7
-records created by other decisions. Those records need the M7 reader contract.
+retrieve it. The maintainer's 2026-10-02 pre-1.0 rule retires superseded shipped
+tool definitions and old-reader/cross-version rollback obligations. Current
+restart retains exact admitted definitions, receipts and staged bytes; it
+refuses unsupported identities instead of translating an old generation.
 
 ## Governance Record
 

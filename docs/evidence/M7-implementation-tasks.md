@@ -105,6 +105,72 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: retire the shipped 1.0 read/grep/find/ls declarations and dispatch
+  support, their canonical vectors, the nil legacy read-capability table row,
+  `CodingTools.generations/0`, the composition default-version pinning shim and
+  the obsolete path-only read validator. Current callers now use one exact
+  declaration per shipped tool. Read/search remain 1.1.0; write/edit/bash retain
+  their current 1.0.0 definitions. Removing those older read/search generations
+  does not erase the valid current null-capability case when no read is selected:
+  job validation now admits that absence explicitly, while owner replay still
+  rejects a substituted binding. Current vectors retain their exact preimages
+  and digests. Executor tests prove retired read/search versions refuse before
+  effects; real current Store/executor restart proves small inline results,
+  early spill and range retrieval. All 128 tool subsets and question selection
+  use the current declarations. The old default-create fixture branch and its
+  two old-generation inline cases are removed; current inline behavior retains
+  its own positive restart proof.
+  The copied Core context fixture now pins the current four declarations and
+  exact separate costs: provider 2,731 bytes/911 tokens, retained components
+  4,774/1,593, and canonical definition list 3,922/1,308. The unrelated
+  inheritance fixture uses a small host tool while preserving its original
+  700-token limit, refusal/promotion order, restart and receive deadlines.
+  ADR 0017's illustrative M2 numbers are identified as historical measurements;
+  its admission rules and historical evidence remain unchanged. ADR 0041's
+  pair and the current embedding guide record the current-only inventory under
+  the maintainer's pre-1.0 rule. Superseded record/protocol/API readers and
+  default genesis/instruction compatibility paths remain T15 work; this is not
+  a claim that all old code has been removed.
+  Focused checks passed with warnings as errors on both supported pairs:
+  Core 108 plus one prescribed exclusion (8.0/8.0 measured suite seconds),
+  current context admission 24 (2.4/2.5), composition 35 (12.2/10.8), local
+  executor 130 (133.0/141.1), and CLI 45 (76.7/79.2). The Linux invalid-name
+  filesystem witness remains unavailable on Darwin and required separately.
+  Complete outputs and SHA-256 digests, after terminal handles were collected:
+
+  | App/check | Current output / SHA-256 | Floor output / SHA-256 |
+  | --- | --- | --- |
+  | Core | `/private/tmp/loopex-m7-current-tools-core-current-v2.log` / `fc4c726d3d948764204aac91479f56861f0b6bbfc795e988aaeee9b3c50c96dd` | `/private/tmp/loopex-m7-current-tools-core-floor-v2.log` / `0d83c660d9e43c0fbf4d69b76a53690abd13e55fdaee21cbeba557116d5b0fd5` |
+  | Context | `/private/tmp/loopex-m7-current-tools-context-current-v3.log` / `1687626346235d652805c6b78b91b084160d5bd35fdbad55ea16fd3304092b5d` | `/private/tmp/loopex-m7-current-tools-context-floor-v3.log` / `ed3346eb6080f79abb2e1b390aed10c77f50fcf71aeebdca8a42543b30082ecc` |
+  | Composition | `/private/tmp/loopex-m7-current-tools-composition-current-v2.log` / `af8f550bfd9042d2c69fd8fb962d27436de5a26894a2a51b1d6c6906edd0dd22` | `/private/tmp/loopex-m7-current-tools-composition-floor-v1.log` / `596e7b845e50fcfc53d89b6195ef4d415adda7077e75e1f744cf0ed843146d57` |
+  | Executor | `/private/tmp/loopex-m7-current-tools-executor-current-v3.log` / `027cbbcba4a1f95822fb4079f78c33cf267a4245564c9421400706d0a4537286` | `/private/tmp/loopex-m7-current-tools-executor-floor-v2.log` / `2d520fadf86e47b8f8ac3ef789ac708f9cf654a1bca2139d19b11878bc91eab1` |
+  | CLI | `/private/tmp/loopex-m7-current-tools-cli-current-v1.log` / `35133a3660fa0d48ec48d5b23ba802c825624ec02c599eb88b11de8a7abe74ae` | `/private/tmp/loopex-m7-current-tools-cli-floor-v1.log` / `5e3b81501ce2cd20416adba0b216cd424ecdb964672bcee04411bee6a9f91888` |
+
+  Failed intermediate outputs remain retained, rather than counted as passing:
+  Core v1 failed because nil validity depended on the removed table row;
+  composition v1 used a 2,816-byte source that correctly spilled rather than
+  staying inline; executor current v1 fixtures still sent retired tool versions,
+  then current v2/floor v1 used an unqualified fixture digest module. Corrected
+  current read/search helper controls passed before the full executor rerun.
+  Context v1 retained obsolete pinned costs and exceeded its intended successor
+  fit with the larger read declaration; v2 still pinned the old list cost.
+  All these source/fixture repairs preserve product ceilings, authority checks,
+  receive/cleanup bounds and the current-format recovery obligations.
+  Failed-output identities:
+
+  | Output | SHA-256 |
+  | --- | --- |
+  | `/private/tmp/loopex-m7-current-tools-core-current-v1.log` | `b3d8bdb4f46c00d2cab60ab0f3a650b4a066aa926f9b13548378ac8a2cbe58cc` |
+  | `/private/tmp/loopex-m7-current-tools-core-floor-v1.log` | `5dcaa9e2bc8ffd9d41d0957b8796f99d7029089ff870237d98b2b6303aae79f8` |
+  | `/private/tmp/loopex-m7-current-tools-composition-current-v1.log` | `c2991f92b1bbea7f82ea4c29621695408cb2d731582b9faddfe0228cea631f19` |
+  | `/private/tmp/loopex-m7-current-tools-executor-current-v1.log` | `0c5b0f4e57d8d038fc6d842d4db3a1d3edd969a175fd1ad2bdf0ff6506fc3d3a` |
+  | `/private/tmp/loopex-m7-current-tools-executor-current-v2.log` | `aa8adf36c29c8b181e51c8445029acd66579f458bbf792573ca12366d9cadd34` |
+  | `/private/tmp/loopex-m7-current-tools-executor-floor-v1.log` | `f29889081d7db79c18b020c23713d3b1d8cd4c2d4c8a8d8b4b4b982d413743ec` |
+  | `/private/tmp/loopex-m7-current-tools-context-current-v1.log` | `5b7ba2b475bec92d244c2669374db8e001b59016383a18e18291e3ff6709715e` |
+  | `/private/tmp/loopex-m7-current-tools-context-floor-v1.log` | `ec24b9a76a023c5be85215197c29f82fbd10a7b92306ff94791137b9751b039e` |
+  | `/private/tmp/loopex-m7-current-tools-context-current-v2.log` | `cb871360ddfb72082ec3543317e181c9e69bfd821213b75506f3c884ac84d8a1` |
+  | `/private/tmp/loopex-m7-current-tools-context-floor-v2.log` | `c2b06bdf7fbd6d9be82ba3a8a84228a3cb37e8e06bc1777f9ec2658f12d779cf` |
+
 - Done: new-chat preparation now retains the approved closed revision-1
   physical workspace binding in exact v3 genesis options and rechecks it after
   configuration capture. Capability-held ordinary chat resume uses the new
@@ -5535,6 +5601,7 @@ or check was relaxed.
 
 - [x] Remove the obsolete M2 accounting probe and exclusive old-reader foundation scaffolding; retain both-pair proof of current embedding, CLI, artifact and recovery workflows.
 - [x] Remove the historical cross-version archive lane, its exclusive helpers and fixtures; refuse its retired selector before staging and prove current build/redaction/manifest checks on both supported toolchains.
+- [x] Retire shipped 1.0 read/search definitions, their capability/vector/dispatch support and default-selection shim; migrate current callers and fixtures, prove exact current identities, all tool subsets, retired-version refusal, inline/spill/range restart and unchanged path/budget/context/cleanup obligations on both supported pairs.
 - [ ] Remove superseded record/API/protocol readers, tool generations, host fallbacks and compatibility-only fixtures; migrate current callers and retain one current contract at each boundary.
 - [ ] Prove current-format backup/restore and recovery with complete manifests, separate workspace state and exact nonredispatch of unresolved effects.
 

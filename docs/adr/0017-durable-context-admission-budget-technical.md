@@ -15,7 +15,8 @@ their sum into a repository-estimator admission decision. Separately, Store vali
 private record against an exact 65,536-byte encoded-item ceiling. Context token
 cost omits envelope and provenance bytes, so neither limit implies the other.
 
-The split is observable in the reference stack. In the named reference fixture,
+The split is observable in the reference stack. In the named M2 reference fixture
+at its recorded revision,
 the exact provider-facing system message plus four model-facing tool projections
 is 2,393 canonical bytes and 799 estimated tokens. The full retained tool
 definitions occupy 4,382 staged-record storage bytes and measure 1,462 tokens
@@ -23,7 +24,9 @@ under the same estimator, but those full definitions are not provider-token
 accounting. A 65,536-byte project file produces a 65,653-byte canonical wrapped
 project message and 21,885 estimated tokens. Request and receipt records are
 measured separately from those exact components; this ADR makes no unsupported
-combined approximate-byte claim.
+combined approximate-byte claim. Current source pins the exact current tool
+declarations and their separate costs in the same fixture; the historical
+numbers above illustrate the two dimensions rather than fixing later definitions.
 
 <a id="technical-adr-0017-decision"></a>
 ## Exact Two-Dimensional Admission

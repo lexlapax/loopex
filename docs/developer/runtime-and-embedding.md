@@ -504,10 +504,12 @@ companion ReqLLM model adapter:
 | `:resource_manifest`, `:project_manifest`, `:project_decision`, `:progress_to`, `:diagnostics_to` | Passed to the runtime unchanged. |
 | `:credential_plane` | A shared credential plane; see below. |
 
-Nonempty durable selections register both supported `loopex.read` generations.
-The legacy active selection pins 1.0.0; configured chat captures 1.1.0 and its
-artifact-read capability in v3 genesis. Registration admits a generation without
-changing a session's frozen selection. An empty active selection still starts
+Nonempty durable selections register only the current shipped coding tools:
+read, grep, find and ls at 1.1.0, and write, edit and bash at 1.0.0. Each ID
+selects that one exact definition. Configured chat retains its selection and
+artifact-read capability in v3 genesis. The maintainer's pre-1.0 rule retires
+the superseded read/search definitions and the old default-selection shim.
+An empty active selection still starts
 the job transfer owner, because resumed sessions use their retained tools.
 
 **The provider credential is consumed once.** A composition started without a

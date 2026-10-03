@@ -44,10 +44,10 @@ defmodule LoopexComposition.ArtifactRangeExecutorTest do
     end
   end
 
-  test "compiled generations retain exact literal identities without changing the legacy selection" do
+  test "compiled definitions retain only current exact read identity" do
     assert length(CodingTools.definitions()) == 7
-    ranges = Enum.filter(CodingTools.generations(), &(&1["tool_id"] == "loopex.read"))
-    assert Enum.map(ranges, & &1["tool_version"]) == ["1.0.0", "1.1.0"]
+    ranges = Enum.filter(CodingTools.definitions(), &(&1["tool_id"] == "loopex.read"))
+    assert Enum.map(ranges, & &1["tool_version"]) == ["1.1.0"]
 
     for definition <- ranges do
       assert {:ok, _} = Loopex.Runtime.ArtifactReadCapabilities.resolve([definition])
@@ -174,22 +174,15 @@ defmodule LoopexComposition.ArtifactRangeExecutorTest do
     assert Agent.get(f.calls, & &1) == [job.job_id]
   end
 
-  test "both read generations preserve path reads and the new path branch rejects resolution" do
+  test "current read preserves path reads and rejects injected artifact resolution" do
     f = fixture(:normal, "artifact")
     File.write!(Path.join(f.workspace, "source.txt"), "workspace text")
 
-    for version <- ["1.0.0", "1.1.0"] do
-      {job, _grant} = request(f, 0, 4)
+    {job, _grant} = request(f, 0, 4)
+    {job, grant} = changed_request(job, %{validated_arguments: %{"path" => "source.txt"}})
 
-      {job, grant} =
-        changed_request(job, %{
-          tool_version: version,
-          validated_arguments: %{"path" => "source.txt"}
-        })
-
-      assert {:ok, %{outcome: :completed, output: "workspace text"}} =
-               Local.execute(f.executor, job, grant)
-    end
+    assert {:ok, %{outcome: :completed, output: "workspace text"}} =
+             Local.execute(f.executor, job, grant)
 
     {job, _grant} = request(f, 0, 4)
 
@@ -202,6 +195,29 @@ defmodule LoopexComposition.ArtifactRangeExecutorTest do
              Local.execute(f.executor, job, grant)
 
     assert Agent.get(f.calls, & &1) == []
+  end
+
+  test "superseded read and search versions refuse before effects" do
+    f = fixture(:normal, "artifact")
+    File.write!(Path.join(f.workspace, "source.txt"), "workspace text")
+
+    for id <- ~w(loopex.read loopex.grep loopex.find loopex.ls) do
+      {job, _grant} = request(f, 0, 4)
+
+      {job, grant} =
+        changed_request(job, %{
+          tool_id: id,
+          tool_version: "1.0.0",
+          validated_arguments: %{"path" => "source.txt"}
+        })
+
+      assert Local.execute(f.executor, job, grant) ==
+               {:error, {:refused_before_effect, :tool_definition_mismatch}}
+    end
+
+    assert Agent.get(f.calls, & &1) == []
+    refute_received :unexpected_fetch
+    assert File.read!(Path.join(f.workspace, "source.txt")) == "workspace text"
   end
 
   test "cancellation while waiting for shared capacity cannot allocate a late transfer" do
