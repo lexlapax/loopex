@@ -12,6 +12,124 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
   alias Loopex.Runtime.{MaintenanceConfiguration, SessionState}
   alias Loopex.Store
 
+  for mode <- [:source_pending, :checkpoint_more] do
+    @mode mode
+    test "succession joins the held #{@mode} source worker before continuing its captured episode" do
+      {fixture, session, episode} = retained_episode(@mode)
+      before = Fixture.records(fixture, session)
+      {:ok, original} = SessionState.recover(session, before, Fixture.events(fixture, session))
+
+      successor =
+        start(
+          store: fixture.store,
+          model: "changed:model",
+          tools: [],
+          script: [
+            %{
+              text:
+                ~s({"summary":"continued retained facts","carry_forward":{"files_read":[],"files_changed":[]}}),
+              usage: %{input_tokens: 37, output_tokens: 19},
+              reply_overrides: %{completion: "natural", continuation: nil}
+            },
+            %{
+              text: "continued",
+              require_previous_worker_down: true,
+              reply_overrides: %{completion: "natural", continuation: nil}
+            }
+          ]
+        )
+
+      {:ok, {:prepared, activation}} =
+        Loopex.prepare_resume_session(successor.runtime, session, "resume-source-predecessor")
+
+      {:ok, children} = Loopex.Runtime.children(successor.runtime)
+      predecessor = :sys.get_state(children.control).sessions[session].coordinator
+      predecessor_state = :sys.get_state(predecessor)
+      hold_next_source_worker(predecessor_state.owner_workers)
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+      assert_receive {:held_maintenance_source_worker, worker}, 5_000
+
+      assert [{_, {:maintenance_preparation, _, ^worker, _}}] =
+               predecessor |> :sys.get_state() |> Map.fetch!(:in_flight) |> Map.to_list()
+
+      captured_rows = Fixture.records(successor, session)
+      captured_events = Fixture.events(successor, session)
+      worker_monitor = Process.monitor(worker)
+      predecessor_monitor = Process.monitor(predecessor)
+
+      assert {:ok, {:prepared, replacement_activation}} =
+               Loopex.prepare_resume_session(
+                 successor.runtime,
+                 session,
+                 "resume-source-successor"
+               )
+
+      assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 5_000
+      assert_receive {:DOWN, ^predecessor_monitor, :process, ^predecessor, :normal}, 5_000
+      replacement = :sys.get_state(children.control).sessions[session].coordinator
+      replacement_state = :sys.get_state(replacement)
+      assert replacement != predecessor
+      assert replacement_state.durable.owner_epoch == predecessor_state.durable.owner_epoch + 1
+      assert replacement_state.in_flight == %{}
+      assert Task.Supervisor.children(replacement_state.owner_workers) == []
+
+      paused = Fixture.records(successor, session)
+      assert Enum.take(paused, length(captured_rows)) == captured_rows
+      assert [owner] = Enum.drop(paused, length(captured_rows))
+      assert owner.payload.kind == "owner_advanced"
+      assert Fixture.events(successor, session) == captured_events
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+
+      assert replacement_state.durable.maintenance_episodes[episode["episode_id"]] ==
+               original.maintenance_episodes[episode["episode_id"]]
+
+      assert replacement_state.durable.checkpoints == original.checkpoints
+      assert replacement_state.durable.charged == original.charged
+      assert {:ok, ^session} = Loopex.activate_resume(replacement_activation)
+      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      assert List.last(rows).payload["outcome"] == "completed"
+      refute Enum.any?(rows, &(&1.payload.kind == "context_admission_refused_v2"))
+
+      assert [ending] =
+               Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+
+      assert ending.payload["episode_id"] == episode["episode_id"]
+      assert ending.payload["result"]["disposition"] == "checkpointed"
+
+      assert ending.payload["result"]["usage"]["total_tokens"] ==
+               original.maintenance_episodes[episode["episode_id"]]["usage"]["total_tokens"] + 56
+
+      assert [maintenance, ordinary] = AgentLoopTestModel.dispatched(successor.model)
+      assert maintenance.model == episode["maintenance_configuration"]["selection"]["model"]
+      assert ordinary.model == Genesis.configuration()["model"]
+
+      assert {:ok, source} =
+               LoopexProtocol.Frame.decode(Enum.at(maintenance.messages, 1)["content"], 16_384)
+
+      assert source["prior_checkpoint"] ==
+               if(original.active_checkpoint,
+                 do: original.checkpoints[original.active_checkpoint]["summary"],
+                 else: nil
+               )
+
+      assert Agent.get(successor.executor, & &1.jobs) == []
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, rows, Fixture.events(successor, session))
+
+      assert recovered.active_run_id == nil
+      assert recovered.active_maintenance == nil
+
+      for old <- Enum.drop(recovered.run_order, -1) do
+        assert SessionState.elements(recovered, old) == SessionState.elements(original, old)
+      end
+
+      assert :sys.get_state(replacement).in_flight == %{}
+      assert Task.Supervisor.children(replacement_state.owner_workers) == []
+      stop_and_join(successor, session)
+    end
+  end
+
   for mode <- [:source_pending, :checkpoint_more],
       phase <- [
         :none,

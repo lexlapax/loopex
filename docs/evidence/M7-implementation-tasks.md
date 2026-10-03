@@ -325,6 +325,24 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: prove durable owner succession while an exact maintenance source worker
+  is held before preparation. Both initial and post-checkpoint source phases
+  join the worker and predecessor, leave only the new owner claim while paused,
+  preserve the complete episode capture, checkpoints and charge, then dispatch
+  one summary and ordinary continuation after activation. The summary carries
+  the original prior checkpoint and selected model; changed startup model
+  settings do not replace that capture. Each episode checkpoints once, retains
+  original conversation facts and charges only its settled summary work.
+  All 119 tests in the three focused maintenance files pass on both supported
+  pairs. Complete outputs:
+  `/private/tmp/loopex-m7-source-worker-succession-current-v2.log`, SHA-256
+  `a9562def51bef13bde9ece5ed27850ce99ba2c196363885a2258e6d2385b6fb7`;
+  `/private/tmp/loopex-m7-source-worker-succession-floor.log`, SHA-256
+  `9f22bf0b0676772c3ea68ef3a359320d9a552dcb94e73054eac73791add3d90e`.
+  This closes one added T07 subtask. Original T01–T19 counts remain
+  52 done / 121 todo / 6 retired; added counts become 194 done / 8 todo.
+  Live preparation cutoff and standalone compact remain open.
+
 - Done: end a lost maintenance source worker through the existing unavailable
   `context_projection_invalid` refusal after its exact DOWN. The generic
   ordinary-history refusal constructor previously rejected this observation
@@ -7186,6 +7204,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Hold the exact initial and later maintenance source worker across durable owner succession; join the worker and predecessor, prove the paused successor commits only its claim while preserving the frozen episode, checkpoint and usage, then complete one new summary/checkpoint/ordinary continuation through the public activation path on both toolchains. Live cutoff and standalone compact remain open.
 
 - [x] Join lost maintenance source workers before committing the existing unavailable episode/refusal/parent ending; validate the eligible phase and retained clock on replay, prove initial and later source preparation across all three Store uncertainty phases plus held-worker cancellation on both toolchains, and preserve checkpoints, usage and raw facts without redispatch. Live cutoff, supersession and standalone compact remain open.
 
