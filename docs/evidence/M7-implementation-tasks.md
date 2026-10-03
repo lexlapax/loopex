@@ -250,6 +250,18 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running: full current-pair fast check on exact clean integration candidate
+  `ff21bed908d7213026ed55ce4c04bfdda94ad5dd`, committed and pushed on `m7`.
+  It runs in `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`, detached at
+  that SHA, with `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. Unified execution handle
+  `53173` was confirmed live after the initial structure, compilation,
+  documentation and archive fixtures. Complete output is streaming to
+  `/private/tmp/loopex-m7-ff21bed9-fast-check.log`; final exit, measured duration
+  and SHA-256 are pending. Poll that same handle; do not restart because a wait
+  returns no output. Collect its terminal result before hashing the log or
+  claiming a pass. This entry changes documentation only after the tested
+  candidate. The implementation goal is active and M7 remains In progress.
+
 - Active: T07 durable compaction. Admission, run-owned terminal ordering and
   expired-preparation/undispatched-abort recovery are implemented. Next join the
   ordinary-limit trigger to bounded source selection, maintenance-specific
