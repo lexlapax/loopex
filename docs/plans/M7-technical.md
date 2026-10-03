@@ -1801,9 +1801,9 @@ preceding durable state, while a retained episode wins before new host settings
 or clocks. Empty fitting history requires no summarizer. Clock overflow and
 cancellation admit no episode. Both-pair selection covers all three standalone
 triggers, declaration endpoints, rehashed substitutions, owner succession and
-bounded one-record private-history traversal without effects. These constructors
-are not yet joined to live owner capture or standalone dispatch/result/cleanup;
-the task checklist keeps that integration and the reply-reserve decision open.
+bounded one-record private-history traversal without effects. These constructors now join initial live owner capture as described below;
+standalone summary dispatch, spent results, snapshots and complete cleanup remain
+open, together with the separately pending reply-reserve decision.
 
 Empty fitting standalone commands now produce a durable unchanged completion
 proposal with no episode or provider attempt. The accepted five-member result
@@ -1812,8 +1812,27 @@ is retained beside its admission binding, wins on duplicate lookup and releases
 the pending slot; admission observation still reports the original acceptance.
 Replay repeats the empty fit and refuses forged results, identities, duplicate
 completion and missing events. Both-pair focused checks and bounded private
-coverage prove the new row and cancellation points. Live scheduling/Store
-uncertainty, failed/cancelled results and completion snapshots remain open.
+coverage prove the new row and cancellation points. Live initial scheduling,
+Store uncertainty and zero-attempt failed/cancelled results now join this path.
+Completion snapshots remain open.
+
+The owner captures one admission-time clock and absolute cutoff before its
+supervised initial preparation. The worker produces only a pure proposal; its
+exact DOWN and unchanged journal version precede commitment. Prepared successors
+pause recovered compact identities, while fresh post-preparation commands can
+progress without an ordinary model. Empty fitting history completes unchanged
+without summarizer settings. Missing or unsupported summarizer settings complete
+failed before an episode or attempt. Worker loss, cancellation and actual cutoff
+expiry join the exact worker before zero-usage, confirmed-cleanup completion.
+An admitted zero-attempt episode closes only with its leading terminal and
+compact completion in one transaction; replay rejects an incomplete prefix,
+changed result/clock and nonzero usage. The bounded private reader rejects a
+checkpoint or unknown cleanup in that undispatched completion generation.
+All three Store uncertainty phases retain one capture, fixed deadline, result
+and public event across exact owner succession; duplicate lookup preserves the
+completed result. The task checklist retains both supported-pair results and
+the Core/static development runs. No standalone summary dispatch, spending,
+checkpoint completion, snapshot or complete runtime-cleanup claim is made.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.

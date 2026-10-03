@@ -465,6 +465,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        executor_reserves: %{},
        streams: %{},
        deadline_timers: %{},
+       compact_timer: nil,
        policy_timers: %{},
        # The expiry timer of each open interaction. A question that nobody
        # answers must end as a fact rather than stand until the run's deadline
@@ -1011,6 +1012,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
               :policy_timeout,
               :artifact_preparation_deadline,
               :maintenance_preparation_deadline,
+              :compact_preparation_deadline,
+              :compact_deadline,
               :model_reserve,
               :execute_result_reserve,
               :cleanup_settled
@@ -1141,6 +1144,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
            {:maintenance_preparation, run_id, pid, metadata}
          )}
 
+      {{:compact_preparation, episode_id, pid, metadata}, remaining} ->
+        {:noreply,
+         put_in_flight(
+           %{state | in_flight: remaining},
+           reference,
+           {:compact_preparation, episode_id, pid, Map.put(metadata, :result, result)}
+         )}
+
       {{:artifact_preparation, run_id, pid, metadata}, remaining} ->
         # Concept: receipt storage finishes only after its worker has stopped.
         # Technical depth: retain the bounded result until this exact monitor's
@@ -1181,6 +1192,53 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:noreply, state}
     end
   end
+
+  defp handle_owner_info({:compact_preparation_deadline, reference, identity}, state) do
+    case state.in_flight[reference] do
+      {:compact_preparation, ^identity, _, metadata} ->
+        if System.system_time(:millisecond) < metadata.deadline do
+          timer =
+            arm_slice(
+              {:compact_preparation_deadline, reference, identity},
+              metadata.deadline - System.system_time(:millisecond)
+            )
+
+          {:noreply,
+           put_in_flight(
+             state,
+             reference,
+             put_elem(state.in_flight[reference], 3, %{metadata | timer: timer})
+           )}
+        else
+          state = cancel_effect_free_preparation(state, identity, :compact_preparation)
+
+          finish_compact_preparation(
+            state,
+            identity,
+            metadata,
+            {:error, :compact_deadline_reached}
+          )
+        end
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  defp handle_owner_info(
+         {:compact_deadline, identity, cutoff},
+         %{phase: :ready, superseded: false} = state
+       ) do
+    case {state.durable.pending_compact, state.durable.maintenance_episodes[identity]} do
+      {%{"episode_id" => ^identity}, %{"stage" => "source_preparation", "deadline" => ^cutoff}} ->
+        advance_compact(disarm_compact_deadline(state))
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  defp handle_owner_info({:compact_deadline, _, _}, state), do: {:noreply, state}
 
   defp handle_owner_info({:artifact_preparation_deadline, reference, run_id}, state) do
     case state.in_flight[reference] do
@@ -1499,6 +1557,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
             else: {:error, :context_projection_invalid}
 
         finish_maintenance_preparation(%{state | in_flight: remaining}, run_id, metadata, result)
+
+      {{:compact_preparation, identity, _pid, metadata}, remaining} ->
+        Process.cancel_timer(metadata.timer)
+
+        result =
+          if reason == :normal,
+            do: Map.get(metadata, :result),
+            else: {:error, :context_projection_invalid}
+
+        finish_compact_preparation(%{state | in_flight: remaining}, identity, metadata, result)
 
       {{:artifact_preparation, run_id, _pid, metadata}, remaining} ->
         Process.cancel_timer(metadata.timer)
@@ -3266,6 +3334,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp commit_category({{:fenced, disposition}, _lane}) when is_atom(disposition), do: :fenced
   defp commit_category(_result), do: :other
 
+  # Concept: standalone commands progress independently of an ordinary model.
+  # Technical depth: compact owns an episode identity and the same current-owner
+  # fence. Its pure preparation worker cannot commit, publish or dispatch.
+  defp advance_work(
+         %{phase: :ready, superseded: false, durable: %{pending_compact: pending}} = state
+       )
+       when is_map(pending) do
+    case Control.current_owner(state.control, state.session_id, state.owner) do
+      :ok -> advance_compact(state)
+      {:error, :superseded_owner} -> {:noreply, superseded_owner(state)}
+      {:error, :runtime_unavailable} -> {:noreply, state}
+    end
+  end
+
   defp advance_work(%{phase: :ready, superseded: false, model: model} = state)
        when is_map(model) do
     case Control.current_owner(state.control, state.session_id, state.owner) do
@@ -3343,6 +3425,232 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp advance_work(state), do: {:noreply, state}
+
+  defp advance_compact(state) do
+    pending = state.durable.pending_compact
+    identity = pending["episode_id"]
+    episode = state.durable.maintenance_episodes[identity]
+
+    cond do
+      is_binary(pending["abort_command_id"]) ->
+        state = cancel_effect_free_preparation(state, identity, :compact_preparation)
+
+        finish_undispatched_compact(
+          state,
+          %{"category" => "cancelled", "retryable" => false},
+          System.system_time(:millisecond)
+        )
+
+      compact_resume_paused?(state, identity) ->
+        {:noreply, state}
+
+      is_map(episode) ->
+        if System.system_time(:millisecond) >= episode["deadline"],
+          do:
+            finish_undispatched_compact(
+              state,
+              compact_deadline_failure(episode["deadline"]),
+              System.system_time(:millisecond)
+            ),
+          else: {:noreply, arm_compact_deadline(state, identity, episode["deadline"])}
+
+      map_size(state.in_flight) > 0 ->
+        {:noreply, state}
+
+      true ->
+        start_compact_preparation(state, pending)
+    end
+  end
+
+  defp compact_resume_paused?(%{prepared: nil}, _), do: false
+  defp compact_resume_paused?(%{prepared: %{state: :spent}}, _), do: false
+
+  defp compact_resume_paused?(%{prepared: prepared}, identity),
+    do: prepared.recovered_compact == identity
+
+  # Concept: one clock and captured owner state bound initial compact preparation.
+  # Technical depth: the worker returns only a proposal; its exact DOWN and
+  # unchanged journal head precede adoption. A deadline timer uses that same
+  # candidate cutoff, with no standalone preparation deadline or synthetic run.
+  defp start_compact_preparation(state, pending) do
+    now = System.system_time(:millisecond)
+    duration = pending["bounds"]["deadline_ms"]
+
+    if not is_integer(now) or now < 0 or now > @uint64_max - duration do
+      clock = if is_integer(now) and now >= 0 and now <= @uint64_max, do: now
+
+      finish_undispatched_compact(
+        state,
+        compact_preparation_failure("maintenance_deadline_unrepresentable", nil),
+        clock
+      )
+    else
+      durable = state.durable
+      selection = state.maintenance_model
+      instructions = state.maintenance_instructions
+      cutoff = now + duration
+
+      check = fn ->
+        if System.system_time(:millisecond) < cutoff,
+          do: :ok,
+          else: {:error, :compact_deadline_reached}
+      end
+
+      task =
+        Task.Supervisor.async_nolink(state.owner_workers, fn ->
+          try do
+            compact_preparation_proposal(durable, selection, instructions, now, check)
+          rescue
+            _ -> {:error, :context_projection_invalid}
+          catch
+            _, _ -> {:error, :context_projection_invalid}
+          end
+        end)
+
+      metadata = %{
+        admitted_at: now,
+        deadline: cutoff,
+        journal_version: durable.journal_version,
+        timer:
+          arm_slice(
+            {:compact_preparation_deadline, task.ref, pending["episode_id"]},
+            cutoff - System.system_time(:millisecond)
+          )
+      }
+
+      {:noreply,
+       put_in_flight(
+         state,
+         task.ref,
+         {:compact_preparation, pending["episode_id"], task.pid, metadata}
+       )}
+    end
+  end
+
+  defp compact_preparation_proposal(durable, selection, instructions, now, check) do
+    case SessionState.propose_standalone_maintenance_episode(
+           durable,
+           selection,
+           instructions,
+           now,
+           check
+         ) do
+      {:unchanged, _} ->
+        SessionState.propose_unchanged_compact(durable, now, check)
+
+      {:refused, %{} = failure} ->
+        SessionState.propose_standalone_compact_failure(durable, failure, now, check)
+
+      {:error, reason}
+      when reason in [
+             :maintenance_model_unconfigured,
+             :maintenance_instructions_unconfigured,
+             :maintenance_reasoning_unsupported
+           ] ->
+        SessionState.propose_standalone_compact_failure(
+          durable,
+          compact_preparation_failure(Atom.to_string(reason), "ordinary"),
+          now,
+          check
+        )
+
+      result ->
+        result
+    end
+  end
+
+  defp finish_compact_preparation(state, identity, metadata, result) do
+    cond do
+      state.superseded ->
+        continue_after_owner_loss(state)
+
+      not match?(%{"episode_id" => ^identity}, state.durable.pending_compact) ->
+        {:noreply, state}
+
+      state.durable.journal_version != metadata.journal_version ->
+        send(self(), :advance_work)
+        {:noreply, state}
+
+      System.system_time(:millisecond) >= metadata.deadline ->
+        finish_undispatched_compact(
+          state,
+          compact_deadline_failure(metadata.deadline),
+          metadata.admitted_at
+        )
+
+      true ->
+        adopt_compact_preparation(state, metadata, result)
+    end
+  end
+
+  defp adopt_compact_preparation(state, _metadata, {:ok, proposal}),
+    do: commit_compact_phase(state, {:ok, proposal})
+
+  defp adopt_compact_preparation(state, metadata, _failure),
+    do:
+      finish_undispatched_compact(
+        state,
+        compact_preparation_failure("context_projection_invalid", nil),
+        metadata.admitted_at
+      )
+
+  defp finish_undispatched_compact(state, failure, clock),
+    do:
+      commit_compact_phase(
+        disarm_compact_deadline(state),
+        SessionState.propose_standalone_compact_failure(state.durable, failure, clock)
+      )
+
+  defp compact_preparation_failure(cause, scope),
+    do: %{
+      "version" => 2,
+      "category" => "context_preparation_failed",
+      "retryable" => false,
+      "measurement_scope" => scope,
+      "cause" => cause
+    }
+
+  defp compact_deadline_failure(cutoff),
+    do: %{
+      "category" => "bound_reached",
+      "retryable" => false,
+      "bound" => "deadline_ms",
+      "observed" => System.system_time(:millisecond),
+      "declared_limit" => cutoff,
+      "accounting_source" => nil
+    }
+
+  defp commit_compact_phase(state, {:ok, proposal}) do
+    case commit_internal(state, proposal) do
+      {:ok, next} ->
+        send(self(), :advance_work)
+        {:noreply, next}
+
+      {:error, reason} ->
+        {:stop, {:compact_commit_failed, reason}, state}
+    end
+  end
+
+  defp commit_compact_phase(state, {:error, reason}),
+    do: {:stop, {:compact_completion_failed, reason}, state}
+
+  defp arm_compact_deadline(%{compact_timer: nil} = state, identity, cutoff),
+    do: %{
+      state
+      | compact_timer:
+          arm_slice(
+            {:compact_deadline, identity, cutoff},
+            cutoff - System.system_time(:millisecond)
+          )
+    }
+
+  defp arm_compact_deadline(state, _, _), do: state
+  defp disarm_compact_deadline(%{compact_timer: nil} = state), do: state
+
+  defp disarm_compact_deadline(state) do
+    Process.cancel_timer(state.compact_timer)
+    %{state | compact_timer: nil}
+  end
 
   defp resume_paused?(%{prepared: nil}, _work), do: false
   defp resume_paused?(%{prepared: %{state: :spent}}, _work), do: false
@@ -6726,7 +7034,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp terminate_superseded_effect_free_work(state) do
     Enum.reduce(state.in_flight, state, fn
       {_reference, {kind, run_id, _pid, _metadata}}, next
-      when kind in [:artifact_preparation, :maintenance_preparation] ->
+      when kind in [:artifact_preparation, :maintenance_preparation, :compact_preparation] ->
         cancel_effect_free_preparation(next, run_id, kind)
 
       {reference, {:model, run_id, pid, tree}}, next ->
@@ -8889,6 +9197,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
          guard_monitor: nil,
          guard_relationship: nil,
          state: :prepared,
+         recovered_compact: nil,
          recovered: MapSet.new()
        }
 
@@ -9077,7 +9386,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp recovered_runs(prepared, durable) do
     %{
       prepared
-      | recovered:
+      | recovered_compact: durable.pending_compact && durable.pending_compact["episode_id"],
+        recovered:
           durable
           |> SessionState.pending_work()
           |> Enum.map(&Map.fetch!(&1, :run_id))

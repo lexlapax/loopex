@@ -753,6 +753,228 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
     end
   end
 
+  test "undispatched cancellation is bound to the actual abort and commits one result" do
+    for captured? <- [false, true] do
+      {state, history, events} = pending(["retained fact"])
+
+      {state, history, events} =
+        if captured? do
+          {:ok, capture} =
+            SessionState.propose_standalone_maintenance_episode(
+              state,
+              maintenance_model(),
+              maintenance_instructions(),
+              1_000,
+              fn -> :ok end
+            )
+
+          commit(state, capture, history, events)
+        else
+          {state, history, events}
+        end
+
+      failure = %{"category" => "cancelled", "retryable" => false}
+
+      assert {:error, :invalid_compact_completion_transition} =
+               SessionState.propose_standalone_compact_failure(state, failure, 1_001)
+
+      {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "stop"})
+      {state, history, events} = commit(state, abort, history, events)
+
+      assert {:ok, proposal} =
+               SessionState.propose_standalone_compact_failure(state, failure, 1_001)
+
+      assert Enum.map(proposal.records, & &1.kind) ==
+               if(captured?,
+                 do: ["maintenance_episode_terminal_v1", "compact_command_completed_v1"],
+                 else: ["compact_command_completed_v1"]
+               )
+
+      assert length(proposal.events) == 1
+      result = List.last(proposal.records)["result"]
+      assert result["failure"] == failure
+
+      assert result["usage"] == %{
+               "attempts" => 0,
+               "reported_tokens" => 0,
+               "estimated_tokens" => 0,
+               "total_tokens" => 0
+             }
+
+      {completed, history, events} = commit(state, proposal, history, events)
+      assert {:ok, ^completed} = SessionState.recover(state.session_id, history, events)
+      assert completed.pending_compact == nil
+      assert completed.active_maintenance == nil
+      assert completed.maintenance_terminal == nil
+      assert completed.commands["compact"].result == result
+      assert completed.conversation == state.conversation
+      assert completed.charged == state.charged
+      assert completed.active_run_id == nil
+
+      if captured? do
+        assert completed.maintenance_episodes[state.active_maintenance]["stage"] == "settled"
+        assert completed.maintenance_episodes[state.active_maintenance]["result"] == result
+      end
+    end
+  end
+
+  test "captured failure prefix and completion are indivisible and authenticated on replay" do
+    {state, history, events} = pending(["retained fact"])
+
+    {:ok, capture} =
+      SessionState.propose_standalone_maintenance_episode(
+        state,
+        maintenance_model(),
+        maintenance_instructions(),
+        1_000,
+        fn -> :ok end
+      )
+
+    {state, history, events} = commit(state, capture, history, events)
+    {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "stop"})
+    {state, history, events} = commit(state, abort, history, events)
+
+    {:ok, proposal} =
+      SessionState.propose_standalone_compact_failure(
+        state,
+        %{"category" => "cancelled", "retryable" => false},
+        1_001
+      )
+
+    [prefix, completion] = proposal.records
+    {_, full_history, full_events} = commit(state, proposal, history, events)
+
+    assert {:error, _} =
+             SessionState.recover(state.session_id, Enum.drop(full_history, -1), events)
+
+    assert {:error, _} =
+             SessionState.recover(
+               state.session_id,
+               history ++ [row(state, completion)],
+               full_events
+             )
+
+    assert {:error, _} = SessionState.recover(state.session_id, full_history, events)
+
+    for {first, last} <- [
+          {Map.put(prefix, "episode_id", "foreign"), completion},
+          {Map.put(prefix, "observed_at", 1_002), completion},
+          {put_in(prefix, ["result", "cleanup"], "unknown"), completion},
+          {prefix, Map.put(completion, "observed_at", 999)},
+          {prefix, Map.put(completion, "command_id", "foreign")},
+          {prefix, put_in(completion, ["result", "usage", "attempts"], 1)},
+          {completion, prefix}
+        ] do
+      rows = [row(state, first), %{row(state, last) | journal_version: state.journal_version + 2}]
+      assert {:error, _} = SessionState.recover(state.session_id, history ++ rows, full_events)
+    end
+  end
+
+  test "deadline failure proves the same candidate or captured absolute cutoff with zero usage" do
+    for captured? <- [false, true] do
+      {state, history, events} = pending(["fact"])
+
+      {state, history, events} =
+        if captured? do
+          {:ok, capture} =
+            SessionState.propose_standalone_maintenance_episode(
+              state,
+              maintenance_model(),
+              maintenance_instructions(),
+              1_000,
+              fn -> :ok end
+            )
+
+          commit(state, capture, history, events)
+        else
+          {state, history, events}
+        end
+
+      failure = %{
+        "category" => "bound_reached",
+        "retryable" => false,
+        "bound" => "deadline_ms",
+        "observed" => 61_001,
+        "declared_limit" => 61_000,
+        "accounting_source" => nil
+      }
+
+      clock = if captured?, do: 61_001, else: 1_000
+
+      assert {:ok, proposal} =
+               SessionState.propose_standalone_compact_failure(state, failure, clock)
+
+      {completed, history, events} = commit(state, proposal, history, events)
+      assert {:ok, ^completed} = SessionState.recover(state.session_id, history, events)
+      assert completed.commands["compact"].result["failure"] == failure
+
+      for changed <- [
+            Map.put(failure, "declared_limit", 60_000),
+            Map.put(failure, "observed", 60_999),
+            Map.put(failure, "accounting_source", "reported"),
+            Map.put(failure, "bound", "max_attempts"),
+            Map.put(failure, "bound", "token_budget")
+          ] do
+        assert {:error, :invalid_compact_completion_transition} =
+                 SessionState.propose_standalone_compact_failure(state, changed, clock)
+      end
+    end
+  end
+
+  test "unrepresentable admission clock completes without fabricating an episode" do
+    {state, history, events} = pending([])
+    failure = preparation_failure("maintenance_deadline_unrepresentable", nil)
+
+    for clock <- [nil, @uint64_max] do
+      assert {:ok, proposal} =
+               SessionState.propose_standalone_compact_failure(state, failure, clock)
+
+      {completed, rows, public} = commit(state, proposal, history, events)
+      assert {:ok, ^completed} = SessionState.recover(state.session_id, rows, public)
+      assert completed.maintenance_episodes == %{}
+      assert completed.commands["compact"].result["failure"] == failure
+      assert length(proposal.records) == 1
+    end
+
+    assert {:error, :invalid_compact_completion_transition} =
+             SessionState.propose_standalone_compact_failure(state, failure, 1_000)
+  end
+
+  test "missing summarizer failures require eligible history and yield to a committed abort" do
+    {state, history, events} = pending(["retained fact"])
+    {empty, _, _} = pending([])
+
+    for cause <-
+          ~w(maintenance_model_unconfigured maintenance_instructions_unconfigured maintenance_reasoning_unsupported) do
+      failure = preparation_failure(cause, "ordinary")
+
+      assert {:ok, proposal} =
+               SessionState.propose_standalone_compact_failure(state, failure, 1_000)
+
+      {completed, rows, public} = commit(state, proposal, history, events)
+      assert {:ok, ^completed} = SessionState.recover(state.session_id, rows, public)
+      assert completed.maintenance_episodes == %{}
+
+      assert {:error, :invalid_compact_completion_transition} =
+               SessionState.propose_standalone_compact_failure(empty, failure, 1_000)
+
+      {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "stop"})
+      {aborting, _, _} = commit(state, abort, history, events)
+
+      assert {:error, :invalid_compact_completion_transition} =
+               SessionState.propose_standalone_compact_failure(aborting, failure, 1_000)
+    end
+  end
+
+  defp preparation_failure(cause, scope),
+    do: %{
+      "version" => 2,
+      "category" => "context_preparation_failed",
+      "retryable" => false,
+      "measurement_scope" => scope,
+      "cause" => cause
+    }
+
   defp configuration(options) do
     Genesis.configuration()
     |> Map.put("context_token_budget", Keyword.get(options, :context_token_budget, 32_768))

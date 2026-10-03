@@ -325,6 +325,100 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: standalone initial preparation now runs through the actual session owner
+  and supervised pure-proposal worker. One captured clock bounds its candidate
+  admission; the exact worker DOWN and unchanged journal head precede adoption.
+  Prepared successors pause recovered compact identities; fresh commands after
+  preparation progress independently of an ordinary model. Empty fitting history
+  completes unchanged without summarizer settings. Missing model/instructions or
+  unsupported reasoning complete failed before any episode or attempt. Actual
+  cancellation, lost worker and cutoff expiry join the worker before zero-usage,
+  confirmed-cleanup completion. Captured zero-attempt episodes commit their
+  leading terminal and compact completion together; replay rejects incomplete
+  prefixes, substituted identities/results/clocks and nonzero usage. The bounded
+  private reader rejects unknown cleanup or a checkpoint in this undispatched
+  generation. Completion returns its exact result on duplicate lookup and
+  preserves the original admission-disposition fact.
+  All three Store uncertainty phases prove one capture with unchanged settings
+  and absolute cutoff, or one completed result/event, across exact owner exits
+  and prepared successors. Held-worker owner exit is joined before successor
+  cancellation. Early or stale deadline notices neither end nor renew the
+  episode; a committed abort retains precedence. No provider or executor work
+  is dispatched by these paths. Nonempty captured episodes remain at source
+  preparation pending the next implementation step; this is not a completed
+  standalone summarization workflow.
+  The final nine-file selection passes 247 cases with two existing exclusions
+  on the current pair in 15.2 seconds and floor pair in 14.8 seconds. The complete
+  current Core suite passes 1,168 cases with eight existing exclusions in 214.4
+  seconds. Production source is identical between those runs; the Core run
+  loaded the test tree before the final held-worker owner-succession case was
+  added, and that additional case passes in both final focused selections.
+  Complete outputs are retained read-only outside the repository:
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-owner-focused-current-v3.log` | PASS, 247 cases, two excluded | `47b8eb58c151101d13c2da90b66189df4325ef4dc2497ed926c5386ff253cb6c` |
+  | `/private/tmp/loopex-m7-standalone-owner-focused-floor-v2.log` | PASS, 247 cases, two excluded | `269c2b5debabee69e8a733c83a979f3ac6543716899a9a2ebd739a95446a0fa4` |
+  | `/private/tmp/loopex-m7-standalone-owner-core-current-v1.log` | PASS, 1,168 cases, eight excluded | `5e864b0cc0cc69ca6be2762feb5d085159f5ef07e8d4cbc3da11d6a9019b6399` |
+
+  Compilation without warnings, formatting, bootstrap/status, compiled
+  documentation, dependency direction and version-train checks pass. Complete
+  output `/private/tmp/loopex-m7-standalone-owner-static-v1.log`, SHA-256
+  `40729f11a63668337ce279617e036e279bf2cb3642b463f310b9f959105a34a4`. This development log was produced before
+  adding its own result/digest to this evidence entry; no source or test changes
+  followed that run. Bootstrap/status and compiled documentation also pass
+  after that backfill, complete output
+  `/private/tmp/loopex-m7-standalone-owner-final-docs-v1.log`, SHA-256
+  `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8`.
+
+  Development failures remain failures. Initial admission fixtures assumed the
+  empty command stayed pending; an explicit scheduling hold now preserves their
+  original unknown-commit, exact owner-exit and paused-successor proof, and adds
+  cancellation/completed-result restart. A syntax error was repaired. A local
+  TCP sandbox refusal supplied no test evidence; the authorized test run used
+  escalation. New live fixtures initially used a mismatched context declaration,
+  omitted runtime identity and attempted to resume a task from a process that
+  did not own its suspension. Correcting those fixtures changed no product
+  bound. A subsequent observation raced separate record/event reads; one atomic
+  Store snapshot now supplies both. The initial joined selection also named two
+  nonexistent files and exposed a real bounded-reader gap for unknown cleanup;
+  the existing closed zero-attempt row now requires confirmed cleanup and null
+  checkpoint. No required assertion, limit or check was dropped.
+
+  | Failed output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-owner-current-v1.log` | FAIL, 71/74 cases | `20547ca74cd1d4f5dd91b95b4e4bf435224a6423c7130dd2fb00121e9b1f0b2b` |
+  | `/private/tmp/loopex-m7-standalone-owner-current-v2.log` | FAIL, fixture syntax | `ce8524eddecd2fdbce6204a7c064c1ae36fd8f50d66d2d448f0c69a8afd05216` |
+  | `/private/tmp/loopex-m7-standalone-owner-current-v3.log` | UNAVAILABLE, local TCP sandbox refusal | `e10cbee50e01b07ab2cf163c0fede103c5bb7cfbb8a51f2ee434856106979efb` |
+  | `/private/tmp/loopex-m7-standalone-owner-live-v1.log` | FAIL, 0/11 cases, fixture construction/hold errors | `6e4c5367f83661ab4f281c23623804a52e53f14802e6de78c475e143b2a1b207` |
+  | `/private/tmp/loopex-m7-standalone-owner-live-v2.log` | FAIL, 10/11 cases, observation race | `5badf912322d0ae4474400786843b0f43ab971ceca4b15c47388b92f84a08a34` |
+  | `/private/tmp/loopex-m7-standalone-owner-focused-current-v1.log` | FAIL, 225/226 cases and two invalid paths | `da4e8b883a45abc4abed740b967abfb956be657b7241b281b0839c86d4c09f34` |
+
+  Intermediate passing outputs are retained read-only as well:
+  `standalone-owner-current-v4.log`, SHA-256
+  `44e0db895fdff964fa40f466d27e98f43f6d19b1d8241ec7e15e02c48d4ce20b`,
+  and `standalone-owner-current-v5.log`, SHA-256
+  `b3cea7d3b4c62b149338fb9fc66012938d4eb1c92c5c2c7243c58b5561ff0341`,
+  pass 74 and 79 cases respectively in 7.8 and 8.0 seconds;
+  `standalone-owner-live-v3.log`, SHA-256
+  `1a4fe971acef44113880af5b510d35740b1e1f6b85e71d27cdb8478b49a4780d`,
+  and `standalone-owner-live-v4.log`, SHA-256
+  `f393661e1a6a1a49de503a20d4b19ac6cdbc7ec9067244ad8d1388478edaaada`,
+  pass 12 and 43 cases in 2.0 and 2.2 seconds;
+  `standalone-owner-focused-current-v2.log`, SHA-256
+  `50e76e9dc1925c897d6181d2c3b6df6366115ff7b0d676d6d01f3c9d254c82d8`,
+  and `standalone-owner-focused-floor-v1.log`, SHA-256
+  `1607529e0c4077b0a939204c558f2cdf4d06367f5834c78585fbe4c9bf86ef76`,
+  pass 246 cases with two exclusions in 15.5 and 14.7 seconds. Each basename in
+  this paragraph is under `/private/tmp/loopex-m7-`.
+  These development checks do not replace the next clean integration candidate's
+  full fast check, real-provider lanes or closure matrix. T01–T19 originals stay
+  54 done / 119 todo / 6 retired; added counts are 203 done / 9 todo, including
+  T07's 36 done / 1 todo. One added initial-owner subtask closes and one explicit
+  integrated standalone source/dispatch/checkpoint workflow subtask is retained
+  open. Both earlier maintainer decisions remain pending. Next join that live
+  workflow using the retained compact identity, without inventing a run.
+
 - Done: empty fitting standalone compact now has a replay-checked unchanged
   completion proposal. Its closed private `compact_command_completed_v1` row
   binds the actual command/episode identity, observed clock and ADR 0043's exact
@@ -7598,6 +7692,11 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+
+- [x] Join standalone initial capture and unchanged/zero-attempt failure completion to the live owner; capture one cutoff, join exact pure workers before adoption, preserve prepared-resume pause, commit admitted-episode terminal/completion together, and prove abort, worker loss, deadline, bounded reader, duplicate results and all three capture/completion uncertainty phases on both toolchains. Provider dispatch, spent/checkpoint results, snapshots and complete cleanup remain open.
+
+- [ ] Join standalone captured source selection, request/permit staging, provider dispatch, settlement/spending, checkpoint continuation and final completion to one live workflow using the actual compact identity; prove restart, unknown commits, immutable captures and bounded cleanup without a synthetic run.
 
 - [x] Retain unchanged standalone completion and its exact event in one replay-checked proposal without an episode, return the completed five-member result on duplicate lookup while preserving admission observation, release the pending slot, validate bounded private coverage, and prove strict result/history/event/cancellation refusal on both toolchains. Live owner scheduling, Store uncertainty, snapshots and failed/cancelled completion remain open.
 

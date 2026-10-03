@@ -510,17 +510,18 @@ defmodule Loopex.Runtime.EffectIntents do
     end
   end
 
-  # Concept: an unchanged compact adds completion evidence without an effect.
+  # Concept: an undispatched compact adds completion evidence without an effect.
   # Technical depth: this bounded reader validates the closed native result and
   # zero accounting; full replay proves the preceding command and empty fit.
   defp neutral_values?(%{payload: %{kind: "compact_command_completed_v1"} = payload}) do
     result = payload["result"]
 
     identifier?(payload["episode_id"]) and identifier?(payload["command_id"]) and
-      version?(payload["observed_at"]) and
+      (is_nil(payload["observed_at"]) or version?(payload["observed_at"])) and
       match?({:ok, _}, LoopexProtocol.Session.CompactResult.encode_wire(result)) and
-      result["disposition"] == "unchanged" and result["usage"]["attempts"] == 0 and
-      result["usage"]["total_tokens"] == 0
+      result["disposition"] in ~w(unchanged failed) and is_nil(result["checkpoint_id"]) and
+      result["cleanup"] == "confirmed" and result["usage"]["attempts"] == 0 and
+      result["usage"]["total_tokens"] == 0 and zero_attempt_completion_clock?(payload)
   end
 
   defp neutral_values?(%{payload: %{kind: "maintenance_request_committed_v1"} = payload}) do
@@ -604,6 +605,21 @@ defmodule Loopex.Runtime.EffectIntents do
     do:
       payload["trigger"] in ~w(ordinary_limit explicit) and
         is_nil(payload["last_offending_source"])
+
+  defp zero_attempt_completion_clock?(%{"observed_at" => nil, "result" => result}),
+    do:
+      result["failure"] in [
+        %{"category" => "cancelled", "retryable" => false},
+        %{
+          "version" => 2,
+          "category" => "context_preparation_failed",
+          "retryable" => false,
+          "measurement_scope" => nil,
+          "cause" => "maintenance_deadline_unrepresentable"
+        }
+      ]
+
+  defp zero_attempt_completion_clock?(_), do: true
 
   # Concept: captured headroom remains private evidence on each bounded page.
   # Technical depth: this reader checks the closed target generation and numeric

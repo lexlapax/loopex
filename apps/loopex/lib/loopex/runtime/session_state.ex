@@ -1290,6 +1290,196 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: undispatched compact failures complete without inventing a run.
+  # Technical depth: ADR 0043 retains zero usage and confirmed cleanup before a
+  # provider attempt. A captured episode requires its leading terminal in the
+  # same transaction. Missing host settings are owner observations after a
+  # measured eligible range; numeric refusals and deadline limits are rederived.
+  @doc false
+  def propose_standalone_compact_failure(state, failure, clock, check \\ fn -> :ok end) do
+    with {:ok, record} <- zero_attempt_compact_failure_record(state, failure, clock, check),
+         {:ok, proposal} <- internal_proposal(state, record["episode_id"] <> ":completed", record),
+         :ok <- check.() do
+      {:ok, proposal}
+    end
+  end
+
+  defp zero_attempt_compact_failure_record(state, failure, clock, check) do
+    with %{} = pending <- state.pending_compact,
+         episode = state.maintenance_episodes[pending["episode_id"]],
+         true <- zero_attempt_standalone?(state, episode),
+         true <- is_nil(clock) or (is_integer(clock) and clock >= 0 and clock <= @uint64_max),
+         :ok <- zero_attempt_compact_failure(state, episode, failure, clock, check) do
+      {:ok,
+       %{
+         :kind => "compact_command_completed_v1",
+         "command_id" => pending["command_id"],
+         "episode_id" => pending["episode_id"],
+         "observed_at" => clock,
+         "result" => %{
+           "disposition" => "failed",
+           "checkpoint_id" => nil,
+           "failure" => failure,
+           "usage" => %{
+             "attempts" => 0,
+             "reported_tokens" => 0,
+             "estimated_tokens" => 0,
+             "total_tokens" => 0
+           },
+           "cleanup" => "confirmed"
+         }
+       }}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_compact_completion_transition}
+    end
+  end
+
+  defp zero_attempt_standalone?(state, nil), do: is_nil(state.active_maintenance)
+
+  defp zero_attempt_standalone?(
+         state,
+         %{
+           :kind => "standalone_maintenance_episode_admitted_v1",
+           "stage" => "source_preparation",
+           "attempts" => 0,
+           "checkpoint_id" => nil
+         } = episode
+       ),
+       do: state.active_maintenance == episode["episode_id"]
+
+  defp zero_attempt_standalone?(_, _), do: false
+
+  defp zero_attempt_compact_failure(state, episode, failure, clock, check) do
+    with {:ok, _} <-
+           LoopexProtocol.Session.CompactResult.encode_wire(%{
+             "disposition" => "failed",
+             "checkpoint_id" => nil,
+             "failure" => failure,
+             "usage" => %{
+               "attempts" => 0,
+               "reported_tokens" => 0,
+               "estimated_tokens" => 0,
+               "total_tokens" => 0
+             },
+             "cleanup" => "confirmed"
+           }),
+         true <- is_nil(episode) or (is_integer(clock) and clock >= episode["admitted_at"]) do
+      zero_attempt_compact_cause(state, episode, failure, clock, check)
+    else
+      _ -> {:error, :invalid_compact_completion_transition}
+    end
+  end
+
+  defp zero_attempt_compact_cause(state, _episode, %{"category" => "cancelled"}, _clock, _check) do
+    if is_binary(state.pending_compact["abort_command_id"]),
+      do: :ok,
+      else: {:error, :invalid_compact_completion_transition}
+  end
+
+  defp zero_attempt_compact_cause(%{pending_compact: %{"abort_command_id" => abort}}, _, _, _, _)
+       when is_binary(abort), do: {:error, :invalid_compact_completion_transition}
+
+  defp zero_attempt_compact_cause(
+         state,
+         nil,
+         %{
+           "version" => 2,
+           "category" => "context_preparation_failed",
+           "measurement_scope" => nil,
+           "cause" => "maintenance_deadline_unrepresentable"
+         },
+         clock,
+         _check
+       ) do
+    if standalone_maintenance_clock(state.pending_compact, clock) != :ok,
+      do: :ok,
+      else: {:error, :invalid_compact_completion_transition}
+  end
+
+  defp zero_attempt_compact_cause(
+         _state,
+         _episode,
+         %{
+           "version" => 2,
+           "category" => "context_preparation_failed",
+           "measurement_scope" => nil,
+           "cause" => "context_projection_invalid"
+         },
+         clock,
+         _check
+       )
+       when is_integer(clock), do: :ok
+
+  defp zero_attempt_compact_cause(
+         state,
+         episode,
+         %{
+           "category" => "bound_reached",
+           "bound" => "deadline_ms",
+           "observed" => observed,
+           "declared_limit" => cutoff,
+           "accounting_source" => nil
+         },
+         clock,
+         _check
+       )
+       when is_integer(clock) do
+    expected =
+      if episode,
+        do: episode["deadline"],
+        else: clock + state.pending_compact["bounds"]["deadline_ms"]
+
+    if expected <= @uint64_max and cutoff == expected and observed >= expected and
+         observed <= @uint64_max, do: :ok, else: {:error, :invalid_compact_completion_transition}
+  end
+
+  defp zero_attempt_compact_cause(
+         state,
+         nil,
+         %{
+           "version" => 2,
+           "category" => "context_preparation_failed",
+           "measurement_scope" => "ordinary",
+           "cause" => cause
+         },
+         clock,
+         check
+       )
+       when cause in ~w(maintenance_model_unconfigured maintenance_instructions_unconfigured maintenance_reasoning_unsupported) do
+    with :ok <- standalone_maintenance_clock(state.pending_compact, clock),
+         {:ok, plan} <-
+           preflight_standalone_compaction(
+             state,
+             clock + state.pending_compact["bounds"]["deadline_ms"],
+             check
+           ),
+         true <- plan.eligible_unit_count > 0 do
+      :ok
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_compact_completion_transition}
+    end
+  end
+
+  defp zero_attempt_compact_cause(state, nil, %{"version" => 2} = failure, clock, check) do
+    with :ok <- standalone_maintenance_clock(state.pending_compact, clock),
+         {:refused, ^failure} <-
+           preflight_standalone_compaction(
+             state,
+             clock + state.pending_compact["bounds"]["deadline_ms"],
+             check
+           ) do
+      :ok
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_compact_completion_transition}
+    end
+  end
+
+  defp zero_attempt_compact_cause(_, _, _, _, _),
+    do: {:error, :invalid_compact_completion_transition}
+
   # Concept: a source fit becomes dispatchable only with its complete request.
   # Technical depth: the caller supplies the eligible tail cut chosen by the
   # ordinary-request selector. This owner rejects cuts crossing protected work,
@@ -6089,9 +6279,9 @@ defmodule Loopex.Runtime.SessionState do
     end)
   end
 
-  # Concept: an episode and its ending run become settled together.
+  # Concept: an episode and its owning run or compact command settle together.
   # Technical depth: ADR 0043 permits one leading episode terminal and then
-  # either the run terminal or one existing consecutive refusal/settlement pair.
+  # the compact completion, run terminal or existing refusal/settlement pair.
   # The marker has no episode, accounting or public effect before that terminal.
   # Every replayed row, including commands and owner succession, obeys its tail.
   defp complete_maintenance_pair(%{maintenance_terminal: nil} = state) do
@@ -6125,6 +6315,9 @@ defmodule Loopex.Runtime.SessionState do
   defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :run_terminal}}, kind),
     do: kind == "run_terminal_committed"
 
+  defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :compact_terminal}}, kind),
+    do: kind == "compact_command_completed_v1"
+
   defp apply_admitted_internal_record(state, record, version \\ nil)
 
   defp apply_admitted_internal_record(state, %{kind: kind} = record, version) do
@@ -6146,7 +6339,7 @@ defmodule Loopex.Runtime.SessionState do
 
         next =
           case {state.maintenance_terminal, next.maintenance_terminal, kind} do
-            {%{}, %{} = marker, kind} when kind != "run_terminal_committed" ->
+            {%{next: :ending}, %{} = marker, kind} when kind != "run_terminal_committed" ->
               %{next | maintenance_terminal: %{marker | next: :run_terminal}}
 
             _ ->
@@ -6244,11 +6437,63 @@ defmodule Loopex.Runtime.SessionState do
     end)
   end
 
+  defp compact_completion_record(state, %{"result" => %{"disposition" => "unchanged"}} = record),
+    do: unchanged_compact_record(state, record["observed_at"], fn -> :ok end)
+
+  defp compact_completion_record(
+         state,
+         %{"result" => %{"disposition" => "failed", "failure" => failure}} = record
+       ),
+       do:
+         zero_attempt_compact_failure_record(state, failure, record["observed_at"], fn -> :ok end)
+
+  defp compact_completion_record(_, _), do: {:error, :invalid_compact_completion_transition}
+
+  defp complete_standalone_zero_attempt_episode(
+         %{active_maintenance: nil, maintenance_terminal: nil} = state,
+         _
+       ),
+       do: {:ok, state}
+
+  defp complete_standalone_zero_attempt_episode(state, record) do
+    with %{episode_id: id, result: result, observed_at: clock, next: :compact_terminal} <-
+           state.maintenance_terminal,
+         true <-
+           id == record["episode_id"] and result == record["result"] and
+             clock == record["observed_at"] do
+      episode =
+        state.maintenance_episodes[id] |> Map.put("stage", "settled") |> Map.put("result", result)
+
+      {:ok,
+       %{
+         state
+         | active_maintenance: nil,
+           maintenance_terminal: nil,
+           maintenance_episodes: Map.put(state.maintenance_episodes, id, episode)
+       }}
+    else
+      _ -> {:error, :invalid_compact_completion_transition}
+    end
+  end
+
   defp maintenance_terminal_prefix(%{active_maintenance: nil}, records, nil),
     do: {:ok, records}
 
   defp maintenance_terminal_prefix(state, records, observed_at) do
     case List.last(records) do
+      %{kind: "compact_command_completed_v1"} = completed
+      when is_binary(state.active_maintenance) ->
+        {:ok,
+         [
+           %{
+             :kind => "maintenance_episode_terminal_v1",
+             "episode_id" => state.active_maintenance,
+             "observed_at" => completed["observed_at"],
+             "result" => completed["result"]
+           }
+           | records
+         ]}
+
       %{kind: "run_terminal_committed"} = terminal ->
         with {:ok, preview} <- maintenance_ending_preview(state, records),
              {:ok, result} <- maintenance_run_result(preview, terminal) do
@@ -6654,7 +6899,11 @@ defmodule Loopex.Runtime.SessionState do
         episode_id: record["episode_id"],
         result: result,
         observed_at: record["observed_at"],
-        next: :ending
+        next:
+          if(Map.has_key?(state.maintenance_episodes[state.active_maintenance], "command_id"),
+            do: :compact_terminal,
+            else: :ending
+          )
       }
 
       {:ok, %{state | maintenance_terminal: marker}, []}
@@ -6765,16 +7014,17 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   # Concept: a completed command releases its slot only with retained evidence.
-  # Technical depth: regenerate the closed unchanged row before installing its
+  # Technical depth: regenerate the closed completion row before installing its
   # result beside the original admission binding. The derived public event is
   # part of the same proposal; private replay refuses duplicate completions,
   # substituted results or identities, and unchanged over nonempty raw history.
   defp apply_internal_record(state, %{kind: "compact_command_completed_v1"} = record) do
-    with {:ok, expected} <- unchanged_compact_record(state, record["observed_at"], fn -> :ok end),
+    with {:ok, expected} <- compact_completion_record(state, record),
          true <- expected == record,
          command_id = record["command_id"],
          %{} = binding <- state.commands[command_id],
-         false <- Map.has_key?(binding, :result) do
+         false <- Map.has_key?(binding, :result),
+         {:ok, state} <- complete_standalone_zero_attempt_episode(state, record) do
       completed = Map.take(record, ~w(episode_id command_id result))
 
       event =

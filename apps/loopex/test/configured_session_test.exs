@@ -79,6 +79,7 @@ defmodule Loopex.ConfiguredSessionTest do
       assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
       bounds = %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
       command = %{type: :compact, command_id: "compact", bounds: bounds}
+      hold_next_compact_advance(fixture)
 
       assert :ok =
                Loopex.M1RuntimeTestStore.inject(
@@ -87,6 +88,13 @@ defmodule Loopex.ConfiguredSessionTest do
                )
 
       assert {:error, :commit_unknown} = Loopex.command(attachment, command)
+      assert_receive {:held_compact_advance, _owner}, 5_000
+      kill_compact_admission_owner(fixture)
+
+      assert {:ok, {:prepared, _paused}} =
+               Loopex.prepare_resume_session(fixture.runtime, session, "observe-compact")
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
       await_command_observation(attachment, "compact", {:committed, :admitted, :accepted, nil})
       assert {:accepted, "compact"} = Loopex.command(attachment, command)
 
@@ -101,11 +109,19 @@ defmodule Loopex.ConfiguredSessionTest do
       assert {:accepted, "compact-abort"} =
                Loopex.command(attachment, %{type: :abort, command_id: "compact-abort"})
 
+      await_compact_completion(fixture, session)
+
       records = Fixture.records(fixture, session)
       events = Fixture.events(fixture, session)
       assert {:ok, retained} = SessionState.recover(session, records, events)
-      assert retained.pending_compact["bounds"] == bounds
-      assert retained.pending_compact["abort_command_id"] == "compact-abort"
+      assert retained.pending_compact == nil
+      admission = Enum.find(records, &(&1.payload.kind == "compact_command_admitted_v1"))
+      assert admission.payload["bounds"] == bounds
+      abort = Enum.find(records, &(&1.payload.kind == "compact_abort_admitted_v1"))
+      assert abort.payload["compact_command_id"] == "compact"
+      assert abort.payload["episode_id"] == admission.payload["episode_id"]
+      result = retained.commands["compact"].result
+      assert result["failure"] == %{"category" => "cancelled", "retryable" => false}
       assert retained.active_run_id == nil
       assert retained.pending_work == %{}
       assert retained.maintenance_episodes == %{}
@@ -121,7 +137,7 @@ defmodule Loopex.ConfiguredSessionTest do
                  ])
              )
 
-      assert events == []
+      assert [%{"result" => ^result, kind: "context.compaction_finished"}] = events
       assert AgentLoopTestModel.dispatched(fixture.model) == []
 
       kill_compact_admission_owner(fixture)
@@ -130,20 +146,21 @@ defmodule Loopex.ConfiguredSessionTest do
                Loopex.prepare_resume_session(fixture.runtime, session, "recover-compact")
 
       assert {:ok, successor} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
-      assert {:accepted, "compact"} = Loopex.command(successor, command)
+      assert ^result = Loopex.command(successor, command)
 
       assert {:ok, replay} =
                SessionState.recover(session, Fixture.records(fixture, session), events)
 
       assert replay.owner_epoch > retained.owner_epoch
-      assert replay.pending_compact == retained.pending_compact
+      assert replay.pending_compact == nil
+      assert replay.commands["compact"].result == result
       assert :ok = Loopex.abandon_resume(activation)
       kill_compact_admission_owner(fixture)
     end
   end
 
-  # Concept: the admission witness stops at the paused owner's durable command
-  # and observes exact predecessor exit, without claiming episode completion.
+  # Concept: uncertain admission survives a paused successor, then cancellation
+  # completes once and the completed result survives another owner succession.
   # Technical depth: every killed owner is joined before preparing its successor;
   # final cleanup leaves no live owner or dispatched worker in this fixture.
   defp kill_compact_admission_owner(fixture) do
@@ -152,6 +169,47 @@ defmodule Loopex.ConfiguredSessionTest do
     monitor = Process.monitor(owner)
     Process.exit(owner, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 5_000
+  end
+
+  # Concept: the admission proof holds scheduling until exact owner exit.
+  # Technical depth: the coordinator's synchronous debug hook stops its next
+  # advance before preparation starts. Succession then proves the production
+  # recovered-compact pause; no clock, callback or durable value is replaced.
+  defp hold_next_compact_advance(fixture) do
+    {:ok, children} = Runtime.children(fixture.runtime)
+    [{_, owner, _, _}] = DynamicSupervisor.which_children(children.sessions)
+    _ = :sys.get_state(owner)
+    caller = self()
+
+    hook = fn
+      :armed, {:in, :advance_work}, _extra ->
+        send(caller, {:held_compact_advance, self()})
+
+        receive do
+          :release_compact_advance -> :spent
+        end
+
+      current, _, _ ->
+        current
+    end
+
+    assert :ok = :sys.install(owner, {hook, :armed})
+    on_exit(fn -> if Process.alive?(owner), do: Process.exit(owner, :kill) end)
+  end
+
+  defp await_compact_completion(fixture, session, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 5_000
+
+    if Enum.any?(
+         Fixture.records(fixture, session),
+         &(&1.payload.kind == "compact_command_completed_v1")
+       ) do
+      :ok
+    else
+      assert System.monotonic_time(:millisecond) < deadline
+      Process.sleep(1)
+      await_compact_completion(fixture, session, deadline)
+    end
   end
 
   test "fresh optional project content cannot spend a new thinking exchange's reserve" do

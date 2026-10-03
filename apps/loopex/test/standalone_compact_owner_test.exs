@@ -1,0 +1,573 @@
+Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/agent_loop_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
+
+defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
+  use ExUnit.Case, async: false
+
+  alias Loopex.AgentLoopFixture, as: Fixture
+  alias Loopex.ConfiguredGenesisFixture, as: Genesis
+  alias Loopex.Runtime.SessionState
+  alias Loopex.{M1RuntimeTestStore, Store}
+
+  test "empty compact completes without ordinary or maintenance model configuration" do
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: "modelless-compact")
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: "modelless-compact",
+        store: store
+      )
+
+    fixture = %{runtime: runtime, store: store_pid}
+    on_exit(fn -> Fixture.stop(fixture) end)
+
+    {:ok, session} =
+      Loopex.create_session(runtime, %{}, command_id: "create", genesis: Genesis.genesis([]))
+
+    {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
+    assert {:accepted, "compact"} = Loopex.command(attachment, command())
+    completed = await_completed(fixture, session)
+    result = completed.commands["compact"].result
+    assert result["disposition"] == "unchanged"
+    assert result["failure"] == nil
+    assert completed.maintenance_episodes == %{}
+    assert ^result = Loopex.command(attachment, command())
+
+    assert {:ok, {:committed, :admitted, :accepted, nil}} =
+             Loopex.command_disposition(attachment, "compact")
+
+    kill_owner(fixture, session)
+    {:ok, _} = Loopex.prepare_resume_session(runtime, session, "resume")
+    {:ok, successor} = Loopex.attach(runtime, session, after_event_sequence: 0)
+    assert ^result = Loopex.command(successor, command())
+
+    assert Enum.count(
+             Fixture.events(fixture, session),
+             &(&1.kind == "context.compaction_finished")
+           ) == 1
+  end
+
+  for {cause, options} <- [
+        {"maintenance_model_unconfigured", []},
+        {"maintenance_instructions_unconfigured", [maintenance_model: :eligible]},
+        {"maintenance_reasoning_unsupported",
+         [maintenance_model: :unsupported, maintenance_instructions: :present]}
+      ] do
+    @cause cause
+    @options options
+    test "nonempty compact reports #{@cause} before any attempt or episode" do
+      {fixture, session} = history_fixture(@options)
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      assert {:accepted, "compact"} = Loopex.command(attachment, command())
+      completed = await_completed(fixture, session)
+      assert completed.commands["compact"].result["failure"] == preparation_failure(@cause)
+      assert completed.maintenance_episodes == %{}
+      assert completed.active_run_id == nil
+      assert completed.pending_work == %{}
+      assert completed.commands["compact"].result["usage"]["attempts"] == 0
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+
+      refute Enum.any?(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "standalone_maintenance_episode_admitted_v1")
+             )
+    end
+  end
+
+  for action <- [:abort, :worker_loss, :deadline] do
+    @action action
+    test "held initial preparation #{@action} joins its exact worker before zero-attempt completion" do
+      {fixture, session} =
+        history_fixture(maintenance_model: :eligible, maintenance_instructions: :present)
+
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      owner = owner(fixture, session)
+      hold_worker(:sys.get_state(owner).owner_workers)
+      deadline_ms = if @action == :deadline, do: 100, else: 60_000
+      cmd = command(deadline_ms)
+      assert {:accepted, "compact"} = Loopex.command(attachment, cmd)
+      assert_receive {:held_compact_worker, worker}, 5_000
+      monitor = Process.monitor(worker)
+      owner_state = :sys.get_state(owner)
+      [{_, {:compact_preparation, _, ^worker, metadata}}] = Map.to_list(owner_state.in_flight)
+
+      case @action do
+        :abort ->
+          assert {:accepted, "stop"} =
+                   Loopex.command(attachment, %{type: :abort, command_id: "stop"})
+
+        :worker_loss ->
+          Process.exit(worker, :kill)
+
+        :deadline ->
+          :ok
+      end
+
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 5_000
+      completed = await_completed(fixture, session)
+      result = completed.commands["compact"].result
+      assert result["disposition"] == "failed"
+      assert result["cleanup"] == "confirmed"
+      assert result["usage"] == zero_usage()
+      assert completed.maintenance_episodes == %{}
+      assert completed.active_run_id == nil
+      assert :sys.get_state(owner).in_flight == %{}
+      assert Task.Supervisor.children(:sys.get_state(owner).owner_workers) == []
+
+      case @action do
+        :abort ->
+          assert result["failure"] == %{"category" => "cancelled", "retryable" => false}
+
+        :worker_loss ->
+          assert result["failure"] == preparation_failure("context_projection_invalid", nil)
+
+        :deadline ->
+          assert result["failure"]["bound"] == "deadline_ms"
+          assert result["failure"]["declared_limit"] == metadata.deadline
+          assert result["failure"]["observed"] >= metadata.deadline
+          assert metadata.deadline - metadata.admitted_at == deadline_ms
+      end
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    end
+  end
+
+  test "held preparation worker exits with its owner before a paused successor can cancel" do
+    {fixture, session} =
+      history_fixture(maintenance_model: :eligible, maintenance_instructions: :present)
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    predecessor = owner(fixture, session)
+    hold_worker(:sys.get_state(predecessor).owner_workers)
+    assert {:accepted, "compact"} = Loopex.command(attachment, command())
+    assert_receive {:held_compact_worker, worker}, 5_000
+    monitor = Process.monitor(worker)
+    kill_owner(fixture, session)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, reason}, 5_000
+    assert reason in [:shutdown, :killed]
+    {:ok, _} = Loopex.prepare_resume_session(fixture.runtime, session, "recover-worker")
+    {:ok, successor} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    state = :sys.get_state(owner(fixture, session))
+    assert state.in_flight == %{}
+    assert state.durable.pending_compact["command_id"] == "compact"
+    assert state.durable.maintenance_episodes == %{}
+    assert {:accepted, "stop"} = Loopex.command(successor, %{type: :abort, command_id: "stop"})
+
+    assert await_completed(fixture, session).commands["compact"].result["failure"] ==
+             %{"category" => "cancelled", "retryable" => false}
+
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+  end
+
+  test "captured standalone cancellation keeps the actual settings and terminal pair" do
+    {fixture, session} =
+      history_fixture(maintenance_model: :eligible, maintenance_instructions: :present)
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    assert {:accepted, "compact"} = Loopex.command(attachment, command())
+    captured = await_state(fixture, session, &is_binary(&1.active_maintenance))
+    episode = captured.maintenance_episodes[captured.active_maintenance]
+    assert episode["deadline"] - episode["admitted_at"] == 60_000
+    assert episode["bounds"] == command().bounds
+    assert episode["maintenance_configuration"]["selection"] == model()
+    assert episode["stage"] == "source_preparation"
+    refute Map.has_key?(episode, "run_id")
+    owner = owner(fixture, session)
+    _ = :sys.get_state(owner)
+    send(owner, {:compact_deadline, captured.active_maintenance, episode["deadline"] - 1})
+    send(owner, {:compact_deadline, captured.active_maintenance, episode["deadline"]})
+    assert :sys.get_state(owner).durable.active_maintenance == captured.active_maintenance
+    assert {:accepted, "stop"} = Loopex.command(attachment, %{type: :abort, command_id: "stop"})
+    completed = await_completed(fixture, session)
+    result = completed.commands["compact"].result
+    assert result["failure"] == %{"category" => "cancelled", "retryable" => false}
+    assert result["usage"] == zero_usage()
+    [terminal, completion] = Enum.take(Fixture.records(fixture, session), -2)
+    assert terminal.payload.kind == "maintenance_episode_terminal_v1"
+    assert completion.payload.kind == "compact_command_completed_v1"
+    assert terminal.payload["result"] == completion.payload["result"]
+    assert terminal.payload["observed_at"] == completion.payload["observed_at"]
+    assert completed.maintenance_episodes[captured.active_maintenance]["stage"] == "settled"
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    send(owner, {:compact_deadline, captured.active_maintenance, episode["deadline"]})
+    assert :sys.get_state(owner).durable.commands["compact"].result == result
+  end
+
+  test "captured standalone expiry retains its original absolute deadline" do
+    {fixture, session} =
+      history_fixture(maintenance_model: :eligible, maintenance_instructions: :present)
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    assert {:accepted, "compact"} = Loopex.command(attachment, command(1_000))
+    captured = await_state(fixture, session, &is_binary(&1.active_maintenance))
+    episode = captured.maintenance_episodes[captured.active_maintenance]
+    completed = await_completed(fixture, session)
+    failure = completed.commands["compact"].result["failure"]
+    assert failure["bound"] == "deadline_ms"
+    assert failure["declared_limit"] == episode["deadline"]
+    assert failure["observed"] >= episode["deadline"]
+    assert episode["deadline"] - episode["admitted_at"] == 1_000
+    assert completed.commands["compact"].result["usage"] == zero_usage()
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+  end
+
+  for phase <- [
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @phase phase
+    test "unchanged completion resolves #{@phase} once across exact owner succession" do
+      fixture = start(script: [], tools: [])
+
+      {:ok, session} =
+        Loopex.create_session(fixture.runtime, %{},
+          command_id: "create",
+          genesis: Genesis.genesis([])
+        )
+
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      owner = owner(fixture, session)
+      hold_worker(:sys.get_state(owner).owner_workers)
+      assert {:accepted, "compact"} = Loopex.command(attachment, command())
+      assert_receive {:held_compact_worker, worker}, 5_000
+      monitor = Process.monitor(worker)
+      assert :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
+
+      :sys.replace_state(:sys.get_state(owner).owner_workers, fn supervisor_state ->
+        true = :erlang.resume_process(worker)
+        supervisor_state
+      end)
+
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 5_000
+      await_worker_adoption(owner, System.monotonic_time(:millisecond) + 5_000)
+      # The internal transaction may resolve in this owner or seal it. Exact
+      # owner exit precedes the successor's lookup in either case.
+      kill_owner(fixture, session)
+      {:ok, _} = Loopex.prepare_resume_session(fixture.runtime, session, "recover")
+      {:ok, successor} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      completed = await_completed(fixture, session)
+      result = completed.commands["compact"].result
+      assert result["disposition"] == "unchanged"
+      assert ^result = Loopex.command(successor, command())
+
+      assert Enum.count(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "compact_command_completed_v1")
+             ) == 1
+
+      assert Enum.count(
+               Fixture.events(fixture, session),
+               &(&1.kind == "context.compaction_finished")
+             ) == 1
+
+      assert completed.maintenance_episodes == %{}
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    end
+  end
+
+  for phase <- [
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @phase phase
+    test "standalone capture resolves #{@phase} without renewing settings or cutoff" do
+      {fixture, session} =
+        history_fixture(maintenance_model: :eligible, maintenance_instructions: :present)
+
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      predecessor = owner(fixture, session)
+      supervisor = :sys.get_state(predecessor).owner_workers
+      hold_worker(supervisor)
+      assert {:accepted, "compact"} = Loopex.command(attachment, command())
+      assert_receive {:held_compact_worker, worker}, 5_000
+
+      [{_, {:compact_preparation, _, ^worker, metadata}}] =
+        Map.to_list(:sys.get_state(predecessor).in_flight)
+
+      monitor = Process.monitor(worker)
+      assert :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
+
+      :sys.replace_state(supervisor, fn state ->
+        true = :erlang.resume_process(worker)
+        state
+      end)
+
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 5_000
+      await_worker_adoption(predecessor, System.monotonic_time(:millisecond) + 5_000)
+      kill_owner(fixture, session)
+      {:ok, _} = Loopex.prepare_resume_session(fixture.runtime, session, "recover-capture")
+      {:ok, successor} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      captured = await_state(fixture, session, &is_binary(&1.active_maintenance))
+      episode = captured.maintenance_episodes[captured.active_maintenance]
+      assert episode["admitted_at"] == metadata.admitted_at
+      assert episode["deadline"] == metadata.deadline
+      assert episode["maintenance_configuration"]["selection"] == model()
+      assert episode["attempts"] == 0
+      assert :sys.get_state(owner(fixture, session)).in_flight == %{}
+
+      assert Enum.count(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "standalone_maintenance_episode_admitted_v1")
+             ) == 1
+
+      assert {:accepted, "stop"} = Loopex.command(successor, %{type: :abort, command_id: "stop"})
+      assert await_completed(fixture, session).commands["compact"].result["usage"] == zero_usage()
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    end
+
+    test "captured cancellation resolves #{@phase} with its indivisible terminal and result" do
+      {fixture, session} =
+        history_fixture(maintenance_model: :eligible, maintenance_instructions: :present)
+
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      assert {:accepted, "compact"} = Loopex.command(attachment, command())
+      captured = await_state(fixture, session, &is_binary(&1.active_maintenance))
+      predecessor = owner(fixture, session)
+
+      assert :ok =
+               M1RuntimeTestStore.hold_next_record_before_linearization(
+                 fixture.store,
+                 "maintenance_episode_terminal_v1",
+                 self()
+               )
+
+      assert {:accepted, "stop"} = Loopex.command(attachment, %{type: :abort, command_id: "stop"})
+
+      assert_receive {:record_held_before_linearization, waiter, _,
+                      "maintenance_episode_terminal_v1", transaction},
+                     5_000
+
+      assert Enum.map(transaction.records, & &1.kind) == [
+               "maintenance_episode_terminal_v1",
+               "compact_command_completed_v1"
+             ]
+
+      assert transaction.records |> hd() |> Map.fetch!("episode_id") ==
+               captured.active_maintenance
+
+      assert :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
+      M1RuntimeTestStore.release(waiter)
+      await_worker_adoption(predecessor, System.monotonic_time(:millisecond) + 5_000)
+      kill_owner(fixture, session)
+      {:ok, _} = Loopex.prepare_resume_session(fixture.runtime, session, "recover-terminal")
+      {:ok, successor} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      completed = await_completed(fixture, session)
+      result = completed.commands["compact"].result
+      assert result["failure"] == %{"category" => "cancelled", "retryable" => false}
+      assert result["usage"] == zero_usage()
+      assert ^result = Loopex.command(successor, command())
+      assert completed.active_maintenance == nil
+
+      assert Enum.count(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "maintenance_episode_terminal_v1")
+             ) == 1
+
+      assert Enum.count(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "compact_command_completed_v1")
+             ) == 1
+
+      assert Enum.count(
+               Fixture.events(fixture, session),
+               &(&1.kind == "context.compaction_finished")
+             ) == 1
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    end
+  end
+
+  # Concept: live maintenance starts with actual settled canonical history.
+  # Technical depth: the prior runtime exits before pure proposals use the
+  # existing Store transaction boundary. A new runtime then resumes that same
+  # journal; no live owner's state or clock is replaced by the fixture.
+  defp history_fixture(options) do
+    prior = start(script: [], tools: [])
+
+    {:ok, session} =
+      Loopex.create_session(prior.runtime, %{},
+        command_id: "create",
+        genesis: Genesis.genesis([])
+      )
+
+    assert :ok = Loopex.stop(prior.runtime)
+    state = recover(prior, session)
+
+    {:ok, prompt} =
+      SessionState.propose(
+        state,
+        %{type: :prompt, command_id: "old", content: "retain this fact"},
+        %{max_turns: 8, deadline_ms: 60_000, token_budget: 10_000, context_token_budget: 8_192}
+      )
+
+    state = retain(prior, state, prompt)
+
+    {:ok, terminal} =
+      SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
+        reason: "model_call_failed"
+      })
+
+    _ = retain(prior, state, terminal)
+
+    options =
+      Enum.map(options, fn
+        {:maintenance_model, :eligible} ->
+          {:maintenance_model, model()}
+
+        {:maintenance_model, :unsupported} ->
+          {:maintenance_model, Map.put(model(), "reasoning", "default")}
+
+        {:maintenance_instructions, :present} ->
+          {:maintenance_instructions, %{"version" => "summary.v1", "body" => "Keep facts"}}
+      end)
+
+    fixture = start(options ++ [script: [], tools: [], store: prior.store])
+    {:ok, _} = Loopex.prepare_resume_session(fixture.runtime, session, "prepare")
+    {fixture, session}
+  end
+
+  defp model do
+    source = Genesis.configuration()
+
+    %{
+      "model" => source["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{
+        source["model_capabilities"]
+        | "reasoning_levels" => ["none", "default"]
+      },
+      "provider_mapping" => %{source["provider_mapping"] | "thinking_disabled" => true}
+    }
+  end
+
+  defp command(deadline_ms \\ 60_000),
+    do: %{
+      type: :compact,
+      command_id: "compact",
+      bounds: %{"max_attempts" => 4, "deadline_ms" => deadline_ms, "token_budget" => 32_768}
+    }
+
+  defp preparation_failure(cause, scope \\ "ordinary"),
+    do: %{
+      "version" => 2,
+      "category" => "context_preparation_failed",
+      "retryable" => false,
+      "measurement_scope" => scope,
+      "cause" => cause
+    }
+
+  defp zero_usage,
+    do: %{"attempts" => 0, "reported_tokens" => 0, "estimated_tokens" => 0, "total_tokens" => 0}
+
+  defp start(options) do
+    fixture = Fixture.start(options)
+    on_exit(fn -> Fixture.stop(fixture) end)
+    fixture
+  end
+
+  defp owner(fixture, session) do
+    {:ok, children} = Loopex.Runtime.children(fixture.runtime)
+    :sys.get_state(children.control).sessions[session].coordinator
+  end
+
+  defp kill_owner(fixture, session) do
+    pid = owner(fixture, session)
+    monitor = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 5_000
+  end
+
+  defp await_worker_adoption(owner, cutoff) do
+    try do
+      if :sys.get_state(owner).in_flight != %{} do
+        assert System.monotonic_time(:millisecond) < cutoff
+        Process.sleep(1)
+        await_worker_adoption(owner, cutoff)
+      end
+    catch
+      :exit, _ -> :ok
+    end
+  end
+
+  defp recover(fixture, session) do
+    retained = M1RuntimeTestStore.inspect_state(fixture.store).sessions[session]
+
+    {:ok, state} =
+      SessionState.recover(
+        session,
+        retained.records,
+        retained.events
+      )
+
+    state
+  end
+
+  defp await_completed(fixture, session),
+    do: await_state(fixture, session, &is_nil(&1.pending_compact))
+
+  defp await_state(fixture, session, predicate),
+    do: await_state(fixture, session, predicate, System.monotonic_time(:millisecond) + 5_000)
+
+  defp await_state(fixture, session, predicate, cutoff) do
+    state = recover(fixture, session)
+
+    if predicate.(state),
+      do: state,
+      else:
+        (
+          assert System.monotonic_time(:millisecond) < cutoff
+          Process.sleep(1)
+          await_state(fixture, session, predicate, cutoff)
+        )
+  end
+
+  defp retain(fixture, state, proposal) do
+    {:ok, store} = Store.new(M1RuntimeTestStore, fixture.store)
+
+    {:ok, tx} =
+      Store.session_commit(
+        state.session_id,
+        "session",
+        proposal.tx_id,
+        state.owner_epoch,
+        state.owner_incarnation_id,
+        state.journal_version,
+        proposal.records,
+        proposal.events
+      )
+
+    assert {:committed, _, receipt} = Store.transact(store, tx)
+    {:ok, next} = SessionState.commit_proposal(proposal, receipt)
+    next
+  end
+
+  defp hold_worker(supervisor) do
+    caller = self()
+
+    hook = fn
+      :armed, {:out, {:ok, worker}, _, _}, _ when is_pid(worker) ->
+        true = :erlang.suspend_process(worker)
+        send(caller, {:held_compact_worker, worker})
+        :held
+
+      state, _, _ ->
+        state
+    end
+
+    assert :ok = :sys.install(supervisor, {hook, :armed})
+
+    on_exit(fn ->
+      if Process.alive?(supervisor) do
+        try do
+          :sys.remove(supervisor, hook)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+    end)
+  end
+end

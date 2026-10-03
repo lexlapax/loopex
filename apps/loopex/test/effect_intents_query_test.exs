@@ -393,6 +393,73 @@ defmodule Loopex.EffectIntentsQueryTest do
     end
   end
 
+  test "undispatched compact failures retain bounded neutral coverage and closed clocks",
+       context do
+    %{runtime: runtime, session: session, reference: reference, records: original} = context
+    history = Enum.take(original, 2)
+    history = List.update_at(history, 0, &%{&1 | payload: Genesis.genesis([])})
+    {:ok, state} = SessionState.recover(session, history, [])
+
+    {:ok, compact} =
+      SessionState.propose(state, %{
+        type: :compact,
+        command_id: "compact",
+        bounds: %{max_attempts: 4, deadline_ms: 60_000, token_budget: 32_768}
+      })
+
+    {state, history, events} = retain(state, compact, history, [])
+
+    for cause <- [:invalid_clock, :cancelled] do
+      {pending, rows, public, failure} =
+        if cause == :cancelled do
+          {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "stop"})
+          {pending, rows, public} = retain(state, abort, history, events)
+          {pending, rows, public, %{"category" => "cancelled", "retryable" => false}}
+        else
+          {state, history, events,
+           %{
+             "version" => 2,
+             "category" => "context_preparation_failed",
+             "retryable" => false,
+             "measurement_scope" => nil,
+             "cause" => "maintenance_deadline_unrepresentable"
+           }}
+        end
+
+      {:ok, completion} = SessionState.propose_standalone_compact_failure(pending, failure, nil)
+      {completed, rows, public} = retain(pending, completion, rows, public)
+      assert {:ok, ^completed} = SessionState.recover(session, rows, public)
+      install_history(reference, rows)
+      pages = all_pages(runtime, session, nil, 1, [])
+      assert length(pages) == length(rows)
+      assert Enum.all?(pages, &(&1.rows == []))
+      assert List.last(pages).next_cursor == nil
+      refute_receive {:forbidden_store_call, _}, 0
+
+      for transform <- [
+            &Map.put(&1, "observed_at", -1),
+            &Map.delete(&1, "observed_at"),
+            &put_in(&1, ["result", "failure"], nil),
+            &put_in(&1, ["result", "failure"], %{
+              "version" => 2,
+              "category" => "context_preparation_failed",
+              "retryable" => false,
+              "measurement_scope" => nil,
+              "cause" => "context_projection_invalid"
+            }),
+            &put_in(&1, ["result", "usage", "attempts"], 1),
+            &put_in(&1, ["result", "cleanup"], "unknown")
+          ] do
+        install_history(
+          reference,
+          change_payload(rows, "compact_command_completed_v1", transform)
+        )
+
+        assert {:error, :invalid_history} = scan_result(runtime, session)
+      end
+    end
+  end
+
   test "later appends stay outside a captured cut and resume verifies the retained boundary",
        context do
     %{
