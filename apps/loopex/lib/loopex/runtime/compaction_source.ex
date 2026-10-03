@@ -53,18 +53,19 @@ defmodule Loopex.Runtime.CompactionSource do
   # Concept: source sizing consumes whole units and never strands a small prefix.
   # Technical depth: the owner supplies only its contiguous eligible range,
   # already projected under ADR 0041. Each unit is a nonempty message enumerable.
-  # The callback preflights the entire maintenance request, including its reserve;
+  # The callback receives the candidate and covered whole-unit count, and
+  # preflights the entire maintenance request, including its reserve;
   # a source-only fit provides no dispatch authority. Prefix scanning retains one
   # bounded source candidate and stops when further complete sources cannot fit.
   @doc false
   @spec select(
           list(),
           map() | nil,
-          (map() -> :ok | {:refused, term()} | {:error, atom()}),
+          (map(), pos_integer() -> :ok | {:refused, term()} | {:error, atom()}),
           (-> :ok | {:error, atom()})
         ) :: {:ok, map() | nil} | {:error, atom()}
   def select(units, prior, preflight, check)
-      when is_list(units) and is_function(preflight, 1) and is_function(check, 0) do
+      when is_list(units) and is_function(preflight, 2) and is_function(check, 0) do
     with :ok <- valid_prior(prior),
          {:ok, best} <- complete_prefixes(units, prior, preflight, check) do
       cond do
@@ -121,7 +122,7 @@ defmodule Loopex.Runtime.CompactionSource do
 
   defp admit_prefix([candidate], index, best, preflight, check) do
     with :ok <- check.() do
-      case preflight.(candidate) do
+      case preflight.(candidate, index) do
         :ok -> {:ok, %{source: candidate, unit_count: index}}
         {:refused, _measurement} -> {:ok, best}
         {:error, _} = error -> error
@@ -137,7 +138,7 @@ defmodule Loopex.Runtime.CompactionSource do
       Enum.reduce_while(candidates, {:error, :compaction_excerpt_budget_too_small}, fn
         candidate, _acc ->
           with :ok <- check.() do
-            case preflight.(candidate) do
+            case preflight.(candidate, count) do
               :ok -> {:halt, {:ok, %{source: candidate, unit_count: count}}}
               {:refused, _measurement} -> {:cont, {:error, :compaction_excerpt_budget_too_small}}
               {:error, _} = error -> {:halt, error}
@@ -154,15 +155,19 @@ defmodule Loopex.Runtime.CompactionSource do
     do: %{count: 0, hash: :crypto.hash_init(:sha256), complete: "", prefix: "", suffix: ""}
 
   defp scan_unit(messages, acc, first?, check) do
-    Enum.reduce_while(messages, {:ok, acc, first?}, fn message, {:ok, acc, first?} ->
-      with true <- canonical_message?(message),
-           {:ok, acc} <- consume(if(first?, do: "", else: ","), acc, check),
-           {:ok, acc} <- value(message, acc, check, 1) do
-        {:cont, {:ok, acc, false}}
-      else
-        {:error, _} = error -> {:halt, error}
-        _invalid -> {:halt, {:error, :context_projection_invalid}}
-      end
+    Enum.reduce_while(messages, {:ok, acc, first?}, fn
+      {:error, reason}, _acc when is_atom(reason) ->
+        {:halt, {:error, reason}}
+
+      message, {:ok, acc, first?} ->
+        with true <- canonical_message?(message),
+             {:ok, acc} <- consume(if(first?, do: "", else: ","), acc, check),
+             {:ok, acc} <- value(message, acc, check, 1) do
+          {:cont, {:ok, acc, false}}
+        else
+          {:error, _} = error -> {:halt, error}
+          _invalid -> {:halt, {:error, :context_projection_invalid}}
+        end
     end)
   end
 

@@ -11,6 +11,47 @@ defmodule Loopex.LineageProjectionTest do
                          LoopexProtocol.ToolDefinition.question_definition()
                        )
 
+  test "streaming projection matches retained, fixed and frozen whole-unit messages" do
+    {elements, sources} = fixture()
+
+    for binding <- [nil, @binding], index <- [sources, %{}], allowance <- [0, 9] do
+      assert {:ok, entries, _} =
+               LineageProjection.project(elements, binding, index, %{}, allowance)
+
+      assert {:ok, stream} =
+               LineageProjection.stream(elements, binding, index, %{}, allowance, fn -> :ok end)
+
+      assert Enum.to_list(stream) == Enum.map(entries, &elem(&1, 1))
+    end
+
+    {:ok, entries, _} = LineageProjection.project(elements, @binding, sources, %{}, 9)
+    {source, message} = List.last(entries)
+    frozen = %{source => %{message: message, range: nil}}
+
+    assert {:ok, stream} =
+             LineageProjection.stream(elements, @binding, sources, frozen, 0, fn -> :ok end)
+
+    assert List.last(Enum.to_list(stream)) == message
+  end
+
+  test "source traversal stops on a lazy projection cancellation without reading later messages" do
+    {elements, sources} = fixture()
+    counter = :counters.new(1, [])
+
+    check = fn ->
+      :counters.add(counter, 1, 1)
+      if :counters.get(counter, 1) == 2, do: {:error, :cancelled}, else: :ok
+    end
+
+    assert {:ok, stream} = LineageProjection.stream(elements, @binding, sources, %{}, 0, check)
+    assert :counters.get(counter, 1) == 0
+
+    assert {:error, :cancelled} ==
+             Loopex.Runtime.CompactionSource.encode(stream, nil, :complete, fn -> :ok end)
+
+    assert :counters.get(counter, 1) == 2
+  end
+
   test "only receipt-owned references become excerpts and the original elements stay complete" do
     {elements, sources} = fixture()
 

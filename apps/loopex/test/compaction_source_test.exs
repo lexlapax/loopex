@@ -17,7 +17,7 @@ defmodule Loopex.Runtime.CompactionSourceTest do
 
   defp user(text), do: %{"role" => "user", "content" => text}
 
-  defp select(units, preflight \\ fn _ -> :ok end),
+  defp select(units, preflight \\ fn _, _ -> :ok end),
     do: CompactionSource.select(units, nil, preflight, &check/0)
 
   defp decode(candidate) do
@@ -234,7 +234,7 @@ defmodule Loopex.Runtime.CompactionSourceTest do
   test "selection retains the largest full-request-admissible whole prefix" do
     units = Enum.map(1..3, &[user(String.duplicate(Integer.to_string(&1), 4_000))])
 
-    preflight = fn candidate ->
+    preflight = fn candidate, _count ->
       if byte_size(candidate.bytes) < 10_000, do: :ok, else: {:refused, :record_bytes}
     end
 
@@ -246,6 +246,25 @@ defmodule Loopex.Runtime.CompactionSourceTest do
     assert {:ok, all} = select(units)
     assert all.unit_count == 3
     assert decode(all.source)["value"] == Enum.concat(units)
+  end
+
+  test "whole-request preflight receives the actual covered-unit count" do
+    units = [[user(String.duplicate("x", 7_000))], [user("later")]]
+
+    preflight = fn candidate, count ->
+      send(self(), {:candidate, count, candidate.source_excerpted})
+      if count == 1, do: :ok, else: {:refused, :range_metadata_budget}
+    end
+
+    assert {:ok, %{unit_count: 1}} = select(units, preflight)
+    assert_receive {:candidate, 1, false}
+    assert_receive {:candidate, 2, false}
+
+    small = [[user("small")], [user("next")]]
+    assert {:error, :compaction_excerpt_budget_too_small} == select(small, preflight)
+    assert_receive {:candidate, 1, false}
+    assert_receive {:candidate, 2, false}
+    refute_receive {:candidate, 1, true}, 0
   end
 
   test "a small prefix consumes the next oversized whole unit and never reads later units" do
@@ -323,7 +342,7 @@ defmodule Loopex.Runtime.CompactionSourceTest do
   test "maintenance preflight selects quota order and can refuse a source-cap fit" do
     units = [[user(String.duplicate("x", 30_000))]]
 
-    preflight = fn candidate ->
+    preflight = fn candidate, _count ->
       send(self(), {:preflight_quota, candidate.quota})
       if candidate.quota <= 1_024, do: :ok, else: {:refused, :maintenance_input_tokens}
     end
@@ -340,7 +359,7 @@ defmodule Loopex.Runtime.CompactionSourceTest do
   test "failed combined excerpts cannot fall back to their small complete prefix" do
     units = [[user("small")], [user(String.duplicate("x", 30_000))]]
 
-    preflight = fn candidate ->
+    preflight = fn candidate, _count ->
       if candidate.source_excerpted, do: {:refused, :record_bytes}, else: :ok
     end
 
@@ -350,7 +369,7 @@ defmodule Loopex.Runtime.CompactionSourceTest do
   test "complete source fit alone does not admit a prefix and prior data spends its cap" do
     units = [[user(String.duplicate("x", 4_000))], [user(String.duplicate("y", 4_000))]]
 
-    preflight = fn candidate ->
+    preflight = fn candidate, _count ->
       if candidate.source_excerpted, do: :ok, else: {:refused, :maintenance_record_bytes}
     end
 
@@ -358,7 +377,7 @@ defmodule Loopex.Runtime.CompactionSourceTest do
     assert selected.unit_count == 1
     assert selected.source.source_excerpted
 
-    assert {:ok, selected} = CompactionSource.select(units, prior(), fn _ -> :ok end, &check/0)
+    assert {:ok, selected} = CompactionSource.select(units, prior(), fn _, _ -> :ok end, &check/0)
     assert {:ok, decoded} = Frame.decode(selected.source.bytes, 16_384)
     assert decoded["prior_checkpoint"] == prior()
     assert selected.unit_count == 2
@@ -368,17 +387,17 @@ defmodule Loopex.Runtime.CompactionSourceTest do
     later = Stream.map([:later], fn _ -> flunk("read after refusal") end)
     units = [[user("first")], later]
 
-    assert select(units, fn _ -> {:error, :maintenance_reasoning_unsupported} end) ==
+    assert select(units, fn _, _ -> {:error, :maintenance_reasoning_unsupported} end) ==
              {:error, :maintenance_reasoning_unsupported}
 
     for cause <- [:cancelled, :deadline] do
-      assert CompactionSource.select(units, nil, fn _ -> :ok end, fn -> {:error, cause} end) ==
+      assert CompactionSource.select(units, nil, fn _, _ -> :ok end, fn -> {:error, cause} end) ==
                {:error, cause}
     end
 
     Process.put(:selection_cancelled, false)
 
-    preflight = fn _ ->
+    preflight = fn _, _ ->
       Process.put(:selection_cancelled, true)
       :ok
     end

@@ -1059,6 +1059,372 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: a source fit becomes dispatchable only with its complete request.
+  # Technical depth: the caller supplies the eligible tail cut chosen by the
+  # ordinary-request selector. This owner rejects cuts crossing protected work,
+  # projects each whole unit lazily at q=0, and preflights every complete prefix
+  # and excerpt against the exact receipt-bearing record. Nothing is committed
+  # by preflight, and no current host setting or artifact is read.
+  @doc false
+  def preflight_maintenance_request(state, eligible_count, now, check)
+      when is_integer(eligible_count) and eligible_count > 0 and is_function(check, 0) do
+    with %{"stage" => "source_preparation", "attempts" => 0} = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         {:ok, _work, _parent} <- maintenance_admission_context(state, episode["run_id"]),
+         true <- is_nil(episode["checkpoint_id"]),
+         :ok <- maintenance_source_clock(state, episode, now),
+         :ok <- maintenance_request_capacity(state, episode),
+         :ok <- maintenance_instruction_budget(episode),
+         {:ok, deadline} <- maintenance_request_deadline(state, episode, now),
+         {:ok, units} <- compaction_units(state, episode["run_id"]),
+         eligible = Enum.take_while(units, &(not &1.protected?)),
+         true <- eligible_count <= length(eligible),
+         selected = Enum.take(eligible, eligible_count),
+         {:ok, streams} <- maintenance_source_streams(state, selected, check),
+         {:ok, choice} <-
+           Loopex.Runtime.CompactionSource.select(
+             streams,
+             nil,
+             fn source, count ->
+               case maintenance_request_candidate(
+                      state,
+                      episode,
+                      units,
+                      eligible_count,
+                      count,
+                      source,
+                      deadline,
+                      now,
+                      check
+                    ) do
+                 {:ok, _record} -> :ok
+                 other -> other
+               end
+             end,
+             check
+           ),
+         %{source: source, unit_count: count} <- choice do
+      maintenance_request_candidate(
+        state,
+        episode,
+        units,
+        eligible_count,
+        count,
+        source,
+        deadline,
+        now,
+        check
+      )
+    else
+      {:error, _} = error -> error
+      {:refused, _} = refusal -> refusal
+      _ -> {:error, :context_projection_invalid}
+    end
+  end
+
+  def preflight_maintenance_request(_, _, _, _), do: {:error, :context_projection_invalid}
+
+  @doc false
+  def propose_maintenance_request(state, eligible_count, now, check) do
+    with {:ok, record} <- preflight_maintenance_request(state, eligible_count, now, check),
+         {:ok, opened} <-
+           ProviderAttempt.opened_record(%{
+             episode_id: record["episode_id"],
+             summary_ordinal: record["summary_ordinal"],
+             purpose: "compaction",
+             operation_id: record["operation_id"],
+             attempt: 1,
+             staged_request_digest: record["staged_request_digest"]
+           }),
+         {:ok, proposal} <-
+           internal_proposal(state, record["operation_id"] <> ":request", [record, opened]),
+         :ok <- check.() do
+      {:ok, proposal}
+    end
+  end
+
+  defp maintenance_source_clock(state, episode, now) do
+    cond do
+      not is_integer(now) or now < episode["admitted_at"] or now > @uint64_max ->
+        {:error, :context_projection_invalid}
+
+      is_integer(state.deadlines[episode["run_id"]]) and
+          now >= state.deadlines[episode["run_id"]] ->
+        {:error, :run_deadline_reached}
+
+      now >= episode["preparation_deadline"] ->
+        {:error, :compaction_preparation_deadline}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp maintenance_request_deadline(state, episode, now) do
+    case state.deadlines[episode["run_id"]] do
+      nil ->
+        duration = episode["bounds"]["deadline_ms"]
+
+        if now <= @uint64_max - duration,
+          do: {:ok, now + duration},
+          else: {:error, :maintenance_deadline_unrepresentable}
+
+      deadline ->
+        {:ok, deadline}
+    end
+  end
+
+  defp maintenance_request_capacity(state, episode) do
+    run = episode["run_id"]
+    ordinary = next_turn_number(state.pending_work[run]) - 1
+
+    maintenance =
+      state.maintenance_episodes
+      |> Map.values()
+      |> Enum.filter(&(&1["run_id"] == run))
+      |> Enum.reduce(0, &(&1["attempts"] + &2))
+
+    charged = state.charged[run] || %{total_tokens: 0}
+
+    if ordinary + maintenance < episode["bounds"]["max_turns"] and
+         episode["bounds"]["token_budget"] - charged.total_tokens >= 1_024,
+       do: :ok,
+       else: {:error, :maintenance_bounds_exhausted}
+  end
+
+  defp maintenance_instruction_budget(episode) do
+    capture = episode["maintenance_configuration"]
+
+    bytes =
+      Canonical.encode(%{
+        "role" => "system",
+        "content" => capture["instructions"]["rendered_bytes"]
+      })
+
+    ContextAdmission.preflight_required_candidate(episode, %{
+      system_class_tokens: Bounds.estimate(bytes),
+      system_class_token_ceiling: capture["system_class_tokens"],
+      provider_estimated_tokens: 0,
+      context_token_budget: capture["context_token_budget"],
+      context_record_byte_ceiling: Store.max_item_bytes(),
+      context_record_depth_limit: Store.max_item_depth(),
+      context_record_cardinality_limit: Store.max_item_cardinality()
+    })
+  end
+
+  defp maintenance_source_streams(state, units, check) do
+    binding = state.tool_selection && state.tool_selection["artifact_read"]
+
+    Enum.reduce_while(units, {:ok, []}, fn unit, {:ok, streams} ->
+      with :ok <- check.(),
+           {:ok, stream} <-
+             Loopex.Runtime.LineageProjection.stream(
+               prepared_elements(state, unit.elements),
+               binding,
+               state.artifact_sources,
+               %{},
+               0,
+               check
+             ) do
+        {:cont, {:ok, [stream | streams]}}
+      else
+        error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, streams} -> {:ok, Enum.reverse(streams)}
+      error -> error
+    end
+  end
+
+  defp maintenance_request_candidate(
+         state,
+         episode,
+         units,
+         eligible,
+         count,
+         source,
+         deadline,
+         now,
+         check
+       ) do
+    capture = episode["maintenance_configuration"]
+
+    with :ok <- check.(),
+         {:ok, range} <- maintenance_covered_range(state, episode, units, count, check),
+         {:ok, request} <-
+           MaintenanceConfiguration.request(
+             capture["selection"],
+             capture["instructions"],
+             source.bytes,
+             deadline
+           ),
+         {:ok, blocks} <-
+           expected_context_blocks(request, [
+             context_source(SessionConfiguration.instruction_source(capture), "system"),
+             context_source(
+               %{"kind" => "compaction_source", "source_digest" => source.digest},
+               "session"
+             )
+           ]) do
+      header =
+        Loopex.Runtime.ResourceContext.initial_header(state.run_resources[episode["run_id"]])
+
+      totals =
+        if header,
+          do: expected_resource_context_totals(blocks),
+          else: expected_context_totals(blocks)
+
+      receipt = %{
+        "provider_identity" => "loopex.context.reference",
+        "provider_revision" => 4,
+        "transformer_identity" => nil,
+        "transformer_revision" => nil,
+        "selector_identity" => nil,
+        "selector_revision" => nil,
+        "token_estimator" => "loopex.context_bytes.v2",
+        "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
+        "blocks" => blocks,
+        "totals" => totals,
+        "continuation_cost" => nil,
+        "provider_estimated_tokens" => totals["token_cost"],
+        "context_token_budget" => capture["context_token_budget"],
+        "context_record_byte_ceiling" => Store.max_item_bytes(),
+        "record_byte_cost" => 0,
+        "ordered_descriptor_digest" => ordered_descriptor_digest(blocks),
+        "project_resource" => %{
+          "class" => "project_resource",
+          "receipt_revision" => 2,
+          "disposition" => "not_evaluated_maintenance",
+          "detail" => nil
+        }
+      }
+
+      receipt = if header, do: Map.put(receipt, "resource_packs", header), else: receipt
+
+      record = %{
+        :kind => "maintenance_request_committed_v1",
+        "episode_id" => episode["episode_id"],
+        "summary_ordinal" => episode["summary_ordinal"],
+        "purpose" => "compaction",
+        "operation_id" =>
+          stable_id("maintenance-model", episode["episode_id"], episode["summary_ordinal"]),
+        "configuration_version" => episode["configuration_version"],
+        "captured_session_version" => episode["session_version"],
+        "strategy_revision" => 3,
+        "eligible_unit_count" => eligible,
+        "covered_range" => range,
+        "source_digest" => source.digest,
+        "source_excerpted" => source.source_excerpted,
+        "staged_at" => now,
+        "staged_request_digest" => request.staged_request_digest,
+        "request" => encode_plain(request),
+        "context_receipt" => receipt
+      }
+
+      observations = %{
+        system_class_tokens: totals["by_provenance"]["system"]["token_cost"],
+        system_class_token_ceiling: capture["system_class_tokens"],
+        provider_estimated_tokens: totals["token_cost"],
+        context_token_budget: capture["context_token_budget"],
+        context_record_byte_ceiling: Store.max_item_bytes(),
+        context_record_depth_limit: Store.max_item_depth(),
+        context_record_cardinality_limit: Store.max_item_cardinality()
+      }
+
+      with {:ok, candidate} <- record_byte_cost_candidate(record),
+           :ok <- ContextAdmission.preflight_required_candidate(candidate, observations),
+           :ok <- check.() do
+        {:ok, candidate}
+      end
+    end
+  end
+
+  # Concept: coverage authenticates complete original records, including private evidence.
+  # Technical depth: collect only small provenance tuples, deduplicate records by
+  # their actual journal position, then hash them in journal order using the
+  # domain and length framing below. Projected message digests remain separate.
+  # Every original predates the episode's captured session version.
+  defp maintenance_covered_range(state, episode, units, count, check) do
+    sources =
+      units
+      |> Stream.take(count)
+      |> Stream.flat_map(& &1.elements)
+      |> Stream.map(&Conversation.source_reference/1)
+
+    initial = {:ok, %{}, nil, nil, 0}
+
+    sources
+    |> Enum.reduce_while(initial, fn reference, {:ok, originals, first, _last, n} ->
+      with :ok <- check.(),
+           %{journal_version: version, record_digest: digest, record_byte_cost: bytes} = original <-
+             state.conversation_record_sources[reference],
+           true <- version < episode["session_version"],
+           true <- is_nil(originals[version]) or originals[version] == original do
+        {:cont,
+         {:ok,
+          Map.put(originals, version, %{
+            journal_version: version,
+            record_digest: digest,
+            record_byte_cost: bytes
+          }), first || reference, reference, n + 1}}
+      else
+        {:error, _} = error -> {:halt, error}
+        _ -> {:halt, {:error, :context_projection_invalid}}
+      end
+    end)
+    |> case do
+      {:ok, originals, first, last, source_count} when source_count > 0 ->
+        hash =
+          :crypto.hash_update(
+            :crypto.hash_init(:sha256),
+            "loopex.compaction.covered_records.v1" <> <<0>>
+          )
+
+        originals
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.reduce_while({:ok, hash}, fn {version, original}, {:ok, hash} ->
+          with :ok <- check.() do
+            bytes =
+              Canonical.encode(%{
+                "journal_version" => version,
+                "record_digest" => original.record_digest,
+                "record_byte_cost" => original.record_byte_cost
+              })
+
+            {:cont,
+             {:ok,
+              hash
+              |> :crypto.hash_update(<<byte_size(bytes)::unsigned-big-integer-size(64)>>)
+              |> :crypto.hash_update(bytes)}}
+          else
+            error -> {:halt, error}
+          end
+        end)
+        |> case do
+          {:ok, hash} ->
+            next = Enum.at(units, count)
+
+            {:ok,
+             %{
+               "unit_count" => count,
+               "record_count" => map_size(originals),
+               "source_count" => source_count,
+               "first" => first,
+               "last" => last,
+               "first_kept" => next && Conversation.source_reference(hd(next.elements)),
+               "digest" => Base.encode16(:crypto.hash_final(hash), case: :lower)
+             }}
+
+          error ->
+            error
+        end
+
+      error ->
+        error
+    end
+  end
+
   defp maintenance_clock(state, run_id, now) do
     cond do
       not is_integer(now) or now < 0 or now > @uint64_max - 60_000 ->
@@ -3057,6 +3423,9 @@ defmodule Loopex.Runtime.SessionState do
 
   defp replay_record(state, %{payload: %{kind: kind}} = record) do
     cond do
+      not maintenance_request_tail?(state, kind) ->
+        {:error, :incomplete_maintenance_request_pair}
+
       not maintenance_terminal_tail?(state, kind) ->
         {:error, :incomplete_maintenance_terminal_transaction}
 
@@ -3237,6 +3606,8 @@ defmodule Loopex.Runtime.SessionState do
               "tool_result_preparation_state_v1",
               "maintenance_episode_admitted_v1",
               "maintenance_episode_terminal_v1",
+              "maintenance_request_committed_v1",
+              "maintenance_attempt_opened_v1",
               "tool_result_reference_prepared",
               "tool_result_preparation_failed_v1",
               "outcome_unknown_committed",
@@ -3856,10 +4227,21 @@ defmodule Loopex.Runtime.SessionState do
   # either the run terminal or one existing consecutive refusal/settlement pair.
   # The marker has no episode, accounting or public effect before that terminal.
   # Every replayed row, including commands and owner succession, obeys its tail.
-  defp complete_maintenance_pair(%{maintenance_terminal: nil}), do: :ok
+  defp complete_maintenance_pair(%{maintenance_terminal: nil} = state) do
+    if maintenance_request_tail?(state, nil),
+      do: :ok,
+      else: {:error, :incomplete_maintenance_request_pair}
+  end
 
   defp complete_maintenance_pair(_state),
     do: {:error, :incomplete_maintenance_terminal_transaction}
+
+  defp maintenance_request_tail?(state, kind) do
+    case state.maintenance_episodes[state.active_maintenance] do
+      %{"stage" => "request_pending_attempt_open"} -> kind == "maintenance_attempt_opened_v1"
+      _ -> true
+    end
+  end
 
   defp maintenance_terminal_tail?(%{maintenance_terminal: nil}, _kind), do: true
 
@@ -3878,10 +4260,19 @@ defmodule Loopex.Runtime.SessionState do
   defp apply_admitted_internal_record(state, record, version \\ nil)
 
   defp apply_admitted_internal_record(state, %{kind: kind} = record, version) do
-    if maintenance_terminal_tail?(state, kind) do
+    if maintenance_terminal_tail?(state, kind) and maintenance_request_tail?(state, kind) do
       with {:ok, next, events} <- apply_internal_record(state, record),
            {:ok, next} <-
              retain_pending_settlement_source(next, record, version || state.journal_version + 1) do
+        next =
+          if kind == "maintenance_episode_admitted_v1",
+            do:
+              put_in(
+                next.maintenance_episodes[record["episode_id"]]["session_version"],
+                version || state.journal_version + 1
+              ),
+            else: next
+
         next =
           case {state.maintenance_terminal, next.maintenance_terminal, kind} do
             {%{}, %{} = marker, kind} when kind != "run_terminal_committed" ->
@@ -4008,6 +4399,7 @@ defmodule Loopex.Runtime.SessionState do
     episode = Map.get(state.maintenance_episodes, state.active_maintenance)
 
     with %{"run_id" => run_id, "usage" => usage, "checkpoint_id" => checkpoint} <- episode,
+         true <- episode["stage"] not in ["request_pending_attempt_open", "model_attempt_open"],
          true <- terminal["run_id"] == run_id,
          true <- maintenance_parent_bound_agrees?(state, terminal),
          {:ok, failure} <- maintenance_run_failure(terminal) do
@@ -4329,6 +4721,67 @@ defmodule Loopex.Runtime.SessionState do
   # public start. The decoded bytes are held under `:staged` until that row
   # arrives, which is why a page boundary between the two is legal and a
   # recovery that stops between them dispatches nothing.
+  defp apply_internal_record(state, %{kind: "maintenance_request_committed_v1"} = record) do
+    with episode when is_map(episode) <- state.maintenance_episodes[state.active_maintenance],
+         true <- record["episode_id"] == state.active_maintenance,
+         {:ok, expected} <-
+           preflight_maintenance_request(
+             state,
+             record["eligible_unit_count"],
+             record["staged_at"],
+             fn -> :ok end
+           ),
+         true <- expected == record,
+         {:ok, request} <- decode_request(record["request"]) do
+      episode =
+        episode
+        |> Map.put("stage", "request_pending_attempt_open")
+        |> Map.put("staged", %{request: request, record: record})
+
+      {:ok, put_in(state.maintenance_episodes[state.active_maintenance], episode), []}
+    else
+      _ -> {:error, :invalid_maintenance_request_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{kind: "maintenance_attempt_opened_v1"} = record) do
+    with :ok <- ProviderAttempt.validate_opened(record),
+         %{
+           "stage" => "request_pending_attempt_open",
+           "attempts" => 0,
+           "staged" => %{request: request, record: staged}
+         } = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <-
+           record["attempt"] == 1 and record["purpose"] == "compaction" and
+             record["episode_id"] == state.active_maintenance and
+             record["summary_ordinal"] == episode["summary_ordinal"] and
+             record["operation_id"] == staged["operation_id"] and
+             record["staged_request_digest"] == request.staged_request_digest do
+      episode =
+        episode
+        |> Map.delete("staged")
+        |> Map.merge(%{
+          "stage" => "model_attempt_open",
+          "attempts" => 1,
+          "request" => request,
+          "request_context_receipt" => staged["context_receipt"],
+          "covered_range" => staged["covered_range"],
+          "source_digest" => staged["source_digest"],
+          "source_excerpted" => staged["source_excerpted"],
+          "operation_id" => staged["operation_id"],
+          "model_attempt" => 1,
+          "model_termination" => nil
+        })
+
+      next = put_in(state.maintenance_episodes[state.active_maintenance], episode)
+      next = %{next | deadlines: Map.put_new(next.deadlines, episode["run_id"], request.deadline)}
+      {:ok, next, []}
+    else
+      _ -> {:error, :invalid_maintenance_attempt_open_transition}
+    end
+  end
+
   defp apply_internal_record(
          state,
          %{

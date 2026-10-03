@@ -58,6 +58,47 @@ defmodule Loopex.Runtime.LineageProjection do
 
   def project(_, _, _, _, _), do: {:error, :context_projection_invalid}
 
+  # Concept: source preparation projects one committed unit lazily under the same rules.
+  # Technical depth: all call/result identities validate before enumeration. A
+  # bounded source error is returned as an internal stream item for the source
+  # encoder to stop on, never as a fabricated model message. Checks precede each
+  # projection and the encoder separately checks its bounded encoding chunks.
+  @doc false
+  @spec stream(list(), map() | nil, map(), map(), non_neg_integer(), function()) ::
+          {:ok, Enumerable.t()} | {:error, atom()}
+  def stream(elements, binding, sources, frozen, allowance, check)
+      when (is_map(binding) or is_nil(binding)) and is_map(sources) and is_map(frozen) and
+             is_integer(allowance) and allowance in 0..2_048 and is_function(check, 0) do
+    with {:ok, entries} <- Conversation.lineage_entry_stream(elements) do
+      {results, calls} = result_facts(elements)
+
+      {:ok,
+       Stream.map(entries, fn {source, message} ->
+         with :ok <- check.() do
+           if is_nil(binding) do
+             message
+           else
+             case project_entry(
+                    source,
+                    message,
+                    results,
+                    calls,
+                    binding,
+                    sources,
+                    frozen,
+                    allowance
+                  ) do
+               {:ok, projected, _range} -> projected
+               {:error, _} = error -> error
+             end
+           end
+         end
+       end)}
+    end
+  end
+
+  def stream(_, _, _, _, _, _), do: {:error, :context_projection_invalid}
+
   @doc false
   @spec preparation_candidates(list(), map() | nil, map(), map()) ::
           {:ok, [map()]} | {:error, atom()}

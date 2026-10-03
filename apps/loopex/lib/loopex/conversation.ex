@@ -130,11 +130,24 @@ defmodule Loopex.Conversation do
   @spec lineage_entries([element()]) ::
           {:ok, [{map(), message()}]} | {:error, :context_projection_invalid}
   def lineage_entries(elements) when is_list(elements) do
+    with {:ok, entries} <- lineage_entry_stream(elements), do: {:ok, Enum.to_list(entries)}
+  end
+
+  def lineage_entries(_invalid), do: {:error, :context_projection_invalid}
+
+  # Concept: maintenance consumes messages without collecting a whole projected range.
+  # Technical depth: identity validation precedes lazy projection. The retained
+  # call/result indexes contain identities only; each emitted message preserves
+  # the same source and normalized tool IDs as ordinary lineage_entries/1.
+  @doc false
+  @spec lineage_entry_stream([element()]) ::
+          {:ok, Enumerable.t()} | {:error, :context_projection_invalid}
+  def lineage_entry_stream(elements) when is_list(elements) do
     with {:ok, calls, results} <- lineage_identities(elements),
          true <- MapSet.new(Map.keys(calls)) == results,
          true <- MapSet.size(MapSet.new(Map.values(calls))) == map_size(calls) do
       {:ok,
-       Enum.map(project_entries(elements), fn {source, message} ->
+       Stream.map(project_entry_stream(elements), fn {source, message} ->
          {source, normalize_call_ids(source, message, calls)}
        end)}
     else
@@ -142,7 +155,7 @@ defmodule Loopex.Conversation do
     end
   end
 
-  def lineage_entries(_invalid), do: {:error, :context_projection_invalid}
+  def lineage_entry_stream(_invalid), do: {:error, :context_projection_invalid}
 
   # Concept: a projected message and its original fact share one source identity.
   # Technical depth: this identity labels conversation data, never provider or
@@ -188,7 +201,7 @@ defmodule Loopex.Conversation do
          run_units(run_elements)
          |> Enum.map(fn unit ->
            frozen? =
-             Enum.any?(project_entries(unit.elements), &MapSet.member?(frozen, elem(&1, 0)))
+             Enum.any?(project_entry_stream(unit.elements), &MapSet.member?(frozen, elem(&1, 0)))
 
            Map.put(
              unit,
@@ -421,7 +434,11 @@ defmodule Loopex.Conversation do
   end
 
   defp project_entries(elements) do
-    Enum.flat_map(elements, fn
+    elements |> project_entry_stream() |> Enum.to_list()
+  end
+
+  defp project_entry_stream(elements) do
+    Stream.flat_map(elements, fn
       %{kind: :user_message, content: content} = input ->
         [
           {source_reference(input), %{"role" => "user", "content" => content}}

@@ -1610,7 +1610,29 @@ Effect-history scans validate these rows and advance coverage without fabricatin
 executor effects. Both-pair focused tests cover mixed/changed identities, stale
 positions, deadlines, repeat sends and exact fixture process joins. This is the
 permit boundary, not a live episode/request reducer or summary dispatch proof;
-the episode-wide spending gate and maintenance settlements remain open.
+the complete episode spending/accounting gate and maintenance settlements remain open.
+
+The owner now binds a maintenance request to the episode's actual admission
+journal position and complete normalized original-record provenance. The covered
+integrity digest deduplicates originals by journal position and hashes their
+position, full-record digest and measured cost in journal order, with the
+`loopex.compaction.covered_records.v1` domain and unsigned 64-bit length framing.
+The source envelope digest separately binds the exact projected JSON bytes.
+Each whole unit projects lazily at `q=0`; prefix/excerpt choice preflights the
+complete receipt-bearing request record, including range identities and resource
+headers. Maintenance retains exactly two descriptors, its captured instruction
+and source, with no optional resource intake. Its fixed-point cost and strict
+system/input/structure/byte admission use existing boundaries. The private
+`maintenance_request_committed_v1` and `maintenance_attempt_opened_v1` rows form
+one proposal. A partial or interrupted pair cannot complete recovery or spend
+an attempt; the open row alone commits the first request deadline and increments
+the episode attempt counter without an ordinary turn or assistant message.
+Captured parent capacity, preparation expiry, cancellation and protected-unit
+checks refuse before intent. The eligible tail cut is still supplied by the
+future ordinary-request selector; minimum-tail release, optional tail growth,
+automatic triggering, live worker dispatch/cleanup, summary settlement,
+checkpoints and standalone compact remain open. This boundary is not a complete
+T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.

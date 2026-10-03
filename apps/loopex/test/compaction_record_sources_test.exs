@@ -46,6 +46,17 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
 
     assert map_size(replayed.conversation_record_sources[source]) == 3
     refute Map.has_key?(replayed.conversation_record_sources[source], :record)
+
+    original_request = maintenance_candidate(replayed)
+    changed_request = maintenance_candidate(other)
+    assert original_request["source_digest"] == changed_request["source_digest"]
+
+    refute original_request["covered_range"]["digest"] ==
+             changed_request["covered_range"]["digest"]
+
+    assert original_request["covered_range"]["unit_count"] == 1
+    assert original_request["covered_range"]["record_count"] == 2
+    assert original_request["covered_range"]["source_count"] == 2
   end
 
   test "queued steer and promoted follow up keep their original admission records" do
@@ -104,7 +115,7 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
 
   test "unstarted results bind the terminal that derived them" do
     {fixture, session, attachment} =
-      start([%{text: "two writes", calls: [call("a"), call("b")]}],
+      start([%{text: "three writes", calls: [call("a"), call("b"), call("c")]}],
         outcomes: %{"a" => "outcome_unknown"}
       )
 
@@ -122,6 +133,10 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
              rows,
              &(&1.payload["receipt"] && &1.payload["receipt"]["tool_call_id"] == "b")
            )
+
+    candidate = maintenance_candidate(replayed)
+    assert candidate["covered_range"]["source_count"] == 5
+    assert candidate["covered_range"]["record_count"] == 4
   end
 
   test "question answers bind the admitted response rather than a fabricated tool result" do
@@ -205,6 +220,67 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
     [{_, coordinator, _, _}] = DynamicSupervisor.which_children(children.sessions)
     live = :sys.get_state(coordinator).durable
     {live, replayed, rows}
+  end
+
+  defp maintenance_candidate(state) do
+    {:ok, prompt} =
+      SessionState.propose(state, %{type: :prompt, command_id: "next", content: "continue"}, %{
+        max_turns: 8,
+        token_budget: 10_000,
+        deadline_ms: 60_000,
+        context_token_budget: 8_192
+      })
+
+    state = commit_local(prompt)
+    parent = state.configuration
+
+    selection = %{
+      "model" => parent["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{parent["model_capabilities"] | "reasoning_levels" => ["none"]},
+      "provider_mapping" => %{parent["provider_mapping"] | "thinking_disabled" => true}
+    }
+
+    {:ok, instructions} =
+      Loopex.Runtime.MaintenanceConfiguration.capture_instructions(%{
+        "version" => "summary.v1",
+        "body" => "Retain facts"
+      })
+
+    {:ok, admission} =
+      SessionState.propose_maintenance_episode(
+        state,
+        state.active_run_id,
+        selection,
+        instructions,
+        1_000
+      )
+
+    state = commit_local(admission)
+    {:ok, candidate} = SessionState.preflight_maintenance_request(state, 1, 1_001, fn -> :ok end)
+    candidate
+  end
+
+  defp commit_local(proposal) do
+    state = proposal.next
+
+    receipt = %{
+      journal_versions: %{
+        first: state.journal_version + 1,
+        last: state.journal_version + length(proposal.records)
+      },
+      event_sequences:
+        if(proposal.events == [],
+          do: nil,
+          else: %{
+            first: state.event_sequence + 1,
+            last: state.event_sequence + length(proposal.events)
+          }
+        )
+    }
+
+    {:ok, committed} = SessionState.commit_proposal(proposal, receipt)
+    committed
   end
 
   defp assert_original(state, element, row) do

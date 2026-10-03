@@ -325,6 +325,59 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: stage the owner-selected maintenance source as an exact receipt-bearing
+  request with a consecutive, distinct maintenance attempt-open row. Bind the
+  captured session version to the episode's actual journal position. Coverage
+  deduplicates complete originals by journal position and hashes their measured
+  cost and full-record digest in that order; source JSON keeps its separate
+  digest. A real provider settlement's private response-ID change leaves source
+  bytes unchanged and changes coverage integrity. Multiple terminal-derived
+  results count their shared original once.
+
+  Whole units now project lazily under the existing artifact/question rules at
+  `q=0`. Prefix and excerpt preflight receives the actual covered-unit count and
+  measures the entire request, including range identities, exact descriptors,
+  receipt fixed point and captured resource headers. Strict system equality
+  refuses before source traversal. The current input and every protected unit
+  remain ineligible. Later queued input changes no captured source. Captured
+  parent capacity, preparation/run clocks and cancellation checks refuse before
+  intent. Partial, interleaved, duplicate and consistently substituted pairs
+  refuse recovery. Attempt-open commits the first request deadline and increments
+  its episode counter without ordinary conversation or accounting mutation. An
+  unsettled maintenance attempt fences bare run endings.
+
+  Ten-file focused verification passed 98 tests on each supported toolchain.
+  Current: 3.5 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-staging-current-v1.log`, SHA-256
+  `2a656828eb7a4b280f9f02740459eaddb0e25a0657d23b74fda3df4b9d78086d`.
+  Floor: 6.3 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-staging-floor-v1.log`, SHA-256
+  `1e0d183dcd1864be0755b7d18e15e246b34bdcbf602e583f73fde8c49755a48a`.
+  Complete outputs retain exact source/test digests. Development failures caught
+  a misplaced test pin, wrong commit helper/result handling, an invalid empty
+  budget probe and a fixture parent ceiling that could not admit genesis.
+  These were corrected before the final selection; no failure was hidden by an
+  unchanged retry. The budget probe now uses the admitted episode and the strict
+  equality witness uses a valid parent with larger maintenance instructions.
+  The expanded development selection then passed 66 tests. Formatting,
+  warning-free compilation, dependency direction, bootstrap structure/status,
+  compiled documentation and diff checks passed in 23.2 measured seconds.
+  Complete output: `/private/tmp/loopex-m7-maintenance-staging-gates-v1.log`,
+  SHA-256 `02a085a57b8d1b340b781b57ff3a3305a2b2fb15e056477ceb77948e6249c810`.
+  No provider payment, full fast check, release check or milestone closure is
+  claimed. All execution handles are terminal and collected.
+
+  This completes one added T07 boundary subtask. T00–T19 originals remain
+  51 done / 128 todo / 7 retired; added subtasks are 180 done / 10 todo.
+  T01–T19 alone remain original 51 / 122 / 6 and added 176 / 9.
+  Original T07 remains 0 done / 11 todo; its added subtasks are 15 done.
+  The eligible cut still comes from the future ordinary-request selector.
+  Minimum-tail release/growth, automatic triggering, live provider dispatch and
+  cleanup, episode settlement/accounting, checkpoint commit/recovery and
+  standalone compact remain open. Private effect-history episode/request/terminal
+  readers and coordinated wire consumers still need their existing T09 decoder
+  work. The goal remains active on `m7`; no agents or decisions are pending.
+
 - Done: add distinct `maintenance_attempt_settled_v3` and
   `maintenance_termination_admitted_v1` vocabulary with the closed episode,
   summary ordinal and compaction purpose identity. Reuse the existing v3 reply,
@@ -6191,6 +6244,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Join owner-selected maintenance sources to exact whole-record receipt preflight and consecutive request/attempt-open replay, binding captured original-record provenance, strict system and input limits, resource headers, clocks and protected units. Verify streaming projection, rejection of partial/substituted history and complete-original integrity on both toolchains. Tail policy, automatic triggering, live dispatch, settlement, checkpoints and standalone compact remain open.
 
 - [x] Add distinct closed maintenance v3 settlement and deadline vocabulary, preserving shared transport/accounting/retry rules, preventing ordinary tool continuation, binding retained reply digests, and joining exact permit retirement plus bounded effect-history validation; prove all boundaries on both toolchains. Live episode spending, summary/checkpoint admission and recovery remain open.
 
