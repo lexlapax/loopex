@@ -69,6 +69,14 @@ This host setting affects new maintenance episodes; an admitted episode keeps
 its captured model across restart. It is separate from ordinary `/configure`.
 
 Tracing uses ADR 0030's runtime-scoped API, existing redaction and ceilings.
+The creating host submits its already-redacted effective settings report once
+through the existing diagnostic consumer. This submission never waits for IO.
+It uses the same bounded pending output and loss accounting as diagnostics;
+oversized rows drop whole rather than misrepresenting a selected value.
+Provider rows show identity and reference form/validity, with credential names
+and values excluded. Instructions, role prompts, capabilities, mappings and
+private continuation remain outside the report. This implements the accepted
+[startup-report decision](../developer/agent-context-map.md#disposition-m7-chat-startup-2026-10-02).
 The host reports effective scope/limits and emitted/dropped counts through a
 stderr writer with bounded pending output, separately from result output.
 The diagnostic sink mailbox keeps ADR 0030's best-effort backpressure; these

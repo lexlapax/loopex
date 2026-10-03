@@ -99,6 +99,22 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
     assert resumed.selection.origins["/session/model"] == "committed"
     assert resumed.selection.origins["/session/instructions"] == "committed"
     assert resumed.selection.origins["/session/bounds/max_turns"] == "flag"
+    rows = LoopexCli.ConfigInspection.settings_rows(resumed.selection, %{})
+
+    for field <- ~w(model reasoning max_tokens context_token_budget system_class_tokens) do
+      row = Enum.find(rows, &(&1["setting"] == "/session/" <> field))
+      retained = f.prepared.selection.configuration[field]
+      assert row["origin"] == "committed"
+
+      assert row["value"] ==
+               if(is_integer(retained), do: Integer.to_string(retained), else: retained)
+    end
+
+    assert Enum.find(rows, &(&1["setting"] == "/session/cleanup_grace_ms"))["origin"] ==
+             "committed"
+
+    refute inspect(rows) =~ "absent-do-not-read"
+    refute inspect(rows) =~ "M7_RESUME_SLOT"
     assert Fixture.records(restarted, f.session) == before
     assert Loopex.AgentLoopTestModel.dispatched(restarted.model) == []
     assert Agent.get(restarted.executor, & &1.jobs) == []

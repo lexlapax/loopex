@@ -3,6 +3,213 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
 
   alias LoopexComposition.DiagnosticConsumer
 
+  test "settings submission preserves caller ownership and abandons late reply aliases" do
+    device = device()
+    {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+    rows = [setting("/paths/workspace", "/workspace", "flag")]
+
+    outsider =
+      Task.async(fn ->
+        assert :ok = DiagnosticConsumer.settings_report(consumer, rows)
+        GenServer.call(consumer, {:settings_report, rows})
+      end)
+
+    assert Task.await(outsider) == {:error, :not_diagnostic_owner}
+
+    assert DiagnosticConsumer.status(consumer).counts.diagnostic ==
+             %{emitted: 0, dropped: 0, unconfirmed: 0}
+
+    refute_receive {:device_write, _, _}, 0
+
+    :ok = :sys.suspend(consumer)
+    assert :ok = DiagnosticConsumer.settings_report(consumer, rows)
+    assert Process.alive?(consumer)
+    refute_receive {:device_write, _, _}, 0
+    :ok = :sys.resume(consumer)
+    assert DiagnosticConsumer.status(consumer).active
+    assert_receive {:device_write, _, bytes}
+    assert {:ok, ^rows} = decode_rows(bytes)
+
+    assert GenServer.call(consumer, {:settings_report, rows}) ==
+             {:error, :invalid_settings_report}
+
+    receive do
+      {ref, _} when is_reference(ref) -> flunk("settings submission left a late request reply")
+    after
+      0 -> :ok
+    end
+
+    assert {:ok, final} = DiagnosticConsumer.close(consumer, deadline())
+    assert final.counts.diagnostic == %{emitted: 0, dropped: 0, unconfirmed: 1}
+  end
+
+  test "settings retain exact paths, decimal quantities, indexed order and committed origins" do
+    StringIO.open("", [encoding: :latin1], fn device ->
+      {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+
+      rows = [
+        setting("/paths/workspace", "/猫/quote\"/line\n/tab\t", "flag"),
+        setting("/session/max_tokens", Integer.to_string(Integer.pow(2, 150)), "committed"),
+        setting("/session/skill_dirs/0", "/first", "file#/session/skill_dirs/0"),
+        setting("/session/skill_dirs/1", "/second", "env"),
+        setting("/trace/enabled", false, "default"),
+        setting(
+          "/providers/openai",
+          %{
+            "provider" => "openai",
+            "reference_form" => "environment_reference",
+            "reference_valid" => true,
+            "unavailable_commands" => []
+          },
+          "file#/providers/openai/credential/env"
+        ),
+        setting(
+          "/providers/anthropic",
+          %{
+            "provider" => "anthropic",
+            "reference_form" => "credential_free",
+            "reference_valid" => true,
+            "unavailable_commands" => ["chat"]
+          },
+          "file#/providers/anthropic/credential/none"
+        )
+      ]
+
+      assert :ok = DiagnosticConsumer.settings_report(consumer, rows)
+      await_idle(consumer)
+      assert {:ok, final} = DiagnosticConsumer.close(consumer, deadline())
+      assert final.counts.diagnostic == %{emitted: length(rows), dropped: 0, unconfirmed: 0}
+      {"", output} = StringIO.contents(device)
+      assert {:ok, ^rows} = decode_rows(output)
+      assert length(:binary.matches(output, "\n")) == length(rows)
+      assert output =~ "\\n" and output =~ "\\t" and output =~ "\\\""
+    end)
+  end
+
+  test "settings exact JSON line ceiling drops oversized rows whole" do
+    StringIO.open("", [encoding: :latin1], fn device ->
+      {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+      empty = setting("/paths/workspace", "", "committed")
+      {:ok, framing} = LoopexProtocol.Frame.encode(empty)
+      exact = %{empty | "value" => String.duplicate("x", 4_096 - IO.iodata_length(framing))}
+      oversized = %{exact | "value" => exact["value"] <> "x"}
+      escaped = %{empty | "value" => String.duplicate("\"", 2_048)}
+      assert :ok = DiagnosticConsumer.settings_report(consumer, [exact, oversized, escaped])
+      await_idle(consumer)
+      assert {:ok, final} = DiagnosticConsumer.close(consumer, deadline())
+      assert final.counts.diagnostic == %{emitted: 1, dropped: 2, unconfirmed: 0}
+      {"", bytes} = StringIO.contents(device)
+      assert byte_size(bytes) == 4_096
+      assert {:ok, [^exact]} = decode_rows(bytes)
+    end)
+  end
+
+  test "settings reject private captures, credential forms and malformed presentation rows" do
+    StringIO.open("", [encoding: :latin1], fn device ->
+      {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+
+      provider = %{
+        "provider" => "openai",
+        "reference_form" => "environment_reference",
+        "reference_valid" => true,
+        "unavailable_commands" => []
+      }
+
+      rejected = [
+        setting("/session/instructions/base", "instruction-canary", "committed"),
+        setting("/roles/reviewer/prompt", "role-prompt-canary", "flag"),
+        setting("/session/model_capabilities", "capability-canary", "committed"),
+        setting("/session/provider_mapping", "mapping-canary", "committed"),
+        setting("/continuation", "continuation-canary", "committed"),
+        setting("/providers/openai/credential/env", "ENV_NAME_CANARY", "flag"),
+        setting("/providers/openai", Map.put(provider, "env", "ENV_NAME_CANARY"), "flag"),
+        setting(
+          "/providers/openai",
+          %{provider | "reference_form" => "secret-value-canary"},
+          "flag"
+        ),
+        setting(
+          "/providers/openai",
+          %{provider | "unavailable_commands" => ["secret-value-canary"]},
+          "flag"
+        ),
+        setting("/session/max_tokens", 123, "flag"),
+        setting("/session/max_tokens", "00123", "flag"),
+        setting("/paths/workspace", <<255>>, "flag"),
+        setting("/trace/modules/64", "Loopex.Runtime.Control", "flag"),
+        setting("/session/skill_dirs", ["array-canary"], "flag"),
+        setting("/paths/workspace", "/safe", "unknown-origin-canary"),
+        Map.put(setting("/paths/workspace", "/safe", "flag"), "extra", "extra-canary")
+      ]
+
+      admitted = setting("/session/model", "openai:confirmed", "committed")
+      assert :ok = DiagnosticConsumer.settings_report(consumer, rejected ++ [admitted])
+      await_idle(consumer)
+      assert {:ok, final} = DiagnosticConsumer.close(consumer, deadline())
+      assert final.counts.diagnostic == %{emitted: 1, dropped: length(rejected), unconfirmed: 0}
+      {"", bytes} = StringIO.contents(device)
+      refute bytes =~ "canary"
+      assert {:ok, [^admitted]} = decode_rows(bytes)
+      refute inspect(:sys.get_status(device)) =~ "ENV_NAME_CANARY"
+    end)
+  end
+
+  test "settings share the bounded diagnostic queue and writer cleanup accounting" do
+    device = device()
+    {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+    rows = for i <- 1..300, do: setting("/session/max_tokens", Integer.to_string(i), "flag")
+    assert :ok = DiagnosticConsumer.settings_report(consumer, rows)
+    view = DiagnosticConsumer.status(consumer)
+    assert view.active and view.pending == 256
+    assert view.counts.diagnostic == %{emitted: 0, dropped: 43, unconfirmed: 0}
+    assert_receive {:device_write, writer, bytes}
+    assert {:ok, [first]} = decode_rows(bytes)
+    assert first == hd(rows)
+    [^consumer, supervisor, ^writer] = elem(DiagnosticConsumer.owned_processes(consumer), 1)
+    monitors = Map.new([consumer, supervisor, writer], &{&1, Process.monitor(&1)})
+    assert {:ok, final} = DiagnosticConsumer.close(consumer, deadline())
+    assert final.counts.diagnostic == %{emitted: 0, dropped: 299, unconfirmed: 1}
+
+    for {pid, ref} <- monitors do
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}
+      refute Process.alive?(pid)
+    end
+  end
+
+  test "broken settings IO is unconfirmed and shares ordinary diagnostic failure sealing" do
+    device = device()
+    {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+
+    rows = [
+      setting("/session/model", "openai:confirmed", "committed"),
+      setting("/session/reasoning", "default", "committed")
+    ]
+
+    assert :ok = DiagnosticConsumer.settings_report(consumer, rows)
+    assert DiagnosticConsumer.status(consumer).pending == 1
+    assert_receive {:device_write, _, _}
+    send(device, {:release, {:error, :broken}})
+    await_failure(consumer)
+    send(consumer, {:loopex_diagnostic, %{"kind" => "trace_call"}})
+    assert DiagnosticConsumer.status(consumer).counts.trace.dropped == 1
+    assert {:ok, final} = DiagnosticConsumer.close(consumer, deadline())
+    assert final.counts.diagnostic == %{emitted: 0, dropped: 1, unconfirmed: 1}
+  end
+
+  defp setting(pointer, value, origin),
+    do: %{"setting" => pointer, "value" => value, "origin" => origin}
+
+  defp decode_rows(bytes) do
+    rows = String.split(bytes, "\n", trim: true)
+
+    Enum.reduce_while(rows, {:ok, []}, fn row, {:ok, decoded} ->
+      case LoopexProtocol.Frame.decode(row, 4_096) do
+        {:ok, value} -> {:cont, {:ok, decoded ++ [value]}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
   test "supervised startup binds the explicit host and asynchronous closing seals dispatch" do
     device = device()
     consumer = start_supervised!({DiagnosticConsumer, {self(), device, 1_000}})

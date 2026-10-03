@@ -440,6 +440,32 @@ control records and model results never enter this lossy queue. The writer
 accepts one entry at a time and acknowledges completion before receiving another.
 It has no additional pending-output queue or unbounded stream of IO requests.
 
+The creating host may submit one closed startup report through
+`DiagnosticConsumer.settings_report/2`. Each row has exactly `setting`, `value`
+and `origin`; origins are `flag`, `env`, `file#<pointer>`, `default` or
+`committed`. Admission preserves caller identity through an asynchronous OTP
+request and abandons its reply alias with a zero-wait receive. A return confirms
+submission only, never admission or delivery. Other callers cannot use this
+trusted path. Ordinary diagnostic and trace messages keep their existing
+redaction and rendering.
+
+The allowlist covers effective schema, paths, policy, output, session and
+maintenance settings, trace selectors/limits, role model/reasoning/instruction
+file paths and resolved limits, and delegation settings/child bounds. Skill
+directory and delegation-role arrays use indexes 0..15; trace modules use
+indexes 0..63. Empty collections retain their empty value. Numeric quantities
+are canonical decimal strings. Provider rows are closed identity/reference-form/
+validity/unavailable-command objects; policy identity uses the existing closed
+registry identity presentation. No credential member or captured body is
+admitted. Selected values come from the host's confirmed configuration; this
+consumer performs no configuration lookup or credential resolution.
+
+Every row is one escaped UTF-8 JSON line including LF, at most 4,096 bytes.
+Malformed or oversized rows drop whole and count as diagnostic loss. Accepted
+rows use the existing 256-entry queue, one writer and emitted/dropped/unconfirmed
+accounting. A blocked or broken stderr and consumer cleanup retain the same
+bounds. The report adds no second writer, pending queue or delivery gate.
+
 Distinguish these bounds: ADR 0030's admitted asynchronous diagnostic-item
 ceiling is 4,096; the
 tracer has its own limits above; the drain's pending-output ceiling is 256 and

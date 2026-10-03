@@ -15,7 +15,9 @@ defmodule LoopexComposition.DiagnosticConsumer do
   separate counters. The mailbox is measured, not claimed bounded: runtime
   backpressure and direct senders retain ADR 0030's best-effort contract.
 
-  Only the creating host may inspect or close this consumer. Closing discards
+  Only the creating host may inspect, close or submit a startup settings report
+  to this consumer. The one report uses closed, already-redacted JSON rows and
+  the same output queue and loss accounting. Closing discards
   its explicit queue and joins the IO worker and its private task supervisor
   within the earlier of the host deadline and captured cleanup grace. An
   unacknowledged write is delivery-unconfirmed, even if bytes may have reached
@@ -25,9 +27,26 @@ defmodule LoopexComposition.DiagnosticConsumer do
   use GenServer, restart: :temporary
 
   alias Loopex.Trace.Entry
+  alias LoopexProtocol.Frame
 
   @queue_entries 256
   @entry_bytes 4_096
+
+  @text_settings ~w(/paths/workspace /paths/state_root /policy /output
+                    /session/model /session/reasoning /session/tools
+                    /session/instructions/system_file /session/instructions/append_file
+                    /maintenance/model /trace/level)
+  @quantity_settings ~w(/schema_version /session/max_tokens /session/context_token_budget
+                        /session/system_class_tokens /session/cleanup_grace_ms
+                        /session/bounds/max_turns /session/bounds/deadline_ms
+                        /session/bounds/token_budget /delegation/max_children
+                        /delegation/token_budget /delegation/max_tokens
+                        /delegation/context_token_budget /delegation/system_class_tokens
+                        /delegation/child_bounds/max_turns /delegation/child_bounds/deadline_ms
+                        /delegation/child_bounds/token_budget /trace/max_entry_bytes
+                        /trace/max_entries_per_second /trace/max_queue_entries)
+  @boolean_settings ~w(/delegation/enabled /trace/enabled)
+  @array_settings ~w(/session/skill_dirs /delegation/roles /trace/modules)
 
   @doc """
   ## Concept
@@ -88,6 +107,35 @@ defmodule LoopexComposition.DiagnosticConsumer do
   @doc """
   ## Concept
 
+  Submit the creating host's already-redacted startup settings once without
+  waiting for diagnostic delivery.
+
+  ## Technical depth
+
+  Each row has exactly setting, value and origin. Only selected-setting pointers
+  and plain presentation values are admitted. Quantities are exact decimal
+  strings; arrays arrive as indexed rows. Provider rows contain reference form
+  and validity, never credential names or values. Captured instructions,
+  capabilities, mappings, role prompts and continuation are excluded.
+
+  The existing queue, writer and diagnostic loss counters apply. A malformed or
+  oversized row drops whole; its JSON line including LF must fit 4,096 bytes.
+  A zero-wait OTP request abandons the reply alias, preserving caller identity
+  for owner admission without leaving late replies in the host mailbox. The
+  return acknowledges submission only, including an unavailable consumer.
+  """
+  @spec settings_report(pid(), list(map())) :: :ok
+  def settings_report(consumer, rows) do
+    request = :gen_server.send_request(consumer, {:settings_report, rows})
+    :gen_server.receive_response(request, 0)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  @doc """
+  ## Concept
+
   Stop diagnostic delivery and retain its final accounting after joining writers.
 
   ## Technical depth
@@ -120,6 +168,7 @@ defmodule LoopexComposition.DiagnosticConsumer do
        pending: 0,
        current: nil,
        closing: nil,
+       settings_submitted: false,
        counts: %{trace: counters(), diagnostic: counters()},
        failure: nil
      }}
@@ -132,6 +181,15 @@ defmodule LoopexComposition.DiagnosticConsumer do
   def handle_call(:status, _from, state), do: {:reply, view(state), state}
 
   def handle_call(:owned_processes, _from, state), do: {:reply, {:ok, owned(state)}, state}
+
+  def handle_call({:settings_report, rows}, _from, %{settings_submitted: false} = state)
+      when is_list(rows) do
+    state = Enum.reduce(rows, %{state | settings_submitted: true}, &admit_setting/2)
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:settings_report, _}, _from, state),
+    do: {:reply, {:error, :invalid_settings_report}, state}
 
   def handle_call({:begin_close, ref, deadline}, _from, %{closing: nil} = state)
       when is_reference(ref) and is_integer(deadline) do
@@ -242,6 +300,101 @@ defmodule LoopexComposition.DiagnosticConsumer do
   end
 
   defp counters, do: %{emitted: 0, dropped: 0, unconfirmed: 0}
+
+  defp admit_setting(row, state) do
+    with true <- state.failure == nil and state.closing == nil and state.pending < @queue_entries,
+         true <- valid_setting_row?(row),
+         {:ok, encoded} <- Frame.encode(row),
+         true <- IO.iodata_length(encoded) <= @entry_bytes do
+      %{state | queue: :queue.in({:diagnostic, encoded}, state.queue), pending: state.pending + 1}
+      |> dispatch()
+    else
+      _ -> count(state, :diagnostic, :dropped)
+    end
+  end
+
+  defp valid_setting_row?(%{"setting" => setting, "value" => value, "origin" => origin} = row)
+       when map_size(row) == 3 and is_binary(setting) and is_binary(origin) do
+    text?(setting) and text?(origin) and
+      (origin in ~w(flag env default committed) or String.starts_with?(origin, "file#/")) and
+      valid_setting?(String.split(setting, "/", trim: false), setting, value)
+  end
+
+  defp valid_setting_row?(_), do: false
+
+  defp valid_setting?(_, setting, value) when setting in @text_settings, do: text?(value)
+
+  defp valid_setting?(_, setting, value) when setting in @quantity_settings,
+    do: text?(value) and Regex.match?(~r/\A(?:0|[1-9][0-9]*)\z/, value)
+
+  defp valid_setting?(_, setting, value) when setting in @boolean_settings,
+    do: is_boolean(value)
+
+  defp valid_setting?(_, setting, []) when setting in @array_settings, do: true
+
+  defp valid_setting?(["", "session", "skill_dirs", index], _, value),
+    do: index?(index, 16) and text?(value)
+
+  defp valid_setting?(["", "delegation", "roles", index], _, value),
+    do: index?(index, 16) and name?(value)
+
+  defp valid_setting?(["", "trace", "modules", index], _, value),
+    do: index?(index, 64) and text?(value)
+
+  defp valid_setting?(["", "roles"], _, value), do: value == %{}
+
+  defp valid_setting?(["", "roles", name, field], _, value)
+       when field in ~w(model reasoning instructions_file max_tokens context_token_budget system_class_tokens) do
+    name?(name) and
+      if field in ~w(max_tokens context_token_budget system_class_tokens),
+        do: valid_setting?([], "/session/" <> field, value),
+        else: text?(value)
+  end
+
+  defp valid_setting?(["", "providers", provider], _, value) do
+    case value do
+      %{
+        "provider" => ^provider,
+        "reference_form" => form,
+        "reference_valid" => true,
+        "unavailable_commands" => commands
+      }
+      when map_size(value) == 4 ->
+        name?(provider) and
+          ((form == "credential_free" and commands == ["chat"]) or
+             (form == "environment_reference" and commands == []))
+
+      _ ->
+        false
+    end
+  end
+
+  defp valid_setting?(["", "policy_identity"], _, value) do
+    case value do
+      %{
+        "origin" => "registry",
+        "id" => id,
+        "revision" => revision,
+        "fixture_manifest_digest" => nil
+      }
+      when map_size(value) == 4 ->
+        text?(id) and text?(revision)
+
+      _ ->
+        false
+    end
+  end
+
+  defp valid_setting?(_, _, _), do: false
+
+  defp text?(value),
+    do: is_binary(value) and byte_size(value) <= @entry_bytes and String.valid?(value)
+
+  defp name?(value), do: text?(value) and Regex.match?(~r/\A[a-z][a-z0-9_-]{0,63}\z/, value)
+
+  defp index?(value, ceiling) do
+    Regex.match?(~r/\A(?:0|[1-9][0-9]?)\z/, value) and String.to_integer(value) < ceiling
+  end
 
   # Concept: shutdown registration captures every process still able to write.
   # Technical depth: begin_close seals dispatch before replying with this list.

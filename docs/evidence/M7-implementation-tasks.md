@@ -105,6 +105,59 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+
+- Done: the one full fast check on exact clean repair checkpoint
+  `b7a8f19ed47d325b2e73a3c02fc7b08509856f96` completed with exit 0 in
+  917.2 measured seconds. All eleven application suites passed with their
+  prescribed exclusions. Complete immutable output is
+  `/private/tmp/loopex-m7-b7a8f19e-fast-check.log`, SHA-256
+  `9ea984aba4e25a6d64adfc39dd4708b561fbccce8484b18cda633d0344129876`.
+  The terminal handle was collected before hashing. This proves the repaired
+  current-tool/trace/receipt integration, not later settings-report bytes.
+
+- Done: implement the approved owner-only startup settings-report admission in
+  the existing DiagnosticConsumer. Its one asynchronous OTP request preserves
+  caller identity and abandons late replies without waiting for IO. A closed
+  row/pointer/value allowlist excludes credentials and private captures. Exact
+  decimal quantities and indexed rows remain complete; each physical escaped
+  UTF-8 JSON row including LF fits 4,096 bytes or drops whole. Existing pending
+  capacity 256, one writer, loss accounting, failure sealing and cleanup joins
+  are shared. Generic trace/diagnostic redaction is unchanged. Config inspection
+  and the startup row producer now reuse the existing pure projection. Natural
+  numeric array ordering preserves indexes 0..15 rather than placing 10 before
+  2. Actual resume preparation supplies committed settings/origins without
+  re-reading changed instruction files. The accepted ADR pair records the
+  already-approved schema and consumer path. Public chat startup submission is
+  still outer-host integration work under T06; this is not a completed public
+  chat workflow claim.
+  Final focused checks passed with warnings as errors on both supported pairs:
+  consumer 19 (0.8/0.8 measured suite seconds), CLI selected/resume rows 26
+  (16.6/15.7). These cover ownership, abandoned replies with a suspended drain,
+  exact byte limits, all sixteen array indexes, provider/credential and captured
+  body canaries, complete physical row equality, ordinary/trace shared loss,
+  broken/stalled IO and exact process joins. Formatting, documentation ordering
+  and structure/status gates passed. All output handles were collected before
+  hashing. This change still needs its own subsequent integration candidate.
+
+  | Check | Complete output | SHA-256 |
+  | --- | --- | --- |
+  | settings-consumer-current-v1 | `/private/tmp/loopex-m7-settings-consumer-current-v1.log` | `369a291868131abf2e5fbe58d11082b075eb76de77efec39fe8e317dc654fb78` |
+  | settings-consumer-current-v2 | `/private/tmp/loopex-m7-settings-consumer-current-v2.log` | `7ca1fe94aa4cf46dac3970b0a2985e38dfc28a911250332dc5d9e43b0de938d0` |
+  | settings-consumer-current-v3 | `/private/tmp/loopex-m7-settings-consumer-current-v3.log` | `d661324b1ade86390433d77e4525aa17b46a638f258909ba97316b053a740e47` |
+  | settings-consumer-current-v4 | `/private/tmp/loopex-m7-settings-consumer-current-v4.log` | `7c031169968c6586434643f51ca5976b23ed9e2979a207d054367e5d849ce057` |
+  | settings-consumer-floor-v1 | `/private/tmp/loopex-m7-settings-consumer-floor-v1.log` | `214546c446ea565a10af253d2d651e0eb10871b81d87e6461b1ac6da9356eb45` |
+  | settings-rows-current-v1 | `/private/tmp/loopex-m7-settings-rows-current-v1.log` | `bd7d183ca4fa6b4dd4ca6eda4cb5956d19c254f0b69bbb74ad4aedea76215174` |
+  | settings-rows-current-v2 | `/private/tmp/loopex-m7-settings-rows-current-v2.log` | `91888567fb7938f0856315f4f2b07612851952d3faa54d9a7163396471718068` |
+  | settings-rows-current-v3 | `/private/tmp/loopex-m7-settings-rows-current-v3.log` | `d2b988b970615df8db268343a52e83e344b288f5dc46a0160e1f730d2094a987` |
+  | settings-rows-floor-v1 | `/private/tmp/loopex-m7-settings-rows-floor-v1.log` | `a089b78eafef562f683b3fbac8c937cee3e3c806585ae89499f0b9747765762a` |
+  | settings-rows-floor-v2 | `/private/tmp/loopex-m7-settings-rows-floor-v2.log` | `727b64e8e231ed7e1e4300d3f28546817c3f290d490c5ae756026e51608383ab` |
+  | settings-report-structure | `/private/tmp/loopex-m7-settings-report-structure.log` | `37be54b486f41ba1b4a94e64827fa6f918a73be4ada0051c7919cf120477290a` |
+
+  Consumer development v1/v2 are failed compile evidence: ExUnit's refute_receive
+  macro does not admit a guard. An ordinary zero-wait receive proves absence of
+  late reference-tagged replies without changing any product or fixture bound.
+  Earlier passing development slices remain scoped to their tested bytes.
+
 - Failed: the single full fast check on exact clean checkpoint
   `d7974fe1bdc79821eaf6c1a89be6a0ea98d09962` completed with exit 1 in
   918.8 measured seconds. Complete output is
@@ -5515,7 +5568,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Resolve and implement the owner-only effective-settings report admission decision; preserve shared diagnostic queue/writer/cleanup bounds and prove redaction, exact values/origins, byte refusal and loss accounting.
+- [x] Resolve and implement the owner-only effective-settings report admission decision; preserve shared diagnostic queue/writer/cleanup bounds and prove redaction, exact values/origins, byte refusal and loss accounting.
 
 - [x] Join ordered status to public session/trace reads and the confirmed host capture; implement closed nested status and standalone compact-result codecs with exact quantities, private-data refusal, byte limits, stale-cache refusal and blocked-read cancellation proof on both toolchains. Public host entry, live maintenance observations and coordinated independent consumer/schema proof remain open.
 
@@ -5678,7 +5731,7 @@ or check was relaxed.
 - [x] Migrate remaining executor/composition fixtures to current tool identities and remove their retired-generation positive cases; preserve retention, receipt, preflight and settlement bounds.
 - [x] Replace the trace rate-window comparison with fresh physical delivery from each prompt under the original receive allowance; preserve session identity and exact actor joins.
 - [x] Preserve the CLI exact-limit receipt/Store proof while checking the current bounded model projection.
-- [ ] Verify the integrated repair once on a new clean committed checkpoint and retain its complete output, exact SHA, measured duration and digest.
+- [x] Verify the integrated repair once on a new clean committed checkpoint and retain its complete output, exact SHA, measured duration and digest.
 - [x] Run the full fast check once on the clean committed pre-1.0 retirement and chat-output synchronization checkpoint; retain exact SHA and terminal output/digest without claiming later public/startup reads are covered.
 
 - [x] Acquire the owner-exit chat fixture writer synchronously before inducing loss; preserve exact DOWN reasons and receive deadlines, retaining failed parent evidence and both-pair focused proof.

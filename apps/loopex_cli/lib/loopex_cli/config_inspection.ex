@@ -225,6 +225,46 @@ defmodule LoopexCli.ConfigInspection do
   end
 
   defp report(%{command: :show, selection: selection, roles: roles}) do
+    Enum.reduce_while(settings_rows(selection, roles), {:ok, []}, fn row, {:ok, output} ->
+      case Frame.encode(%{"value" => row["value"]}) do
+        {:ok, encoded} ->
+          {:cont,
+           {:ok,
+            [
+              output,
+              row["setting"],
+              " = ",
+              String.trim_trailing(IO.iodata_to_binary(encoded), "\n"),
+              " [",
+              row["origin"],
+              "]\n"
+            ]}}
+
+        _ ->
+          {:halt, {:error, :configuration_report_unavailable}}
+      end
+    end)
+  end
+
+  @doc """
+  ## Concept
+
+  Project confirmed host settings into already-redacted presentation rows.
+
+  ## Technical depth
+
+  Config inspection and the chat startup diagnostic submission share this pure
+  host-private projection. It reads only the supplied confirmed selection and
+  resolved roles. Providers expose reference form/validity and unavailable
+  commands, never environment-reference names or values. Instructions, role
+  prompts, capabilities, mappings and continuation are not traversed.
+  Ordered pointers retain indexed arrays, exact decimal quantities and their
+  selected origins, including committed origins supplied by resume preparation.
+  This projection performs no file, catalog, credential, Store or IO operation.
+  Consumer admission separately owns each physical JSON line's byte ceiling.
+  """
+  @spec settings_rows(map(), map()) :: [map()]
+  def settings_rows(selection, roles) do
     profile = selection.profile
 
     profile =
@@ -292,27 +332,17 @@ defmodule LoopexCli.ConfigInspection do
         end)
       end)
 
-    Enum.reduce_while(Enum.sort_by(rows, &elem(&1, 0)), {:ok, []}, fn {pointer, value, origin},
-                                                                      {:ok, output} ->
-      value = quantities(value)
-
-      case Frame.encode(%{"value" => value}) do
-        {:ok, encoded} ->
-          {:cont,
-           {:ok,
-            [
-              output,
-              pointer,
-              " = ",
-              String.trim_trailing(IO.iodata_to_binary(encoded), "\n"),
-              " [",
-              origin || "default",
-              "]\n"
-            ]}}
-
-        _ ->
-          {:halt, {:error, :configuration_report_unavailable}}
-      end
+    rows
+    |> Enum.sort_by(fn {pointer, _, _} ->
+      Enum.map(String.split(pointer, "/"), fn segment ->
+        case Integer.parse(segment) do
+          {index, ""} when index >= 0 -> {0, index}
+          _ -> {1, segment}
+        end
+      end)
+    end)
+    |> Enum.map(fn {pointer, value, origin} ->
+      %{"setting" => pointer, "value" => quantities(value), "origin" => origin || "default"}
     end)
   end
 

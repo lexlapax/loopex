@@ -27,6 +27,64 @@ defmodule LoopexCli.ConfigInspectionTest do
     %{root: root, config_path: file}
   end
 
+  test "confirmed inspection rows pass through the existing diagnostic consumer without private captures",
+       f do
+    configured =
+      profile(f.root)
+      |> put_in(["session", "instructions"], %{"system_file" => "instructions.txt"})
+      |> put_in(["session", "skill_dirs"], ["first", "second"] ++ Enum.map(2..15, &"dir-#{&1}"))
+
+    File.write!(f.config_path, :json.encode(configured))
+    assert {:ok, prepared} = ConfigInspection.prepare(show(f), f.root, nil)
+    rows = ConfigInspection.settings_rows(prepared.selection, prepared.roles)
+    skill_rows = Enum.filter(rows, &String.starts_with?(&1["setting"], "/session/skill_dirs/"))
+
+    assert Enum.map(skill_rows, & &1["setting"]) ==
+             Enum.map(0..15, &"/session/skill_dirs/#{&1}")
+
+    assert Enum.find(rows, &(&1["setting"] == "/session/skill_dirs/0"))["value"] ==
+             Path.join(f.root, "first")
+
+    assert Enum.find(rows, &(&1["setting"] == "/session/skill_dirs/1"))["value"] ==
+             Path.join(f.root, "second")
+
+    assert Enum.find(rows, &(&1["setting"] == "/session/model"))["value"] == @canonical
+    refute inspect(rows) =~ @slot
+    refute inspect(rows) =~ @secret
+    refute inspect(rows) =~ @prompt
+
+    StringIO.open("", [encoding: :latin1], fn device ->
+      {:ok, consumer} = LoopexComposition.DiagnosticConsumer.start_link(device, 1_000)
+      assert :ok = LoopexComposition.DiagnosticConsumer.settings_report(consumer, rows)
+      cutoff = System.monotonic_time(:millisecond) + 1_000
+      await_report(consumer, cutoff)
+      assert {:ok, final} = LoopexComposition.DiagnosticConsumer.close(consumer, cutoff)
+      assert final.counts.diagnostic == %{emitted: length(rows), dropped: 0, unconfirmed: 0}
+      {"", output} = StringIO.contents(device)
+
+      decoded =
+        for line <- String.split(output, "\n", trim: true) do
+          assert {:ok, row} = LoopexProtocol.Frame.decode(line, 4_096)
+          row
+        end
+
+      assert decoded == rows
+      refute output =~ @slot
+      refute output =~ @secret
+      refute output =~ @prompt
+    end)
+  end
+
+  defp await_report(consumer, cutoff) do
+    status = LoopexComposition.DiagnosticConsumer.status(consumer)
+
+    if status.active or status.pending > 0 do
+      assert System.monotonic_time(:millisecond) < cutoff
+      Process.sleep(1)
+      await_report(consumer, cutoff)
+    end
+  end
+
   test "effective inspection resolves exact values, origins and escaped paths without private data",
        f do
     profile =
