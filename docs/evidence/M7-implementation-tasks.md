@@ -325,6 +325,25 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the clean integration commit
+  `9ab1ede347484cc65f9f7a62678533eb66e43d1b` passes its one full current-pair
+  fast check: all eleven application suites, 3,586 tests passed, 39 expected
+  exclusions, 912 seconds. This includes the complete Core suite after the
+  premature-expiry repair: 1,117 passed, eight excluded, 230 seconds. Complete
+  immutable output `/private/tmp/loopex-m7-9ab1ede3-fast-check.log`, SHA-256
+  `28c8d840f2d43d6348f0ae5ae2d098c7db1fd60ad3deea857ed329009a60f219`.
+  Compilation, formatting, bootstrap/status, documentation, repository-command
+  fixtures and dependency/version gates also pass. No full check will repeat
+  for those bytes. This is integration evidence, not the floor/fresh-source/
+  provider closure matrix. Original T01–T19 counts stay 54 done / 119 todo /
+  6 retired; added counts stay 198 done / 8 todo. Both pending maintainer
+  decisions remain unanswered. Standalone episode capture and execution are
+  next; no whole standalone workflow row is closed by this integration check.
+  The clean managed `m7-trace-check` worktree has been prepared at this tested
+  commit for the next source phase. Its previous detached `07bfc363` commit is
+  retained under `refs/loopex/checkpoints/m7-trace-check-07bfc363`; no prior
+  committed work was discarded. There is no live check or agent remaining.
+
 - Done: standalone compact command admission and replay now retain the closed
   explicit attempt/deadline/token declaration and command-derived episode ID
   without a clock, prompt, run, episode capture or provider dispatch. The owner

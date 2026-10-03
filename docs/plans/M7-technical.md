@@ -1752,6 +1752,12 @@ cannot settle before its retained wall-clock cutoff. The handler re-arms against
 the same instant, preserving the original real two-second bound and complete
 ending/replay assertions. The task checklist retains the deterministic red run,
 the earlier failed floor selection and subsequent focused evidence separately.
+The clean `9ab1ede347484cc65f9f7a62678533eb66e43d1b` integration commit now
+passes its full current-pair fast check: all eleven suites, 3,586 passed,
+39 expected exclusions, 912 seconds. This includes the complete Core suite
+after the expiry repair. The immutable output and digest are indexed in the
+checklist. It does not establish standalone episode capture or execution and
+does not replace the closure matrix.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
