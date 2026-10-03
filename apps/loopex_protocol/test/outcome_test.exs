@@ -5,11 +5,19 @@ defmodule LoopexProtocol.Session.OutcomeTest do
   alias LoopexProtocol.Session.Outcome
 
   test "literal terminal vectors pin all branches, refusal shapes and exact quantities" do
-    fixture = read_contract("vectors/chat-terminal-outcome.v1.json")
-    assert fixture["contract"] == "chat_terminal_outcome"
-    assert length(fixture["cases"]) == 64
+    fixtures =
+      Enum.map(
+        [
+          "vectors/chat-terminal-outcome.v1.json",
+          "vectors/chat-terminal-context-failure.v2.json"
+        ],
+        &read_contract/1
+      )
 
-    for vector <- fixture["cases"] do
+    assert Enum.map(fixtures, &length(&1["cases"])) == [64, 93]
+    assert Enum.all?(fixtures, &(&1["contract"] == "chat_terminal_outcome"))
+
+    for vector <- Enum.flat_map(fixtures, & &1["cases"]) do
       if vector["error"] do
         assert Outcome.decode_wire(vector["input"]) == :error, vector["name"]
       else
@@ -90,6 +98,29 @@ defmodule LoopexProtocol.Session.OutcomeTest do
              :error
   end
 
+  test "configured context failures retain their v2 shape at terminal barriers" do
+    failure = %{
+      "version" => 2,
+      "category" => "context_preparation_failed",
+      "retryable" => false,
+      "measurement_scope" => nil,
+      "cause" => "maintenance_summary_invalid"
+    }
+
+    native = %{
+      outcome: :failed,
+      details: %{
+        "reason" => nil,
+        "failure" => failure,
+        "cleanup_grace_ms" => 5_000
+      }
+    }
+
+    assert {:ok, wire} = Outcome.encode_wire(native)
+    assert wire["details"]["failure"] == failure
+    assert Outcome.decode_wire(wire) == {:ok, native}
+  end
+
   test "schema fixes the closed terminal-only union and retains distinct quantity domains" do
     schema = read_contract("schema/chat-terminal-outcome.v1.json")
     assert schema["required"] == ["outcome", "details"]
@@ -121,11 +152,15 @@ defmodule LoopexProtocol.Session.OutcomeTest do
     root = Path.expand("../../..", __DIR__)
     runner = Path.join(root, "clients/node/terminal-outcome-vectors.mjs")
     vectors = Path.join(root, "apps/loopex_protocol/priv/vectors/chat-terminal-outcome.v1.json")
-    {output, status} = System.cmd(node, [runner, vectors], stderr_to_stdout: true)
+
+    contexts =
+      Path.join(root, "apps/loopex_protocol/priv/vectors/chat-terminal-context-failure.v2.json")
+
+    {output, status} = System.cmd(node, [runner, vectors, contexts], stderr_to_stdout: true)
     assert status == 0, output
 
     assert {:ok,
-            %{"contract" => "chat_terminal_outcome", "checked" => 64, "boundary_checks" => 2}} =
+            %{"contract" => "chat_terminal_outcome", "checked" => 157, "boundary_checks" => 2}} =
              Frame.decode(String.trim_trailing(output, "\n"), 65_536)
   end
 
@@ -134,6 +169,9 @@ defmodule LoopexProtocol.Session.OutcomeTest do
 
   defp retained(value) when is_map(value) do
     Map.new(value, fn
+      {"version", version} ->
+        {"version", version}
+
       {"reconciliation_ref", bytes} ->
         {"reconciliation_ref", %{"opaque_hex" => Base.encode16(bytes, case: :lower)}}
 

@@ -325,6 +325,46 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: chat terminal outcomes preserve ADR 0043's approved v2 numeric and
+  preparation failures. Outcome and CompactResult share the closed current
+  failure validator; the independent Node consumers share their corresponding
+  decoder. No cause, quantity bound, cleanup meaning or outer result changes.
+  The regression first rejected a valid configured preparation failure. Real
+  chat staging now retains a configured byte refusal through both the explicit
+  wait and quit-drain barrier, then closing, without transport failure or model
+  dispatch. The original 64 vectors remain byte-identical; a separate bounded
+  fixture adds 93 positive/negative v2 vectors. Both consumers check all 157.
+  This extends T10's completed terminal-codec subtask; all checkbox totals remain
+  unchanged and the remaining chat workflow outcomes stay open.
+
+  The four-file selection, explicitly including the Node client tests, passed
+  57 tests on each supported pair. Current: 9.5 measured runner seconds,
+  `/private/tmp/loopex-m7-terminal-v2-current-dev4.log`, SHA-256
+  `a6751a536d7597a4f36564fae0b8c8113f4d249a88b134ac923b601179602f84`.
+  Floor: 10.1 measured runner seconds,
+  `/private/tmp/loopex-m7-terminal-v2-floor-v1.log`, SHA-256
+  `4ef096a42b10d58e1ffd1a581f0e9a01cac1a209af47d23f036c48c7551fccac`.
+  Formatting, warning-free compilation, dependency direction, structure/status,
+  documentation and diff gates passed in 21.0 measured seconds:
+  `/private/tmp/loopex-m7-terminal-v2-gates-v2.log`, SHA-256
+  `410087965b10563a030c600339f318850d895f43a8048d4b0463a668163f8f06`.
+  The failing-before regression remains in
+  `/private/tmp/loopex-m7-terminal-v2-red-current-v1.log`, SHA-256
+  `f1e7581811c330195a5dae8c4d5c045c1de9d1178e5dc97e2caee28f0ff4f3d3`.
+  Fixture corrections split vectors under the unchanged 65,536-byte decoder cap,
+  assert successful transport's actual nil value, and assert both barrier records
+  with their exact input sequences and identical outcomes. Failed selections are
+  retained as `/private/tmp/loopex-m7-terminal-v2-current-dev2.log`, SHA-256
+  `45e7f4a50ff9c825b1965fd77fe6b402c1bbb71d44c2c0622482dc3f5bcf56e4`,
+  and `/private/tmp/loopex-m7-terminal-v2-current-dev3.log`, SHA-256
+  `3dd6d22b998f2686c08c4d1d424616ef6bd14fd153e8f263f1a770910ec0c261`.
+  The initial dependency gate refused an unstaged new source; staging its ordinary
+  blob corrected the repository precondition. That output remains in
+  `/private/tmp/loopex-m7-terminal-v2-gates-v1.log`, SHA-256
+  `ae23bfd702d5b3a9ff99109f627bb44e70ae103539a36445bc397dc6d591b719`.
+  All handles are terminal and collected. No decision or agent is pending.
+  Successful live compaction remains open; the goal continues on m7.
+
 - Done: private effect-history coverage now traverses current maintenance
   admission, request and terminal records as neutral rows. It validates closed
   shapes, captured configuration, canonical request/source bindings, spending

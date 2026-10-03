@@ -6,6 +6,8 @@
 // ordinary turn/token counts beyond u64; references remain opaque Buffers.
 // The caller owns framing, the presentation cap and the truth of settlement.
 
+import { decodeContextFailure } from "./context-failure.mjs";
+
 const u64 = 18446744073709551615n;
 const observedMax = 55340232221128654844n;
 const dimensions = new Set([
@@ -61,6 +63,7 @@ export function decodeTerminalOutcome(value) {
 }
 
 function decodeFailure(value) {
+  if (value?.version === 2) return decodeContextFailure(value);
   if (!closed(value, ["category", "retryable", "dimension", "observed", "limit"]) || value.retryable !== false) return null;
   if (value.category === "deadline_preflight_failed") {
     return value.dimension === null && value.observed === null && value.limit === null ? { ...value } : null;

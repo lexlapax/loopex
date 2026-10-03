@@ -7,6 +7,49 @@ defmodule LoopexCli.ChatDriverTest do
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
 
+  test "a configured byte refusal reaches wait and closing without a transport failure" do
+    prepared = prepared_configuration()
+    fixture = start_fixture([], model: prepared.selection.configuration["model"])
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    prompt = String.duplicate("x", 33_000)
+    {:ok, input} = StringIO.open(prompt <> "\n/wait\n/quit\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output, configuration: prepared)
+
+    assert %{exit_code: 1, cleanup: :confirmed, transport: nil} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 1
+    {_, transcript} = StringIO.contents(output)
+    controls = records(transcript)
+
+    assert [barrier, quit_barrier] =
+             Enum.filter(controls, &(&1["event"] == "wait" and &1["run_id"] != nil))
+
+    assert Enum.map([barrier, quit_barrier], & &1["input_sequence"]) == ["2", "3"]
+    assert quit_barrier["outcome"] == barrier["outcome"]
+    assert quit_barrier["run_id"] == barrier["run_id"]
+    failure = barrier["outcome"]["details"]["failure"]
+    assert failure["version"] == 2
+    assert failure["category"] == "context_budget_exceeded"
+    assert failure["measurement_scope"] == "ordinary"
+    assert failure["dimension"] == "context_record_bytes"
+    assert String.to_integer(failure["observed"]) > 65_536
+    assert failure["limit"] == "65536"
+    assert failure["hard_limit"] == "65536"
+    assert List.last(controls)["last_outcome"] == barrier["outcome"]
+    assert List.last(controls)["cleanup"] == "confirmed"
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+    refute transcript =~ prompt
+  end
+
   test "a second interrupt ends a blocked status read under the first captured cutoff" do
     prepared = prepared_configuration()
     fixture = start_fixture([], model: prepared.selection.configuration["model"])

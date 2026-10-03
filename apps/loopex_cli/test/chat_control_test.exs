@@ -340,6 +340,40 @@ defmodule LoopexCli.ChatControlTest do
     end
   end
 
+  test "wait and closing preserve configured preparation failure without changing cleanup" do
+    failure = %{
+      "version" => 2,
+      "category" => "context_preparation_failed",
+      "retryable" => false,
+      "measurement_scope" => nil,
+      "cause" => "maintenance_summary_invalid"
+    }
+
+    terminal = %{
+      outcome: :failed,
+      details: %{
+        "reason" => nil,
+        "failure" => failure,
+        "cleanup_grace_ms" => 5_000
+      }
+    }
+
+    assert {:ok, barrier} =
+             ChatControl.encode(:wait, %{wait() | run_id: "run", outcome: terminal})
+
+    assert decode(barrier)["outcome"]["details"]["failure"] == failure
+
+    assert {:ok, closing} =
+             ChatControl.encode(:closing, %{
+               exit_code: 1,
+               cleanup: :confirmed,
+               last_outcome: terminal
+             })
+
+    assert decode(closing)["last_outcome"]["details"]["failure"] == failure
+    assert decode(closing)["cleanup"] == "confirmed"
+  end
+
   test "closing reports prior failure even when the last run succeeded and refuses false success" do
     base = %{exit_code: 1, cleanup: :confirmed, last_outcome: completed()}
     assert {:ok, line} = ChatControl.encode(:closing, base)

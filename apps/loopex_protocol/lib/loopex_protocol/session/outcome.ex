@@ -118,6 +118,9 @@ defmodule LoopexProtocol.Session.Outcome do
   defp failure(reason, nil, _) when reason in ~w(model_call_failed unreadable_model_answer),
     do: {:ok, nil}
 
+  defp failure(nil, %{"version" => 2} = value, mode),
+    do: LoopexProtocol.Session.ContextFailure.project(value, mode)
+
   defp failure(
          nil,
          %{"category" => "deadline_preflight_failed", "retryable" => false} = value,

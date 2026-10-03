@@ -10,10 +10,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { decodeTerminalOutcome } from "./terminal-outcome.mjs";
 
-const [path] = process.argv.slice(2);
-if (!path) throw new Error("usage: node terminal-outcome-vectors.mjs <vector-path>");
-const fixture = JSON.parse(readFileSync(path, "utf8"));
-assert.equal(fixture.format, "loopex.experimental.payload-vectors/1");
+const paths = process.argv.slice(2);
+if (paths.length === 0) throw new Error("usage: node terminal-outcome-vectors.mjs <vector-path>...");
+const fixtures = paths.map(path => JSON.parse(readFileSync(path, "utf8")));
+for (const fixture of fixtures) {
+  assert.equal(fixture.format, "loopex.experimental.payload-vectors/1");
+  assert.equal(fixture.contract, "chat_terminal_outcome");
+}
+const cases = fixtures.flatMap(fixture => fixture.cases);
 
 function retained(value) {
   if (typeof value === "bigint") return value.toString();
@@ -24,7 +28,7 @@ function retained(value) {
   return value;
 }
 
-for (const vector of fixture.cases) {
+for (const vector of cases) {
   const decoded = decodeTerminalOutcome(vector.input);
   assert.deepEqual(retained(decoded), vector.error ? null : vector.decoded, vector.name);
 }
@@ -34,4 +38,4 @@ const unknown = { outcome: "outcome_unknown", details: { cleanup_grace_ms: "1", 
 assert.deepEqual(decodeTerminalOutcome(unknown).details.reconciliation_ref, reference);
 unknown.details.reconciliation_ref = Buffer.concat([reference, Buffer.from("x")]).toString("base64url");
 assert.equal(decodeTerminalOutcome(unknown), null);
-process.stdout.write(JSON.stringify({ contract: fixture.contract, checked: fixture.cases.length, boundary_checks: 2 }) + "\n");
+process.stdout.write(JSON.stringify({ contract: "chat_terminal_outcome", checked: cases.length, boundary_checks: 2 }) + "\n");
