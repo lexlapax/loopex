@@ -1569,6 +1569,15 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   it. Normal M7 startup may already write new configuration; no broad backward-read
   promise follows from an unchanged storage container.
 
+Prepared chat startup facts now constrain the selected policy identity/revision
+and every admitted model's provider route before activation, with no credential
+or current catalog lookup. Pending and answered questions retain exact facts;
+refusal abandons without reevaluation or executor/provider dispatch. Recovered
+answered-policy scheduling applies the existing recovered-run pause, including
+prepared, abandoned and fenced capabilities. Matching-policy activation has a
+positive reevaluation and exact worker-join witness. Public chat host integration
+and closure evidence remain open.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

@@ -17,8 +17,10 @@ defmodule LoopexCli.ChatConfiguration do
   Resume has a separate configuration preparation path using the capability
   holder's retained reads. New chat captures the physical workspace identity;
   resume requires that binding and checks every retained pending effect against
-  it. Pending-policy/routing checks, activation and enabled delegation remain
-  outer-host integration obligations.
+  it. The selected registry policy must match a retained policy question, and
+  admitted model identities must have configured provider routes. These checks
+  resolve no credential or catalog entry. Activation and enabled delegation
+  remain outer-host integration obligations.
   """
 
   alias LoopexCli.{ConfigFile, ConfigOptions, ConfigSelection, SessionInstructions}
@@ -128,8 +130,10 @@ defmodule LoopexCli.ChatConfiguration do
   catalog. Explicit prompt flags read only those bounded selected sections;
   omitted prompt files are never reopened. New-run bounds and separately
   resolved maintenance selection stay invocation settings. The result spends
-  no activation and dispatches no work. Outer startup still validates workspace,
-  pending policy and admitted-work routes, installs cancellation, then activates.
+  no activation and dispatches no work. Retained policy questions must match
+  the selected registry identity and revision. Every already-admitted model must
+  retain its provider route, without re-resolving its captured model metadata.
+  Outer startup rechecks physical placement, installs cancellation, then activates.
   Missing workspace binding refuses; no older-root migration or host-selected
   identity fallback is offered. Helper bindings remain separate integration work.
   Failed abandonment reports the original refusal and cleanup uncertainty.
@@ -164,6 +168,9 @@ defmodule LoopexCli.ChatConfiguration do
              selection.profile["paths"]["workspace"],
              startup.admitted_workspace_refs
            ),
+         :ok <-
+           pending_policy_binding(startup.pending_policy_identity, selection.profile["policy"]),
+         :ok <- admitted_model_routes(startup.admitted_models, selection.profile["providers"]),
          %{"definitions" => definitions} <- retained.tool_selection,
          configuration when is_map(configuration) <- retained.configuration,
          :ok <- SessionConfiguration.validate(configuration, definitions),
@@ -254,6 +261,49 @@ defmodule LoopexCli.ChatConfiguration do
   end
 
   defp resume_configuration(_, _), do: {:error, :invalid_chat_resume_invocation}
+
+  # Concept: a pending policy question continues under the same host identity.
+  # Technical depth: names select fixed trusted registry modules; they do not
+  # invent identities or adopt a retained policy. With no policy interaction,
+  # a newly selected policy remains the host's choice for subsequent work.
+  defp pending_policy_binding(nil, _policy), do: :ok
+
+  defp pending_policy_binding(retained, policy) do
+    case Map.fetch(LoopexCli.AskOptions.policy_profiles(), policy) do
+      {:ok, module} ->
+        if retained == %{"id" => inspect(module), "revision" => "0.2.0"},
+          do: :ok,
+          else: {:error, :chat_pending_policy_binding_conflict}
+
+      :error ->
+        {:error, :chat_pending_policy_binding_conflict}
+    end
+  end
+
+  # Concept: recovery cannot lose a route needed by work already admitted.
+  # Technical depth: compare only the provider prefix of each retained exact
+  # model identity. No catalog, current alias, capability or credential lookup
+  # may replace the captured model or grant permission to dispatch it.
+  defp admitted_model_routes(models, bindings) do
+    with {:ok, _} <- ProviderBindings.validate(bindings),
+         true <- Enum.all?(models, &admitted_model_route?(&1, bindings)) do
+      :ok
+    else
+      _ -> {:error, :provider_route_unavailable}
+    end
+  end
+
+  defp admitted_model_route?(model, bindings) when is_binary(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider, name] when byte_size(provider) > 0 and byte_size(name) > 0 ->
+        Map.has_key?(bindings, provider)
+
+      _ ->
+        false
+    end
+  end
+
+  defp admitted_model_route?(_, _), do: false
 
   # Concept: the host continues work only in the physical workspace retained at creation.
   # Technical depth: paths and explicit flags cannot adopt an unbound older root.

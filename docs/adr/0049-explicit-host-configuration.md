@@ -55,7 +55,10 @@ session. The maintainer's 2026-10-02 current-contract decision retires the
 pre-1.0 legacy model-selection and unbound-workspace exceptions.
 Resume also keeps the session's committed cleanup period. A changed file value
 is a default for new sessions; a conflicting explicit cleanup flag refuses
-through ADR 0016's prepared-recovery path before work can start.
+through ADR 0016's prepared-recovery path before work can start. Preparation
+compares retained policy questions with the selected policy identity and revision,
+and keeps every provider route needed by already-admitted work. An answered
+question remains paused until the holder activates the recovered session.
 The reference host also supplies ADR 0043's shared versioned compaction
 instructions at runtime startup. They have no new file field or CLI flag;
 an admitted episode retains its block across restart, while future episodes

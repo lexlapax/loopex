@@ -95,7 +95,7 @@ defmodule Loopex.AgentLoopFixture do
           identity: "agent-loop-executor",
           epoch: 1,
           fencing_token: 1,
-          workspace_ref: "workspace-ref",
+          workspace_ref: Keyword.get(options, :workspace_ref, "workspace-ref"),
           workspace_lease: "workspace-lease"
         },
         tool: nil,

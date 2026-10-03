@@ -3241,7 +3241,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
                 {:noreply, state}
 
               %{status: "answered"} = interaction ->
-                resume_policy_evaluation(state, interaction)
+                # Concept: an answer does not spend the host's resume capability.
+                # Technical depth: policy reevaluation is dispatch too. Apply the
+                # recovered-run pause before starting its worker, including
+                # abandoned/fenced owners, just as for ordinary pending work.
+                if resume_paused?(state, interaction),
+                  do: {:noreply, state},
+                  else: resume_policy_evaluation(state, interaction)
 
               _none ->
                 case Enum.reject(

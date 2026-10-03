@@ -70,9 +70,10 @@ defmodule Loopex.PreparedSessionStartupTest do
     :ok = Loopex.abandon_resume(recovered)
   end
 
-  for status <- [:pending, :answered] do
+  for status <- [:pending, :answered], identity <- [:same, :changed] do
     @status status
-    test "#{status} policy question retains its binding before successor reevaluation" do
+    @identity identity
+    test "#{status} policy question retains its binding before #{@identity} successor reevaluation" do
       policy = %{"id" => "retained.policy", "revision" => "exact-revision"}
 
       fixture =
@@ -111,7 +112,9 @@ defmodule Loopex.PreparedSessionStartupTest do
         start(
           store: fixture.store,
           script: [],
-          policy_identity: %{"id" => "changed", "revision" => "2"}
+          policy: %{module: QuestionPolicy, context: self()},
+          policy_identity:
+            if(@identity == :same, do: policy, else: %{"id" => "changed", "revision" => "2"})
         )
 
       {:ok, {:prepared, activation}} =
@@ -130,7 +133,20 @@ defmodule Loopex.PreparedSessionStartupTest do
       assert AgentLoopTestModel.dispatched(successor.model) == []
       assert Agent.get(successor.executor, & &1.jobs) == []
       refute_receive {:policy_reevaluation, _}, 0
-      :ok = Loopex.abandon_resume(activation)
+      {:ok, children} = Loopex.Runtime.children(successor.runtime)
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      assert :sys.get_state(coordinator).in_flight == %{}
+
+      if @status == :answered and @identity == :same do
+        assert {:ok, ^session} = Loopex.activate_resume(activation)
+        assert_receive {:policy_reevaluation, worker}, 5_000
+        monitor = Process.monitor(worker)
+        send(worker, :release)
+        assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 5_000
+        assert :ok = Loopex.stop(successor.runtime)
+      else
+        :ok = Loopex.abandon_resume(activation)
+      end
     end
   end
 

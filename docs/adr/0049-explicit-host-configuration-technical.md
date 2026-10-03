@@ -131,8 +131,15 @@ immediately before activation. Missing or malformed binding refuses; explicit
 creating them. All options remain within the unchanged whole-genesis ceiling.
 Inspection measures the same fixed-width binding cost without retaining or
 publishing a physical identity or requiring the selected directory to exist.
-Require ADR 0024 policy identity for pending interactions and available routes
-for admitted work. Core has no session-wide policy identity.
+Require ADR 0024 policy identity and revision for pending or answered policy
+interactions. Compare the holder's retained startup capture with the selected
+fixed policy registry identity; matching a policy name alone cannot adopt
+another revision. Require a configured route for the provider prefix of every
+already-admitted model identity. These checks read no credential, resolve no
+current catalog alias and substitute no captured model metadata. Refusal
+abandons the prepared owner. Answered policy reevaluation observes the same
+recovered-run pause as ordinary work and begins only after holder activation;
+an answer does not spend that capability. Core has no session-wide policy identity.
 A settled session has no core session-wide policy identity, so this proposal
 adds no such resume comparison. The fixture runbook reopens through the same
 trusted wrapper and fixed case policy/manifest, with those identities retained

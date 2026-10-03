@@ -107,6 +107,66 @@ did not resolve them. No paid provider calls were made during this check.
 
 
 
+- Done: join prepared chat resume to the exact retained policy-question
+  identity/revision and every already-admitted model's provider route. The
+  checks resolve no current catalog aliases or credentials, preserve captured
+  metadata and abandon every refused owner. A policy may change when there is
+  no retained policy question. Real pending/answered questions prove matching
+  preparation, conflicting policy/revision refusal, missing admitted-model route
+  refusal, untouched environment credentials and zero provider/executor work.
+  The fixture now supplies its actual physical workspace reference to the
+  existing executor boundary; default fixture callers retain their prior value.
+  Each zero-mutation comparison spans one prepared-owner lifetime, rather than
+  confusing a subsequent ownership acquisition with mutation by an inspection.
+
+- Done: fix premature answered-policy reevaluation during prepared recovery.
+  The ordinary scheduler paused recovered work but its answered-question branch
+  bypassed that check. With a matching policy, reevaluation could resolve the
+  interaction or stage an effect before holder activation; added chat witnesses
+  reproduced changed bindings or a vanished retained policy. The branch now
+  applies the same recovered-run pause to its interaction's run. Pending and
+  answered questions with matching and changed policies retain exact facts and
+  an empty in-flight worker set. Matching answered recovery positively starts
+  reevaluation only after activation and joins that exact worker. Prepared,
+  abandoned and fenced states keep the existing pause; explicit abort retains
+  its ordinary cleanup path. ADR 0049 and the active plan pair retain the same
+  guarantee, with no new API or authority decision.
+
+  Final focused checks passed with warnings as errors on both supported pairs:
+  62 CLI preparation/startup/guarded-signal cases (22.3/22.6 measured suite
+  seconds), plus 36 Core startup/configuration/interaction cases (9.0/9.1).
+  Complete terminal outputs and SHA-256:
+
+  | Check | Complete output | SHA-256 |
+  | --- | --- | --- |
+  | chat-admitted-startup-current-final | `/private/tmp/loopex-m7-chat-admitted-startup-current-final.log` | `3ff4bf8cab1d0124b63a7c8d04d1d20fc9dc0170c2183b95e1e604f58b663304` |
+  | chat-admitted-startup-floor-final | `/private/tmp/loopex-m7-chat-admitted-startup-floor-final.log` | `09149d89cb44829b7f6da1fe0944012be4bba0569461741282c7ba8ff07dd782` |
+  | prepared-policy-current-v1 | `/private/tmp/loopex-m7-prepared-policy-current-v1.log` | `e3701b30ce688a16d07553b781ab58deb9f5ec55c0c954a447160b0c516a78c0` |
+  | prepared-policy-floor-final | `/private/tmp/loopex-m7-prepared-policy-floor-final.log` | `2dcbbee61a67e210158c0f5bc521f2eea30ee4527a476692943b3552fdb18e21` |
+  | chat-admitted-startup-current-v1 | `/private/tmp/loopex-m7-chat-admitted-startup-current-v1.log` | `ea8fa5be4a94edff2ab4136f3015ed10bb514dc89cc7eef1bb0d47f9c1e59c4f` |
+  | chat-admitted-startup-current-v2 | `/private/tmp/loopex-m7-chat-admitted-startup-current-v2.log` | `cd64724da2f7c06bb8b1c31db1111875cced3dfa5e5f6ecc0ae9057e722304f7` |
+  | chat-admitted-startup-current-v3 | `/private/tmp/loopex-m7-chat-admitted-startup-current-v3.log` | `c99b524eaf0933e48c41b0c4f4b3b7588b47b713d12b9ad27ec9d63e5def7a64` |
+  | chat-admitted-startup-current-v4 | `/private/tmp/loopex-m7-chat-admitted-startup-current-v4.log` | `7af2ce0dc98b154c3d1fa5c790ec825ce4d6735bced5ad73eb909781d2ecda39` |
+  | chat-admitted-startup-current-v5 | `/private/tmp/loopex-m7-chat-admitted-startup-current-v5.log` | `b19c1b5584a667804979f44322b9ae584bbb7e0c73b31b8fefacef422830b52f` |
+
+  Formatting, warning-free compilation, documentation ordering, repository
+  structure/status and diff checks passed in 18.4 measured seconds. Complete
+  output `/private/tmp/loopex-m7-chat-admitted-startup-gates-v1.log`, SHA-256
+  `97f2509c769f247c3f278e51ea33e07115d78239b03e024726c9bb8cff92bf9a`.
+
+  Initial development failures are retained. V1 also exposed a stale comparison
+  across two prepared-owner acquisitions; its subsequent comparison captures
+  each new owner before inspection. The answered-question failures persisted
+  after correcting the executor workspace fixture and then identified actual
+  pre-activation reevaluation. V5 passed after the scheduler fix; both final
+  selections include startup and guarded-signal cases. No deadline, required
+  path, pause or physical-workspace guard was relaxed. The earlier 10c3fd5d
+  full fast check predates these bytes and the request/receipt retirement.
+  One added T06 and one added T09 subtask close. Original tally remains
+  50 done / 129 todo / 7 retired; added tally is 171 done / 9 todo. Public
+  chat command startup, report/input/placement joining, helpers, maintenance,
+  coordinated protocols and closure/release proof remain open.
+
 - Done: remove the model-request v1 reader, receipt revision 2/3 readers,
   old per-run conversation query, estimator/key fallback and lineage-validation
   bypass. Every admitted request is current v2 with receipt revision 4,
@@ -5534,6 +5594,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Join prepared resume to exact retained policy identity/revision and all admitted model routes; abandon refusals without credentials/catalog lookup and prove matching/conflicting pending/answered questions, zero dispatch and untouched facts on both toolchains.
+
 - [x] Expose the approved exact-create/provenance public facade reads; retire older-generation positive-read scaffolding and prove unchanged Store bytes and zero activation through current-genesis Memory/Local recovery on both supported pairs.
 
 - [x] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
@@ -5634,6 +5696,8 @@ or check was relaxed.
 - [x] Prove recovery retains the actual pending question identity.
 
 ### Added implementation subtasks
+
+- [x] Fence recovered answered-policy reevaluation with the existing prepared-run pause; prove matching and changed policy facts stay unchanged with no in-flight worker before activation, then positively observe reevaluation and its exact worker join after activation on both toolchains.
 
 - [x] Pin its format-v2 canonical preimage/digest and enforce exact schema/byte/choice limits before policy.
 - [x] Separate interaction tools from executor dispatch and reject nested policy defer.
@@ -5824,6 +5888,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Run the prepared-policy scheduling and current-only request/receipt integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 
 - [x] Run the combined owner-only settings-report and current-only settlement integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 - [x] Run the full fast check once on the clean committed current-only tool and prepared-chat binding checkpoint; retain exact SHA, terminal output, measured duration and SHA-256 without claiming later changes are covered.

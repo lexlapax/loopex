@@ -8,6 +8,29 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
   alias LoopexCli.ChatConfiguration
   alias Loopex.AgentLoopFixture, as: Fixture
 
+  defmodule PendingPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+    @impl true
+    def decide(_request), do: {:deny, :policy_denied}
+
+    @impl true
+    def decide(request, observer) do
+      if Map.has_key?(request, :interaction_response) do
+        send(observer, {:policy_reevaluation, self()})
+        receive do: (:release -> {:deny, :policy_denied})
+      else
+        {:defer,
+         %{
+           kind: :choice,
+           prompt: "May this effect proceed?",
+           choices: [%{id: "allow", label: "Allow"}, %{id: "deny", label: "Deny"}],
+           expires_in_ms: 60_000
+         }}
+      end
+    end
+  end
+
   setup do
     root = Path.join(System.tmp_dir!(), "chat-resume-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(root, "workspace"))
@@ -124,6 +147,147 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
              ChatConfiguration.update(resumed, %{"max_tokens" => 2048})
 
     assert candidate["configuration_version"] == 2
+    assert :ok = Loopex.abandon_resume(activation)
+  end
+
+  for status <- [:pending, :answered] do
+    @pending_status status
+    test "#{status} policy question requires the exact selected registry identity before activation",
+         f do
+      expected = %{"id" => inspect(LoopexCli.Policy.AllowAll), "revision" => "0.2.0"}
+      fixture = pending_policy_fixture(f, expected, @pending_status)
+      bound = %{f | fixture: fixture.fixture, session: fixture.session}
+      {:ok, invocation} = load(bound)
+      activation = activation(fixture.fixture, fixture.session)
+
+      before =
+        {Fixture.records(fixture.fixture, fixture.session),
+         Fixture.events(fixture.fixture, fixture.session)}
+
+      assert {:ok, capture} = Loopex.prepared_session_startup(activation)
+      assert capture.session_options == f.prepared.session_options
+
+      assert invocation.selection.profile["paths"]["workspace"] ==
+               f.prepared.selection.profile["paths"]["workspace"]
+
+      assert {:ok, actual_workspace} =
+               LoopexComposition.WorkspaceIdentity.reference(
+                 invocation.selection.profile["paths"]["workspace"]
+               )
+
+      assert actual_workspace == capture.session_options["workspace_binding"]["workspace_ref"]
+
+      assert capture.admitted_workspace_refs in [
+               [],
+               [f.prepared.session_options["workspace_binding"]["workspace_ref"]]
+             ]
+
+      assert {:ok, resumed} = ChatConfiguration.resume(invocation, activation)
+      assert resumed.startup.pending_policy_identity == expected
+      assert resumed.startup.admitted_models == [f.prepared.selection.configuration["model"]]
+
+      assert {Fixture.records(fixture.fixture, fixture.session),
+              Fixture.events(fixture.fixture, fixture.session)} == before
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.fixture.model) == []
+      assert Agent.get(fixture.fixture.executor, & &1.jobs) == []
+      refute_receive {:policy_reevaluation, _}, 0
+      assert :ok = Loopex.abandon_resume(activation)
+
+      {:ok, conflicting} = load(bound, ["--policy", "shell-allowlist"])
+      activation = activation(fixture.fixture, fixture.session)
+
+      refused_before =
+        {Fixture.records(fixture.fixture, fixture.session),
+         Fixture.events(fixture.fixture, fixture.session)}
+
+      assert {:error, :chat_pending_policy_binding_conflict} =
+               ChatConfiguration.resume(conflicting, activation)
+
+      assert {:error, :resume_activation_abandoned} = Loopex.prepared_session_startup(activation)
+
+      assert {Fixture.records(fixture.fixture, fixture.session),
+              Fixture.events(fixture.fixture, fixture.session)} == refused_before
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.fixture.model) == []
+      assert Agent.get(fixture.fixture.executor, & &1.jobs) == []
+      refute_receive {:policy_reevaluation, _}, 0
+    end
+  end
+
+  test "a matching policy name cannot adopt another retained revision", f do
+    identity = %{"id" => inspect(LoopexCli.Policy.AllowAll), "revision" => "changed"}
+    fixture = pending_policy_fixture(f, identity, :pending)
+    {:ok, invocation} = load(%{f | fixture: fixture.fixture, session: fixture.session})
+    activation = activation(fixture.fixture, fixture.session)
+
+    before =
+      {Fixture.records(fixture.fixture, fixture.session),
+       Fixture.events(fixture.fixture, fixture.session)}
+
+    assert {:error, :chat_pending_policy_binding_conflict} =
+             ChatConfiguration.resume(invocation, activation)
+
+    assert {:error, :resume_activation_abandoned} = Loopex.prepared_session_startup(activation)
+
+    assert {Fixture.records(fixture.fixture, fixture.session),
+            Fixture.events(fixture.fixture, fixture.session)} == before
+
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.fixture.model) == []
+    assert Agent.get(fixture.fixture.executor, & &1.jobs) == []
+  end
+
+  test "a pending run refuses a missing admitted-model route without consuming credentials", f do
+    identity = %{"id" => inspect(LoopexCli.Policy.AllowAll), "revision" => "0.2.0"}
+    fixture = pending_policy_fixture(f, identity, :pending)
+
+    profile =
+      f.profile
+      |> Map.put("providers", %{
+        "openai" => %{"credential" => %{"env" => "M7_PENDING_ROUTE_SLOT"}}
+      })
+      |> put_in(["session", "model"], "openai:irrelevant-file-default")
+
+    File.write!(f.path, :json.encode(profile))
+    {:ok, invocation} = load(%{f | fixture: fixture.fixture, session: fixture.session})
+    activation = activation(fixture.fixture, fixture.session)
+    assert {:ok, %{admitted_models: models}} = Loopex.prepared_session_startup(activation)
+    assert models == [f.prepared.selection.configuration["model"]]
+
+    before =
+      {Fixture.records(fixture.fixture, fixture.session),
+       Fixture.events(fixture.fixture, fixture.session)}
+
+    previous = System.get_env("M7_PENDING_ROUTE_SLOT")
+    System.put_env("M7_PENDING_ROUTE_SLOT", "unconsumed-pending-route-canary")
+
+    try do
+      assert {:error, :provider_route_unavailable} =
+               ChatConfiguration.resume(invocation, activation)
+
+      assert {:error, :resume_activation_abandoned} = Loopex.prepared_session_startup(activation)
+      assert System.get_env("M7_PENDING_ROUTE_SLOT") == "unconsumed-pending-route-canary"
+
+      assert {Fixture.records(fixture.fixture, fixture.session),
+              Fixture.events(fixture.fixture, fixture.session)} == before
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.fixture.model) == []
+      assert Agent.get(fixture.fixture.executor, & &1.jobs) == []
+      refute_receive {:policy_reevaluation, _}, 0
+    after
+      if previous,
+        do: System.put_env("M7_PENDING_ROUTE_SLOT", previous),
+        else: System.delete_env("M7_PENDING_ROUTE_SLOT")
+    end
+  end
+
+  test "a different selected policy is permitted when no retained policy question exists", f do
+    {:ok, invocation} = load(f, ["--policy", "shell-allowlist"])
+    activation = activation(f.fixture, f.session)
+
+    assert {:ok, %{startup: %{pending_policy_identity: nil}}} =
+             ChatConfiguration.resume(invocation, activation)
+
     assert :ok = Loopex.abandon_resume(activation)
   end
 
@@ -495,6 +659,77 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
     send(holder, :abandon)
     assert_receive {:abandoned, :ok}
     assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}
+  end
+
+  defp pending_policy_fixture(f, identity, status) do
+    options = [
+      tools: f.prepared.genesis["tool_selection"]["definitions"],
+      model: f.prepared.selection.configuration["model"],
+      policy: %{module: PendingPolicy, context: self()},
+      policy_identity: identity,
+      workspace_ref: f.prepared.session_options["workspace_binding"]["workspace_ref"],
+      script: [
+        %{
+          text: "proposed",
+          calls: [%{id: "read", name: "read", arguments: %{"path" => "owned.txt"}}]
+        }
+      ]
+    ]
+
+    original = Fixture.start(options)
+    on_exit(fn -> Fixture.stop(original) end)
+
+    {:ok, session} =
+      Loopex.create_session(original.runtime, f.prepared.session_options,
+        command_id: "policy-create",
+        genesis: f.prepared.genesis
+      )
+
+    {:ok, attachment} = Loopex.attach(original.runtime, session)
+
+    assert {:accepted, "policy-prompt"} =
+             Loopex.command(
+               attachment,
+               %{type: :prompt, command_id: "policy-prompt", content: "request read"}
+             )
+
+    question =
+      await_policy_question(original.runtime, session, System.monotonic_time(:millisecond) + 5000)
+
+    if status == :answered do
+      assert {:accepted, "policy-answer"} =
+               Loopex.command(
+                 attachment,
+                 %{
+                   type: :interaction_answer,
+                   command_id: "policy-answer",
+                   interaction_id: question["interaction_id"],
+                   choice_id: "allow"
+                 }
+               )
+
+      assert_receive {:policy_reevaluation, _}, 5000
+    end
+
+    assert :ok = Loopex.stop(original.runtime)
+    restarted = start(store: original.store, tools: [], policy_identity: identity)
+    %{fixture: restarted, session: session}
+  end
+
+  defp await_policy_question(runtime, session, deadline) do
+    {:ok, status} = Loopex.session_status(runtime, session)
+
+    cond do
+      status.open_interaction != nil ->
+        status.open_interaction
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("policy question did not commit")
+
+      true ->
+        Process.sleep(1)
+        await_policy_question(runtime, session, deadline)
+    end
   end
 
   defp start(options) do
