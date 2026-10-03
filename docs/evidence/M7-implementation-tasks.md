@@ -105,6 +105,17 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running: the single full fast check for exact clean implementation checkpoint
+  `d7974fe1bdc79821eaf6c1a89be6a0ea98d09962` is executing in the existing
+  detached verification worktree
+  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Complete streamed output
+  is `/private/tmp/loopex-m7-d7974fe1-fast-check.log`. Its header binds the SHA;
+  its final runner footer will record exit and measured elapsed time. No result
+  or digest is claimed while the run is live. Collect terminal completion
+  before hashing, retain a failure if one occurs, and do not repeat the same
+  bytes to count a vanished failure as a pass. The primary `m7` checkout's
+  later administrative tracking edits do not change the tested bytes.
+
 - Done: retire the shipped 1.0 read/grep/find/ls declarations and dispatch
   support, their canonical vectors, the nil legacy read-capability table row,
   `CodingTools.generations/0`, the composition default-version pinning shim and
@@ -5621,6 +5632,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Run the full fast check once on the clean committed current-only tool and prepared-chat binding checkpoint; retain exact SHA, terminal output, measured duration and SHA-256 without claiming later changes are covered.
 - [x] Run the full fast check once on the clean committed pre-1.0 retirement and chat-output synchronization checkpoint; retain exact SHA and terminal output/digest without claiming later public/startup reads are covered.
 
 - [x] Acquire the owner-exit chat fixture writer synchronously before inducing loss; preserve exact DOWN reasons and receive deadlines, retaining failed parent evidence and both-pair focused proof.
