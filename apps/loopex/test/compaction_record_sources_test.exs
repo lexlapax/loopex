@@ -355,6 +355,40 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
     assert plan.eligible_unit_count == 1
     assert plan.retained_tail == []
     assert plan.tail_tokens == 0
+
+    parent = pending.configuration
+
+    selection = %{
+      "model" => parent["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{parent["model_capabilities"] | "reasoning_levels" => ["none"]},
+      "provider_mapping" => %{parent["provider_mapping"] | "thinking_disabled" => true}
+    }
+
+    {:ok, instructions} =
+      Loopex.Runtime.MaintenanceConfiguration.capture_instructions(%{
+        "version" => "summary.v1",
+        "body" => "Retain the complete tool outcome"
+      })
+
+    assert {:ok, capture} =
+             SessionState.propose_standalone_maintenance_episode(
+               pending,
+               selection,
+               instructions,
+               1_000,
+               fn -> :ok end
+             )
+
+    assert hd(capture.records)["trigger"] == "canonical_rendering"
+    assert hd(capture.records)["last_offending_source"] == plan.last_offending_source
+    assert hd(capture.records)["deadline"] == 61_000
+    captured = commit_local(capture)
+    assert captured.active_run_id == nil
+
+    assert captured.maintenance_episodes[captured.active_maintenance]["session_version"] ==
+             captured.journal_version
+
     assert pending.conversation == replayed.conversation
     assert pending.conversation_record_sources == replayed.conversation_record_sources
   end

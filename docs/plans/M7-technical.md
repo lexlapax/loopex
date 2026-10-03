@@ -1791,6 +1791,20 @@ exact-candidate fast check or closure matrix. Episode capture,
 dispatch/spending, result/snapshot and cleanup remain open; this measurement
 and selection does not claim any completed standalone workflow.
 
+Standalone episode admission/replay now retains the command-derived identity,
+exact explicit declaration, captured current configuration version, measured
+trigger, original rendering offender, frozen maintenance configuration and one
+admission-time absolute deadline. The new closed private row omits run,
+staging-turn and preparation-cutoff fields; its journal stamp supplies the
+captured session version. Replay reconstructs its exact members from the
+preceding durable state, while a retained episode wins before new host settings
+or clocks. Empty fitting history requires no summarizer. Clock overflow and
+cancellation admit no episode. Both-pair selection covers all three standalone
+triggers, declaration endpoints, rehashed substitutions, owner succession and
+bounded one-record private-history traversal without effects. These constructors
+are not yet joined to live owner capture or standalone dispatch/result/cleanup;
+the task checklist keeps that integration and the reply-reserve decision open.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

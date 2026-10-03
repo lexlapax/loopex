@@ -64,6 +64,9 @@ defmodule Loopex.Runtime.EffectIntents do
     "maintenance_episode_admitted_v1" =>
       {~w(episode_id run_id staging_turn_id trigger targets origin configuration_version maintenance_configuration bounds admitted_at preparation_deadline attempts summary_ordinal checkpoint_id usage),
        []},
+    "standalone_maintenance_episode_admitted_v1" =>
+      {~w(episode_id command_id trigger targets origin last_offending_source configuration_version maintenance_configuration bounds admitted_at deadline attempts summary_ordinal checkpoint_id usage),
+       []},
     "maintenance_request_committed_v1" =>
       {~w(episode_id summary_ordinal purpose operation_id configuration_version captured_session_version strategy_revision eligible_unit_count covered_range source_digest source_excerpted staged_at staged_request_digest request context_receipt),
        []},
@@ -469,6 +472,43 @@ defmodule Loopex.Runtime.EffectIntents do
     end
   end
 
+  # Concept: bounded private coverage crosses a standalone capture without effects.
+  # Technical depth: the current closed row has command bounds and its own exact
+  # cutoff, with no run or preparation deadline. Full replay additionally proves
+  # its command identity, preceding configuration, trigger and original offender.
+  defp neutral_values?(%{
+         payload: %{kind: "standalone_maintenance_episode_admitted_v1"} = payload
+       }) do
+    capture = payload["maintenance_configuration"]
+    bounds = payload["bounds"]
+
+    with %{"budget_origins" => %{"parent" => %{} = origins}} <- capture,
+         parent =
+           Map.take(capture, ~w(configuration_version context_token_budget system_class_tokens)),
+         :ok <-
+           MaintenanceConfiguration.validate_capture(
+             capture,
+             Map.put(parent, "budget_origins", origins)
+           ),
+         true <- capture["configuration_version"] == payload["configuration_version"],
+         {:ok, ^bounds} <- SessionState.normalize_compact_bounds(bounds),
+         true <- version?(payload["admitted_at"]) and version?(payload["deadline"]),
+         true <- payload["deadline"] == payload["admitted_at"] + bounds["deadline_ms"] do
+      identifier?(payload["episode_id"]) and identifier?(payload["command_id"]) and
+        payload["origin"] == "explicit" and is_nil(payload["targets"]) and
+        standalone_rendering_source?(payload) and payload["attempts"] == 0 and
+        payload["summary_ordinal"] == 1 and is_nil(payload["checkpoint_id"]) and
+        payload["usage"] == %{
+          "attempts" => 0,
+          "reported_tokens" => 0,
+          "estimated_tokens" => 0,
+          "total_tokens" => 0
+        }
+    else
+      _ -> false
+    end
+  end
+
   defp neutral_values?(%{payload: %{kind: "maintenance_request_committed_v1"} = payload}) do
     with true <- valid_request?(payload),
          request = payload["request"],
@@ -536,6 +576,20 @@ defmodule Loopex.Runtime.EffectIntents do
   end
 
   defp neutral_values?(_record), do: true
+
+  defp standalone_rendering_source?(%{
+         "trigger" => "canonical_rendering",
+         "last_offending_source" => source
+       }) do
+    is_map(source) and closed?(source, ~w(kind run_id turn)) and
+      source["kind"] == "session_assistant" and identifier?(source["run_id"]) and
+      version?(source["turn"]) and source["turn"] > 0
+  end
+
+  defp standalone_rendering_source?(payload),
+    do:
+      payload["trigger"] in ~w(ordinary_limit explicit) and
+        is_nil(payload["last_offending_source"])
 
   # Concept: captured headroom remains private evidence on each bounded page.
   # Technical depth: this reader checks the closed target generation and numeric

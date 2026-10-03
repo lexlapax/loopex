@@ -257,6 +257,97 @@ defmodule Loopex.EffectIntentsQueryTest do
     end
   end
 
+  test "standalone episode capture advances private coverage and rejects malformed captures",
+       context do
+    %{runtime: runtime, session: session, reference: reference, records: original} = context
+    history = Enum.take(original, 2)
+    history = List.update_at(history, 0, &%{&1 | payload: Genesis.genesis([])})
+    {:ok, state} = SessionState.recover(session, history, [])
+
+    {:ok, prompt} =
+      SessionState.propose(
+        state,
+        %{type: :prompt, command_id: "old", content: "retained fact"},
+        %{max_turns: 8, deadline_ms: 60_000, token_budget: 10_000, context_token_budget: 8_192}
+      )
+
+    {state, history, events} = retain(state, prompt, history, [])
+
+    {:ok, terminal} =
+      SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
+        reason: "model_call_failed"
+      })
+
+    {state, history, events} = retain(state, terminal, history, events)
+
+    {:ok, compact} =
+      SessionState.propose(state, %{
+        type: :compact,
+        command_id: "compact",
+        bounds: %{max_attempts: 4, deadline_ms: 60_000, token_budget: 32_768}
+      })
+
+    {state, history, events} = retain(state, compact, history, events)
+    parent = state.configuration
+
+    selection = %{
+      "model" => parent["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{parent["model_capabilities"] | "reasoning_levels" => ["none"]},
+      "provider_mapping" => %{parent["provider_mapping"] | "thinking_disabled" => true}
+    }
+
+    {:ok, instructions} =
+      MaintenanceConfiguration.capture_instructions(%{
+        "version" => "summary.v1",
+        "body" => "Retain facts"
+      })
+
+    {:ok, capture} =
+      SessionState.propose_standalone_maintenance_episode(
+        state,
+        selection,
+        instructions,
+        1_000,
+        fn -> :ok end
+      )
+
+    {state, records, events} = retain(state, capture, history, events)
+    assert {:ok, ^state} = SessionState.recover(session, records, events)
+    install_history(reference, records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert length(pages) == length(records)
+    assert Enum.all?(pages, &(&1.rows == []))
+    assert List.last(pages).next_cursor == nil
+    assert List.last(pages).scanned_through == length(records)
+    refute_receive {:forbidden_store_call, _}, 0
+
+    for transform <- [
+          &Map.put(&1, "run_id", "invented"),
+          &Map.put(&1, "preparation_deadline", 61_000),
+          &Map.delete(&1, "deadline"),
+          &Map.put(&1, "deadline", 61_001),
+          &Map.put(&1, "admitted_at", -1),
+          &put_in(&1, ["bounds", "max_attempts"], 5),
+          &put_in(&1, ["bounds", "token_budget"], "32768"),
+          &Map.put(&1, "origin", "automatic"),
+          &Map.put(&1, "trigger", "thinking_headroom"),
+          &Map.put(&1, "targets", %{}),
+          &Map.put(&1, "last_offending_source", %{}),
+          &Map.put(&1, "attempts", 1),
+          &Map.put(&1, "checkpoint_id", "invented"),
+          &put_in(&1, ["usage", "total_tokens"], 1),
+          &put_in(&1, ["maintenance_configuration", "digest"], String.duplicate("0", 64))
+        ] do
+      install_history(
+        reference,
+        change_payload(records, "standalone_maintenance_episode_admitted_v1", transform)
+      )
+
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+  end
+
   test "later appends stay outside a captured cut and resume verifies the retained boundary",
        context do
     %{

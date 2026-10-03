@@ -1139,6 +1139,97 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: standalone maintenance retains the admitted command's own capture.
+  # Technical depth: ADR 0043 gives it no run or preparation cutoff. Its exact
+  # declared bounds and admission-time absolute deadline belong to the command;
+  # the retained episode wins before consulting a new clock or host selection.
+  # The private row implements that accepted capture without nullable run fields.
+  # Whole-session/minimum-tail measurement precedes summarizer configuration.
+  @doc false
+  @spec propose_standalone_maintenance_episode(t(), term(), term(), term(), function()) ::
+          {:ok, proposal()}
+          | {:retained, map()}
+          | {:unchanged, map()}
+          | {:refused, term()}
+          | {:error, term()}
+  def propose_standalone_maintenance_episode(state, selection, instructions, now, check) do
+    case state.pending_compact do
+      %{"episode_id" => identity} ->
+        case Map.fetch(state.maintenance_episodes, identity) do
+          {:ok, episode} ->
+            {:retained, episode}
+
+          :error ->
+            with {:ok, record} <-
+                   standalone_maintenance_episode_record(
+                     state,
+                     selection,
+                     instructions,
+                     now,
+                     check
+                   ) do
+              internal_proposal(state, identity <> ":admit", record)
+            end
+        end
+
+      _ ->
+        {:error, :maintenance_not_quiescent}
+    end
+  end
+
+  defp standalone_maintenance_episode_record(state, selection, instructions, now, check) do
+    with %{"abort_command_id" => nil} = pending <- state.pending_compact,
+         true <- is_nil(state.active_maintenance),
+         :ok <- standalone_maintenance_clock(pending, now),
+         deadline = now + pending["bounds"]["deadline_ms"],
+         {:ok, plan} <- preflight_standalone_compaction(state, deadline, check) do
+      if plan.eligible_unit_count == 0 do
+        {:unchanged, plan}
+      else
+        with {:ok, capture} <-
+               MaintenanceConfiguration.capture(selection, instructions, state.configuration),
+             :ok <- check.() do
+          record = %{
+            :kind => "standalone_maintenance_episode_admitted_v1",
+            "episode_id" => pending["episode_id"],
+            "command_id" => pending["command_id"],
+            "trigger" => plan.trigger,
+            "targets" => nil,
+            "origin" => "explicit",
+            "last_offending_source" => plan.last_offending_source,
+            "configuration_version" => state.configuration["configuration_version"],
+            "maintenance_configuration" => capture,
+            "bounds" => pending["bounds"],
+            "admitted_at" => now,
+            "deadline" => deadline,
+            "attempts" => 0,
+            "summary_ordinal" => 1,
+            "checkpoint_id" => nil,
+            "usage" => %{
+              "attempts" => 0,
+              "reported_tokens" => 0,
+              "estimated_tokens" => 0,
+              "total_tokens" => 0
+            }
+          }
+
+          with {:ok, _} <- Store.admit_bounded(record), do: {:ok, record}
+        end
+      end
+    else
+      {:refused, _} = refusal -> refusal
+      {:error, _} = error -> error
+      _ -> {:error, :maintenance_not_quiescent}
+    end
+  end
+
+  defp standalone_maintenance_clock(pending, now) do
+    if is_integer(now) and now >= 0 and
+         now <= @uint64_max - pending["bounds"]["deadline_ms"],
+       do: :ok,
+       else: {:error, :maintenance_deadline_unrepresentable}
+  end
+
   # Concept: a source fit becomes dispatchable only with its complete request.
   # Technical depth: the caller supplies the eligible tail cut chosen by the
   # ordinary-request selector. This owner rejects cuts crossing protected work,
@@ -5188,6 +5279,7 @@ defmodule Loopex.Runtime.SessionState do
               "executor_receipt_committed_v2",
               "tool_result_preparation_state_v1",
               "maintenance_episode_admitted_v1",
+              "standalone_maintenance_episode_admitted_v1",
               "maintenance_episode_terminal_v1",
               "compaction_checkpoint_committed_v1",
               "maintenance_request_committed_v1",
@@ -5980,13 +6072,16 @@ defmodule Loopex.Runtime.SessionState do
            {:ok, next} <-
              retain_pending_settlement_source(next, record, version || state.journal_version + 1) do
         next =
-          if kind == "maintenance_episode_admitted_v1",
-            do:
-              put_in(
-                next.maintenance_episodes[record["episode_id"]]["session_version"],
-                version || state.journal_version + 1
-              ),
-            else: next
+          if kind in [
+               "maintenance_episode_admitted_v1",
+               "standalone_maintenance_episode_admitted_v1"
+             ],
+             do:
+               put_in(
+                 next.maintenance_episodes[record["episode_id"]]["session_version"],
+                 version || state.journal_version + 1
+               ),
+             else: next
 
         next =
           case {state.maintenance_terminal, next.maintenance_terminal, kind} do
@@ -6567,6 +6662,41 @@ defmodule Loopex.Runtime.SessionState do
          state
          | active_maintenance: identity,
            maintenance_episodes: Map.put(state.maintenance_episodes, identity, episode)
+       }, []}
+    else
+      _ -> {:error, :invalid_maintenance_episode_transition}
+    end
+  end
+
+  # Concept: replay reconstructs the same command-owned admission.
+  # Technical depth: reproduce the accepted bounds, absolute cutoff, current
+  # configuration, trigger and original rendering offender from the preceding
+  # journal. Captured settings validate against that parent; current host options
+  # never participate. The journal stamp supplies the captured session version.
+  defp apply_internal_record(
+         state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = record
+       ) do
+    with false <- Map.has_key?(state.maintenance_episodes, record["episode_id"]),
+         %{"selection" => selection, "instructions" => instructions} <-
+           record["maintenance_configuration"],
+         {:ok, expected} <-
+           standalone_maintenance_episode_record(
+             state,
+             selection,
+             instructions,
+             record["admitted_at"],
+             fn -> :ok end
+           ),
+         true <- expected == record do
+      episode = Map.put(record, "stage", "source_preparation")
+
+      {:ok,
+       %{
+         state
+         | active_maintenance: record["episode_id"],
+           maintenance_episodes:
+             Map.put(state.maintenance_episodes, record["episode_id"], episode)
        }, []}
     else
       _ -> {:error, :invalid_maintenance_episode_transition}

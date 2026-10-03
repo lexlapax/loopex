@@ -325,6 +325,61 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the standalone episode admission constructor now freezes the accepted
+  compact command's explicit bounds, current ordinary configuration version,
+  normalized summarizer/instruction capture, measured trigger and last original
+  rendering offender. Its private `standalone_maintenance_episode_admitted_v1`
+  row has command/episode identity, explicit origin, null targets, admission time,
+  one absolute deadline, zero attempts/usage, initial summary ordinal and null
+  checkpoint. It has no run, staging-turn or preparation-deadline fields. The
+  owning journal stamp supplies the captured session version. This implements
+  ADR 0043's accepted standalone capture in the existing journal/episode state;
+  it creates no new public contract or authority path. Full replay reproduces
+  the exact row from the preceding command/configuration/history and validates
+  the captured settings against that parent. A retained episode returns before
+  any changed host setting, clock or measurement callback is consulted.
+  Both declared bound endpoints, including a one-token spending declaration,
+  remain valid captures; the separately pending reply-reserve failure decision
+  is not implemented here. Empty fitting history returns an unchanged plan with
+  no capture or summarizer lookup. Invalid/overflowed admission clocks return
+  the accepted preparation cause before any traversal. Cancellation stops new
+  admission before commitment. Command result, invalid-clock completion and
+  automatic owner execution of this constructor remain open.
+  Bounded private-history coverage validates the closed row locally, advances
+  one-record pages without effect rows, and refuses malformed captures. Real
+  terminal tool-history provenance proves the canonical-rendering capture;
+  ordinary hard overflow captures its higher-priority trigger. Current-format
+  replay, owner succession and rehashed parent-limit substitutions are covered.
+  The final seven-file selection passes 174 cases with two existing exclusions
+  on the current pair in 8.9 seconds and on the floor pair in 8.2 seconds.
+  Complete outputs `/private/tmp/loopex-m7-standalone-capture-current-v3.log`,
+  SHA-256 `f5a38a4380bd3473db96fb895bdef83151199e1e8dfcdecd7b310e026181eb3c`;
+  `/private/tmp/loopex-m7-standalone-capture-floor-v1.log`, SHA-256
+  `0b18ef6c0bc94f6ce413696bc4ff80b745a02ed9a9df68a9eb11e342b6c357ae`.
+  The complete current Core suite passes 1,139 cases with eight existing
+  exclusions in 212.3 seconds; complete output
+  `/private/tmp/loopex-m7-standalone-capture-core-current.log`, SHA-256
+  `863929dcbb5fb181cac03b8376ca89581f6919cf2aa3f64e67952376cf4d7f1b`.
+  Warning-free compilation, formatting, bootstrap, documentation, dependency
+  direction and version-train checks pass; complete output
+  `/private/tmp/loopex-m7-standalone-capture-static.log`, SHA-256
+  `e190bea4e3070e25a9c2299cf47d6c13d1fad89dba4a750032784506edcc0cf7`.
+  These development checks do not replace the exact-candidate fast check or
+  closure matrix. The initial admission selection passed 31 tests in 0.7 seconds,
+  `/private/tmp/loopex-m7-standalone-capture-current-v1.log`, SHA-256
+  `79fa6a4e3d01c87a0c8c8fe7793da1321cf77c633281e641ce70cda0e1b68249`.
+  The next selection failed one new query fixture which omitted required prompt
+  bounds, 66/67 passed, `/private/tmp/loopex-m7-standalone-capture-current-v2.log`,
+  SHA-256 `2cbab21b96b97ec5941e49e1a1e515ef92d10bb4704864f70751313796002ef6`.
+  Supplying that fixture's existing explicit run bounds repaired its construction;
+  no product bound or assertion was softened. The failed output remains failed.
+  Original T01–T19 counts stay 54 done / 119 todo / 6 retired. One added T07
+  admission/replay subtask closes, making added counts 201 done / 8 todo and T07
+  added 34 done / 0 todo. Both maintainer decisions remain pending. Live owner
+  admission with Store uncertainty, source dispatch/spending, checkpoint/result/
+  snapshot and abort/quiescence cleanup still require standalone integration;
+  no original complete-workflow item closes.
+
 - Done: standalone compact now measures its exact whole-session canonical
   context and selects all eligible terminal units through the shared hard-limit
   preflight. The transient seven-member Store sizing view binds the accepted
@@ -7489,6 +7544,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Implement standalone episode admission/replay capture with command-owned bounds and absolute deadline, unchanged empty-history planning, retained settings before new host/clock lookup, original rendering-offender identity and exact journal-version capture; prove malformed/rehashed capture refusal, succession, cancellation and bounded private-history coverage on both toolchains. Live owner admission, dispatch and completion remain open.
 
 - [x] Measure standalone canonical context with the exact shared Store fixed point and hard-limit precedence, select explicit terminal-unit release with retained checkpoints, and pin the last original rendering offender; prove current/floor numeric, structural, cancellation, provenance and empty-history cases. Durable capture and live execution remain open.
 

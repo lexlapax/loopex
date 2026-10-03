@@ -4,10 +4,276 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
   use ExUnit.Case, async: true
 
   alias Loopex.ConfiguredGenesisFixture, as: Genesis
-  alias Loopex.Runtime.{ContextAdmission, SessionState}
+  alias Loopex.Runtime.{ContextAdmission, MaintenanceConfiguration, SessionState}
   alias Loopex.Store
   alias LoopexProtocol.Session.ContextFailure
   alias LoopexProtocol.ToolDefinition
+
+  @uint64_max 18_446_744_073_709_551_615
+
+  test "standalone admission freezes command bounds and an absolute cutoff without a run" do
+    for bounds <- [
+          %{max_attempts: 4, deadline_ms: 60_000, token_budget: 32_768},
+          %{max_attempts: 1, deadline_ms: 1, token_budget: 1}
+        ] do
+      {state, history, events} = pending(["old fact"], bounds: bounds)
+
+      assert {:ok, proposal} =
+               SessionState.propose_standalone_maintenance_episode(
+                 state,
+                 maintenance_model(),
+                 maintenance_instructions(),
+                 1_000,
+                 fn -> :ok end
+               )
+
+      [record] = proposal.records
+      assert proposal.events == []
+      assert record.kind == "standalone_maintenance_episode_admitted_v1"
+      assert record["command_id"] == state.pending_compact["command_id"]
+      assert record["episode_id"] == state.pending_compact["episode_id"]
+      assert record["origin"] == "explicit"
+      assert record["trigger"] == "explicit"
+      assert record["targets"] == nil
+      assert record["last_offending_source"] == nil
+      assert record["bounds"] == state.pending_compact["bounds"]
+      assert record["deadline"] == 1_000 + bounds.deadline_ms
+      assert record["admitted_at"] == 1_000
+      assert record["attempts"] == 0
+      assert record["summary_ordinal"] == 1
+      assert record["checkpoint_id"] == nil
+
+      assert record["usage"] == %{
+               "attempts" => 0,
+               "reported_tokens" => 0,
+               "estimated_tokens" => 0,
+               "total_tokens" => 0
+             }
+
+      assert record["maintenance_configuration"]["selection"] == maintenance_model()
+      assert record["maintenance_configuration"]["instructions"] == maintenance_instructions()
+      assert {:ok, _} = Store.admit_bounded(record)
+      refute Map.has_key?(record, "run_id")
+      refute Map.has_key?(record, "staging_turn_id")
+      refute Map.has_key?(record, "preparation_deadline")
+      assert proposal.next.active_run_id == nil
+      assert proposal.next.pending_work == %{}
+      assert proposal.next.deadlines == %{}
+      assert proposal.next.conversation == state.conversation
+      assert proposal.next.charged == state.charged
+
+      {committed, history, events} = commit(state, proposal, history, events)
+      assert {:ok, ^committed} = SessionState.recover(state.session_id, history, events)
+      episode = committed.maintenance_episodes[committed.active_maintenance]
+      assert episode["session_version"] == committed.journal_version
+      assert episode["stage"] == "source_preparation"
+    end
+  end
+
+  test "standalone succession reuses capture before consulting new settings, clock or work" do
+    {state, history, events} = pending(["old fact"])
+
+    {:ok, proposal} =
+      SessionState.propose_standalone_maintenance_episode(
+        state,
+        maintenance_model(),
+        maintenance_instructions(),
+        1_000,
+        fn -> :ok end
+      )
+
+    {state, history, events} = commit(state, proposal, history, events)
+    captured = state.maintenance_episodes[state.active_maintenance]
+
+    succession = %{
+      journal_version: state.journal_version + 1,
+      owner_epoch: state.owner_epoch + 1,
+      owner_incarnation_id: "successor",
+      payload: %{
+        :kind => "owner_advanced",
+        "prior_owner_epoch" => state.owner_epoch,
+        "owner_epoch" => state.owner_epoch + 1,
+        "owner_incarnation_id" => "successor",
+        "owner_transaction_id" => "successor-tx"
+      }
+    }
+
+    assert {:ok, recovered} =
+             SessionState.recover(state.session_id, history ++ [succession], events)
+
+    assert recovered.owner_epoch == state.owner_epoch + 1
+
+    assert {:retained, ^captured} =
+             SessionState.propose_standalone_maintenance_episode(
+               recovered,
+               nil,
+               nil,
+               @uint64_max,
+               fn -> flunk("retained episode remeasured") end
+             )
+
+    {:ok, abort} = SessionState.propose(recovered, %{type: :abort, command_id: "stop"})
+    {cancelled, _, _} = commit(recovered, abort, history ++ [succession], events)
+
+    assert {:retained, ^captured} =
+             SessionState.propose_standalone_maintenance_episode(
+               cancelled,
+               %{},
+               %{},
+               nil,
+               fn -> flunk("cancelled capture replaced") end
+             )
+
+    assert captured["deadline"] == 61_000
+    assert captured["session_version"] == state.journal_version
+  end
+
+  test "standalone capture rejects rehashed substitutions and every forged fixed member" do
+    {state, history, events} = pending(["old fact"])
+
+    {:ok, proposal} =
+      SessionState.propose_standalone_maintenance_episode(
+        state,
+        maintenance_model(),
+        maintenance_instructions(),
+        1_000,
+        fn -> :ok end
+      )
+
+    record = hd(proposal.records)
+    changed_capture = Map.put(record["maintenance_configuration"], "context_token_budget", 1_024)
+
+    changed_capture =
+      Map.put(
+        changed_capture,
+        "digest",
+        LoopexProtocol.Canonical.digest(Map.delete(changed_capture, "digest"))
+      )
+
+    mutations = [
+      &Map.put(&1, "extra", true),
+      &Map.put(&1, "run_id", "invented"),
+      &Map.put(&1, "preparation_deadline", 61_000),
+      &Map.put(&1, "command_id", "other"),
+      &Map.put(&1, "episode_id", "other"),
+      &Map.put(&1, "configuration_version", 2),
+      &Map.put(&1, "trigger", "ordinary_limit"),
+      &Map.put(&1, "targets", %{}),
+      &Map.put(&1, "origin", "automatic"),
+      &Map.put(&1, "last_offending_source", %{}),
+      &Map.put(&1, "deadline", 61_001),
+      &Map.put(&1, "admitted_at", @uint64_max),
+      &put_in(&1, ["bounds", "max_attempts"], 3),
+      &Map.put(&1, "attempts", 1),
+      &Map.put(&1, "summary_ordinal", 2),
+      &Map.put(&1, "checkpoint_id", "invented"),
+      &put_in(&1, ["usage", "total_tokens"], 1),
+      &Map.put(&1, "maintenance_configuration", changed_capture)
+    ]
+
+    for changed <-
+          Enum.map(mutations, & &1.(record)) ++
+            Enum.map(Map.keys(record), &Map.delete(record, &1)) do
+      assert {:error, _} =
+               SessionState.recover(state.session_id, history ++ [row(state, changed)], events)
+    end
+
+    {admitted, admitted_history, events} = commit(state, proposal, history, events)
+
+    assert {:error, :invalid_maintenance_episode_transition} =
+             SessionState.recover(
+               state.session_id,
+               admitted_history ++ [row(admitted, record)],
+               events
+             )
+  end
+
+  test "empty history needs no summarizer and invalid clock admits no episode" do
+    {empty, _, _} = pending([])
+
+    assert {:unchanged, %{eligible_unit_count: 0}} =
+             SessionState.propose_standalone_maintenance_episode(empty, nil, nil, 0, fn -> :ok end)
+
+    assert empty.maintenance_episodes == %{}
+    {state, _, _} = pending(["old fact"])
+
+    for now <- [0, @uint64_max - 60_000] do
+      assert {:ok, proposal} =
+               SessionState.propose_standalone_maintenance_episode(
+                 state,
+                 maintenance_model(),
+                 maintenance_instructions(),
+                 now,
+                 fn -> :ok end
+               )
+
+      assert hd(proposal.records)["deadline"] == now + 60_000
+    end
+
+    for now <- [nil, -1, @uint64_max - 59_999, @uint64_max + 1] do
+      assert {:error, :maintenance_deadline_unrepresentable} =
+               SessionState.propose_standalone_maintenance_episode(
+                 state,
+                 nil,
+                 nil,
+                 now,
+                 fn -> flunk("invalid clock entered source work") end
+               )
+    end
+
+    assert state.maintenance_episodes == %{}
+  end
+
+  test "standalone capture keeps configuration refusal order and cancellation before commitment" do
+    {state, _, _} = pending(["old fact"])
+
+    assert {:error, :maintenance_model_unconfigured} =
+             SessionState.propose_standalone_maintenance_episode(state, nil, nil, 1_000, fn ->
+               :ok
+             end)
+
+    assert {:error, :maintenance_instructions_unconfigured} =
+             SessionState.propose_standalone_maintenance_episode(
+               state,
+               maintenance_model(),
+               nil,
+               1_000,
+               fn -> :ok end
+             )
+
+    unsupported = put_in(maintenance_model(), ["provider_mapping", "thinking_disabled"], false)
+
+    assert {:error, :maintenance_reasoning_unsupported} =
+             SessionState.propose_standalone_maintenance_episode(
+               state,
+               unsupported,
+               nil,
+               1_000,
+               fn -> :ok end
+             )
+
+    for stop_at <- 1..10 do
+      counter = :counters.new(1, [])
+
+      check = fn ->
+        :counters.add(counter, 1, 1)
+        if :counters.get(counter, 1) == stop_at, do: {:error, :cancelled}, else: :ok
+      end
+
+      assert {:error, :cancelled} =
+               SessionState.propose_standalone_maintenance_episode(
+                 state,
+                 maintenance_model(),
+                 maintenance_instructions(),
+                 1_000,
+                 check
+               )
+
+      assert :counters.get(counter, 1) == stop_at
+    end
+
+    assert state.maintenance_episodes == %{}
+  end
 
   test "explicit selection releases every terminal unit even when the whole history fits" do
     for texts <- [[], ["first raw input", "second raw input"]] do
@@ -49,6 +315,19 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
     assert plan.eligible_unit_count == 1
     assert plan.retained_tail == []
     assert plan.tail_tokens == 0
+
+    assert {:ok, capture} =
+             SessionState.propose_standalone_maintenance_episode(
+               state,
+               maintenance_model(),
+               maintenance_instructions(),
+               1_000,
+               fn -> :ok end
+             )
+
+    assert hd(capture.records)["trigger"] == "ordinary_limit"
+    assert hd(capture.records)["origin"] == "explicit"
+    assert hd(capture.records)["maintenance_configuration"]["context_token_budget"] == 1_000
   end
 
   test "cancellation during minimum-tail measurement prevents a selection result" do
@@ -273,6 +552,27 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
     |> put_in(["budget_origins", "context_token_budget"], "explicit")
   end
 
+  defp maintenance_model do
+    source = Genesis.configuration()
+
+    %{
+      "model" => source["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{source["model_capabilities"] | "reasoning_levels" => ["none"]},
+      "provider_mapping" => %{source["provider_mapping"] | "thinking_disabled" => true}
+    }
+  end
+
+  defp maintenance_instructions do
+    {:ok, captured} =
+      MaintenanceConfiguration.capture_instructions(%{
+        "version" => "summary.v1",
+        "body" => "Keep facts 猫"
+      })
+
+    captured
+  end
+
   defp pending(texts, options \\ []) do
     configuration = Keyword.get_lazy(options, :configuration, fn -> configuration(options) end)
 
@@ -328,7 +628,12 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
       SessionState.propose(state, %{
         type: :compact,
         command_id: "compact",
-        bounds: %{max_attempts: 4, deadline_ms: 60_000, token_budget: 32_768}
+        bounds:
+          Keyword.get(options, :bounds, %{
+            max_attempts: 4,
+            deadline_ms: 60_000,
+            token_budget: 32_768
+          })
       })
 
     {state, history, events} = commit(state, compact, history, events)
