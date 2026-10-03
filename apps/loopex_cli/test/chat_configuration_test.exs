@@ -18,6 +18,34 @@ defmodule LoopexCli.ChatConfigurationTest do
     %{root: root, config_path: file, argv: ["chat", "--config", file]}
   end
 
+  test "creation captures the verified physical identity and preserves alias identity", f do
+    workspace = Path.join(f.root, "workspace")
+    alias_path = Path.join(f.root, "workspace-alias")
+    File.ln_s!(workspace, alias_path)
+    assert {:ok, reference} = LoopexComposition.WorkspaceIdentity.reference(workspace)
+    assert {:ok, prepared} = load(f)
+
+    assert prepared.session_options == %{
+             "surface" => "chat",
+             "workspace_binding" => %{"revision" => 1, "workspace_ref" => reference}
+           }
+
+    assert prepared.genesis["options"] == prepared.session_options
+    assert {:ok, aliased} = load(f, ["--workspace", alias_path])
+    assert aliased.session_options == prepared.session_options
+    refute File.exists?(Path.join(f.root, "state"))
+  end
+
+  test "creation requires an existing physical workspace and never creates it", f do
+    absent = Path.join(f.root, "absent-workspace")
+    assert load(f, ["--workspace", absent]) == {:error, :enoent}
+    refute File.exists?(absent)
+    file = Path.join(f.root, "ordinary-file")
+    File.write!(file, "not a directory")
+    assert load(f, ["--workspace", file]) == {:error, :workspace_root_not_directory}
+    refute File.exists?(Path.join(f.root, "state"))
+  end
+
   test "each chat profile freezes exactly its tools, including opt-in questions", fixture do
     for {profile, expected} <- [
           {"none", []},

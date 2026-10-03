@@ -117,12 +117,22 @@ max_turns, deadline_ms and token_budget for a new run come from validated
 invocation configuration; in-flight bounds stay committed. A conflicting
 `chat --resume S --max-tokens 8000` therefore refuses before dispatch and
 directs the operator to settled `/configure`; it is not a run-bound override.
-A legacy settled session with no committed configuration and no retained
-selection evidence takes ADR 0044's explicit host selection from an explicit
-`--model` flag only; without it resume refuses through the abandonment path
-below. File values never supply that migration.
-Require matching workspace and ADR 0024 policy identity for pending interactions,
-and available routes for admitted work. Core has no session-wide policy identity.
+The maintainer's 2026-10-02 current-contract decision retires the pre-1.0
+legacy model-selection and unbound-workspace exceptions. New chat genesis
+options are exactly `{"surface":"chat","workspace_binding":{"revision":1,
+"workspace_ref":REFERENCE}}`. The reference is the existing verified
+canonical-root/device/inode digest returned by `WorkspaceIdentity.reference/1`.
+Capture and recheck it during new-session preparation. On resume, read exact
+retained options and pending effect workspace references through the holder-only
+prepared-startup API. Require the selected physical workspace to match the
+binding and every pending effect, then recheck execution/resource placement
+immediately before activation. Missing or malformed binding refuses; explicit
+`--workspace` does not supply a migration. Missing directories refuse without
+creating them. All options remain within the unchanged whole-genesis ceiling.
+Inspection measures the same fixed-width binding cost without retaining or
+publishing a physical identity or requiring the selected directory to exist.
+Require ADR 0024 policy identity for pending interactions and available routes
+for admitted work. Core has no session-wide policy identity.
 A settled session has no core session-wide policy identity, so this proposal
 adds no such resume comparison. The fixture runbook reopens through the same
 trusted wrapper and fixed case policy/manifest, with those identities retained
@@ -289,7 +299,7 @@ Publish an input admission record before question/wait output caused by that
 input. Barriers report all earlier admitted work settled, the current question,
 or uncertainty; a transient idle boundary before queued follow-up promotion
 is not settled. Hosts use bounded generated identities for new work; maximum
-encoded records, including legacy-resumed questions and choices, must be proved
+encoded records, including current-format resumed questions and choices, must be proved
 by vectors before integration. The cap is 65,536 bytes. If an existing public
 record cannot be represented, report `control_record_too_large` and perform
 transport-failure cleanup, never truncate an ID or question. This is an explicit
@@ -483,9 +493,10 @@ Concept: [Observable consequences](0049-explicit-host-configuration.md#concept-a
   A second command submitted at the facade during the pending window receives
   the fenced `commit_unknown` reply, is never queued, and its own ID observes
   `pending`; the interactive host refuses it locally without submitting.
-- A legacy settled session with no prior request resumes with an explicit
-  `--model`, refuses and abandons its prepared owner without one, and never takes
-  a file model; offline `run`, `resume` and `cancel`, and inspection commands
+- Current-format chat resume requires its retained physical workspace binding;
+  missing binding, a different workspace, symlink retargeting, directory
+  replacement and a conflicting retained pending effect refuse and abandon
+  before activation. Offline `run`, `resume` and `cancel`, and inspection commands
   `config show` and `config validate`, reject every trace flag. Inspection may
   display file-derived trace values without starting a trace.
 - Helper-enabled file resume of an old non-task session stays disabled; a task

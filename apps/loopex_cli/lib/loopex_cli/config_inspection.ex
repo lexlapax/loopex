@@ -13,7 +13,9 @@ defmodule LoopexCli.ConfigInspection do
   read-only generations. Enabled roles contribute their names and a preview
   catalog digest to parent instruction cost; this preview is not a retained
   delegation binding. The complete parent genesis is measured, including the
-  fixed helper definition when enabled. Metadata resolution may consult the
+  fixed helper definition when enabled and a fixed-width workspace binding
+  cost marker. Inspection does not require the workspace directory to exist
+  and never retains that marker as a physical identity. Metadata resolution may consult the
   host-selected trusted model catalog. Credential references remain private;
   output contains only reference form and validity, never environment names,
   secret values, captured instructions, capabilities or provider mappings.
@@ -62,7 +64,11 @@ defmodule LoopexCli.ConfigInspection do
              ConfigSelection.resolve_session(selection, instructions, definitions),
              "/session"
            ),
-         {:ok, _genesis} <- locate(ChatConfiguration.genesis(selection, definitions), "/session") do
+         {:ok, _genesis} <-
+           locate(
+             ChatConfiguration.genesis(selection, definitions, workspace_cost_options()),
+             "/session"
+           ) do
       {:ok, %{command: command, selection: selection, roles: roles}}
     else
       {:error, {class, pointer}} when is_atom(class) and is_binary(pointer) ->
@@ -71,6 +77,15 @@ defmodule LoopexCli.ConfigInspection do
       _ ->
         {:error, {:invalid_configuration_inspection, ""}}
     end
+  end
+
+  # Concept: inspection measures the complete creation footprint without claiming a binding.
+  # Technical depth: the current workspace reference has a fixed prefix and
+  # 64 hexadecimal bytes. This measurement-only placeholder has identical byte
+  # cost; it is never returned, persisted, used for execution or printed. New
+  # chat replaces it with WorkspaceIdentity's verified physical reference.
+  defp workspace_cost_options do
+    ChatConfiguration.session_options("workspace:" <> String.duplicate("0", 64))
   end
 
   @doc """

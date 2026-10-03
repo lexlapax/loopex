@@ -105,6 +105,38 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: new-chat preparation now retains the approved closed revision-1
+  physical workspace binding in exact v3 genesis options and rechecks it after
+  configuration capture. Capability-held ordinary chat resume uses the new
+  public startup read to compare the selected canonical-root/device/inode
+  digest with both the retained binding and every pending effect reference.
+  A same-root alias agrees; a different root, retargeted symlink, replacement
+  directory, missing/non-directory root, or missing/malformed binding refuses
+  through confirmed abandonment without durable mutation or dispatch. Explicit
+  `--workspace` never adopts an unbound session. The pending-effect case uses an
+  actual linearized intent and kills its coordinator before dispatch, then
+  verifies unchanged records/events and one prior model call with zero jobs.
+  Configuration inspection measures the full genesis with an equal-width cost
+  marker while preserving nonexistent-path inspection and excluding the marker
+  from returned or printed results. ADR 0049's pair records the approved shape
+  and retires its legacy model/unbound exceptions under the maintainer's rule.
+  All 40 focused preparation/resume/inspection cases passed with warnings as
+  errors on both supported pairs: 27.3/25.8 measured suite seconds. Complete
+  current output `/private/tmp/loopex-m7-chat-workspace-current-v3.log`, SHA-256
+  `d07da3ca154df64ebe0fe870aa54b56caa927ec3b3e51b0a69dbd6ae9dc812bf`;
+  floor `/private/tmp/loopex-m7-chat-workspace-floor-v2.log`, SHA-256
+  `36f580124dd5df18c52e14a0f6d7e89b1d2a958d113cf3b10d441478183c969c`.
+  Both terminal handles were collected before hashing. The initial current
+  attempt failed only because a new inspection test called a private function;
+  it now exercises the public command. Failed output retained at
+  `/private/tmp/loopex-m7-chat-workspace-current-v1.log`, SHA-256
+  `d0d5f2766f3051e3f0633ffad9a30eb8c4b7ae97238cc22605e1462575667df8`.
+  This completes the preparer binding subtask. Public chat startup, its final
+  execution/resource placement recheck before activation, pending-policy/routes,
+  helper bindings and the owner-only bounded settings report remain open under
+  the original T06/T10 integration obligations. Older APIs/readers and tool
+  generations still require the separate T15 retirement work.
+
 - Done: implement the approved separate `prepared_session_startup/1` read.
   Replay retains exact normalized genesis options. The serial owner reads those
   options, unresolved policy identity including an answered question awaiting
@@ -5237,7 +5269,7 @@ or check was relaxed.
 - [x] Expose the approved exact-create/provenance public facade reads; retire older-generation positive-read scaffolding and prove unchanged Store bytes and zero activation through current-genesis Memory/Local recovery on both supported pairs.
 
 - [x] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
-- [ ] Implement the approved new-chat physical workspace binding; require it for current-format chat resume and prove retained identity conflicts, symlink retargeting and physical replacement before activation. The superseded legacy-unbound exception and older-root migration are retired.
+- [x] Implement the approved new-chat physical workspace binding; require it for current-format chat resume and prove retained identity conflicts, symlink retargeting and physical replacement before activation. The superseded legacy-unbound exception and older-root migration are retired.
 
 - [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, captured invocation bounds and queued-run inheritance, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
 - [x] Resolve the prepared-recovery configuration-read boundary, then expose its exact retained host capture under capability ownership and prove refusal/fencing without activation or dispatch.

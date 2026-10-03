@@ -74,6 +74,25 @@ defmodule LoopexCli.ConfigInspectionTest do
     assert System.get_env(@slot) == @secret
   end
 
+  test "inspection measures binding cost without retaining a physical identity", f do
+    assert {:ok, inspection} = ConfigInspection.prepare(show(f), f.root, nil)
+    assert {:ok, chat} = ChatConfiguration.load(["chat", "--config", f.config_path], f.root, nil)
+    definitions = chat.genesis["tool_selection"]["definitions"]
+    placeholder = ChatConfiguration.session_options("workspace:" <> String.duplicate("0", 64))
+
+    assert {:ok, measured} =
+             ChatConfiguration.genesis(inspection.selection, definitions, placeholder)
+
+    assert byte_size(LoopexProtocol.Canonical.encode(measured)) ==
+             byte_size(LoopexProtocol.Canonical.encode(chat.genesis))
+
+    refute Map.has_key?(inspection, :genesis)
+    refute Map.has_key?(inspection, :session_options)
+    output = capture_io(fn -> assert :ok = ConfigInspection.run(show(f), f.root, nil) end)
+    refute output =~ "workspace_binding"
+    refute output =~ chat.session_options["workspace_binding"]["workspace_ref"]
+  end
+
   test "credential-free bindings validate and name chat without claiming credential availability",
        f do
     File.write!(

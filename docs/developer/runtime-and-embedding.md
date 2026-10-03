@@ -863,6 +863,18 @@ work. It exposes no private continuation, credentials or routing handles and
 leaves the prepared configuration result unchanged. This separate public read
 was approved by the maintainer on 2026-10-02.
 
+Reference chat retains `%{"surface" => "chat", "workspace_binding" =>
+%{"revision" => 1, "workspace_ref" => reference}}` in exact genesis options.
+`ChatConfiguration.load/3` captures and rechecks the existing canonical-root,
+device and inode digest without creating directories. Capability-held resume
+compares the selected physical identity against that binding and all retained
+pending effect references, abandoning on refusal. An explicit workspace flag
+does not adopt an unbound session. Execution/resource placement still requires
+the outer host's recheck immediately before activation. Configuration inspection
+uses only an equal-width cost marker and never returns or publishes it as an
+identity. These current-format checks implement the approved binding and the
+maintainer's pre-1.0 compatibility retirement.
+
 Activating a prepared owner is the host's statement that the process which
 dispatched the last effect is gone, so the coordinator settles that effect
 itself where its executor can say what it retained. It solicits its own query

@@ -1,5 +1,6 @@
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 
 defmodule LoopexCli.ChatResumeConfigurationTest do
   use ExUnit.Case, async: false
@@ -85,6 +86,7 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
     assert {:ok, resumed} = ChatConfiguration.resume(invocation, activation)
     assert resumed.selection.configuration == f.prepared.selection.configuration
     assert resumed.retained.tool_selection == f.prepared.genesis["tool_selection"]
+    assert resumed.startup.session_options == f.prepared.session_options
 
     assert resumed.selection.profile["session"]["model"] ==
              resumed.selection.configuration["model"]
@@ -107,6 +109,157 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
 
     assert candidate["configuration_version"] == 2
     assert :ok = Loopex.abandon_resume(activation)
+  end
+
+  test "a same-root alias retains binding but an explicit different workspace refuses", f do
+    alias_path = Path.join(f.root, "workspace-alias")
+    File.ln_s!(Path.join(f.root, "workspace"), alias_path)
+    {:ok, invocation} = load(f, ["--workspace", alias_path])
+    activation = activation(f.fixture, f.session)
+    assert {:ok, resumed} = ChatConfiguration.resume(invocation, activation)
+    assert resumed.startup.session_options == f.prepared.session_options
+    assert :ok = Loopex.abandon_resume(activation)
+
+    alternate = Path.join(f.root, "another-workspace")
+    File.mkdir!(alternate)
+    {:ok, invocation} = load(f, ["--workspace", alternate])
+    assert_workspace_refusal(f, invocation, :chat_workspace_binding_conflict)
+  end
+
+  test "replacement after file preflight refuses even at the same textual path", f do
+    {:ok, invocation} = load(f)
+    workspace = Path.join(f.root, "workspace")
+    File.rename!(workspace, workspace <> "-previous")
+    File.mkdir!(workspace)
+    assert {:ok, changed} = LoopexComposition.WorkspaceIdentity.reference(workspace)
+    refute changed == f.prepared.session_options["workspace_binding"]["workspace_ref"]
+    assert_workspace_refusal(f, invocation, :chat_workspace_binding_conflict)
+  end
+
+  test "an absent or non-directory selected workspace abandons without creating a root", f do
+    {:ok, invocation} = load(f)
+    workspace = Path.join(f.root, "workspace")
+    File.rename!(workspace, workspace <> "-previous")
+    assert_workspace_refusal(f, invocation, :enoent)
+    refute File.exists?(workspace)
+    File.write!(workspace, "not a directory")
+    assert_workspace_refusal(f, invocation, :workspace_root_not_directory)
+    assert File.read!(workspace) == "not a directory"
+  end
+
+  test "retargeting a captured workspace symlink refuses before activation", f do
+    workspace = Path.join(f.root, "workspace")
+    alias_path = Path.join(f.root, "workspace-alias")
+    alternate = Path.join(f.root, "another-workspace")
+    File.mkdir!(alternate)
+    File.ln_s!(workspace, alias_path)
+
+    {:ok, prepared} =
+      ChatConfiguration.load(["chat", "--config", f.path, "--workspace", alias_path], f.root, nil)
+
+    {:ok, session} =
+      Loopex.create_session(f.fixture.runtime, prepared.session_options,
+        command_id: "symlink-create",
+        genesis: prepared.genesis
+      )
+
+    bound = %{f | session: session, prepared: prepared}
+    {:ok, invocation} = load(bound, ["--workspace", alias_path])
+    File.rm!(alias_path)
+    File.ln_s!(alternate, alias_path)
+    assert_workspace_refusal(bound, invocation, :chat_workspace_binding_conflict)
+  end
+
+  test "missing or malformed binding refuses rather than adopting an explicit host workspace",
+       f do
+    for {options, index} <-
+          Enum.with_index([
+            %{"surface" => "chat"},
+            put_in(f.prepared.session_options, ["workspace_binding", "revision"], 0),
+            put_in(f.prepared.session_options, ["workspace_binding", "unexpected"], true)
+          ]) do
+      genesis = Map.put(f.prepared.genesis, "options", options)
+
+      {:ok, session} =
+        Loopex.create_session(f.fixture.runtime, options,
+          command_id: "unbound-#{index}",
+          genesis: genesis
+        )
+
+      bound = %{f | session: session}
+      {:ok, invocation} = load(bound, ["--workspace", Path.join(f.root, "workspace")])
+      assert_workspace_refusal(bound, invocation, :chat_workspace_binding_unavailable)
+    end
+  end
+
+  test "a real retained effect for another workspace refuses without redispatch", f do
+    fixture =
+      Fixture.start(
+        script: [
+          %{
+            text: "proposed",
+            calls: [
+              %{id: "call", name: "write", arguments: %{"path" => "owned.txt"}}
+            ]
+          }
+        ]
+      )
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+
+    genesis =
+      Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions)
+      |> Map.put("options", f.prepared.session_options)
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, f.prepared.session_options,
+        command_id: "pending-effect",
+        genesis: genesis
+      )
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session)
+
+    :ok =
+      Loopex.M1RuntimeTestStore.delay_after_record(
+        fixture.store,
+        "effect_intent_committed_v2",
+        self()
+      )
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(
+               attachment,
+               %{type: :prompt, command_id: "prompt", content: "effect"}
+             )
+
+    assert_receive {:record_linearized, waiter, _store, "effect_intent_committed_v2", _tx,
+                    {:committed, _, _}},
+                   5_000
+
+    {:ok, children} = Loopex.Runtime.children(fixture.runtime)
+    coordinator = :sys.get_state(children.control).sessions[session].coordinator
+    monitor = Process.monitor(coordinator)
+    Process.exit(coordinator, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^coordinator, :killed}, 5_000
+    Loopex.M1RuntimeTestStore.release(waiter)
+    bound = %{f | fixture: fixture, session: session}
+    {:ok, invocation} = load(bound)
+    activation = activation(fixture, session)
+
+    assert {:ok, %{admitted_workspace_refs: ["workspace-ref"]}} =
+             Loopex.prepared_session_startup(activation)
+
+    before = {Fixture.records(fixture, session), Fixture.events(fixture, session)}
+    dispatched = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    assert length(dispatched) == 1
+
+    assert ChatConfiguration.resume(invocation, activation) ==
+             {:error, :chat_workspace_binding_conflict}
+
+    assert {:error, :resume_activation_abandoned} = Loopex.prepared_session_startup(activation)
+    assert {Fixture.records(fixture, session), Fixture.events(fixture, session)} == before
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == dispatched
+    assert Agent.get(fixture.executor, & &1.jobs) == []
   end
 
   test "each conflicting durable flag abandons its owner without dispatch or configuration mutation",
@@ -332,6 +485,16 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
     fixture = Fixture.start(Keyword.put(options, :script, []))
     on_exit(fn -> Fixture.stop(fixture) end)
     fixture
+  end
+
+  defp assert_workspace_refusal(f, invocation, reason) do
+    activation = activation(f.fixture, f.session)
+    before = {Fixture.records(f.fixture, f.session), Fixture.events(f.fixture, f.session)}
+    assert ChatConfiguration.resume(invocation, activation) == {:error, reason}
+    assert {:error, :resume_activation_abandoned} = Loopex.prepared_session_startup(activation)
+    assert {Fixture.records(f.fixture, f.session), Fixture.events(f.fixture, f.session)} == before
+    assert Loopex.AgentLoopTestModel.dispatched(f.fixture.model) == []
+    assert Agent.get(f.fixture.executor, & &1.jobs) == []
   end
 
   defp activation(fixture, session) do

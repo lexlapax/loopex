@@ -15,8 +15,10 @@ defmodule LoopexCli.ChatConfiguration do
   model resolution may load trusted packaged catalog metadata. This stage does
   no environment lookup, resource discovery, credential resolution or startup.
   Resume has a separate configuration preparation path using the capability
-  holder's retained read. Activation, workspace/pending-policy checks, legacy
-  migration and enabled delegation remain outer-host integration obligations.
+  holder's retained reads. New chat captures the physical workspace identity;
+  resume requires that binding and checks every retained pending effect against
+  it. Pending-policy/routing checks, activation and enabled delegation remain
+  outer-host integration obligations.
   """
 
   alias LoopexCli.{ConfigFile, ConfigOptions, ConfigSelection, SessionInstructions}
@@ -24,6 +26,7 @@ defmodule LoopexCli.ChatConfiguration do
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionConfiguration
   alias LoopexComposition.ProviderBindings
+  alias LoopexComposition.WorkspaceIdentity
   alias LoopexProtocol.ToolDefinition
 
   @profiles %{
@@ -31,7 +34,6 @@ defmodule LoopexCli.ChatConfiguration do
     "read-only" => ~w(loopex.read loopex.grep loopex.find loopex.ls loopex.ask),
     "none" => []
   }
-  @session_options %{"surface" => "chat"}
 
   @doc """
   ## Concept
@@ -55,6 +57,9 @@ defmodule LoopexCli.ChatConfiguration do
          {:ok, selection} <- ConfigSelection.compose(file, parsed, cwd, home),
          :ok <- required_paths(selection.profile),
          :ok <- delegation(selection.profile),
+         {:ok, workspace_ref} <-
+           WorkspaceIdentity.reference(selection.profile["paths"]["workspace"]),
+         session_options <- session_options(workspace_ref),
          active <- Map.fetch!(@profiles, selection.profile["session"]["tools"]),
          definitions <- selected_definitions(active),
          {:ok, instructions} <- capture_instructions(selection.profile),
@@ -65,12 +70,13 @@ defmodule LoopexCli.ChatConfiguration do
              provider_bindings: selection.profile["providers"],
              active_tools: active
            ),
-         {:ok, genesis} <- genesis(selection, definitions) do
+         :ok <- workspace_binding(session_options, selection.profile["paths"]["workspace"], []),
+         {:ok, genesis} <- genesis(selection, definitions, session_options) do
       {:ok,
        %{
          selection: selection,
          active_tools: active,
-         session_options: @session_options,
+         session_options: session_options,
          genesis: genesis
        }}
     else
@@ -124,7 +130,8 @@ defmodule LoopexCli.ChatConfiguration do
   resolved maintenance selection stay invocation settings. The result spends
   no activation and dispatches no work. Outer startup still validates workspace,
   pending policy and admitted-work routes, installs cancellation, then activates.
-  Legacy migration and helper bindings refuse until their separate paths exist.
+  Missing workspace binding refuses; no older-root migration or host-selected
+  identity fallback is offered. Helper bindings remain separate integration work.
   Failed abandonment reports the original refusal and cleanup uncertainty.
   """
   @spec resume(term(), Loopex.ResumeActivation.t()) :: {:ok, map()} | {:error, term()}
@@ -150,6 +157,13 @@ defmodule LoopexCli.ChatConfiguration do
        )
        when is_map(flags) and is_binary(session) do
     with {:ok, retained} <- Loopex.prepared_session_configuration(activation),
+         {:ok, startup} <- Loopex.prepared_session_startup(activation),
+         :ok <-
+           workspace_binding(
+             startup.session_options,
+             selection.profile["paths"]["workspace"],
+             startup.admitted_workspace_refs
+           ),
          %{"definitions" => definitions} <- retained.tool_selection,
          configuration when is_map(configuration) <- retained.configuration,
          :ok <- SessionConfiguration.validate(configuration, definitions),
@@ -229,16 +243,45 @@ defmodule LoopexCli.ChatConfiguration do
            |> Map.put(:maintenance_model, maintenance)
            |> Map.put(:origins, origins),
          retained: retained,
+         startup: startup,
          resume_session_id: session,
          active_tools: Enum.map(definitions, & &1["tool_id"])
        }}
     else
       {:error, _} = error -> error
-      _ -> {:error, :legacy_chat_resume_configuration_unavailable}
+      _ -> {:error, :chat_resume_configuration_unavailable}
     end
   end
 
   defp resume_configuration(_, _), do: {:error, :invalid_chat_resume_invocation}
+
+  # Concept: the host continues work only in the physical workspace retained at creation.
+  # Technical depth: paths and explicit flags cannot adopt an unbound older root.
+  # Compare the existing canonical-root/device/inode digest and every pending
+  # intent before returning prepared settings; the caller still checks placement
+  # again immediately before activation. Refusal abandons through resume/2.
+  defp workspace_binding(
+         %{
+           "surface" => "chat",
+           "workspace_binding" => %{"revision" => 1, "workspace_ref" => retained} = binding
+         } = options,
+         workspace,
+         pending
+       )
+       when map_size(options) == 2 and map_size(binding) == 2 and is_binary(retained) and
+              is_list(pending) do
+    with {:ok, reference} <- WorkspaceIdentity.reference(workspace),
+         true <- retained == reference,
+         true <- Enum.all?(pending, &(&1 == reference)) do
+      :ok
+    else
+      false -> {:error, :chat_workspace_binding_conflict}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp workspace_binding(_options, _workspace, _pending),
+    do: {:error, :chat_workspace_binding_unavailable}
 
   defp resume_grace(flags, grace), do: agrees(flags, "cleanup-grace-ms", grace)
 
@@ -447,7 +490,15 @@ defmodule LoopexCli.ChatConfiguration do
   end
 
   @doc false
-  def genesis(selection, definitions) do
+  def session_options(workspace_ref) do
+    %{
+      "surface" => "chat",
+      "workspace_binding" => %{"revision" => 1, "workspace_ref" => workspace_ref}
+    }
+  end
+
+  @doc false
+  def genesis(selection, definitions, session_options) do
     names =
       Map.new(definitions, fn definition ->
         {id, version, digest} = ToolDefinition.generation(definition)
@@ -456,7 +507,7 @@ defmodule LoopexCli.ChatConfiguration do
          %{"tool_id" => id, "tool_version" => version, "definition_digest" => digest}}
       end)
 
-    SessionGenesis.resolve(@session_options, %{
+    SessionGenesis.resolve(session_options, %{
       genesis_version: "session_genesis_v3",
       runtime_configuration: %{
         "cleanup_grace_ms" => selection.profile["session"]["cleanup_grace_ms"]
