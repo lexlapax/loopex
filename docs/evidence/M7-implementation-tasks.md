@@ -29,7 +29,89 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
-## Restart handoff — 2026-10-02
+## Restart checkpoint — 2026-10-02, maintenance admission
+
+The maintainer requested another safe stop for restart. The goal is paused,
+M7 remains In progress, and implementation is committed and pushed on `m7` at
+`85e15036836f496d19860f84e7d7ece224699a2f`. This checkpoint changes only this
+handoff document. No product edits followed that implementation. No agents,
+check handles or maintainer decisions are pending. Resume from this checkpoint
+and Current work below; earlier handoffs describe their own revisions.
+
+The admission reducer and ordinary-terminal fence passed 53 focused tests on
+each supported pair. The final source/output inventory, final gate output and
+previous full-check output were rehashed before this stop; all matched their
+recorded SHA-256 digests below. The full current-pair check still covers
+`9e9768396d4d2a782e6ce87a56273f290bf289f8`, not the later admission source.
+Run the next full check once on a clean committed live-owner integration
+candidate. The detached verification checkout remains at that earlier SHA in
+`/Users/spuri/.codex/worktrees/m7-trace-check/loopex`.
+
+Process inspection found three abandoned CLI signal-fixture VMs and their
+orphaned wrappers from four days earlier. Their arguments identified
+`LoopexCli.AskOSSignalDriver.main()` and temporary `loopex-ask-os-signal-*`
+fixtures. Only those nine fixture-owned processes were terminated; all exited
+on SIGTERM, with no final kill required. No task-owned fixture process remained.
+The editor language server was left running. This is cleanup of an observed
+fixture leak, not a new passing proof. Investigate signal-fixture process joins
+under T16 before relying on future fixture cleanup claims.
+
+T01–T19 originals: 51 done / 122 todo / 6 retired. Added subtasks:
+171 done / 8 todo. Including T00: originals 51 / 128 / 7; added 175 / 9.
+
+| Task | Original done / todo / retired | Added done / todo |
+| --- | ---: | ---: |
+| T01 | 7 / 0 / 0 | 0 / 0 |
+| T02 | 9 / 0 / 0 | 18 / 0 |
+| T03 | 5 / 2 / 1 | 4 / 0 |
+| T04 | 5 / 6 / 0 | 24 / 1 |
+| T05 | 0 / 10 / 0 | 1 / 0 |
+| T06 | 1 / 6 / 0 | 11 / 0 |
+| T07 | 0 / 11 / 0 | 10 / 0 |
+| T08 | 5 / 6 / 0 | 25 / 1 |
+| T09 | 8 / 0 / 0 | 10 / 2 |
+| T10 | 1 / 9 / 0 | 15 / 0 |
+| T11 | 1 / 14 / 0 | 5 / 0 |
+| T12 | 6 / 4 / 0 | 9 / 0 |
+| T13 | 2 / 8 / 0 | 2 / 0 |
+| T14 | 0 / 10 / 0 | 0 / 0 |
+| T15 | 0 / 4 / 5 | 5 / 2 |
+| T16 | 1 / 8 / 0 | 32 / 2 |
+| T17 | 0 / 10 / 0 | 0 / 0 |
+| T18 | 0 / 7 / 0 | 0 / 0 |
+| T19 | 0 / 7 / 0 | 0 / 0 |
+
+First resume work is T07's live serial-owner integration. Existing
+`SessionState.propose_maintenance_episode/5` retains automatic ordinary-limit
+admission and owner-succession capture. It is not invoked by the coordinator.
+Source selectors, summary admission and request construction are available;
+summary dispatch, maintenance-specific attempts/settlements, checkpoints,
+standalone compact and complete recovery remain open.
+
+The latest exploration was read-only. ADR 0043 requires an episode terminal
+first in the same transaction as an ending run, preserving refusal/terminal or
+settlement/terminal adjacency. The current fence rejects a run terminal while
+maintenance is active; implement and prove the accepted complete ordering before
+joining that ending path. Source-preparation expiry must derive from the retained
+admission + 60,000-ms cutoff and committed run cutoff. Existing context-refusal
+validation assumes no episode and re-derives ordinary-history preparation
+causes, so it cannot merely accept a fabricated maintenance-expiry reason.
+`commit_model_settlement` currently reads the first proposal record; review that
+assumption when adding the required episode-terminal prefix. Reuse the existing
+owner transaction and unknown-commit resolution before adoption/publication.
+No new schema proposal from this exploration was implemented or accepted.
+
+Keep the current-contract-only pre-1.0 disposition. All earlier explicit
+maintainer approvals remain recorded below. Remaining work includes chat joins,
+helpers, coordinated protocol /3 and /4, current-contract cleanup, fixture
+tracking and release evidence. T16 also retains the provider launcher's
+2,100-ms interrupted-wait defect and Task.Supervisor cleanup diagnostics.
+No paid provider call was made while preparing this stop. Closure, merge to
+main, tags and publication remain separate maintainer decisions.
+
+## Historical restart handoff — 2026-10-02, before admission
+
+Historical snapshot. Resume from the latest checkpoint and Current work below.
 
 The maintainer requested a safe pause and a committed, pushed resume record.
 No product edits were made after implementation `9e9768396d4d2a782e6ce87a56273f290bf289f8`.
@@ -165,7 +247,8 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Active: T07 durable compaction. The admission/replay foundation below is
+- Paused at the maintainer's request for restart: T07 durable compaction.
+  The admission/replay foundation below is
   implemented; next connect the serial owner to its ordinary-limit trigger,
   fixed source-preparation cutoff, bounded selection, maintenance-specific
   request/attempt/settlement records and checkpoint commit. Standalone compact,
