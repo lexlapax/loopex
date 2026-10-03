@@ -566,11 +566,11 @@ defmodule Loopex.ArtifactReadAdmissionTest do
              )
   end
 
-  test "historical staging remains readable but projection provenance cannot disappear after cutover",
+  test "current artifact staging requires exact projection provenance from the first request",
        context do
     fixture = Fixture.start(tools: context.definitions, script: [%{text: "one"}, %{text: "two"}])
     on_exit(fn -> Fixture.stop(fixture) end)
-    {session, attachment} = run(fixture, "compatibility")
+    {session, attachment} = run(fixture, "current-projection")
     assert List.last(finish(attachment))["outcome"] == "completed"
 
     assert {:accepted, "next"} =
@@ -598,16 +598,20 @@ defmodule Loopex.ArtifactReadAdmissionTest do
     assert {:error, :invalid_model_request_transition} =
              SessionState.recover(session, malformed, events)
 
-    historical = remove_projection(records, first.journal_version)
-    assert {:ok, state} = SessionState.recover(session, historical, events)
-    assert state.lineage_projection_revision == 1
+    assert {:ok, _state} = SessionState.recover(session, records, events)
+
+    for version <- [first.journal_version, second.journal_version] do
+      assert {:error, :invalid_model_request_transition} =
+               SessionState.recover(session, remove_projection(records, version), events)
+    end
+
+    missing =
+      records
+      |> remove_projection(first.journal_version)
+      |> remove_projection(second.journal_version)
 
     assert {:error, :invalid_model_request_transition} =
-             SessionState.recover(
-               session,
-               remove_projection(records, second.journal_version),
-               events
-             )
+             SessionState.recover(session, missing, events)
   end
 
   defp remove_projection(records, version) do

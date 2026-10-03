@@ -325,6 +325,35 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: remove the superseded lineage-projection cutover cache and historical
+  inline staging fallback. Replay now asks the captured current lineage
+  constructor whether a projection is required. Artifact-capable sessions retain
+  exact provenance from their first request; sessions without that capability
+  retain their current null projection. The formerly failing fixture proves
+  unchanged current replay and refuses null, missing first, missing later and
+  wholly removed projection metadata after exact record-cost repair. This applies
+  the accepted pre-1.0 current-contract disposition; it removes no current restart,
+  source-binding, accounting or cleanup obligation.
+
+  Nineteen-file current artifact, projection, maintenance and accounting
+  selection: 277 passed and one existing long-bound exclusion on each pair.
+  Current: 14.6 measured seconds,
+  `/private/tmp/loopex-m7-projection-current-current-dev1.log`, SHA-256
+  `6755c67f1d02d7b0e2ea696bef5f6bdcdc73fb30918a6b5c718aaa541a03707f`.
+  Floor: 15.3 measured seconds,
+  `/private/tmp/loopex-m7-projection-current-floor-v1.log`, SHA-256
+  `f1fb6341d7ec7017ccf3eb6b84baa509e84a8849c35da5d87c5be7db4724f36c`.
+  One added T15 subtask closes. Originals remain 51 / 128 / 7 including T00;
+  added totals become 185 done / 10 todo, or 181 / 9 for T01–T19. Superseded
+  genesis/API/protocol/host fallback cleanup and current backup/restore remain
+  open. The failed full check of 4e4778a2 remains failed evidence; these are
+  focused proofs on the changed source, not a rerun of that candidate.
+
+  Formatting, warning-free compilation, dependency direction, bootstrap/status,
+  documentation and diff checks passed in 26.4 measured seconds:
+  `/private/tmp/loopex-m7-projection-current-gates-v1.log`, SHA-256
+  `c85b7734b796b31193a39ad27004bedb0cde9c28ba56bac2aa7f8c653f683080`.
+
 - Done: commit and recover a measured `compaction_no_progress` ending for a
   valid settled summary that fails strict byte/token progress. The last minimum
   ordinary candidate supplies exact descriptor counts, token estimate and digest;
@@ -6982,6 +7011,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Remove the historical lineage-projection cutover cache and fallback; require the captured current artifact projection from the first request, preserve current null-projection sessions, and prove unchanged restart plus null/missing-first/missing-later/fully-removed provenance refusal and adjacent artifact/maintenance/accounting behavior on both supported toolchains.
 - [x] Remove model-request v1 and receipt revision 2/3 readers, old per-run conversation query and lineage bypass; migrate current resource/source-binding fixtures and prove self-consistent retired-version refusal, exact unchanged bounds and current recovery on both toolchains.
 - [x] Remove provider settlement v1/v2 readers, legacy accounting branches, cutover state and exclusive historical-reader interaction fixtures; prove current v3 verdict/accounting/source/terminal/restart and effect-query obligations on both toolchains.
 - [x] Remove the obsolete M2 accounting probe and exclusive old-reader foundation scaffolding; retain both-pair proof of current embedding, CLI, artifact and recovery workflows.

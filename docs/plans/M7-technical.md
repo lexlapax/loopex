@@ -1666,7 +1666,10 @@ This is not a complete T07 workflow proof.
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are
-removed. Self-consistent old encodings refuse; current restart/source-binding,
+removed. The historical lineage-projection cutover cache and fallback are also
+removed; captured artifact capability requires exact projection provenance from
+the first request, while current sessions without that capability keep their null
+projection. Self-consistent old encodings refuse; current restart/source-binding,
 resource class/header bounds and exact record-cost reservation remain required.
 
 The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)

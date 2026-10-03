@@ -218,7 +218,6 @@ defmodule Loopex.Runtime.SessionState do
           active_maintenance: binary() | nil,
           maintenance_terminal: map() | nil,
           prepared_tool_results: map(),
-          lineage_projection_revision: nil | 1,
           run_order: [binary()],
           bounds: map(),
           context_budgets: map(),
@@ -275,7 +274,6 @@ defmodule Loopex.Runtime.SessionState do
             active_maintenance: nil,
             maintenance_terminal: nil,
             prepared_tool_results: %{},
-            lineage_projection_revision: nil,
             run_order: [],
             bounds: %{},
             # The context-admission ceiling each run committed at its own prompt
@@ -2181,14 +2179,12 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  # Concept: historical inline staging stays readable without permitting a
-  # later request to discard the projection provenance already in use.
-  # Technical depth: the cutover is derived from validated committed staging records.
-  defp projected_entries(state, run_id, nil) do
-    if is_nil(state.lineage_projection_revision),
-      do: projected_entries_without_artifacts(state, run_id),
-      else: {:error, :context_projection_invalid}
-  end
+  # Concept: replay requires the current projection for the session's captured tools.
+  # Technical depth: an absent projection is valid only when the configured
+  # lineage constructor itself returns none. Artifact-capable sessions require
+  # exact range provenance from their first request, without a historical cutover.
+  defp projected_entries(state, run_id, nil),
+    do: projected_entries_without_artifacts(state, run_id)
 
   defp projected_entries(state, run_id, %{"revision" => 1, "allowance" => allowance} = projection)
        when map_size(projection) == 3 do
@@ -5822,10 +5818,7 @@ defmodule Loopex.Runtime.SessionState do
         })
 
       next = put_pending(state, run_id, next_work)
-      revision = get_in(record, ["lineage_projection", "revision"])
-
-      {:ok, %{next | lineage_projection_revision: revision || state.lineage_projection_revision},
-       []}
+      {:ok, next, []}
     else
       _other -> {:error, :invalid_model_request_transition}
     end
@@ -5892,10 +5885,7 @@ defmodule Loopex.Runtime.SessionState do
         })
 
       next = put_pending(state, run_id, next_work)
-      revision = get_in(record, ["lineage_projection", "revision"])
-
-      {:ok, %{next | lineage_projection_revision: revision || state.lineage_projection_revision},
-       []}
+      {:ok, next, []}
     else
       _other -> {:error, :invalid_model_request_transition}
     end
