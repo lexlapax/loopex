@@ -29,6 +29,66 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Restart handoff — 2026-10-02
+
+The maintainer requested a safe pause and a committed, pushed resume record.
+No product edits were made after implementation `9e9768396d4d2a782e6ce87a56273f290bf289f8`.
+Its full current-pair fast check passed all eleven application suites in
+1,387.4 measured seconds. Complete output:
+`/private/tmp/loopex-m7-9e976839-fast-check.log`, SHA-256
+`9831595f0665c91833150ca5d34578a8be62c1086a6d6a84224c7524d167c9b5`.
+Wrapper handle `53188` is terminal and collected; do not poll or restart it.
+The clean verification checkout remains detached at that tested implementation
+in `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Subsequent primary-branch
+changes are handoff documentation only. No agents or decisions are pending.
+Preserve the current-only pre-1.0 override; retired originals are not passes.
+The implementation goal is paused at the maintainer's request, not completed;
+M7 remains In progress. Resume requires no active worker or test process.
+
+T01–T19 original items: 51 done / 122 todo / 6 retired. Added subtasks:
+170 done / 8 todo. Including T00: 51 / 128 / 7 original and 174 / 9 added.
+
+| Task | Original done / todo / retired | Added done / todo |
+| --- | ---: | ---: |
+| T01 | 7 / 0 / 0 | 0 / 0 |
+| T02 | 9 / 0 / 0 | 18 / 0 |
+| T03 | 5 / 2 / 1 | 4 / 0 |
+| T04 | 5 / 6 / 0 | 24 / 1 |
+| T05 | 0 / 10 / 0 | 1 / 0 |
+| T06 | 1 / 6 / 0 | 11 / 0 |
+| T07 | 0 / 11 / 0 | 9 / 0 |
+| T08 | 5 / 6 / 0 | 25 / 1 |
+| T09 | 8 / 0 / 0 | 10 / 2 |
+| T10 | 1 / 9 / 0 | 15 / 0 |
+| T11 | 1 / 14 / 0 | 5 / 0 |
+| T12 | 6 / 4 / 0 | 9 / 0 |
+| T13 | 2 / 8 / 0 | 2 / 0 |
+| T14 | 0 / 10 / 0 | 0 / 0 |
+| T15 | 0 / 4 / 5 | 5 / 2 |
+| T16 | 1 / 8 / 0 | 32 / 2 |
+| T17 | 0 / 10 / 0 | 0 / 0 |
+| T18 | 0 / 7 / 0 | 0 / 0 |
+| T19 | 0 / 7 / 0 | 0 / 0 |
+
+Resume work begins with T07's durable compaction episode. Read accepted
+ADR 0043's maintenance records and checkpoint
+transaction rules, then the SessionState reducer and SessionCoordinator
+admission/staging/settlement paths. Existing compaction source selection,
+summary admission and maintenance-request helpers are implemented, but no live
+maintenance lifecycle or checkpoint/replay integration has been added. The
+latest exploration was read-only. Complete explicit and automatic paths,
+fixed admission cutoffs, usage-once accounting, checkpoint uncertainty and
+recovery before closing original T07 items. Do not invent an unapproved public
+or persistent contract.
+
+Other unfinished work: remaining chat joins and built multi-prompt proof,
+helpers, coordinated protocol /3 and /4, current-only contract cleanup,
+fixture/attempt tracking and release evidence. T16 also retains the provider
+launcher 2,100-ms interrupted-wait defect and Task.Supervisor cleanup diagnostic
+investigation. Closure, main merge, tag and publication still require their
+separate maintainer decisions. No paid provider calls were made in this pause
+preparation.
+
 ## Restart handoff — 2026-10-01
 
 Historical snapshot. Resume from Current work below and the checkbox reporter;
@@ -105,20 +165,19 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: full current-pair integration check on exact clean public-chat
-  implementation `9e9768396d4d2a782e6ce87a56273f290bf289f8`. Dedicated detached
-  worktree `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`; complete output
-  `/private/tmp/loopex-m7-9e976839-fast-check.log`; live wrapper handle `53188`.
-  Header binds the exact SHA and `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`.
-  Collect that handle before hashing; retain any failure and never rerun the
-  same bytes as a pass. No result is claimed while running. The preceding
-  `5036d2d9` run is terminal and passed, as recorded below. All focused chat
-  and gate handles are terminal and collected. No agents or maintainer questions
-  are pending. Continue remaining chat joins, compaction, helpers, current-only
-  contract cleanup and protocol/evidence work after collecting this run.
-
-
-
+- Paused: the maintainer requested a safe restart checkpoint. See the
+  2026-10-02 restart handoff above for the complete T01–T19 tally and next steps.
+  No agents, live checks or maintainer questions remain. Product implementation
+  is `9e9768396d4d2a782e6ce87a56273f290bf289f8`; its full current-pair fast check
+  passed all eleven application suites in 1,387.4 measured seconds. Complete
+  terminal output `/private/tmp/loopex-m7-9e976839-fast-check.log`, SHA-256
+  `9831595f0665c91833150ca5d34578a8be62c1086a6d6a84224c7524d167c9b5`.
+  Handle `53188` is terminal and collected. The header binds the exact SHA and
+  `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. No later documentation bytes are claimed
+  as tested implementation. Original tally: 51 done / 128 todo / 7 retired;
+  added tally: 174 done / 9 todo. Resume T07 durable compaction, then remaining
+  chat/helper/protocol/current-only cleanup and fixture/evidence work. Do not
+  repeat this exact full check or claim M7 closure from it.
 
 - Done: the full current-pair integration check on exact clean implementation
   `5036d2d9675483025fa3ab98c4431844d5b072cb` passed all eleven application
@@ -5965,7 +6024,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Run the public-chat host and shared diagnostic-lifetime integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
+- [x] Run the public-chat host and shared diagnostic-lifetime integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 
 
 - [x] Run the prepared-policy scheduling and current-only request/receipt integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
