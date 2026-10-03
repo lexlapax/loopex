@@ -325,6 +325,45 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: commit a validated first ordinary-limit checkpoint and its
+  `context.compacted` event in one owner proposal. Replay recomputes original
+  coverage, settled summary, metadata and exact progress before accepting it.
+  Derived projection excludes exact covered source identities, prepends the
+  canonical summary and preserves every unsummarized element; original run and
+  lineage reads remain unchanged. Fitted checkpoint completion releases the
+  parent staging identity without ending its run, opening another summary
+  attempt or charging again. The next ordinary request and receipt replay from
+  committed projection. A partial checkpoint cannot claim completion and
+  survives cancellation. Private effect-history pages validate and traverse
+  both checkpoint and completed episode without owner activation or dispatch.
+  This is a reducer/reader proof; live checkpoint transaction uncertainty,
+  multi-prefix continuation, automatic dispatch and standalone compact remain
+  open. One added T07 subtask closes; original totals remain 51 done / 128 todo /
+  7 retired including T00. Added totals become 183 done / 10 todo, or
+  179 done / 9 todo for T01–T19.
+
+  The sixteen-file selection passed 225 tests on both supported pairs. Current:
+  12.5 measured runner seconds,
+  `/private/tmp/loopex-m7-checkpoint-commit-current-dev3.log`, SHA-256
+  `06032c8a8c01b9a6f234cd14453e587b2270f778ac6cbcf21ec4fdc5d72128ff`.
+  Floor: 13.2 measured runner seconds,
+  `/private/tmp/loopex-m7-checkpoint-commit-floor-v1.log`, SHA-256
+  `a3c19500c6f65ec91601bb4b317be0aa5cd248ac44fa1fc4dbc9fa53e57bddad`.
+  Development failures remain retained at
+  `/private/tmp/loopex-m7-checkpoint-commit-current-dev1.log`, SHA-256
+  `9d4049d60b0122a3a8e71de65869c9025668e4ff49a3a602eb761b391e3da0d4`,
+  and `...-current-dev2.log`, SHA-256
+  `54adefe0e1a704122e7ad120be2a09cdb57bbbe66bd1a298237a68f04b73a8d1`.
+  The joined ordinary request exposed raw-lineage receipt reconstruction after
+  substitution; this was corrected. Its probe-only project receipt also needed
+  the actual current `no_manifest` shape for durable ordinary staging. No
+  production validator, bound, cleanup proof or check was weakened.
+
+  Formatting, warning-free compilation, dependency direction, bootstrap/status,
+  documentation and diff checks passed in 23.6 measured seconds. Complete output:
+  `/private/tmp/loopex-m7-checkpoint-commit-gates-v1.log`, SHA-256
+  `84a5f1a3e9cda7ac55b3819b688cabec0b271081cab2d92105570f505eb796f6`.
+
 - Done: a settled first summary now has an exact pending-substitution probe.
   It validates the unprotected whole-unit cut against complete original-record
   coverage, renders owner-authenticated summary provenance and measures before
@@ -6593,6 +6632,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Commit and replay a useful first ordinary-limit checkpoint with its event, exact original coverage, settled summary provenance and unchanged raw facts; substitute only covered source identities, retain the unsummarized tail, release fitted completion without a parent terminal or duplicate charge, reject partial success and forged fields, and traverse checkpoint/completion in bounded private history on both supported toolchains. Live Store uncertainty, later prefixes and standalone compact remain open.
 
 - [x] Select a contiguous retained tail from validated complete units, releasing terminal units oldest-first, preserving protected and frozen units, releasing all eligible units for explicit origin, and growing only unreleased tails within the 2,048-token preference and whole-request fit callback. Prove irreducible refusal, rendering refusal, exact preference, mandatory oversized tail, interruption and fixed-input measurement for empty history on both toolchains. The owner now shares exact configured request/receipt construction with the q=0 ordinary-limit probe. Thinking targets, captured rendering offender, prior-checkpoint substitution and live automatic triggering remain open.
 

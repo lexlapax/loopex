@@ -66,6 +66,9 @@ defmodule Loopex.Runtime.EffectIntents do
       {~w(episode_id summary_ordinal purpose operation_id configuration_version captured_session_version strategy_revision eligible_unit_count covered_range source_digest source_excerpted staged_at staged_request_digest request context_receipt),
        []},
     "maintenance_episode_terminal_v1" => {~w(episode_id observed_at result), []},
+    "compaction_checkpoint_committed_v1" =>
+      {~w(checkpoint_id episode_id run_id summary_ordinal committed_at lineage covered_range consumed_range prior_checkpoint_id summary strategy strategy_revision model reasoning configuration_version usage source_digest),
+       []},
     "deadline_staging_failed_v1" => {~w(run_id turn_id category), []},
     "run_terminal_committed" =>
       {~w(run_id outcome bound observed declared_limit accounting_source reconciliation_ref cleanup_grace_ms command_id),
@@ -468,6 +471,30 @@ defmodule Loopex.Runtime.EffectIntents do
     else
       _ -> false
     end
+  end
+
+  defp neutral_values?(%{payload: %{kind: "compaction_checkpoint_committed_v1"} = payload}) do
+    range = payload["covered_range"]
+    lineage = payload["lineage"]
+
+    Enum.all?(~w(checkpoint_id episode_id run_id), &identifier?(payload[&1])) and
+      positive_version?(payload["summary_ordinal"]) and version?(payload["committed_at"]) and
+      closed?(lineage, ~w(session_id through_run_id)) and identifier?(lineage["session_id"]) and
+      lineage["through_run_id"] == payload["run_id"] and
+      closed?(range, ~w(unit_count record_count source_count first last first_kept digest)) and
+      Enum.all?(~w(unit_count record_count source_count), &positive_version?(range[&1])) and
+      range["record_count"] <= range["source_count"] and digest?(range["digest"]) and
+      Enum.all?(~w(first last first_kept), &is_map(range[&1])) and
+      payload["consumed_range"] == range and is_nil(payload["prior_checkpoint_id"]) and
+      Loopex.Runtime.CompactionSummary.validate_prior(payload["summary"]) == :ok and
+      payload["summary"]["covered_range_digest"] == range["digest"] and
+      payload["strategy"] == "loopex.compaction.reference" and payload["strategy_revision"] == 3 and
+      identifier?(payload["model"]) and payload["reasoning"] == "none" and
+      positive_version?(payload["configuration_version"]) and digest?(payload["source_digest"]) and
+      closed?(payload["usage"], ~w(attempts reported_tokens estimated_tokens total_tokens)) and
+      Enum.all?(Map.values(payload["usage"]), &version?/1) and
+      payload["usage"]["total_tokens"] ==
+        payload["usage"]["reported_tokens"] + payload["usage"]["estimated_tokens"]
   end
 
   defp neutral_values?(%{payload: %{kind: "maintenance_episode_terminal_v1"} = payload}) do

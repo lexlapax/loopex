@@ -211,6 +211,9 @@ defmodule Loopex.Runtime.SessionState do
           artifact_sources: map(),
           tool_result_sources: map(),
           artifact_preparations: map(),
+          checkpoints: map(),
+          active_checkpoint: binary() | nil,
+          compacted_sources: MapSet.t(),
           maintenance_episodes: map(),
           active_maintenance: binary() | nil,
           maintenance_terminal: map() | nil,
@@ -261,6 +264,13 @@ defmodule Loopex.Runtime.SessionState do
             # record digest/cost and ADR 0015's five use labels, not output copies.
             tool_result_sources: %{},
             artifact_preparations: %{},
+            # Concept: checkpoints change projection while original facts remain readable.
+            # Technical depth: replay validates each whole-unit cut, then indexes
+            # exact source identities. Journal positions cannot identify a cut:
+            # queued inputs may have older admission positions than later units.
+            checkpoints: %{},
+            active_checkpoint: nil,
+            compacted_sources: MapSet.new(),
             maintenance_episodes: %{},
             active_maintenance: nil,
             maintenance_terminal: nil,
@@ -895,7 +905,7 @@ defmodule Loopex.Runtime.SessionState do
         end)
 
       Conversation.compaction_units(
-        lineage_elements(state, run_id),
+        uncompacted_elements(state, lineage_elements(state, run_id)),
         state.active_run_id,
         terminal_runs,
         Map.keys(frozen_lineage(state, state.active_run_id))
@@ -911,13 +921,40 @@ defmodule Loopex.Runtime.SessionState do
   def projected_lineage(state, run_id, allowance, elements \\ nil) do
     binding = state.tool_selection && state.tool_selection["artifact_read"]
 
-    Loopex.Runtime.LineageProjection.project(
-      prepared_elements(state, elements || lineage_elements(state, run_id)),
-      binding,
-      state.artifact_sources,
-      frozen_lineage(state, run_id),
-      allowance
-    )
+    with {:ok, entries, projection} <-
+           Loopex.Runtime.LineageProjection.project(
+             prepared_elements(
+               state,
+               uncompacted_elements(state, elements || lineage_elements(state, run_id))
+             ),
+             binding,
+             state.artifact_sources,
+             frozen_lineage(state, run_id),
+             allowance
+           ),
+         {:ok, checkpoint} <- checkpoint_entries(state) do
+      {:ok, checkpoint ++ entries, projection}
+    end
+  end
+
+  defp uncompacted_elements(state, elements),
+    do:
+      Enum.reject(
+        elements,
+        &MapSet.member?(state.compacted_sources, Conversation.source_reference(&1))
+      )
+
+  defp checkpoint_entries(%{active_checkpoint: nil}), do: {:ok, []}
+
+  defp checkpoint_entries(state) do
+    checkpoint = state.checkpoints[state.active_checkpoint]
+
+    with {:ok, entry} <-
+           Loopex.Runtime.CompactionSummary.project(
+             state.active_checkpoint,
+             checkpoint["summary"]
+           ),
+         do: {:ok, [entry]}
   end
 
   @doc false
@@ -933,7 +970,10 @@ defmodule Loopex.Runtime.SessionState do
 
     with {:ok, candidates} <-
            Loopex.Runtime.LineageProjection.preparation_candidates(
-             prepared_elements(state, elements || lineage_elements(state, run_id)),
+             prepared_elements(
+               state,
+               uncompacted_elements(state, elements || lineage_elements(state, run_id))
+             ),
              binding,
              state.artifact_sources,
              frozen_lineage(state, run_id)
@@ -1259,7 +1299,7 @@ defmodule Loopex.Runtime.SessionState do
              Map.get(staging, :excerpt_allowance, 2_048),
              staging.elements
            ),
-         entries = Map.get(staging, :checkpoint_entries, []) ++ entries,
+         entries = replace_checkpoint_entries(entries, staging),
          {blocks, sources} = Enum.unzip(selected),
          steer = staging.steer,
          messages =
@@ -1314,14 +1354,25 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp replace_checkpoint_entries(entries, staging) do
+    case Map.fetch(staging, :checkpoint_entries) do
+      :error ->
+        entries
+
+      {:ok, checkpoint} ->
+        checkpoint ++
+          Enum.reject(entries, fn {source, _} -> source["kind"] == "compaction_summary" end)
+    end
+  end
+
   # Concept: choose whole retained units against the ordinary request's real cost.
   # Technical depth: q=0 excludes removable excerpts and fresh optional bodies;
   # both legal empty resource headers must fit. Frozen context stays exact.
   # Fit includes captured instructions, tool definitions, steer, continuation,
   # metadata and the complete receipt-bearing record's fixed point. The tail
-  # preference counts raw session descriptors, excluding fixed steer. This
-  # ordinary-limit probe does not implement thinking targets, checkpoint
-  # substitution or a live automatic trigger, and never opens an attempt.
+  # preference counts raw session descriptors, excluding fixed steer and prior
+  # checkpoint cost. This ordinary-limit probe does not implement thinking
+  # targets or a live automatic trigger, and never opens an attempt.
   @doc false
   @spec ordinary_compaction_tail(t(), map(), :automatic | :explicit, map(), function()) ::
           {:ok, map()} | {:refused, term()} | {:error, term()}
@@ -1375,7 +1426,10 @@ defmodule Loopex.Runtime.SessionState do
                 fixed["context_receipt"]["blocks"]
                 |> Enum.filter(
                   &(&1["provenance_class"] == "session" and
-                      &1["source_reference"]["kind"] != "session_steer")
+                      &1["source_reference"]["kind"] not in [
+                        "session_steer",
+                        "compaction_summary"
+                      ])
                 )
                 |> Enum.reduce(0, &(&1["token_cost"] + &2))
 
@@ -1419,7 +1473,8 @@ defmodule Loopex.Runtime.SessionState do
          } = episode <-
            state.maintenance_episodes[state.active_maintenance],
          true <- is_nil(state.aborting) and episode["run_id"] == state.active_run_id,
-         true <- is_integer(now) and now >= 0 and now <= @uint64_max,
+         nil <- state.active_checkpoint,
+         true <- is_integer(now) and now >= episode["request_staged_at"] and now <= @uint64_max,
          true <- is_integer(state.deadlines[episode["run_id"]]),
          true <- now < state.deadlines[episode["run_id"]],
          :ok <- pending_checkpoint_capacity(state, episode),
@@ -1482,6 +1537,117 @@ defmodule Loopex.Runtime.SessionState do
       {:error, _} = error -> error
       _ -> {:error, :no_pending_maintenance_checkpoint}
     end
+  end
+
+  # Concept: checkpoint commitment retains a useful summary without completing its run.
+  # Technical depth: the owner recomputes coverage and exact progress from the
+  # settled reply. One proposal contains the private checkpoint and its public
+  # event. The Store fence owns transaction identity and uncertain resolution;
+  # no model call, accounting charge or raw conversation fact is added here.
+  @doc false
+  @spec propose_maintenance_checkpoint(t(), integer(), function()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_maintenance_checkpoint(state, now, check) when is_function(check, 0) do
+    with {:ok, candidate} <- preflight_maintenance_checkpoint(state, now, check),
+         record = maintenance_checkpoint_record(state, candidate, now),
+         {:ok, _} <- Store.admit_bounded(record),
+         {:ok, proposal} <-
+           internal_proposal(state, candidate.checkpoint_id <> ":checkpoint", record),
+         :ok <- check.() do
+      {:ok, proposal}
+    end
+  end
+
+  # Concept: a fitted committed checkpoint releases its parent staging identity.
+  # Technical depth: run-owned completion has no run terminal or second charge.
+  # Rebuild the required ordinary projection from committed checkpoint truth,
+  # retaining the admission's steer and q=0 header. Partial progress remains an
+  # active episode until further maintenance or a truthful ending settles it.
+  @doc false
+  @spec propose_maintenance_checkpoint_completion(t(), integer(), function()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_maintenance_checkpoint_completion(state, now, check) when is_function(check, 0) do
+    with {:ok, record} <- maintenance_checkpoint_completion_record(state, now, check),
+         {:ok, proposal} <-
+           internal_proposal(state, state.active_maintenance <> ":completed", record),
+         :ok <- check.() do
+      {:ok, proposal}
+    end
+  end
+
+  defp maintenance_checkpoint_completion_record(state, now, check) do
+    with %{"stage" => "checkpoint_committed", "checkpoint_id" => id} = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <- id == state.active_checkpoint and episode["run_id"] == state.active_run_id,
+         true <- is_nil(state.aborting),
+         true <-
+           is_integer(now) and now >= state.checkpoints[id]["committed_at"] and now <= @uint64_max,
+         true <- now < state.deadlines[episode["run_id"]],
+         :ok <- pending_checkpoint_capacity(state, episode),
+         staging = %{
+           run_id: episode["run_id"],
+           elements: lineage_elements(state, episode["run_id"]),
+           steer: episode["ordinary_steer"],
+           resources: state.run_resources[episode["run_id"]],
+           deadline: state.deadlines[episode["run_id"]],
+           excerpt_allowance: 0
+         },
+         project = %{
+           "class" => "project_resource",
+           "receipt_revision" => 2,
+           "disposition" => "not_evaluated_required_failure",
+           "detail" => nil
+         },
+         header = Loopex.Runtime.ResourceContext.initial_header(staging.resources),
+         header = if(header, do: Map.put(header, "status", "retained_content_missing"), else: nil),
+         {:ok, measurement} <-
+           checkpoint_projection_measurement(state, staging, project, header, check),
+         {:ok, _} <- measurement.admission do
+      {:ok,
+       %{
+         :kind => "maintenance_episode_terminal_v1",
+         "episode_id" => episode["episode_id"],
+         "observed_at" => now,
+         "result" => %{
+           "disposition" => "checkpointed",
+           "checkpoint_id" => id,
+           "failure" => nil,
+           "usage" => episode["usage"],
+           "cleanup" => "confirmed"
+         }
+       }}
+    else
+      {:refused, refusal} -> {:error, {:checkpoint_requires_more_progress, refusal}}
+      {:error, _} = error -> error
+      false -> pending_checkpoint_refusal(state, now)
+      _ -> {:error, :no_committed_maintenance_checkpoint}
+    end
+  end
+
+  defp maintenance_checkpoint_record(state, candidate, now) do
+    episode = state.maintenance_episodes[state.active_maintenance]
+    configuration = episode["maintenance_configuration"]
+
+    %{
+      :kind => "compaction_checkpoint_committed_v1",
+      "checkpoint_id" => candidate.checkpoint_id,
+      "episode_id" => episode["episode_id"],
+      "run_id" => episode["run_id"],
+      "summary_ordinal" => episode["summary_ordinal"],
+      "committed_at" => now,
+      "lineage" => %{"session_id" => state.session_id, "through_run_id" => episode["run_id"]},
+      "covered_range" => candidate.covered_range,
+      "consumed_range" => candidate.covered_range,
+      "prior_checkpoint_id" => candidate.prior_checkpoint_id,
+      "summary" => candidate.summary,
+      "strategy" => "loopex.compaction.reference",
+      "strategy_revision" => 3,
+      "model" => configuration["selection"]["model"],
+      "reasoning" => configuration["selection"]["reasoning"],
+      "configuration_version" => episode["configuration_version"],
+      "usage" => episode["usage"],
+      "source_digest" => episode["source_digest"]
+    }
   end
 
   defp pending_checkpoint_capacity(state, episode) do
@@ -1908,7 +2074,7 @@ defmodule Loopex.Runtime.SessionState do
   # Technical depth: the cutover is derived from validated committed staging records.
   defp projected_entries(state, run_id, nil) do
     if is_nil(state.lineage_projection_revision),
-      do: Conversation.lineage_entries(lineage_elements(state, run_id)),
+      do: projected_entries_without_artifacts(state, run_id),
       else: {:error, :context_projection_invalid}
   end
 
@@ -1920,6 +2086,10 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp projected_entries(_, _, _), do: {:error, :context_projection_invalid}
+
+  defp projected_entries_without_artifacts(state, run_id) do
+    with {:ok, entries, nil} <- projected_lineage(state, run_id, 0), do: {:ok, entries}
+  end
 
   @doc """
   ## Concept
@@ -4143,6 +4313,7 @@ defmodule Loopex.Runtime.SessionState do
               "tool_result_preparation_state_v1",
               "maintenance_episode_admitted_v1",
               "maintenance_episode_terminal_v1",
+              "compaction_checkpoint_committed_v1",
               "maintenance_request_committed_v1",
               "maintenance_attempt_opened_v1",
               "maintenance_attempt_settled_v3",
@@ -5199,6 +5370,81 @@ defmodule Loopex.Runtime.SessionState do
        )
        when is_binary(episode),
        do: {:error, :invalid_maintenance_episode_transition}
+
+  defp apply_internal_record(state, %{kind: "compaction_checkpoint_committed_v1"} = record) do
+    with {:ok, candidate} <-
+           preflight_maintenance_checkpoint(state, record["committed_at"], fn -> :ok end),
+         true <- record == maintenance_checkpoint_record(state, candidate, record["committed_at"]),
+         false <- Map.has_key?(state.checkpoints, candidate.checkpoint_id),
+         {:ok, units} <- compaction_units(state, record["run_id"]),
+         {:ok, _} <- Store.admit_bounded(record) do
+      covered =
+        units
+        |> Enum.take(candidate.covered_range["unit_count"])
+        |> Enum.flat_map(& &1.elements)
+        |> Enum.map(&Conversation.source_reference/1)
+        |> MapSet.new()
+
+      episode =
+        state.maintenance_episodes[state.active_maintenance]
+        |> Map.put("checkpoint_id", candidate.checkpoint_id)
+        |> Map.put("stage", "checkpoint_committed")
+
+      next = %{
+        state
+        | checkpoints: Map.put(state.checkpoints, candidate.checkpoint_id, record),
+          active_checkpoint: candidate.checkpoint_id,
+          compacted_sources: MapSet.union(state.compacted_sources, covered),
+          maintenance_episodes:
+            Map.put(state.maintenance_episodes, state.active_maintenance, episode)
+      }
+
+      event =
+        Map.take(
+          record,
+          ~w(checkpoint_id episode_id run_id covered_range prior_checkpoint_id strategy strategy_revision model reasoning configuration_version usage)
+        )
+        |> Map.put("source_excerpted", candidate.summary["source_excerpted"])
+        |> Map.put(:kind, "context.compacted")
+        |> Map.put(
+          :event_id,
+          stable_id("event-compacted", state.session_id, candidate.checkpoint_id)
+        )
+
+      with {:ok, _} <- Store.admit_bounded(event), do: {:ok, next, [event]}
+    else
+      _ -> {:error, :invalid_compaction_checkpoint_transition}
+    end
+  end
+
+  defp apply_internal_record(
+         state,
+         %{
+           :kind => "maintenance_episode_terminal_v1",
+           "result" => %{"disposition" => "checkpointed"}
+         } = record
+       ) do
+    with {:ok, expected} <-
+           maintenance_checkpoint_completion_record(state, record["observed_at"], fn -> :ok end),
+         true <- record == expected,
+         {:ok, _} <- Store.admit_bounded(record) do
+      id = state.active_maintenance
+
+      episode =
+        state.maintenance_episodes[id]
+        |> Map.put("stage", "settled")
+        |> Map.put("result", record["result"])
+
+      {:ok,
+       %{
+         state
+         | active_maintenance: nil,
+           maintenance_episodes: Map.put(state.maintenance_episodes, id, episode)
+       }, []}
+    else
+      _ -> {:error, :invalid_maintenance_episode_transition}
+    end
+  end
 
   defp apply_internal_record(state, %{kind: "maintenance_episode_terminal_v1"} = record) do
     with true <- closed_history_map?(record, [:kind, "episode_id", "observed_at", "result"]),
@@ -6852,6 +7098,7 @@ defmodule Loopex.Runtime.SessionState do
           "stage" => "model_attempt_open",
           "attempts" => 1,
           "request" => request,
+          "request_staged_at" => staged["staged_at"],
           "request_context_receipt" => staged["context_receipt"],
           "covered_range" => staged["covered_range"],
           "source_digest" => staged["source_digest"],
@@ -9120,8 +9367,15 @@ defmodule Loopex.Runtime.SessionState do
 
   defp validate_receipt_generation(_receipt, _request), do: {:error, :invalid_context_receipt}
 
-  defp request_session_entries(state, run_id),
-    do: Conversation.lineage_entries(lineage_elements(state, run_id))
+  defp request_session_entries(state, run_id) do
+    with {:ok, entries} <-
+           Conversation.lineage_entries(
+             uncompacted_elements(state, lineage_elements(state, run_id))
+           ),
+         {:ok, checkpoint} <- checkpoint_entries(state) do
+      {:ok, checkpoint ++ entries}
+    end
+  end
 
   # Concept: every receipt describes exactly the committed lineage.
   # Technical depth: receipt digests cannot admit substituted or omitted history;
@@ -9541,7 +9795,7 @@ defmodule Loopex.Runtime.SessionState do
         with :ok <-
                SessionConfiguration.preflight_history(
                  configuration,
-                 lineage_elements(state, run_id),
+                 uncompacted_elements(state, lineage_elements(state, run_id)),
                  Enum.reject(state.run_order, &(&1 == run_id))
                ),
              {:ok, _, _} <- projected_lineage(state, run_id, 0),

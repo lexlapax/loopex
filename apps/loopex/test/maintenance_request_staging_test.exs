@@ -364,8 +364,290 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     end
   end
 
+  test "checkpoint and event commit together while exact raw facts remain readable" do
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("old", 1_000), later_old_units: ["unsummarized middle"])
+
+    episode_id = state.active_maintenance
+    run = state.active_run_id
+    raw = SessionState.lineage_elements(state, run)
+    {:ok, candidate} = SessionState.preflight_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    assert {:ok, proposal} =
+             SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    assert [record] = proposal.records
+    assert record.kind == "compaction_checkpoint_committed_v1"
+    assert record["checkpoint_id"] == candidate.checkpoint_id
+    assert record["covered_range"] == candidate.covered_range
+    assert record["consumed_range"] == candidate.covered_range
+    assert record["summary"] == candidate.summary
+    assert record["source_digest"] == state.maintenance_episodes[episode_id]["source_digest"]
+    assert record["usage"]["total_tokens"] == 56
+    assert record["model"] == state.maintenance_episodes[episode_id]["request"].model
+    assert record["reasoning"] == "none"
+    assert [event] = proposal.events
+    assert event.kind == "context.compacted"
+    assert event["checkpoint_id"] == record["checkpoint_id"]
+    assert event["source_excerpted"] == false
+    refute Map.has_key?(event, "summary")
+    refute Map.has_key?(event, "source_digest")
+    {next, rows, all_events} = commit(state, proposal, events)
+    assert next.checkpoints[candidate.checkpoint_id] == record
+    assert next.active_checkpoint == candidate.checkpoint_id
+    assert next.maintenance_episodes[episode_id]["stage"] == "checkpoint_committed"
+    assert next.active_maintenance == episode_id
+    assert next.pending_work == state.pending_work
+    assert next.charged == state.charged
+    assert next.conversation == state.conversation
+    assert SessionState.lineage_elements(next, run) == raw
+
+    assert SessionState.elements(next, hd(next.run_order)) ==
+             SessionState.elements(state, hd(state.run_order))
+
+    assert {:ok, entries, nil} = SessionState.projected_lineage(next, run, 0)
+
+    assert entries == [
+             candidate.entry
+             | Enum.map(Enum.drop(raw, 1), fn element ->
+                 {Loopex.Conversation.source_reference(element),
+                  %{"role" => "user", "content" => element.content}}
+               end)
+           ]
+
+    assert {:ok, units} = SessionState.compaction_units(next, run)
+    assert Enum.flat_map(units, & &1.elements) == Enum.drop(raw, 1)
+
+    assert {:ok, candidate_after} =
+             SessionState.reference_model_candidate(
+               next,
+               ordinary_staging(next),
+               [],
+               ordinary_project(),
+               nil
+             )
+
+    assert candidate_after.request == candidate.after.request
+
+    assert candidate_after.receipt ==
+             candidate.after.record["context_receipt"] |> Map.put("record_byte_cost", 0)
+
+    assert {:error, :maintenance_active} =
+             SessionState.preflight_model_request(next, run, candidate_after.request)
+
+    assert {:error, :no_pending_maintenance_checkpoint} =
+             SessionState.propose_maintenance_checkpoint(next, 2_000, fn -> :ok end)
+
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history ++ rows, all_events)
+    assert recovered == next
+
+    assert {:error, :private_public_projection_mismatch} =
+             SessionState.recover(state.session_id, history ++ rows, events)
+
+    assert {:error, :private_public_projection_mismatch} =
+             SessionState.recover(state.session_id, history, all_events)
+  end
+
+  test "checkpoint replay rejects forged coverage summary metadata charge and event" do
+    {state, history, events} = pending_checkpoint(String.duplicate("o", 3_000))
+    {:ok, proposal} = SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+    {_next, rows, all_events} = commit(state, proposal, events)
+    [record] = proposal.records
+
+    mutations = [
+      Map.put(record, "extra", true),
+      Map.put(record, "checkpoint_id", "forged"),
+      Map.put(record, "episode_id", "forged"),
+      Map.put(record, "run_id", "forged"),
+      Map.put(record, "summary_ordinal", 2),
+      Map.put(record, "committed_at", 61_001),
+      Map.put(record, "lineage", %{"session_id" => state.session_id, "through_run_id" => "forged"}),
+      put_in(record, ["covered_range", "digest"], String.duplicate("0", 64)),
+      put_in(record, ["consumed_range", "unit_count"], 2),
+      Map.put(record, "prior_checkpoint_id", record["checkpoint_id"]),
+      put_in(record, ["summary", "summary"], "rewritten"),
+      put_in(record, ["summary", "source_excerpted"], true),
+      Map.put(record, "strategy", "forged"),
+      Map.put(record, "strategy_revision", 4),
+      Map.put(record, "model", "forged"),
+      Map.put(record, "reasoning", "high"),
+      Map.put(record, "configuration_version", 2),
+      put_in(record, ["usage", "total_tokens"], 57),
+      Map.put(record, "source_digest", String.duplicate("0", 64))
+    ]
+
+    for forged <- mutations do
+      assert {:error, :invalid_compaction_checkpoint_transition} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ [%{hd(rows) | payload: forged}],
+                 all_events
+               )
+    end
+
+    forged_events = List.update_at(all_events, -1, &Map.put(&1, "source_excerpted", true))
+
+    assert {:error, :private_public_projection_mismatch} =
+             SessionState.recover(state.session_id, history ++ rows, forged_events)
+
+    duplicate = %{hd(rows) | journal_version: hd(rows).journal_version + 1}
+
+    assert {:error, :invalid_compaction_checkpoint_transition} =
+             SessionState.recover(state.session_id, history ++ rows ++ [duplicate], all_events)
+  end
+
+  test "successor commits a settled checkpoint without another summary charge or attempt" do
+    {state, history, events} = pending_checkpoint(String.duplicate("o", 3_000))
+    owner = owner_advance(state)
+    {:ok, successor} = SessionState.recover(state.session_id, history ++ [owner], events)
+    {:ok, original} = SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+    {:ok, proposal} = SessionState.propose_maintenance_checkpoint(successor, 2_000, fn -> :ok end)
+    assert proposal.records == original.records
+    assert proposal.events == original.events
+    refute proposal.tx_id == original.tx_id
+    {next, rows, all_events} = commit(successor, proposal, events)
+
+    assert {:ok, recovered} =
+             SessionState.recover(state.session_id, history ++ [owner] ++ rows, all_events)
+
+    assert recovered == next
+    assert recovered.charged == state.charged
+    assert recovered.maintenance_episodes[state.active_maintenance]["attempts"] == 1
+    assert recovered.maintenance_episodes[state.active_maintenance]["usage"]["attempts"] == 1
+  end
+
+  test "fitted checkpoint completion releases ordinary staging without ending the run or recharging" do
+    {state, history, events} = pending_checkpoint(String.duplicate("o", 3_000))
+    run = state.active_run_id
+    episode_id = state.active_maintenance
+    {:ok, checkpoint} = SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+    {state, rows, events} = commit(state, checkpoint, events)
+    history = history ++ rows
+
+    assert {:ok, completed} =
+             SessionState.propose_maintenance_checkpoint_completion(state, 2_001, fn -> :ok end)
+
+    assert [terminal] = completed.records
+
+    assert terminal["result"] == %{
+             "disposition" => "checkpointed",
+             "checkpoint_id" => state.active_checkpoint,
+             "failure" => nil,
+             "cleanup" => "confirmed",
+             "usage" => state.maintenance_episodes[episode_id]["usage"]
+           }
+
+    assert completed.events == []
+    {next, rows, events} = commit(state, completed, events)
+    assert next.active_maintenance == nil
+    assert next.active_run_id == run
+    assert next.maintenance_episodes[episode_id]["stage"] == "settled"
+    assert next.charged == state.charged
+    assert next.conversation == state.conversation
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history ++ rows, events)
+    assert recovered == next
+    assert :ok == SessionState.preflight_run_history(next, run)
+
+    {:ok, candidate} =
+      SessionState.reference_model_candidate(
+        next,
+        ordinary_staging(next),
+        [],
+        %{
+          "class" => "project_resource",
+          "receipt_revision" => 2,
+          "disposition" => "no_manifest",
+          "detail" => %{}
+        },
+        nil
+      )
+
+    assert {:ok, ordinary} =
+             SessionState.propose_model_request(next, run, candidate.request,
+               context_receipt: candidate.receipt,
+               lineage_projection: candidate.projection
+             )
+
+    {next, ordinary_rows, ordinary_events} = commit(next, ordinary, events)
+
+    assert {:ok, replayed} =
+             SessionState.recover(
+               state.session_id,
+               history ++ rows ++ ordinary_rows,
+               ordinary_events
+             )
+
+    assert replayed == next
+    assert replayed.charged == state.charged
+    assert replayed.pending_work[run].request.messages == candidate.request.messages
+
+    for changed <- [
+          put_in(terminal, ["result", "usage", "total_tokens"], 57),
+          Map.put(terminal, "observed_at", 61_001),
+          put_in(terminal, ["result", "checkpoint_id"], "forged")
+        ] do
+      assert {:error, :invalid_maintenance_episode_transition} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ [%{hd(rows) | payload: changed}],
+                 events
+               )
+    end
+  end
+
+  test "partial committed checkpoint remains useful and cannot fabricate successful completion" do
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("o", 3_000),
+        current_content: String.duplicate("p", 33_000),
+        context_token_budget: 16_384
+      )
+
+    {:ok, proposal} = SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+    {next, rows, events} = commit(state, proposal, events)
+
+    assert {:error, {:checkpoint_requires_more_progress, refusal}} =
+             SessionState.propose_maintenance_checkpoint_completion(next, 2_001, fn -> :ok end)
+
+    assert refusal["dimension"] == "context_record_bytes"
+    assert refusal["observed"] > 65_536
+    assert next.active_checkpoint != nil
+    assert next.active_maintenance == state.active_maintenance
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history ++ rows, events)
+    assert recovered == next
+
+    {:ok, abort} =
+      SessionState.propose(next, %{
+        type: :abort,
+        command_id: "partial-abort",
+        run_id: next.active_run_id
+      })
+
+    {aborted, abort_rows, abort_events} = commit(next, abort, events)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.propose_maintenance_checkpoint_completion(aborted, 2_001, fn -> :ok end)
+
+    assert {:ok, ending} =
+             SessionState.propose_run_terminal(aborted, aborted.active_run_id, "cancelled", %{})
+
+    assert hd(ending.records)["result"]["checkpoint_id"] == next.active_checkpoint
+    {ended, ending_rows, ending_events} = commit(aborted, ending, abort_events)
+    assert ended.active_checkpoint == next.active_checkpoint
+    assert ended.checkpoints == next.checkpoints
+    assert ended.charged == next.charged
+
+    assert {:ok, ^ended} =
+             SessionState.recover(
+               state.session_id,
+               history ++ rows ++ abort_rows ++ ending_rows,
+               ending_events
+             )
+  end
+
   defp pending_checkpoint(old, options \\ []) do
-    {state, history, events} = admitted([old], options)
+    {state, history, events} =
+      admitted([old] ++ Keyword.get(options, :later_old_units, []), options)
+
     {:ok, opened} = propose(state, 1)
     {state, rows, events} = commit(state, opened, events)
     history = history ++ rows

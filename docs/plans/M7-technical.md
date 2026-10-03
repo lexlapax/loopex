@@ -1641,14 +1641,20 @@ exact or conservative usage once, preserves abort/deadline precedence and permit
 only the one exact not-dispatched retry. The first-checkpoint pending-substitution
 probe authenticates original coverage, renders summary provenance and requires
 strictly lower exact ordinary record bytes and estimated tokens, preserving
-captured steer through owner succession. Its candidate data is not a committed
-checkpoint. Live successors finish inherited lost
-attempts and invalid/incomplete summaries without redispatch, including all
-three Store uncertainty phases and exact owner joins. Automatic triggering, new
-summary dispatch/cleanup, successful checkpoint commits and standalone compact
-remain open. The full fast check passes on d0dd8ec6 through shared ordinary
-staging/tail measurement; both supported pairs pass the later focused pending-
-substitution selection. This is not a complete T07 workflow proof.
+captured steer through owner succession. The first checkpoint now commits with
+its event through the reducer, which recomputes coverage, summary, metadata and
+progress on replay. Projection substitutes exact covered source identities and
+retains every later raw element; original reads remain unchanged. Fitted episode
+completion releases ordinary staging without a parent ending or second charge,
+while partial progress remains active and survives cancellation. The private
+history reader traverses checkpoint and completion without activation. Live
+successors finish inherited lost attempts and invalid/incomplete summaries
+without redispatch, including all three Store uncertainty phases and exact owner
+joins. Automatic triggering, new summary dispatch/cleanup, live checkpoint
+uncertainty, later prefixes and standalone compact remain open. The full fast
+check passes on d0dd8ec6 through shared ordinary staging/tail measurement; both
+supported pairs pass the later focused checkpoint reducer/reader selection.
+This is not a complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.

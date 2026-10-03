@@ -602,6 +602,54 @@ defmodule Loopex.EffectIntentsQueryTest do
     refute_received {:forbidden_store_call, _}
   end
 
+  test "checkpoint and completed episode advance private coverage without owning or dispatching",
+       context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    {records, events} = maintenance_history(session, :checkpointed)
+    assert {:ok, replayed} = SessionState.recover(session, records, events)
+    assert replayed.active_checkpoint != nil
+    assert replayed.active_maintenance == nil
+    assert replayed.active_run_id != nil
+    install_history(reference, records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert length(pages) == length(records)
+    assert List.last(pages).next_cursor == nil
+    assert Enum.all?(pages, &(&1.rows == []))
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+
+    checkpoint = Enum.find(records, &(&1.payload.kind == "compaction_checkpoint_committed_v1"))
+
+    for forged <- [
+          Map.put(checkpoint.payload, "extra", true),
+          put_in(checkpoint.payload, ["summary", "extra"], true),
+          put_in(
+            checkpoint.payload,
+            ["summary", "covered_range_digest"],
+            String.duplicate("0", 64)
+          ),
+          put_in(checkpoint.payload, ["usage", "total_tokens"], 57),
+          Map.put(checkpoint.payload, "strategy_revision", 4),
+          Map.put(checkpoint.payload, "prior_checkpoint_id", checkpoint.payload["checkpoint_id"])
+        ] do
+      install_history(
+        reference,
+        List.replace_at(records, checkpoint.journal_version - 1, %{checkpoint | payload: forged})
+      )
+
+      cursor = %{
+        version: 1,
+        runtime_id: "agent-loop-runtime",
+        session_id: session,
+        through_version: length(records),
+        after_version: checkpoint.journal_version - 1
+      }
+
+      assert {:error, :invalid_history} = Runtime.effect_intents(runtime, session, cursor, 1)
+    end
+  end
+
   test "maintenance history refuses malformed captured rows and request byte substitutions",
        context do
     %{runtime: runtime, session: session, reference: reference} = context
@@ -700,7 +748,7 @@ defmodule Loopex.EffectIntentsQueryTest do
     end)
   end
 
-  defp maintenance_history(session) do
+  defp maintenance_history(session, ending \\ :failed) do
     history = [
       %{
         journal_version: 1,
@@ -734,7 +782,11 @@ defmodule Loopex.EffectIntentsQueryTest do
     {:ok, old} =
       SessionState.propose(
         state,
-        %{type: :prompt, command_id: "old", content: "old facts"},
+        %{
+          type: :prompt,
+          command_id: "old",
+          content: if(ending == :failed, do: "old facts", else: String.duplicate("old", 1_000))
+        },
         bounds
       )
 
@@ -785,7 +837,11 @@ defmodule Loopex.EffectIntentsQueryTest do
     captured = state.maintenance_episodes[state.active_maintenance]["request"]
 
     reply = %{
-      text: "invalid JSON",
+      text:
+        if(ending == :failed,
+          do: "invalid JSON",
+          else: ~s({"summary":"retained","carry_forward":{"files_read":[],"files_changed":[]}})
+        ),
       identity: %{provider: "scripted", model: captured.model, endpoint: "in-process"},
       usage: %{input_tokens: 37, output_tokens: 19},
       tool_calls: [],
@@ -801,14 +857,30 @@ defmodule Loopex.EffectIntentsQueryTest do
     {:ok, settled} = SessionState.propose_maintenance_attempt_settled(state, {:reply, reply})
     {state, history, events} = retain(state, settled, history, events)
 
-    {:ok, refused} =
-      SessionState.propose_context_preparation_failure(
-        state,
-        state.active_run_id,
-        :maintenance_summary_invalid
-      )
+    {history, events} =
+      if ending == :failed do
+        {:ok, refused} =
+          SessionState.propose_context_preparation_failure(
+            state,
+            state.active_run_id,
+            :maintenance_summary_invalid
+          )
 
-    {_state, history, events} = retain(state, refused, history, events)
+        {_state, history, events} = retain(state, refused, history, events)
+        {history, events}
+      else
+        {:ok, checkpoint} =
+          SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+        {state, history, events} = retain(state, checkpoint, history, events)
+
+        {:ok, completed} =
+          SessionState.propose_maintenance_checkpoint_completion(state, 2_001, fn -> :ok end)
+
+        {_state, history, events} = retain(state, completed, history, events)
+        {history, events}
+      end
+
     {history, events}
   end
 
