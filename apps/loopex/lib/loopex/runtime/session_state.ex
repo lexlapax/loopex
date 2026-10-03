@@ -52,7 +52,7 @@ defmodule Loopex.Runtime.SessionState do
   belongs to the live recovery boundary, not this pure decoder.
   """
   @context_receipt_keys Enum.sort(~w(
-                          blocks context_record_byte_ceiling context_token_budget
+                          blocks continuation_cost context_record_byte_ceiling context_token_budget
                           descriptor_canonicalization_version ordered_descriptor_digest
                           project_resource provider_estimated_tokens provider_identity
                           provider_revision record_byte_cost selector_identity
@@ -7125,7 +7125,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  # Concept: revision-three receipts bind the immutable resource selection and
+  # Concept: resource receipts bind the immutable resource selection and
   # only the resource bytes actually retained in the staged request.
   #
   # Technical depth: replay derives every resource descriptor from the frozen
@@ -7175,14 +7175,14 @@ defmodule Loopex.Runtime.SessionState do
 
   defp validate_resource_receipt_shell(receipt) when is_map(receipt) do
     with true <-
-           Enum.sort(Map.keys(receipt)) == receipt_keys(receipt, @resource_context_receipt_keys),
+           Enum.sort(Map.keys(receipt)) == @resource_context_receipt_keys,
          true <- receipt["provider_identity"] == "loopex.context.reference",
-         true <- receipt["provider_revision"] in [3, 4],
+         true <- receipt["provider_revision"] == 4,
          true <- receipt["transformer_identity"] == nil,
          true <- receipt["transformer_revision"] == nil,
          true <- receipt["selector_identity"] == nil,
          true <- receipt["selector_revision"] == nil,
-         true <- receipt["token_estimator"] == receipt_estimator(receipt),
+         true <- receipt["token_estimator"] == "loopex.context_bytes.v2",
          true <-
            receipt["descriptor_canonicalization_version"] ==
              @descriptor_canonicalization_version,
@@ -7362,7 +7362,7 @@ defmodule Loopex.Runtime.SessionState do
        when is_integer(project_count) and project_count >= 0 and is_integer(staged_count) and
               staged_count >= 0 do
     with {:ok, entries} <-
-           request_session_entries(state, run_id, request.canonicalization_version),
+           request_session_entries(state, run_id),
          steer_count = if(applied_steer, do: 1, else: 0),
          true <-
            length(request.messages) ==
@@ -7422,14 +7422,6 @@ defmodule Loopex.Runtime.SessionState do
   defp resource_sources(_rows, _messages, _resources, _reversed),
     do: {:error, :invalid_context_receipt}
 
-  defp receipt_keys(%{"provider_revision" => 4}, keys),
-    do: Enum.sort(["continuation_cost" | keys])
-
-  defp receipt_keys(_receipt, keys), do: keys
-
-  defp receipt_estimator(%{"provider_revision" => 4}), do: "loopex.context_bytes.v2"
-  defp receipt_estimator(_receipt), do: Bounds.estimator()
-
   defp validate_receipt_generation(
          %{"provider_revision" => 4, "continuation_cost" => cost},
          %{canonicalization_version: "loopex.model_request.v2"} = request
@@ -7440,34 +7432,15 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp validate_receipt_generation(
-         %{"provider_revision" => revision},
-         %{canonicalization_version: "loopex.model_request.v1", continuation: nil}
-       )
-       when revision in [2, 3], do: :ok
-
   defp validate_receipt_generation(_receipt, _request), do: {:error, :invalid_context_receipt}
 
-  defp request_session_entries(state, run_id, "loopex.model_request.v2"),
+  defp request_session_entries(state, run_id),
     do: Conversation.lineage_entries(lineage_elements(state, run_id))
 
-  defp request_session_entries(state, run_id, "loopex.model_request.v1"),
-    do: {:ok, Conversation.session_entries(elements(state, run_id))}
-
-  # Concept: a new receipt describes exactly the committed lineage, while old
-  # staged requests retain their original per-run validation.
-  # Technical depth: recomputing receipt digests cannot admit substituted or
-  # omitted history; both normalized messages and their source bindings are
-  # independently reconstructed from the reducer's committed elements.
-  defp validate_lineage_projection(
-         _state,
-         %{canonicalization_version: "loopex.model_request.v1"},
-         _run_id,
-         _steer,
-         _projection
-       ),
-       do: :ok
-
+  # Concept: every receipt describes exactly the committed lineage.
+  # Technical depth: receipt digests cannot admit substituted or omitted history;
+  # normalized messages and source bindings are independently reconstructed from
+  # the reducer's committed elements before dispatch or replay.
   defp validate_lineage_projection(state, request, run_id, applied_steer, projection) do
     with {:ok, entries} <-
            projected_entries(state, run_id, projection),
@@ -7493,14 +7466,14 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp validate_receipt_shell(receipt) when is_map(receipt) do
-    with true <- Enum.sort(Map.keys(receipt)) == receipt_keys(receipt, @context_receipt_keys),
+    with true <- Enum.sort(Map.keys(receipt)) == @context_receipt_keys,
          true <- Map.get(receipt, "provider_identity") == "loopex.context.reference",
-         true <- Map.get(receipt, "provider_revision") in [2, 4],
+         true <- Map.get(receipt, "provider_revision") == 4,
          true <- Map.get(receipt, "transformer_identity") == nil,
          true <- Map.get(receipt, "transformer_revision") == nil,
          true <- Map.get(receipt, "selector_identity") == nil,
          true <- Map.get(receipt, "selector_revision") == nil,
-         true <- Map.get(receipt, "token_estimator") == receipt_estimator(receipt),
+         true <- Map.get(receipt, "token_estimator") == "loopex.context_bytes.v2",
          true <-
            Map.get(receipt, "descriptor_canonicalization_version") ==
              @descriptor_canonicalization_version,
@@ -7582,11 +7555,6 @@ defmodule Loopex.Runtime.SessionState do
   # command, turn, or call therefore stops matching even when its own digest was
   # recomputed to agree with the rename.
   defp expected_context_sources(state, receipt, run_id, applied_steer) do
-    version =
-      if receipt["provider_revision"] == 4,
-        do: "loopex.model_request.v2",
-        else: "loopex.model_request.v1"
-
     steer =
       case applied_steer && Map.get(state.steer, run_id) do
         %{command_id: ^applied_steer} ->
@@ -7605,7 +7573,7 @@ defmodule Loopex.Runtime.SessionState do
           []
       end
 
-    with {:ok, entries} <- request_session_entries(state, run_id, version) do
+    with {:ok, entries} <- request_session_entries(state, run_id) do
       {:ok,
        [context_source(instruction_source(state, receipt, run_id), "system")] ++
          expected_project_sources(Map.get(receipt, "project_resource")) ++
@@ -7621,11 +7589,6 @@ defmodule Loopex.Runtime.SessionState do
          applied_steer,
          resource_sources
        ) do
-    version =
-      if receipt["provider_revision"] == 4,
-        do: "loopex.model_request.v2",
-        else: "loopex.model_request.v1"
-
     steer =
       case applied_steer && Map.get(state.steer, run_id) do
         %{command_id: ^applied_steer} ->
@@ -7650,7 +7613,7 @@ defmodule Loopex.Runtime.SessionState do
     if steer == :invalid do
       {:error, :invalid_context_receipt}
     else
-      with {:ok, entries} <- request_session_entries(state, run_id, version) do
+      with {:ok, entries} <- request_session_entries(state, run_id) do
         {:ok,
          [context_source(instruction_source(state, receipt, run_id), "system")] ++
            expected_project_sources(receipt["project_resource"]) ++

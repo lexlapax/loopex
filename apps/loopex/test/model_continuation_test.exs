@@ -59,6 +59,27 @@ defmodule Loopex.ModelContinuationTest do
              })
   end
 
+  test "a self-consistent retired request refuses even with nil continuation" do
+    assert {:ok, request} =
+             Model.request("m", [%{"role" => "user", "content" => "prompt"}],
+               sampling: %{"max_tokens" => 64},
+               deadline: 123
+             )
+
+    assert :ok = Model.validate_request(request)
+    retired = Map.put(request, :canonicalization_version, "loopex.model_request.v1")
+    fields = ~w(canonicalization_version model messages tools sampling deadline continuation)a
+    bytes = Canonical.encode(Enum.map(fields, &{&1, Map.fetch!(retired, &1)}))
+
+    retired = %{
+      retired
+      | canonical_request_bytes: bytes,
+        staged_request_digest: Canonical.digest_bytes(bytes)
+    }
+
+    assert {:error, :canonical_model_request_mismatch} = Model.validate_request(retired)
+  end
+
   test "closed source, entry, capsule and call bindings reject substituted or ambiguous targets" do
     {envelope, messages} = exchange(2)
     first = hd(envelope["entries"])

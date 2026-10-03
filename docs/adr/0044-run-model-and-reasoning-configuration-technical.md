@@ -351,9 +351,10 @@ public progress kinds and field names are unchanged. Ephemeral calls remain
 buffered without a new progress callback or post-hoc summary disclosure.
 
 **Private reply and request forms.** Every newly staged ordinary or maintenance request uses
-`loopex.model_request.v2`, including nil continuation; v1 is read-only. This revision retains
-the same top-level semantic members and digest coverage, admitting `continuation`
-as nil or the envelope below. Old v1 bytes remain immutable. An adapter reply
+`loopex.model_request.v2`, including nil continuation, the only admitted request
+version under the pre-1.0 current-contract rule. This revision retains the same
+top-level semantic members and digest coverage, admitting `continuation` as nil
+or the envelope below. V1 bytes are refused without rewriting them. An adapter reply
 uses `bounded_adapter_reply_v3`, the exact nine fields of ADR 0018's v2 plus `completion` and `continuation`.
 `completion` is exactly `natural`, `limit` or `unknown`, validated from the final
 native stop reason. In the pinned Anthropic grammar, end_turn, tool_use and
@@ -793,8 +794,9 @@ Keep `totals` and every `by_provenance` bucket equal to their message/tool
 descriptor sums. Under estimator `loopex.context_bytes.v2`,
 `provider_estimated_tokens = totals.token_cost + continuation_cost.token_cost`,
 treating null as zero. Input admission uses that complete sum. Maintenance has
-nil continuation and a null cost. Existing receipt revisions 2/3 retain their
-original estimator, closed keys and block-only equations. Public projection
+nil continuation and a null cost. Receipt revisions 2/3 are retired under the
+pre-1.0 current-contract rule; only revision 4 is admitted with its exact
+null-cost branch. Public projection
 retains its existing metadata allowlist; this does not expose the private
 continuation or its digest. Charging only the smaller stored layout is invalid;
 mutating a target, index or slice must change the staged digest or refuse.
@@ -821,9 +823,16 @@ retains the existing private-store audience, not an encryption guarantee.
 Recovery dispatches committed requests byte-for-byte under the same digest and
 ADR 0018's dispatch classification. Missing/corrupt/incompatible state refuses
 before dispatch, never reconstructs a signature, reuses a provider response ID
-as authority, or repeats an ambiguous provider attempt. Legacy v1 requests,
-v2 replies and v1/v2 settlements decode under their old rules. No continuation
-is synthesized for historical replies that did not retain it.
+as authority, or repeats an ambiguous provider attempt. Under the pre-1.0
+current-contract rule, only `loopex.model_request.v2` and receipt revision 4
+are admitted. The current receipt has mandatory `continuation_cost`, including
+nil when no envelope is present, and uses `loopex.context_bytes.v2`. Request v1
+and receipt revisions 2/3 refuse, even with self-consistent canonical bytes and
+digests. Their readers, per-run projection and lineage-validation bypass are
+removed. Current recovery derives the complete committed lineage independently
+of request bytes and recomputed receipt descriptors. The separate nine-field
+callback admission remains pending removal; it does not admit old requests or
+settlements.
 
 Protocol adds `session.configure`, `session.configured` and configuration snapshot
 fields with a new experimental schema/generation jointly with ADRs 0043/0045.
@@ -841,13 +850,13 @@ Concept: [Observable consequences](0044-run-model-and-reasoning-configuration.md
 - New v3 settlement writers cover ordinary settlements and ADR 0043's maintenance settlement kind, successful nil/non-nil
   continuation, model-call error, unreadable and validated-compaction results.
   Exact legacy v2 adapter replies succeed only without required continuation;
-  mixed/extra-key shapes refuse. Historical settlement readers stay unchanged.
+  mixed/extra-key shapes refuse. Retired settlement readers are removed.
 - Ephemeral explicit instructions, reasoning and system ceiling reach the shared
   initial configuration and encoded request. Unknown/duplicate options and
   per-call overrides refuse; buffered delivery and cleanup remain unchanged.
 - Revision-4 continuation-cost null/non-null branches, exact digest/cost replay,
-  descriptor totals versus complete input estimate, unchanged v2/v3 equations,
-  and public exclusion of the private cost digest. A missing or fabricated
+  descriptor totals versus complete input estimate, retired request/receipt
+  refusal, committed-lineage agreement, and public exclusion of the private cost digest. A missing or fabricated
   continuation charge cannot pass input admission.
 - Generic expansion vectors cover zero-length/interleaved text, UTF-8 splits,
   quotes/control characters, overwritten fields, missing/duplicate/reordered call

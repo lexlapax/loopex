@@ -107,14 +107,56 @@ did not resolve them. No paid provider calls were made during this check.
 
 
 
-- Running: the full fast check started once on exact clean combined checkpoint
+- Done: remove the model-request v1 reader, receipt revision 2/3 readers,
+  old per-run conversation query, estimator/key fallback and lineage-validation
+  bypass. Every admitted request is current v2 with receipt revision 4,
+  mandatory null/non-null continuation cost and independently derived committed
+  lineage. Resource fixtures now use current requests/receipts without a legacy
+  writer helper. Exact whole-record/header reservation, row counts/order,
+  supporting-file byte/size limits, instruction allowance, selection/source
+  identities and replay refusals remain proved. Recomputed descriptors cannot
+  replace committed prompt bytes. Independent self-consistent v1/nil encoding
+  and old receipt revisions refuse. ADR 0044 and both active plan files retain
+  the same rule. Genesis, outer staging-record generations and nine-field
+  callback admission remain separate T15 work; this does not claim all old code
+  is removed.
+  Focused final checks passed with warnings as errors on both supported pairs:
+  118 request/context/resource/skill/configuration/conversation/lineage tests,
+  8.0/7.8 measured suite seconds. Complete terminal outputs and SHA-256:
+
+  | Check | Complete output | SHA-256 |
+  | --- | --- | --- |
+  | current-final | `/private/tmp/loopex-m7-current-request-current-final.log` | `f5ffdebadcc9d5e33526ee725663857bc27f7232d3755db57bfe2dcc7f19c9f1` |
+  | floor-final | `/private/tmp/loopex-m7-current-request-floor-final.log` | `0fce1317cc17bb8e87ae6ff5c4664b6a1b2d229d15459e81a2a4d68a541397bd` |
+  | current-v2 | `/private/tmp/loopex-m7-current-request-current-v2.log` | `60d0e929d18de7693af31222fac22c7cdc1e428708e6ce098d1b838545b815c6` |
+  | current-v1 | `/private/tmp/loopex-m7-current-request-current-v1.log` | `0b37656b8435f38dd811f219a18c5c77290f4ab079a73e83fca889b26c3b6ebe` |
+
+  Formatting, warning-free compilation, documentation ordering, repository
+  structure/status and diff checks passed in 18.7 measured seconds. Complete
+  output `/private/tmp/loopex-m7-current-request-gates-v1.log`, SHA-256 `a144c4865bf6bd990980f0f8aeae2e0863913408e09f707450ddf16fc74d36fb`.
+
+  The initial run failed two fixture assumptions: the current encoding fits
+  exactly 65,536 bytes rather than the old 65,535-byte nearest fit; changing
+  the header adds the same exact 11 bytes and refuses at 65,547. The matching
+  receipt control for a rewritten prompt now correctly refuses at committed
+  lineage, while matching system/tool/project descriptors retain their positive
+  controls. Limits and deadlines are unchanged; failed output is retained above.
+  The second development selection passed 85 cases; the final selection includes
+  removal of the unused old conversation query and its current callers.
+  One added T15 subtask closes. Original tally remains 50 done / 129 todo /
+  7 retired; added tally is 169 done / 9 todo. The 10c3fd5d integration proof
+  predates this cleanup. A later integration candidate must include these bytes.
+
+- Done: the full fast check passed once on exact clean combined checkpoint
   `10c3fd5def1c58491f0d44e59fd51c6f06d8e1c4` in the detached verification
-  worktree `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Complete
-  streamed output is `/private/tmp/loopex-m7-10c3fd5d-fast-check.log`; its header
-  binds the SHA and its eventual footer records terminal exit and measured
-  duration. No result or digest is claimed while it runs. Collect its terminal
-  handle before hashing, retain any failure, and do not repeat the same bytes.
-  Later primary-checkout edits are outside this exact integration proof.
+  worktree `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. All eleven
+  credential-free application suites passed with their prescribed exclusions.
+  Complete output `/private/tmp/loopex-m7-10c3fd5d-fast-check.log`, SHA-256
+  `35d67e91483ae9cf8be28ef556f3feea13ec1580750332558aa1801cb966f552`.
+  The terminal handle was collected; exit 0, measured duration 913.6 seconds.
+  Later request/receipt cleanup in the primary checkout is outside that proof.
+  Original tally remains 50 done / 129 todo / 7 retired; added tally is
+  168 done / 9 todo. No closure or release evidence is claimed.
 
 - Done: retire provider settlement v1/v2 decoders, their legacy ambiguity-only
   accounting branches and session cutover bookkeeping. The current v3 decoder
@@ -5759,6 +5801,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Remove model-request v1 and receipt revision 2/3 readers, old per-run conversation query and lineage bypass; migrate current resource/source-binding fixtures and prove self-consistent retired-version refusal, exact unchanged bounds and current recovery on both toolchains.
 - [x] Remove provider settlement v1/v2 readers, legacy accounting branches, cutover state and exclusive historical-reader interaction fixtures; prove current v3 verdict/accounting/source/terminal/restart and effect-query obligations on both toolchains.
 - [x] Remove the obsolete M2 accounting probe and exclusive old-reader foundation scaffolding; retain both-pair proof of current embedding, CLI, artifact and recovery workflows.
 - [x] Remove the historical cross-version archive lane, its exclusive helpers and fixtures; refuse its retired selector before staging and prove current build/redaction/manifest checks on both supported toolchains.
@@ -5782,7 +5825,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Run the combined owner-only settings-report and current-only settlement integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
+- [x] Run the combined owner-only settings-report and current-only settlement integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 - [x] Run the full fast check once on the clean committed current-only tool and prepared-chat binding checkpoint; retain exact SHA, terminal output, measured duration and SHA-256 without claiming later changes are covered.
 - [x] Migrate remaining executor/composition fixtures to current tool identities and remove their retired-generation positive cases; preserve retention, receipt, preflight and settlement bounds.
 - [x] Replace the trace rate-window comparison with fresh physical delivery from each prompt under the original receive allowance; preserve session identity and exact actor joins.
@@ -5873,12 +5916,12 @@ before a provider demonstration.
 | Tool-output preparation | ADR 0041 | Immutable receipt plus versioned prepared-reference/preparation-state facts and exact source digests | SessionState; SessionCoordinator; ArtifactStore; local executor | Implemented; exact-source preparation, frozen job context, early spill, literal generations and real prepared-range restart proved on both pairs; one actual 60-second cutoff per pair retained above |
 | Artifact read capability | ADR 0041 | loopex.artifact_read.v1 binding from literal tool-generation table; resolved executor arguments | ToolDefinition; SessionGenesis; local read tool; SessionCoordinator | Implemented and proved through exact literal capabilities, owner membership, bounded job transfers and empty-registry restart |
 | Instruction envelope | ADR 0042 | Closed version/base/environment/appendix map, exact rendered bytes/digest | SessionGenesis; configuration reducer; host composition | Pending |
-| Context receipts | ADRs 0042–0044 | Old revisions 2/3 unchanged; new 4 has mandatory continuation_cost and frozen source bindings | SessionCoordinator; SessionState; ContextAdmission | Ordinary nil/non-nil continuation costs and source/configuration bindings implemented; maintenance bindings pending |
+| Context receipts | ADRs 0042–0044 | Current-only revision 4; mandatory continuation_cost and frozen source bindings; retired revisions 2/3 refuse | SessionCoordinator; SessionState; ContextAdmission | Ordinary nil/non-nil continuation costs and source/configuration bindings implemented; maintenance bindings pending |
 | Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 and unavailable terminal-history preparation failures implemented; other causes, maintenance/headroom and wire projections pending |
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers, live exact create, exact lookup and provenance queries implemented; helper host integration pending |
 | Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
-| Model request | ADR 0044 | Read v1/v2; new v2 local-reference continuation with generic expansion | Model; SessionState; SessionCoordinator; model adapters | v2 source-bound staging, bounded expansion, v1 nil-only compatibility and streamed/buffered native rendering implemented |
+| Model request | ADR 0044 | Current-only v2 local-reference continuation with generic expansion; retired v1 refuses | Model; SessionState; SessionCoordinator; model adapters | Source-bound staging, bounded expansion, self-consistent retired-version refusal, committed-lineage validation and streamed/buffered native rendering implemented |
 | Model reply and settlement | ADR 0044 | Bounded reply v3; current-only model_attempt_settled_v3; retired v1/v2 readers and cutover state; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Nine ordinary adapter mappings registered with both native transports, per-cell streaming/bound/disclosure and canonical terminal-history conformance; host integration, separate summarizer and live witnesses pending |
 | Maintenance and compaction | ADR 0043/0044 | Captured maintenance configuration, immutable checkpoint and strategy revision 3, source_excerpted | SessionState; SessionCoordinator; ContextAdmission; host startup | Core startup capture and durable/ephemeral instruction forwarding implemented; model routing, episode capture, checkpoint and compaction pending |

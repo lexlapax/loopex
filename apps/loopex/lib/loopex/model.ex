@@ -38,9 +38,9 @@ defmodule Loopex.Model do
 
   Ordinary requests begin an exchange with nil continuation. Later requests
   may carry a source-bound content-reference envelope under ADR 0044. New requests use
-  `loopex.model_request.v2`; retained v1 requests remain readable with their
-  original bytes and digest. The continuation member stays inside the ordered
-  semantic projection in both generations.
+  `loopex.model_request.v2`, the only admitted generation. The continuation
+  member stays inside the ordered semantic projection; older requests refuse
+  before dispatch under the pre-1.0 current-contract rule.
 
   There is no sampling default anywhere. `max_tokens` is a declared committed
   value and a request built without one is refused, rather than silently
@@ -52,7 +52,6 @@ defmodule Loopex.Model do
   alias Loopex.ProgressPayload
 
   @canonicalization_version "loopex.model_request.v2"
-  @readable_versions ["loopex.model_request.v1", @canonicalization_version]
 
   @semantic_fields [
     :canonicalization_version,
@@ -391,7 +390,7 @@ defmodule Loopex.Model do
          deadline: deadline,
          continuation: continuation
        })
-       when version in @readable_versions and
+       when version == @canonicalization_version and
               is_binary(model) and byte_size(model) > 0 and byte_size(model) <= 512 and
               is_list(messages) and length(messages) > 0 and length(messages) <= 1_024 and
               is_list(tools) and length(tools) <= 256 and
@@ -405,9 +404,6 @@ defmodule Loopex.Model do
         {:error, :invalid_model_request}
 
       not plain?(sampling) ->
-        {:error, :invalid_model_request}
-
-      version == "loopex.model_request.v1" and not is_nil(continuation) ->
         {:error, :invalid_model_request}
 
       true ->

@@ -1569,6 +1569,12 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   it. Normal M7 startup may already write new configuration; no broad backward-read
   promise follows from an unchanged storage container.
 
+Current model requests admit only `loopex.model_request.v2` with receipt
+revision 4, its mandatory null/non-null continuation cost and current estimator.
+Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are
+removed. Self-consistent old encodings refuse; current restart/source-binding,
+resource class/header bounds and exact record-cost reservation remain required.
+
 The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes the older-reader, upgrade and cross-version rollback bullets above.
 The old archive runner, helpers and exclusive fixtures have been removed.

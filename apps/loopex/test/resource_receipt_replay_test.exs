@@ -20,7 +20,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
              )
 
     assert fixed.kind == "model_request_committed_resources_v1"
-    assert fixed["context_receipt"]["provider_revision"] == 3
+    assert fixed["context_receipt"]["provider_revision"] == 4
     assert fixed["context_receipt"]["record_byte_cost"] > 0
     assert {:ok, ^fixed, bytes} = Store.normalize_and_measure_item(:record, fixed)
     assert fixed["context_receipt"]["record_byte_cost"] == bytes
@@ -54,6 +54,11 @@ defmodule Loopex.ResourceReceiptReplayTest do
     {_state, records, events} = append_proposal(fixture, proposal)
 
     mutations = [
+      fn payload -> put_in(payload, ["context_receipt", "provider_revision"], 2) end,
+      fn payload -> put_in(payload, ["context_receipt", "provider_revision"], 3) end,
+      fn payload ->
+        update_in(payload, ["context_receipt"], &Map.delete(&1, "continuation_cost"))
+      end,
       fn payload ->
         put_in(payload, ["context_receipt", "resource_packs", "selection_digest"], @digest)
       end,
@@ -206,7 +211,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
              Store.normalize_and_measure_item(:record, short_record)
 
     assert short_record["context_receipt"]["record_byte_cost"] == short_bytes
-    assert short_bytes == 65_535
+    assert short_bytes == 65_536
     assert short_bytes <= Store.max_item_bytes()
 
     long_receipt =
@@ -221,7 +226,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
              Store.normalize_and_measure_item(:record, long_record)
 
     assert long_record["context_receipt"]["record_byte_cost"] == long_bytes
-    assert long_bytes == 65_546
+    assert long_bytes == 65_547
     assert short_bytes in (Store.max_item_bytes() - 10)..Store.max_item_bytes()
 
     assert long_bytes - short_bytes ==
@@ -362,7 +367,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
     ]
 
     {:ok, request} =
-      legacy_model_request("fixture:model", messages,
+      Model.request("fixture:model", messages,
         tools: [],
         sampling: %{"max_tokens" => 1},
         deadline: 1
@@ -417,12 +422,13 @@ defmodule Loopex.ResourceReceiptReplayTest do
 
     %{
       "provider_identity" => "loopex.context.reference",
-      "provider_revision" => 3,
+      "provider_revision" => 4,
+      "continuation_cost" => nil,
       "transformer_identity" => nil,
       "transformer_revision" => nil,
       "selector_identity" => nil,
       "selector_revision" => nil,
-      "token_estimator" => Bounds.estimator(),
+      "token_estimator" => "loopex.context_bytes.v2",
       "descriptor_canonicalization_version" => Canonical.version(),
       "blocks" => blocks,
       "totals" => totals,
@@ -480,7 +486,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
     ]
 
     {:ok, request} =
-      legacy_model_request("fixture:model", messages,
+      Model.request("fixture:model", messages,
         tools: [],
         sampling: %{"max_tokens" => 1},
         deadline: 1
@@ -512,12 +518,13 @@ defmodule Loopex.ResourceReceiptReplayTest do
 
     receipt = %{
       "provider_identity" => "loopex.context.reference",
-      "provider_revision" => 3,
+      "provider_revision" => 4,
+      "continuation_cost" => nil,
       "transformer_identity" => nil,
       "transformer_revision" => nil,
       "selector_identity" => nil,
       "selector_revision" => nil,
-      "token_estimator" => Bounds.estimator(),
+      "token_estimator" => "loopex.context_bytes.v2",
       "descriptor_canonicalization_version" => Canonical.version(),
       "blocks" => blocks,
       "totals" => totals,
@@ -685,7 +692,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
   end
 
   defp restage(request) do
-    legacy_model_request(request.model, request.messages,
+    Model.request(request.model, request.messages,
       tools: request.tools,
       sampling: request.sampling,
       deadline: request.deadline
@@ -703,22 +710,4 @@ defmodule Loopex.ResourceReceiptReplayTest do
 
   defp plain(value) when is_map(value),
     do: Map.new(value, fn {key, item} -> {plain(key), plain(item)} end)
-
-  # Concept: this suite keeps the revision-three resource receipt readable.
-  # Technical depth: the fixture explicitly encodes historical v1 requests;
-  # the production request constructor writes v2 and cannot select an old writer.
-  defp legacy_model_request(model, messages, options) do
-    with {:ok, request} <- Model.request(model, messages, options) do
-      request = Map.put(request, :canonicalization_version, "loopex.model_request.v1")
-      fields = ~w(canonicalization_version model messages tools sampling deadline continuation)a
-      bytes = Canonical.encode(Enum.map(fields, &{&1, Map.fetch!(request, &1)}))
-
-      {:ok,
-       %{
-         request
-         | canonical_request_bytes: bytes,
-           staged_request_digest: Canonical.digest_bytes(bytes)
-       }}
-    end
-  end
 end

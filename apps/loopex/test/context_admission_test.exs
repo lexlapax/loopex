@@ -1411,7 +1411,7 @@ defmodule Loopex.ContextAdmissionTest do
             )
       })
 
-    old_request = legacy_request(request)
+    old_request = retired_request(request)
 
     mutations = [
       fn payload ->
@@ -1484,27 +1484,7 @@ defmodule Loopex.ContextAdmissionTest do
     assert_receive {:context_model_invoked, _worker, request}, 5_000
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
-    request = legacy_request(request)
-
     record_prefix = records_through_kind(records(fixture, session_id), "model_request_committed")
-
-    record_prefix =
-      mutate_model_request(record_prefix, fn payload ->
-        receipt =
-          payload["context_receipt"]
-          |> Map.delete("continuation_cost")
-          |> Map.put("provider_revision", 2)
-          |> Map.put("token_estimator", "loopex.context_bytes.v1")
-
-        payload =
-          payload
-          |> Map.put("request", encode_plain_for_record(request))
-          |> Map.put("staged_request_digest", request.staged_request_digest)
-          |> Map.put("context_receipt", receipt)
-
-        {fixed, _cost} = resolve_record_cost(payload)
-        fixed
-      end)
 
     event_prefix =
       recoverable_event_prefix(session_id, record_prefix, events(fixture, session_id))
@@ -1557,8 +1537,8 @@ defmodule Loopex.ContextAdmissionTest do
     # compares the two before it reads the receipt. Restaging only the inner
     # copy left every mutant below refused by that comparison, so the receipt
     # relation this case is named for was never reached. Carrying the restaged
-    # digest to both places is what leaves the receipt as the only remaining
-    # objection to a request that is entirely self-consistent.
+    # digest to both places reaches descriptor and committed-lineage validation
+    # for a request whose own representations are entirely self-consistent.
     for {label, mutate} <- request_mutations do
       mutated_request = restage_request(mutate.(request))
 
@@ -1575,11 +1555,9 @@ defmodule Loopex.ContextAdmissionTest do
       # Technical depth: replay folds every refusal on this path into one
       # transition reason, so naming the reason cannot tell the receipt relation
       # from a guard ahead of it, and this loop has twice passed on such a guard.
-      # The positive control is what isolates the relation: the identical
-      # restaged request, carrying a receipt rebuilt to match its substituted
-      # member the way replay itself recomputes it, must replay cleanly; if
-      # anything ahead of the receipt were refusing the mutant, this replay
-      # would refuse too.
+      # A matching receipt isolates the descriptor relation for system, tool
+      # and project members. Session content additionally binds committed
+      # lineage, so that substitution must still refuse with matching arithmetic.
       matching =
         mutate_model_request(record_prefix, fn payload ->
           payload
@@ -1588,8 +1566,16 @@ defmodule Loopex.ContextAdmissionTest do
           |> update_in(["context_receipt"], &receipt_matching(&1, mutated_request))
         end)
 
-      assert {:ok, _matching} = SessionState.recover(session_id, matching, event_prefix),
-             "#{label} substitution with a matching receipt was refused ahead of the relation"
+      if label == :session_message do
+        # Concept: matching arithmetic cannot replace committed session truth.
+        # Technical depth: the current lineage check derives the prompt bytes
+        # independently of both substituted request and recomputed descriptors.
+        assert {:error, :invalid_model_request_transition} =
+                 SessionState.recover(session_id, matching, event_prefix)
+      else
+        assert {:ok, _matching} = SessionState.recover(session_id, matching, event_prefix),
+               "#{label} substitution with a matching receipt was refused ahead of the relation"
+      end
     end
 
     source_substitution =
@@ -3031,12 +3017,13 @@ defmodule Loopex.ContextAdmissionTest do
       },
       "context_receipt" => %{
         "provider_identity" => "loopex.context.reference",
-        "provider_revision" => 2,
+        "provider_revision" => 4,
+        "continuation_cost" => nil,
         "transformer_identity" => nil,
         "transformer_revision" => nil,
         "selector_identity" => nil,
         "selector_revision" => nil,
-        "token_estimator" => "loopex.context_bytes.v1",
+        "token_estimator" => "loopex.context_bytes.v2",
         "descriptor_canonicalization_version" => "loopex.canonical.v1",
         "blocks" => blocks,
         "totals" => %{
@@ -3332,12 +3319,10 @@ defmodule Loopex.ContextAdmissionTest do
                deadline: request.deadline
              )
 
-    if request.canonicalization_version == "loopex.model_request.v1",
-      do: legacy_request(restaged),
-      else: restaged
+    restaged
   end
 
-  defp legacy_request(request) do
+  defp retired_request(request) do
     request = Map.put(request, :canonicalization_version, "loopex.model_request.v1")
     fields = ~w(canonicalization_version model messages tools sampling deadline continuation)a
     bytes = Canonical.encode(Enum.map(fields, &{&1, Map.fetch!(request, &1)}))

@@ -112,10 +112,6 @@ defmodule Loopex.Conversation do
       project_elements(elements)
   end
 
-  @doc false
-  @spec session_entries([element()]) :: [{binary(), message()}]
-  def session_entries(elements) when is_list(elements), do: project_entries(elements)
-
   @doc """
   ## Concept
 
@@ -128,8 +124,8 @@ defmodule Loopex.Conversation do
   Each provider-facing ID is `lx_` plus the first 48 lowercase SHA-256 hex
   characters of `Canonical.encode([run_id, turn_number, tool_call_id])`.
   Missing, duplicate or orphan facts and normalized-ID collisions return
-  `context_projection_invalid`. Historical `session_entries/1` keeps its
-  original call IDs for validation of already staged legacy requests.
+  `context_projection_invalid`. Every current request binds this committed
+  lineage projection; no older per-run projection is admitted.
   """
   @spec lineage_entries([element()]) ::
           {:ok, [{map(), message()}]} | {:error, :context_projection_invalid}
