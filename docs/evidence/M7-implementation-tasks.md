@@ -325,6 +325,57 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: commit and recover a measured `compaction_no_progress` ending for a
+  valid settled summary that fails strict byte/token progress. The last minimum
+  ordinary candidate supplies exact descriptor counts, token estimate and digest;
+  the nonnumeric refusal has null record cost and no invented budget observation.
+  One transaction retains episode terminal, refusal and failed parent terminal.
+  Replay recomputes the failed substitution, rejects altered measurements and
+  missing/reordered rows, and preserves raw facts and the single 56-token charge.
+  Abort, elapsed deadline and spent parent bounds win before measurement. Live
+  prepared recovery remains paused until activation; all three Store uncertainty
+  phases settle once without another summary, ordinary call, checkpoint or
+  compaction event. The private reader traverses every row without owning the
+  session. This closes one added T07 subtask; originals remain 51 / 128 / 7
+  including T00. Added totals are 184 done / 10 todo, or 180 / 9 for T01–T19.
+
+  Final sixteen-file selection: 245 tests on each supported pair. Current:
+  11.0 measured seconds,
+  `/private/tmp/loopex-m7-nonprogress-current-dev3.log`, SHA-256
+  `f9f8a32bc2c74ccfbab0a62f53f2ab942dffe3d0abc145e25ff5f8e1e7378449`.
+  Floor: 10.7 measured seconds,
+  `/private/tmp/loopex-m7-nonprogress-floor-v2.log`, SHA-256
+  `947f03e4273355fcb9d2384ae5c74bfc24d2cd57e0174dcdce4a4fd688d20c6a`.
+  Development failures are retained: current dev1
+  `/private/tmp/loopex-m7-nonprogress-current-dev1.log`, SHA-256
+  `013f71471af6738a41bbd2d888623a6d9b4ba13fc3ef08f839678812f7733d2e`;
+  current dev2 `/private/tmp/loopex-m7-nonprogress-current-dev2.log`, SHA-256
+  `15ae5c26e6062ab7da65f6988255cc63131e0f848502e18f3cc1c8a4b6f62e4e`;
+  floor v1 `/private/tmp/loopex-m7-nonprogress-floor-v1.log`, SHA-256
+  `33153f8e8374236031eb4091e0681d11614c8c4fc41acf5c956b30619eb30713`.
+  Fixture expectations now include the existing session-settled event and exact
+  owner-succession rows while proving terminal adjacency and uniqueness. No
+  production validator, deadline, retry or required proof was weakened.
+
+  Formatting, warning-free compilation, dependency direction, bootstrap/status,
+  documentation and diff gates passed in 24.5 measured seconds:
+  `/private/tmp/loopex-m7-nonprogress-gates-v1.log`, SHA-256
+  `97cf9982658b529e580a35afb3c887ffeb52c661d5cca9218ab3940d52a972b6`.
+
+- Integration check failed on exact
+  `4e4778a2e7b35e1e9f7f37c36f5060cb5fafd09c`. All preliminary gates and ten
+  application suites passed; Core passed 1,050 of 1,051 tests, with six exclusions.
+  The remaining artifact-history fixture expects a removed first-request
+  projection to remain readable under a historical cutover. Current projection
+  reconstruction refuses it. The pre-1.0 disposition removes this compatibility
+  obligation; preserve positive current replay and malformed/missing provenance
+  refusal, then remove the superseded cutover state under T15. This check is
+  failed evidence and will not be repeated on the same bytes.
+  Complete output, 1,401.0 measured seconds:
+  `/private/tmp/loopex-m7-4e4778a2-fast-check.log`, SHA-256
+  `08349011c80e59b57ec35db8ae100e564b797f45e8a3ea3171bc58af3f55bc96`.
+  Execution handle 72292 is terminal and collected; do not poll it.
+
 - Done: join the live successor to settled first-checkpoint commitment and
   fitted episode completion through the existing owner fence and uncertainty
   resolver. Prepared resume remains paused until activation. Six Store-fault
@@ -6672,6 +6723,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Retain and independently replay a measured non-progress episode/refusal/parent ending, authenticate the last minimum ordinary projection and exact terminal ordering, preserve settled usage and raw facts, prove abort/deadline/capacity precedence and all three live uncertainty phases without redispatch, and traverse bounded private history on both supported toolchains.
 
 - [x] Commit and replay a useful first ordinary-limit checkpoint with its event, exact original coverage, settled summary provenance and unchanged raw facts; substitute only covered source identities, retain the unsummarized tail, release fitted completion without a parent terminal or duplicate charge, reject partial success and forged fields, and traverse checkpoint/completion in bounded private history on both supported toolchains. Later prefixes and standalone compact remain open. Extend the live owner to finish pending/committed first checkpoints through all three uncertainty phases, retain once-only usage before one captured ordinary dispatch, and preserve checkpoint identity across abort/deadline while refusing spent parent bounds. Exact owner joins and bounded private coverage pass both supported pairs.
 

@@ -296,6 +296,199 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
              "checkpoint_pending"
   end
 
+  test "nonprogress ends the episode and parent with the last measured ordinary projection" do
+    {state, history, events} = pending_checkpoint("small")
+    run = state.active_run_id
+    episode = state.active_maintenance
+
+    {:ok, candidate} =
+      SessionState.reference_model_candidate(
+        state,
+        ordinary_staging(state),
+        [],
+        ordinary_project(),
+        nil
+      )
+
+    assert Enum.map(candidate.request.messages, & &1["content"]) == [
+             "host.v1: Follow the host's captured instructions.\n\ncaptured environment",
+             "small",
+             "protected"
+           ]
+
+    assert {:ok, proposal} =
+             SessionState.propose_maintenance_nonprogress(state, 2_000, fn -> :ok end)
+
+    assert [prefix, refusal, terminal] = proposal.records
+    assert prefix.kind == "maintenance_episode_terminal_v1"
+    assert prefix["observed_at"] == 2_000
+    assert prefix["episode_id"] == episode
+    assert prefix["result"]["usage"] == state.maintenance_episodes[episode]["usage"]
+    assert prefix["result"]["disposition"] == "failed"
+    assert prefix["result"]["checkpoint_id"] == nil
+    assert prefix["result"]["cleanup"] == "confirmed"
+    assert refusal.kind == "context_admission_refused_v2"
+    assert refusal["projection_state"] == "measured"
+    assert refusal["measurement_scope"] == "ordinary"
+    assert refusal["system_message_count"] == 1
+    assert refusal["session_message_count"] == 2
+    assert refusal["steer_message_count"] == 0
+    assert refusal["tool_definition_count"] == 0
+    assert refusal["provider_estimated_tokens"] == candidate.receipt["provider_estimated_tokens"]
+    assert refusal["record_byte_cost"] == nil
+    assert refusal["targets"] == nil
+    assert refusal["project_disposition"] == "not_evaluated_required_failure"
+    assert refusal["configuration_version"] == state.configuration["configuration_version"]
+    assert refusal["episode_id"] == episode
+
+    framed =
+      ["loopex.context.descriptors.v1", <<0>>] ++
+        Enum.flat_map(candidate.receipt["blocks"], fn block ->
+          bytes = Canonical.encode(block)
+          [<<byte_size(bytes)::unsigned-big-integer-size(64)>>, bytes]
+        end)
+
+    assert refusal["ordered_descriptor_digest"] ==
+             :crypto.hash(:sha256, framed) |> Base.encode16(case: :lower)
+
+    assert refusal["failure"] == %{
+             "version" => 2,
+             "category" => "context_preparation_failed",
+             "retryable" => false,
+             "measurement_scope" => "ordinary",
+             "cause" => "compaction_no_progress"
+           }
+
+    assert terminal.kind == "run_terminal_committed"
+    assert terminal["outcome"] == "failed"
+    assert terminal["failure"] == refusal["failure"]
+    assert prefix["result"]["failure"] == refusal["failure"]
+    assert [event, settled] = proposal.events
+    assert event.kind == "run.finished"
+    assert event["failure"] == refusal["failure"]
+    assert settled.kind == "session.settled"
+    assert settled["run_id"] == run
+
+    assert {:ok, ^refusal, bytes} = Store.normalize_and_measure_item(:record, refusal)
+    assert bytes == byte_size(:erlang.term_to_binary(refusal, [:deterministic]))
+    assert bytes < 65_536
+    refute inspect(refusal) =~ "small"
+    refute inspect(refusal) =~ "protected"
+
+    {next, rows, all_events} = commit(state, proposal, events)
+    assert next.active_maintenance == nil
+    assert next.active_run_id == nil
+    assert next.active_checkpoint == nil
+    assert next.checkpoints == %{}
+    assert next.conversation == state.conversation
+    assert next.charged == state.charged
+    assert next.charged[run].tokens == 56
+    assert next.maintenance_episodes[episode]["attempts"] == 1
+    assert next.maintenance_episodes[episode]["stage"] == "settled"
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, all_events)
+
+    assert {:error, :no_pending_maintenance_checkpoint} =
+             SessionState.propose_maintenance_nonprogress(next, 2_000, fn -> :ok end)
+  end
+
+  test "nonprogress replay authenticates measurements clock and complete terminal ordering" do
+    {state, history, events} = pending_checkpoint("small")
+    {:ok, proposal} = SessionState.propose_maintenance_nonprogress(state, 2_000, fn -> :ok end)
+    {_next, [prefix, refusal, terminal] = rows, all_events} = commit(state, proposal, events)
+
+    changes = [
+      {"system_message_count", 0},
+      {"session_message_count", 3},
+      {"steer_message_count", 1},
+      {"tool_definition_count", 1},
+      {"provider_estimated_tokens", 0},
+      {"ordered_descriptor_digest", String.duplicate("0", 64)},
+      {"record_byte_cost", 42},
+      {"projection_state", "unavailable"},
+      {"measurement_scope", nil},
+      {"configuration_version", 99},
+      {"episode_id", nil},
+      {"targets", %{}},
+      {"project_disposition", "staged"},
+      {"project_resource_count", 1},
+      {"failure", Map.put(refusal.payload["failure"], "measurement_scope", nil)}
+    ]
+
+    for {field, value} <- changes do
+      altered = %{refusal | payload: Map.put(refusal.payload, field, value)}
+
+      assert {:error, :invalid_context_refusal} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ [prefix, altered, terminal],
+                 all_events
+               )
+    end
+
+    for time <- [nil, 1_000, 61_001] do
+      altered = %{prefix | payload: Map.put(prefix.payload, "observed_at", time)}
+
+      assert {:error, _} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ [altered, refusal, terminal],
+                 all_events
+               )
+    end
+
+    for partial <- [
+          [prefix],
+          [prefix, refusal],
+          [refusal, terminal],
+          [prefix, terminal],
+          [refusal, prefix, terminal],
+          rows ++ rows
+        ] do
+      assert {:error, _} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ restamp(state, partial),
+                 all_events
+               )
+    end
+
+    {useful, _, _} = pending_checkpoint(String.duplicate("o", 3_000))
+
+    assert {:error, :checkpoint_makes_progress} =
+             SessionState.propose_maintenance_nonprogress(useful, 2_000, fn -> :ok end)
+  end
+
+  test "nonprogress cannot override deadline cancellation or settled parent capacity" do
+    {state, _, events} = pending_checkpoint("small")
+
+    assert {:error, :run_deadline_reached} =
+             SessionState.propose_maintenance_nonprogress(state, 61_001, fn ->
+               flunk("elapsed parent entered nonprogress measurement")
+             end)
+
+    assert {:error, :run_deadline_reached} =
+             SessionState.propose_maintenance_nonprogress(state, 2_000, fn ->
+               {:error, :run_deadline_reached}
+             end)
+
+    {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "abort-nonprogress"})
+    {aborted, _, _} = commit(state, abort, events)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.propose_maintenance_nonprogress(aborted, 2_000, fn ->
+               flunk("cancelled parent entered nonprogress measurement")
+             end)
+
+    for options <- [[max_turns: 1], [usage: %{}]] do
+      {spent, _, _} = pending_checkpoint("small", options)
+
+      assert {:error, :maintenance_bounds_exhausted} =
+               SessionState.propose_maintenance_nonprogress(spent, 2_000, fn ->
+                 flunk("spent parent entered nonprogress measurement")
+               end)
+    end
+  end
+
   test "strict progressing substitution may remain above an ordinary hard limit" do
     {state, _, _} =
       pending_checkpoint(String.duplicate("o", 3_000),

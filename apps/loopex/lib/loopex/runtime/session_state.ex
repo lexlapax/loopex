@@ -1465,6 +1465,19 @@ defmodule Loopex.Runtime.SessionState do
           {:ok, map()} | {:error, term()}
   def preflight_maintenance_checkpoint(state, now, check)
       when is_function(check, 0) do
+    with {:ok, candidate} <- pending_checkpoint_measurements(state, now, check) do
+      if checkpoint_progress?(candidate),
+        do: {:ok, candidate},
+        else: {:error, :compaction_no_progress}
+    end
+  end
+
+  defp checkpoint_progress?(candidate),
+    do:
+      candidate.after.record_bytes < candidate.before.record_bytes and
+        candidate.after.tokens < candidate.before.tokens
+
+  defp pending_checkpoint_measurements(state, now, check) do
     with %{
            "stage" => "checkpoint_pending",
            "summary" => summary,
@@ -1518,9 +1531,6 @@ defmodule Loopex.Runtime.SessionState do
            |> Map.put(:checkpoint_entries, [entry]),
          {:ok, after_value} <-
            checkpoint_projection_measurement(state, after_staging, project, header, check),
-         true <-
-           after_value.record_bytes < before.record_bytes and
-             after_value.tokens < before.tokens,
          :ok <- check.() do
       {:ok,
        %{
@@ -1555,6 +1565,71 @@ defmodule Loopex.Runtime.SessionState do
            internal_proposal(state, candidate.checkpoint_id <> ":checkpoint", record),
          :ok <- check.() do
       {:ok, proposal}
+    end
+  end
+
+  # Concept: a settled summary that makes no progress ends its parent once.
+  # Technical depth: preserve the last minimum ordinary projection's counts,
+  # estimate and digest, with no invented numeric failure or record cost. The
+  # episode terminal, measured refusal and parent terminal share one Store fence.
+  # Replay repeats the exact substitution against retained originals and rejects
+  # a failed progress claim for a useful summary. Settled usage is never charged again.
+  @doc false
+  @spec propose_maintenance_nonprogress(t(), integer(), function()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_maintenance_nonprogress(state, now, check) when is_function(check, 0) do
+    with {:ok, refusal} <- maintenance_nonprogress_refusal(state, now, check),
+         terminal =
+           state
+           |> run_terminal_record(refusal["run_id"], "failed", %{})
+           |> Map.put("failure", context_failure(refusal)),
+         {:ok, proposal} <-
+           build_internal_proposal(
+             state,
+             state.active_maintenance <> ":nonprogress",
+             [refusal, terminal],
+             now
+           ),
+         :ok <- check.() do
+      {:ok, proposal}
+    end
+  end
+
+  defp maintenance_nonprogress_refusal(state, now, check) do
+    with {:ok, candidate} <- pending_checkpoint_measurements(state, now, check),
+         false <- checkpoint_progress?(candidate),
+         record = candidate.before.record,
+         {:ok, counts} <- context_descriptor_counts(record) do
+      run = state.active_run_id
+      receipt = record["context_receipt"]
+      configuration = run_configuration(state, run)
+      turn = next_turn_number(state.pending_work[run])
+
+      refusal =
+        unavailable_context_refusal(state, run, configuration, turn, "compaction_no_progress")
+        |> Map.merge(%{
+          "failure" => %{
+            "version" => 2,
+            "category" => "context_preparation_failed",
+            "retryable" => false,
+            "measurement_scope" => "ordinary",
+            "cause" => "compaction_no_progress"
+          },
+          "projection_state" => "measured",
+          "measurement_scope" => "ordinary",
+          "system_message_count" => counts.system,
+          "session_message_count" => counts.session,
+          "steer_message_count" => counts.steer,
+          "tool_definition_count" => counts.tools,
+          "provider_estimated_tokens" => receipt["provider_estimated_tokens"],
+          "ordered_descriptor_digest" => receipt["ordered_descriptor_digest"],
+          "project_disposition" => refusal_project_disposition(receipt, counts)
+        })
+
+      {:ok, refusal}
+    else
+      true -> {:error, :checkpoint_makes_progress}
+      {:error, _} = error -> error
     end
   end
 
@@ -2608,39 +2683,21 @@ defmodule Loopex.Runtime.SessionState do
   # history length.
   defp context_refusal_result(state, record, refusal, work, turn_number) do
     receipt = Map.fetch!(record, "context_receipt")
-    blocks = Map.fetch!(receipt, "blocks")
-    request = Map.fetch!(record, "request")
-    tools = length(Map.get(request, "tools", []))
-    messages = length(blocks) - tools
-    steer = if Map.get(record, "applied_steer"), do: 1, else: 0
-
-    message_blocks = Enum.take(blocks, messages)
-    system = Enum.count(message_blocks, &(&1["provenance_class"] == "system"))
-    session = Enum.count(message_blocks, &(&1["provenance_class"] == "session")) - steer
-    project = Enum.count(message_blocks, &(&1["provenance_class"] == "project_resource"))
-    resources = Enum.count(message_blocks, &(&1["provenance_class"] == "resource_pack"))
     configured? = not is_nil(record["configuration_version"])
     frozen? = not is_nil(frozen_context(state, work.run_id))
 
-    if system + session + steer + tools + project + resources == length(blocks) and
-         (project + resources == 0 or (configured? and frozen?)) do
+    with {:ok, counts} <- context_descriptor_counts(record),
+         true <- counts.project + counts.resources == 0 or (configured? and frozen?) do
       compact =
-        compact_refusal(receipt, refusal, work, turn_number, %{
-          system: system,
-          session: session,
-          steer: steer,
-          tools: tools,
-          project: project,
-          resources: resources
-        })
+        compact_refusal(receipt, refusal, work, turn_number, counts)
 
       refusal = configured_refusal(compact, record["configuration_version"])
 
       refusal =
-        if project + resources > 0 do
+        if counts.project + counts.resources > 0 do
           Map.merge(refusal, %{
-            "project_resource_count" => project,
-            "resource_pack_count" => resources
+            "project_resource_count" => counts.project,
+            "resource_pack_count" => counts.resources
           })
         else
           refusal
@@ -2648,8 +2705,29 @@ defmodule Loopex.Runtime.SessionState do
 
       {:refused, refusal}
     else
-      {:refused_not_required_only, refusal}
+      _ -> {:refused_not_required_only, refusal}
     end
+  end
+
+  defp context_descriptor_counts(record) do
+    blocks = Map.fetch!(record["context_receipt"], "blocks")
+    tools = length(Map.get(record["request"], "tools", []))
+    messages = Enum.take(blocks, length(blocks) - tools)
+    steer = if record["applied_steer"], do: 1, else: 0
+
+    counts = %{
+      system: Enum.count(messages, &(&1["provenance_class"] == "system")),
+      session: Enum.count(messages, &(&1["provenance_class"] == "session")) - steer,
+      steer: steer,
+      tools: tools,
+      project: Enum.count(messages, &(&1["provenance_class"] == "project_resource")),
+      resources: Enum.count(messages, &(&1["provenance_class"] == "resource_pack"))
+    }
+
+    if Enum.all?(Map.values(counts), &nonnegative_uint64?/1) and
+         Enum.sum(Map.values(counts)) == length(blocks),
+       do: {:ok, counts},
+       else: {:error, :invalid_context_refusal}
   end
 
   # Concept: A refusal describes every class in the measured candidate.
@@ -5319,6 +5397,14 @@ defmodule Loopex.Runtime.SessionState do
           observed >= episode["preparation_deadline"] and
           (is_nil(deadline) or deadline > episode["preparation_deadline"])
 
+      %{
+        "outcome" => "failed",
+        "failure" => %{"cause" => "compaction_no_progress"}
+      } ->
+        episode["stage"] == "checkpoint_pending" and
+          observed >= episode["request_staged_at"] and is_integer(deadline) and
+          observed < deadline
+
       %{"outcome" => "bound_reached", "bound" => "deadline"} ->
         is_integer(deadline) and deadline <= episode["preparation_deadline"] and
           observed >= deadline and terminal["observed"] == observed and
@@ -5330,7 +5416,11 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp valid_maintenance_ending_clock?(_state, terminal, nil),
-    do: get_in(terminal, ["failure", "cause"]) != "compaction_preparation_deadline"
+    do:
+      get_in(terminal, ["failure", "cause"]) not in [
+        "compaction_preparation_deadline",
+        "compaction_no_progress"
+      ]
 
   # Concept: a recovered artifact job must name the original committed source.
   # Technical depth: recompute resolution from frozen request definitions and
@@ -10118,6 +10208,22 @@ defmodule Loopex.Runtime.SessionState do
 
       _ ->
         {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp validate_context_refusal(
+         state,
+         %{
+           :kind => "context_admission_refused_v2",
+           "failure" => %{"cause" => "compaction_no_progress"}
+         } = refusal
+       ) do
+    with %{observed_at: now} <- state.maintenance_terminal,
+         {:ok, expected} <- maintenance_nonprogress_refusal(state, now, fn -> :ok end),
+         true <- refusal == expected do
+      :ok
+    else
+      _ -> {:error, :invalid_context_refusal}
     end
   end
 

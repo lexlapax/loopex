@@ -1653,9 +1653,12 @@ without redispatch, including all three Store uncertainty phases and exact owner
 joins. Live successors also finish pending/committed first checkpoints through
 all three uncertainty phases, with no ordinary dispatch while fenced, one
 summary charge and one captured ordinary continuation. Abort/deadline and spent
-parent bounds win, retaining previously committed checkpoints. Automatic
-triggering, new summary dispatch/cleanup, measured non-progress endings, later
-prefixes and standalone compact remain open. The full fast
+parent bounds win, retaining previously committed checkpoints. Measured
+non-progress endings now authenticate the last minimum ordinary projection and
+commit the episode, refusal and parent ending together, including all three live
+uncertainty phases and private-reader traversal without redispatch or recharge.
+Automatic triggering, new summary dispatch/cleanup, later prefixes and standalone
+compact remain open. The full fast
 check passes on d0dd8ec6 through shared ordinary staging/tail measurement; both
 supported pairs pass the later focused checkpoint reducer/reader selection.
 This is not a complete T07 workflow proof.

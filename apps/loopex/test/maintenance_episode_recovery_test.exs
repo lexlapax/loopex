@@ -441,6 +441,107 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     end
   end
 
+  for phase <- [
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @phase phase
+    test "live nonprogress ending resolves #{@phase} without another summary or ordinary dispatch" do
+      {fixture, session, episode} = retained_episode(:nonprogress)
+      before = Fixture.records(fixture, session)
+      {:ok, original} = SessionState.recover(session, before, Fixture.events(fixture, session))
+      :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
+      successor = start(store: fixture.store, script: [], tools: [], model: "changed:model")
+
+      {:ok, {:prepared, activation}} =
+        Loopex.prepare_resume_session(successor.runtime, session, "resume")
+
+      {:ok, children} = Loopex.Runtime.children(successor.runtime)
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      monitor = Process.monitor(coordinator)
+      prepared = Fixture.records(successor, session)
+      assert Enum.take(prepared, length(before)) == before
+      assert [owner] = Enum.drop(prepared, length(before))
+      assert owner.payload.kind == "owner_advanced"
+      assert :sys.get_state(coordinator).in_flight == %{}
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+
+      if @phase == :recovery_representation do
+        assert_receive {:DOWN, ^monitor, :process, ^coordinator,
+                        {:maintenance_checkpoint_failed, :commit_unknown}},
+                       5_000
+
+        assert AgentLoopTestModel.dispatched(successor.model) == []
+
+        assert {:ok, ^session} =
+                 Loopex.resume_session(successor.runtime, session,
+                   command_id: "resolve-nonprogress"
+                 )
+      end
+
+      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      assert [prefix] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+
+      assert [refusal, terminal] =
+               rows
+               |> Enum.drop_while(&(&1.journal_version <= prefix.journal_version))
+               |> Enum.take(2)
+
+      assert Enum.count(rows, &(&1.payload.kind == "context_admission_refused_v2")) == 1
+
+      assert Enum.count(
+               rows,
+               &(&1.payload.kind == "run_terminal_committed" and
+                   &1.payload["run_id"] == episode["run_id"])
+             ) == 1
+
+      assert prefix.payload.kind == "maintenance_episode_terminal_v1"
+      assert prefix.payload["result"]["usage"]["total_tokens"] == 56
+      assert prefix.payload["result"]["checkpoint_id"] == nil
+      assert prefix.payload["result"]["cleanup"] == "confirmed"
+      assert refusal.payload.kind == "context_admission_refused_v2"
+      assert refusal.payload["projection_state"] == "measured"
+      assert refusal.payload["measurement_scope"] == "ordinary"
+      assert refusal.payload["record_byte_cost"] == nil
+      assert refusal.payload["system_message_count"] == 1
+      assert refusal.payload["session_message_count"] == 2
+      assert refusal.payload["failure"]["cause"] == "compaction_no_progress"
+      assert terminal.payload.kind == "run_terminal_committed"
+      assert terminal.payload["failure"] == refusal.payload["failure"]
+      assert prefix.payload["result"]["failure"] == refusal.payload["failure"]
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_opened_v1")) == 1
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_settled_v3")) == 1
+
+      refute Enum.any?(
+               rows,
+               &(&1.payload.kind in [
+                   "compaction_checkpoint_committed_v1",
+                   "model_request_committed_v2"
+                 ])
+             )
+
+      refute Enum.any?(Fixture.events(successor, session), &(&1.kind == "context.compacted"))
+
+      assert MapSet.member?(
+               M1RuntimeTestStore.observed(fixture.store),
+               {:session_journal_commit, @phase}
+             )
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, rows, Fixture.events(successor, session))
+
+      assert recovered.active_maintenance == nil
+      assert recovered.active_run_id == nil
+      assert recovered.charged[episode["run_id"]] == %{tokens: 56, source: :reported}
+      assert recovered.conversation == original.conversation
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+      assert Agent.get(successor.executor, & &1.jobs) == []
+      stop_and_join(successor, session)
+    end
+  end
+
   defp await_parent_terminal(fixture, session, run, cutoff) do
     rows = Fixture.records(fixture, session)
 
@@ -601,6 +702,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
            :incomplete,
            :invalid_aborted,
            :invalid_expired,
+           :nonprogress,
            :checkpoint_pending,
            :checkpoint_committed,
            :checkpoint_committed_aborted,

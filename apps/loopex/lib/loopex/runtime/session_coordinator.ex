@@ -3472,6 +3472,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  defp commit_checkpoint_phase(state, work, {:error, :compaction_no_progress}) do
+    result =
+      SessionState.propose_maintenance_nonprogress(
+        state.durable,
+        System.system_time(:millisecond),
+        checkpoint_clock_check(state, work.run_id)
+      )
+
+    case result do
+      {:error, :compaction_no_progress} ->
+        {:stop, {:maintenance_checkpoint_failed, :invalid_pending_checkpoint}, state}
+
+      ending ->
+        commit_checkpoint_phase(state, work, ending)
+    end
+  end
+
   defp commit_checkpoint_phase(state, _work, {:error, reason}),
     do: {:stop, {:maintenance_checkpoint_failed, reason}, state}
 

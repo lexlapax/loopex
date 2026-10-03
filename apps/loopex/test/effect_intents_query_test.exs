@@ -602,6 +602,27 @@ defmodule Loopex.EffectIntentsQueryTest do
     refute_received {:forbidden_store_call, _}
   end
 
+  test "measured nonprogress history advances every page without an effect or owner", context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    {records, events} = maintenance_history(session, :nonprogress)
+    assert {:ok, replayed} = SessionState.recover(session, records, events)
+    assert replayed.active_maintenance == nil
+    assert replayed.active_run_id == nil
+    assert replayed.active_checkpoint == nil
+    assert Enum.map(Map.values(replayed.charged), & &1.tokens) |> Enum.sum() == 56
+    refusal = Enum.find(records, &(&1.payload.kind == "context_admission_refused_v2"))
+    assert refusal.payload["projection_state"] == "measured"
+    assert refusal.payload["failure"]["cause"] == "compaction_no_progress"
+    install_history(reference, records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert Enum.map(pages, & &1.scanned_through) == Enum.to_list(1..length(records))
+    assert Enum.all?(pages, &(&1.rows == []))
+    assert List.last(pages).next_cursor == nil
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+  end
+
   test "run-owned parent turn bounds retain complete private coverage and reject substitutions",
        context do
     %{runtime: runtime, session: session, reference: reference} = context
@@ -822,7 +843,11 @@ defmodule Loopex.EffectIntentsQueryTest do
         %{
           type: :prompt,
           command_id: "old",
-          content: if(ending == :failed, do: "old facts", else: String.duplicate("old", 1_000))
+          content:
+            if(ending in [:failed, :nonprogress],
+              do: "old facts",
+              else: String.duplicate("old", 1_000)
+            )
         },
         bounds
       )
@@ -903,6 +928,13 @@ defmodule Loopex.EffectIntentsQueryTest do
               state.active_run_id,
               :maintenance_summary_invalid
             )
+
+          {_state, history, events} = retain(state, refused, history, events)
+          {history, events}
+
+        ending == :nonprogress ->
+          {:ok, refused} =
+            SessionState.propose_maintenance_nonprogress(state, 2_000, fn -> :ok end)
 
           {_state, history, events} = retain(state, refused, history, events)
           {history, events}
