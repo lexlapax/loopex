@@ -966,6 +966,243 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
     end
   end
 
+  test "standalone source staging commits the existing episode request/open identity without a run" do
+    {state, history, events} = captured_source(["first fact", "second fact"])
+    raw = state.conversation
+    episode = state.maintenance_episodes[state.active_maintenance]
+
+    assert {:ok, proposal} =
+             SessionState.propose_selected_maintenance_request(state, 1_500, fn -> :ok end)
+
+    [staged, opened] = proposal.records
+    assert staged.kind == "maintenance_request_committed_v1"
+    assert opened.kind == "maintenance_attempt_opened_v1"
+    assert staged["eligible_unit_count"] == 2
+    assert staged["covered_range"]["unit_count"] == 2
+    assert staged["covered_range"]["first_kept"] == nil
+    assert staged["captured_session_version"] == episode["session_version"]
+    assert staged["source_excerpted"] == false
+    assert staged["request"]["deadline"] == episode["deadline"]
+    assert staged["request"]["tools"] == []
+    assert staged["request"]["continuation"] == nil
+    assert staged["request"]["sampling"]["max_tokens"] == 1_024
+    assert staged["request"]["sampling"]["reasoning"] == "none"
+
+    assert staged["context_receipt"]["record_byte_cost"] ==
+             byte_size(:erlang.term_to_binary(staged, [:deterministic]))
+
+    assert {:ok, _} = Store.admit_bounded(staged)
+    assert {:ok, _} = Store.admit_bounded(opened)
+
+    assert {:ok, binding} =
+             Loopex.Runtime.ProviderAttempt.binding_from_opened(state.session_id, opened)
+
+    assert binding["episode_id"] == episode["episode_id"]
+    assert binding["purpose"] == "compaction"
+    assert binding["operation_id"] == staged["operation_id"]
+    assert binding["staged_request_digest"] == staged["staged_request_digest"]
+    refute Map.has_key?(binding, "run_id")
+    refute Map.has_key?(binding, "turn_id")
+
+    for row <- proposal.records do
+      refute Map.has_key?(row, "run_id")
+      refute Map.has_key?(row, "staging_turn_id")
+      refute Map.has_key?(row, "preparation_deadline")
+    end
+
+    assert proposal.events == []
+    {opened_state, history, events} = commit(state, proposal, history, events)
+    assert {:ok, ^opened_state} = SessionState.recover(state.session_id, history, events)
+    assert opened_state.active_run_id == nil
+    assert opened_state.pending_work == %{}
+    assert opened_state.deadlines == %{}
+    assert opened_state.charged == state.charged
+    assert opened_state.conversation == raw
+    live = opened_state.maintenance_episodes[state.active_maintenance]
+    assert live["stage"] == "model_attempt_open"
+    assert live["attempts"] == 1
+    assert live["model_attempt"] == 1
+    assert live["deadline"] == episode["deadline"]
+    assert live["request"].deadline == episode["deadline"]
+    assert live["usage"] == episode["usage"]
+  end
+
+  test "standalone source staging preserves captured request identity through owner succession" do
+    {state, history, events} = captured_source(["first fact", "second fact"])
+    {:ok, before} = SessionState.propose_selected_maintenance_request(state, 1_500, fn -> :ok end)
+
+    owner = %{
+      journal_version: state.journal_version + 1,
+      owner_epoch: state.owner_epoch + 1,
+      owner_incarnation_id: "successor",
+      payload: %{
+        :kind => "owner_advanced",
+        "prior_owner_epoch" => state.owner_epoch,
+        "owner_epoch" => state.owner_epoch + 1,
+        "owner_incarnation_id" => "successor",
+        "owner_transaction_id" => "successor-tx"
+      }
+    }
+
+    {:ok, successor} = SessionState.recover(state.session_id, history ++ [owner], events)
+
+    assert {:ok, after_value} =
+             SessionState.propose_selected_maintenance_request(successor, 5_000, fn -> :ok end)
+
+    [first_request, first_open] = before.records
+    [later_request, later_open] = after_value.records
+    assert Map.delete(first_request, "staged_at") == Map.delete(later_request, "staged_at")
+    assert first_open == later_open
+    assert first_request["request"]["deadline"] == 61_000
+    {opened, history, events} = commit(successor, after_value, history ++ [owner], events)
+    assert {:ok, ^opened} = SessionState.recover(state.session_id, history, events)
+    assert opened.owner_epoch == successor.owner_epoch
+    assert opened.charged == state.charged
+    assert opened.deadlines == %{}
+  end
+
+  test "standalone source staging permits exactly the accepted fixed reply reserve" do
+    {state, _, _} =
+      captured_source(["fact"],
+        bounds: %{max_attempts: 1, deadline_ms: 60_000, token_budget: 1_024}
+      )
+
+    assert {:ok, proposal} =
+             SessionState.propose_selected_maintenance_request(state, 1_500, fn -> :ok end)
+
+    assert hd(proposal.records)["request"]["sampling"]["max_tokens"] == 1_024
+    episode = proposal.next.maintenance_episodes[state.active_maintenance]
+    assert episode["bounds"]["token_budget"] == 1_024
+    assert episode["attempts"] == 1
+    assert episode["usage"]["total_tokens"] == 0
+    assert proposal.next.bounds == state.bounds
+    assert proposal.next.charged == state.charged
+  end
+
+  test "standalone source selection cannot strand a huge unit behind a small complete prefix" do
+    {state, _, _} = captured_source(["small prefix", String.duplicate("x", 34_000)])
+
+    assert {:ok, proposal} =
+             SessionState.propose_selected_maintenance_request(state, 1_500, fn -> :ok end)
+
+    record = hd(proposal.records)
+    assert record["covered_range"]["unit_count"] == 2
+    assert record["source_excerpted"] == true
+    [_system, source] = record["request"]["messages"]
+    assert byte_size(source["content"]) <= 16_384
+    assert source["content"] =~ "serialized_excerpt"
+    assert source["content"] =~ "loopex.compaction.messages_json.v1"
+  end
+
+  test "standalone request replay refuses separated opens and rehashed source/request substitutions" do
+    {state, history, events} = captured_source(["first fact", "second fact"])
+
+    {:ok, proposal} =
+      SessionState.propose_selected_maintenance_request(state, 1_500, fn -> :ok end)
+
+    [staged, opened] = proposal.records
+    {_, full_history, full_events} = commit(state, proposal, history, events)
+
+    assert {:error, _} =
+             SessionState.recover(state.session_id, Enum.drop(full_history, -1), events)
+
+    assert {:error, _} =
+             SessionState.recover(state.session_id, history ++ [row(state, opened)], events)
+
+    for change <- [
+          &Map.put(&1, "run_id", "invented"),
+          &Map.put(&1, "captured_session_version", state.journal_version + 1),
+          &Map.put(&1, "staged_at", 61_000),
+          &Map.put(&1, "eligible_unit_count", 1),
+          &Map.put(&1, "source_digest", String.duplicate("0", 64)),
+          &put_in(&1, ["covered_range", "unit_count"], 1),
+          &put_in(&1, ["request", "deadline"], 61_001),
+          &put_in(&1, ["request", "sampling", "max_tokens"], 1_025),
+          &put_in(&1, ["context_receipt", "record_byte_cost"], 0)
+        ] do
+      bad = [
+        row(state, change.(staged)),
+        %{row(state, opened) | journal_version: state.journal_version + 2}
+      ]
+
+      assert {:error, _} = SessionState.recover(state.session_id, history ++ bad, full_events)
+    end
+
+    assert {:error, _} =
+             SessionState.recover(
+               state.session_id,
+               history ++
+                 [
+                   row(state, staged),
+                   %{row(state, staged) | journal_version: state.journal_version + 2}
+                 ],
+               events
+             )
+  end
+
+  test "standalone request preparation checks the retained cutoff and actual abort before work" do
+    {state, history, events} = captured_source(["retained fact"])
+
+    for clock <- [nil, 999, 18_446_744_073_709_551_616] do
+      assert {:error, :context_projection_invalid} =
+               SessionState.propose_selected_maintenance_request(state, clock, fn -> :ok end)
+    end
+
+    assert {:error, :standalone_deadline_reached} =
+             SessionState.propose_selected_maintenance_request(state, 61_000, fn -> :ok end)
+
+    {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "stop"})
+    {aborting, _, _} = commit(state, abort, history, events)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.propose_selected_maintenance_request(aborting, 1_500, fn ->
+               flunk("aborted source traversed history")
+             end)
+  end
+
+  test "every standalone source selection and staged-proposal check can cancel" do
+    {state, _, _} = captured_source(["first fact", "second fact"])
+    counter = :atomics.new(1, [])
+
+    assert {:ok, _} =
+             SessionState.propose_selected_maintenance_request(state, 1_500, fn ->
+               :atomics.add_get(counter, 1, 1)
+               :ok
+             end)
+
+    total = :atomics.get(counter, 1)
+    assert total > 10
+
+    for stop <- 1..total do
+      :atomics.put(counter, 1, 0)
+
+      assert {:error, :cancelled} =
+               SessionState.propose_selected_maintenance_request(state, 1_500, fn ->
+                 if :atomics.add_get(counter, 1, 1) == stop, do: {:error, :cancelled}, else: :ok
+               end)
+
+      assert :atomics.get(counter, 1) == stop
+    end
+
+    assert state.maintenance_episodes[state.active_maintenance]["attempts"] == 0
+    assert state.deadlines == %{}
+  end
+
+  defp captured_source(texts, options \\ []) do
+    {state, history, events} = pending(texts, options)
+
+    {:ok, capture} =
+      SessionState.propose_standalone_maintenance_episode(
+        state,
+        maintenance_model(),
+        maintenance_instructions(),
+        1_000,
+        fn -> :ok end
+      )
+
+    commit(state, capture, history, events)
+  end
+
   defp preparation_failure(cause, scope),
     do: %{
       "version" => 2,

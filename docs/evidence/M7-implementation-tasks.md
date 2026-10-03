@@ -325,6 +325,60 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: standalone captured source selection now reuses the maintenance source
+  encoder, fixed-point Store sizing and adjacent request/open proposal. The actual
+  compact command and idle session bind its whole-session selection. Its admitted
+  absolute deadline and frozen maintenance selection stay unchanged through a
+  later journal head; opening an attempt adds no run deadline or run accounting.
+  All eligible units may be released, with a null first-kept identity. The bounded
+  reader permits that null only when the covered count equals the eligible count.
+  Both supported-pair focused selections pass 254 cases with two existing
+  exclusions, current in 15.5 seconds and floor in 14.9 seconds. Tests cover exact
+  request/open replay, the 1,024-token reserve, oversized-unit excerpts, unchanged
+  raw facts, cancellation and forged or incomplete staging pairs. The provider
+  dispatch, settlement, checkpoint and final completion integration remains open.
+  These are development checks, not closure or real-provider evidence.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-staging-focused-current-v2.log` | PASS, 254 cases, two excluded | `e267c703cbff443bc46ada4ddd5a51e43f47516f3e7ad3bc4b58b2c713efbd1d` |
+  | `/private/tmp/loopex-m7-standalone-staging-focused-floor-v1.log` | PASS, 254 cases, two excluded | `25c678089592758d8b7b1843a21848f76aff7118a22a428aab9c35b96d961a18` |
+
+  Intermediate complete passing outputs are retained read-only under
+  `/private/tmp/loopex-m7-`: `standalone-staging-current-v1.log`, 74 cases in
+  2.1 seconds, SHA-256 `946a161ba10badcc1abc4040c8856879a6c8715de22107ec78d817bbe7b42228`;
+  `standalone-staging-current-v2.log`, 96 cases in 3.6 seconds, SHA-256
+  `b0eb9ec47795fb64f56bc87b1cd2c3a8a23c4d96b1cd5d71296a1bb4e8da9a82`;
+  `standalone-staging-current-v3.log`, 98 cases in 3.7 seconds, SHA-256
+  `edfc38a253b4d4167410125984cce56e559059974fefdcaba5c6068e0c5e5430`;
+  and `standalone-staging-focused-current-v1.log`, 254 cases with two exclusions
+  in 15.6 seconds, SHA-256
+  `617b174180b29542289f6f822cad05bc0c9833cdf9c395ca15db6bf77259e408`.
+  The last intermediate run precedes the bounded reader's rejection of null
+  first-kept identities on partial selections; both final selections include it.
+  T01–T19 originals remain 54 done / 119 todo / 6 retired; added subtasks are
+  204 done / 9 todo, including T07's 37 done / 1 todo. Both earlier maintainer
+  decisions remain pending. The complete current Core suite also passes 1,176
+  cases with eight existing exclusions in 215.6 seconds; its retained output and
+  static results are recorded below.
+
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-staging-core-current-v1.log` | PASS, 1,176 cases, eight excluded | `9c53eb0b34fa31a7458a89b7cebf5826e0ef90efcefd7048422159652cb4e622` |
+  | `/private/tmp/loopex-m7-standalone-staging-static-v1.log` | PASS, warning-free compile, format, bootstrap/status, compiled documentation, dependency direction and version train | `ebb9516142f74ed63e4d323121aba71b0ec4062106a6992a297a75fbe0bbfd82` |
+
+  The static run precedes adding its own digest and the Core digest to this
+  entry. Bootstrap/status and compiled documentation are checked again after
+  that metadata backfill and pass. Complete output is retained read-only at
+  `/private/tmp/loopex-m7-standalone-staging-final-docs-v1.log`, SHA-256
+  `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8`.
+  This final reference is appended after that check. Production and test bytes
+  remain unchanged. All check handles are terminal and collected; no agents
+  are running. Continue by joining standalone provider settlement and checkpoint
+  completion to the captured source workflow; no complete standalone workflow
+  or milestone closure is claimed.
+
 - Done: standalone initial preparation now runs through the actual session owner
   and supervised pure-proposal worker. One captured clock bounds its candidate
   admission; the exact worker DOWN and unchanged journal head precede adoption.
@@ -7692,6 +7746,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Reuse captured whole-session source selection, exact source/receipt sizing and the adjacent maintenance request/open pair for standalone commands; retain the immutable cutoff and actual command identity, add no run accounting/deadline, and prove excerpt selection, strict replay, cancellation and bounded private coverage on both toolchains. Live dispatch, settlement and checkpoint completion remain open.
 
 
 - [x] Join standalone initial capture and unchanged/zero-attempt failure completion to the live owner; capture one cutoff, join exact pure workers before adoption, preserve prepared-resume pause, commit admitted-episode terminal/completion together, and prove abort, worker loss, deadline, bounded reader, duplicate results and all three capture/completion uncertainty phases on both toolchains. Provider dispatch, spent/checkpoint results, snapshots and complete cleanup remain open.

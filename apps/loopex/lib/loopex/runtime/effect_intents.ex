@@ -542,7 +542,10 @@ defmodule Loopex.Runtime.EffectIntents do
         range["unit_count"] <= payload["eligible_unit_count"] and
         positive_version?(range["record_count"]) and positive_version?(range["source_count"]) and
         range["record_count"] <= range["source_count"] and digest?(range["digest"]) and
-        Enum.all?(~w(first last first_kept), &is_map(range[&1])) and
+        Enum.all?(~w(first last), &is_map(range[&1])) and
+        (is_map(range["first_kept"]) or
+           (is_nil(range["first_kept"]) and
+              range["unit_count"] == payload["eligible_unit_count"])) and
         is_boolean(payload["source_excerpted"]) and version?(payload["staged_at"]) and
         request["tools"] == [] and is_nil(request["continuation"]) and
         request["sampling"]["max_tokens"] == 1_024 and request["sampling"]["reasoning"] == "none"

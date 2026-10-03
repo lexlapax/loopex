@@ -1834,6 +1834,16 @@ completed result. The task checklist retains both supported-pair results and
 the Core/static development runs. No standalone summary dispatch, spending,
 checkpoint completion, snapshot or complete runtime-cleanup claim is made.
 
+Standalone source proposals now reuse the shared encoder and fixed-point Store
+measurement under their actual command and whole-session scope. The adjacent
+maintenance request/open pair retains the original cutoff and frozen selection;
+opening it creates no run deadline, pending work or run accounting. All released
+eligible history has a null first-kept identity, which the bounded reader accepts
+only when the covered and eligible counts match. Both supported-pair tests prove
+exact replay, incomplete/forged pair refusal, oversized-unit excerpt selection,
+fixed reserve and cancellation. Live dispatch and settlement/checkpoint adoption
+are still open; the task checklist retains the complete development outputs.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

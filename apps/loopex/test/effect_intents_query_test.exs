@@ -322,6 +322,34 @@ defmodule Loopex.EffectIntentsQueryTest do
     assert List.last(pages).scanned_through == length(records)
     refute_receive {:forbidden_store_call, _}, 0
 
+    {:ok, staged} = SessionState.propose_selected_maintenance_request(state, 1_500, fn -> :ok end)
+    {opened, staged_records, staged_events} = retain(state, staged, records, events)
+    assert {:ok, ^opened} = SessionState.recover(session, staged_records, staged_events)
+    assert hd(staged.records)["covered_range"]["first_kept"] == nil
+    assert opened.deadlines == %{}
+    install_history(reference, staged_records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert length(pages) == length(staged_records)
+    assert Enum.all?(pages, &(&1.rows == []))
+    assert List.last(pages).scanned_through == length(staged_records)
+    assert List.last(pages).next_cursor == nil
+    refute_receive {:forbidden_store_call, _}, 0
+
+    for transform <- [
+          &put_in(&1, ["covered_range", "first_kept"], "invented"),
+          &Map.put(&1, "eligible_unit_count", 2),
+          &put_in(&1, ["covered_range", "first"], nil),
+          &put_in(&1, ["covered_range", "last"], nil),
+          &put_in(&1, ["request", "sampling", "max_tokens"], 1_025)
+        ] do
+      install_history(
+        reference,
+        change_payload(staged_records, "maintenance_request_committed_v1", transform)
+      )
+
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+
     for transform <- [
           &Map.put(&1, "run_id", "invented"),
           &Map.put(&1, "preparation_deadline", 61_000),

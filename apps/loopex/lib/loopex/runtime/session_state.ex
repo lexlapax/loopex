@@ -1492,7 +1492,7 @@ defmodule Loopex.Runtime.SessionState do
     with {:ok, episode} <- maintenance_source_episode(state, now, check),
          :ok <- maintenance_instruction_budget(episode),
          {:ok, deadline} <- maintenance_request_deadline(state, episode, now),
-         {:ok, units} <- compaction_units(state, episode["run_id"]),
+         {:ok, units} <- compaction_units(state, maintenance_scope(episode)),
          eligible = Enum.take_while(units, &(not &1.protected?)),
          true <- eligible_count <= length(eligible),
          selected = Enum.take(eligible, eligible_count),
@@ -1540,17 +1540,20 @@ defmodule Loopex.Runtime.SessionState do
 
   def preflight_maintenance_request(_, _, _, _), do: {:error, :context_projection_invalid}
 
-  # Concept: source preparation uses the captured ordinary tail policy.
-  # Technical depth: this pure worker proposal selects q=0 whole units with the
-  # same configured request and fixed receipt cost as checkpoint completion. It
-  # grants no dispatch authority until the owner commits its request/open pair.
+  # Concept: source preparation follows its owning run or explicit command.
+  # Technical depth: the pure worker selects q=0 whole units under the ordinary
+  # run's tail policy or the standalone command's whole-session release. Shared
+  # source encoding and request sizing precede the adjacent request/open pair;
+  # only that committed pair permits dispatch under the episode identity.
   @doc false
   def propose_selected_maintenance_request(state, now, check) do
     case selected_maintenance_source_result(state, now, check) do
-      {:error, :compaction_excerpt_budget_too_small} ->
+      {:error, :compaction_excerpt_budget_too_small}
+      when is_nil(state.pending_compact) ->
         propose_maintenance_source_refusal(state, now, check)
 
-      {:refused, %{} = _measurement} ->
+      {:refused, %{} = _measurement}
+      when is_nil(state.pending_compact) ->
         propose_maintenance_source_numeric_refusal(state, now, check)
 
       result ->
@@ -1591,6 +1594,17 @@ defmodule Loopex.Runtime.SessionState do
     else
       {:error, _} = error -> error
       _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp selected_maintenance_source_result(%{pending_compact: %{}} = state, now, check) do
+    with {:ok, episode} <- maintenance_source_episode(state, now, check),
+         {:ok, choice} <- preflight_standalone_compaction(state, episode["deadline"], check),
+         true <- choice.eligible_unit_count > 0 do
+      propose_maintenance_request(state, choice.eligible_unit_count, now, check)
+    else
+      false -> {:error, :compaction_no_progress}
+      result -> result
     end
   end
 
@@ -1853,7 +1867,7 @@ defmodule Loopex.Runtime.SessionState do
   # ordinal; no separate advancement fact or summary-only cycle is admitted.
   defp maintenance_source_episode(state, now, check) do
     with %{} = episode <- state.maintenance_episodes[state.active_maintenance],
-         {:ok, _work, _parent} <- maintenance_admission_context(state, episode["run_id"]),
+         :ok <- maintenance_source_owner(state, episode),
          :ok <- maintenance_source_clock(state, episode, now),
          :ok <- maintenance_request_capacity(state, episode) do
       case episode do
@@ -1890,10 +1904,60 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: summaries cover the owning session or its active run directly.
+  # Technical depth: an explicit compact has no synthetic run or staging turn.
+  # Its pending command, idle ordinary state and current capture bind source
+  # preparation; run-owned episodes retain their existing admission fence.
+  defp maintenance_scope(%{kind: "standalone_maintenance_episode_admitted_v1"}), do: :session
+  defp maintenance_scope(episode), do: episode["run_id"]
+
+  defp maintenance_source_owner(
+         state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = episode
+       ) do
+    case state.pending_compact do
+      %{"episode_id" => id, "command_id" => command, "abort_command_id" => nil}
+      when id == state.active_maintenance ->
+        if id == episode["episode_id"] and command == episode["command_id"] and
+             is_nil(state.active_run_id) and state.pending_work == %{} and
+             is_nil(state.aborting) and is_nil(state.open_interaction) and
+             is_nil(state.follow_up),
+           do: :ok,
+           else: {:error, :maintenance_not_quiescent}
+
+      _ ->
+        {:error, :maintenance_not_quiescent}
+    end
+  end
+
+  defp maintenance_source_owner(state, episode) do
+    case maintenance_admission_context(state, episode["run_id"]) do
+      {:ok, _, _} -> :ok
+      error -> error
+    end
+  end
+
   defp maintenance_prior_summary(%{active_checkpoint: nil}), do: nil
 
   defp maintenance_prior_summary(state),
     do: state.checkpoints[state.active_checkpoint]["summary"]
+
+  defp maintenance_source_clock(
+         _state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = episode,
+         now
+       ) do
+    cond do
+      not is_integer(now) or now < episode["admitted_at"] or now > @uint64_max ->
+        {:error, :context_projection_invalid}
+
+      now >= episode["deadline"] ->
+        {:error, :standalone_deadline_reached}
+
+      true ->
+        :ok
+    end
+  end
 
   defp maintenance_source_clock(state, episode, now) do
     cond do
@@ -1912,6 +1976,13 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp maintenance_request_deadline(
+         _state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = episode,
+         _now
+       ),
+       do: {:ok, episode["deadline"]}
+
   defp maintenance_request_deadline(state, episode, now) do
     case state.deadlines[episode["run_id"]] do
       nil ->
@@ -1924,6 +1995,16 @@ defmodule Loopex.Runtime.SessionState do
       deadline ->
         {:ok, deadline}
     end
+  end
+
+  defp maintenance_request_capacity(
+         _state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = episode
+       ) do
+    if episode["attempts"] < episode["bounds"]["max_attempts"] and
+         episode["bounds"]["token_budget"] - episode["usage"]["total_tokens"] >= 1_024,
+       do: :ok,
+       else: {:error, :maintenance_bounds_exhausted}
   end
 
   defp maintenance_request_capacity(state, episode) do
@@ -8630,7 +8711,15 @@ defmodule Loopex.Runtime.SessionState do
         })
 
       next = put_in(state.maintenance_episodes[state.active_maintenance], episode)
-      next = %{next | deadlines: Map.put_new(next.deadlines, episode["run_id"], request.deadline)}
+
+      next =
+        if maintenance_scope(episode) == :session,
+          do: next,
+          else: %{
+            next
+            | deadlines: Map.put_new(next.deadlines, episode["run_id"], request.deadline)
+          }
+
       {:ok, next, []}
     else
       _ -> {:error, :invalid_maintenance_attempt_open_transition}
