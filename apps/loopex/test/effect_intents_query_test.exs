@@ -504,6 +504,69 @@ defmodule Loopex.EffectIntentsQueryTest do
     end
   end
 
+  test "maintenance deadlines and settlements advance validated history coverage", context do
+    %{runtime: runtime, session: session, records: records, reference: reference} = context
+    before = all_pages(runtime, session, nil, 1, []) |> Enum.flat_map(& &1.rows)
+
+    {:ok, opened} =
+      Loopex.Runtime.ProviderAttempt.opened_record(%{
+        episode_id: "maintenance-episode",
+        summary_ordinal: 1,
+        purpose: "compaction",
+        operation_id: "summary-operation",
+        attempt: 1,
+        staged_request_digest: String.duplicate("d", 64)
+      })
+
+    deadline =
+      Map.merge(opened, %{
+        :kind => "maintenance_termination_admitted_v1",
+        "cause" => "deadline",
+        "deadline" => 100,
+        "observed" => 100
+      })
+
+    settled =
+      Map.merge(opened, %{
+        :kind => "maintenance_attempt_settled_v3",
+        "transport" => "not_dispatched",
+        "termination" => "deadline",
+        "conversation" => "none",
+        "next" => "terminal",
+        "result" => %{"kind" => "error", "category" => "model_call_failed"},
+        "accounting" => %{"source" => "none", "basis" => "not_dispatched"}
+      })
+
+    last = List.last(records)
+
+    added =
+      [opened, deadline, settled]
+      |> Enum.with_index(last.journal_version + 1)
+      |> Enum.map(fn {payload, version} ->
+        %{last | journal_version: version, payload: payload}
+      end)
+
+    Agent.update(reference, &%{&1 | records: records ++ added})
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert Enum.flat_map(pages, & &1.rows) == before
+    assert List.last(pages).scanned_through == List.last(added).journal_version
+    assert List.last(pages).next_cursor == nil
+
+    for {index, payload} <- [
+          {1, Map.put(deadline, "observed", 99)},
+          {1, Map.put(deadline, "run_id", "invented")},
+          {1, Map.delete(deadline, "purpose")},
+          {2, Map.put(settled, "next", "retry")},
+          {2, Map.put(settled, "transport", "dispatched_or_unknown")},
+          {2, Map.put(settled, "turn_id", "invented")},
+          {2, Map.delete(settled, "episode_id")}
+        ] do
+      changed = List.update_at(added, index, &%{&1 | payload: payload})
+      Agent.update(reference, &%{&1 | records: records ++ changed})
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+  end
+
   test "Store-read timeout joins the blocked reader before answering", context do
     %{runtime: runtime, session: session, reference: reference} = context
     Agent.update(reference, &%{&1 | mode: :block})

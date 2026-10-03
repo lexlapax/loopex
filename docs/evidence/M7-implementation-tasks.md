@@ -325,6 +325,51 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: add distinct `maintenance_attempt_settled_v3` and
+  `maintenance_termination_admitted_v1` vocabulary with the closed episode,
+  summary ordinal and compaction purpose identity. Reuse the existing v3 reply,
+  transport, termination, retry and accounting validators. A canonical summary
+  reply ends its summary operation even if it attempted tools; it cannot select
+  ordinary executor continuation. Natural completion, output schema, sizes and
+  progress still require owner validation before checkpoint publication. Late
+  replies remain evidence only; exact not-dispatched attempt one alone permits
+  the one retry. Dispatched/unknown owner loss charges the remaining allowance;
+  validated oversized reply evidence retains exact reported usage. Maintenance
+  rejects a required continuation mapping. Ordinary and maintenance settlements
+  now also refuse a reply digest differing from the outer staged-request digest.
+
+  Control retires an exactly matching spent maintenance permit from its
+  validated settlement, without requiring an invented ordinary run terminal.
+  The existing boundary fixture joins its worker before acknowledging the
+  actual Store settlement receipt, observes retirement, then proves the old
+  position remains stale. It invokes no provider and proves no checkpoint.
+  Effect-history reads validate the new deadline/settlement rows and advance
+  coverage without inventing executor effects; malformed rows refuse.
+
+  The six-file focused selection passed 97 tests on each supported pair.
+  Current: 26.9 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-outcomes-current-v1.log`, SHA-256
+  `cdc0732138c76cc064e30da7610040144e5d64eb2d4158643c3dd2a2115f2b12`.
+  Floor: 28.9 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-outcomes-floor-v1.log`, SHA-256
+  `bd9f3571fb237d2452fe9c664ead997ec2290b644f14536ec8ac813bbc92ed2e`.
+  Complete outputs retain exact source/test digests. The five-case boundary
+  selection passed before the added history/accounting/digest witnesses; the expanded
+  two-file development selection then passed 15. No paid provider calls were
+  made. Formatting, warning-free compilation, dependency direction, repository
+  structure/status, compiled documentation and diff checks passed in 22.2
+  measured seconds. Complete output:
+  `/private/tmp/loopex-m7-maintenance-outcomes-gates-v1.log`, SHA-256
+  `f76e9fc9e1082bc573898613d0c428e8966d795cc3fc3105f6299d21763a566a`.
+
+  The goal remains active on `m7`. T00–T19 original rows remain 51 done / 128
+  todo / 7 retired; added subtasks now have 179 done / 10 todo. T01–T19 alone
+  retain original 51 / 122 / 6 and added 175 / 9. No agents or decisions are
+  pending. Original T07 rows remain open: request/source ownership and complete
+  receipt preflight, episode spending/recovery, live triggering/dispatch,
+  checkpoints and standalone results still need integration. The latest full
+  fast pass remains `ff21bed9`; no full check of these newer bytes is claimed.
+
 - Done: retain complete normalized original-record provenance beside each
   committed conversation source. The index contains only digest, byte cost and
   original journal position; it stores no original-record or message copies.
@@ -6146,6 +6191,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Add distinct closed maintenance v3 settlement and deadline vocabulary, preserving shared transport/accounting/retry rules, preventing ordinary tool continuation, binding retained reply digests, and joining exact permit retirement plus bounded effect-history validation; prove all boundaries on both toolchains. Live episode spending, summary/checkpoint admission and recovery remain open.
 
 - [x] Retain replay-derived complete original-record digests/costs/positions for existing conversation sources, preserving queued input admission, deferred settlement pairs, executor receipt evidence, terminal-derived results and question response provenance; prove live/replay equality and private-original changes invisible to canonical messages on both supported toolchains. Ordered range digest and live maintenance staging remain open.
 

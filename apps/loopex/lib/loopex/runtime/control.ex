@@ -1297,7 +1297,10 @@ defmodule Loopex.Runtime.Control do
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, []}, fn
       {%{payload: payload}, index}, {:ok, retired} ->
-        if record_kind(payload) == ProviderAttempt.settled_kind() do
+        if record_kind(payload) in [
+             ProviderAttempt.settled_kind(),
+             ProviderAttempt.maintenance_settled_kind()
+           ] do
           with :ok <- ProviderAttempt.validate_settled(payload),
                :ok <- settlement_domain_closed(payload, Enum.at(records, index + 1)) do
             matching =
@@ -1320,6 +1323,12 @@ defmodule Loopex.Runtime.Control do
 
   defp settled_spent_bindings(_records, _session_id, _spent),
     do: {:error, :invalid_settlement_records}
+
+  # Concept: a settled summary attempt can retire its permit before its checkpoint.
+  # Technical depth: the distinct validated maintenance row closes that provider
+  # attempt, not the parent run. Summary validation and checkpoint publication
+  # remain serial-owner work; a fabricated ordinary terminal is never required.
+  defp settlement_domain_closed(%{"purpose" => "compaction"}, _next), do: :ok
 
   defp settlement_domain_closed(%{"next" => "terminal"} = settlement, %{
          payload: terminal

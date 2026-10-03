@@ -39,7 +39,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @opened_kind "model_attempt_opened_v1"
   @maintenance_opened_kind "maintenance_attempt_opened_v1"
   @settled_v3_kind "model_attempt_settled_v3"
+  @maintenance_settled_kind "maintenance_attempt_settled_v3"
   @termination_kind "model_termination_admitted_v1"
+  @maintenance_termination_kind "maintenance_termination_admitted_v1"
 
   @opened_keys ["run_id", "turn_id", "operation_id", "attempt", "staged_request_digest"]
   @maintenance_opened_keys [
@@ -73,6 +75,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
     "deadline",
     "observed"
   ]
+  @maintenance_settled_keys @maintenance_opened_keys ++ (@settled_keys -- @opened_keys)
+  @maintenance_termination_keys @maintenance_opened_keys ++ (@termination_keys -- @opened_keys)
 
   @reply_keys [
     "text",
@@ -175,6 +179,22 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
+  Identify the settlement of one compaction provider attempt.
+
+  ## Technical depth
+
+  ADR 0043 substitutes episode, summary ordinal and fixed purpose for ordinary
+  run/turn identity. V3 reply and accounting evidence retain their existing
+  domains. A canonical maintenance reply ends its summary operation, including
+  a reply that attempted tool use; the owner validates summary output before
+  checkpoint commitment and never dispatches its tool calls.
+  """
+  @spec maintenance_settled_kind() :: binary()
+  def maintenance_settled_kind, do: @maintenance_settled_kind
+
+  @doc """
+  ## Concept
+
   The kind of the record that admits a deadline against an open attempt.
 
   ## Technical depth
@@ -183,6 +203,20 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec termination_kind() :: binary()
   def termination_kind, do: @termination_kind
+
+  @doc """
+  ## Concept
+
+  Identify a deadline admitted against an open summary attempt.
+
+  ## Technical depth
+
+  The distinct ADR 0043 maintenance identity keeps this deadline out of the
+  ordinary attempt vocabulary. The clock and dispatch classification follow
+  ADR 0018; this record alone grants no retry or checkpoint authority.
+  """
+  @spec maintenance_termination_kind() :: binary()
+  def maintenance_termination_kind, do: @maintenance_termination_kind
 
   @doc """
   ## Concept
@@ -361,7 +395,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
-  Whether a replayed settlement row is the exact twelve-key record with a
+  Whether a replayed ordinary or maintenance settlement is a closed record with a
   closed, internally consistent verdict.
 
   ## Technical depth
@@ -373,10 +407,15 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_settled(map()) :: :ok | {:error, term()}
   def validate_settled(record) when is_map(record) do
-    with @settled_v3_kind <- Map.get(record, :kind, Map.get(record, "kind")),
-         :ok <- exact_keys(record, @settled_keys),
-         :ok <- validate_identity(record),
-         :ok <- validate_verdict(record, @settled_v3_kind) do
+    kind = Map.get(record, :kind, Map.get(record, "kind"))
+    maintenance? = kind == @maintenance_settled_kind
+    keys = if maintenance?, do: @maintenance_settled_keys, else: @settled_keys
+
+    with true <- kind in [@settled_v3_kind, @maintenance_settled_kind],
+         :ok <- exact_keys(record, keys),
+         :ok <- validate_binding_identity(record, maintenance?),
+         :ok <- validate_settlement_reply_digest(record),
+         :ok <- validate_verdict(record, kind) do
       :ok
     else
       {:error, reason} -> {:error, reason}
@@ -385,6 +424,17 @@ defmodule Loopex.Runtime.ProviderAttempt do
   end
 
   def validate_settled(_record), do: {:error, :invalid_attempt_settlement}
+
+  defp validate_settlement_reply_digest(
+         %{"result" => %{"kind" => "reply", "reply" => reply}} = record
+       )
+       when is_map(reply) do
+    if reply["staged_request_digest"] == record["staged_request_digest"],
+      do: :ok,
+      else: {:error, :invalid_attempt_settlement}
+  end
+
+  defp validate_settlement_reply_digest(_record), do: :ok
 
   @doc """
   ## Concept
@@ -401,8 +451,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @spec validate_settled(term(), map(), boolean()) :: :ok | {:error, term()}
   def validate_settled(record, request, required)
       when is_map(record) and is_boolean(required) do
-    with @settled_v3_kind <- Map.get(record, :kind, Map.get(record, "kind")),
-         :ok <- validate_settled(record),
+    with :ok <- validate_settled(record),
+         true <- ordinary_settlement?(record) or not required,
          true <- record["staged_request_digest"] == request.staged_request_digest do
       case record["result"] do
         %{"kind" => "reply", "reply" => reply} ->
@@ -427,7 +477,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
-  Whether a replayed termination row is the exact nine-key deadline admission.
+  Whether a replayed ordinary or maintenance termination is a closed deadline admission.
 
   ## Technical depth
 
@@ -436,8 +486,13 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_termination(map()) :: :ok | {:error, term()}
   def validate_termination(record) when is_map(record) do
-    with :ok <- exact_keys(record, @termination_keys),
-         :ok <- validate_identity(record),
+    kind = Map.get(record, :kind, Map.get(record, "kind"))
+    maintenance? = kind == @maintenance_termination_kind
+    keys = if maintenance?, do: @maintenance_termination_keys, else: @termination_keys
+
+    with true <- kind in [@termination_kind, @maintenance_termination_kind],
+         :ok <- exact_keys(record, keys),
+         :ok <- validate_binding_identity(record, maintenance?),
          true <- record["cause"] == "deadline",
          true <- uint64?(record["deadline"]),
          true <- uint64?(record["observed"]),
@@ -450,6 +505,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
   end
 
   def validate_termination(_record), do: {:error, :invalid_model_termination}
+
+  defp ordinary_settlement?(record),
+    do: Map.get(record, :kind, Map.get(record, "kind")) == @settled_v3_kind
 
   @doc """
   ## Concept
@@ -653,6 +711,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
          :ok <- validate_accounting(accounting),
          :ok <-
            validate_combination(
+             kind,
              record["attempt"],
              transport,
              termination,
@@ -668,8 +727,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
-  defp validate_result(%{"kind" => "reply", "reply" => reply} = result, @settled_v3_kind)
-       when map_size(result) == 2 and is_map(reply) and map_size(reply) == 10 do
+  defp validate_result(%{"kind" => "reply", "reply" => reply} = result, kind)
+       when kind in [@settled_v3_kind, @maintenance_settled_kind] and
+              map_size(result) == 2 and is_map(reply) and map_size(reply) == 10 do
     with :ok <- exact_keys(reply, @reply_keys ++ ~w(completion continuation)),
          {:ok, _identity} <- reply_identity(Map.get(reply, "identity")),
          {:ok, _calls} <- reply_tool_calls(Map.get(reply, "tool_calls")),
@@ -707,7 +767,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
          } = result,
          kind
        )
-       when kind == @settled_v3_kind and map_size(result) == 3,
+       when kind in [@settled_v3_kind, @maintenance_settled_kind] and map_size(result) == 3,
        do: validate_accounting_evidence(evidence)
 
   defp validate_result(_result, _kind), do: {:error, :invalid_attempt_settlement}
@@ -771,6 +831,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   defp validate_accounting(_accounting), do: {:error, :invalid_attempt_settlement}
 
   defp validate_combination(
+         kind,
          attempt,
          transport,
          termination,
@@ -781,6 +842,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
        ) do
     with {:ok, expected_conversation, expected_next, expected_sources} <-
            settlement_cell(attempt, transport, termination, result),
+         expected_next = maintenance_next(kind, expected_next),
          true <- conversation == expected_conversation,
          true <- next == expected_next,
          true <- accounting["source"] in expected_sources,
@@ -791,6 +853,13 @@ defmodule Loopex.Runtime.ProviderAttempt do
       _other -> {:error, :invalid_attempt_settlement}
     end
   end
+
+  # Concept: summary tool attempts are evidence for rejection, never work to run.
+  # Technical depth: maintenance uses the same transport and accounting cell;
+  # only ordinary canonical tool replies continue into executor dispatch. The
+  # maintenance owner checks natural completion, schema and progress separately.
+  defp maintenance_next(@maintenance_settled_kind, "continue"), do: "terminal"
+  defp maintenance_next(_kind, next), do: next
 
   # Concept: one cell of ADR 0018's closed table -- given who was answering,
   # what the transport did, which termination won, and what came back, there is

@@ -10,7 +10,7 @@ defmodule Loopex.Runtime.MaintenanceProviderAttemptTest do
   alias Loopex.ConfiguredGenesisFixture, as: Genesis
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime.{Control, ProviderAttempt}
-  alias Loopex.Store
+  alias Loopex.{Model, Store}
 
   @uint64_max 18_446_744_073_709_551_615
 
@@ -109,6 +109,176 @@ defmodule Loopex.Runtime.MaintenanceProviderAttemptTest do
              {:error, :invalid_attempt_identity}
   end
 
+  test "maintenance settlements retain v3 evidence and the closed accounting verdict" do
+    {:ok, request} =
+      Model.request("summary:v1", [%{"role" => "user", "content" => "source"}],
+        sampling: %{"max_tokens" => 1_024},
+        deadline: 100_000
+      )
+
+    row = settlement(request.staged_request_digest)
+    assert ProviderAttempt.maintenance_settled_kind() == row.kind
+    assert ProviderAttempt.validate_settled(row) == :ok
+    assert ProviderAttempt.validate_settled(row, request, false) == :ok
+
+    ordinary =
+      row
+      |> Map.drop(~w(episode_id summary_ordinal purpose))
+      |> Map.merge(%{:kind => "model_attempt_settled_v3", "run_id" => "run", "turn_id" => "turn"})
+
+    assert :ok = ProviderAttempt.validate_settled(ordinary)
+
+    assert {:error, _} =
+             ProviderAttempt.validate_settled(
+               put_in(
+                 ordinary,
+                 ["result", "reply", "staged_request_digest"],
+                 String.duplicate("b", 64)
+               )
+             )
+
+    assert {:error, _} = ProviderAttempt.validate_settled(row, request, true)
+
+    assert {:error, _} =
+             ProviderAttempt.validate_settled(
+               row,
+               %{request | staged_request_digest: String.duplicate("a", 64)},
+               false
+             )
+
+    for key <- Map.keys(row) do
+      assert {:error, _} = ProviderAttempt.validate_settled(Map.delete(row, key))
+    end
+
+    for changed <- [
+          Map.put(row, "run_id", "invented"),
+          Map.put(row, "turn_id", "invented"),
+          Map.put(row, "purpose", "ordinary"),
+          Map.put(row, "summary_ordinal", 0),
+          Map.put(row, "attempt", 3),
+          Map.put(row, :kind, "model_attempt_settled_v3"),
+          Map.put(row, "kind", row.kind),
+          put_in(row, ["result", "reply", "staged_request_digest"], String.duplicate("b", 64)),
+          put_in(row, ["result", "reply", "extra"], true),
+          put_in(row, ["accounting", "input_tokens"], 4),
+          Map.put(row, "transport", "not_dispatched"),
+          Map.put(row, "conversation", "evidence_only"),
+          Map.put(row, "next", "retry")
+        ] do
+      assert {:error, _} = ProviderAttempt.validate_settled(changed)
+    end
+
+    # A bounded valid reply can still be invalid summary output. Retain and
+    # charge it here; the owner must refuse checkpoint publication separately.
+    calls = [%{"id" => "tool", "name" => "write", "arguments" => %{}}]
+    tools = put_in(row, ["result", "reply", "tool_calls"], calls)
+    assert :ok = ProviderAttempt.validate_settled(tools)
+    assert tools["next"] == "terminal"
+    assert {:error, _} = ProviderAttempt.validate_settled(%{tools | "next" => "continue"})
+
+    assert :ok =
+             ProviderAttempt.validate_settled(
+               put_in(row, ["result", "reply", "completion"], "limit")
+             )
+
+    for termination <- ["abort", "deadline"] do
+      late = %{row | "termination" => termination, "conversation" => "evidence_only"}
+      assert :ok = ProviderAttempt.validate_settled(late)
+
+      assert {:error, _} =
+               ProviderAttempt.validate_settled(%{late | "conversation" => "canonical"})
+    end
+
+    for attempt <- [1, 2] do
+      not_sent = %{
+        row
+        | "attempt" => attempt,
+          "transport" => "not_dispatched",
+          "conversation" => "none",
+          "next" => if(attempt == 1, do: "retry", else: "terminal"),
+          "result" => %{"kind" => "error", "category" => "model_call_failed"},
+          "accounting" => %{"source" => "none", "basis" => "not_dispatched"}
+      }
+
+      assert :ok = ProviderAttempt.validate_settled(not_sent)
+      wrong = if attempt == 1, do: "terminal", else: "retry"
+      assert {:error, _} = ProviderAttempt.validate_settled(%{not_sent | "next" => wrong})
+
+      unknown = %{
+        not_sent
+        | "transport" => "dispatched_or_unknown",
+          "termination" => "owner_loss",
+          "next" => "terminal",
+          "accounting" => %{"source" => "estimated", "basis" => "remaining_allowance"}
+      }
+
+      assert :ok = ProviderAttempt.validate_settled(unknown)
+      assert {:error, _} = ProviderAttempt.validate_settled(%{unknown | "next" => "retry"})
+    end
+
+    oversized = %{
+      row
+      | "conversation" => "none",
+        "result" => %{
+          "kind" => "error",
+          "category" => "unreadable_model_answer",
+          "accounting_evidence" => %{
+            "kind" => "validated_reply_compaction_v1",
+            "usage" => row["result"]["reply"]["usage"],
+            "dimension" => "record_bytes",
+            "observed" => 65_537,
+            "limit" => 65_536
+          }
+        }
+    }
+
+    assert :ok = ProviderAttempt.validate_settled(oversized)
+
+    assert {:error, _} =
+             ProviderAttempt.validate_settled(
+               put_in(oversized, ["accounting", "output_tokens"], 3)
+             )
+
+    assert {:error, _} =
+             ProviderAttempt.validate_settled(
+               put_in(oversized, ["result", "accounting_evidence", "observed"], 65_536)
+             )
+  end
+
+  test "maintenance deadlines require their exact kind, scope and reached clock" do
+    {:ok, opened} = ProviderAttempt.opened_record(identity())
+
+    row =
+      Map.merge(opened, %{
+        :kind => "maintenance_termination_admitted_v1",
+        "cause" => "deadline",
+        "deadline" => 1_000,
+        "observed" => 1_000
+      })
+
+    assert ProviderAttempt.maintenance_termination_kind() == row.kind
+    assert ProviderAttempt.validate_termination(row) == :ok
+    assert :ok = ProviderAttempt.validate_termination(%{row | "observed" => @uint64_max})
+
+    for key <- Map.keys(row) do
+      assert {:error, _} = ProviderAttempt.validate_termination(Map.delete(row, key))
+    end
+
+    for changed <- [
+          Map.put(row, "run_id", "invented"),
+          Map.put(row, "turn_id", "invented"),
+          Map.put(row, "purpose", "ordinary"),
+          Map.put(row, "summary_ordinal", 0),
+          Map.put(row, :kind, "model_termination_admitted_v1"),
+          Map.put(row, "cause", "abort"),
+          Map.put(row, "observed", 999),
+          Map.put(row, "observed", @uint64_max + 1),
+          Map.put(row, "deadline", -1)
+        ] do
+      assert {:error, _} = ProviderAttempt.validate_termination(changed)
+    end
+  end
+
   # Concept: the existing Control handler authorizes only the retained summary
   # attempt at the current position, once, under the current owner and deadline.
   # Technical depth: this boundary fixture writes the accepted open row through
@@ -180,7 +350,71 @@ defmodule Loopex.Runtime.MaintenanceProviderAttemptTest do
     assert Map.keys(:sys.get_state(control).spent_attempts) == [binding]
     assert AgentLoopTestModel.dispatched(fixture.model) == []
     stop_worker(worker, monitor)
+
+    # This is an exact-row permit retirement witness, not summary/checkpoint
+    # integration. The worker is joined before its settlement is acknowledged.
+    {:ok, transaction} =
+      Store.session_commit(
+        session,
+        "session",
+        "maintenance-settled-boundary",
+        entry.owner.owner_epoch,
+        entry.owner.owner_incarnation_id,
+        position,
+        [settlement(binding["staged_request_digest"])],
+        []
+      )
+
+    assert {:committed, _tx, settled_receipt} = Store.transact(store, transaction)
+    settled_position = settled_receipt.journal_versions.last
+
+    assert :ok =
+             Control.post_commit(
+               control,
+               session,
+               entry.owner,
+               %{journal_version: settled_position, event_sequence: entry.event_sequence},
+               settled_receipt
+             )
+
+    assert :sys.get_state(control).spent_attempts == %{}
+
+    assert dispatch(control, entry, binding, worker, position) ==
+             {:error, :stale_attempt_open_position}
+
+    refute_received {:permit_received, ^worker, _}
     stop_fixture(fixture, entry.coordinator, control)
+  end
+
+  defp settlement(digest) do
+    {:ok, opened} = ProviderAttempt.opened_record(%{identity() | staged_request_digest: digest})
+
+    reply = %{
+      "text" => "{\"summary\":\"done\",\"carry_forward\":\"\"}",
+      "identity" => %{
+        "provider" => "scripted",
+        "model" => "summary:v1",
+        "endpoint" => "in-process"
+      },
+      "usage" => %{"status" => "reported", "input_tokens" => 3, "output_tokens" => 2},
+      "tool_calls" => [],
+      "delta_count" => 0,
+      "streamed" => false,
+      "provider_response_id" => nil,
+      "staged_request_digest" => digest,
+      "completion" => "natural",
+      "continuation" => nil
+    }
+
+    Map.merge(opened, %{
+      :kind => "maintenance_attempt_settled_v3",
+      "transport" => "dispatched_or_unknown",
+      "termination" => nil,
+      "conversation" => "canonical",
+      "next" => "terminal",
+      "result" => %{"kind" => "reply", "reply" => reply},
+      "accounting" => %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}
+    })
   end
 
   defp identity do
