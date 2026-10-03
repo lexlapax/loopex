@@ -1393,6 +1393,39 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     assert {:error, :context_projection_invalid} == preflight(state, 0)
   end
 
+  test "irreducible excerpt commits one replay-checked episode and parent refusal" do
+    {state, history, events} =
+      admitted([String.duplicate("o", 30_000)],
+        context_token_budget: 800,
+        system_class_tokens: 800,
+        maintenance_body: String.duplicate("i", 2_048)
+      )
+
+    assert {:ok, proposal} =
+             SessionState.propose_selected_maintenance_request(state, 1_001, fn -> :ok end)
+
+    assert [episode_terminal, refusal, terminal] = proposal.records
+    assert episode_terminal.kind == "maintenance_episode_terminal_v1"
+    assert episode_terminal["observed_at"] == 1_001
+    assert refusal.kind == "context_admission_refused_v2"
+    assert refusal["failure"]["cause"] == "compaction_excerpt_budget_too_small"
+    assert refusal["measurement_scope"] == nil
+    assert refusal["episode_id"] == state.active_maintenance
+    assert terminal.kind == "run_terminal_committed"
+    assert terminal["failure"] == refusal["failure"]
+
+    {next, rows, events} = commit(state, proposal, events)
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, events)
+
+    for changed <- [
+          put_in(rows, [Access.at(0), :payload, "observed_at"], 61_000),
+          put_in(rows, [Access.at(1), :payload, "failure", "cause"], "compaction_no_progress"),
+          put_in(rows, [Access.at(1), :payload, "episode_id"], nil)
+        ] do
+      assert {:error, _} = SessionState.recover(state.session_id, history ++ changed, events)
+    end
+  end
+
   test "captured clocks and spending prevent source intent while traversal errors survive" do
     {state, _, _} = admitted([String.duplicate("x", 30_000)])
     run = state.active_run_id

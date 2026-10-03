@@ -1685,8 +1685,14 @@ settings commit the accepted named pre-intent v2 failure, and irreducible
 current input keeps its numeric refusal without a model call. Both supported
 pairs pass focused recovery and surrounding source/protocol tests; the preceding
 911f26c7 candidate passed its exact full current-pair fast check. Thinking and
-rendering triggers, post-admission irreducible preparation/refusal endings,
+rendering triggers, numeric post-admission preparation/refusal endings,
 source-worker fault joins and standalone compact remain open.
+The source worker now proposes the accepted named excerpt-budget refusal when
+no complete or fixed-quota excerpt fits. Its episode terminal, v2 refusal and
+parent terminal commit together before provider intent. Replay reselects the
+frozen source at the retained clock. A live automatic case and pure replay
+mutation checks pass all 87 maintenance staging/recovery tests on both pairs;
+the current/floor complete outputs and digests are indexed in the task checklist.
 This is not a complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt

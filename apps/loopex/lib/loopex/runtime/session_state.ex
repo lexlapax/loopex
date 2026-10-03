@@ -1171,6 +1171,16 @@ defmodule Loopex.Runtime.SessionState do
   # grants no dispatch authority until the owner commits its request/open pair.
   @doc false
   def propose_selected_maintenance_request(state, now, check) do
+    case selected_maintenance_source_result(state, now, check) do
+      {:error, :compaction_excerpt_budget_too_small} ->
+        propose_maintenance_source_refusal(state, now, check)
+
+      result ->
+        result
+    end
+  end
+
+  defp selected_maintenance_source_result(state, now, check) do
     with {:ok, episode} <- maintenance_source_episode(state, now, check),
          {:ok, deadline} <- maintenance_request_deadline(state, episode, now),
          staging = %{
@@ -1193,6 +1203,43 @@ defmodule Loopex.Runtime.SessionState do
     else
       false -> {:error, :compaction_no_progress}
       result -> result
+    end
+  end
+
+  # Concept: an irreducible excerpt ends the episode and its parent before a
+  # provider attempt exists.
+  # Technical depth: no complete maintenance request was measured, so this
+  # accepted named failure has no numeric observation. Replay reselects the
+  # exact frozen source at the retained clock before accepting the refusal.
+  defp propose_maintenance_source_refusal(state, now, check) do
+    episode = state.maintenance_episodes[state.active_maintenance]
+    run_id = episode["run_id"]
+    work = state.pending_work[run_id]
+    configuration = run_configuration(state, run_id)
+
+    refusal =
+      unavailable_context_refusal(
+        state,
+        run_id,
+        configuration,
+        next_turn_number(work),
+        "compaction_excerpt_budget_too_small"
+      )
+
+    terminal =
+      state
+      |> run_terminal_record(run_id, "failed", %{})
+      |> Map.put("failure", context_failure(refusal))
+
+    with {:ok, proposal} <-
+           build_internal_proposal(
+             state,
+             episode["episode_id"] <> ":source-refusal",
+             [refusal, terminal],
+             now
+           ),
+         :ok <- check.() do
+      {:ok, proposal}
     end
   end
 
@@ -5579,6 +5626,13 @@ defmodule Loopex.Runtime.SessionState do
         episode["stage"] == "checkpoint_pending" and
           observed >= episode["request_staged_at"] and is_integer(deadline) and
           observed < deadline
+
+      %{
+        "outcome" => "failed",
+        "failure" => %{"cause" => "compaction_excerpt_budget_too_small"}
+      } ->
+        episode["stage"] in ["source_preparation", "checkpoint_committed"] and
+          maintenance_source_clock(state, episode, observed) == :ok
 
       %{"outcome" => "failed", "failure" => %{"category" => "context_budget_exceeded"}} ->
         episode["stage"] == "checkpoint_committed" and
@@ -10367,6 +10421,17 @@ defmodule Loopex.Runtime.SessionState do
              },
              now
            ) do
+      :ok
+    else
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp validate_preparation_failure_cause(state, run_id, "compaction_excerpt_budget_too_small") do
+    with %{observed_at: now} <- state.maintenance_terminal,
+         true <- run_id == state.active_run_id,
+         {:error, :compaction_excerpt_budget_too_small} <-
+           selected_maintenance_source_result(state, now, fn -> :ok end) do
       :ok
     else
       _ -> {:error, :invalid_context_refusal}

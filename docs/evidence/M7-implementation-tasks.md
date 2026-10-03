@@ -325,6 +325,24 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: make a source selector's irreducible excerpt failure a durable
+  `compaction_excerpt_budget_too_small` ending. The pure worker proposes the
+  episode terminal, unavailable v2 refusal and failed parent terminal together;
+  replay reselects the frozen source at the retained clock and rejects a
+  different cause, episode identity or expired observation. A live automatic
+  overflow proves no request, provider call or executor job was opened. Both
+  supported pairs pass all 87 tests in the maintenance staging and recovery
+  files. Complete outputs: `/private/tmp/loopex-m7-source-refusal-current.log`,
+  SHA-256 `6beabc47c3735fdee6d0c4c7fef48b1e62ab1f94998a2426e568b2305516ff7f`;
+  `/private/tmp/loopex-m7-source-refusal-floor.log`, SHA-256
+  `49c070d7778f1aa9aeecc42e3a925b2fe292e0305e68c8be7998d1073dca06f2`.
+  Initial unprivileged combined runs could not start Mix because its local TCP
+  lock returned `:eperm`; the retained passing runs used the permitted test
+  sandbox. Numeric source-stage refusal, worker-fault joins and the other T07
+  outcomes remain open. This closes one added T07 subtask; T01–T19 originals
+  stay 51 done / 122 todo / 6 retired and added subtasks become 186 done /
+  9 todo. Including T00: originals 51 / 128 / 7 and added 190 / 10.
+
 - Done: join measured ordinary token/record-byte overflow to live automatic
   episode admission. The owner checks whether the captured q=0 ordinary tail
   can release a complete older unit, then commits the frozen summarizer,
@@ -7024,6 +7042,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Commit an irreducible bounded-source excerpt as the accepted named episode/refusal/parent ending before provider intent; rederive the frozen source and retained clock on replay, and prove a live automatic no-dispatch ending on both supported toolchains. Numeric source-stage refusals and worker-fault joins remain open.
 
 - [x] Admit a live automatic ordinary-limit episode from the measured v2 token/record-byte refusal only when a complete older unit can be released; capture the host summarizer and cutoff before source work, finish a real summary/checkpoint/ordinary continuation, and prove missing-summarizer and irreducible-current-prompt endings without provider or executor work on both supported pairs. Thinking/headroom, post-admission refusal faults and standalone compact remain open.
 
