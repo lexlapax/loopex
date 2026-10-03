@@ -105,6 +105,19 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running: full current-pair integration check on exact clean public-chat
+  implementation `9e9768396d4d2a782e6ce87a56273f290bf289f8`. Dedicated detached
+  worktree `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`; complete output
+  `/private/tmp/loopex-m7-9e976839-fast-check.log`; live wrapper handle `53188`.
+  Header binds the exact SHA and `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`.
+  Collect that handle before hashing; retain any failure and never rerun the
+  same bytes as a pass. No result is claimed while running. The preceding
+  `5036d2d9` run is terminal and passed, as recorded below. All focused chat
+  and gate handles are terminal and collected. No agents or maintainer questions
+  are pending. Continue remaining chat joins, compaction, helpers, current-only
+  contract cleanup and protocol/evidence work after collecting this run.
+
+
 
 
 - Done: the full current-pair integration check on exact clean implementation
@@ -152,6 +165,20 @@ did not resolve them. No paid provider calls were made during this check.
   cwd and did not create the file; its 44-case run covered only existing tests,
   and is not host-workflow proof. No product bound, cleanup assertion or check
   was weakened. This closes one original T06 item and one added host subtask.
+  Original tally is 51 done / 128 todo / 7 retired. Added tally is 173 done /
+  10 todo, including the new public-host integration check under T16.
+
+  Formatting, warning-free compilation, documentation ordering, dependency
+  direction, repository structure/status and staged diff checks passed in 21.4
+  measured seconds. Complete output
+  `/private/tmp/loopex-m7-chat-workflow-gates-v2.log`, SHA-256
+  `3e9e668aae72b5875898ca45087cfc426f67c3c930b3c3b7efdede65bc404e3b`.
+  The first gate selection refused the newly created source files because they
+  were not yet in Git's ordinary tracked inventory. Staging those files changed
+  that inventory; no rule was bypassed. Failed output
+  `/private/tmp/loopex-m7-chat-workflow-gates-v1.log`, SHA-256
+  `4ce81918fc4404e4fb57e9f7b781ac5f56595488450dd2c326c29aa8c06b33ce`.
+
 
 - Done: join prepared chat resume to the exact retained policy-question
   identity/revision and every already-admitted model's provider route. The
@@ -5937,6 +5964,9 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Run the public-chat host and shared diagnostic-lifetime integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
+
 
 - [x] Run the prepared-policy scheduling and current-only request/receipt integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 
