@@ -1685,8 +1685,8 @@ settings commit the accepted named pre-intent v2 failure, and irreducible
 current input keeps its numeric refusal without a model call. Both supported
 pairs pass focused recovery and surrounding source/protocol tests; the preceding
 911f26c7 candidate passed its exact full current-pair fast check. Thinking and
-rendering triggers, numeric post-admission preparation/refusal endings,
-source-worker fault joins and standalone compact remain open.
+rendering triggers, remaining preparation errors and standalone compact
+remain open.
 The source worker now proposes the accepted named excerpt-budget refusal when
 no complete or fixed-quota excerpt fits. Its episode terminal, v2 refusal and
 parent terminal commit together before provider intent. Replay reselects the
@@ -1704,6 +1704,21 @@ produce a measured maintenance-scope v2 refusal before source traversal. The
 single frozen system descriptor fixes its count, estimate and digest; replay
 rederives them without provider work. A live automatic ending and both-pair
 92-test maintenance selection pass are indexed in the checklist.
+Lost source workers now join before the existing unavailable refusal and
+adjacent episode/parent ending. Replay proves the eligible source phase and
+retained observation clock. Both initial and later source phases pass all three
+Store uncertainty cases and cancellation, preserving checkpoints and usage
+without redispatch. Durable succession joins the held worker and predecessor,
+leaves only the new owner claim while paused, then completes one summary and
+ordinary continuation using the frozen capture. The three focused maintenance
+files pass 119 tests on both pairs. Two long-bound cases wait the original live
+60,000-ms preparation or committed run cutoff without clock/timer replacement,
+join the worker and preserve the distinct preparation-failure and deadline-bound
+endings; both pairs pass. Existing grouping, source and original-record tests
+also pass 97 cases on both pairs, closing original T07's complete eligible-group
+selection item. Complete outputs and digests are indexed in the implementation
+checklist. Thinking/rendering triggers, remaining preparation errors, standalone
+compact and the real long-conversation proof remain open.
 This is not a complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt

@@ -325,6 +325,39 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: prove the captured live source cutoffs with held workers, without clock
+  replacement or a shorter production deadline. Initial preparation waits its
+  original 60,000-ms cutoff, joins the worker and commits the named preparation
+  failure without inventing a run bound. Later preparation waits the committed
+  run deadline and keeps its existing `deadline` bound outcome. Each preserves
+  the exact checkpoint, raw facts and usage, commits one episode ending and
+  performs no new provider or executor work. The two cases are tagged
+  `long_bound` and selected by the existing release runner. Complete passing
+  outputs: `/private/tmp/loopex-m7-source-worker-live-cutoff-current-v2.log`,
+  SHA-256 `3c9944396526bbfff4b39628823af9915a0cc24938e97ddf864c3692e9399267`,
+  125.8 seconds; `/private/tmp/loopex-m7-source-worker-live-cutoff-floor-v2.log`,
+  SHA-256 `9d12d4de438e3ee028bb69ed11b012452dded4e9d8b8631ff823a12376e993a9`,
+  125.3 seconds. The initial current/floor outputs without `-v2` remain failed
+  records: the new assertion incorrectly used `deadline_ms` for the existing
+  run terminal's `deadline` value. No production bound or check was weakened.
+
+- Done: audit original T07's complete eligible-group selection item. Existing
+  grouping, tail release, bounded source and original-record tests cover
+  preceding same-run inputs, complete assistant/result groups in call order,
+  terminal input-only runs, protected current/unfinished/frozen units,
+  contiguous prefix selection, whole-unit excerpts and retained source binding.
+  The owner derives eligibility from durable session state; malformed lineage
+  refuses before source intent. Four focused files pass 97 tests on each pair.
+  Complete outputs: `/private/tmp/loopex-m7-eligible-units-current.log`, SHA-256
+  `6668670864d49bf75a72c86bb2861aada35a73449d125bbc203550891ad7a5ce`;
+  `/private/tmp/loopex-m7-eligible-units-floor.log`, SHA-256
+  `e488918d4cb58e7813381f3e06eae664cf65e07e03a5d38cb336b3e84dffdafd`.
+  This closes one original T07 item and the live-cutoff work closes one added
+  subtask. Original T01–T19 counts become 53 done / 120 todo / 6 retired;
+  added counts become 195 done / 8 todo. The separate native-prefix protection
+  obligation, thinking/rendering triggers, remaining preparation errors,
+  standalone compact and real long-conversation proof remain open.
+
 - Done: prove durable owner succession while an exact maintenance source worker
   is held before preparation. Both initial and post-checkpoint source phases
   join the worker and predecessor, leave only the new owner claim while paused,
@@ -7191,7 +7224,7 @@ or check was relaxed.
 
 ### Original checklist
 
-- [ ] Select complete eligible conversation groups.
+- [x] Select complete eligible conversation groups.
 - [ ] Protect open exchanges and their complete native prefixes from compaction or re-rendering.
 - [ ] Have the owner select and encode bounded source excerpts; have the model produce the summary.
 - [ ] Capture maintenance model, route, instructions, deadlines, origin and targets before dispatch.
@@ -7204,6 +7237,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Hold initial and later maintenance source workers through their captured live production cutoffs without clock or timer replacement; join the exact worker, retain the preparation-failure versus committed run-deadline distinction, preserve checkpoints/raw facts/usage and prove one ending with no dispatch on both toolchains. Keep these cases in the existing long-bound release lane.
 
 - [x] Hold the exact initial and later maintenance source worker across durable owner succession; join the worker and predecessor, prove the paused successor commits only its claim while preserving the frozen episode, checkpoint and usage, then complete one new summary/checkpoint/ordinary continuation through the public activation path on both toolchains. Live cutoff and standalone compact remain open.
 

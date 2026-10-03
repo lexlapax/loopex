@@ -14,6 +14,101 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
 
   for mode <- [:source_pending, :checkpoint_more] do
     @mode mode
+    @tag :long_bound
+    @tag timeout: 75_000
+    test "the captured live #{@mode} cutoff joins a held source worker before ending" do
+      {fixture, session, episode} = retained_episode(@mode)
+      before = Fixture.records(fixture, session)
+      {:ok, original} = SessionState.recover(session, before, Fixture.events(fixture, session))
+      successor = start(store: fixture.store, tools: [], script: [])
+
+      {:ok, {:prepared, activation}} =
+        Loopex.prepare_resume_session(successor.runtime, session, "resume-live-source-cutoff")
+
+      {:ok, children} = Loopex.Runtime.children(successor.runtime)
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      workers = :sys.get_state(coordinator).owner_workers
+      hold_next_source_worker(workers)
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+      assert_receive {:held_maintenance_source_worker, worker}, 5_000
+
+      assert [{_, {:maintenance_preparation, run_id, ^worker, metadata}}] =
+               coordinator |> :sys.get_state() |> Map.fetch!(:in_flight) |> Map.to_list()
+
+      assert run_id == episode["run_id"]
+      assert episode["preparation_deadline"] == episode["admitted_at"] + 60_000
+      assert System.system_time(:millisecond) < metadata.deadline
+
+      if @mode == :source_pending do
+        assert metadata.origin == :preparation
+        assert metadata.deadline == episode["preparation_deadline"]
+        assert original.deadlines == %{}
+      else
+        assert metadata.origin == :run
+        assert metadata.deadline == original.deadlines[run_id]
+      end
+
+      monitor = Process.monitor(worker)
+      captured_rows = Fixture.records(successor, session)
+      refute Enum.any?(captured_rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+
+      # Concept: this case waits through the retained production cutoff.
+      # Technical depth: no clock, episode or timer is replaced. The existing
+      # 5,000-ms fixture join grace starts at that captured absolute deadline.
+      join_wait = metadata.deadline - System.system_time(:millisecond) + 5_000
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, join_wait
+      assert System.system_time(:millisecond) >= metadata.deadline
+      rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+      ending = Enum.find(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+      assert ending.payload["episode_id"] == episode["episode_id"]
+      assert ending.payload["result"]["checkpoint_id"] == original.active_checkpoint
+
+      assert ending.payload["result"]["usage"] ==
+               original.maintenance_episodes[episode["episode_id"]]["usage"]
+
+      if @mode == :source_pending do
+        assert [^ending, refusal, terminal] = Enum.take(rows, -3)
+        assert refusal.payload.kind == "context_admission_refused_v2"
+        assert terminal.payload["outcome"] == "failed"
+        assert terminal.payload["failure"]["cause"] == "compaction_preparation_deadline"
+        assert ending.payload["observed_at"] >= metadata.deadline
+        assert terminal.payload["bound"] == nil
+        assert terminal.payload["observed"] == nil
+        refute Enum.any?(rows, &(&1.payload.kind == "run_deadline_committed"))
+      else
+        assert [^ending, terminal] = Enum.take(rows, -2)
+        assert terminal.payload["outcome"] == "bound_reached"
+        assert terminal.payload["bound"] == "deadline"
+        refute Enum.any?(rows, &(&1.payload.kind == "context_admission_refused_v2"))
+      end
+
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1")) == 1
+      assert Enum.take(rows, length(captured_rows)) == captured_rows
+
+      assert Enum.filter(rows, &(&1.payload.kind == "maintenance_request_committed_v1")) ==
+               Enum.filter(before, &(&1.payload.kind == "maintenance_request_committed_v1"))
+
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+      assert Agent.get(successor.executor, & &1.jobs) == []
+      assert :sys.get_state(coordinator).in_flight == %{}
+      assert Task.Supervisor.children(workers) == []
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, rows, Fixture.events(successor, session))
+
+      assert recovered.active_run_id == nil
+      assert recovered.active_maintenance == nil
+      assert recovered.active_checkpoint == original.active_checkpoint
+      assert recovered.checkpoints == original.checkpoints
+      assert recovered.charged == original.charged
+      assert recovered.conversation == original.conversation
+      stop_and_join(successor, session)
+    end
+  end
+
+  for mode <- [:source_pending, :checkpoint_more] do
+    @mode mode
     test "succession joins the held #{@mode} source worker before continuing its captured episode" do
       {fixture, session, episode} = retained_episode(@mode)
       before = Fixture.records(fixture, session)
