@@ -325,6 +325,52 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: join measured ordinary token/record-byte overflow to live automatic
+  episode admission. The owner checks whether the captured q=0 ordinary tail
+  can release a complete older unit, then commits the frozen summarizer,
+  instructions, parent spending and fixed preparation cutoff before its source
+  worker. One recovered long-history run now stages a real summary, commits a
+  checkpoint and continues the original prompt once. A missing summarizer
+  commits a named v2 refusal and failed run without an episode or provider call;
+  an irreducible current prompt keeps its measured numeric refusal. Current
+  recovery verifies the three endings and no executor work. Missing host
+  settings and admission-clock causes use the accepted closed v2 refusal union.
+
+  This closes one added T07 automatic-trigger subtask. T01–T19 originals remain
+  51 done / 122 todo / 6 retired; added subtasks become 185 done / 9 todo.
+  Including T00: originals 51 / 128 / 7, added 189 / 10. Original T07 remains
+  0 / 11 / 0. Thinking-headroom/rendering triggers, explicit and standalone
+  compact, source-worker fault joins, all irreducible post-admission endings,
+  public progress and real Store/provider proof remain open. The case where
+  fewer than 1,024 run tokens remain has a concrete maintainer decision packet
+  at `/private/tmp/loopex-m7-maintenance-reserve-decision.md`; the dependent
+  public-contract amendment has not been implemented.
+
+  The preceding `911f26c76216b082b4d0b5bd5d3c7494835b4aa7` candidate
+  passed its exact-source full current-pair fast check in 1,417 reported seconds:
+  complete `/private/tmp/loopex-m7-live-source-fast-check.log`, SHA-256
+  `5257a6bf95cffd2a66b8eb39c2253ee6a2a4517fd6dc503c860ef06cb9392e5e`.
+  The newer automatic-trigger bytes pass the 20-file focused selection on the
+  current pair in 15.8 measured seconds, complete
+  `/private/tmp/loopex-m7-live-source-current-v5.log`, SHA-256
+  `eafc08ba4a32c1b2d0c71ad829f5f2bc4a6f8a803f81709b3bba07dd2dc5dd60`,
+  and the floor pair in 17.7 measured seconds, complete
+  `/private/tmp/loopex-m7-live-source-floor-v5.log`, SHA-256
+  `2a5fd41371fb9bd59c4f9ee7ddb4b5d4ee3f570abbe21ae3dba6f34df44d84dc`.
+  One later irreducible-trigger case brings the focused recovery file to 46
+  passes on each pair; it does not change production bytes. Formatting,
+  warning-free compile, dependency direction, bootstrap, docs and diff gates
+  passed in 23.9 measured seconds before that final test/doc edit, complete
+  `/private/tmp/loopex-m7-automatic-gates-v1.log`, SHA-256
+  `8b158fbb342ae954e37263026fc475613b5cb7576b9b2a64df729fed1f943aac`.
+  The same gates passed after the final test and plan update in 21.2 measured
+  seconds: complete `/private/tmp/loopex-m7-automatic-gates-v2.log`, SHA-256
+  `e77a01df077d3b20d3926e9fde2bccb49ad3aea258e711306595f3460a22fb1f`.
+  The sandbox blocked two attempted 20-file runners before Mix started; their
+  `:eperm` outputs are retained as `current-v4`, `floor-v4`, and `current-dev4`
+  logs, and the successful v5 runs used local Mix TCP permission. No full fast
+  check is claimed on the newer bytes.
+
 - Done: join retained run-owned ordinary-limit source preparation and further
   prefixes to the live serial owner. A supervised worker selects the q=0 tail
   through the captured ordinary request/receipt constructor, streams bounded
@@ -6978,6 +7024,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Admit a live automatic ordinary-limit episode from the measured v2 token/record-byte refusal only when a complete older unit can be released; capture the host summarizer and cutoff before source work, finish a real summary/checkpoint/ordinary continuation, and prove missing-summarizer and irreducible-current-prompt endings without provider or executor work on both supported pairs. Thinking/headroom, post-admission refusal faults and standalone compact remain open.
 
 - [x] Join captured ordinary-tail source selection to a supervised pure-proposal worker and exact request/open commitment after its DOWN; dispatch newly adopted maintenance requests through their retained closed Control binding and existing provider cleanup, keeping raw summary deltas private. Prove first preparation and further-prefix continuation across all three staging uncertainty phases with prepared pause, exact fenced-owner succession, captured configuration/deadline/prior checkpoint, guarded callback replacement, once-only usage and no executor jobs on both toolchains. Automatic triggers, irreducible refusals, source-worker fault joins and real-provider evidence remain open.
 

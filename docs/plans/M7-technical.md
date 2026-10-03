@@ -1677,10 +1677,16 @@ identity through Control and the existing provider cleanup; raw summary deltas
 stay private. First preparation and further-prefix tests cover all three staging
 uncertainty phases before captured ordinary continuation, preserving prior
 checkpoints and settling unresolved inherited attempts without redispatch.
-Automatic triggering, irreducible preparation/refusal endings, source-worker
-fault joins, thinking/rendering triggers and standalone compact remain open. The full fast
-check passes on d0dd8ec6 through shared ordinary staging/tail measurement; both
-supported pairs pass the later focused checkpoint reducer/reader selection.
+The live ordinary-limit trigger now reads the measured v2 numeric failure,
+proves a releasable complete older unit with the same q=0 ordinary request and
+commits the frozen episode before source work. A recovered prompt then completes
+the actual summary, checkpoint and ordinary continuation. Missing summarizer
+settings commit the accepted named pre-intent v2 failure, and irreducible
+current input keeps its numeric refusal without a model call. Both supported
+pairs pass focused recovery and surrounding source/protocol tests; the preceding
+911f26c7 candidate passed its exact full current-pair fast check. Thinking and
+rendering triggers, post-admission irreducible preparation/refusal endings,
+source-worker fault joins and standalone compact remain open.
 This is not a complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt

@@ -751,6 +751,122 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     end
   end
 
+  test "ordinary history overflow admits and completes one live automatic maintenance episode" do
+    {fixture, session, run_id, configuration} = retained_automatic_prompt()
+
+    selection = %{
+      "model" => configuration["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{
+        configuration["model_capabilities"]
+        | "reasoning_levels" => ["none"]
+      },
+      "provider_mapping" => %{configuration["provider_mapping"] | "thinking_disabled" => true}
+    }
+
+    successor =
+      start(
+        store: fixture.store,
+        tools: [],
+        maintenance_model: selection,
+        maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep the facts"},
+        script: [
+          %{
+            text:
+              ~s({"summary":"old facts retained","carry_forward":{"files_read":[],"files_changed":[]}}),
+            usage: %{input_tokens: 37, output_tokens: 19},
+            reply_overrides: %{completion: "natural", continuation: nil}
+          },
+          %{text: "continued", reply_overrides: %{completion: "natural", continuation: nil}}
+        ]
+      )
+
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_session(successor.runtime, session, "resume-automatic")
+
+    assert AgentLoopTestModel.dispatched(successor.model) == []
+    assert {:ok, ^session} = Loopex.activate_resume(activation)
+
+    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+
+    assert Enum.count(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1")) == 1,
+           inspect(Enum.map(rows, & &1.payload.kind))
+
+    assert Enum.count(rows, &(&1.payload.kind == "maintenance_request_committed_v1")) == 1
+    assert Enum.count(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1")) == 1
+    assert [ending] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+    assert ending.payload["result"]["disposition"] == "checkpointed"
+
+    assert [summary, ordinary] = AgentLoopTestModel.dispatched(successor.model)
+    assert summary.sampling["max_tokens"] == 1_024
+    assert summary.tools == []
+    assert ordinary.tools == []
+    assert List.last(ordinary.messages) == %{"role" => "user", "content" => "retained"}
+    assert Agent.get(successor.executor, & &1.jobs) == []
+
+    assert {:ok, recovered} =
+             SessionState.recover(session, rows, Fixture.events(successor, session))
+
+    assert recovered.active_maintenance == nil
+    assert recovered.active_run_id == nil
+    stop_and_join(successor, session)
+  end
+
+  test "automatic maintenance without a selected summarizer ends in one durable refusal" do
+    {fixture, session, run_id, _configuration} = retained_automatic_prompt()
+    successor = start(store: fixture.store, tools: [], script: [])
+
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_session(successor.runtime, session, "resume-unconfigured")
+
+    assert {:ok, ^session} = Loopex.activate_resume(activation)
+    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+
+    refute Enum.any?(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
+    assert [refusal] = Enum.filter(rows, &(&1.payload.kind == "context_admission_refused_v2"))
+    assert refusal.payload["episode_id"] == nil
+    assert refusal.payload["failure"]["cause"] == "maintenance_model_unconfigured"
+
+    assert [terminal] =
+             Enum.filter(
+               rows,
+               &(&1.payload.kind == "run_terminal_committed" and &1.payload["run_id"] == run_id)
+             )
+
+    assert terminal.payload["outcome"] == "failed"
+    assert terminal.payload["failure"] == refusal.payload["failure"]
+    assert AgentLoopTestModel.dispatched(successor.model) == []
+    assert Agent.get(successor.executor, & &1.jobs) == []
+
+    assert {:ok, recovered} =
+             SessionState.recover(session, rows, Fixture.events(successor, session))
+
+    assert recovered.active_run_id == nil
+    stop_and_join(successor, session)
+  end
+
+  test "an irreducible current prompt keeps its measured ordinary refusal" do
+    {fixture, session, run_id, _configuration} =
+      retained_automatic_prompt(String.duplicate("p", 20_000))
+
+    successor = start(store: fixture.store, tools: [], script: [])
+
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_session(successor.runtime, session, "resume-irreducible")
+
+    assert {:ok, ^session} = Loopex.activate_resume(activation)
+    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+
+    refute Enum.any?(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
+    assert [refusal] = Enum.filter(rows, &(&1.payload.kind == "context_admission_refused_v2"))
+    assert refusal.payload["failure"]["category"] == "context_budget_exceeded"
+    assert refusal.payload["failure"]["dimension"] == "context_tokens"
+    assert refusal.payload["failure"]["observed"] > 4_000
+    assert AgentLoopTestModel.dispatched(successor.model) == []
+    assert Agent.get(successor.executor, & &1.jobs) == []
+    stop_and_join(successor, session)
+  end
+
   defp await_parent_terminal(fixture, session, run, cutoff) do
     rows = Fixture.records(fixture, session)
 
@@ -764,6 +880,67 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       Process.sleep(1)
       await_parent_terminal(fixture, session, run, cutoff)
     end
+  end
+
+  defp retained_automatic_prompt(content \\ "retained") do
+    fixture = start(script: [], tools: [])
+
+    configuration =
+      Genesis.configuration()
+      |> Map.put("context_token_budget", 4_000)
+      |> Map.put("system_class_tokens", 2_048)
+      |> Map.update!("budget_origins", &Map.put(&1, "context_token_budget", "explicit"))
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, %{},
+        command_id: "create",
+        genesis: Genesis.genesis([], configuration)
+      )
+
+    assert :ok = Loopex.stop(fixture.runtime)
+
+    {:ok, state} =
+      SessionState.recover(
+        session,
+        Fixture.records(fixture, session),
+        Fixture.events(fixture, session)
+      )
+
+    {:ok, old} =
+      SessionState.propose(
+        state,
+        %{type: :prompt, command_id: "old", content: String.duplicate("o", 30_000)},
+        %{
+          max_turns: 8,
+          token_budget: 10_000,
+          deadline_ms: 60_000,
+          context_token_budget: configuration["context_token_budget"]
+        }
+      )
+
+    state = retain(fixture, state, old)
+
+    {:ok, finished} =
+      SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
+        reason: "model_call_failed"
+      })
+
+    state = retain(fixture, state, finished)
+
+    {:ok, prompt} =
+      SessionState.propose(
+        state,
+        %{type: :prompt, command_id: "automatic", content: content},
+        %{
+          max_turns: 8,
+          token_budget: 10_000,
+          deadline_ms: 60_000,
+          context_token_budget: configuration["context_token_budget"]
+        }
+      )
+
+    state = retain(fixture, state, prompt)
+    {fixture, session, state.active_run_id, configuration}
   end
 
   # Concept: recovery starts from a committed episode with no summary dispatch.

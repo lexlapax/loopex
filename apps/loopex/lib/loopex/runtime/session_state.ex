@@ -10196,7 +10196,11 @@ defmodule Loopex.Runtime.SessionState do
              :artifact_preparation_deadline,
              :artifact_preparation_failed,
              :maintenance_summary_invalid,
-             :maintenance_summary_incomplete
+             :maintenance_summary_incomplete,
+             :maintenance_model_unconfigured,
+             :maintenance_instructions_unconfigured,
+             :maintenance_reasoning_unsupported,
+             :maintenance_deadline_unrepresentable
            ] do
     case {run_configuration(state, run_id), Map.get(state.pending_work, run_id)} do
       {%{} = configuration, %{stage: stage, turn_number: _} = work}
@@ -10365,6 +10369,24 @@ defmodule Loopex.Runtime.SessionState do
            ) do
       :ok
     else
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  # Concept: host startup settings and the admission clock are observed before
+  # an episode exists; the retained closed cause is the durable refusal fact.
+  # Technical depth: replay can prove the run was still eligible for admission,
+  # but cannot reread the predecessor host's settings or clock. The owner is the
+  # only writer of this pre-intent record, and no provider dispatch can precede it.
+  defp validate_preparation_failure_cause(state, run_id, expected)
+       when expected in [
+              "maintenance_model_unconfigured",
+              "maintenance_instructions_unconfigured",
+              "maintenance_reasoning_unsupported",
+              "maintenance_deadline_unrepresentable"
+            ] do
+    case maintenance_admission_context(state, run_id) do
+      {:ok, _, _} when is_nil(state.active_maintenance) -> :ok
       _ -> {:error, :invalid_context_refusal}
     end
   end

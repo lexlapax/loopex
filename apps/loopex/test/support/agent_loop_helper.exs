@@ -89,6 +89,8 @@ defmodule Loopex.AgentLoopFixture do
           model: Keyword.get(options, :model, "scripted:v1"),
           options: [script: model_pid, max_tokens: Keyword.get(options, :max_tokens, 256)]
         },
+        maintenance_model: Keyword.get(options, :maintenance_model),
+        maintenance_instructions: Keyword.get(options, :maintenance_instructions),
         executor: %{
           module: Loopex.AgentLoopTestExecutor,
           reference: executor_pid,

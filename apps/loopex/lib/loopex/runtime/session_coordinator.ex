@@ -3925,16 +3925,24 @@ defmodule Loopex.Runtime.SessionCoordinator do
       resources: Map.get(state.durable.run_resources, run_id)
     }
 
-    with {:ok, deadline} <- run_deadline(declared),
-         staging = Map.put(staging, :deadline, deadline),
-         {:ok, max_tokens} <- declared_max_tokens(state, run_id),
-         staging = Map.put(staging, :max_tokens, max_tokens),
-         :ok <- SessionState.preflight_run_history(state.durable, run_id),
-         {:ok, proposal} <- stage_candidate(state, staging),
-         {:ok, next} <- commit_internal(state, proposal) do
-      send(self(), :advance_work)
-      {:noreply, adopt_run(next, run_id)}
-    else
+    result =
+      with {:ok, deadline} <- run_deadline(declared),
+           staging = Map.put(staging, :deadline, deadline),
+           {:ok, max_tokens} <- declared_max_tokens(state, run_id),
+           staging = Map.put(staging, :max_tokens, max_tokens),
+           :ok <- SessionState.preflight_run_history(state.durable, run_id) do
+        {:candidate, staging, stage_candidate(state, staging)}
+      end
+
+    case result do
+      {:candidate, _staging, {:ok, proposal}} ->
+        with {:ok, next} <- commit_internal(state, proposal) do
+          send(self(), :advance_work)
+          {:noreply, adopt_run(next, run_id)}
+        else
+          {:error, reason} -> {:stop, {:model_request_failed, reason}, state}
+        end
+
       # Concept: a request that cannot be admitted ends its run, and calls
       # nobody.
       #
@@ -3943,8 +3951,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # nothing. The run is over: a retained terminal is final and the same run
       # never re-enters staging, so changing context, configuration, or policy
       # requires a newly admitted run.
-      {:refused, refusal} ->
-        commit_context_refusal(state, run_id, refusal)
+      {:candidate, staging, {:refused, refusal}} ->
+        maybe_admit_automatic_maintenance(state, work, staging, refusal)
 
       {:deadline_unrepresentable, category} ->
         commit_deadline_failure(state, run_id, category)
@@ -3957,8 +3965,84 @@ defmodule Loopex.Runtime.SessionCoordinator do
            ] ->
         commit_context_preparation_failure(state, run_id, cause)
 
+      {:candidate, _staging, {:error, cause}}
+      when cause in [
+             :canonical_history_rendering_unsupported,
+             :context_projection_invalid,
+             :artifact_metadata_unrepresentable
+           ] ->
+        commit_context_preparation_failure(state, run_id, cause)
+
       {:error, reason} ->
         {:stop, {:model_request_failed, reason}, state}
+
+      {:candidate, _staging, {:error, reason}} ->
+        {:stop, {:model_request_failed, reason}, state}
+    end
+  end
+
+  # Concept: a measured history overflow starts maintenance only when a whole
+  # older unit can be released while the protected input still fits.
+  # Technical depth: the q=0 probe uses the same captured ordinary request and
+  # receipt cost as source selection. A successful episode admission commits its
+  # frozen host settings before any source worker or provider attempt is opened.
+  defp maybe_admit_automatic_maintenance(state, work, staging, refusal) do
+    if get_in(refusal, ["failure", "dimension"]) in [
+         "context_tokens",
+         "context_record_bytes"
+       ] do
+      project = ProjectResource.receipt(:not_evaluated_required_failure, %{})
+
+      case SessionState.ordinary_compaction_tail(
+             state.durable,
+             staging,
+             :automatic,
+             project,
+             fn -> :ok end
+           ) do
+        {:ok, %{eligible_unit_count: count}} when count > 0 ->
+          case SessionState.propose_maintenance_episode(
+                 state.durable,
+                 work.run_id,
+                 state.maintenance_model,
+                 state.maintenance_instructions,
+                 System.system_time(:millisecond)
+               ) do
+            {:ok, proposal} ->
+              with {:ok, next} <- commit_internal(state, proposal) do
+                send(self(), :advance_work)
+                {:noreply, adopt_run(next, work.run_id)}
+              else
+                {:error, reason} -> {:stop, {:maintenance_admission_failed, reason}, state}
+              end
+
+            {:error, cause}
+            when cause in [
+                   :maintenance_model_unconfigured,
+                   :maintenance_instructions_unconfigured,
+                   :maintenance_reasoning_unsupported,
+                   :maintenance_deadline_unrepresentable
+                 ] ->
+              commit_context_preparation_failure(state, work.run_id, cause)
+
+            {:error, :run_deadline_reached} ->
+              finish_at_deadline(state, work.run_id)
+
+            {:error, reason} ->
+              {:stop, {:maintenance_admission_failed, reason}, state}
+          end
+
+        {:ok, _} ->
+          commit_context_refusal(state, work.run_id, refusal)
+
+        {:refused, _} ->
+          commit_context_refusal(state, work.run_id, refusal)
+
+        {:error, reason} ->
+          {:stop, {:maintenance_tail_failed, reason}, state}
+      end
+    else
+      commit_context_refusal(state, work.run_id, refusal)
     end
   end
 
