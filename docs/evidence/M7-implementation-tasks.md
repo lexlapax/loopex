@@ -325,6 +325,45 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: join retained maintenance endings to the live serial session owner.
+  Successors settle inherited open summary attempts conservatively without
+  redispatch, finish retained invalid/incomplete summaries through the required
+  v2 refusal, and preserve abort/deadline precedence, exact usage and unchanged
+  conversation. The existing provider settlement, deadline admission and
+  cleanup path now selects the owning episode's record family. Seven live
+  recovery cases cover open/lost attempts, late abort, expired deadline,
+  invalid/incomplete replies and termination after a known reply. Lost-attempt
+  and known-summary endings additionally exercise all three Store uncertainty
+  phases, exact owner exit/succession, one settlement/ending/public finish and
+  no provider/executor dispatch. This extends the completed reducer subtask;
+  no original or added checkbox totals change. Successful checkpoint recovery,
+  new summary dispatch, selection and automatic triggering remain open.
+
+  The eleven-file current selection passed 132 tests in 3.7 measured seconds:
+  `/private/tmp/loopex-m7-maintenance-owner-current-dev5.log`, SHA-256
+  `94f70d7e6d95e3692d7e2de2e76bdf4d3852008bbbb315b0a1c95b67ae86f448`.
+  Floor: 132 tests in 3.4 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-owner-floor-v2.log`, SHA-256
+  `93abdb7194d65d6268ff365616d1464959b6d2ff36a48c505eff012bc7e5605b`.
+  Formatting, warning-free compilation, dependency direction, bootstrap
+  structure/status, compiled documentation and diff gates passed in 21.2
+  measured seconds:
+  `/private/tmp/loopex-m7-maintenance-owner-gates-v1.log`, SHA-256
+  `db6f829eeedc57495d00474403dfa0979c93aa705e11d3ceb458d01e295c63dc`.
+  The first floor run passed assertions but correctly refused compiler warnings
+  from generated tests comparing a literal mode against several distinct atoms.
+  Small parameter helpers preserve the same case matrix without those warnings.
+  An exploratory effect-query witness first used the wrong facade, then the
+  correct Runtime API reported history_unavailable because this fixture Store
+  lacks creation provenance. That optional read is outside the live ending
+  proof and its exploratory witness was removed. Required ending assertions,
+  faults, joins and bounds remain. T09's private maintenance coverage is still
+  open and no query-completeness claim is made here. Every development failure
+  is retained separately. All focused/gate handles are terminal and collected.
+  The next integrated candidate will run the full fast check once. No agent or
+  maintainer decision is pending; the goal remains active.
+
+
 - Done: correct invalid/incomplete summary endings to retain ADR 0043's private
   v2 refusal. The prior reducer derived the failure from the settlement but
   omitted its required refusal record. Canonical summary replies now settle
@@ -6353,7 +6392,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Join maintenance settlement to durable episode accounting and strict replay, retaining natural bounded summaries pending checkpoints, atomically ending invalid/incomplete or lost attempts, enforcing one exact not-dispatched retry and captured parent capacity, preserving the first abort/deadline and late usage evidence, and proving depth compaction, duplicate/interrupted endings and successor recovery on both supported toolchains. Live dispatch/cleanup, checkpoint transactions and later prefixes remain open.
+- [x] Join maintenance settlement to durable episode accounting and strict replay, retaining natural bounded summaries pending checkpoints, atomically ending invalid/incomplete or lost attempts, enforcing one exact not-dispatched retry and captured parent capacity, preserving the first abort/deadline and late usage evidence, and proving depth compaction, duplicate/interrupted endings and successor recovery on both supported toolchains. Join the live owner recovery path for lost attempts and retained summary failures, with all three commit-uncertainty phases, exact joins, no redispatch and unchanged conversation. New summary dispatch/cleanup, checkpoint transactions and later prefixes remain open.
 
 - [x] Join owner-selected maintenance sources to exact whole-record receipt preflight and consecutive request/attempt-open replay, binding captured original-record provenance, strict system and input limits, resource headers, clocks and protected units. Verify streaming projection, rejection of partial/substituted history and complete-original integrity on both toolchains. Tail policy, automatic triggering, live dispatch, settlement, checkpoints and standalone compact remain open.
 

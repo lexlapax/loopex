@@ -3308,6 +3308,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
       cleaning_up?(state, run_id) ->
         {:noreply, state}
 
+      maintenance_open_attempt?(state.durable, run_id) and map_size(state.in_flight) == 0 ->
+        settle_model_attempt(state, run_id, :owner_loss)
+
+      match?(
+        %{"run_id" => ^run_id, "stage" => "checkpoint_pending"},
+        Map.get(state.durable.maintenance_episodes, state.durable.active_maintenance)
+      ) and
+          map_size(state.in_flight) == 0 ->
+        commit_terminal(state, run_id, "cancelled", %{})
+
       maintenance_source_preparation?(state.durable, run_id) and
         map_size(state.in_flight) == 0 and
           not SessionState.unproven_effect?(state.durable, run_id) ->
@@ -3369,11 +3379,45 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp advance_run(state, %{stage: "effect_dispatched"}), do: {:noreply, state}
 
   defp advance_run(state, work) do
-    if SessionState.unproven_effect?(state.durable, work.run_id) do
-      finish_unknown(state, work.run_id)
-    else
-      dispatch_stage(state, work)
+    episode = Map.get(state.durable.maintenance_episodes, state.durable.active_maintenance)
+
+    cond do
+      SessionState.unproven_effect?(state.durable, work.run_id) ->
+        finish_unknown(state, work.run_id)
+
+      maintenance_open_attempt?(state.durable, work.run_id) and
+          not MapSet.member?(state.adopted, work.run_id) ->
+        # Concept: an inherited summary attempt is settled, never redispatched.
+        # Technical depth: it shares the provider deadline, cleanup and retained
+        # settlement path, while its episode supplies the distinct identity.
+        before_run_deadline(state, work, &start_model_work/2)
+
+      match?(%{"stage" => "checkpoint_pending", "summary_failure" => _}, episode) ->
+        # Concept: a retained invalid summary needs no replacement provider call.
+        # Technical depth: replay already charged its exact settlement once.
+        # Abort is handled at the scheduling gate; elapsed deadline still wins.
+        before_run_deadline(state, work, &finish_pending_summary_failure/2)
+
+      true ->
+        dispatch_stage(state, work)
     end
+  end
+
+  defp finish_pending_summary_failure(state, work) do
+    cause =
+      case state.durable.maintenance_episodes[state.durable.active_maintenance]["summary_failure"] do
+        "maintenance_summary_invalid" -> :maintenance_summary_invalid
+        "maintenance_summary_incomplete" -> :maintenance_summary_incomplete
+      end
+
+    commit_context_preparation_failure(state, work.run_id, cause)
+  end
+
+  defp maintenance_open_attempt?(durable, run_id) do
+    match?(
+      %{"run_id" => ^run_id, "stage" => "model_attempt_open"},
+      Map.get(durable.maintenance_episodes, durable.active_maintenance)
+    )
   end
 
   defp dispatch_stage(state, %{stage: "model_pending"} = work),
@@ -5902,7 +5946,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # opens a new attempt identity, which no owner has asked Control to spend.
     state = %{state | permit_requested: MapSet.delete(state.permit_requested, run_id)}
 
-    case SessionState.propose_model_attempt_settled(state.durable, run_id, outcome) do
+    proposal =
+      if maintenance_open_attempt?(state.durable, run_id),
+        do: SessionState.propose_maintenance_attempt_settled(state.durable, outcome),
+        else: SessionState.propose_model_attempt_settled(state.durable, run_id, outcome)
+
+    case proposal do
       {:ok, proposal} ->
         commit_model_settlement(state, run_id, proposal)
 
@@ -5916,7 +5965,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp commit_model_settlement(state, run_id, proposal) do
-    settlement = Enum.find(proposal.records, &(&1.kind == "model_attempt_settled_v3"))
+    settlement =
+      Enum.find(
+        proposal.records,
+        &(&1.kind in ["model_attempt_settled_v3", "maintenance_attempt_settled_v3"])
+      )
 
     case retain_terminal_operation_fact(state, proposal) do
       {:ok, next} ->
@@ -6038,11 +6091,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
     do: admit_model_deadline(state, run_id, System.system_time(:millisecond))
 
   defp admit_model_deadline(state, run_id, observed) do
-    case SessionState.propose_model_termination(
-           state.durable,
-           run_id,
-           observed
-         ) do
+    proposal =
+      if maintenance_open_attempt?(state.durable, run_id),
+        do: SessionState.propose_maintenance_termination(state.durable, observed),
+        else: SessionState.propose_model_termination(state.durable, run_id, observed)
+
+    case proposal do
       {:ok, proposal} -> commit_internal(state, proposal)
       {:error, _nothing_to_admit} -> {:ok, state}
     end
@@ -6716,7 +6770,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
       cleaning_up?(state, run_id) ->
         {:ok, state}
 
-      match?(%{stage: "model_attempt_open"}, Map.get(state.durable.pending_work, run_id)) ->
+      maintenance_open_attempt?(state.durable, run_id) or
+          match?(%{stage: "model_attempt_open"}, Map.get(state.durable.pending_work, run_id)) ->
         begin_model_termination(state, run_id, purpose)
 
       true ->
