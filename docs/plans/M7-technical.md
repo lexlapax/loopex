@@ -1575,8 +1575,13 @@ or current catalog lookup. Pending and answered questions retain exact facts;
 refusal abandons without reevaluation or executor/provider dispatch. Recovered
 answered-policy scheduling applies the existing recovered-run pause, including
 prepared, abandoned and fenced capabilities. Matching-policy activation has a
-positive reevaluation and exact worker-join witness. Public chat host integration
-and closure evidence remain open.
+positive reevaluation and exact worker-join witness. The public chat host now
+joins that preparation with exact creation, session-directory tracking, effective
+reporting, driver readiness and guarded signal activation. Both supported pairs
+prove the built startup/quit path with actual composition and no provider request,
+plus scripted two-prompt/restart/refusal/cleanup paths. Closing follows diagnostic
+joins, composition cleanup, placement release and signal finish. Built multi-prompt
+provider, attended, maintenance/helper integration and closure evidence remain open.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.

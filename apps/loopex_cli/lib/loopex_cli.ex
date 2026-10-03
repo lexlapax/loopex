@@ -72,6 +72,13 @@ defmodule LoopexCli do
     |> halt_ask()
   end
 
+  def main(["chat" | _] = argv) do
+    if stdio_encoding(:latin1) != :ok, do: System.halt(1)
+    :ok = Application.put_env(:logger, :level, :none)
+    :ok = :logger.set_primary_config(:level, :none)
+    System.halt(LoopexCli.Chat.run(argv))
+  end
+
   def main(["daemon" | arguments]) do
     start_legacy_application_or_halt()
     LoopexCli.Daemon.main(arguments)
@@ -170,6 +177,13 @@ defmodule LoopexCli do
   def dispatch(["run" | rest], options),
     do: offline_or_live("run", rest, options, &run(&1, options))
 
+  def dispatch(["chat" | _] = argv, options) do
+    case LoopexCli.Chat.run(argv, Keyword.get(options, :chat_options, [])) do
+      0 -> :ok
+      _ -> {:error, "chat_failed"}
+    end
+  end
+
   def dispatch(["config" | _] = argv, _options),
     do: LoopexCli.ConfigInspection.run(argv, File.cwd!(), System.get_env("LOOPEX_HOME"))
 
@@ -189,7 +203,7 @@ defmodule LoopexCli do
   def dispatch([], _options),
     do:
       {:error,
-       "choose one command: run, ask, -p, config, sessions, resume, attach, cancel, artifact, skill, or daemon\n\n" <>
+       "choose one command: run, ask, -p, chat, config, sessions, resume, attach, cancel, artifact, skill, or daemon\n\n" <>
          usage()}
 
   def dispatch([unknown | _rest], _options),
@@ -1823,6 +1837,8 @@ defmodule LoopexCli do
       loopex run --policy allow-all "describe the change"
       loopex ask --policy allow-all "one question"
       loopex -p --policy allow-all --output json "one question"
+      loopex chat --config FILE
+      loopex chat --config FILE --resume <session>
       loopex config validate --config FILE
       loopex config show --config FILE --effective
       loopex run --policy allow-all --steer "actually, do it this way"

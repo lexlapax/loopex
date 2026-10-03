@@ -128,6 +128,13 @@ defmodule LoopexCli.ChatDriver do
   """
   def interrupt(driver), do: send(driver, :interrupt)
 
+  # Concept: startup refusal uses the driver's existing bounded output and stop.
+  # Technical depth: the owner supplies a fixed host code before any input read;
+  # the reply is provisional until the outer host has cleaned composition.
+  @doc false
+  def refuse_startup(driver, code),
+    do: GenServer.call(driver, {:refuse_startup, code}, :infinity)
+
   @impl true
   def init({owner, runtime, session, input, output, options}) do
     Process.flag(:trap_exit, true)
@@ -212,6 +219,15 @@ defmodule LoopexCli.ChatDriver do
 
   def handle_call(:run, {caller, _} = from, %{owner: caller, from: nil, finished: false} = state) do
     {:noreply, state |> startup_caller(:run, from) |> start_attachments()}
+  end
+
+  def handle_call(
+        {:refuse_startup, code},
+        {caller, _} = from,
+        %{owner: caller, startup: :ready, from: nil, finished: false} = state
+      )
+      when is_atom(code) and code not in [nil, true, false] do
+    {:noreply, %{state | from: from} |> error(code) |> fail(code)}
   end
 
   def handle_call(

@@ -107,18 +107,51 @@ did not resolve them. No paid provider calls were made during this check.
 
 
 
-- Running: the full current-pair integration check started once on exact clean
-  implementation `5036d2d9675483025fa3ab98c4431844d5b072cb`, including
-  request/receipt retirement and the recovered-policy pause/startup checks.
-  Detached verification worktree
-  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`; complete streaming output
-  `/private/tmp/loopex-m7-5036d2d9-fast-check.log`. The header binds the exact
-  SHA and `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`; the eventual footer records
-  terminal exit and measured duration. Live wrapper handle `88650` must be
-  collected before hashing. No result/digest is claimed while running; retain
-  any failure and do not rerun the same bytes. Primary-checkout changes after
-  that SHA are outside this proof. Original tally remains 50 done / 129 todo /
-  7 retired; added tally is 171 done / 10 todo, including this new check.
+- Done: the full current-pair integration check on exact clean implementation
+  `5036d2d9675483025fa3ab98c4431844d5b072cb` passed all eleven application
+  suites in 1,382.0 measured seconds. Complete terminal output
+  `/private/tmp/loopex-m7-5036d2d9-fast-check.log`, SHA-256
+  `76b42eb43beb494231317f244a1c9b68882489a9be090b8aed9ebbe798cf44cb`.
+  Wrapper handle `88650` is terminal and collected. The header binds the exact
+  SHA and `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. No later chat-host bytes are
+  covered by this checkpoint. Original tally remains 50 done / 129 todo /
+  7 retired; added tally advances to 172 done / 9 todo.
+
+- Done: add the public `chat` main/dispatch branch, using the prepared host
+  configuration, exact-genesis facade, session-directory tracking and existing
+  command driver. Resume uses retained settings, verifies placement immediately
+  before guarded activation and submits its redacted settings report before
+  input. The shared diagnostic lifetime helper retains ask's existing certificate
+  and exact-process joins. Startup refusals and installer exceptions stop input
+  and attachments; composition or activation uncertainty forces unknown closing.
+  Signal finish and closing occur after outer composition and placement cleanup.
+
+  The final eight-file CLI selection passed 175 tests on both supported pairs
+  in 66.8/67.5 measured suite seconds. Current output
+  `/private/tmp/loopex-m7-chat-workflow-current-v11.log`, SHA-256
+  `980aab8bc52b5b573aa842716f7f5ac843708a30cf291be5edc8f8c411a24f24`;
+  floor output `/private/tmp/loopex-m7-chat-workflow-floor-v3.log`, SHA-256
+  `b013ebadcb51e7febe29674f33968d3486d134491e924298de84d059d3f83fe2`.
+  Both terminal handles are collected. The built escript embeds the actual Chat
+  beam and runs startup/quit through real composition with an unused credential
+  canary and no provider request. Command tests retain two scripted prompts,
+  restart through the actual prepared signal holder, exact retained conversation,
+  ignored schema-valid changed file aliases, redaction and startup/cleanup loss.
+  This is not built two-prompt/provider, attended or complete maintenance/helper
+  proof. Those original outcomes remain open.
+
+  Development failures remain retained. Initial assertions assumed no quit
+  barrier, decimal-string exit status, a pre-existing fixture state directory
+  and synchronous terminal delivery. Corrections use the existing exact wire
+  domains, an isolated state root and a captured event-join cutoff. The real
+  signal-holder case establishes/restores the same isolated OTP manager as its
+  conformance tests. A changed alias must still satisfy authored route validation;
+  it does not resolve or replace the recovered model. Complete output inventory
+  and final focused source digests: `/private/tmp/loopex-m7-chat-workflow-focused-evidence.json`,
+  SHA-256 `c929efaa64c48c4afb4454303cc30610b22bc2798cc3a2a85e4f764d88c48763`. The first attempted test-file write used the wrong relative
+  cwd and did not create the file; its 44-case run covered only existing tests,
+  and is not host-workflow proof. No product bound, cleanup assertion or check
+  was weakened. This closes one original T06 item and one added host subtask.
 
 - Done: join prepared chat resume to the exact retained policy-question
   identity/revision and every already-admitted model's provider route. The
@@ -5597,7 +5630,7 @@ or check was relaxed.
 
 ### Original checklist
 
-- [ ] Add loopex chat through the existing session/runtime facade.
+- [x] Add loopex chat through the existing session/runtime facade.
 - [ ] Join explicit configuration, continuity and instructions.
 - [ ] Support prompts, status, wait, abort, bounded output and truthful shutdown.
 - [ ] Prove two prompts and restart through the built command.
@@ -5606,6 +5639,9 @@ or check was relaxed.
 - [ ] Later retain the required attended multi-prompt proof.
 
 ### Added implementation subtasks
+
+- [x] Join the public chat entrypoint to exact creation, session tracking, prepared resume, guarded signals, effective report and existing input/output driver; share ask diagnostic joins and prove actual built startup/quit plus scripted continuity/restart/refusal/cleanup behavior on both pairs. Built multi-prompt/provider, attended, maintenance and helper proof remains open.
+
 
 - [x] Join prepared resume to exact retained policy identity/revision and all admitted model routes; abandon refusals without credentials/catalog lookup and prove matching/conflicting pending/answered questions, zero dispatch and untouched facts on both toolchains.
 
@@ -5902,7 +5938,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Run the prepared-policy scheduling and current-only request/receipt integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
+- [x] Run the prepared-policy scheduling and current-only request/receipt integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 
 - [x] Run the combined owner-only settings-report and current-only settlement integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 - [x] Run the full fast check once on the clean committed current-only tool and prepared-chat binding checkpoint; retain exact SHA, terminal output, measured duration and SHA-256 without claiming later changes are covered.

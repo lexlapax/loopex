@@ -49,6 +49,62 @@ defmodule LoopexCli.AskCommandTest do
     assert stdout == ""
     assert String.starts_with?(stderr, "loopex: choose one command:")
     refute File.exists?(state_root)
+
+    {status, stdout, stderr} =
+      capture(
+        command,
+        ["chat", "--config", Path.join(root, "absent-chat.json")],
+        root,
+        state_root
+      )
+
+    assert status == 1
+    assert stderr == ""
+    controls = for "@loopex " <> json <- String.split(stdout, "\n"), do: :json.decode(json)
+
+    assert [
+             %{"event" => "error"},
+             %{"event" => "closing", "exit_code" => 1, "cleanup" => "confirmed"}
+           ] = controls
+
+    refute File.exists?(state_root)
+    workspace = Path.join(root, "chat-workspace")
+    File.mkdir!(workspace)
+    config_path = Path.join(root, "chat.json")
+
+    File.write!(
+      config_path,
+      :json.encode(%{
+        "schema_version" => 1,
+        "providers" => %{"anthropic" => %{"credential" => %{"env" => "M7_CHAT_COMMAND_SLOT"}}},
+        "policy" => "allow-all",
+        "paths" => %{"workspace" => workspace},
+        "session" => %{
+          "model" => "anthropic:claude-haiku-4-5",
+          "tools" => "none",
+          "bounds" => %{"max_turns" => 2, "deadline_ms" => 1000, "token_budget" => 10000}
+        }
+      })
+    )
+
+    {status, stdout, stderr} =
+      capture(
+        command,
+        ["chat", "--config", config_path],
+        root,
+        state_root,
+        [{"M7_CHAT_COMMAND_SLOT", "unused-chat-credential-canary"}],
+        "/quit\n"
+      )
+
+    assert status == 0, stdout <> stderr
+    controls = for "@loopex " <> json <- String.split(stdout, "\n"), do: :json.decode(json)
+    assert List.last(controls)["event"] == "closing"
+    assert List.last(controls)["exit_code"] == 0
+    assert List.last(controls)["cleanup"] == "confirmed"
+    refute stdout <> stderr =~ "unused-chat-credential-canary"
+    refute stdout <> stderr =~ "M7_CHAT_COMMAND_SLOT"
+    assert File.exists?(Path.join(state_root, "runtime_id"))
     assert_boot_io(command, root)
   end
 
@@ -336,7 +392,7 @@ defmodule LoopexCli.AskCommandTest do
     {:ok, sections} = :escript.extract(String.to_charlist(command), [])
     {:ok, entries} = :zip.extract(Keyword.fetch!(sections, :archive), [:memory])
 
-    for module <- [LoopexCli, LoopexCli.Ask] do
+    for module <- [LoopexCli, LoopexCli.Ask, LoopexCli.Chat] do
       name = Atom.to_string(module) <> ".beam"
 
       embedded =

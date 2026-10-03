@@ -20,7 +20,7 @@ defmodule LoopexCli.DurableAsk do
 
   alias LoopexCli.AskResult
   alias LoopexCli.DurableAsk.FollowReader
-  alias LoopexComposition.{DiagnosticConsumer, TraceConfiguration}
+  alias LoopexComposition.TraceConfiguration
 
   @uint64_max 18_446_744_073_709_551_615
   @default_deadline_ms 600_000
@@ -133,7 +133,7 @@ defmodule LoopexCli.DurableAsk do
       {:ok, %{enabled: true, configuration: configuration}} ->
         grace = Loopex.Executor.default_cleanup_grace_ms()
 
-        case start_diagnostics(Map.get(deps, :diagnostic_device, :stderr), grace) do
+        case LoopexCli.DiagnosticLifetime.start(Map.get(deps, :diagnostic_device, :stderr), grace) do
           {:ok, consumer} ->
             own_diagnostics(consumer, grace, configuration, options, deps, callback)
 
@@ -143,23 +143,6 @@ defmodule LoopexCli.DurableAsk do
 
       _ ->
         {:diagnostic, :invalid_trace_configuration}
-    end
-  end
-
-  defp start_diagnostics(device, grace) do
-    previous = Process.flag(:trap_exit, true)
-
-    try do
-      case DiagnosticConsumer.start_link(device, grace) do
-        {:ok, consumer} = started ->
-          Process.unlink(consumer)
-          started
-
-        refusal ->
-          refusal
-      end
-    after
-      Process.flag(:trap_exit, previous)
     end
   end
 
@@ -178,7 +161,10 @@ defmodule LoopexCli.DurableAsk do
                 _ -> {:diagnostic, :trace_start_failed}
               end
             after
-              send(self(), {tag, close_diagnostics(consumer, grace, monitors)})
+              send(
+                self(),
+                {tag, LoopexCli.DiagnosticLifetime.begin_close(consumer, grace, monitors)}
+              )
             end
           end
         )
@@ -188,63 +174,16 @@ defmodule LoopexCli.DurableAsk do
       receive do
         {^tag, closing} -> closing
       after
-        0 -> close_diagnostics(consumer, grace, monitors)
+        0 -> LoopexCli.DiagnosticLifetime.begin_close(consumer, grace, monitors)
       end
 
-    if join_diagnostics(consumer, closing) do
+    if LoopexCli.DiagnosticLifetime.join(consumer, closing) do
       case result do
         {:ok, result} -> result
         :failed -> {:diagnostic, :composition_unavailable}
       end
     else
       {:diagnostic, :runtime_cleanup_unconfirmed}
-    end
-  end
-
-  defp monitor_diagnostics(pids, monitors) do
-    Enum.reduce(pids, monitors, fn pid, monitors ->
-      if Map.has_key?(monitors, pid),
-        do: monitors,
-        else: Map.put(monitors, pid, Process.monitor(pid))
-    end)
-  end
-
-  defp close_diagnostics(consumer, grace, monitors) do
-    deadline = System.monotonic_time(:millisecond) + grace
-    reference = make_ref()
-
-    case DiagnosticConsumer.begin_close(consumer, reference, deadline) do
-      {:ok, owned} -> {reference, deadline, monitor_diagnostics(owned, monitors)}
-      _ -> {reference, deadline, monitors}
-    end
-  end
-
-  defp join_diagnostics(consumer, {reference, deadline, monitors}) do
-    joined = await_diagnostics(consumer, reference, deadline, monitors, false)
-    Enum.each(monitors, fn {_pid, monitor} -> Process.demonitor(monitor, [:flush]) end)
-    joined
-  end
-
-  defp await_diagnostics(_consumer, _reference, deadline, monitors, true)
-       when map_size(monitors) == 0,
-       do: System.monotonic_time(:millisecond) <= deadline
-
-  defp await_diagnostics(consumer, reference, deadline, monitors, certified) do
-    receive do
-      {:diagnostic_consumer_closed, ^consumer, ^reference, {:ok, _counts}} ->
-        await_diagnostics(consumer, reference, deadline, monitors, true)
-
-      {:diagnostic_consumer_closed, ^consumer, ^reference, _unproved} ->
-        false
-
-      {:DOWN, monitor, :process, pid, _reason} when is_map_key(monitors, pid) ->
-        if monitors[pid] == monitor do
-          await_diagnostics(consumer, reference, deadline, Map.delete(monitors, pid), certified)
-        else
-          await_diagnostics(consumer, reference, deadline, monitors, certified)
-        end
-    after
-      max(deadline - System.monotonic_time(:millisecond), 0) -> false
     end
   end
 
