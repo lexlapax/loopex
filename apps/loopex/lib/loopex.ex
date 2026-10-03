@@ -202,8 +202,8 @@ defmodule Loopex do
   @doc """
   ## Concept
 
-  Admits a prompt, steer, follow-up, or abort through the session reached by
-  this attachment.
+  Admits a prompt, steer, follow-up, abort or standalone compact through the
+  session reached by this attachment.
 
   ## Technical depth
 
@@ -212,8 +212,13 @@ defmodule Loopex do
   applied to the active run's next request and a follow-up is queued behind
   the active run; at most one of each is held unapplied. Durable command identity, active-run
   exclusion, and post-commit ownership fencing are enforced below the facade.
+  Compact carries explicit `max_attempts`, `deadline_ms` and `token_budget` bounds.
+  Admission returns its acknowledgement. Repeating a completed compact returns
+  the retained closed `disposition`, `checkpoint_id`, `failure`, `usage` and
+  `cleanup` result, with binary keys and native integer counters. Admission
+  disposition remains a separate observation of the original acceptance.
   """
-  @spec command(Attachment.t(), map()) :: {:accepted, binary()} | {:error, term()}
+  @spec command(Attachment.t(), map()) :: {:accepted, binary()} | {:error, term()} | map()
   def command(attachment, command), do: Runtime.command(attachment, command)
 
   @doc """

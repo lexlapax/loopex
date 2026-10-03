@@ -545,6 +545,214 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
     end
   end
 
+  test "unchanged completion atomically retains the exact result and event without an episode" do
+    for bounds <- [
+          %{max_attempts: 4, deadline_ms: 60_000, token_budget: 32_768},
+          %{max_attempts: 1, deadline_ms: 1, token_budget: 1}
+        ] do
+      {state, history, events} = pending([], bounds: bounds)
+      assert {:ok, proposal} = SessionState.propose_unchanged_compact(state, 1_000, fn -> :ok end)
+      [record] = proposal.records
+      [event] = proposal.events
+      assert record.kind == "compact_command_completed_v1"
+      assert record["observed_at"] == 1_000
+      assert event.kind == "context.compaction_finished"
+
+      assert Map.take(event, ~w(episode_id command_id result)) ==
+               Map.take(record, ~w(episode_id command_id result))
+
+      result = record["result"]
+
+      assert result == %{
+               "disposition" => "unchanged",
+               "checkpoint_id" => nil,
+               "failure" => nil,
+               "usage" => %{
+                 "attempts" => 0,
+                 "reported_tokens" => 0,
+                 "estimated_tokens" => 0,
+                 "total_tokens" => 0
+               },
+               "cleanup" => "confirmed"
+             }
+
+      assert {:ok, wire} = LoopexProtocol.Session.CompactResult.encode_wire(result)
+      assert {:ok, ^result} = LoopexProtocol.Session.CompactResult.decode_wire(wire)
+      assert {:ok, _} = Store.admit_bounded(record)
+      assert {:ok, _} = Store.admit_bounded(event)
+      {completed, history, events} = commit(state, proposal, history, events)
+      assert {:ok, ^completed} = SessionState.recover(state.session_id, history, events)
+      assert completed.pending_compact == nil
+      assert completed.commands["compact"].result == result
+      assert completed.commands["compact"].reply == {:accepted, "compact"}
+
+      for field <- [
+            :conversation,
+            :run_order,
+            :pending_work,
+            :bounds,
+            :deadlines,
+            :charged,
+            :maintenance_episodes,
+            :active_maintenance,
+            :checkpoints,
+            :active_checkpoint,
+            :configuration,
+            :tool_selection
+          ] do
+        assert Map.fetch!(completed, field) == Map.fetch!(state, field)
+      end
+
+      command = %{type: :compact, command_id: "compact", bounds: bounds}
+      assert {:replayed, ^result} = SessionState.propose(completed, command)
+
+      assert {:committed, :admitted, :accepted, nil} =
+               SessionState.command_disposition(completed, "compact")
+
+      assert {:error, :idempotency_conflict} =
+               SessionState.propose(completed, %{command | bounds: %{bounds | deadline_ms: 2}})
+
+      assert {:ok, fresh} = SessionState.propose(completed, %{command | command_id: "next"})
+      assert fresh.reply == {:accepted, "next"}
+      assert fresh.next.pending_compact["command_id"] == "next"
+    end
+  end
+
+  test "unchanged replay refuses substituted results, identities, clocks and missing events" do
+    {state, history, events} = pending([])
+    {:ok, proposal} = SessionState.propose_unchanged_compact(state, 1_000, fn -> :ok end)
+    {completed, full_history, full_events} = commit(state, proposal, history, events)
+    record = hd(proposal.records)
+
+    changes =
+      [
+        &Map.put(&1, "episode_id", "foreign"),
+        &Map.put(&1, "command_id", "foreign"),
+        &Map.put(&1, "observed_at", -1),
+        &Map.put(&1, "observed_at", @uint64_max),
+        &Map.put(&1, "run_id", "invented"),
+        &put_in(&1, ["result", "checkpoint_id"], "invented"),
+        &put_in(&1, ["result", "disposition"], "checkpointed"),
+        &put_in(&1, ["result", "cleanup"], "unknown"),
+        &put_in(&1, ["result", "failure"], %{"category" => "cancelled", "retryable" => false}),
+        &put_in(&1, ["result", "usage", "attempts"], 1),
+        &put_in(&1, ["result", "usage"], %{
+          "attempts" => 0,
+          "reported_tokens" => 1,
+          "estimated_tokens" => 0,
+          "total_tokens" => 1
+        })
+      ] ++ Enum.map(Map.keys(record), fn key -> &Map.delete(&1, key) end)
+
+    for change <- changes do
+      assert {:error, _} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ [row(state, change.(record))],
+                 full_events
+               )
+    end
+
+    assert {:error, _} = SessionState.recover(state.session_id, full_history, events)
+
+    assert {:error, _} =
+             SessionState.recover(state.session_id, full_history, full_events ++ full_events)
+
+    assert {:error, _} =
+             SessionState.recover(
+               state.session_id,
+               full_history ++ [row(completed, record)],
+               full_events
+             )
+
+    {nonempty, raw_history, raw_events} = pending(["retained raw fact"])
+
+    assert {:error, _} =
+             SessionState.recover(
+               nonempty.session_id,
+               raw_history ++ [row(nonempty, record)],
+               raw_events ++
+                 [Map.put(hd(proposal.events), :event_sequence, nonempty.event_sequence + 1)]
+             )
+  end
+
+  test "unchanged completion refuses eligible history, aborts, captured episodes and invalid clocks" do
+    {nonempty, _, _} = pending(["retained fact"])
+
+    assert {:error, :compaction_required} =
+             SessionState.propose_unchanged_compact(nonempty, 1_000, fn -> :ok end)
+
+    {:ok, capture} =
+      SessionState.propose_standalone_maintenance_episode(
+        nonempty,
+        maintenance_model(),
+        maintenance_instructions(),
+        1_000,
+        fn -> :ok end
+      )
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.propose_unchanged_compact(capture.next, 1_000, fn ->
+               flunk("captured episode measured")
+             end)
+
+    {empty, history, events} = pending([])
+    {:ok, abort} = SessionState.propose(empty, %{type: :abort, command_id: "stop"})
+    {aborting, _, _} = commit(empty, abort, history, events)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.propose_unchanged_compact(aborting, 1_000, fn ->
+               flunk("aborted compact measured")
+             end)
+
+    for invalid <- [nil, -1, @uint64_max] do
+      assert {:error, :maintenance_deadline_unrepresentable} =
+               SessionState.propose_unchanged_compact(empty, invalid, fn ->
+                 flunk("invalid clock measured")
+               end)
+    end
+
+    {:ok, instructions} =
+      Loopex.Runtime.Instructions.capture(%{
+        "version" => "large.v1",
+        "base" => String.duplicate("x", 2_000),
+        "environment" => "",
+        "appendix" => ""
+      })
+
+    configuration = Map.put(configuration(system_class_tokens: 500), "instructions", instructions)
+
+    assert {:error, :invalid_session_configuration} =
+             Loopex.Runtime.SessionConfiguration.validate(configuration, [])
+  end
+
+  test "every unchanged completion measurement and final proposal check can cancel" do
+    {state, _, _} = pending([])
+    callbacks = :atomics.new(1, [])
+
+    assert {:ok, _} =
+             SessionState.propose_unchanged_compact(state, 1_000, fn ->
+               :atomics.add_get(callbacks, 1, 1)
+               :ok
+             end)
+
+    count = :atomics.get(callbacks, 1)
+    assert count > 1
+
+    for stop <- 1..count do
+      :atomics.put(callbacks, 1, 0)
+
+      assert {:error, :cancelled} =
+               SessionState.propose_unchanged_compact(state, 1_000, fn ->
+                 if :atomics.add_get(callbacks, 1, 1) == stop, do: {:error, :cancelled}, else: :ok
+               end)
+
+      assert :atomics.get(callbacks, 1) == stop
+      assert state.pending_compact != nil
+      assert state.maintenance_episodes == %{}
+    end
+  end
+
   defp configuration(options) do
     Genesis.configuration()
     |> Map.put("context_token_budget", Keyword.get(options, :context_token_budget, 32_768))

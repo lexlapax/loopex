@@ -1805,6 +1805,16 @@ bounded one-record private-history traversal without effects. These constructors
 are not yet joined to live owner capture or standalone dispatch/result/cleanup;
 the task checklist keeps that integration and the reply-reserve decision open.
 
+Empty fitting standalone commands now produce a durable unchanged completion
+proposal with no episode or provider attempt. The accepted five-member result
+and exact completion event share one transaction proposal. The completed result
+is retained beside its admission binding, wins on duplicate lookup and releases
+the pending slot; admission observation still reports the original acceptance.
+Replay repeats the empty fit and refuses forged results, identities, duplicate
+completion and missing events. Both-pair focused checks and bounded private
+coverage prove the new row and cancellation points. Live scheduling/Store
+uncertainty, failed/cancelled results and completion snapshots remain open.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

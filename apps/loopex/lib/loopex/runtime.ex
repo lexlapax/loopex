@@ -508,7 +508,7 @@ defmodule Loopex.Runtime do
   def release_holder(_runtime, _holder), do: {:error, :runtime_unavailable}
 
   @doc false
-  @spec command(Attachment.t(), map()) :: {:accepted, binary()} | {:error, term()}
+  @spec command(Attachment.t(), map()) :: {:accepted, binary()} | {:error, term()} | map()
   def command(%Attachment{} = attachment, command) when is_map(command) do
     with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
            Attachment.routing(attachment),

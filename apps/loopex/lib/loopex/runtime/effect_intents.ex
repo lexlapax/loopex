@@ -67,6 +67,7 @@ defmodule Loopex.Runtime.EffectIntents do
     "standalone_maintenance_episode_admitted_v1" =>
       {~w(episode_id command_id trigger targets origin last_offending_source configuration_version maintenance_configuration bounds admitted_at deadline attempts summary_ordinal checkpoint_id usage),
        []},
+    "compact_command_completed_v1" => {~w(episode_id command_id observed_at result), []},
     "maintenance_request_committed_v1" =>
       {~w(episode_id summary_ordinal purpose operation_id configuration_version captured_session_version strategy_revision eligible_unit_count covered_range source_digest source_excerpted staged_at staged_request_digest request context_receipt),
        []},
@@ -507,6 +508,19 @@ defmodule Loopex.Runtime.EffectIntents do
     else
       _ -> false
     end
+  end
+
+  # Concept: an unchanged compact adds completion evidence without an effect.
+  # Technical depth: this bounded reader validates the closed native result and
+  # zero accounting; full replay proves the preceding command and empty fit.
+  defp neutral_values?(%{payload: %{kind: "compact_command_completed_v1"} = payload}) do
+    result = payload["result"]
+
+    identifier?(payload["episode_id"]) and identifier?(payload["command_id"]) and
+      version?(payload["observed_at"]) and
+      match?({:ok, _}, LoopexProtocol.Session.CompactResult.encode_wire(result)) and
+      result["disposition"] == "unchanged" and result["usage"]["attempts"] == 0 and
+      result["usage"]["total_tokens"] == 0
   end
 
   defp neutral_values?(%{payload: %{kind: "maintenance_request_committed_v1"} = payload}) do

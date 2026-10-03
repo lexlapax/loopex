@@ -325,6 +325,60 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: empty fitting standalone compact now has a replay-checked unchanged
+  completion proposal. Its closed private `compact_command_completed_v1` row
+  binds the actual command/episode identity, observed clock and ADR 0043's exact
+  five-member result. Zero usage, null checkpoint/failure and confirmed cleanup
+  commit with exactly one `context.compaction_finished` event; no episode,
+  attempt, run, deadline or checkpoint is created. Completion clears the pending
+  slot and retains the result beside the original command admission. Duplicate
+  lookup returns that exact completed result before current-state checks, while
+  the admission-disposition query retains the accepted admission fact. Replay
+  remeasures the unchanged selection and rejects substituted/missing fields,
+  identities, results, duplicate completion, nonempty raw history and missing
+  public completion. Abort, an admitted episode, invalid clocks and every
+  cancellable measurement/final proposal check prevent unchanged completion.
+  The bounded private reader validates the native closed result and zero usage,
+  advances one-record coverage without effects and rejects malformed rows.
+  This implements the accepted completed-result path as a pure owner proposal;
+  live owner scheduling/Store uncertainty, completion snapshots, no-episode
+  failed/cancelled results and admitted-episode endings remain open.
+  Seven-file focused checks pass 179 cases with two existing exclusions on the
+  current pair in 8.8 seconds and floor pair in 8.2 seconds. Complete outputs:
+  `/private/tmp/loopex-m7-standalone-completion-current-v2.log`, SHA-256
+  `7e2ab671f1026bf545d1740fd32425650b7a2a2dc3860a59a0285c54ffe5c7eb`;
+  `/private/tmp/loopex-m7-standalone-completion-floor-v1.log`, SHA-256
+  `86674818d102bfded2ee81335b381522d4cfc0ab60570b486c21e0dadd0ac429`.
+  The complete current Core suite passes 1,144 cases with eight existing
+  exclusions in 211.4 seconds; complete output
+  `/private/tmp/loopex-m7-standalone-completion-core-current.log`, SHA-256
+  `194944e12bbdc807349372c946c74c40e8c4ca5c346d5cb9c3045d1b03829e7c`.
+  Initial static checks pass, complete output
+  `/private/tmp/loopex-m7-standalone-completion-static.log`, SHA-256
+  `9fe651f497624d3b5dd8be22a0dfdba23087c02d768c3af9faab12535a65c0f4`.
+  Review then aligned the two delegating facade specifications and public
+  command documentation with the accepted completed-result return; their
+  function bodies stayed unchanged. Compilation, formatting, bootstrap,
+  documentation, dependency direction and version-train checks pass on that
+  final metadata, complete output
+  `/private/tmp/loopex-m7-standalone-completion-static-v2.log`, SHA-256
+  `9a45103e4233946631333c57280e628af5b601d7aa333e6368b8bba164cbc9a0`.
+  The plan's stale fixed-core-instruction progress statement now describes its
+  existing captured-host implementation and remaining helper/fallback work.
+  These development checks do not replace the exact-candidate fast check or
+  closure matrix.
+  The initial two-file selection failed one new fixture that attempted to create
+  an already-invalid instruction/system-ceiling configuration, 28/29 passed;
+  `/private/tmp/loopex-m7-standalone-completion-current-v1.log`, SHA-256
+  `0ae47099ad8a93516d5d3ceeb4bb5c11547890eccc149749bc9b133bbb4ad03c`.
+  The fixture now asserts the existing configuration rejection instead of
+  constructing unreachable durable state; no configuration limit or product
+  assertion was weakened. That failed output remains failed.
+  One added T07 result/replay subtask closes: T01–T19 originals stay
+  54 done / 119 todo / 6 retired; added counts become 202 done / 8 todo, T07
+  added 35 done / 0 todo. Both maintainer decisions remain pending. No original
+  complete-workflow item closes from this preparatory result path.
+
 - Done: the standalone episode admission constructor now freezes the accepted
   compact command's explicit bounds, current ordinary configuration version,
   normalized summarizer/instruction capture, measured trigger and last original
@@ -7544,6 +7598,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Retain unchanged standalone completion and its exact event in one replay-checked proposal without an episode, return the completed five-member result on duplicate lookup while preserving admission observation, release the pending slot, validate bounded private coverage, and prove strict result/history/event/cancellation refusal on both toolchains. Live owner scheduling, Store uncertainty, snapshots and failed/cancelled completion remain open.
 
 - [x] Implement standalone episode admission/replay capture with command-owned bounds and absolute deadline, unchanged empty-history planning, retained settings before new host/clock lookup, original rendering-offender identity and exact journal-version capture; prove malformed/rehashed capture refusal, succession, cancellation and bounded private-history coverage on both toolchains. Live owner admission, dispatch and completion remain open.
 

@@ -191,7 +191,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       do: owner_identity("drain_fence_incarnation", session_id, owner_epoch)
 
   @doc false
-  @spec command(pid(), owner(), map()) :: {:accepted, binary()} | {:error, term()}
+  @spec command(pid(), owner(), map()) :: {:accepted, binary()} | {:error, term()} | map()
   def command(coordinator, owner, command)
       when is_pid(coordinator) and is_map(owner) and is_map(command) do
     safe_call(coordinator, {:command, owner, command}, :infinity)

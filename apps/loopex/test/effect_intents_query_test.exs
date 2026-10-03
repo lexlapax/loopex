@@ -348,6 +348,51 @@ defmodule Loopex.EffectIntentsQueryTest do
     end
   end
 
+  test "unchanged compact completion advances bounded coverage without effects", context do
+    %{runtime: runtime, session: session, reference: reference, records: original} = context
+    history = Enum.take(original, 2)
+    history = List.update_at(history, 0, &%{&1 | payload: Genesis.genesis([])})
+    {:ok, state} = SessionState.recover(session, history, [])
+
+    {:ok, compact} =
+      SessionState.propose(state, %{
+        type: :compact,
+        command_id: "compact",
+        bounds: %{max_attempts: 1, deadline_ms: 1, token_budget: 1}
+      })
+
+    {state, history, events} = retain(state, compact, history, [])
+    {:ok, completion} = SessionState.propose_unchanged_compact(state, 1_000, fn -> :ok end)
+    {state, records, events} = retain(state, completion, history, events)
+    assert {:ok, ^state} = SessionState.recover(session, records, events)
+    install_history(reference, records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert length(pages) == length(records)
+    assert Enum.all?(pages, &(&1.rows == []))
+    assert List.last(pages).next_cursor == nil
+    refute_receive {:forbidden_store_call, _}, 0
+
+    for transform <- [
+          &Map.put(&1, "run_id", "invented"),
+          &Map.delete(&1, "command_id"),
+          &Map.put(&1, "observed_at", -1),
+          &Map.put(&1, "observed_at", 18_446_744_073_709_551_616),
+          &put_in(&1, ["result", "disposition"], "failed"),
+          &put_in(&1, ["result", "cleanup"], "unknown"),
+          &put_in(&1, ["result", "checkpoint_id"], "invented"),
+          &put_in(&1, ["result", "usage", "attempts"], 1),
+          &put_in(&1, ["result", "usage", "reported_tokens"], 1),
+          &put_in(&1, ["result", "extra"], nil)
+        ] do
+      install_history(
+        reference,
+        change_payload(records, "compact_command_completed_v1", transform)
+      )
+
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+  end
+
   test "later appends stay outside a captured cut and resume verifies the retained boundary",
        context do
     %{

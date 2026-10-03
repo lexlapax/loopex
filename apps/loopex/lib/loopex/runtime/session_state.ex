@@ -395,11 +395,13 @@ defmodule Loopex.Runtime.SessionState do
   The reducer first canonicalizes the bounded command. Existing bindings return
   their retained response without another transaction. New accepted and
   rejected admissions both return Store-ready records so a later repetition
-  cannot change merely because run state moved on.
+  cannot change merely because run state moved on. A completed standalone
+  compact returns ADR 0043's retained five-member result; its original admission
+  remains available to the separate admission-disposition query.
   """
   @spec propose(t(), map(), map()) ::
           {:ok, proposal()}
-          | {:replayed, {:accepted, binary()} | {:error, term()}}
+          | {:replayed, {:accepted, binary()} | {:error, term()} | map()}
           | {:error, term()}
   def propose(state, command, resolved \\ %{})
 
@@ -408,6 +410,9 @@ defmodule Loopex.Runtime.SessionState do
     with {:ok, normalized} <- normalize_command(command),
          {:ok, digest} <- command_digest(normalized) do
       case Map.fetch(state.commands, normalized.command_id) do
+        {:ok, %{digest: ^digest, result: result}} ->
+          {:replayed, result}
+
         {:ok, %{digest: ^digest, reply: reply}} ->
           {:replayed, reply}
 
@@ -1228,6 +1233,61 @@ defmodule Loopex.Runtime.SessionState do
          now <= @uint64_max - pending["bounds"]["deadline_ms"],
        do: :ok,
        else: {:error, :maintenance_deadline_unrepresentable}
+  end
+
+  # Concept: an empty fitting session completes compact without a summarizer.
+  # Technical depth: ADR 0043's unchanged result and completion event commit in
+  # the same owner transaction. The exact current projection must fit and render
+  # with no eligible raw units. No episode, provider attempt, usage or checkpoint
+  # is created; replay proves the selection from the preceding durable state.
+  @doc false
+  @spec propose_unchanged_compact(t(), term(), function()) ::
+          {:ok, proposal()} | {:error, term()} | {:refused, term()}
+  def propose_unchanged_compact(state, now, check) do
+    with {:ok, record} <- unchanged_compact_record(state, now, check),
+         {:ok, proposal} <-
+           internal_proposal(state, record["episode_id"] <> ":completed", record),
+         :ok <- check.() do
+      {:ok, proposal}
+    end
+  end
+
+  defp unchanged_compact_record(state, now, check) do
+    with %{"abort_command_id" => nil} = pending <- state.pending_compact,
+         true <- is_nil(state.active_maintenance),
+         false <- Map.has_key?(state.maintenance_episodes, pending["episode_id"]),
+         :ok <- standalone_maintenance_clock(pending, now),
+         {:ok, %{eligible_unit_count: 0}} <-
+           preflight_standalone_compaction(
+             state,
+             now + pending["bounds"]["deadline_ms"],
+             check
+           ) do
+      {:ok,
+       %{
+         :kind => "compact_command_completed_v1",
+         "command_id" => pending["command_id"],
+         "episode_id" => pending["episode_id"],
+         "observed_at" => now,
+         "result" => %{
+           "disposition" => "unchanged",
+           "checkpoint_id" => nil,
+           "failure" => nil,
+           "usage" => %{
+             "attempts" => 0,
+             "reported_tokens" => 0,
+             "estimated_tokens" => 0,
+             "total_tokens" => 0
+           },
+           "cleanup" => "confirmed"
+         }
+       }}
+    else
+      {:ok, _nonempty} -> {:error, :compaction_required}
+      {:error, _} = error -> error
+      {:refused, _} = refusal -> refusal
+      _ -> {:error, :maintenance_not_quiescent}
+    end
   end
 
   # Concept: a source fit becomes dispatchable only with its complete request.
@@ -5280,6 +5340,7 @@ defmodule Loopex.Runtime.SessionState do
               "tool_result_preparation_state_v1",
               "maintenance_episode_admitted_v1",
               "standalone_maintenance_episode_admitted_v1",
+              "compact_command_completed_v1",
               "maintenance_episode_terminal_v1",
               "compaction_checkpoint_committed_v1",
               "maintenance_request_committed_v1",
@@ -6700,6 +6761,38 @@ defmodule Loopex.Runtime.SessionState do
        }, []}
     else
       _ -> {:error, :invalid_maintenance_episode_transition}
+    end
+  end
+
+  # Concept: a completed command releases its slot only with retained evidence.
+  # Technical depth: regenerate the closed unchanged row before installing its
+  # result beside the original admission binding. The derived public event is
+  # part of the same proposal; private replay refuses duplicate completions,
+  # substituted results or identities, and unchanged over nonempty raw history.
+  defp apply_internal_record(state, %{kind: "compact_command_completed_v1"} = record) do
+    with {:ok, expected} <- unchanged_compact_record(state, record["observed_at"], fn -> :ok end),
+         true <- expected == record,
+         command_id = record["command_id"],
+         %{} = binding <- state.commands[command_id],
+         false <- Map.has_key?(binding, :result) do
+      completed = Map.take(record, ~w(episode_id command_id result))
+
+      event =
+        Map.merge(completed, %{
+          kind: "context.compaction_finished",
+          event_id: stable_id("event-compact-finished", state.session_id, command_id)
+        })
+
+      next = %{
+        state
+        | pending_compact: nil,
+          commands:
+            Map.put(state.commands, command_id, Map.put(binding, :result, record["result"]))
+      }
+
+      {:ok, next, [event]}
+    else
+      _ -> {:error, :invalid_compact_completion_transition}
     end
   end
 
