@@ -3,6 +3,14 @@
 
 Concept: [M7 coding-agent proof](M7.md#concept).
 
+
+The [2026-10-02 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+supersedes this plan's older-format/client compatibility, upgrade and
+cross-version rollback obligations. Before 1.0, remove superseded code and keep
+only current contracts. Current-format restart/replay, effect uncertainty,
+authority, cleanup and backup/restore remain acceptance obligations. Retired
+checklist rows retain their original identities and are not counted as passes.
+
 <a id="technical-plan-prerequisites"></a>
 ### Prerequisites and Acceptance Points
 
@@ -185,8 +193,8 @@ well-formed initialization, client digest mismatch, both mixed-offer orders,
 daemon accept-time expiry and foreground continued refusal using real transport
 paths; framing-only vectors cannot prove these behaviors. Preserve historical literal
 schema/vector validation where retained; old-only offers to an M7 live server now
-prove explicit refusal. Keep the pinned historical release/rollback lanes
-unchanged and add the new-generation consumers to the M7 lanes.
+prove explicit refusal. The pre-1.0 maintainer override retires historical
+release/rollback lanes; current-generation consumers remain required in M7 lanes.
 The implementation updates the operator/developer protocol references, examples
 and migration notes to show the new client/server pair and expected upgrade
 diagnostic. Do not rewrite current-product documentation before that integration.
@@ -1180,6 +1188,12 @@ second truth writer. Operator timing against a
 
 #### V13. Upgrade and supported rollback
 
+The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+retires the historical upgrade, old-reader and cross-version rollback work in
+this retained specification. Current-format backup/restore, complete manifests,
+separate workspace restoration and unknown-effect nonredispatch remain required.
+The removed historical runner is no longer a current check or selector.
+
 Use the updated client/server pair for M7. Inspect the retained negotiation
 cases first: old-only offers receive `unsupported_generation`, the correct new
 offer succeeds, the wrong server's generation refuses, and a digest mismatch
@@ -1555,24 +1569,16 @@ Concept: [Rollout and compatibility](M7.md#concept-plan-rollout).
   it. Normal M7 startup may already write new configuration; no broad backward-read
   promise follows from an unchanged storage container.
 
-The old reference is the published `v0.3.0` source at
-`187d6efa6a1cfda6fc48785bcaba916405b85c88`. Retain or build its exact executable
-with source/toolchain/digest evidence before the fixture run. A later source-docs
-commit is not a substitute for that artifact. Extend `scripts/rollback-lane.sh`
-and its selectors to cover the M7 matrix without dropping its earlier proofs.
-Keep the v0.2.0↔v0.3.0 fixture pair pinned to those exact historical artifacts
-and its original assertions. Add a distinct v0.3.0↔M7 pair: M6-to-M7 recovery
-must preserve staged truth; M7-to-M6 new-record cases expect safe refusal or
-the isolated backup-restore procedure, never successful decoding of v3 genesis
-by M6. Do not silently retarget an old positive-read vector to M7 and invert
-its expected result. The operator first stops all owners and removes the old
-binary's access to the live upgraded root through their launch procedure;
-this is a runbook precondition, not a new store marker claimed to fence M6.
-This fixture and runbook procedure does not implement M8's backup commands.
-Quiescent backups include sessions, runtime control, artifacts, executor
-receipts, private continuation/recovery state, catalogs and host ledgers; compare complete manifests after restoring
-into an empty root. Old staged v1 requests and old tool-definition bytes remain
-unchanged; new semantics have explicit versions. Pre-v2 genesis remains refused.
+The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+supersedes the older-reader, upgrade and cross-version rollback bullets above.
+The old archive runner, helpers and exclusive fixtures have been removed.
+Current-format recovery preserves staged requests and resolves uncertainty
+without redispatch. The operator stops all owners and prevents access to the
+root during a quiescent backup or restore. Backups include sessions, runtime
+control, artifacts, executor receipts, private continuation/recovery state,
+catalogs and host ledgers. Restore into an empty root, compare complete
+manifests and restore disposable workspace state separately. This procedure
+does not implement M8's backup commands.
 
 No installer, tag, publication or compatibility freeze is part of M7. A release
 label is separately selected. Accepted historical plans and evidence remain

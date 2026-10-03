@@ -91,7 +91,7 @@ Concept: [Selection](verification.md#concept-verification-selection).
 
 | Boundary | Where its checks live |
 | --- | --- |
-| Store port | `apps/loopex_store_local/test/` conformance and fault-injection cases, `apps/loopex/test/` recovery and `commit_unknown` cases; old-reader refusal in `interaction_lifecycle_test.exs` |
+| Store port | `apps/loopex_store_local/test/` conformance and fault-injection cases, `apps/loopex/test/` current-format restart/replay and `commit_unknown` cases |
 | Model port | `apps/loopex_llm_reqllm/test/` adapter, streaming conformance, credential plane; the `real_provider` cases |
 | Executor port | `apps/loopex_executor_local/test/` authority, receipts, cancellation, coding tools; `apps/loopex/test/cancellation*_test.exs` |
 | Wire protocol | `apps/loopex_protocol/test/` vectors and negotiation, `apps/loopex_app_server/test/`, `clients/node/vectors.mjs`; `docs/developer/compatibility-surfaces.md` |
@@ -123,7 +123,6 @@ was already selected; a group plus one of its rows is an ordinary union.
 | `node_client` | The Node client cases in app server, protocol, daemon and CLI |
 | `long_bound` | The current long-bound cases in core, local executor and daemon, plus the ReqLLM transport-drain case |
 | `cross_uid` | The daemon's two Linux cross-UID cases |
-| `rollback` | The released `v0.2.0` and candidate archive compatibility lane |
 
 Rows 1 and 2 are attended and cannot be selected individually. Unknown names,
 missing names, duplicate names and any other argument refuse with exit 2
@@ -136,10 +135,11 @@ uses local Ollama with provider credential variables removed and requires a
 reachable model named by `LOOPEX_RELEASE_OLLAMA_MODEL=ollama:<installed-model>`.
 Row 11 maps the release credential to `ANTHROPIC_API_KEY` and removes the
 other hosted-provider keys for its test process. Node is required for
-`node_client`, provider row 4 and provider row 9. The `rollback` selection
-requires the recorded `v0.2.0` closure tag, then stages archives of that
-commit and the candidate. It needs neither a credential nor Node. The full
-run retains both credential and Node preconditions. An explicitly selected
+`node_client`, provider row 4 and provider row 9. The
+[pre-1.0 maintainer override](agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+removes the cross-version `rollback` selector, its staging and its exclusive
+fixtures. Selecting it returns exit 2 before any staging or Node invocation.
+The full run retains both credential and Node preconditions. An explicitly selected
 `cross_uid` refuses outside
 Linux before staging. Every selection keeps the fresh-source extraction and
 build, then runs only its selected test lanes. Its final line is

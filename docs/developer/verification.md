@@ -83,7 +83,7 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 | --- | --- |
 | Code or tests behind an unchanged boundary | Nothing; the suite is the proof |
 | A port behaviour (Store, model, executor, extension, transport) or an adapter of one | Nothing more to run; the review confirms the port's conformance suite still runs against every adapter |
-| Durable records, the Store, recovery | Nothing more to run; the review confirms the fault-injection and old-reader cases still cover the change |
+| Durable records, the Store, recovery | Nothing more to run; the review confirms current-format fault injection, restart/replay and uncertainty cases still cover the change |
 | The wire protocol, its schema or vectors | The Node consumer workflows (`--only node_client`, part of the release check), and the compatibility surfaces page updated in the same change |
 | The CLI or operator-facing commands | The operator page that describes the behavior updated in the same change; a changed operator command also selects its workflow in the release check |
 | Provider or credential handling | The applicable unattended real-provider cases, selected with `check-release.sh --only`; attended cases remain mandatory at closure |
@@ -96,12 +96,13 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 Pass each selection as `--only NAME`, repeating the option to combine lanes.
 `real_provider` selects all nine unattended real-provider rows (3 through 11);
 `real-provider-3` through `real-provider-11` select one exact row. The other
-names are `node_client`, `long_bound`, `cross_uid` and `rollback`. Rows 1 and 2
+names are `node_client`, `long_bound` and `cross_uid`. Rows 1 and 2
 are attended and cannot be selected. Row 10 exercises local Ollama without a
 provider credential; row 11 exercises the hosted ephemeral profile with one.
-`long_bound` includes the ReqLLM transport-drain proof, and `rollback`
-compares the released `v0.2.0` and candidate archives without a credential or
-Node. Unknown names, missing names and duplicate names refuse before staging.
+`long_bound` includes the ReqLLM transport-drain proof. The
+[pre-1.0 maintainer override](agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+retires cross-version archive compatibility and its `rollback` selector.
+Unknown names, removed names, missing names and duplicate names refuse before staging.
 Selections run the shared fresh-source build first. They require a provider
 credential or pinned Node only when the selected cases need it. A selected
 `cross_uid` lane requires Linux and refuses elsewhere. A successful selection

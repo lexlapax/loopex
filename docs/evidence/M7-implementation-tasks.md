@@ -13,6 +13,11 @@ tracked separately and do not increase the original denominator. An unchecked
 original item may have substantial partial implementation; it closes only when
 its entire stated outcome is proved.
 
+Retired original rows use `[-]` and remain in the 186-item denominator.
+They are counted separately from done and todo, never as passing evidence. The
+[pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+retires older-version compatibility obligations; current-format proofs remain.
+
 Run `python3 scripts/m7-task-status.py` for the current T00–T19 tally. The
 [read-only reporter](../../scripts/m7-task-status.py) counts the two sections
 separately and refuses missing/duplicate task headings or a changed original
@@ -97,7 +102,61 @@ reservation/deadline rules and frozen native prefixes. The three contract
 questions under Current work remain unanswered; the history-correction approval
 did not resolve them. No paid provider calls were made during this check.
 
+<a id="current-work"></a>
 ## Current work
+
+- Done: record the maintainer's pre-1.0 current-contract rule and retire the
+  historical cross-version archive runner. Remove its eleven exclusive helpers,
+  shell archive fixture and CLI archive-checker suite. Remove old-tag staging
+  and execution from the release runner and the retired fixture from the fast
+  check. The removed `rollback` selector now refuses before Node or staging.
+  The runner's current fresh-source build, exact redaction/collision checks,
+  failed-redactor status retention and real-provider manifest census remain.
+  Current and floor runner fixtures passed in 12.5/11.5 measured seconds:
+  - `/private/tmp/loopex-m7-pre1-release-runner-current-v1.log`, SHA-256
+    `c4420c1aae398eb95ea6a13a4847a030c2690e5c47e3df96fb2c3436745506b4`.
+  - `/private/tmp/loopex-m7-pre1-release-runner-floor-v1.log`, SHA-256
+    `5ad8711b58ebf7ff6dcb18ddab87f0b9070dcf5d20450ff69ed0f76ae2b8235a`.
+  Formatting/status/documentation gates passed in 10.5 measured seconds:
+  `/private/tmp/loopex-m7-pre1-gates-current-v1.log`, SHA-256
+  `8a66e1ddc2942ad8d9f9a4074f104ed478c9fd154d78be53c4458d1db4e4ac53`.
+  The reporter now counts retired rows separately, rejects invalid states and
+  retains all 186 original item texts exactly against the supplied attachment.
+  The completed old-receipt decoding row is retired too; its historical proof
+  stays recorded at its revision. Original tally: 50 done / 129 todo / 7 retired.
+  Added tally: 154 done / 12 todo. Current product decoder/API/protocol cleanup
+  remains open; removing this exclusive runner family does not close it.
+
+- Failed integration: the one full fast check on exact committed
+  `c788127fe02a57f1105ccfb8a50f5044e55e15d9` exited 1 after 1,408.7 measured
+  seconds. Ten application suites passed; CLI passed 535 of 536 cases and
+  failed the owner-exit chat-output fixture's pre-acquisition 100-ms writer
+  receive. Complete output `/private/tmp/loopex-m7-c788127f-fast-check.log`,
+  SHA-256 `62c3d089cfbf57320ef06464758a299c63be42178b12b3cf8237191c5f3b605d`.
+  The fixture now acquires the writer through synchronous Agent startup before
+  inducing owner loss. Exact writer-normal/IO-worker-killed DOWN assertions and
+  original receive waits are unchanged; failure cleanup stops the fixture owner.
+  The complete chat-output suite passed eleven cases on both supported pairs,
+  in 6.6/6.1 measured seconds including VM startup:
+  - `/private/tmp/loopex-m7-chat-output-setup-current-v1.log`, SHA-256
+    `35a5aa7bcf4bf0d217c68183d522b3efe1209a8c2dcf4eed3e5c7aecc52310c2`.
+  - `/private/tmp/loopex-m7-chat-output-setup-floor-v1.log`, SHA-256
+    `afbb2cd09bcaaa9b99695d7125f78538dec1ec56bd182d3cae9fe2b8f999badd`.
+  No later bytes claim that failed parent as a pass. The next integration
+  candidate requires its own single fast check.
+
+- Maintainer decisions, 2026-10-02: all three new chat-startup recommendations
+  are explicitly approved against the retained packet. No startup question
+  remains unanswered. The subsequent rule removes pre-1.0 legacy/backward
+  compatibility and requires old code to be deleted. It supersedes the approved
+  legacy-unbound resume exception before implementation. Public startup reads,
+  new-chat physical binding and owner-only diagnostic reporting remain approved.
+  Seven original compatibility-only rows are retired rather than marked done;
+  the original denominator remains 186. Added T15 tasks track removal and
+  current-format recovery/backup proof. Historical progress text below describes
+  its own revisions. The full c788127f check finished with one CLI failure;
+  its retained output predates this scope change and is failed evidence.
+  There are no live checks or delegated agents at this checkpoint.
 
 - Done: live v3 authority witnesses now stage exact hostile claims in all
   host instruction sections and in role-shaped instructions. A denying policy
@@ -4411,7 +4470,7 @@ bGlzZWNvbmQpIDw9IGN1dG9mZgogICAgIGVuZAogICBlbmQKIAo=
 - [ ] Create the M7 fixture manifest with exact prompts, budgets, allowed changes and objective results.
 - [ ] Assign every operator step and negative scenario to a named test or demonstration.
 - [ ] Prepare the indexed closure-evidence scaffold with results marked Pending.
-- [ ] Retain the exact historical binaries and session roots needed for migration and rollback.
+- [-] Retain the exact historical binaries and session roots needed for migration and rollback.
 - [ ] Verify manifest completeness, invalid-manifest rejection and actual instruction/tool-schema costs.
 
 ### Added implementation subtasks
@@ -4999,7 +5058,7 @@ or check was relaxed.
 - [x] Capture workspace/environment facts and exact selected tool schemas.
 - [x] Enforce the configured system ceiling and complete serialized-request limit.
 - [x] Implement receipt revision 4, including continuation costs and source/configuration binding.
-- [x] Preserve old receipt decoding.
+- [-] Preserve old receipt decoding.
 - [ ] Test admitted, declined, changed and oversized instructions, long paths, restart and exact staged bytes.
 - [ ] Prove instructions cannot widen policy or helper authority.
 
@@ -5090,7 +5149,7 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [ ] Resolve and implement the public prepared startup facts and exact-create/provenance facade decision; prove holder fences, retained pending policy/model/workspace identity, exact-byte refusal and zero pre-activation dispatch.
-- [ ] Resolve and implement new-chat physical workspace binding and the explicit legacy-unbound resume decision; prove retained identity conflicts, physical replacement, unchanged historical bytes and actual settled/unresolved migration.
+- [ ] Implement the approved new-chat physical workspace binding; require it for current-format chat resume and prove retained identity conflicts, symlink retargeting and physical replacement before activation. The superseded legacy-unbound exception and older-root migration are retired.
 
 - [x] Join the private chat driver to a live Core session; prove two-prompt continuity, acknowledgement ordering, wait backpressure, exact question answers, pipe/interactive refusal, captured invocation bounds and queued-run inheritance, lost acknowledgement observation, blocked input/admission cancellation, actor loss, unknown-cleanup retention and closing after outer cleanup on both supported toolchains. Public command startup, status/maintenance joins, tracing, installed signals and resume remain pending.
 - [x] Resolve the prepared-recovery configuration-read boundary, then expose its exact retained host capture under capability ownership and prove refusal/fencing without activation or dispatch.
@@ -5342,15 +5401,21 @@ or check was relaxed.
 
 ### Original checklist
 
-- [ ] Upgrade exact settled and unresolved M6 roots without changing staged requests.
+- [-] Upgrade exact settled and unresolved M6 roots without changing staged requests.
 - [ ] Prove unknown effects are not redispatched.
-- [ ] Observe the actual historical reader against disposable new-format roots.
-- [ ] Preserve the existing v0.2.0↔v0.3.0 rollback proof.
-- [ ] Add the separate v0.3.0↔M7 proof.
+- [-] Observe the actual historical reader against disposable new-format roots.
+- [-] Preserve the existing v0.2.0↔v0.3.0 rollback proof.
+- [-] Add the separate v0.3.0↔M7 proof.
 - [ ] Implement access-prevention and complete backup-restore instructions.
 - [ ] Restore into an empty root and compare complete manifests.
 - [ ] Restore workspace state separately from runtime state.
-- [ ] Join automated rollback artifacts to attended restore inspection without rerunning the case.
+- [-] Join automated rollback artifacts to attended restore inspection without rerunning the case.
+
+### Added implementation subtasks
+
+- [x] Remove the historical cross-version archive lane, its exclusive helpers and fixtures; refuse its retired selector before staging and prove current build/redaction/manifest checks on both supported toolchains.
+- [ ] Remove superseded record/API/protocol readers, tool generations, host fallbacks and compatibility-only fixtures; migrate current callers and retain one current contract at each boundary.
+- [ ] Prove current-format backup/restore and recovery with complete manifests, separate workspace state and exact nonredispatch of unresolved effects.
 
 ## T16 — Complete integration and regression checks
 
@@ -5367,6 +5432,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Acquire the owner-exit chat fixture writer synchronously before inducing loss; preserve exact DOWN reasons and receive deadlines, retaining failed parent evidence and both-pair focused proof.
 
 - [x] Run the full fast check once on the clean committed guarded-activation and ordered-status candidate; retain exact SHA, complete output and terminal digest without reusing earlier integration proof.
 

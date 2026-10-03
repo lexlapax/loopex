@@ -132,6 +132,15 @@ plan's progress section or the context map, in one short entry naming what
 changed and why. Historical override dispositions in the context map remain
 true for the revisions they name; nothing requires re-recording them.
 
+**Before 1.0.** Maintain only the current contract for each boundary. Remove
+superseded code, decoders, compatibility shims and fallback paths instead of
+supporting older versions. Older-root migration, old-client compatibility and
+cross-version rollback are not required acceptance proofs. Current-format
+restart/replay, durability, authority, cleanup and backup/restore remain required.
+The [maintainer disposition](docs/developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+supersedes earlier compatibility obligations for active work; historical evidence
+remains a record of its tested revision.
+
 Resolve reversible in-scope ambiguity with the smallest safe assumption, and
 research mechanics and alternatives autonomously. Ask only when plausible
 answers require a material decision about purpose, scope, observable behavior,

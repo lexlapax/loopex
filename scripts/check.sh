@@ -175,7 +175,6 @@ step "release runner fixtures" bash scripts/test/check-release-test.sh
 step "escript inventory fixture" bash scripts/test/escript-inventory-test.sh
 step "archive manifest fixtures" bash scripts/test/stage-archive-manifest-test.sh
 step "archive source binding fixtures" bash scripts/test/source-archive-check-test.sh
-step "rollback archive binding fixtures" bash scripts/test/rollback-archive-test.sh
 step "attended release fixtures" bash scripts/test/attended-release-test.sh
 step "floor lane fixtures" bash scripts/test/floor-lane-test.sh
 step "M6 demonstration fixtures" bash scripts/test/m6-demonstration-test.sh

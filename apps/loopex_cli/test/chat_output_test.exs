@@ -168,17 +168,19 @@ defmodule LoopexCli.ChatOutputTest do
 
   test "owner exit joins blocked IO, and another process cannot enqueue output" do
     device = device()
-    test = self()
 
-    owner =
-      spawn(fn ->
+    # Concept: setup readiness is separate from the owner-loss witness.
+    # Technical depth: synchronous owner startup returns the acquired writer;
+    # scheduler delay before acquisition spends no cleanup receive deadline.
+    {:ok, owner} =
+      Agent.start_link(fn ->
         {:ok, writer} = ChatOutput.start_link(device)
         :ok = ChatOutput.write(writer, :text, "blocked")
-        send(test, {:writer, writer})
-        receive do: (:stop -> :ok)
+        writer
       end)
 
-    assert_receive {:writer, writer}
+    on_exit(fn -> if Process.alive?(owner), do: Agent.stop(owner) end)
+    writer = Agent.get(owner, & &1)
     assert_receive {:device_write, _peer, "blocked"}
 
     worker = :sys.get_state(writer).current.pid
@@ -187,7 +189,7 @@ defmodule LoopexCli.ChatOutputTest do
     worker_monitor = Process.monitor(worker)
     assert_monitor_established(writer)
     assert_monitor_established(worker)
-    send(owner, :stop)
+    :ok = Agent.stop(owner)
     assert_receive {:DOWN, ^writer_monitor, :process, ^writer, :normal}
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}
   end

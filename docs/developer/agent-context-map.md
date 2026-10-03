@@ -6502,3 +6502,43 @@ The roadmap pair and project README are updated with this acceptance; M8–M10
 remain drafts, with no successor implementation authority. The maintainer
 explicitly authorizes committing/pushing this record and merging/pushing it to
 `main`. No tag, package, release or milestone closure is authorized.
+
+<a id="disposition-m7-chat-startup-2026-10-02"></a>
+### M7 chat startup decisions, 2026-10-02
+
+The maintainer explicitly selected all three recommendations presented in this
+chat: a separate holder-only public prepared-startup read plus existing exact
+creation/provenance facade queries; physical workspace binding in new chat
+options with an explicit legacy-unbound resume exception; and owner-only
+already-redacted settings admission through the existing bounded diagnostic
+consumer. The complete reviewed packet is retained in
+[the task record](../evidence/M7-implementation-tasks.md#current-work), source
+`/private/tmp/loopex-m7-chat-startup-decision.md`, SHA-256
+`d4f6a1a4db1a625854ebb67161bc4cd8593c2031375fd3c4d3c8e4cbe32d75c4`.
+This accepts those exact APIs, shapes, limits and ownership rules. It does not
+close M7 or authorize publication. The immediately following maintainer rule
+supersedes the legacy-unbound exception before implementation; the public reads,
+new-chat binding and bounded settings path remain approved.
+
+<a id="disposition-pre1-current-contract-2026-10-02"></a>
+### Current contracts only before 1.0, 2026-10-02
+
+The maintainer instructed:
+
+> as a rule, until 1.0, no legacy or backward compatibility needs to be honored. remove old code.
+
+This explicit current decision supersedes active pre-1.0 compatibility clauses
+in earlier ADRs, plans and verification procedures. Implementation retains only
+the current format/API/protocol of each boundary and removes superseded readers,
+shims and fallback branches. Active M7 older-root upgrade, historical-reader,
+old-client and cross-version rollback proof obligations are retired; their
+retirement is a scope change, not passing evidence. Current-format restart,
+uncertain-effect nonredispatch, authority, security, cleanup and backup/restore
+remain required. Existing historical plans and retained runs remain true at
+their named revisions. No vision file is edited by this request.
+The original 186-item M7 checklist retains retired rows and counts them
+separately; current implementation tasks replace only the obsolete portions of
+mixed rows. No provider retry, deadline relaxation, milestone closure, merge,
+release or publication is authorized. In particular, the just-approved legacy
+chat-resume exception is retired: current chat requires its retained physical
+workspace binding, and unsupported older roots receive no migration fallback.

@@ -194,28 +194,6 @@ for retained in source-archive-manifest source-archive-manifest.source-identity 
   (umask 077; set -C; : >"$retain/$retained") 2>/dev/null ||
     { printf 'check-release: retained path unavailable or already exists: %s\n' "$retain/$retained" >&2; exit 2; }
 done
-# The rollback driver receives only retained, independently named archive and
-# Git-tree bytes. Stage both before entering the candidate's fresh-source
-# extraction; the driver itself has no checkout or Git dependency.
-if release_selected rollback; then
-  rollback_old=$(git rev-parse 'v0.2.0^{commit}')
-  [ "$rollback_old" = 3f81b04828901a6fb05b29e8b6bed211eed2d376 ] ||
-    { echo 'check-release: v0.2.0 does not name the recorded closure commit' >&2; exit 2; }
-  for label in old new; do
-    for suffix in archive.tar projection identity; do
-      (umask 077; set -C; : >"$retain/rollback-$label.$suffix") 2>/dev/null ||
-        { printf 'check-release: rollback retained path unavailable: %s\n' "$retain/rollback-$label.$suffix" >&2; exit 2; }
-    done
-    if [ "$label" = old ]; then stage_sha=$rollback_old; else stage_sha=$commit; fi
-    git --no-replace-objects archive "$stage_sha" >"$retain/rollback-$label.archive.tar"
-    git --no-replace-objects ls-tree -rz -r -t --full-tree "$stage_sha" >"$retain/rollback-$label.projection"
-    git --no-replace-objects show -s --format='commit %H%ncommitter-date %cI' "$stage_sha" >"$retain/rollback-$label.identity"
-    printf 'check-release: rollback staged %s %s\n' "$label" "$stage_sha"
-    for suffix in archive.tar projection identity; do
-      release_retain_identity "$retain/rollback-$label.$suffix"
-    done
-  done
-fi
 tree="$fresh/src"
 printf 'check-release: fresh-source extraction of %s\n' "$commit"
 (
@@ -353,28 +331,6 @@ if release_selected cross_uid && [ "$platform" = Linux ]; then
   lane cross-uid loopex_daemon 2 without_credential mix test --only cross_uid
 elif release_selected cross_uid; then
   printf 'cross_uid: not run (%s)\n' "$platform"
-fi
-if release_selected rollback; then
-  rollback_log="$retain/rollback.log"
-  (umask 077; set -C; : >"$rollback_log") 2>/dev/null ||
-    { echo 'check-release: rollback log unavailable or already exists' >&2; exit 2; }
-  rollback_started=$SECONDS
-  set +e
-  without_credential bash "$tree/scripts/rollback-lane.sh" \
-    "$retain" "$rollback_old" "$retain/rollback-old.archive.tar" \
-    "$retain/rollback-old.projection" "$retain/rollback-old.identity" \
-    "$commit" "$retain/rollback-new.archive.tar" \
-    "$retain/rollback-new.projection" "$retain/rollback-new.identity" 2>&1 |
-    release_redact | tee "$rollback_log"
-  rollback_statuses=("${PIPESTATUS[@]}")
-  set -e
-  printf 'rollback-evidence: command_status=%s redactor_status=%s tee_status=%s duration_seconds=%s\n' \
-    "${rollback_statuses[0]}" "${rollback_statuses[1]}" "${rollback_statuses[2]}" \
-    "$((SECONDS - rollback_started))" >>"$rollback_log"
-  release_retain_identity "$rollback_log"
-  [ "${rollback_statuses[0]}" -eq 0 ] && [ "${rollback_statuses[1]}" -eq 0 ] &&
-    [ "${rollback_statuses[2]}" -eq 0 ] ||
-    { echo 'check-release: rollback RED' >&2; exit 1; }
 fi
 printf 'check-release: total=%ss\n' "$((SECONDS - started))"
 if [ "$release_mode" = selection-only ]; then

@@ -15,7 +15,7 @@ def task_counts(source):
             task = heading[1]
             if task in tasks:
                 raise ValueError(f"duplicate task heading: {task}")
-            tasks[task] = {"original": [0, 0], "added": [0, 0]}
+            tasks[task] = {"original": [0, 0, 0], "added": [0, 0, 0]}
             section = None
         elif line.startswith("## "):
             task = section = None
@@ -25,9 +25,11 @@ def task_counts(source):
                 "### Added implementation subtasks": "added",
             }.get(line)
         elif task and section:
-            checkbox = re.fullmatch(r"- \[([ x])\] .+", line)
+            checkbox = re.fullmatch(r"- \[([ x-])\] .+", line)
             if checkbox:
-                tasks[task][section][0 if checkbox[1] == "x" else 1] += 1
+                tasks[task][section][{"x": 0, " ": 1, "-": 2}[checkbox[1]]] += 1
+            elif line.startswith("- ["):
+                raise ValueError(f"unsupported checklist status: {line}")
 
     expected = [f"T{number:02d}" for number in range(20)]
     if list(tasks) != expected:
@@ -44,14 +46,16 @@ def main():
         raise ValueError("usage: python3 scripts/m7-task-status.py")
     ledger = Path(__file__).resolve().parent.parent / "docs/evidence/M7-implementation-tasks.md"
     tasks = task_counts(ledger.read_text(encoding="utf-8"))
-    print("| Task | Original done / todo | Added done / todo |")
+    print("| Task | Original done / todo / retired | Added done / todo / retired |")
     print("|---|---:|---:|")
     for task, row in tasks.items():
         original, added = row["original"], row["added"]
-        print(f"| {task} | {original[0]} / {original[1]} | {added[0]} / {added[1]} |")
+        print(f"| {task} | {original[0]} / {original[1]} / {original[2]} | {added[0]} / {added[1]} / {added[2]} |")
     for section in ("original", "added"):
-        done, todo = (sum(row[section][index] for row in tasks.values()) for index in (0, 1))
-        print(f"\n{section.capitalize()}: {done} done / {todo} todo.")
+        done, todo, retired = (
+            sum(row[section][index] for row in tasks.values()) for index in (0, 1, 2)
+        )
+        print(f"\n{section.capitalize()}: {done} done / {todo} todo / {retired} retired.")
 
 
 if __name__ == "__main__":

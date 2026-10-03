@@ -33,8 +33,8 @@ expect_refusal() {
 }
 release_select
 for row in 1 2 3 4 5 6 7 8 9 10 11; do release_selected "real-provider-$row" || fail "full omitted row $row"; done
-release_selected node_client && release_selected long_bound && release_selected cross_uid &&
-  release_selected rollback || fail 'full omitted a group'
+release_selected node_client && release_selected long_bound && release_selected cross_uid ||
+  fail 'full omitted a group'
 release_select --only real_provider --only real-provider-5 --only long_bound
 count=0
 for row in 1 2 3 4 5 6 7 8 9 10 11; do
@@ -58,9 +58,7 @@ release_select --only node_client
 release_needs_node || fail 'node_client omitted its Node preflight'
 if release_needs_provider; then fail 'node_client spuriously requires a credential'; fi
 expect_refusal --only
-release_select --only rollback
-release_selected rollback || fail 'rollback selector did not select its lane'
-if release_needs_provider || release_needs_node; then fail 'rollback has unrelated preflights'; fi
+expect_refusal --only rollback
 release_select --only long_bound
 expect_refusal --only real-provider-1
 expect_refusal --only real-provider-2
@@ -314,16 +312,12 @@ grep -q 'command_status=0 tee_status=24 summary_status=0' "$retain/tee-failed.lo
   ! grep -Fq "$LOOPEX_PROVIDER_API_KEY" "$retain/redactor-failed.log" "$work/redactor-failed.output" ||
     fail 'raw output escaped after redactor failure'
 )
-# Run the runner's build and rollback pipeline blocks with disposable commands.
+# Run the runner's current fresh-source build pipeline with disposable commands.
 # All four names share one value to exercise the redactor's collision path.
 mkdir -p "$work/pipeline-bin"
 cat >"$work/pipeline-bin/mix" <<'EOF'
 #!/usr/bin/env bash
 printf 'build emitted %s\n' "$RELEASE_TEST_SECRET"
-EOF
-cat >"$tree/scripts/rollback-lane.sh" <<'EOF'
-#!/usr/bin/env bash
-printf 'rollback emitted %s\n' "$RELEASE_TEST_SECRET"
 EOF
 chmod +x "$work/pipeline-bin/mix"
 awk '
@@ -331,58 +325,39 @@ awk '
   inside && /^elixir "\$tree\/scripts\/escript-inventory.exs"/ { exit }
   inside { print }
 ' "$root/scripts/check-release.sh" >"$work/build-pipeline.sh"
-awk '
-  /^  without_credential bash "\$tree\/scripts\/rollback-lane.sh"/ { inside = 1 }
-  inside && /^fi$/ { exit }
-  inside { print }
-' "$root/scripts/check-release.sh" >"$work/rollback-pipeline.sh"
-[ -s "$work/build-pipeline.sh" ] && [ -s "$work/rollback-pipeline.sh" ] ||
-  fail 'release pipeline fixture could not find the runner blocks'
-for pipeline in build rollback; do
-  for redactor in live failed; do
-    status=0
-    output="$work/$pipeline-$redactor.output"
-    pipeline_retain="$work/pipeline-retained/$pipeline-$redactor"
-    mkdir -p "$pipeline_retain"
-    if [ "$pipeline" = build ]; then
-      log="$pipeline_retain/fresh-source-build.log"
-    else
-      log="$pipeline_retain/rollback.log"
-    fi
-    (
-      retain=$pipeline_retain
-      export RELEASE_TEST_SECRET=release-pipeline-collision-synthetic
-      export LOOPEX_PROVIDER_API_KEY=$RELEASE_TEST_SECRET
-      export OPENAI_API_KEY=$RELEASE_TEST_SECRET
-      export ANTHROPIC_API_KEY=$RELEASE_TEST_SECRET
-      export OPENROUTER_API_KEY=$RELEASE_TEST_SECRET
-      export PATH="$work/pipeline-bin:$PATH"
-      if [ "$redactor" = failed ]; then release_redact() { return 27; }; fi
-      fresh_started=$SECONDS
-      rollback_started=$SECONDS
-      rollback_old=old
-      commit=new
-      rollback_log=$log
-      set +e
-      if [ "$pipeline" = build ]; then
-        source "$work/build-pipeline.sh"
-      else
-        source "$work/rollback-pipeline.sh"
-      fi
-    ) >"$output" 2>&1 || status=$?
-    if [ "$redactor" = failed ]; then
-      [ "$status" -eq 1 ] || fail "$pipeline passed after redactor failure (status=$status)"
-      grep -q 'redactor_status=27' "$log" || fail "$pipeline lost redactor failure status"
-    else
-      [ "$status" -eq 0 ] || fail "$pipeline fixture returned $status"
-      grep -q 'command_status=0 redactor_status=0 tee_status=0' "$log" ||
-        fail "$pipeline lost pipeline statuses"
-      grep -Fq '[REDACTED]' "$log" && grep -Fq '[REDACTED]' "$output" ||
-        fail "$pipeline did not redact the shared value"
-    fi
-    ! grep -Fq 'release-pipeline-collision-synthetic' "$log" "$output" ||
-      fail "$pipeline published a supported credential value"
-  done
+[ -s "$work/build-pipeline.sh" ] ||
+  fail 'release pipeline fixture could not find the build block'
+for redactor in live failed; do
+  status=0
+  output="$work/build-$redactor.output"
+  pipeline_retain="$work/pipeline-retained/build-$redactor"
+  mkdir -p "$pipeline_retain"
+  log="$pipeline_retain/fresh-source-build.log"
+  (
+    retain=$pipeline_retain
+    export RELEASE_TEST_SECRET=release-pipeline-collision-synthetic
+    export LOOPEX_PROVIDER_API_KEY=$RELEASE_TEST_SECRET
+    export OPENAI_API_KEY=$RELEASE_TEST_SECRET
+    export ANTHROPIC_API_KEY=$RELEASE_TEST_SECRET
+    export OPENROUTER_API_KEY=$RELEASE_TEST_SECRET
+    export PATH="$work/pipeline-bin:$PATH"
+    if [ "$redactor" = failed ]; then release_redact() { return 27; }; fi
+    fresh_started=$SECONDS
+    set +e
+    source "$work/build-pipeline.sh"
+  ) >"$output" 2>&1 || status=$?
+  if [ "$redactor" = failed ]; then
+    [ "$status" -eq 1 ] || fail "build passed after redactor failure (status=$status)"
+    grep -q 'redactor_status=27' "$log" || fail 'build lost redactor failure status'
+  else
+    [ "$status" -eq 0 ] || fail "build fixture returned $status"
+    grep -q 'command_status=0 redactor_status=0 tee_status=0' "$log" ||
+      fail 'build lost pipeline statuses'
+    grep -Fq '[REDACTED]' "$log" && grep -Fq '[REDACTED]' "$output" ||
+      fail 'build did not redact the shared value'
+  fi
+  ! grep -Fq 'release-pipeline-collision-synthetic' "$log" "$output" ||
+    fail 'build published a supported credential value'
 done
 before=$(release_digest "$retain/green.log")
 status=0
@@ -484,8 +459,8 @@ grep -q 'LOOPEX_PROVIDER_API_KEY is required' "$work/preflight-output" || fail '
 [ ! -s "$RELEASE_TEST_MARKER" ] || fail 'missing credential reached Node or staging'
 preflight 77 --only long_bound
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'long_bound queried Node or refused the absent credential'
-preflight 77 --only rollback
-[ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'rollback queried Node or required a real credential'
+preflight 2 --only rollback
+[ ! -s "$RELEASE_TEST_MARKER" ] || fail 'retired rollback selector reached Node or staging'
 preflight 2 --only real-provider-10
 grep -q 'LOOPEX_RELEASE_OLLAMA_MODEL is required' "$work/preflight-output" || fail 'local Ollama model refusal missing'
 [ ! -s "$RELEASE_TEST_MARKER" ] || fail 'missing Ollama model reached Node or staging'

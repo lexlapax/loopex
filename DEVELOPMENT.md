@@ -151,10 +151,9 @@ fast check excludes. On Linux the last lane runs the daemon's two
 unprivileged user named in `LOOPEX_CROSS_UID_USER` that you may run a command
 as with `sudo -n`. Elsewhere that lane prints `cross_uid: not run (Darwin)` and
 the run ends `PASS (closure-incomplete: cross_uid not run)`; closure needs a
-Linux run ending in a plain `PASS`. The separate `--only rollback` lane builds
-pristine `v0.2.0` and candidate source archives with a scripted provider and
-checks the documented N/N-1 interaction and skill behavior without a real
-credential. Every lane prints its executed count and
+Linux run ending in a plain `PASS`. The pre-1.0 current-contract rule retires
+the old cross-version `rollback` lane and its historical archive requirements;
+the removed selector refuses before staging. Every current lane prints its executed count and
 elapsed time. Provider keys are not placed in command arguments; exact
 nonempty values of the four supported key names are masked before release-lane
 output reaches the terminal or retained evidence. The attended terminal
