@@ -1631,8 +1631,11 @@ Captured parent capacity, preparation expiry, cancellation and protected-unit
 checks refuse before intent. A pure tail selector now releases terminal units
 oldest-first through complete-candidate fit probes, preserves protected units,
 releases all eligible units for explicit origin, and grows only unreleased tails
-within the 2,048-token preference. Exact ordinary-request measurement, captured
-rendering offenders and prior-checkpoint substitution still need the owner join.
+within the 2,048-token preference. Configured ordinary staging and the q=0
+ordinary-limit probe now share the request/receipt constructor and full record
+sizing, preserving fixed inputs, frozen context, empty resource headers and
+cancellation. Thinking targets, captured rendering offenders, prior-checkpoint
+substitution and live triggering still need the owner join.
 Maintenance settlement now retains valid summaries pending checkpoints, charges
 exact or conservative usage once, preserves abort/deadline precedence and permits
 only the one exact not-dispatched retry. Live successors finish inherited lost

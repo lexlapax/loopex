@@ -1241,6 +1241,215 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: configured staging and compaction probes render the same request.
+  # Technical depth: the captured run configuration owns instructions, model,
+  # tools and sampling. Projection preserves frozen native messages and costs
+  # continuation through the shared receipt builder. This constructs plain
+  # candidate data only; admission and journal ownership remain separate.
+  @doc false
+  @spec reference_model_candidate(t(), map(), list(), map(), map() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def reference_model_candidate(state, staging, selected, project, header) do
+    with configuration when is_map(configuration) <- run_configuration(state, staging.run_id),
+         {:ok, text} <- Instructions.render(configuration["instructions"]),
+         {:ok, entries, projection} <-
+           projected_lineage(
+             state,
+             staging.run_id,
+             Map.get(staging, :excerpt_allowance, 2_048),
+             staging.elements
+           ),
+         {blocks, sources} = Enum.unzip(selected),
+         steer = staging.steer,
+         messages =
+           [%{"role" => "system", "content" => text}] ++
+             Enum.map(blocks, &%{"role" => "user", "content" => &1}) ++
+             Enum.map(entries, &elem(&1, 1)) ++
+             if(steer, do: [%{"role" => "user", "content" => steer.content}], else: []),
+         {:ok, continuation} <-
+           model_continuation(
+             state,
+             staging.run_id,
+             messages,
+             steer && steer.command_id,
+             projection
+           ),
+         {:ok, request} <-
+           Loopex.Model.request(configuration["model"], messages,
+             continuation: continuation,
+             tools: state.tool_selection["definitions"],
+             sampling: SessionConfiguration.sampling(configuration),
+             deadline: staging.deadline
+           ),
+         sources =
+           [context_source(SessionConfiguration.instruction_source(configuration), "system")] ++
+             sources ++
+             Enum.map(entries, fn {reference, _} -> context_source(reference, "session") end) ++
+             if(steer,
+               do: [
+                 context_source(
+                   %{
+                     "kind" => "session_steer",
+                     "run_id" => staging.run_id,
+                     "command_id" => steer.command_id
+                   },
+                   "session"
+                 )
+               ],
+               else: []
+             ),
+         {:ok, receipt} <-
+           reference_context_receipt(
+             request,
+             sources,
+             project,
+             context_token_budget(state, staging.run_id),
+             header
+           ) do
+      {:ok, %{request: request, receipt: receipt, projection: projection}}
+    else
+      nil -> {:error, :invalid_session_configuration}
+      {:error, _} = error -> error
+    end
+  end
+
+  # Concept: choose whole retained units against the ordinary request's real cost.
+  # Technical depth: q=0 excludes removable excerpts and fresh optional bodies;
+  # both legal empty resource headers must fit. Frozen context stays exact.
+  # Fit includes captured instructions, tool definitions, steer, continuation,
+  # metadata and the complete receipt-bearing record's fixed point. The tail
+  # preference counts raw session descriptors, excluding fixed steer. This
+  # ordinary-limit probe does not implement thinking targets, checkpoint
+  # substitution or a live automatic trigger, and never opens an attempt.
+  @doc false
+  @spec ordinary_compaction_tail(t(), map(), :automatic | :explicit, map(), function()) ::
+          {:ok, map()} | {:refused, term()} | {:error, term()}
+  def ordinary_compaction_tail(state, staging, origin, project, check)
+      when origin in [:automatic, :explicit] and is_function(check, 0) do
+    with true <- state.active_run_id == staging.run_id,
+         :ok <- check.(),
+         configuration when is_map(configuration) <- run_configuration(state, staging.run_id),
+         {:ok, units} <- compaction_units(state, staging.run_id) do
+      {selected, project, headers} =
+        case frozen_context(state, staging.run_id) do
+          nil ->
+            initial = Loopex.Runtime.ResourceContext.initial_header(staging.resources)
+            reserved = initial && Map.put(initial, "status", "retained_content_missing")
+            {[], project, Enum.uniq([initial, reserved])}
+
+          frozen ->
+            {frozen.selected, frozen.project, [frozen.resources]}
+        end
+
+      Conversation.compaction_tail(units, origin, fn tail ->
+        elements = Enum.flat_map(tail, & &1.elements)
+        probe = staging |> Map.put(:elements, elements) |> Map.put(:excerpt_allowance, 0)
+
+        with :ok <- check.(),
+             :ok <-
+               SessionConfiguration.preflight_history(
+                 configuration,
+                 elements,
+                 Enum.reject(state.run_order, &(&1 == staging.run_id))
+               ) do
+          Enum.reduce_while(headers, {:ok, 0}, fn header, {:ok, _} ->
+            with :ok <- check.(),
+                 {:ok, candidate} <-
+                   reference_model_candidate(state, probe, selected, project, header),
+                 record =
+                   model_request_record(
+                     state,
+                     staging.run_id,
+                     candidate.request,
+                     [
+                       applied_steer: staging.steer && staging.steer.command_id,
+                       context_receipt: candidate.receipt,
+                       lineage_projection: candidate.projection
+                     ],
+                     next_turn_number(state.pending_work[staging.run_id])
+                   ),
+                 {:ok, fixed} <- admit_context_candidate(record, state),
+                 :ok <- check.() do
+              tokens =
+                fixed["context_receipt"]["blocks"]
+                |> Enum.filter(
+                  &(&1["provenance_class"] == "session" and
+                      &1["source_reference"]["kind"] != "session_steer")
+                )
+                |> Enum.reduce(0, &(&1["token_cost"] + &2))
+
+              {:cont, {:ok, tokens}}
+            else
+              failure -> {:halt, failure}
+            end
+          end)
+        else
+          {:error, :canonical_history_rendering_unsupported} = error ->
+            {:refused, elem(error, 1)}
+
+          failure ->
+            failure
+        end
+      end)
+    else
+      false -> {:error, :maintenance_not_quiescent}
+      nil -> {:error, :invalid_session_configuration}
+      {:error, _} = error -> error
+    end
+  end
+
+  # Concept: ordinary and maintenance staging account for the same visible bytes.
+  # Technical depth: the reference receipt builder shares replay's descriptor,
+  # tool projection, estimator, provenance totals and ordered digest. It includes
+  # continuation once and leaves exact complete-record fixed-point sizing to the
+  # owning request constructor. A source/message mismatch refuses before zip.
+  @doc false
+  @spec reference_context_receipt(
+          Loopex.Model.request(),
+          list(),
+          map(),
+          pos_integer(),
+          map() | nil
+        ) ::
+          {:ok, map()} | {:error, term()}
+  def reference_context_receipt(request, sources, project, budget, header) do
+    with true <- length(request.messages) == length(sources),
+         {:ok, continuation} <-
+           Loopex.Model.Continuation.cost(request.continuation, request.model, request.messages),
+         {:ok, blocks} <- expected_context_blocks(request, sources) do
+      totals =
+        if header,
+          do: expected_resource_context_totals(blocks),
+          else: expected_context_totals(blocks)
+
+      receipt = %{
+        "provider_identity" => "loopex.context.reference",
+        "provider_revision" => 4,
+        "transformer_identity" => nil,
+        "transformer_revision" => nil,
+        "selector_identity" => nil,
+        "selector_revision" => nil,
+        "token_estimator" => "loopex.context_bytes.v2",
+        "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
+        "blocks" => blocks,
+        "totals" => totals,
+        "continuation_cost" => continuation,
+        "provider_estimated_tokens" =>
+          totals["token_cost"] + if(continuation, do: continuation["token_cost"], else: 0),
+        "context_token_budget" => budget,
+        "context_record_byte_ceiling" => Store.max_item_bytes(),
+        "record_byte_cost" => 0,
+        "ordered_descriptor_digest" => ordered_descriptor_digest(blocks),
+        "project_resource" => project
+      }
+
+      {:ok, if(header, do: Map.put(receipt, "resource_packs", header), else: receipt)}
+    else
+      false -> {:error, :context_receipt_source_mismatch}
+      {:error, _} = error -> error
+    end
+  end
+
   defp maintenance_request_candidate(
          state,
          episode,
@@ -1263,48 +1472,26 @@ defmodule Loopex.Runtime.SessionState do
              source.bytes,
              deadline
            ),
-         {:ok, blocks} <-
-           expected_context_blocks(request, [
-             context_source(SessionConfiguration.instruction_source(capture), "system"),
-             context_source(
-               %{"kind" => "compaction_source", "source_digest" => source.digest},
-               "session"
-             )
-           ]) do
-      header =
-        Loopex.Runtime.ResourceContext.initial_header(state.run_resources[episode["run_id"]])
-
-      totals =
-        if header,
-          do: expected_resource_context_totals(blocks),
-          else: expected_context_totals(blocks)
-
-      receipt = %{
-        "provider_identity" => "loopex.context.reference",
-        "provider_revision" => 4,
-        "transformer_identity" => nil,
-        "transformer_revision" => nil,
-        "selector_identity" => nil,
-        "selector_revision" => nil,
-        "token_estimator" => "loopex.context_bytes.v2",
-        "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
-        "blocks" => blocks,
-        "totals" => totals,
-        "continuation_cost" => nil,
-        "provider_estimated_tokens" => totals["token_cost"],
-        "context_token_budget" => capture["context_token_budget"],
-        "context_record_byte_ceiling" => Store.max_item_bytes(),
-        "record_byte_cost" => 0,
-        "ordered_descriptor_digest" => ordered_descriptor_digest(blocks),
-        "project_resource" => %{
-          "class" => "project_resource",
-          "receipt_revision" => 2,
-          "disposition" => "not_evaluated_maintenance",
-          "detail" => nil
-        }
-      }
-
-      receipt = if header, do: Map.put(receipt, "resource_packs", header), else: receipt
+         {:ok, receipt} <-
+           reference_context_receipt(
+             request,
+             [
+               context_source(SessionConfiguration.instruction_source(capture), "system"),
+               context_source(
+                 %{"kind" => "compaction_source", "source_digest" => source.digest},
+                 "session"
+               )
+             ],
+             %{
+               "class" => "project_resource",
+               "receipt_revision" => 2,
+               "disposition" => "not_evaluated_maintenance",
+               "detail" => nil
+             },
+             capture["context_token_budget"],
+             Loopex.Runtime.ResourceContext.initial_header(state.run_resources[episode["run_id"]])
+           ) do
+      totals = receipt["totals"]
 
       record = %{
         :kind => "maintenance_request_committed_v1",

@@ -42,7 +42,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Policy
   alias Loopex.ProjectResource
   alias Loopex.StreamDomain
-  alias LoopexProtocol.Canonical
   alias LoopexProtocol.ToolDefinition
   alias Loopex.Store
   alias Loopex.Store.OwnerLane
@@ -291,8 +290,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   #
   # Technical depth: an unknown canonicalization version is unavailable history
   # rather than something to decode with the current encoder and hope.
-  @descriptor_canonicalization_version "loopex.canonical.v1"
-  @descriptor_digest_domain "loopex.context.descriptors.v1"
   @uint64_max 18_446_744_073_709_551_615
 
   @doc false
@@ -3944,6 +3941,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp model_candidate(state, staging, selected, project_receipt, resource_header) do
+    case SessionState.run_configuration(state.durable, staging.run_id) do
+      nil ->
+        legacy_model_candidate(state, staging, selected, project_receipt, resource_header)
+
+      _configuration ->
+        SessionState.reference_model_candidate(
+          state.durable,
+          staging,
+          selected,
+          project_receipt,
+          resource_header
+        )
+    end
+  end
+
+  defp legacy_model_candidate(state, staging, selected, project_receipt, resource_header) do
     {blocks, sources} = Enum.unzip(selected)
 
     with {:ok, entries, projection} <-
@@ -3976,7 +3989,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
              deadline: staging.deadline
            ),
          {:ok, receipt} <-
-           context_receipt(
+           SessionState.reference_context_receipt(
              request,
              context_sources(
                state,
@@ -4118,97 +4131,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: every byte class staged for a model call says where it came from,
-  # what trust it carries, and what it cost before the provider sees it.
-  #
-  # Technical depth: this is one final ordered receipt over the three provenance
-  # classes ADR 0010 fixes for M2. The provider identity is the fixed local
-  # context stage, not the model provider; a future pluggable pipeline can change
-  # that identity without migrating the descriptor algebra. Project-resource
-  # admission remains nested so a declined class keeps its exact reason even
-  # though it contributes no block.
-  defp context_receipt(
-         request,
-         message_sources,
-         project_receipt,
-         context_token_budget,
-         resource_header
-       ) do
-    # Technical depth: `Enum.zip/2` truncates silently. A projection/source
-    # disagreement is therefore refused before commit instead of producing a
-    # receipt that simply omits the tail of the request it claims to describe.
-    with true <- length(request.messages) == length(message_sources),
-         {:ok, continuation_cost} <-
-           Loopex.Model.Continuation.cost(request.continuation, request.model, request.messages) do
-      message_blocks =
-        request.messages
-        |> Enum.zip(message_sources)
-        |> Enum.map(fn {message, source} ->
-          context_descriptor(source, Canonical.encode(message))
-        end)
-
-      blocks = message_blocks ++ Enum.map(request.tools, &tool_descriptor/1)
-      totals = context_totals(blocks, resource_header)
-
-      receipt =
-        %{
-          "provider_identity" => "loopex.context.reference",
-          "provider_revision" => 4,
-          "continuation_cost" => continuation_cost,
-          "transformer_identity" => nil,
-          "transformer_revision" => nil,
-          "selector_identity" => nil,
-          "selector_revision" => nil,
-          "token_estimator" => "loopex.context_bytes.v2",
-          "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
-          "blocks" => blocks,
-          "totals" => totals,
-          "project_resource" => project_receipt,
-          "context_token_budget" => context_token_budget,
-          "provider_estimated_tokens" =>
-            totals["token_cost"] +
-              if(continuation_cost, do: continuation_cost["token_cost"], else: 0),
-          "context_record_byte_ceiling" => Store.max_item_bytes(),
-          "record_byte_cost" => 0,
-          "ordered_descriptor_digest" => ordered_descriptor_digest(blocks)
-        }
-
-      {:ok,
-       if(resource_header, do: Map.put(receipt, "resource_packs", resource_header), else: receipt)}
-    else
-      false -> {:error, :context_receipt_source_mismatch}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  # Concept: the ordered descriptor list is bound by one digest rather than
-  # re-listed anywhere it has to be referred to.
-  #
-  # Technical depth: the preimage is the exact ASCII domain, one zero byte, and
-  # then each descriptor's eight-byte unsigned big-endian canonical length
-  # followed by its canonical bytes. Length framing is what stops two different
-  # descriptor sequences sharing a preimage. Hashing incrementally means no
-  # aggregate encoding of the whole list is ever allocated, which matters because
-  # the compact refusal has to carry this digest without carrying the list.
-  defp ordered_descriptor_digest(blocks) do
-    blocks
-    |> Enum.reduce(
-      :crypto.hash_update(
-        :crypto.hash_init(:sha256),
-        @descriptor_digest_domain <> <<0>>
-      ),
-      fn block, context ->
-        bytes = Canonical.encode(block)
-
-        context
-        |> :crypto.hash_update(<<byte_size(bytes)::unsigned-big-integer-size(64)>>)
-        |> :crypto.hash_update(bytes)
-      end
-    )
-    |> :crypto.hash_final()
-    |> Base.encode16(case: :lower)
-  end
-
   # Technical depth: the project sources are the ones the staged blocks actually
   # carry, not the ones the receipt's resolution would imply. A required-only
   # candidate measured under an eligible resolution keeps that resolution in its
@@ -4226,27 +4148,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
       Enum.map(session_entries, fn {source_reference, _message} ->
         source(source_reference, "session")
       end) ++ steer_sources(steer, run_id)
-  end
-
-  # Concept: a tool is charged for what the model is actually shown.
-  #
-  # Technical depth: ADR 0017 charges the model-facing projection for content
-  # digest, byte cost, and token cost, while the source reference keeps the whole
-  # generation triple and the full definition digest. Changing storage-only tool
-  # metadata therefore changes retained source identity and record bytes without
-  # misreporting a provider-context cost that did not change.
-  defp tool_descriptor(tool) do
-    source_reference = %{
-      "kind" => "tool_definition",
-      "tool_id" => Map.fetch!(tool, "tool_id"),
-      "tool_version" => Map.fetch!(tool, "tool_version"),
-      "definition_digest" => ToolDefinition.definition_digest(tool)
-    }
-
-    context_descriptor(
-      source(source_reference, "system"),
-      Canonical.encode(ToolDefinition.model_facing(tool))
-    )
   end
 
   defp project_sources(%{
@@ -4308,39 +4209,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
       "provenance_class" => provenance_class,
       "trust_class" => trust_class
     }
-  end
-
-  defp context_descriptor(source, bytes) do
-    Map.merge(source, %{
-      "content_digest" => Canonical.digest_bytes(bytes),
-      "byte_cost" => byte_size(bytes),
-      "token_cost" => Bounds.estimate(bytes)
-    })
-  end
-
-  # Technical depth: all three provenance buckets are always present, using zero
-  # costs for a class with no block, so a consumer reads the same shape whether
-  # or not a class contributed and the three buckets always sum back to both
-  # outer totals.
-  defp context_totals(blocks, resource_header) do
-    classes =
-      ~w(system session project_resource) ++ if(resource_header, do: ["resource_pack"], else: [])
-
-    by_provenance =
-      Map.new(classes, fn provenance ->
-        {provenance, sum_costs(Enum.filter(blocks, &(&1["provenance_class"] == provenance)))}
-      end)
-
-    Map.put(sum_costs(blocks), "by_provenance", by_provenance)
-  end
-
-  defp sum_costs(blocks) do
-    Enum.reduce(blocks, %{"byte_cost" => 0, "token_cost" => 0}, fn block, totals ->
-      %{
-        "byte_cost" => totals["byte_cost"] + block["byte_cost"],
-        "token_cost" => totals["token_cost"] + block["token_cost"]
-      }
-    end)
   end
 
   defp steer_message(nil), do: []

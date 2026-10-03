@@ -7,6 +7,197 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
   alias LoopexProtocol.{Canonical, Frame}
   alias Loopex.Store
 
+  test "ordinary tail selection uses the actual configured request and excludes fixed instruction cost from preference" do
+    {state, history, events} = admitted(List.duplicate(String.duplicate("x", 2_000), 3))
+    run = state.active_run_id
+    staging = ordinary_staging(state)
+    project = ordinary_project()
+
+    assert {:ok, choice} =
+             SessionState.ordinary_compaction_tail(state, staging, :automatic, project, fn ->
+               :ok
+             end)
+
+    assert choice.eligible_unit_count == 1
+    assert length(choice.retained_tail) == 3
+    assert choice.tail_tokens <= 2_048
+    assert choice.released_unit_count == 0
+
+    elements = Enum.flat_map(choice.retained_tail, & &1.elements)
+    probe = %{staging | elements: elements}
+
+    assert {:ok, candidate} =
+             SessionState.reference_model_candidate(state, probe, [], project, nil)
+
+    assert candidate.request.messages ==
+             [
+               %{
+                 "role" => "system",
+                 "content" =>
+                   "host.v1: Follow the host's captured instructions.\n\ncaptured environment"
+               }
+             ] ++
+               Enum.map(elements, &%{"role" => "user", "content" => &1.content})
+
+    assert candidate.receipt["provider_estimated_tokens"] > choice.tail_tokens
+
+    assert candidate.request.sampling ==
+             Loopex.Runtime.SessionConfiguration.sampling(state.configuration)
+
+    assert candidate.request.tools == []
+    assert candidate.request.continuation == nil
+    assert candidate.receipt["continuation_cost"] == nil
+
+    # Measurement is allowed while maintenance fences ordinary intent.
+    assert {:error, :maintenance_active} =
+             SessionState.preflight_model_request(state, run, candidate.request)
+
+    measured = %{state | active_maintenance: nil}
+
+    assert {:ok, record} =
+             SessionState.preflight_model_request(measured, run, candidate.request,
+               context_receipt: candidate.receipt,
+               lineage_projection: candidate.projection
+             )
+
+    assert {:ok, ^record, exact_bytes} = Store.normalize_and_measure_item(:record, record)
+    assert record["context_receipt"]["record_byte_cost"] == exact_bytes
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history, events)
+    assert recovered == state
+  end
+
+  test "fixed required content can refuse an otherwise small protected tail" do
+    {state, _, _} =
+      admitted(["old"],
+        ordinary_body: String.duplicate("s", 2_000),
+        current_content: String.duplicate("p", 1_500),
+        system_class_tokens: 1_024,
+        context_token_budget: 1_024
+      )
+
+    assert {:refused, refusal} =
+             SessionState.ordinary_compaction_tail(
+               state,
+               ordinary_staging(state),
+               :automatic,
+               ordinary_project(),
+               fn -> :ok end
+             )
+
+    assert refusal["dimension"] == "context_tokens"
+    assert refusal["observed"] > 1_024
+    assert refusal["limit"] == 1_024
+    assert refusal["record_byte_cost"] == nil
+  end
+
+  test "mandatory tails above the preference fit hard limits and explicit selection covers all older units" do
+    {state, _, _} =
+      admitted(["older", "newer"],
+        current_content: String.duplicate("p", 10_000),
+        resources: true
+      )
+
+    for origin <- [:automatic, :explicit] do
+      assert {:ok, choice} =
+               SessionState.ordinary_compaction_tail(
+                 state,
+                 ordinary_staging(state),
+                 origin,
+                 ordinary_project(),
+                 fn -> :ok end
+               )
+
+      assert choice.eligible_unit_count == 2
+      assert length(choice.retained_tail) == 1
+      assert choice.tail_tokens > 2_048
+      assert hd(choice.retained_tail).protected?
+    end
+  end
+
+  test "ordinary tail probes retain cancellation and complete-record refusal without dispatch" do
+    {state, _, _} =
+      admitted(["old"],
+        current_content: String.duplicate("p", 33_000),
+        context_token_budget: 16_384
+      )
+
+    assert {:refused, refusal} =
+             SessionState.ordinary_compaction_tail(
+               state,
+               ordinary_staging(state),
+               :automatic,
+               ordinary_project(),
+               fn -> :ok end
+             )
+
+    assert refusal["dimension"] == "context_record_bytes"
+    assert refusal["observed"] > 65_536
+    assert refusal["limit"] == 65_536
+    assert refusal["record_byte_cost"] == refusal["observed"]
+
+    assert {:error, :cancelled} =
+             SessionState.ordinary_compaction_tail(
+               state,
+               ordinary_staging(state),
+               :automatic,
+               ordinary_project(),
+               fn -> {:error, :cancelled} end
+             )
+
+    assert state.maintenance_episodes[state.active_maintenance]["attempts"] == 0
+    assert state.maintenance_episodes[state.active_maintenance]["stage"] == "source_preparation"
+  end
+
+  test "cancellation after complete candidate measurement is a failure rather than a fit result" do
+    {state, _, _} = admitted(["old"])
+    counter = :atomics.new(1, [])
+
+    check = fn ->
+      if :atomics.add_get(counter, 1, 1) == 4, do: {:error, :cancelled}, else: :ok
+    end
+
+    assert {:error, :cancelled} =
+             SessionState.ordinary_compaction_tail(
+               state,
+               ordinary_staging(state),
+               :automatic,
+               ordinary_project(),
+               check
+             )
+
+    assert :atomics.get(counter, 1) == 4
+    assert state.maintenance_episodes[state.active_maintenance]["attempts"] == 0
+
+    old = hd(state.run_order)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.ordinary_compaction_tail(
+               state,
+               %{ordinary_staging(state) | run_id: old},
+               :automatic,
+               ordinary_project(),
+               fn -> flunk("inactive run entered candidate measurement") end
+             )
+  end
+
+  defp ordinary_staging(state),
+    do: %{
+      run_id: state.active_run_id,
+      elements: SessionState.lineage_elements(state, state.active_run_id),
+      steer: SessionState.pending_steer(state, state.active_run_id),
+      resources: state.run_resources[state.active_run_id],
+      deadline: 61_001,
+      excerpt_allowance: 0
+    }
+
+  defp ordinary_project,
+    do: %{
+      "class" => "project_resource",
+      "receipt_revision" => 2,
+      "disposition" => "not_evaluated_required_failure",
+      "detail" => nil
+    }
+
   test "source staging binds originals, exact receipt and an adjacent attempt without ordinary work" do
     {state, history, events} = admitted(["early fact 猫", "another fact"])
     parent = state.active_run_id
@@ -840,10 +1031,18 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
   defp admitted(texts, options \\ []) do
     configuration =
       Map.put(
-        Genesis.configuration(),
+        Genesis.configuration(
+          Keyword.get(options, :ordinary_body, "Follow the host's captured instructions.")
+        ),
         "system_class_tokens",
         Keyword.get(options, :system_class_tokens, 5_000)
       )
+      |> Map.put("context_token_budget", Keyword.get(options, :context_token_budget, 8_192))
+      |> Map.update!("budget_origins", fn origins ->
+        if Keyword.has_key?(options, :context_token_budget),
+          do: Map.put(origins, "context_token_budget", "explicit"),
+          else: origins
+      end)
 
     history = [
       %{
@@ -875,7 +1074,7 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
           SessionState.propose(
             state,
             %{type: :prompt, command_id: "old-#{n}", content: text},
-            bounds()
+            Map.put(bounds(), :context_token_budget, configuration["context_token_budget"])
           )
 
         {state, rows, events} = commit(state, prompt, events)
@@ -925,8 +1124,13 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     {:ok, prompt} =
       SessionState.propose(
         state,
-        %{type: :prompt, command_id: "current", content: "protected"},
+        %{
+          type: :prompt,
+          command_id: "current",
+          content: Keyword.get(options, :current_content, "protected")
+        },
         Map.put(bounds(), :max_turns, Keyword.get(options, :max_turns, 8))
+        |> Map.put(:context_token_budget, configuration["context_token_budget"])
       )
 
     {state, rows, events} = commit(state, prompt, events)

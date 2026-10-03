@@ -325,6 +325,45 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: ordinary and maintenance staging share the reference receipt builder,
+  using replay's canonical descriptors, tool projection, estimator and ordered
+  digest. Configured live ordinary staging and the compaction-tail probe also
+  share the request builder. The ordinary-limit probe selects real replay-derived
+  complete units at q=0, includes fixed instructions, tools, steer, continuation,
+  metadata and complete record sizing, preserves frozen context and checks both
+  legal empty resource headers. It uses the 2,048-token preference only for raw
+  tail descriptors. Current-run protection, oversized mandatory tails, fixed
+  input overflow, complete-record byte refusal and cancellation before/after
+  measurement are proved without opening an attempt or bypassing the ordinary
+  staging fence. Thinking targets, prior-checkpoint substitution, captured
+  rendering offenders and the live automatic trigger remain open. This extends
+  T07's completed tail-selection subtask; all checkbox totals stay unchanged.
+
+  The sixteen-file selection passed 213 tests on each supported pair, including
+  real configured-owner, optional-resource and maintenance staging cases.
+  Current: 12.8 measured runner seconds,
+  `/private/tmp/loopex-m7-ordinary-tail-current-dev4.log`, SHA-256
+  `eb08139c4866fe79185fc2da666b414a03961feda01a4d3a1fe4c1506ea287c1`.
+  Floor: 13.6 measured runner seconds,
+  `/private/tmp/loopex-m7-ordinary-tail-floor-v1.log`, SHA-256
+  `761d4ae9f9ea700ec17af6f5d3b5e63af586a7ce780f5f146c1794b933e211b2`.
+  Formatting, warning-free compilation, dependency direction, structure/status,
+  documentation and diff gates passed in 23.8 measured seconds:
+  `/private/tmp/loopex-m7-ordinary-tail-gates-v1.log`, SHA-256
+  `c63da64aa1af250dd652c2aec134621531e715839401d46c6fb082e235f1694d`.
+  Initial fixture failures are retained. The real estimator charges one token
+  per three canonical bytes; explicit budget overrides require matching origin
+  and run-admission values; captured instructions must be rendered rather than
+  read from a nonexistent ordinary rendered_bytes member. Correcting these
+  fixture assumptions changes no production bound or assertion purpose.
+  `/private/tmp/loopex-m7-ordinary-tail-current-dev1.log`, SHA-256
+  `f7d7d663106c8b16dcd72312abf3dffdd24306ea19113595e627133cde3f789b`,
+  and `/private/tmp/loopex-m7-ordinary-tail-current-dev2.log`, SHA-256
+  `b32231e53a8fbbd98dd6947a2b96bb0f3c9366320ea3ff3d4fb9a1769ff492bb`.
+  All handles are terminal and collected; no agent or decision is pending.
+  The active goal continues on m7. This focused proof does not cover successful
+  checkpoint commitment, automatic dispatch or the full integration candidate.
+
 - Done: chat terminal outcomes preserve ADR 0043's approved v2 numeric and
   preparation failures. Outcome and CompactResult share the closed current
   failure validator; the independent Node consumers share their corresponding
@@ -6506,7 +6545,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Select a contiguous retained tail from validated complete units, releasing terminal units oldest-first, preserving protected and frozen units, releasing all eligible units for explicit origin, and growing only unreleased tails within the 2,048-token preference and whole-request fit callback. Prove irreducible refusal, rendering refusal, exact preference, mandatory oversized tail, interruption and fixed-input measurement for empty history on both toolchains. Exact owner request measurement, captured rendering offender and live automatic triggering remain open.
+- [x] Select a contiguous retained tail from validated complete units, releasing terminal units oldest-first, preserving protected and frozen units, releasing all eligible units for explicit origin, and growing only unreleased tails within the 2,048-token preference and whole-request fit callback. Prove irreducible refusal, rendering refusal, exact preference, mandatory oversized tail, interruption and fixed-input measurement for empty history on both toolchains. The owner now shares exact configured request/receipt construction with the q=0 ordinary-limit probe. Thinking targets, captured rendering offender, prior-checkpoint substitution and live automatic triggering remain open.
 
 - [x] Join maintenance settlement to durable episode accounting and strict replay, retaining natural bounded summaries pending checkpoints, atomically ending invalid/incomplete or lost attempts, enforcing one exact not-dispatched retry and captured parent capacity, preserving the first abort/deadline and late usage evidence, and proving depth compaction, duplicate/interrupted endings and successor recovery on both supported toolchains. Join the live owner recovery path for lost attempts and retained summary failures, with all three commit-uncertainty phases, exact joins, no redispatch and unchanged conversation. New summary dispatch/cleanup, checkpoint transactions and later prefixes remain open.
 
