@@ -14,6 +14,7 @@ defmodule Loopex.Runtime.MaintenanceConfiguration do
   """
 
   alias Loopex.Runtime.SessionConfiguration
+  alias LoopexProtocol.Canonical
   @levels ~w(default none low medium high)
   @version ~r/\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z/
 
@@ -93,6 +94,68 @@ defmodule Loopex.Runtime.MaintenanceConfiguration do
   end
 
   def validate_model(_), do: {:error, :maintenance_model_invalid}
+
+  # Concept: each episode retains its own summarizer and input allowance.
+  # Technical depth: derive the allowance from the parent and the fixed 1,024
+  # reserve, retain both origins, and digest the closed canonical capture. Replay
+  # recomputes the capture against the retained parent, never current host options.
+  @doc false
+  def capture(selection, instructions, parent) when is_map(parent) do
+    with :ok <- eligible_model(selection),
+         :ok <- instruction_capture(instructions),
+         true <-
+           is_integer(parent["configuration_version"]) and
+             parent["configuration_version"] > 0,
+         true <-
+           is_integer(parent["context_token_budget"]) and
+             parent["context_token_budget"] > 0,
+         true <- is_integer(parent["system_class_tokens"]) and parent["system_class_tokens"] > 0,
+         %{} = origins <- parent["budget_origins"],
+         true <- Enum.sort(Map.keys(origins)) == ~w(context_token_budget system_class_tokens),
+         true <-
+           origins["context_token_budget"] in ~w(model_window unknown_window explicit) and
+             origins["system_class_tokens"] in ~w(legacy_default explicit) do
+      window = selection["model_capabilities"]["context_window"]
+      allowance = if is_nil(window), do: 8_192, else: window - 1_024
+
+      captured = %{
+        "selection" => selection,
+        "instructions" => instructions,
+        "configuration_version" => parent["configuration_version"],
+        "context_token_budget" => min(parent["context_token_budget"], allowance),
+        "system_class_tokens" => parent["system_class_tokens"],
+        "budget_origins" => %{
+          "parent" => parent["budget_origins"],
+          "summarizer" => if(is_nil(window), do: "unknown_window", else: "model_window")
+        }
+      }
+
+      with {:ok, _} <- Loopex.Store.admit_bounded(captured) do
+        {:ok, Map.put(captured, "digest", capture_digest(captured))}
+      end
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_maintenance_configuration}
+    end
+  end
+
+  def capture(_, _, _), do: {:error, :invalid_maintenance_configuration}
+
+  @doc false
+  def validate_capture(
+        %{"selection" => selection, "instructions" => instructions} = captured,
+        parent
+      ) do
+    case capture(selection, instructions, parent) do
+      {:ok, ^captured} -> :ok
+      _ -> {:error, :invalid_maintenance_configuration}
+    end
+  end
+
+  def validate_capture(_, _), do: {:error, :invalid_maintenance_configuration}
+
+  defp capture_digest(captured),
+    do: :crypto.hash(:sha256, Canonical.encode(captured)) |> Base.encode16(case: :lower)
 
   # Concept: maintenance uses its own captured instructions and fixed reply
   # allowance rather than inheriting ordinary tools, resources or sampling.

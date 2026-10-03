@@ -165,10 +165,68 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Paused: the maintainer requested a safe restart checkpoint. See the
-  2026-10-02 restart handoff above for the complete T01–T19 tally and next steps.
+- Active: T07 durable compaction. The admission/replay foundation below is
+  implemented; next connect the serial owner to its ordinary-limit trigger,
+  fixed source-preparation cutoff, bounded selection, maintenance-specific
+  request/attempt/settlement records and checkpoint commit. Standalone compact,
+  automatic thinking headroom, abort/deadline terminal ordering, unknown-commit
+  fencing and live recovery remain open. No agents or decisions are pending.
+  All focused test handles are terminal and collected. The prior full check
+  covers `9e976839`, not these new implementation bytes.
+
+- Done: implement the closed `maintenance_episode_admitted_v1` reducer for an
+  automatic ordinary-limit episode, bound to its run and next staging identity.
+  Capture the explicitly configured summarizer/instructions, parent input/system
+  ceilings and origins, parent spending bounds, fixed four-attempt ceiling,
+  zero initial usage/progress and admission + 60,000-ms preparation cutoff.
+  Admission reads no current catalog and opens no provider attempt. Repeated
+  admission and owner succession reuse the retained capture and cutoff even
+  when current host settings are absent. Ordinary model staging is blocked
+  while maintenance is active. A run terminal also refuses until an episode
+  terminal clears that marker, preventing orphaned maintenance. Replay recomputes identities, configuration
+  capture/digest and parent-bound relations, rejecting duplicate, incomplete,
+  changed or consistently rehashed derived fields. This is the reducer foundation;
+  it is not yet called by the live owner and proves no summary dispatch,
+  checkpoint, standalone command or whole automatic-compaction workflow.
+
+  The five-file focused selection passed 53 tests on each supported pair in
+  3.0/2.6 measured runner seconds (0.4 suite seconds each). Current output:
+  `/private/tmp/loopex-m7-maintenance-admission-current-v4.log`, SHA-256
+  `2d49276b62afbe1cb0795a839bc09b1649ed4f03f2046144dd4e01c54dc19021`;
+  floor output `/private/tmp/loopex-m7-maintenance-admission-floor-v4.log`, SHA-256
+  `c020bddcae15b86ca45aa9c99d27bdbc8b93f1a999bb2c7fa7bad2b07d90fe61`.
+  The earlier 51-case selection passed both pairs before the explicit succession
+  proof was added. Review then found a run-terminal proposal which left an active episode orphaned.
+  The new regression failed before the fence: seven of eight tests passed,
+  `/private/tmp/loopex-m7-maintenance-terminal-failing-before.log`, SHA-256
+  `5bcc7362ec92e955614b30930198b3c6960550eeec0a974b306fff64496df180`.
+  Both proposal and replay now refuse that incomplete ordering. Complete output
+  inventory and final focused source digests:
+  `/private/tmp/loopex-m7-maintenance-admission-focused-evidence-v2.json`, SHA-256
+  `e1b1ddfa806d5312f93506c1ef80a5e19bbef62b054d4a88055cd43b4559dd36`.
+  The first gate selection stopped after formatting/compilation because the
+  invocation used nonexistent `mix loopex.doc_order`; the documented task is
+  `mix loopex.docs_check`. Failed invocation output:
+  `/private/tmp/loopex-m7-maintenance-admission-gates-v1.log`, SHA-256
+  `3ec34bfc22432018af00ced53f050f2bab3f5d03ac2f1c642f42287a292cae02`.
+  No product bound or existing assertion was weakened. Original T00–T19 tally
+  stays 51 done / 128 todo / 7 retired; added tally is 175 done / 9 todo.
+  T01–T19 alone: originals 51 / 122 / 6; added 171 / 8.
+
+  Final formatting, warning-free compilation, compiled documentation ordering,
+  dependency direction, repository structure/status and staged diff checks
+  passed in 23.5 measured seconds. Complete output:
+  `/private/tmp/loopex-m7-maintenance-admission-gates-v3.log`, SHA-256
+  `0a3d59746598cebf07ded8267e5f0dfef0e7aff2c68d9bc716622c8e58e5bbb0`.
+  No full integration run is claimed for this reducer-only checkpoint; run a
+  new clean committed integration candidate after the live owner join.
+
+
+- Done: the requested restart checkpoint was committed and pushed at
+  `daa31dbccfccb41f21f88ac9a56fed7a86f3ae73`. The maintainer resumed the active
+  goal on 2026-10-02; the handoff above remains its historical pause snapshot.
   No agents, live checks or maintainer questions remain. Product implementation
-  is `9e9768396d4d2a782e6ce87a56273f290bf289f8`; its full current-pair fast check
+  was `9e9768396d4d2a782e6ce87a56273f290bf289f8`; its full current-pair fast check
   passed all eleven application suites in 1,387.4 measured seconds. Complete
   terminal output `/private/tmp/loopex-m7-9e976839-fast-check.log`, SHA-256
   `9831595f0665c91833150ca5d34578a8be62c1086a6d6a84224c7524d167c9b5`.
@@ -5761,6 +5819,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Implement durable automatic ordinary-limit episode admission and replay with frozen maintenance configuration, parent/staging identity, spending bounds, zero counters, fixed preparation cutoff, ordinary-staging and run-terminal fences; prove owner succession, missing/unsupported settings, overflow, overlap refusal and rehashed tampering on both toolchains. Live owner triggering, dispatch, terminal and checkpoint integration remain open.
 
 - [x] Validate explicit Core maintenance model/instruction startup settings and privately forward exact captured instruction bytes to session owners.
 - [x] Validate and forward explicit maintenance instructions through all durable constructors and ephemeral startup before owned effects, preserving per-call refusal.

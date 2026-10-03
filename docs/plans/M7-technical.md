@@ -1583,6 +1583,16 @@ plus scripted two-prompt/restart/refusal/cleanup paths. Closing follows diagnost
 joins, composition cleanup, placement release and signal finish. Built multi-prompt
 provider, attended, maintenance/helper integration and closure evidence remain open.
 
+Automatic ordinary-limit episode admission now has a closed private reducer
+record, frozen maintenance model/instructions and derived input/system limits,
+parent spending bounds and the fixed admission + 60,000-ms preparation cutoff.
+Replay checks identities and derived captures against retained run truth; owner
+succession cannot renew the cutoff. Admission opens no attempt, publishes no
+event and blocks ordinary model staging and run terminals while active. Both-pair focused tests
+cover these reducer guarantees. The live owner does not invoke this admission
+yet; automatic/standalone dispatch, maintenance settlement, checkpoint commits,
+abort/deadline precedence and process/Store fault joins remain unproved.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

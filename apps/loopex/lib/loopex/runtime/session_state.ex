@@ -2,7 +2,7 @@ defmodule Loopex.Runtime.SessionState do
   @moduledoc """
   ## Concept
 
-  The pure durable state and command transition for an M1 session. It rebuilds
+  The pure durable state and command transition for a session. It rebuilds
   the current owner, command admissions, one active run, pending model intent,
   and public projection from Store-stamped history without performing IO.
 
@@ -21,6 +21,10 @@ defmodule Loopex.Runtime.SessionState do
   select the same recipe. Their payload members and public event members remain
   unchanged. Historical kinds reproduce their original IDs exactly. No record
   or retained event is rewritten, and unsupported variants refuse on replay.
+
+  Automatic maintenance admission retains the run's staging identity, bounds,
+  frozen summarizer configuration and fixed preparation cutoff. Admission alone
+  opens no provider attempt, changes no conversation and publishes no event.
   """
 
   @max_command_bytes 65_536
@@ -33,9 +37,10 @@ defmodule Loopex.Runtime.SessionState do
   ## Technical depth
 
   `commands` binds canonical command digests to stable admission responses.
-  `pending_work` contains plain model intents derived from committed prompt
-  admissions; Workstream B makes them observable as eligible but does not
-  dispatch them.
+  `pending_work` contains plain work intents derived from committed admissions.
+  The session coordinator dispatches them only after the owner's durable fence.
+  `maintenance_episodes` retains frozen maintenance admissions;
+  `active_maintenance` blocks ordinary model staging until that episode settles.
 
   `run_order` retains admission and promotion order reconstructed from history.
   `conversation` holds the committed elements of each run, which
@@ -114,6 +119,7 @@ defmodule Loopex.Runtime.SessionState do
   alias Loopex.Runtime.ContextAdmission
   alias Loopex.Runtime.ArtifactPreparation
   alias Loopex.Runtime.ProviderAttempt
+  alias Loopex.Runtime.MaintenanceConfiguration
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionConfiguration
   alias Loopex.Runtime.Instructions
@@ -241,6 +247,8 @@ defmodule Loopex.Runtime.SessionState do
             # record digest/cost and ADR 0015's five use labels, not output copies.
             tool_result_sources: %{},
             artifact_preparations: %{},
+            maintenance_episodes: %{},
+            active_maintenance: nil,
             prepared_tool_results: %{},
             lineage_projection_revision: nil,
             run_order: [],
@@ -966,6 +974,95 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: maintenance admission freezes one run's summarizer before work.
+  # Technical depth: this internal proposal binds the next ordinary staging
+  # identity, host capture and spending bounds. The fixed preparation cutoff is
+  # recorded once; an existing episode is returned before consulting a changed
+  # clock or host configuration. It grants no provider dispatch authority.
+  @doc false
+  def propose_maintenance_episode(%__MODULE__{} = state, run_id, selection, instructions, now) do
+    with {:ok, work, parent} <- maintenance_admission_context(state, run_id) do
+      identity = stable_id("maintenance", run_id, next_turn_number(work))
+
+      case Map.fetch(state.maintenance_episodes, identity) do
+        {:ok, episode} ->
+          {:retained, episode}
+
+        :error ->
+          with true <- is_nil(state.active_maintenance),
+               :ok <- maintenance_clock(state, run_id, now),
+               {:ok, capture} <- MaintenanceConfiguration.capture(selection, instructions, parent) do
+            record = %{
+              :kind => "maintenance_episode_admitted_v1",
+              "episode_id" => identity,
+              "run_id" => run_id,
+              "staging_turn_id" => stable_id("turn", run_id, next_turn_number(work)),
+              "trigger" => "ordinary_limit",
+              "origin" => "automatic",
+              "configuration_version" => parent["configuration_version"],
+              "maintenance_configuration" => capture,
+              "bounds" => maintenance_bounds(state, run_id),
+              "admitted_at" => now,
+              "preparation_deadline" => now + 60_000,
+              "attempts" => 0,
+              "summary_ordinal" => 1,
+              "checkpoint_id" => nil,
+              "usage" => %{
+                "attempts" => 0,
+                "reported_tokens" => 0,
+                "estimated_tokens" => 0,
+                "total_tokens" => 0
+              }
+            }
+
+            with {:ok, _} <- Store.admit_bounded(record) do
+              internal_proposal(state, identity <> ":admit", record)
+            end
+          else
+            false -> {:error, :maintenance_active}
+            error -> error
+          end
+      end
+    end
+  end
+
+  defp maintenance_admission_context(state, run_id) do
+    case {state.active_run_id, state.pending_work[run_id], run_configuration(state, run_id)} do
+      {^run_id, %{stage: stage} = work, %{} = parent}
+      when stage in ["model_pending", "turn_settled"] ->
+        if is_nil(state.aborting) and is_nil(state.open_interaction) and
+             is_nil(state.context_refusal) and is_nil(work[:continuation_exchange]) and
+             preparation_ready?(state, run_id) do
+          {:ok, work, parent}
+        else
+          {:error, :maintenance_not_quiescent}
+        end
+
+      _ ->
+        {:error, :maintenance_not_quiescent}
+    end
+  end
+
+  defp maintenance_clock(state, run_id, now) do
+    cond do
+      not is_integer(now) or now < 0 or now > @uint64_max - 60_000 ->
+        {:error, :maintenance_deadline_unrepresentable}
+
+      is_integer(state.deadlines[run_id]) and state.deadlines[run_id] <= now ->
+        {:error, :run_deadline_reached}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp maintenance_bounds(state, run_id) do
+    state.bounds[run_id]
+    |> Map.take([:max_turns, :token_budget, :deadline_ms])
+    |> encode_plain()
+    |> Map.merge(%{"max_attempts" => 4, "run_deadline" => state.deadlines[run_id]})
+  end
+
   @doc false
   @spec propose_preparation_failure(t(), binary(), atom(), integer()) ::
           {:ok, proposal()} | {:error, atom()}
@@ -1398,6 +1495,15 @@ defmodule Loopex.Runtime.SessionState do
           | {:refused_not_required_only, map()}
           | {:error, term()}
   def preflight_model_request(state, run_id, request, options \\ [])
+
+  def preflight_model_request(
+        %__MODULE__{active_maintenance: episode},
+        _run_id,
+        _request,
+        _options
+      )
+      when not is_nil(episode),
+      do: {:error, :maintenance_active}
 
   def preflight_model_request(%__MODULE__{} = state, run_id, request, options)
       when is_binary(run_id) and is_map(request) and is_list(options) do
@@ -3108,6 +3214,7 @@ defmodule Loopex.Runtime.SessionState do
               "executor_receipt_committed",
               "executor_receipt_committed_v2",
               "tool_result_preparation_state_v1",
+              "maintenance_episode_admitted_v1",
               "tool_result_reference_prepared",
               "tool_result_preparation_failed_v1",
               "outcome_unknown_committed",
@@ -3771,6 +3878,76 @@ defmodule Loopex.Runtime.SessionState do
     )
   end
 
+  # Concept: a run ending cannot orphan its active maintenance episode.
+  # Technical depth: ADR 0043 requires the episode terminal first in the same
+  # transaction. Until it clears the active marker, both proposal and replay
+  # refuse an ordinary run terminal, including abort and deadline endings.
+  defp apply_internal_record(
+         %{active_maintenance: episode},
+         %{kind: "run_terminal_committed"}
+       )
+       when is_binary(episode),
+       do: {:error, :invalid_maintenance_episode_transition}
+
+  # Concept: a replayed episode is the same frozen admission, not a new one.
+  # Technical depth: rebuild every derived identity, cutoff, bound and zero
+  # counter against the preceding durable run. Recomputing only the capture's
+  # digest would allow a consistently rehashed substitution of its parent limits.
+  defp apply_internal_record(state, %{kind: "maintenance_episode_admitted_v1"} = record) do
+    with true <-
+           closed_history_map?(record, [
+             :kind,
+             "episode_id",
+             "run_id",
+             "staging_turn_id",
+             "trigger",
+             "origin",
+             "configuration_version",
+             "maintenance_configuration",
+             "bounds",
+             "admitted_at",
+             "preparation_deadline",
+             "attempts",
+             "summary_ordinal",
+             "checkpoint_id",
+             "usage"
+           ]),
+         run_id = record["run_id"],
+         {:ok, work, parent} <- maintenance_admission_context(state, run_id),
+         identity = stable_id("maintenance", run_id, next_turn_number(work)),
+         true <- is_nil(state.active_maintenance),
+         false <- Map.has_key?(state.maintenance_episodes, identity),
+         :ok <- maintenance_clock(state, run_id, record["admitted_at"]),
+         :ok <-
+           MaintenanceConfiguration.validate_capture(record["maintenance_configuration"], parent),
+         true <-
+           record["episode_id"] == identity and
+             record["staging_turn_id"] == stable_id("turn", run_id, next_turn_number(work)) and
+             record["configuration_version"] == parent["configuration_version"] and
+             record["bounds"] == maintenance_bounds(state, run_id) and
+             record["trigger"] == "ordinary_limit" and record["origin"] == "automatic" and
+             record["preparation_deadline"] == record["admitted_at"] + 60_000 and
+             record["attempts"] == 0 and record["summary_ordinal"] == 1 and
+             is_nil(record["checkpoint_id"]) and
+             record["usage"] == %{
+               "attempts" => 0,
+               "reported_tokens" => 0,
+               "estimated_tokens" => 0,
+               "total_tokens" => 0
+             } do
+      episode = Map.put(record, "stage", "source_preparation")
+
+      {:ok,
+       %{
+         state
+         | active_maintenance: identity,
+           maintenance_episodes: Map.put(state.maintenance_episodes, identity, episode)
+       }, []}
+    else
+      _ -> {:error, :invalid_maintenance_episode_transition}
+    end
+  end
+
   # Concept: the request row alone stages nothing observable.
   #
   # Technical depth: ADR 0018 makes the consecutive attempt-open row the
@@ -3792,7 +3969,8 @@ defmodule Loopex.Runtime.SessionState do
          } = record
        )
        when kind in ["model_request_committed", "model_request_committed_v2"] do
-    with true <- preparation_ready?(state, run_id),
+    with true <- is_nil(state.active_maintenance),
+         true <- preparation_ready?(state, run_id),
          true <- is_nil(Map.get(state.run_resources, run_id)),
          {:ok, request} <- decode_request(request),
          %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
@@ -3855,7 +4033,8 @@ defmodule Loopex.Runtime.SessionState do
               "model_request_committed_resources_v1",
               "model_request_committed_resources_v2"
             ] do
-    with true <- preparation_ready?(state, run_id),
+    with true <- is_nil(state.active_maintenance),
+         true <- preparation_ready?(state, run_id),
          true <- not is_nil(Map.get(state.run_resources, run_id)),
          true <-
            map_size(record) ==
