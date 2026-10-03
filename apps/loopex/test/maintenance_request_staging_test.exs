@@ -424,12 +424,10 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
           {%{raw | tool_calls: [%{id: "call", name: "forbidden", arguments: %{}}]},
            "maintenance_summary_invalid"}
         ] do
-      assert {:ok, proposal} =
+      assert {:ok, settlement_proposal} =
                SessionState.propose_maintenance_attempt_settled(state, {:reply, reply})
 
-      assert [prefix, settlement, terminal] = proposal.records
-      assert prefix.kind == "maintenance_episode_terminal_v1"
-      assert settlement.kind == "maintenance_attempt_settled_v3"
+      assert [settlement] = settlement_proposal.records
 
       assert settlement["accounting"] == %{
                "source" => "reported",
@@ -437,17 +435,44 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
                "output_tokens" => 19
              }
 
-      assert terminal["failure"]["cause"] == cause
+      assert settlement_proposal.events == []
+      {pending, settled_rows, pending_events} = commit(state, settlement_proposal, events)
+      assert pending.maintenance_episodes[episode_id]["stage"] == "checkpoint_pending"
+      assert pending.maintenance_episodes[episode_id]["summary_failure"] == cause
+      assert pending.charged[state.active_run_id] == %{tokens: 56, source: :reported}
+
+      assert {:ok, pending_replay} =
+               SessionState.recover(state.session_id, history ++ settled_rows, pending_events)
+
+      assert pending_replay.maintenance_episodes == pending.maintenance_episodes
+
+      cause_atom =
+        if cause == "maintenance_summary_invalid",
+          do: :maintenance_summary_invalid,
+          else: :maintenance_summary_incomplete
+
+      assert {:ok, proposal} =
+               SessionState.propose_context_preparation_failure(
+                 pending,
+                 state.active_run_id,
+                 cause_atom
+               )
+
+      assert [prefix, refusal, terminal] = proposal.records
+      assert prefix.kind == "maintenance_episode_terminal_v1"
+      assert refusal.kind == "context_admission_refused_v2"
+      assert refusal["failure"]["cause"] == cause
+      assert terminal["failure"] == refusal["failure"]
       assert prefix["result"]["usage"]["total_tokens"] == 56
-      {next, rows, all_events} = commit(state, proposal, events)
+      {next, rows, all_events} = commit(pending, proposal, pending_events)
       assert next.active_run_id == nil
       assert next.active_maintenance == nil
-      assert next.charged[state.active_run_id] == %{tokens: 56, source: :reported}
+      assert next.charged == pending.charged
       assert next.conversation == state.conversation
       assert next.maintenance_episodes[episode_id]["usage"]["attempts"] == 1
 
       assert {:ok, recovered} =
-               SessionState.recover(state.session_id, history ++ rows, all_events)
+               SessionState.recover(state.session_id, history ++ settled_rows ++ rows, all_events)
 
       assert recovered.charged == next.charged
       assert recovered.maintenance_episodes == next.maintenance_episodes
@@ -466,9 +491,79 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
         assert {:error, _} =
                  SessionState.recover(
                    state.session_id,
-                   history ++ restamp(state, broken),
+                   history ++ settled_rows ++ restamp(pending, broken),
                    all_events
                  )
+      end
+    end
+  end
+
+  test "abort or deadline after canonical settlement wins before any checkpoint or summary refusal" do
+    {state, history, events} = opened()
+    run = state.active_run_id
+    request = state.maintenance_episodes[state.active_maintenance]["request"]
+
+    for text <- [summary_reply(request).text, "{}"] do
+      {:ok, settled} =
+        SessionState.propose_maintenance_attempt_settled(
+          state,
+          {:reply, %{summary_reply(request) | text: text}}
+        )
+
+      {pending, rows, settled_events} = commit(state, settled, events)
+      settled_history = history ++ rows
+
+      assert pending.maintenance_episodes[state.active_maintenance]["stage"] ==
+               "checkpoint_pending"
+
+      for ending <- [:abort, :deadline] do
+        {pending, ending_history, ending_events} =
+          if ending == :abort do
+            {:ok, abort} =
+              SessionState.propose(pending, %{
+                type: :abort,
+                command_id: "pending-abort",
+                run_id: run
+              })
+
+            {next, rows, all_events} = commit(pending, abort, settled_events)
+
+            assert {:error, :invalid_context_refusal} =
+                     SessionState.propose_context_preparation_failure(
+                       next,
+                       run,
+                       :maintenance_summary_invalid
+                     )
+
+            {next, settled_history ++ rows, all_events}
+          else
+            {pending, settled_history, settled_events}
+          end
+
+        ending_proposal =
+          if ending == :abort do
+            SessionState.propose_run_terminal(pending, run, "cancelled", %{})
+          else
+            SessionState.propose_run_terminal(pending, run, "bound_reached", %{
+              bound: "deadline",
+              observed: request.deadline,
+              declared_limit: request.deadline,
+              accounting_source: "reported"
+            })
+          end
+
+        assert {:ok, terminal} = ending_proposal
+        assert [prefix, _terminal] = terminal.records
+        assert prefix["result"]["checkpoint_id"] == nil
+        assert prefix["result"]["usage"]["total_tokens"] == 56
+        {next, rows, all_events} = commit(pending, terminal, ending_events)
+        assert next.charged == pending.charged
+
+        assert {:ok, recovered} =
+                 SessionState.recover(state.session_id, ending_history ++ rows, all_events)
+
+        assert recovered.maintenance_episodes == next.maintenance_episodes
+        assert recovered.active_maintenance == nil
       end
     end
   end
@@ -632,12 +727,11 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
 
   test "an interrupted failed settlement cannot charge or admit unrelated commands or owner succession" do
     {state, history, events} = opened()
-    request = state.maintenance_episodes[state.active_maintenance]["request"]
 
     assert {:ok, proposal} =
              SessionState.propose_maintenance_attempt_settled(
                state,
-               {:reply, %{summary_reply(request) | text: "{}"}}
+               :owner_loss
              )
 
     {_next, [prefix, settlement, terminal], all_events} = commit(state, proposal, events)

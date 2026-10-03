@@ -2505,41 +2505,27 @@ defmodule Loopex.Runtime.SessionState do
 
   defp maintenance_failed_settlement?(%{"next" => "retry"}), do: false
 
-  defp maintenance_failed_settlement?(record),
-    do: not match?({:ok, _}, maintenance_summary(record))
+  defp maintenance_failed_settlement?(%{
+         "conversation" => "canonical",
+         "result" => %{"kind" => "reply"}
+       }),
+       do: false
 
-  defp maintenance_summary_failure(cause) do
-    %{
-      "version" => 2,
-      "category" => "context_preparation_failed",
-      "retryable" => false,
-      "measurement_scope" => nil,
-      "cause" => Atom.to_string(cause)
-    }
-  end
+  defp maintenance_failed_settlement?(_record), do: true
 
   defp maintenance_attempt_terminal(state, episode, record) do
     run = episode["run_id"]
+    terminal = attempt_terminal_record(state, run, record)
 
-    case {record["termination"], maintenance_summary(record)} do
-      {nil, {:error, cause}}
-      when cause in [:maintenance_summary_invalid, :maintenance_summary_incomplete] ->
-        run_terminal_record(state, run, "failed", %{})
-        |> Map.put("failure", maintenance_summary_failure(cause))
+    if record["termination"] == "deadline" do
+      {charged_state, _episode} = charge_maintenance_settlement(state, episode, record)
+      {_bounds, charged} = accounting(charged_state, run)
 
-      _ ->
-        terminal = attempt_terminal_record(state, run, record)
-
-        if record["termination"] == "deadline" do
-          {charged_state, _episode} = charge_maintenance_settlement(state, episode, record)
-          {_bounds, charged} = accounting(charged_state, run)
-
-          terminal
-          |> Map.put("outcome", "bound_reached")
-          |> Map.put("accounting_source", charged.source && Atom.to_string(charged.source))
-        else
-          terminal
-        end
+      terminal
+      |> Map.put("outcome", "bound_reached")
+      |> Map.put("accounting_source", charged.source && Atom.to_string(charged.source))
+    else
+      terminal
     end
   end
 
@@ -2579,15 +2565,6 @@ defmodule Loopex.Runtime.SessionState do
           {next, episode} = charge_maintenance_settlement(state, episode, record)
           episode = Map.put(episode, "stage", "settling")
           next = put_in(next.maintenance_episodes[state.active_maintenance], episode)
-
-          next =
-            case terminal["failure"] do
-              %{} = failure ->
-                %{next | context_refusal: %{run_id: episode["run_id"], failure: failure}}
-
-              _ ->
-                next
-            end
 
           {:ok, next}
         else
@@ -5064,11 +5041,14 @@ defmodule Loopex.Runtime.SessionState do
           {:ok, put_in(state.maintenance_episodes[state.active_maintenance], episode), []}
 
         true ->
-          {:ok, summary} = maintenance_summary(record)
           {next, episode} = charge_maintenance_settlement(state, episode, record)
+          episode = Map.put(episode, "stage", "checkpoint_pending")
 
           episode =
-            episode |> Map.put("stage", "checkpoint_pending") |> Map.put("summary", summary)
+            case maintenance_summary(record) do
+              {:ok, summary} -> Map.put(episode, "summary", summary)
+              {:error, cause} -> Map.put(episode, "summary_failure", Atom.to_string(cause))
+            end
 
           {:ok, put_in(next.maintenance_episodes[state.active_maintenance], episode), []}
       end
@@ -9301,7 +9281,9 @@ defmodule Loopex.Runtime.SessionState do
              :artifact_preparation_count_exhausted,
              :artifact_preparation_bytes_exhausted,
              :artifact_preparation_deadline,
-             :artifact_preparation_failed
+             :artifact_preparation_failed,
+             :maintenance_summary_invalid,
+             :maintenance_summary_incomplete
            ] do
     case {run_configuration(state, run_id), Map.get(state.pending_work, run_id)} do
       {%{} = configuration, %{stage: stage, turn_number: _} = work}
@@ -9434,6 +9416,26 @@ defmodule Loopex.Runtime.SessionState do
       "observed" => Map.fetch!(refusal, "observed"),
       "limit" => Map.fetch!(refusal, "limit")
     }
+  end
+
+  # Concept: a summary refusal is proved by the preceding canonical settlement.
+  # Technical depth: its usage already settled once. The v2 refusal and episode
+  # terminal reuse that retained verdict without another provider settlement.
+  defp validate_preparation_failure_cause(state, run_id, expected)
+       when expected in ["maintenance_summary_invalid", "maintenance_summary_incomplete"] do
+    with %{
+           "run_id" => ^run_id,
+           "stage" => "checkpoint_pending",
+           "summary_failure" => ^expected,
+           "settlement" => record
+         } <- state.maintenance_episodes[state.active_maintenance],
+         true <- is_nil(state.aborting),
+         {:error, cause} <- maintenance_summary(record),
+         true <- Atom.to_string(cause) == expected do
+      :ok
+    else
+      _ -> {:error, :invalid_context_refusal}
+    end
   end
 
   defp validate_preparation_failure_cause(state, run_id, "compaction_preparation_deadline") do

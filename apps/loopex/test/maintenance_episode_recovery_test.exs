@@ -134,8 +134,8 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
   end
 
   # Concept: recovery starts from a committed episode with no summary dispatch.
-  # Technical depth: the fixture uses public exact creation and a paused prompt,
-  # stops that runtime, then commits the reducer proposal through the actual
+  # Technical depth: the fixture uses public exact creation, stops that runtime, then
+  # commits prompt and episode reducer proposals through the actual
   # Store transaction boundary. This supplies the durable boundary the live
   # automatic trigger has not yet joined, without mutating coordinator cache.
   defp retained_episode(mode) do
@@ -147,18 +147,6 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         genesis: Genesis.genesis([])
       )
 
-    {:ok, attachment} = Loopex.attach(fixture.runtime, session)
-
-    {:ok, {:prepared, _activation}} =
-      Loopex.prepare_resume_session(fixture.runtime, session, "pause")
-
-    assert {:accepted, "prompt"} =
-             Loopex.command(attachment, %{
-               type: :prompt,
-               command_id: "prompt",
-               content: "retained"
-             })
-
     assert :ok = Loopex.stop(fixture.runtime)
 
     {:ok, state} =
@@ -167,6 +155,21 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         Fixture.records(fixture, session),
         Fixture.events(fixture, session)
       )
+
+    # Concept: the retained prompt is undispatched by construction.
+    # Technical depth: prepared resume pauses only recovered work, not a new
+    # prompt. Commit this pure admission after the fixture owner has stopped,
+    # through the same actual Store boundary used for episode admission below.
+    {:ok, prompt} =
+      SessionState.propose(state, %{type: :prompt, command_id: "prompt", content: "retained"}, %{
+        max_turns: 8,
+        token_budget: 10_000,
+        deadline_ms: 60_000,
+        context_token_budget: 8_192
+      })
+
+    state = retain(fixture, state, prompt)
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
 
     configuration = Genesis.configuration()
 

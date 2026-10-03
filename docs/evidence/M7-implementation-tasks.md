@@ -325,6 +325,44 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: correct invalid/incomplete summary endings to retain ADR 0043's private
+  v2 refusal. The prior reducer derived the failure from the settlement but
+  omitted its required refusal record. Canonical summary replies now settle
+  accounting once into checkpoint-pending state, retaining either bounded
+  summary output or its independently recomputed failure. A failed summary then
+  commits the episode terminal, v2 refusal and parent terminal together, without
+  a second provider settlement. Recovery can finish that refusal from the
+  retained reply without another call. Abort or deadline after settlement wins
+  before checkpoint/refusal completion; usage remains charged once. Provider
+  errors, owner loss and admitted terminations keep their adjacent settlement
+  and parent-terminal transaction.
+
+  The final eleven-file selection passed 119 tests on both supported pairs.
+  Current: 3.8 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-settlement-current-v2.log`, SHA-256
+  `2b5d2c61eb9ba0069899f7ffa107d00dff28abb5bd89b4808fb7323328b4a674`.
+  Floor: 7.1 measured runner seconds,
+  `/private/tmp/loopex-m7-maintenance-settlement-floor-v3.log`, SHA-256
+  `8a661fb096a2e2b951408e6b56d1e8140138769dbfa9b24cc8c10d479191b6e7`.
+  Formatting, warning-free compilation, dependency, structure/status,
+  documentation and diff gates passed in 24.3 measured seconds:
+  `/private/tmp/loopex-m7-maintenance-summary-refusal-gates-v2.log`, SHA-256
+  `e79c35b8b3ecf6555674c5c8cccd97ca801d4ebf9c6cdac113f800bfa9c2fa69`.
+  Development current-dev5 failed compilation because an assert directly wrapped
+  an Elixir if/do expression; assigning before asserting fixed that fixture.
+  The first gate found a formatting layout difference; applying its required
+  layout exposed a pre-existing fixture race in current-v1. Prepared resume
+  pauses recovered work, so the fixture's newly admitted prompt could dispatch
+  before shutdown and refuse episode admission as non-quiescent. The fixture
+  now stops its runtime before retaining the prompt through the real Store,
+  just as it retains the episode. Successor prepared activation, uncertainty
+  injection, zero provider/executor calls and exact joins stay required. No
+  bounds, retries or acceptance checks were weakened. Every output is retained
+  separately; no unchanged failed run was retried as a pass. All handles are
+  terminal and collected. This correction changes no checklist totals.
+  Live dispatch/cleanup, selection and checkpoint transactions remain open.
+  No agents or decisions are pending and the goal remains active.
+
 - Done: join maintenance settlement to the durable episode reducer. Successful
   natural summaries retain bounded output pending checkpoint admission, charge
   reported or remaining-allowance usage once, and leave ordinary conversation,
