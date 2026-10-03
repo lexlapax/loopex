@@ -60,7 +60,7 @@ defmodule Loopex.Runtime.EffectIntents do
          ~w(failure configuration_version episode_id targets projection_state measurement_scope),
        ~w(project_resource_count resource_pack_count)},
     "maintenance_episode_admitted_v1" =>
-      {~w(episode_id run_id staging_turn_id trigger origin configuration_version maintenance_configuration bounds admitted_at preparation_deadline attempts summary_ordinal checkpoint_id usage),
+      {~w(episode_id run_id staging_turn_id trigger targets origin configuration_version maintenance_configuration bounds admitted_at preparation_deadline attempts summary_ordinal checkpoint_id usage),
        []},
     "maintenance_request_committed_v1" =>
       {~w(episode_id summary_ordinal purpose operation_id configuration_version captured_session_version strategy_revision eligible_unit_count covered_range source_digest source_excerpted staged_at staged_request_digest request context_receipt),
@@ -425,7 +425,8 @@ defmodule Loopex.Runtime.EffectIntents do
              deadline_ms: bounds["deadline_ms"]
            }) do
       Enum.all?(~w(episode_id run_id staging_turn_id), &identifier?(payload[&1])) and
-        payload["trigger"] == "ordinary_limit" and payload["origin"] == "automatic" and
+        payload["trigger"] in ~w(ordinary_limit thinking_headroom) and
+        valid_episode_targets?(payload) and payload["origin"] == "automatic" and
         bounds["max_attempts"] == 4 and
         (is_nil(bounds["run_deadline"]) or version?(bounds["run_deadline"])) and
         version?(payload["admitted_at"]) and version?(payload["preparation_deadline"]) and
@@ -510,6 +511,18 @@ defmodule Loopex.Runtime.EffectIntents do
   end
 
   defp neutral_values?(_record), do: true
+
+  # Concept: captured headroom remains private evidence on each bounded page.
+  # Technical depth: this reader checks the closed target generation and numeric
+  # domains. Full reducer replay derives the values from the ordinary run's
+  # configuration; the summarizer capture may have a smaller input ceiling.
+  defp valid_episode_targets?(%{"targets" => nil, "trigger" => "ordinary_limit"}), do: true
+
+  defp valid_episode_targets?(%{"targets" => targets}) do
+    closed?(targets, ~w(revision record_target input_target)) and
+      targets["revision"] == "loopex.thinking_headroom.v1" and
+      targets["record_target"] == 32_768 and positive_version?(targets["input_target"])
+  end
 
   # Concept: cumulative checkpoints preserve a strictly smaller new raw cut.
   # Technical depth: this neutral reader checks closed ranges, identities,

@@ -29,7 +29,9 @@ defmodule Loopex.Runtime.ContextAdmission do
      `context_token_budget`;
   3. the exact durable record's structure, reported as `context_record_depth`
      or `context_record_cardinality`; and
-  4. that record's exact encoded byte cost against the Store item ceiling.
+  4. that record's exact encoded byte cost against the Store item ceiling; and
+  5. for a new continuation-required exchange, its captured input and record
+     targets under `loopex.thinking_headroom.v1`.
 
   Structure precedes bytes because a structurally inadmissible record has no
   meaningful size, and both are measured through `Loopex.Store` so a caller and
@@ -66,7 +68,8 @@ defmodule Loopex.Runtime.ContextAdmission do
           required(:context_token_budget) => pos_integer(),
           required(:context_record_byte_ceiling) => pos_integer(),
           required(:context_record_depth_limit) => pos_integer(),
-          required(:context_record_cardinality_limit) => pos_integer()
+          required(:context_record_cardinality_limit) => pos_integer(),
+          optional(:reserve_thinking_exchange) => boolean()
         }
 
   @typedoc """
@@ -113,6 +116,21 @@ defmodule Loopex.Runtime.ContextAdmission do
     end
   end
 
+  # Concept: a new thinking exchange leaves room for its private continuation.
+  # Technical depth: ADR 0044 fixes this derivation from the captured ordinary
+  # input ceiling. Integer division preserves odd and uint64 ceilings exactly;
+  # targets do not change the hard ceiling or the provider reply allowance.
+  @doc false
+  @spec thinking_targets(pos_integer()) :: map()
+  def thinking_targets(ceiling)
+      when is_integer(ceiling) and ceiling > 0 and ceiling <= 18_446_744_073_709_551_615 do
+    %{
+      "revision" => "loopex.thinking_headroom.v1",
+      "record_target" => 32_768,
+      "input_target" => ceiling - min(8_192, div(ceiling, 2))
+    }
+  end
+
   # Concept: the system class is checked before the total it contributes to.
   #
   # Technical depth: ADR 0010's rule is strict rather than inclusive -- exactly
@@ -152,7 +170,8 @@ defmodule Loopex.Runtime.ContextAdmission do
   defp record_admission(candidate, observations) do
     case Store.normalize_and_measure_item(:record, candidate) do
       {:ok, _normalized, bytes} ->
-        record_bytes(bytes, observations)
+        with :ok <- record_bytes(bytes, observations),
+             do: thinking_headroom(bytes, observations)
 
       {:error, {:item_structure_exceeded, dimension, observed, _limit}} ->
         structural(dimension, observed, observations)
@@ -166,6 +185,48 @@ defmodule Loopex.Runtime.ContextAdmission do
     do: refused("context_record_bytes", bytes, limit, bytes)
 
   defp record_bytes(_bytes, _observations), do: :ok
+
+  defp thinking_headroom(bytes, %{reserve_thinking_exchange: true} = observations) do
+    targets = thinking_targets(observations.context_token_budget)
+
+    cond do
+      observations.provider_estimated_tokens > targets["input_target"] ->
+        headroom_refused(
+          "context_tokens",
+          observations.provider_estimated_tokens,
+          targets["input_target"],
+          observations.context_token_budget,
+          nil,
+          targets
+        )
+
+      bytes > targets["record_target"] ->
+        headroom_refused(
+          "context_record_bytes",
+          bytes,
+          targets["record_target"],
+          observations.context_record_byte_ceiling,
+          bytes,
+          targets
+        )
+
+      true ->
+        :ok
+    end
+  end
+
+  defp thinking_headroom(_bytes, _observations), do: :ok
+
+  defp headroom_refused(dimension, observed, limit, hard_limit, cost, targets) do
+    {:refused, refusal} = refused(dimension, observed, limit, cost)
+
+    {:refused,
+     Map.merge(refusal, %{
+       "category" => "thinking_exchange_headroom",
+       "hard_limit" => hard_limit,
+       "targets" => targets
+     })}
+  end
 
   defp structural(:depth, observed, %{context_record_depth_limit: limit}),
     do: refused("context_record_depth", observed, limit, nil)

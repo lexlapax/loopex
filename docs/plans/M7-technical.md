@@ -1717,8 +1717,17 @@ join the worker and preserve the distinct preparation-failure and deadline-bound
 endings; both pairs pass. Existing grouping, source and original-record tests
 also pass 97 cases on both pairs, closing original T07's complete eligible-group
 selection item. Complete outputs and digests are indexed in the implementation
-checklist. Thinking/rendering triggers, remaining preparation errors, standalone
-compact and the real long-conversation proof remain open.
+checklist. New ordinary exchanges now apply the exact thinking headroom
+rule inside the shared fixed-point admission path, allocator, optional intake,
+tail measurement and checkpoint completion. Episode capture retains the trigger
+and derived targets; replay validates both and repeats request admission for
+ordinary/resource records. Hard ceilings remain first, while open exchanges
+retain their native prefix and use hard ceilings. Live cases prove initial
+no-dispatch refusal, optional project withholding, continued preparation after
+one hard-fitting checkpoint and reserve spending by an open exchange. All 207
+focused cases pass on both pairs; complete outputs and digests are indexed in
+the checklist. Rendering-trigger capture, remaining preparation errors,
+standalone compact and the real long-conversation proof remain open.
 This is not a complete T07 workflow proof.
 
 Current model requests admit only `loopex.model_request.v2` with receipt

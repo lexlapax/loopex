@@ -289,6 +289,91 @@ defmodule Loopex.ContextAdmissionTest do
     transformer_identity transformer_revision
   )
 
+  test "thinking targets retain exact odd, small and uint64 input ceilings" do
+    for {ceiling, input_target} <- [
+          {1, 1},
+          {3, 2},
+          {8_192, 4_096},
+          {8_193, 4_097},
+          {16_384, 8_192},
+          {16_385, 8_193},
+          {18_446_744_073_709_551_615, 18_446_744_073_709_543_423}
+        ] do
+      assert ContextAdmission.thinking_targets(ceiling) == %{
+               "revision" => "loopex.thinking_headroom.v1",
+               "record_target" => 32_768,
+               "input_target" => input_target
+             }
+    end
+  end
+
+  test "thinking targets are inclusive and follow every ordinary hard limit" do
+    observations = %{
+      system_class_tokens: 0,
+      provider_estimated_tokens: 4_096,
+      context_token_budget: 8_192,
+      context_record_byte_ceiling: @record_limit,
+      context_record_depth_limit: @max_item_depth,
+      context_record_cardinality_limit: @max_item_cardinality,
+      reserve_thinking_exchange: true
+    }
+
+    assert :ok =
+             ContextAdmission.preflight_required_candidate(
+               sized_context_candidate(32_768),
+               observations
+             )
+
+    assert {:refused, token} =
+             ContextAdmission.preflight_required_candidate(
+               sized_context_candidate(32_769),
+               %{observations | provider_estimated_tokens: 4_097}
+             )
+
+    assert token["category"] == "thinking_exchange_headroom"
+    assert token["dimension"] == "context_tokens"
+    assert token["observed"] == 4_097
+    assert token["limit"] == 4_096
+    assert token["hard_limit"] == 8_192
+    assert token["record_byte_cost"] == nil
+    assert token["targets"] == ContextAdmission.thinking_targets(8_192)
+
+    assert {:refused, bytes} =
+             ContextAdmission.preflight_required_candidate(
+               sized_context_candidate(32_769),
+               observations
+             )
+
+    assert bytes["category"] == "thinking_exchange_headroom"
+    assert bytes["dimension"] == "context_record_bytes"
+    assert bytes["observed"] == 32_769
+    assert bytes["record_byte_cost"] == 32_769
+    assert bytes["limit"] == 32_768
+    assert bytes["hard_limit"] == 65_536
+
+    for {candidate, input, dimension} <- [
+          {%{}, %{observations | system_class_tokens: 1_000}, "system_class_tokens"},
+          {%{}, %{observations | provider_estimated_tokens: 8_193}, "context_tokens"},
+          {sized_context_candidate(65_537), %{observations | provider_estimated_tokens: 4_097},
+           "context_record_bytes"}
+        ] do
+      assert {:refused, hard} = ContextAdmission.preflight_required_candidate(candidate, input)
+      assert hard["dimension"] == dimension
+      refute Map.has_key?(hard, "targets")
+      refute Map.has_key?(hard, "category")
+    end
+
+    assert :ok =
+             ContextAdmission.preflight_required_candidate(
+               sized_context_candidate(60_000),
+               %{
+                 observations
+                 | provider_estimated_tokens: 8_192,
+                   reserve_thinking_exchange: false
+               }
+             )
+  end
+
   test "Runtime rejects an omitted or invalid context token budget before Control or Store starts" do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "context-validation")
     on_exit(fn -> stop_process(store_pid) end)
@@ -1560,10 +1645,14 @@ defmodule Loopex.ContextAdmissionTest do
       # lineage, so that substitution must still refuse with matching arithmetic.
       matching =
         mutate_model_request(record_prefix, fn payload ->
-          payload
-          |> Map.put("request", encode_plain_for_record(mutated_request))
-          |> Map.put("staged_request_digest", mutated_request.staged_request_digest)
-          |> update_in(["context_receipt"], &receipt_matching(&1, mutated_request))
+          {fixed, _bytes} =
+            payload
+            |> Map.put("request", encode_plain_for_record(mutated_request))
+            |> Map.put("staged_request_digest", mutated_request.staged_request_digest)
+            |> update_in(["context_receipt"], &receipt_matching(&1, mutated_request))
+            |> resolve_record_cost()
+
+          fixed
         end)
 
       if label == :session_message do

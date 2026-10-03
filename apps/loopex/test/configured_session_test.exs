@@ -54,6 +54,211 @@ defmodule Loopex.ConfiguredSessionTest do
   alias LoopexProtocol.ToolDefinition
   alias LoopexProtocol.Canonical
 
+  test "fresh optional project content cannot spend a new thinking exchange's reserve" do
+    content = String.duplicate("p", 3_500)
+
+    project = %{
+      workspace: %{workspace_ref: "workspace-ref", repository_origin: nil, revision: nil},
+      entries: [
+        %{
+          label: "AGENTS.md",
+          content: content,
+          byte_size: byte_size(content),
+          content_digest: Canonical.digest_bytes(content),
+          contained: true
+        }
+      ]
+    }
+
+    {:ok, digest, _} = Loopex.ProjectResource.digest(project)
+
+    decision = %{
+      manifest_digest: digest,
+      workspace_ref: "workspace-ref",
+      trust_scope: "project_resource",
+      decision_source: "host_supplied",
+      issued_at: "2026-09-10T00:00:00Z",
+      expires_at: nil,
+      revocation_state: "active"
+    }
+
+    fixture =
+      start(
+        project_manifest: project,
+        project_decision: decision,
+        script: [
+          %{
+            text: "done",
+            reply_overrides: %{completion: "natural", continuation: closed_capsule("done")}
+          }
+        ]
+      )
+
+    captured =
+      continuation_configuration()
+      |> Map.put("context_token_budget", 2_000)
+      |> Map.put("system_class_tokens", 1_000)
+      |> put_in(["budget_origins", "context_token_budget"], "explicit")
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create-headroom-project",
+               %{},
+               genesis(fixture.definitions, captured)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    prompt(attachment, "headroom-project", "go")
+    assert [request] = AgentLoopTestModel.dispatched(fixture.model)
+    refute Enum.any?(request.messages, &String.contains?(&1["content"], content))
+    assert request.sampling["max_tokens"] == captured["max_tokens"]
+
+    assert [staged] =
+             Enum.filter(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "model_request_committed_v2")
+             )
+
+    receipt = staged.payload["context_receipt"]
+    assert receipt["context_token_budget"] == 2_000
+    assert receipt["provider_estimated_tokens"] <= 1_000
+    assert receipt["record_byte_cost"] <= 32_768
+    assert receipt["project_resource"]["disposition"] == "context_token_budget"
+    assert receipt["project_resource"]["detail"]["limit"] == 1_000
+    assert receipt["project_resource"]["detail"]["observed"] <= 2_000
+
+    assert {:ok, _} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+  end
+
+  test "replay refuses hard-fitting first requests above either thinking headroom target" do
+    for {dimension, ceiling, content} <- [
+          {"context_tokens", 3_000, String.duplicate("p", 7_000)},
+          {"context_record_bytes", 30_000, String.duplicate("p", 20_000)}
+        ] do
+      fixture = start(tools: [], script: [%{text: "done"}])
+
+      captured =
+        configuration()
+        |> Map.put("context_token_budget", ceiling)
+        |> Map.put("system_class_tokens", 1_000)
+        |> put_in(["budget_origins", "context_token_budget"], "explicit")
+
+      assert {:ok, session} =
+               Runtime.create_session_with_genesis(
+                 fixture.runtime,
+                 "create-replay-headroom-#{dimension}",
+                 %{},
+                 genesis(fixture.definitions, captured)
+               )
+
+      assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      assert {:accepted, "headroom-replay"} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "headroom-replay",
+                 content: content
+               })
+
+      finished = Enum.find(finish(attachment), &(&1.kind == "run.finished"))
+      assert finished["outcome"] == "completed", inspect(finished)
+      rows = Fixture.records(fixture, session)
+      request = Enum.find(rows, &(&1.payload.kind == "model_request_committed_v2"))
+      prefix = Enum.take(rows, request.journal_version)
+      events = Fixture.events(fixture, session)
+
+      matching_events =
+        Enum.find_value(0..length(events), fn count ->
+          selected = Enum.take(events, count)
+          if match?({:ok, _}, SessionState.recover(session, prefix, selected)), do: selected
+        end)
+
+      assert is_list(matching_events)
+      receipt = request.payload["context_receipt"]
+      targets = ContextAdmission.thinking_targets(ceiling)
+      assert receipt["provider_estimated_tokens"] <= ceiling
+      assert receipt["record_byte_cost"] <= 65_536
+
+      if dimension == "context_tokens" do
+        assert receipt["provider_estimated_tokens"] > targets["input_target"]
+      else
+        assert receipt["provider_estimated_tokens"] <= targets["input_target"]
+        assert receipt["record_byte_cost"] > targets["record_target"]
+      end
+
+      thinking =
+        captured
+        |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
+        |> put_in(["provider_mapping", "mapping_revision"], "fixture.continuation.v1")
+        |> put_in(["provider_mapping", "continuation_required"], true)
+
+      altered = put_in(hd(prefix), [:payload, "initial_configuration"], thinking)
+
+      assert {:error, :invalid_model_request_transition} =
+               SessionState.recover(session, [altered | tl(prefix)], matching_events)
+    end
+  end
+
+  test "an open thinking exchange spends its reserve without changing its frozen prefix" do
+    text = String.duplicate("w", 1_200)
+
+    opening =
+      open_turn("headroom-loop")
+      |> Map.put(:text, text)
+      |> update_in([:reply_overrides, :continuation, "content"], fn [native_text, tool] ->
+        [Map.put(native_text, "byte_length", byte_size(text)), tool]
+      end)
+
+    fixture =
+      start(
+        script: [
+          opening,
+          %{
+            text: "done",
+            reply_overrides: %{completion: "natural", continuation: closed_capsule("done")}
+          }
+        ]
+      )
+
+    captured =
+      continuation_configuration()
+      |> Map.put("context_token_budget", 2_000)
+      |> Map.put("system_class_tokens", 1_000)
+      |> put_in(["budget_origins", "context_token_budget"], "explicit")
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create-open-headroom",
+               %{},
+               genesis(fixture.definitions, captured)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    prompt(attachment, "open-headroom", "work")
+    assert [first, second] = AgentLoopTestModel.dispatched(fixture.model)
+    assert first.continuation == nil
+    assert second.continuation != nil
+    assert Enum.take(second.messages, length(first.messages)) == first.messages
+    assert second.sampling == first.sampling
+    rows = Fixture.records(fixture, session)
+    refute Enum.any?(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
+
+    assert [initial, continued] =
+             Enum.filter(rows, &(&1.payload.kind == "model_request_committed_v2"))
+
+    assert initial.payload["context_receipt"]["provider_estimated_tokens"] <= 1_000
+    assert continued.payload["context_receipt"]["provider_estimated_tokens"] > 1_000
+    assert continued.payload["context_receipt"]["provider_estimated_tokens"] <= 2_000
+    assert {:ok, _} = SessionState.recover(session, rows, Fixture.events(fixture, session))
+  end
+
   test "required v3 capsules commit atomically through unknown replies and survive restart" do
     for phase <- [:before, :after] do
       capsule = closed_capsule("done")

@@ -602,6 +602,51 @@ defmodule Loopex.EffectIntentsQueryTest do
     refute_received {:forbidden_store_call, _}
   end
 
+  test "bounded maintenance coverage requires current closed headroom targets", context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    {records, _events} = maintenance_history(session)
+    episode = Enum.find(records, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
+
+    targets = %{
+      "revision" => "loopex.thinking_headroom.v1",
+      "record_target" => 32_768,
+      "input_target" => 4_096
+    }
+
+    headroom =
+      Map.merge(episode.payload, %{"trigger" => "thinking_headroom", "targets" => targets})
+
+    for payload <- [episode.payload, headroom, Map.put(headroom, "trigger", "ordinary_limit")] do
+      install_history(
+        reference,
+        List.replace_at(records, episode.journal_version - 1, %{episode | payload: payload})
+      )
+
+      assert :complete = scan_result(runtime, session)
+    end
+
+    for payload <- [
+          Map.delete(episode.payload, "targets"),
+          Map.put(headroom, "targets", nil),
+          put_in(headroom, ["targets", "revision"], "future"),
+          put_in(headroom, ["targets", "record_target"], 32_769),
+          put_in(headroom, ["targets", "input_target"], 0),
+          put_in(headroom, ["targets", "input_target"], 18_446_744_073_709_551_616),
+          put_in(headroom, ["targets", "extra"], true)
+        ] do
+      install_history(
+        reference,
+        List.replace_at(records, episode.journal_version - 1, %{episode | payload: payload})
+      )
+
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+  end
+
   test "measured nonprogress history advances every page without an effect or owner", context do
     %{runtime: runtime, session: session, reference: reference} = context
     {records, events} = maintenance_history(session, :nonprogress)

@@ -325,6 +325,46 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: enforce the accepted `loopex.thinking_headroom.v1` targets throughout
+  new ordinary-exchange staging, required/excerpt allocation, optional intake,
+  ordinary tail measurement and checkpoint completion. Hard limits retain their
+  first-failure precedence. Episodes capture the exact trigger and targets;
+  replay derives them from retained run configuration and rejects missing or
+  forged current fields. Ordinary hard-limit refusals keep null targets;
+  headroom failures retain their target and hard ceiling. Open native exchanges
+  use hard ceilings and keep their complete frozen prefix. Summarizer input
+  and its 1,024-token reply reserve remain separate.
+  Live tests prove initial headroom refusal without dispatch, target-aware
+  optional project withholding, an open exchange spending above its initial
+  target without compaction or re-rendering, and two summaries when the first
+  checkpoint fits hard limits but still misses headroom. Request replay now
+  independently repeats admission and verifies the exact receipt byte fixed
+  point for both ordinary and resource-bearing records. Bounded private pages
+  require the current episode target field and reject malformed generations.
+  All 207 focused cases pass on each supported pair, with two existing
+  long-bound cases excluded: current output
+  `/private/tmp/loopex-m7-headroom-current-final-v3.log`, SHA-256
+  `006d0df5032f3deebc301636ce03b950bd218e24f17afdc694a5c8d63b2db476`,
+  14.7 seconds; floor output
+  `/private/tmp/loopex-m7-headroom-floor-final-v3.log`, SHA-256
+  `2d58d26f97b7b8bd28c1064834d612ce0205cacd90743c6dadf35f2a719d77c4`,
+  14.1 seconds. A broader Core run before adding the last open-exchange witness
+  passes 1,103 tests with eight long-bound exclusions; the final focused run
+  includes that additional witness. Complete broader output
+  `/private/tmp/loopex-m7-headroom-core-v2.log`, SHA-256
+  `b5459e9403044eed282c29a5a2427d3bae7493ef44b3e0efb689c761ccaefd48`,
+  212.4 seconds. Compilation, formatting, module documentation, status and whitespace
+  checks pass. Earlier failed headroom logs remain diagnostic records, not
+  passing evidence: the private reader had the previous key list, a matching
+  receipt control needed its byte cost recomputed, and new fixture setups first
+  used invalid mapping/system captures or exceeded the hard byte ceiling.
+  This closes one added T07 subtask. Original T01–T19 counts remain 53 done /
+  120 todo / 6 retired; added counts become 196 done / 8 todo. Rendering-trigger
+  capture, remaining preparation errors, standalone compact, native-prefix
+  protection audit and real long-conversation proof remain open. No full
+  integration or closure matrix is claimed for this batch. The stderr fixture
+  cutoff and small maintenance reply-reserve decision remain pending.
+
 - Done: prove the captured live source cutoffs with held workers, without clock
   replacement or a shorter production deadline. Initial preparation waits its
   original 60,000-ms cutoff, joins the worker and commits the named preparation
@@ -7237,6 +7277,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Enforce captured thinking headroom throughout new ordinary staging, excerpt/optional allocation, tail selection and checkpoint completion; retain exact episode targets and v2 refusals, reject forged current replay, keep open exchanges under hard ceilings with immutable prefixes, and prove live target-aware preparation, initial no-dispatch refusal, optional withholding and open-exchange reserve spending on both toolchains. Rendering-trigger capture, standalone compaction and real-provider evidence remain open.
 
 - [x] Hold initial and later maintenance source workers through their captured live production cutoffs without clock or timer replacement; join the exact worker, retain the preparation-failure versus committed run-deadline distinction, preserve checkpoints/raw facts/usage and prove one ending with no dispatch on both toolchains. Keep these cases in the existing long-bound release lane.
 

@@ -4029,7 +4029,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
                  work.run_id,
                  state.maintenance_model,
                  state.maintenance_instructions,
-                 System.system_time(:millisecond)
+                 System.system_time(:millisecond),
+                 if(get_in(refusal, ["failure", "category"]) == "thinking_exchange_headroom",
+                   do: "thinking_headroom",
+                   else: "ordinary_limit"
+                 )
                ) do
             {:ok, proposal} ->
               with {:ok, next} <- commit_internal(state, proposal) do

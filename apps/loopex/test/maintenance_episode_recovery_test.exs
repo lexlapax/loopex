@@ -12,6 +12,194 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
   alias Loopex.Runtime.{MaintenanceConfiguration, SessionState}
   alias Loopex.Store
 
+  test "thinking preparation continues past a hard-limit fit until the captured targets fit" do
+    {fixture, session, run_id, configuration} =
+      retained_automatic_prompt("retained",
+        context_token_budget: 10_000,
+        continuation_required: true,
+        old_contents: [String.duplicate("a", 10_000), String.duplicate("b", 17_000)]
+      )
+
+    {:ok, original} =
+      SessionState.recover(
+        session,
+        Fixture.records(fixture, session),
+        Fixture.events(fixture, session)
+      )
+
+    selection = %{
+      "model" => configuration["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{
+        configuration["model_capabilities"]
+        | "reasoning_levels" => ["none"]
+      },
+      "provider_mapping" => %{
+        configuration["provider_mapping"]
+        | "thinking_disabled" => true,
+          "continuation_required" => false
+      }
+    }
+
+    summary = %{
+      text: ~s({"summary":"retained facts","carry_forward":{"files_read":[],"files_changed":[]}}),
+      usage: %{input_tokens: 37, output_tokens: 19},
+      reply_overrides: %{completion: "natural", continuation: nil}
+    }
+
+    capsule = %{
+      "format" => "loopex.anthropic.content_refs.v1",
+      "provider" => "anthropic",
+      "model" => "scripted:v1",
+      "status" => "closed",
+      "content" => [
+        %{
+          "kind" => "text_ref",
+          "byte_length" => 9,
+          "template" => %{"type" => "text"},
+          "field" => "text"
+        }
+      ]
+    }
+
+    successor =
+      start(
+        store: fixture.store,
+        tools: [],
+        maintenance_model: selection,
+        maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep the facts"},
+        script: [
+          summary,
+          summary,
+          %{
+            text: "continued",
+            require_previous_worker_down: true,
+            reply_overrides: %{completion: "natural", continuation: capsule}
+          }
+        ]
+      )
+
+    assert {:ok, ^session} =
+             Loopex.resume_session(successor.runtime, session, command_id: "resume-headroom")
+
+    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    assert List.last(rows).payload["outcome"] == "completed"
+    assert [episode] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
+    assert episode.payload["trigger"] == "thinking_headroom"
+
+    assert episode.payload["targets"] == %{
+             "revision" => "loopex.thinking_headroom.v1",
+             "record_target" => 32_768,
+             "input_target" => 5_000
+           }
+
+    assert Enum.count(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1")) == 2
+
+    [first_checkpoint, _] =
+      Enum.filter(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1"))
+
+    events = Fixture.events(successor, session)
+    first_event = Enum.find(events, &(&1.kind == "context.compacted"))
+    first_rows = Enum.take_while(rows, &(&1.journal_version <= first_checkpoint.journal_version))
+    first_events = Enum.take_while(events, &(&1.event_sequence <= first_event.event_sequence))
+    assert {:ok, partial} = SessionState.recover(session, first_rows, first_events)
+
+    assert {:error, {:checkpoint_requires_more_progress, headroom}} =
+             SessionState.propose_maintenance_checkpoint_completion(
+               partial,
+               partial.checkpoints[partial.active_checkpoint]["committed_at"],
+               fn -> :ok end
+             )
+
+    assert headroom["category"] == "thinking_exchange_headroom"
+    assert headroom["observed"] > headroom["limit"]
+    assert headroom["observed"] <= headroom["hard_limit"]
+    assert [first, second, ordinary] = AgentLoopTestModel.dispatched(successor.model)
+    assert first.sampling["max_tokens"] == 1_024
+    assert second.continuation == nil
+    assert ordinary.continuation == nil
+    assert first.deadline == second.deadline and second.deadline == ordinary.deadline
+    assert first.tools == [] and second.tools == []
+    assert [request] = Enum.filter(rows, &(&1.payload.kind == "model_request_committed_v2"))
+    assert request.payload["context_receipt"]["provider_estimated_tokens"] <= 5_000
+    assert request.payload["context_receipt"]["record_byte_cost"] <= 32_768
+
+    assert {:ok, recovered} =
+             SessionState.recover(session, rows, Fixture.events(successor, session))
+
+    assert recovered.maintenance_episodes[episode.payload["episode_id"]]["usage"]["total_tokens"] ==
+             112
+
+    assert recovered.charged[run_id].tokens == 114
+
+    for altered <- [
+          put_in(episode, [:payload, "targets", "input_target"], 5_001),
+          put_in(episode, [:payload, "targets", "revision"], "future"),
+          put_in(episode, [:payload, "targets"], nil),
+          update_in(episode, [:payload], &Map.delete(&1, "targets"))
+        ] do
+      changed =
+        Enum.map(rows, fn row ->
+          if row.journal_version == episode.journal_version, do: altered, else: row
+        end)
+
+      assert {:error, _} = SessionState.recover(session, changed, events)
+    end
+
+    for old <- Enum.drop(original.run_order, -1) do
+      assert SessionState.elements(recovered, old) == SessionState.elements(original, old)
+    end
+
+    assert Agent.get(successor.executor, & &1.jobs) == []
+    stop_and_join(successor, session)
+  end
+
+  test "irreducible initial thinking input refuses its target before any maintenance or ordinary dispatch" do
+    {fixture, session, run_id, _configuration} =
+      retained_automatic_prompt(String.duplicate("p", 7_000),
+        context_token_budget: 3_000,
+        continuation_required: true,
+        old_contents: []
+      )
+
+    successor = start(store: fixture.store, tools: [], script: [])
+
+    assert {:ok, ^session} =
+             Loopex.resume_session(successor.runtime, session,
+               command_id: "resume-irreducible-headroom"
+             )
+
+    rows = await_parent_terminal(successor, session, run_id, now() + 5_000)
+    assert [refusal, terminal] = Enum.take(rows, -2)
+    assert refusal.payload["failure"]["category"] == "thinking_exchange_headroom"
+    assert refusal.payload["failure"]["dimension"] == "context_tokens"
+    assert refusal.payload["failure"]["limit"] == 1_500
+    assert refusal.payload["failure"]["hard_limit"] == 3_000
+    assert refusal.payload["failure"]["observed"] > 1_500
+    assert refusal.payload["failure"]["observed"] <= 3_000
+    assert terminal.payload["failure"] == refusal.payload["failure"]
+    refute Enum.any?(rows, &(&1.payload.kind == "maintenance_episode_admitted_v1"))
+    assert AgentLoopTestModel.dispatched(successor.model) == []
+    assert {:ok, _} = SessionState.recover(session, rows, Fixture.events(successor, session))
+
+    for altered <- [
+          put_in(refusal, [:payload, "targets", "input_target"], 1_501),
+          put_in(refusal, [:payload, "targets", "revision"], "future"),
+          put_in(refusal, [:payload, "failure", "hard_limit"], 3_001),
+          put_in(refusal, [:payload, "failure", "observed"], 1_500)
+        ] do
+      changed =
+        Enum.map(rows, fn row ->
+          if row.journal_version == refusal.journal_version, do: altered, else: row
+        end)
+
+      assert {:error, _} =
+               SessionState.recover(session, changed, Fixture.events(successor, session))
+    end
+
+    stop_and_join(successor, session)
+  end
+
   for mode <- [:source_pending, :checkpoint_more] do
     @mode mode
     @tag :long_bound
@@ -1415,6 +1603,19 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         )
       )
       |> Map.update!("budget_origins", &Map.put(&1, "context_token_budget", "explicit"))
+      |> put_in(
+        ["provider_mapping", "continuation_required"],
+        Keyword.get(options, :continuation_required, false)
+      )
+
+    configuration =
+      if configuration["provider_mapping"]["continuation_required"] do
+        configuration
+        |> put_in(["provider_mapping", "mapping_revision"], "fixture.continuation.v1")
+        |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
+      else
+        configuration
+      end
 
     {:ok, session} =
       Loopex.create_session(fixture.runtime, %{},
@@ -1431,26 +1632,36 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         Fixture.events(fixture, session)
       )
 
-    {:ok, old} =
-      SessionState.propose(
-        state,
-        %{type: :prompt, command_id: "old", content: String.duplicate("o", 30_000)},
-        %{
-          max_turns: 8,
-          token_budget: 10_000,
-          deadline_ms: 60_000,
-          context_token_budget: configuration["context_token_budget"]
-        }
-      )
+    state =
+      options
+      |> Keyword.get(:old_contents, [String.duplicate("o", 30_000)])
+      |> Enum.with_index()
+      |> Enum.reduce(state, fn {text, index}, current ->
+        {:ok, old} =
+          SessionState.propose(
+            current,
+            %{
+              type: :prompt,
+              command_id: if(index == 0, do: "old", else: "old-#{index}"),
+              content: text
+            },
+            %{
+              max_turns: 8,
+              token_budget: 10_000,
+              deadline_ms: 60_000,
+              context_token_budget: configuration["context_token_budget"]
+            }
+          )
 
-    state = retain(fixture, state, old)
+        current = retain(fixture, current, old)
 
-    {:ok, finished} =
-      SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
-        reason: "model_call_failed"
-      })
+        {:ok, finished} =
+          SessionState.propose_run_terminal(current, current.active_run_id, "failed", %{
+            reason: "model_call_failed"
+          })
 
-    state = retain(fixture, state, finished)
+        retain(fixture, current, finished)
+      end)
 
     {:ok, prompt} =
       SessionState.propose(

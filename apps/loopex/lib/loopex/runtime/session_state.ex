@@ -1042,8 +1042,27 @@ defmodule Loopex.Runtime.SessionState do
   # recorded once; an existing episode is returned before consulting a changed
   # clock or host configuration. It grants no provider dispatch authority.
   @doc false
-  def propose_maintenance_episode(%__MODULE__{} = state, run_id, selection, instructions, now) do
-    with {:ok, work, parent} <- maintenance_admission_context(state, run_id) do
+  def propose_maintenance_episode(
+        state,
+        run_id,
+        selection,
+        instructions,
+        now,
+        trigger \\ "ordinary_limit"
+      )
+
+  def propose_maintenance_episode(
+        %__MODULE__{} = state,
+        run_id,
+        selection,
+        instructions,
+        now,
+        trigger
+      ) do
+    with true <- trigger in ["ordinary_limit", "thinking_headroom"],
+         {:ok, work, parent} <- maintenance_admission_context(state, run_id),
+         targets = request_headroom_targets(state, run_id),
+         true <- trigger != "thinking_headroom" or is_map(targets) do
       identity = stable_id("maintenance", run_id, next_turn_number(work))
 
       case Map.fetch(state.maintenance_episodes, identity) do
@@ -1059,7 +1078,8 @@ defmodule Loopex.Runtime.SessionState do
               "episode_id" => identity,
               "run_id" => run_id,
               "staging_turn_id" => stable_id("turn", run_id, next_turn_number(work)),
-              "trigger" => "ordinary_limit",
+              "trigger" => trigger,
+              "targets" => targets,
               "origin" => "automatic",
               "configuration_version" => parent["configuration_version"],
               "maintenance_configuration" => capture,
@@ -1085,6 +1105,9 @@ defmodule Loopex.Runtime.SessionState do
             error -> error
           end
       end
+    else
+      false -> {:error, :maintenance_not_quiescent}
+      {:error, _} = error -> error
     end
   end
 
@@ -1391,7 +1414,7 @@ defmodule Loopex.Runtime.SessionState do
              next_turn_number(work),
              %{system: 1, session: 0, steer: 0, tools: 0, project: 0, resources: 0}
            ),
-         refusal = configured_refusal(compact, episode["configuration_version"]),
+         refusal = configured_refusal(compact, episode["configuration_version"], raw),
          refusal =
            refusal
            |> put_in(["failure", "measurement_scope"], "maintenance")
@@ -1708,8 +1731,9 @@ defmodule Loopex.Runtime.SessionState do
   # Fit includes captured instructions, tool definitions, steer, continuation,
   # metadata and the complete receipt-bearing record's fixed point. The tail
   # preference counts raw session descriptors, excluding fixed steer and prior
-  # checkpoint cost. This ordinary-limit probe does not implement thinking
-  # targets or a live automatic trigger, and never opens an attempt.
+  # checkpoint cost. New thinking exchanges use their derived targets throughout
+  # selection; open exchanges keep their exact prefix and hard ceilings. This
+  # pure probe never opens an attempt.
   @doc false
   @spec ordinary_compaction_tail(t(), map(), :automatic | :explicit, map(), function()) ::
           {:ok, map()} | {:refused, term()} | {:error, term()}
@@ -1818,8 +1842,9 @@ defmodule Loopex.Runtime.SessionState do
     with %{
            "stage" => "checkpoint_pending",
            "summary" => summary,
-           "trigger" => "ordinary_limit"
-         } = episode <-
+           "trigger" => trigger
+         } = episode
+         when trigger in ["ordinary_limit", "thinking_headroom"] <-
            state.maintenance_episodes[state.active_maintenance],
          true <- is_nil(state.aborting) and episode["run_id"] == state.active_run_id,
          true <- episode["prior_checkpoint_id"] == state.active_checkpoint,
@@ -3063,7 +3088,8 @@ defmodule Loopex.Runtime.SessionState do
       context_token_budget: Map.get(receipt, "context_token_budget"),
       context_record_byte_ceiling: Store.max_item_bytes(),
       context_record_depth_limit: Store.max_item_depth(),
-      context_record_cardinality_limit: Store.max_item_cardinality()
+      context_record_cardinality_limit: Store.max_item_cardinality(),
+      reserve_thinking_exchange: not is_nil(request_headroom_targets(state, record["run_id"]))
     }
 
     observations =
@@ -3095,6 +3121,22 @@ defmodule Loopex.Runtime.SessionState do
 
   defp admit_context_candidate(record, _state), do: resolve_record_byte_cost(record)
 
+  # Concept: only a new ordinary exchange reserves continuation capacity.
+  # Technical depth: an open exchange's immutable prefix uses its hard ceilings.
+  # Every other probe derives the same targets from the retained configuration,
+  # including tail selection and checkpoint progress; summarizer input is separate.
+  defp request_headroom_targets(state, run_id) do
+    case run_configuration(state, run_id) do
+      %{"provider_mapping" => %{"continuation_required" => true}} = configuration ->
+        if is_nil(get_in(state.pending_work, [run_id, :continuation_exchange])),
+          do: ContextAdmission.thinking_targets(configuration["context_token_budget"]),
+          else: nil
+
+      _ ->
+        nil
+    end
+  end
+
   defp record_byte_cost_candidate(record) do
     case resolve_record_byte_cost(record) do
       {:ok, fixed} -> {:ok, fixed}
@@ -3122,7 +3164,7 @@ defmodule Loopex.Runtime.SessionState do
       compact =
         compact_refusal(receipt, refusal, work, turn_number, counts)
 
-      refusal = configured_refusal(compact, record["configuration_version"])
+      refusal = configured_refusal(compact, record["configuration_version"], refusal)
 
       refusal =
         if counts.project + counts.resources > 0 do
@@ -3175,7 +3217,7 @@ defmodule Loopex.Runtime.SessionState do
     %{
       "run_id" => Map.fetch!(work, :run_id),
       "turn_id" => stable_id("turn", Map.fetch!(work, :run_id), turn_number),
-      "category" => "context_budget_exceeded",
+      "category" => Map.get(refusal, "category", "context_budget_exceeded"),
       "dimension" => Map.fetch!(refusal, "dimension"),
       "token_estimator" => Bounds.estimator(),
       "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
@@ -3195,16 +3237,16 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
-  defp configured_refusal(compact, nil), do: compact
+  defp configured_refusal(compact, nil, _measurement), do: compact
 
-  defp configured_refusal(compact, version) do
+  defp configured_refusal(compact, version, measurement) do
     failure =
       Map.take(compact, ~w(category dimension observed limit))
       |> Map.merge(%{
         "version" => 2,
         "retryable" => false,
         "measurement_scope" => "ordinary",
-        "hard_limit" => compact["limit"]
+        "hard_limit" => Map.get(measurement, "hard_limit", compact["limit"])
       })
 
     compact
@@ -3215,7 +3257,7 @@ defmodule Loopex.Runtime.SessionState do
       "token_estimator" => "loopex.context_bytes.v2",
       "configuration_version" => version,
       "episode_id" => nil,
-      "targets" => nil,
+      "targets" => Map.get(measurement, "targets"),
       "projection_state" => "measured",
       "measurement_scope" => "ordinary"
     })
@@ -6060,6 +6102,7 @@ defmodule Loopex.Runtime.SessionState do
              "run_id",
              "staging_turn_id",
              "trigger",
+             "targets",
              "origin",
              "configuration_version",
              "maintenance_configuration",
@@ -6084,7 +6127,10 @@ defmodule Loopex.Runtime.SessionState do
              record["staging_turn_id"] == stable_id("turn", run_id, next_turn_number(work)) and
              record["configuration_version"] == parent["configuration_version"] and
              record["bounds"] == maintenance_bounds(state, run_id) and
-             record["trigger"] == "ordinary_limit" and record["origin"] == "automatic" and
+             record["trigger"] in ["ordinary_limit", "thinking_headroom"] and
+             record["targets"] == request_headroom_targets(state, run_id) and
+             (record["trigger"] != "thinking_headroom" or is_map(record["targets"])) and
+             record["origin"] == "automatic" and
              record["preparation_deadline"] == record["admitted_at"] + 60_000 and
              record["attempts"] == 0 and record["summary_ordinal"] == 1 and
              is_nil(record["checkpoint_id"]) and
@@ -9596,7 +9642,8 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, sources} <- expected_context_sources(state, receipt, run_id, applied_steer),
          {:ok, expected} <- expected_context_blocks(request, sources),
          true <- Map.get(receipt, "blocks") == expected,
-         :ok <- validate_receipt_totals(receipt, expected) do
+         :ok <- validate_receipt_totals(receipt, expected),
+         {:ok, ^record} <- admit_context_candidate(record, state) do
       :ok
     else
       {:error, reason} -> {:error, reason}
@@ -9683,7 +9730,8 @@ defmodule Loopex.Runtime.SessionState do
            ),
          {:ok, expected} <- expected_context_blocks(request, sources),
          true <- receipt["blocks"] == expected,
-         :ok <- validate_resource_receipt_totals(receipt, expected) do
+         :ok <- validate_resource_receipt_totals(receipt, expected),
+         {:ok, ^record} <- admit_context_candidate(record, state) do
       :ok
     else
       {:error, reason} -> {:error, reason}
@@ -10572,7 +10620,7 @@ defmodule Loopex.Runtime.SessionState do
       "ordered_descriptor_digest" => nil,
       "configuration_version" => configuration["configuration_version"],
       "episode_id" => state.active_maintenance,
-      "targets" => nil,
+      "targets" => request_headroom_targets(state, run_id),
       "projection_state" => "unavailable",
       "measurement_scope" => nil,
       :kind => "context_admission_refused_v2"
@@ -10748,12 +10796,13 @@ defmodule Loopex.Runtime.SessionState do
          true <- refusal["projection_state"] == "unavailable",
          true <-
            Enum.all?(
-             ~w(targets measurement_scope system_message_count
+             ~w(measurement_scope system_message_count
                    session_message_count steer_message_count tool_definition_count
                    provider_estimated_tokens record_byte_cost ordered_descriptor_digest),
              &is_nil(refusal[&1])
            ),
          true <- refusal["episode_id"] == state.active_maintenance,
+         true <- refusal["targets"] == request_headroom_targets(state, run_id),
          :ok <- validate_preparation_failure_cause(state, run_id, failure["cause"]) do
       :ok
     else
@@ -10766,10 +10815,11 @@ defmodule Loopex.Runtime.SessionState do
          %{
            :kind => "context_admission_refused_v2",
            "episode_id" => episode,
-           "failure" => %{"category" => "context_budget_exceeded"}
+           "failure" => %{"category" => category}
          } = refusal
        )
-       when is_binary(episode) do
+       when is_binary(episode) and
+              category in ["context_budget_exceeded", "thinking_exchange_headroom"] do
     with %{observed_at: now} <- state.maintenance_terminal,
          %{"bounds" => %{} = bounds} = current <-
            state.maintenance_episodes[state.active_maintenance],
@@ -10799,7 +10849,7 @@ defmodule Loopex.Runtime.SessionState do
          true <- is_map(configuration),
          true <- refusal["configuration_version"] == configuration["configuration_version"],
          true <- is_nil(state.active_maintenance),
-         true <- is_nil(refusal["episode_id"]) and is_nil(refusal["targets"]),
+         true <- is_nil(refusal["episode_id"]),
          true <-
            refusal["projection_state"] == "measured" and
              refusal["measurement_scope"] == "ordinary",
@@ -10813,11 +10863,11 @@ defmodule Loopex.Runtime.SessionState do
          true <-
            failure["version"] == 2 and failure["retryable"] == false and
              failure["measurement_scope"] == "ordinary",
-         true <- failure["category"] == "context_budget_exceeded",
+         true <- failure["category"] in ["context_budget_exceeded", "thinking_exchange_headroom"],
          true <-
            is_integer(failure["observed"]) and failure["observed"] >= 0 and
              failure["observed"] <= @uint64_max,
-         true <- positive_uint64?(failure["limit"]) and failure["hard_limit"] == failure["limit"],
+         true <- positive_uint64?(failure["limit"]) and positive_uint64?(failure["hard_limit"]),
          :ok <- validate_ordinary_v2_relations(state, refusal, configuration, failure) do
       :ok
     else
@@ -10841,12 +10891,38 @@ defmodule Loopex.Runtime.SessionState do
         disposition -> disposition
       end)
 
-    validate_context_refusal_base(
-      state,
-      common,
-      configuration["system_class_tokens"],
-      "loopex.context_bytes.v2"
-    )
+    case failure["category"] do
+      "context_budget_exceeded" ->
+        if is_nil(refusal["targets"]) and failure["hard_limit"] == failure["limit"],
+          do:
+            validate_context_refusal_base(
+              state,
+              common,
+              configuration["system_class_tokens"],
+              "loopex.context_bytes.v2"
+            ),
+          else: {:error, :invalid_context_refusal}
+
+      "thinking_exchange_headroom" ->
+        targets = request_headroom_targets(state, refusal["run_id"])
+
+        hard_limit =
+          if failure["dimension"] == "context_tokens",
+            do: configuration["context_token_budget"],
+            else: Store.max_item_bytes()
+
+        if is_map(targets) and refusal["targets"] == targets and
+             failure["hard_limit"] == hard_limit,
+           do:
+             validate_context_refusal_base(
+               state,
+               common,
+               configuration["system_class_tokens"],
+               "loopex.context_bytes.v2",
+               targets
+             ),
+           else: {:error, :invalid_context_refusal}
+    end
   end
 
   # Concept: Frozen optional inputs stay visible in a compact measured refusal.
@@ -10878,7 +10954,7 @@ defmodule Loopex.Runtime.SessionState do
   defp nonnegative_uint64?(value),
     do: is_integer(value) and value >= 0 and value <= @uint64_max
 
-  defp validate_context_refusal_base(state, refusal, system_limit, estimator) do
+  defp validate_context_refusal_base(state, refusal, system_limit, estimator, targets \\ nil) do
     run_id = Map.get(refusal, "run_id")
     work = Map.get(state.pending_work, run_id)
 
@@ -10887,7 +10963,12 @@ defmodule Loopex.Runtime.SessionState do
          %{stage: stage} <- work,
          true <- stage in ["model_pending", "turn_settled"],
          true <- Map.get(refusal, "turn_id") == stable_id("turn", run_id, next_turn_number(work)),
-         true <- Map.get(refusal, "category") == "context_budget_exceeded",
+         true <-
+           Map.get(refusal, "category") ==
+             if(is_nil(targets),
+               do: "context_budget_exceeded",
+               else: "thinking_exchange_headroom"
+             ),
          true <- Map.get(refusal, "token_estimator") == estimator,
          true <-
            Map.get(refusal, "descriptor_canonicalization_version") ==
@@ -10897,10 +10978,34 @@ defmodule Loopex.Runtime.SessionState do
            Map.get(refusal, "context_token_budget") == Map.get(state.context_budgets, run_id),
          true <- Map.get(refusal, "project_disposition") in @context_project_dispositions,
          true <- valid_descriptor_counts?(refusal),
-         true <- valid_context_dimension?(refusal, system_limit) do
+         true <- valid_context_relation?(refusal, system_limit, targets) do
       :ok
     else
       _invalid -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp valid_context_relation?(refusal, system_limit, nil),
+    do: valid_context_dimension?(refusal, system_limit)
+
+  defp valid_context_relation?(refusal, _system_limit, targets) do
+    observed = refusal["observed"]
+    limit = refusal["limit"]
+    estimated = refusal["provider_estimated_tokens"]
+
+    case refusal["dimension"] do
+      "context_tokens" ->
+        observed == estimated and limit == targets["input_target"] and
+          observed > limit and observed <= refusal["context_token_budget"] and
+          is_nil(refusal["record_byte_cost"])
+
+      "context_record_bytes" ->
+        observed == refusal["record_byte_cost"] and limit == targets["record_target"] and
+          observed > limit and observed <= Store.max_item_bytes() and
+          estimated <= targets["input_target"]
+
+      _ ->
+        false
     end
   end
 
