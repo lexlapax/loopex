@@ -99,6 +99,40 @@ did not resolve them. No paid provider calls were made during this check.
 
 ## Current work
 
+- Done: live v3 authority witnesses now stage exact hostile claims in all
+  host instruction sections and in role-shaped instructions. A denying policy
+  still denies the model's write, with no executor job or effect intent. A host
+  registry containing write still stages only the retained read generation when
+  genesis selects read-only tools. The admitted read dispatches as a positive
+  control; write and nested task calls receive exact unknown-tool refusals and
+  have no effect intents. Replay preserves the same instructions and selection.
+  This is Core's authority proof with scripted adapters; it does not establish
+  the not-yet-implemented helper adapter's binding or child admission.
+  The complete configured-session suite passed 39 cases on both supported pairs
+  in 7.6/7.2 measured seconds. Complete outputs and SHA-256:
+  - `/private/tmp/loopex-m7-instruction-authority-current-v2.log`,
+    `ca45064abc57aa14f94fc80eb9c448c530549af7d5f8c5ce20d0391f84ffb60f`.
+  - `/private/tmp/loopex-m7-instruction-authority-floor-v2.log`,
+    `52d09cb3979a776d8eecbe648649936bfb8e0806fdbe5de0e6d5077e42e87c81`.
+  The initial two-case run failed its new assertion because it looked for an
+  absent public tool-name field. It now names each exact retained call ID and
+  checks both historical and v2 intent kinds, preventing a vacuous no-intent
+  assertion. The recovered tool selection uses the actual retained field.
+  Failed output `/private/tmp/loopex-m7-instruction-authority-current-v1.log`, SHA-256
+  `13ad4070911cdc40045f1e47c781dfd83986aae4148782392bb615a42e56358b`.
+  One added T03 subtask closes; original authority/helper integration remains
+  open. Original tally remains 51 done / 135 todo; added tally is 152 done /
+  10 todo. The full fast check still runs only on c788127f in its clean detached
+  checkout, not on this later test/evidence child. Its handle remains 45309.
+
+- Running integration check: exact committed implementation
+  `c788127fe02a57f1105ccfb8a50f5044e55e15d9`, clean detached verification
+  checkout `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`, current pair.
+  `bash scripts/check.sh` runs once with `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`.
+  Complete streaming output `/private/tmp/loopex-m7-c788127f-fast-check.log`;
+  live wrapper handle `45309`. Collect that handle to its terminal result before
+  hashing. This is not a completed result or a closure matrix.
+
 - Done: `loopex config validate` and `loopex config show --effective` now run
   through the actual CLI entry before runtime/application/custody startup. They
   validate the selected authored file before overrides, read exact selected
@@ -4974,6 +5008,8 @@ or check was relaxed.
 - [x] Implement pure closed instruction capture, exact rendering and retained-digest validation; preserve legacy fallback bytes through the shared renderer.
 - [x] Stage captured v3 instructions with configuration-bound revision-4 provenance and exact system/tool costs; reject substituted configuration/source identities on replay.
 - [x] Implement reference-host default/explicit/role capture, bounded regular-file reads and exact JSON environment byte/digest vectors; prove captured facts and immutable schemas in live chat staging. Public command startup and role-helper joins remain pending.
+
+- [x] Prove through live v3 owners and replay that exact host/role instruction sections cannot override a denying policy or enable unselected write/task calls; retain a successful admitted read as a positive control. Actual helper-adapter authority and nesting proof remain open.
 
 ## T04 — Implement configuration, genesis and provider routing
 
