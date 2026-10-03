@@ -325,6 +325,55 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: prove live exhausted-episode recovery through before-linearization,
+  after-linearization-before-result and recovery-representation Store faults.
+  The fixture uses public exact genesis, stops the initial owner and commits
+  four physical attempts (including one exact not-dispatched retry), three
+  useful checkpoints and 168 reported tokens through the Store boundary.
+  Prepared resume appends only owner succession and remains paused. Activation
+  commits one adjacent episode/refusal/parent ending; unresolved uncertainty
+  joins the exact fenced owner before a new owner resolves it. No summary,
+  ordinary request, executor job or further checkpoint is dispatched. Replay
+  retains all original facts, all three checkpoints, the active checkpoint and
+  once-only usage. Coordinator/control joins complete every case. The shared
+  live-ending fixture also preserves all prior non-progress fault assertions.
+  This extends the completed T07 exhaustion subtask; no tally changes. New
+  source preparation/summary dispatch, automatic and explicit workflows, and
+  real persistent Store/provider checkpoint faults remain open.
+
+  Final twenty-file selection: 285 Core tests and seven composition tests pass
+  on each supported pair; one existing Core long-bound exclusion remains.
+  Current: 14.9 measured seconds,
+  `/private/tmp/loopex-m7-exhaustion-current-dev4.log`, SHA-256
+  `596621a00f8b0da46fdaee043535a53a00f9b0aa8f87b64d2507be4bf6541829`.
+  Floor: 14.2 measured seconds,
+  `/private/tmp/loopex-m7-exhaustion-floor-v3.log`, SHA-256
+  `087b67cf3638a680867999516dc8a563d01a9fcf6c2ed1b6061f53b89fedb988`.
+  Intermediate case-level runs passed before fixture consolidation: current
+  `/private/tmp/loopex-m7-exhaustion-current-dev3.log`, SHA-256
+  `e949518d54f835cd9500ae9ecfe274de7daae94266c982be64ba81e4ef7889a1`;
+  floor `/private/tmp/loopex-m7-exhaustion-floor-v2.log`, SHA-256
+  `27bb3b1211f54baede7837731d0bac75ea8951226e9e9353cc294a0c6823b8b6`.
+  Final focused handles 18232 and 28609 are terminal and collected; no agent
+  or maintainer decision is pending. T01–T19 remain original 51 done / 122 todo /
+  6 retired, added 183 done / 9 todo. Including T00: original 51 / 128 / 7 and
+  added 187 / 10. These fault-injection fixtures do not replace real persistent
+  Store or provider release witnesses.
+
+  Formatting, warning-free compilation, dependency direction, bootstrap/status,
+  documentation and diff gates passed in 21.0 measured seconds:
+  `/private/tmp/loopex-m7-exhaustion-live-gates-v1.log`, SHA-256
+  `5c4fb58929f9252c44d815fc8be156679ae979813b0ee7f80ac2ec757689f3d1`.
+  Gate handle 15415 is terminal and collected. Next join source selection and
+  request preparation in a supervised worker that returns evidence to the
+  serial owner, then commit the exact request/open pair before a newly adopted
+  maintenance attempt uses the existing Control permit and provider cleanup.
+  Current provider dispatch still reads ordinary work request/binding/progress
+  fields; it needs the retained maintenance request and operation identity.
+  Inherited open attempts continue to settle owner loss without redispatch.
+  Worker cancellation must join before abort/deadline/owner-loss disposition;
+  stale prepared evidence must not replace current journal truth.
+
 - Done: add the run-owned exhausted-episode reducer for four physical
   maintenance attempts whose current partial checkpoint still fails ordinary
   limits. It recomputes the last minimum ordinary candidate and retains the
@@ -6858,7 +6907,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Add and independently replay the run-owned four-physical-attempt exhaustion proposal, preserving useful partial checkpoints, original facts and once-only spending while retaining the last minimum ordinary numeric refusal and exact episode/refusal/parent ordering. Prove abort/deadline precedence and reject changed measurements, clocks and stripped episode identity on both toolchains. Live exhaustion recovery under Store faults and new summary dispatch remain open.
+- [x] Add and independently replay the run-owned four-physical-attempt exhaustion proposal, preserving useful partial checkpoints, original facts and once-only spending while retaining the last minimum ordinary numeric refusal and exact episode/refusal/parent ordering. Prove abort/deadline precedence and reject changed measurements, clocks and stripped episode identity on both toolchains. Prove all three live Store uncertainty phases with prepared pause, exact fenced-owner succession, one adjacent ending, unchanged partial checkpoints/raw facts, no redispatch or recharge and exact coordinator/control joins on both pairs. New summary dispatch and real persistent Store/provider fault witnesses remain open.
 
 - [x] Extend run-owned ordinary-limit requests and checkpoints across contiguous new raw prefixes with the exact prior checkpoint, cumulative original-record digest, separate consumed range, inherited omission, fixed capture/deadline, ordinal/operation separation, usage-once accounting and physical four-attempt limit; prove fitted-cycle refusal, later non-progress retaining the prior checkpoint, tamper rejection and bounded private traversal on both toolchains. Live dispatch and exhausted-episode endings remain open.
 

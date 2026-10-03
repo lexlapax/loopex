@@ -1667,7 +1667,10 @@ and retains its numeric refusal with episode and parent endings, preserving
 useful partial checkpoints and settled usage. Replay refuses altered measurements
 and removal of the episode identity; ordinary refusals require no active
 maintenance. Abort/deadline precedence and current-format replay pass both pairs.
-Automatic triggering, new summary dispatch/cleanup, exhaustion fault recovery,
+Live exhausted recovery also proves all three Store uncertainty phases, prepared
+pause, exact fenced-owner succession, one adjacent ending, unchanged partial
+checkpoints and no redispatch or recharge on both pairs.
+Automatic triggering and new summary dispatch/cleanup,
 thinking/rendering triggers and standalone compact remain open. The full fast
 check passes on d0dd8ec6 through shared ordinary staging/tail measurement; both
 supported pairs pass the later focused checkpoint reducer/reader selection.

@@ -441,14 +441,20 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     end
   end
 
-  for phase <- [
+  for mode <- [:nonprogress, :exhausted],
+      phase <- [
         :before_linearization,
         :after_linearization_before_result,
         :recovery_representation
       ] do
+    @mode mode
     @phase phase
-    test "live nonprogress ending resolves #{@phase} without another summary or ordinary dispatch" do
-      {fixture, session, episode} = retained_episode(:nonprogress)
+    @expected_tokens if(mode == :exhausted, do: 168, else: 56)
+    @expected_attempts if(mode == :exhausted, do: 4, else: 1)
+    @expected_checkpoints if(mode == :exhausted, do: 3, else: 0)
+    @expected_messages if(mode == :exhausted, do: 3, else: 2)
+    test "live #{@mode} ending resolves #{@phase} without another summary or ordinary dispatch" do
+      {fixture, session, episode} = retained_episode(@mode)
       before = Fixture.records(fixture, session)
       {:ok, original} = SessionState.recover(session, before, Fixture.events(fixture, session))
       :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
@@ -476,9 +482,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         assert AgentLoopTestModel.dispatched(successor.model) == []
 
         assert {:ok, ^session} =
-                 Loopex.resume_session(successor.runtime, session,
-                   command_id: "resolve-nonprogress"
-                 )
+                 Loopex.resume_session(successor.runtime, session, command_id: "resolve-#{@mode}")
       end
 
       rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
@@ -498,31 +502,49 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
              ) == 1
 
       assert prefix.payload.kind == "maintenance_episode_terminal_v1"
-      assert prefix.payload["result"]["usage"]["total_tokens"] == 56
-      assert prefix.payload["result"]["checkpoint_id"] == nil
+      assert prefix.payload["result"]["usage"]["total_tokens"] == @expected_tokens
+      assert prefix.payload["result"]["checkpoint_id"] == original.active_checkpoint
       assert prefix.payload["result"]["cleanup"] == "confirmed"
       assert refusal.payload.kind == "context_admission_refused_v2"
       assert refusal.payload["projection_state"] == "measured"
       assert refusal.payload["measurement_scope"] == "ordinary"
       assert refusal.payload["record_byte_cost"] == nil
       assert refusal.payload["system_message_count"] == 1
-      assert refusal.payload["session_message_count"] == 2
-      assert refusal.payload["failure"]["cause"] == "compaction_no_progress"
+      assert refusal.payload["session_message_count"] == @expected_messages
+      assert refusal.payload["episode_id"] == episode["episode_id"]
+
+      case @mode do
+        :nonprogress ->
+          assert refusal.payload["failure"]["cause"] == "compaction_no_progress"
+
+        :exhausted ->
+          assert refusal.payload["failure"]["category"] == "context_budget_exceeded"
+          assert refusal.payload["failure"]["dimension"] == "context_tokens"
+          assert refusal.payload["failure"]["limit"] == 4_000
+
+          assert refusal.payload["failure"]["observed"] ==
+                   refusal.payload["provider_estimated_tokens"]
+
+          assert refusal.payload["provider_estimated_tokens"] > 4_000
+      end
+
       assert terminal.payload.kind == "run_terminal_committed"
       assert terminal.payload["failure"] == refusal.payload["failure"]
       assert prefix.payload["result"]["failure"] == refusal.payload["failure"]
-      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_opened_v1")) == 1
-      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_settled_v3")) == 1
 
-      refute Enum.any?(
-               rows,
-               &(&1.payload.kind in [
-                   "compaction_checkpoint_committed_v1",
-                   "model_request_committed_v2"
-                 ])
-             )
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_opened_v1")) ==
+               @expected_attempts
 
-      refute Enum.any?(Fixture.events(successor, session), &(&1.kind == "context.compacted"))
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_settled_v3")) ==
+               @expected_attempts
+
+      assert Enum.count(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1")) ==
+               @expected_checkpoints
+
+      assert Enum.count(Fixture.events(successor, session), &(&1.kind == "context.compacted")) ==
+               @expected_checkpoints
+
+      refute Enum.any?(rows, &(&1.payload.kind == "model_request_committed_v2"))
 
       assert MapSet.member?(
                M1RuntimeTestStore.observed(fixture.store),
@@ -534,8 +556,23 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
 
       assert recovered.active_maintenance == nil
       assert recovered.active_run_id == nil
-      assert recovered.charged[episode["run_id"]] == %{tokens: 56, source: :reported}
+
+      assert recovered.charged[episode["run_id"]] == %{
+               tokens: @expected_tokens,
+               source: :reported
+             }
+
       assert recovered.conversation == original.conversation
+      assert recovered.active_checkpoint == original.active_checkpoint
+      assert recovered.checkpoints == original.checkpoints
+
+      assert recovered.maintenance_episodes[episode["episode_id"]]["usage"] == %{
+               "attempts" => @expected_attempts,
+               "reported_tokens" => @expected_tokens,
+               "estimated_tokens" => 0,
+               "total_tokens" => @expected_tokens
+             }
+
       assert AgentLoopTestModel.dispatched(successor.model) == []
       assert Agent.get(successor.executor, & &1.jobs) == []
       stop_and_join(successor, session)
@@ -565,10 +602,20 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
   defp retained_episode(mode) do
     fixture = start(script: [], tools: [])
 
+    configuration =
+      if mode == :exhausted do
+        Genesis.configuration(String.duplicate("s", 10_000))
+        |> Map.put("system_class_tokens", 4_000)
+        |> Map.put("context_token_budget", 4_000)
+        |> Map.update!("budget_origins", &Map.put(&1, "context_token_budget", "explicit"))
+      else
+        Genesis.configuration()
+      end
+
     {:ok, session} =
       Loopex.create_session(fixture.runtime, %{},
         command_id: "create",
-        genesis: Genesis.genesis([])
+        genesis: Genesis.genesis([], configuration)
       )
 
     assert :ok = Loopex.stop(fixture.runtime)
@@ -597,6 +644,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
               content:
                 if(
                   mode in [
+                    :exhausted,
                     :checkpoint_pending,
                     :checkpoint_committed,
                     :checkpoint_committed_aborted,
@@ -606,7 +654,11 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                     :checkpoint_spent_tokens,
                     :checkpoint_spent_turns
                   ],
-                  do: String.duplicate("old", 1_000),
+                  do:
+                    if(mode == :exhausted,
+                      do: String.duplicate("o", 10_000),
+                      else: String.duplicate("old", 1_000)
+                    ),
                   else: "original facts"
                 )
             },
@@ -614,7 +666,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
               max_turns: 8,
               token_budget: 10_000,
               deadline_ms: 60_000,
-              context_token_budget: 8_192
+              context_token_budget: configuration["context_token_budget"]
             }
           )
 
@@ -628,18 +680,48 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         retain(fixture, prior, ending)
       end
 
+    state =
+      if mode == :exhausted do
+        Enum.reduce(1..3, state, fn ordinal, state ->
+          {:ok, prompt} =
+            SessionState.propose(
+              state,
+              %{
+                type: :prompt,
+                command_id: "old-#{ordinal}",
+                content: String.duplicate("o", 10_000)
+              },
+              %{
+                max_turns: 8,
+                token_budget: 10_000,
+                deadline_ms: 60_000,
+                context_token_budget: 4_000
+              }
+            )
+
+          state = retain(fixture, state, prompt)
+
+          {:ok, ending} =
+            SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
+              reason: "model_call_failed"
+            })
+
+          retain(fixture, state, ending)
+        end)
+      else
+        state
+      end
+
     {:ok, prompt} =
       SessionState.propose(state, %{type: :prompt, command_id: "prompt", content: "retained"}, %{
         max_turns: if(mode == :checkpoint_spent_turns, do: 1, else: 8),
         token_budget: 10_000,
         deadline_ms: 60_000,
-        context_token_budget: 8_192
+        context_token_budget: configuration["context_token_budget"]
       })
 
     state = retain(fixture, state, prompt)
     assert AgentLoopTestModel.dispatched(fixture.model) == []
-
-    configuration = Genesis.configuration()
 
     model = %{
       "model" => configuration["model"],
@@ -697,7 +779,18 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       end
 
     state =
+      if mode == :exhausted do
+        {:ok, not_sent} = SessionState.propose_maintenance_attempt_settled(state, :not_dispatched)
+        state = retain(fixture, state, not_sent)
+        {:ok, retry} = SessionState.propose_maintenance_attempt_open(state)
+        retain(fixture, state, retry)
+      else
+        state
+      end
+
+    state =
       if mode in [
+           :exhausted,
            :invalid,
            :incomplete,
            :invalid_aborted,
@@ -714,28 +807,25 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
          ] do
         request = state.maintenance_episodes[state.active_maintenance]["request"]
 
-        raw = %{
-          text:
+        raw =
+          request
+          |> retained_summary_reply()
+          |> Map.put(
+            :text,
             if(mode in [:invalid, :incomplete, :invalid_aborted, :invalid_expired],
               do: "{}",
               else:
                 ~s({"summary":"retained facts","carry_forward":{"files_read":[],"files_changed":[]}})
-            ),
-          identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
-          usage:
+            )
+          )
+          |> Map.put(
+            :usage,
             if(mode == :checkpoint_spent_tokens,
               do: %{},
               else: %{input_tokens: 37, output_tokens: 19}
-            ),
-          tool_calls: [],
-          delta_count: 0,
-          streamed: false,
-          provider_response_id: nil,
-          canonical_request_bytes: request.canonical_request_bytes,
-          staged_request_digest: request.staged_request_digest,
-          completion: if(mode == :incomplete, do: "limit", else: "natural"),
-          continuation: nil
-        }
+            )
+          )
+          |> Map.put(:completion, if(mode == :incomplete, do: "limit", else: "natural"))
 
         {:ok, settlement} = SessionState.propose_maintenance_attempt_settled(state, {:reply, raw})
         retain(fixture, state, settlement)
@@ -745,6 +835,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
 
     state =
       if mode in [
+           :exhausted,
            :checkpoint_committed,
            :checkpoint_committed_aborted,
            :checkpoint_committed_expired
@@ -753,6 +844,38 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
           SessionState.propose_maintenance_checkpoint(state, admitted_at + 2, fn -> :ok end)
 
         retain(fixture, state, checkpoint)
+      else
+        state
+      end
+
+    state =
+      if mode == :exhausted do
+        Enum.reduce(2..3, state, fn ordinal, state ->
+          {:ok, request} =
+            SessionState.propose_maintenance_request(state, 1, admitted_at + ordinal * 2, fn ->
+              :ok
+            end)
+
+          state = retain(fixture, state, request)
+          request = state.maintenance_episodes[state.active_maintenance]["request"]
+
+          {:ok, settlement} =
+            SessionState.propose_maintenance_attempt_settled(
+              state,
+              {:reply, retained_summary_reply(request)}
+            )
+
+          state = retain(fixture, state, settlement)
+
+          {:ok, checkpoint} =
+            SessionState.propose_maintenance_checkpoint(
+              state,
+              admitted_at + ordinal * 2 + 1,
+              fn -> :ok end
+            )
+
+          retain(fixture, state, checkpoint)
+        end)
       else
         state
       end
@@ -768,7 +891,37 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       retain(fixture, state, abort)
     end
 
+    if mode == :exhausted do
+      assert state.maintenance_episodes[state.active_maintenance]["attempts"] == 4
+      assert state.maintenance_episodes[state.active_maintenance]["summary_ordinal"] == 3
+      assert map_size(state.checkpoints) == 3
+      assert state.charged[state.active_run_id] == %{tokens: 168, source: :reported}
+
+      assert {:error, {:checkpoint_requires_more_progress, _}} =
+               SessionState.propose_maintenance_checkpoint_completion(
+                 state,
+                 admitted_at + 8,
+                 fn -> :ok end
+               )
+    end
+
     {fixture, session, hd(admission.records)}
+  end
+
+  defp retained_summary_reply(request) do
+    %{
+      text: ~s({"summary":"retained facts","carry_forward":{"files_read":[],"files_changed":[]}}),
+      identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+      usage: %{input_tokens: 37, output_tokens: 19},
+      tool_calls: [],
+      delta_count: 0,
+      streamed: false,
+      provider_response_id: nil,
+      canonical_request_bytes: request.canonical_request_bytes,
+      staged_request_digest: request.staged_request_digest,
+      completion: "natural",
+      continuation: nil
+    }
   end
 
   defp retain(fixture, state, proposal) do
