@@ -325,6 +325,49 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: retain complete normalized original-record provenance beside each
+  committed conversation source. The index contains only digest, byte cost and
+  original journal position; it stores no original-record or message copies.
+  Prompt, queued steer and promoted follow-up sources keep their original
+  admission. Deferred terminal replies retain their settlement's provenance
+  through the existing indivisible pair. Executor results bind their full
+  receipts, question answers bind the actual response admission, and unstarted
+  cancelled results bind the terminal that derived them. Projection and replay
+  use the same existing source identities. Multi-row proposals supply each
+  source's actual prospective journal position without advancing the proposed
+  state's committed version.
+
+  The nine-file focused selection passed 138 tests on each supported pair.
+  Current: 28.2 measured runner seconds,
+  `/private/tmp/loopex-m7-compaction-originals-current-v1.log`, SHA-256
+  `4b9c18af22bee712b9224615253e7ff45284136d871bbdb7978cdb121b93ffc4`.
+  Floor: 29.0 measured runner seconds,
+  `/private/tmp/loopex-m7-compaction-originals-floor-v1.log`, SHA-256
+  `c6b5271e22341d6023f17b1dba97bf29c2729c7276436db232ed8193bb1a92ea`.
+  Complete outputs retain exact source/test digests. The new witnesses compare
+  actual live owner state with complete replay, verify queued/promoted inputs,
+  real executor receipts, terminal-derived cancellation and question responses,
+  and alter a retained provider response ID without changing canonical messages:
+  the complete-original digest changes. Development runs first found wrong
+  fixture API/question spelling and synchronous use of the nonblocking event
+  queue. The corrected fixture then caught deferred assistant provenance being
+  attributed to the terminal rather than its original settlement; production
+  attribution was fixed before the final selection. No failed run was retried
+  unchanged as passing evidence.
+
+  Formatting, warning-free compilation, dependency direction, repository
+  structure/status, compiled documentation and diff checks passed in 23.0
+  measured seconds. Complete output:
+  `/private/tmp/loopex-m7-compaction-originals-gates-v1.log`, SHA-256
+  `d04e41798aa83cf807f1eb23439ad76180816fee9327aebc9516c1af7856a0b1`.
+
+  The goal remains active on `m7`; no agents or
+  maintainer decisions are pending. T00–T19 originals remain 51 done / 128 todo /
+  7 retired, with 178 done / 10 todo added subtasks. T01–T19 alone have original
+  51 / 122 / 6 and added 174 / 9. No original compaction row is closed by this
+  provenance index: ordered range integrity, maintenance request staging,
+  attempts/accounting, dispatch, checkpoints and standalone compact remain.
+
 - Done: extend the existing ProviderAttempt vocabulary and verified Control
   permit boundary with `maintenance_attempt_opened_v1`. Its closed fields are
   episode identity, positive unsigned summary ordinal, fixed compaction purpose,
@@ -6103,6 +6146,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Retain replay-derived complete original-record digests/costs/positions for existing conversation sources, preserving queued input admission, deferred settlement pairs, executor receipt evidence, terminal-derived results and question response provenance; prove live/replay equality and private-original changes invisible to canonical messages on both supported toolchains. Ordered range digest and live maintenance staging remain open.
 
 - [x] Extend the existing provider-attempt open vocabulary, closed permit bindings, exact-position one-use Control send and effect-history coverage for distinct maintenance episode/summary identities; prove fabricated/mixed/changed identities, stale positions, deadlines, repeat sends and process joins on both toolchains. Episode/request reducer, four-attempt accounting and actual maintenance dispatch remain open.
 

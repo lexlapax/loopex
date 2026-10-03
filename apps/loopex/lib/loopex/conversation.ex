@@ -144,6 +144,26 @@ defmodule Loopex.Conversation do
 
   def lineage_entries(_invalid), do: {:error, :context_projection_invalid}
 
+  # Concept: a projected message and its original fact share one source identity.
+  # Technical depth: this identity labels conversation data, never provider or
+  # executor authority. Replay uses it to bind complete original-record digests
+  # independently of the bytes a renderer exposes to the model.
+  @doc false
+  @spec source_reference(element()) :: map()
+  def source_reference(%{kind: :user_message, run_id: run, command_id: command}),
+    do: %{"kind" => "session_command", "run_id" => run, "command_id" => command}
+
+  def source_reference(%{kind: :assistant_message, run_id: run, turn_number: turn}),
+    do: %{"kind" => "session_assistant", "run_id" => run, "turn" => turn}
+
+  def source_reference(%{
+        kind: :tool_result,
+        run_id: run,
+        turn_number: turn,
+        tool_call_id: call
+      }),
+      do: %{"kind" => "session_tool_result", "run_id" => run, "turn" => turn, "call_id" => call}
+
   # Concept: compaction preserves complete exchanges and their preceding inputs.
   # Technical depth: these transient units contain no maintenance records. A
   # selector may cover only a contiguous prefix before its first protected unit.
@@ -402,16 +422,14 @@ defmodule Loopex.Conversation do
 
   defp project_entries(elements) do
     Enum.flat_map(elements, fn
-      %{kind: :user_message, run_id: run_id, command_id: command_id, content: content} ->
+      %{kind: :user_message, content: content} = input ->
         [
-          {%{"kind" => "session_command", "run_id" => run_id, "command_id" => command_id},
-           %{"role" => "user", "content" => content}}
+          {source_reference(input), %{"role" => "user", "content" => content}}
         ]
 
-      %{kind: :assistant_message, run_id: run_id, turn_number: turn_number} = assistant ->
+      %{kind: :assistant_message} = assistant ->
         [
-          {%{"kind" => "session_assistant", "run_id" => run_id, "turn" => turn_number},
-           assistant_message(assistant)}
+          {source_reference(assistant), assistant_message(assistant)}
           | turn_result_entries(elements, assistant)
         ]
 
@@ -475,12 +493,7 @@ defmodule Loopex.Conversation do
         {:ok, result} ->
           [
             {
-              %{
-                "kind" => "session_tool_result",
-                "run_id" => result.run_id,
-                "turn" => result.turn_number,
-                "call_id" => tool_call_id
-              },
+              source_reference(result),
               %{
                 "role" => "tool",
                 "tool_call_id" => tool_call_id,

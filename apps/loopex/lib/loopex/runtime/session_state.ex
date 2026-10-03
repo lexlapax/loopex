@@ -44,7 +44,11 @@ defmodule Loopex.Runtime.SessionState do
 
   `run_order` retains admission and promotion order reconstructed from history.
   `conversation` holds the committed elements of each run, which
-  `Loopex.Conversation` projects into the message list a turn stages. `bounds`
+  `Loopex.Conversation` projects into the message list a turn stages.
+  `conversation_record_sources` binds each element's source to the complete
+  normalized original record's digest, cost and journal position. It retains no
+  record copies and is reconstructed alongside conversation during replay.
+  `bounds`
   holds each run's declared bounds exactly as they were committed at admission
   or promotion, and `charged` accumulates that run's token charge with the
   source that produced it.
@@ -203,6 +207,7 @@ defmodule Loopex.Runtime.SessionState do
           commands: map(),
           pending_work: map(),
           conversation: map(),
+          conversation_record_sources: map(),
           artifact_sources: map(),
           tool_result_sources: map(),
           artifact_preparations: map(),
@@ -241,6 +246,12 @@ defmodule Loopex.Runtime.SessionState do
             commands: %{},
             pending_work: %{},
             conversation: %{},
+            # Concept: summaries bind complete originals even when projection omits data.
+            # Technical depth: replay derives one fixed-size digest/cost/position
+            # per conversation source from the owning normalized record. Queued
+            # inputs retain admission provenance when they are later promoted;
+            # synthetic terminal results bind their actual terminal record.
+            conversation_record_sources: %{},
             # Concept: artifact membership comes from this session's committed receipts.
             # Technical depth: this derived index contains full references and
             # canonical source-payload digests, never object contents or handles.
@@ -3282,6 +3293,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, command_type} <- record_binary(record, "command_type"),
          {:ok, admission} <- record_binary(record, "admission"),
          false <- Map.has_key?(state.commands, command_id),
+         {:ok, record_source} <- original_record_source(record, state.journal_version + 1),
          {:ok, reply, active_run_id, pending_work, expected_events, patch} <-
            command_effect(state, record, command_type, admission, command_id) do
       run_id =
@@ -3291,19 +3303,26 @@ defmodule Loopex.Runtime.SessionState do
             _absent -> nil
           end
 
-      command_binding = %{digest: digest, reply: reply, run_id: run_id}
+      command_binding = %{
+        digest: digest,
+        reply: reply,
+        run_id: run_id,
+        record_source: record_source
+      }
 
-      {:ok,
-       Map.merge(
-         %{
-           state
-           | active_run_id: active_run_id,
-             pending_work: pending_work,
-             expected_events: expected_events,
-             commands: Map.put(state.commands, command_id, command_binding)
-         },
-         patch
-       )}
+      next =
+        Map.merge(
+          %{
+            state
+            | active_run_id: active_run_id,
+              pending_work: pending_work,
+              expected_events: expected_events,
+              commands: Map.put(state.commands, command_id, command_binding)
+          },
+          patch
+        )
+
+      retain_conversation_record_sources(state, next, record_source)
     else
       true -> {:error, :duplicate_command_record}
       {:error, reason} -> {:error, reason}
@@ -3822,8 +3841,10 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_records(state, records) do
-    Enum.reduce_while(records, {:ok, state, []}, fn record, {:ok, current, events} ->
-      case apply_admitted_internal_record(current, record) do
+    records
+    |> Enum.with_index(state.journal_version + 1)
+    |> Enum.reduce_while({:ok, state, []}, fn {record, version}, {:ok, current, events} ->
+      case apply_admitted_internal_record(current, record, version) do
         {:ok, next, emitted} -> {:cont, {:ok, next, events ++ emitted}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -3854,9 +3875,13 @@ defmodule Loopex.Runtime.SessionState do
   defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :run_terminal}}, kind),
     do: kind == "run_terminal_committed"
 
-  defp apply_admitted_internal_record(state, %{kind: kind} = record) do
+  defp apply_admitted_internal_record(state, record, version \\ nil)
+
+  defp apply_admitted_internal_record(state, %{kind: kind} = record, version) do
     if maintenance_terminal_tail?(state, kind) do
-      with {:ok, next, events} <- apply_internal_record(state, record) do
+      with {:ok, next, events} <- apply_internal_record(state, record),
+           {:ok, next} <-
+             retain_pending_settlement_source(next, record, version || state.journal_version + 1) do
         next =
           case {state.maintenance_terminal, next.maintenance_terminal, kind} do
             {%{}, %{} = marker, kind} when kind != "run_terminal_committed" ->
@@ -3866,11 +3891,95 @@ defmodule Loopex.Runtime.SessionState do
               next
           end
 
-        {:ok, next, events}
+        if next.conversation == state.conversation do
+          {:ok, next, events}
+        else
+          with {:ok, source} <-
+                 original_record_source(record, version || state.journal_version + 1),
+               {:ok, next} <- retain_conversation_record_sources(state, next, source) do
+            {:ok, next, events}
+          end
+        end
       end
     else
       {:error, :incomplete_maintenance_terminal_transaction}
     end
+  end
+
+  defp original_record_source(record, version) do
+    with {:ok, normalized, bytes} <- Store.normalize_and_measure_item(:record, record) do
+      {:ok,
+       %{
+         record_digest: Canonical.digest(normalized),
+         record_byte_cost: bytes,
+         journal_version: version
+       }}
+    end
+  end
+
+  # Concept: a deferred assistant still belongs to the settlement that supplied it.
+  # Technical depth: the terminal pair keeps the settlement's digest/position
+  # alongside its existing pending row. The ending publishes that row's facts;
+  # it supplies no replacement reply provenance across proposal or replay pages.
+  defp retain_pending_settlement_source(
+         state,
+         %{"run_id" => run, kind: "model_attempt_settled_v3"} = record,
+         version
+       ) do
+    case Map.get(state.pending_work, run) do
+      %{stage: "model_attempt_pending_terminal"} = work ->
+        with {:ok, source} <- original_record_source(record, version) do
+          {:ok, put_pending(state, run, Map.put(work, :settlement_record_source, source))}
+        end
+
+      _ ->
+        {:ok, state}
+    end
+  end
+
+  defp retain_pending_settlement_source(state, _record, _version), do: {:ok, state}
+
+  # Concept: promoting an input does not change which record originally admitted it.
+  # Technical depth: only newly derived elements receive provenance. Questions,
+  # receipt results and terminal-generated results bind the outer committed row,
+  # rather than a synthetic nested tool-result payload used by a reducer helper.
+  # Sources already retained cannot be overwritten by a later staging record.
+  defp retain_conversation_record_sources(prior, next, source) do
+    additions =
+      next.conversation
+      |> Stream.flat_map(fn {run, elements} ->
+        previous = Map.get(prior.conversation, run, [])
+        if elements == previous, do: [], else: Stream.drop(elements, length(previous))
+      end)
+
+    Enum.reduce_while(additions, {:ok, next}, fn element, {:ok, current} ->
+      reference = Conversation.source_reference(element)
+
+      original =
+        case element do
+          %{kind: :user_message, command_id: command} ->
+            get_in(current.commands, [command, :record_source])
+
+          %{kind: :assistant_message, run_id: run} ->
+            case Map.get(prior.pending_work, run) do
+              %{stage: "model_attempt_pending_terminal", settlement_record_source: original} ->
+                original
+
+              _ ->
+                source
+            end
+
+          _ ->
+            source
+        end
+
+      if is_map(original) and not Map.has_key?(current.conversation_record_sources, reference) do
+        retained = Map.put(current.conversation_record_sources, reference, original)
+        {:cont, {:ok, %{current | conversation_record_sources: retained}}}
+      else
+        {:halt, {:error, :context_projection_invalid}}
+      end
+    end)
   end
 
   defp maintenance_terminal_prefix(%{active_maintenance: nil}, records, nil),
