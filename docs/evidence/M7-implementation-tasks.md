@@ -31,6 +31,9 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Restart checkpoint — 2026-10-02, maintenance admission
 
+Historical checkpoint. The goal resumed after this stop; Current work below
+records the active implementation and latest verification.
+
 The maintainer requested another safe stop for restart. The goal is paused,
 M7 remains In progress, and implementation is committed and pushed on `m7` at
 `85e15036836f496d19860f84e7d7ece224699a2f`. This checkpoint changes only this
@@ -247,15 +250,84 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Paused at the maintainer's request for restart: T07 durable compaction.
-  The admission/replay foundation below is
-  implemented; next connect the serial owner to its ordinary-limit trigger,
-  fixed source-preparation cutoff, bounded selection, maintenance-specific
-  request/attempt/settlement records and checkpoint commit. Standalone compact,
-  automatic thinking headroom, abort/deadline terminal ordering, unknown-commit
-  fencing and live recovery remain open. No agents or decisions are pending.
-  All focused test handles are terminal and collected. The prior full check
-  covers `9e976839`, not these new implementation bytes.
+- Active: T07 durable compaction. Admission, run-owned terminal ordering and
+  expired-preparation/undispatched-abort recovery are implemented. Next join the
+  ordinary-limit trigger to bounded source selection, maintenance-specific
+  request/attempt/settlement records and checkpoint commits. The not-yet-expired
+  source-preparation dispatch path and its timer/worker joins remain open, along
+  with standalone compact, automatic thinking headroom, usage-once accounting,
+  checkpoint uncertainty and complete live recovery. No agents or decisions are
+  pending. Focused handles are terminal and collected. A new full integration
+  run will cover the committed ending/expiry candidate; the previous full check
+  still covers `9e976839`, not these later source bytes.
+
+- Done: implement `maintenance_episode_terminal_v1` as the leading row of a
+  run-owned ending transaction. Its closed private fields are episode identity,
+  optional unsigned clock observation and the accepted five-member result.
+  Applying it installs only a transient marker. The exact existing ending pair
+  remains adjacent; the matching run terminal validates and applies the episode
+  result with the run ending. A partial durable head, intervening command/owner
+  succession, duplicate prefix, wrong identity, changed result/counters/cleanup
+  or fabricated parent-bound measurement refuses. Bare run terminals still
+  cannot orphan an active episode. Provider-failure and cancellation containers
+  remain distinct; deadline-staging keeps its own four-key record and original
+  run failure, with the episode's maintenance-deadline cause alongside it.
+
+  Expired pre-first-request preparation retains the observed clock and validates
+  it against admission + 60,000 ms on replay. It produces the episode terminal,
+  unavailable v2 refusal and failed run terminal with zero usage and no numeric
+  bound or run deadline fabricated. An earlier or equal committed run cutoff
+  wins with the run's existing deadline bound and exact measurement. These
+  parent-cutoff reducer cases use explicit retained-state fixtures, not a live
+  staged maintenance request. The live owner joins expired recovery through
+  its existing commit fence. A recovered abort in the quiescent zero-attempt
+  source stage ends cancelled, without a fictional unknown operation. The
+  ordinary settlement consumer selects its settlement by kind so a leading
+  episode terminal cannot be mistaken for that verdict.
+
+  The twelve-file focused selection passed 287 tests on each supported pair,
+  in 50.7/50.2 measured runner seconds, 47.8/48.0 suite seconds. Current output:
+  `/private/tmp/loopex-m7-maintenance-endings-current-v3.log`, SHA-256
+  `7bd6e40703da5a98209df89d63b7bd72652fe16db90b20c8533b1777804994d2`;
+  floor output `/private/tmp/loopex-m7-maintenance-endings-floor-v3.log`, SHA-256
+  `b6823470db50cf70dbdbfe0ab97472474b05094f3baa122d302d58ca044fd008`.
+  Live recovery tests seed the admitted boundary through public exact creation,
+  a paused prompt, runtime stop and a real Store transaction using the existing
+  test adapter. They cover all three uncertainty phases and no duplicate ending,
+  provider dispatch or executor job. They do not replace real-Store/checkpoint
+  fault evidence or prove the live automatic admission trigger.
+
+  The first 59-case reducer selection passed both pairs; the first four live
+  recovery cases also passed but did not join the owner's post-receipt handler.
+  Adding that join exposed an incorrect fixture assumption that the owner stays
+  alive after two uncertain Store presentations. The broader v2 selection failed
+  one of 286 cases on each pair: current 48.7 seconds,
+  `/private/tmp/loopex-m7-maintenance-endings-current-v2.log`, SHA-256
+  `4538f78b9617f6765196b0fe90bf054f7c4b576e01168e4bb25041618e4479c0`;
+  floor 48.5 seconds, `/private/tmp/loopex-m7-maintenance-endings-floor-v2.log`,
+  SHA-256 `f422e5861929521bfb473b0888641e03d34426febd2019b2aa659c6b0ea21c1f`.
+  An early owner monitor independently retained that same fenced exit:
+  `/private/tmp/loopex-m7-maintenance-recovery-current-v2.log`, SHA-256
+  `6a3913d8169821f3bb4f10c59651226f4412f46bec01b0b6727a63797aa9dabf`.
+  The final witness joins exactly `maintenance_expiry_failed/commit_unknown`,
+  then proves a successor reuses the already committed ending and public events.
+  It adds no retry, timeout, fake replacement or weaker cleanup condition.
+  Original T00–T19 counts remain 51 done / 128 todo / 7 retired. Added counts
+  are 176 done / 10 todo, including the newly tracked T16 signal-fixture leak.
+  T01–T19 alone: originals 51 / 122 / 6; added 172 / 9.
+
+  Formatting, warning-free compilation, compiled documentation ordering,
+  dependency direction, repository structure/status and diff checks passed in
+  23.1 measured seconds. Complete output
+  `/private/tmp/loopex-m7-maintenance-endings-gates-v1.log`, SHA-256
+  `fab2675c8c5ad924a4794208c997a26172a4bfe093fea09c0f532b9920826718`.
+  Final focused source digests and complete output inventory:
+  `/private/tmp/loopex-m7-maintenance-endings-focused-evidence-v1.json`, SHA-256
+  `ffbdd020e594c53067da2c94b595ca9c98ae73c6477da9e46e2ada9f49acec01`.
+  The next full fast check runs once from this committed integration candidate
+  in the existing detached verification checkout; its result is pending until
+  the process exits and the complete output is retained. No full-check pass for
+  the ending/expiry source is claimed from the earlier `9e976839` output.
 
 - Done: implement the closed `maintenance_episode_admitted_v1` reducer for an
   automatic ordinary-limit episode, bound to its run and next staging identity.
@@ -5903,6 +5975,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Commit run-owned episode terminal prefixes atomically with existing endings; validate the closed result, parent-bound observations, retained preparation clock, adjacency and complete replay; join live expired preparation and undispatched-abort recovery, including exact uncertainty/owner-exit/successor proof on both toolchains. Live triggering, summary attempt accounting, checkpoint faults and standalone endings remain open.
+
 - [x] Implement durable automatic ordinary-limit episode admission and replay with frozen maintenance configuration, parent/staging identity, spending bounds, zero counters, fixed preparation cutoff, ordinary-staging and run-terminal fences; prove owner succession, missing/unsupported settings, overflow, overlap refusal and rehashed tampering on both toolchains. Live owner triggering, dispatch, terminal and checkpoint integration remain open.
 
 - [x] Validate explicit Core maintenance model/instruction startup settings and privately forward exact captured instruction bytes to session owners.
@@ -6166,6 +6240,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Investigate and repair the CLI signal fixture's leaked process trees observed at the 2026-10-02 restart checkpoint; prove exact wrapper/VM joins for normal, interrupted and failing fixture exits without relying on manual cleanup.
 
 - [x] Run the public-chat host and shared diagnostic-lifetime integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest.
 

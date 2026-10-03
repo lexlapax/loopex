@@ -1588,10 +1588,19 @@ record, frozen maintenance model/instructions and derived input/system limits,
 parent spending bounds and the fixed admission + 60,000-ms preparation cutoff.
 Replay checks identities and derived captures against retained run truth; owner
 succession cannot renew the cutoff. Admission opens no attempt, publishes no
-event and blocks ordinary model staging and run terminals while active. Both-pair focused tests
-cover these reducer guarantees. The live owner does not invoke this admission
-yet; automatic/standalone dispatch, maintenance settlement, checkpoint commits,
-abort/deadline precedence and process/Store fault joins remain unproved.
+event and blocks ordinary model staging and bare run terminals while active.
+Run-owned endings now prepend an episode terminal whose transient marker applies
+only with the complete existing ending transaction. Both-pair tests refuse
+partial, interleaved and forged history; expired source preparation retains and
+replays its fixed clock observation without inventing a run deadline or numeric
+failure. An earlier or equal run cutoff keeps its own bound measurements. Live
+expired-preparation and undispatched-abort recovery use the existing owner commit
+fence; fault tests join an unresolved owner exit and a successor with no duplicate
+ending or provider dispatch. These use the existing test Store adapter and do not
+replace real-Store/checkpoint evidence. The live owner does not invoke admission
+yet; not-yet-expired source dispatch, its worker/timer cleanup, automatic and
+standalone attempts, maintenance settlement/usage, checkpoint commits and complete
+abort/deadline precedence remain unproved.
 
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.

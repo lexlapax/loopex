@@ -3304,21 +3304,33 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # `tool.started` and nothing after it, and the run's outcome was a second,
   # independent statement of the same unknown rather than a consequence of it.
   defp resume_aborting_run(state, run_id) do
-    if cleaning_up?(state, run_id) do
-      {:noreply, state}
-    else
-      case commit_owned_operation_unknown(state, run_id) do
-        {:ok, settled} ->
-          commit_terminal(
-            settled,
-            run_id,
-            "outcome_unknown",
-            %{reconciliation_ref: reconciliation_ref(state, run_id)}
-          )
+    cond do
+      cleaning_up?(state, run_id) ->
+        {:noreply, state}
 
-        {:error, reason} ->
-          {:stop, {:tool_result_failed, reason}, state}
-      end
+      maintenance_source_preparation?(state.durable, run_id) and
+        map_size(state.in_flight) == 0 and
+          not SessionState.unproven_effect?(state.durable, run_id) ->
+        # Concept: cancelling undispatched preparation has no unknown operation.
+        # Technical depth: the retained zero-attempt source stage proves there
+        # was no summary dispatch, and admission required quiescent ordinary
+        # work. The episode terminal and cancelled run commit together; no
+        # provider cleanup or reconciliation result is invented on recovery.
+        commit_terminal(state, run_id, "cancelled", %{})
+
+      true ->
+        case commit_owned_operation_unknown(state, run_id) do
+          {:ok, settled} ->
+            commit_terminal(
+              settled,
+              run_id,
+              "outcome_unknown",
+              %{reconciliation_ref: reconciliation_ref(state, run_id)}
+            )
+
+          {:error, reason} ->
+            {:stop, {:tool_result_failed, reason}, state}
+        end
     end
   end
 
@@ -4459,6 +4471,41 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # expiry is therefore decided here, ahead of the call, and the run terminates
   # instead of redispatching.
   defp before_deadline(state, work, dispatch) do
+    if maintenance_source_preparation?(state.durable, work.run_id) do
+      case SessionState.propose_maintenance_preparation_expiry(
+             state.durable,
+             work.run_id,
+             System.system_time(:millisecond)
+           ) do
+        {:ok, proposal} ->
+          state = disarm_deadline(state, work.run_id)
+
+          with {:ok, next} <- commit_internal(state, proposal) do
+            send(self(), :advance_work)
+            {:noreply, %{next | adopted: MapSet.delete(next.adopted, work.run_id)}}
+          else
+            {:error, reason} -> {:stop, {:maintenance_expiry_failed, reason}, state}
+          end
+
+        {:error, :maintenance_preparation_not_elapsed} ->
+          before_run_deadline(state, work, dispatch)
+
+        {:error, reason} ->
+          {:stop, {:maintenance_expiry_failed, reason}, state}
+      end
+    else
+      before_run_deadline(state, work, dispatch)
+    end
+  end
+
+  defp maintenance_source_preparation?(durable, run_id) do
+    match?(
+      %{"run_id" => ^run_id, "stage" => "source_preparation", "attempts" => 0},
+      Map.get(durable.maintenance_episodes, durable.active_maintenance)
+    )
+  end
+
+  defp before_run_deadline(state, work, dispatch) do
     if deadline_reached?(state, work.run_id) do
       finish_at_deadline(state, work.run_id)
     else
@@ -5869,7 +5916,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp commit_model_settlement(state, run_id, proposal) do
-    settlement = hd(proposal.records)
+    settlement = Enum.find(proposal.records, &(&1.kind == "model_attempt_settled_v3"))
 
     case retain_terminal_operation_fact(state, proposal) do
       {:ok, next} ->

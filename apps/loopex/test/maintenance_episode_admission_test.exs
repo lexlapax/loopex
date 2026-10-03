@@ -139,8 +139,23 @@ defmodule Loopex.Runtime.MaintenanceEpisodeAdmissionTest do
     {:ok, admission} = admit(state, 1_000)
     {committed, rows} = commit(state, admission)
 
-    assert {:error, :invalid_maintenance_episode_transition} ==
-             SessionState.propose_run_terminal(committed, run, "failed", detail)
+    assert {:ok, ending} = SessionState.propose_run_terminal(committed, run, "failed", detail)
+    assert [prefix, terminal] = ending.records
+    assert prefix.kind == "maintenance_episode_terminal_v1"
+
+    assert prefix["result"]["failure"] == %{
+             "category" => "model_call_failed",
+             "retryable" => false
+           }
+
+    assert prefix["result"]["usage"] == hd(admission.records)["usage"]
+    assert terminal == hd(ordinary_terminal.records)
+    assert ending.next.active_maintenance == nil
+    assert ending.next.maintenance_terminal == nil
+    assert ending.next.maintenance_episodes[committed.active_maintenance]["stage"] == "settled"
+    assert {:ok, recovered} = replay_ending(committed, history ++ rows, events, ending)
+    assert recovered.maintenance_episodes == ending.next.maintenance_episodes
+    assert recovered.active_run_id == nil
 
     terminal_row = %{
       journal_version: committed.journal_version + 1,
@@ -250,6 +265,290 @@ defmodule Loopex.Runtime.MaintenanceEpisodeAdmissionTest do
         ] do
       assert {:error, :maintenance_not_quiescent} == admit(busy, 1_000)
     end
+  end
+
+  test "expiry uses its retained cutoff, zero usage and an adjacent unavailable refusal" do
+    {state, history, events} = admitted_state()
+    run = state.active_run_id
+
+    assert {:error, :maintenance_preparation_not_elapsed} ==
+             SessionState.propose_maintenance_preparation_expiry(state, run, 60_999)
+
+    assert {:ok, ending} = SessionState.propose_maintenance_preparation_expiry(state, run, 61_000)
+    assert [prefix, refusal, terminal] = ending.records
+
+    assert Enum.map(ending.records, & &1.kind) == [
+             "maintenance_episode_terminal_v1",
+             "context_admission_refused_v2",
+             "run_terminal_committed"
+           ]
+
+    assert prefix["observed_at"] == 61_000
+    assert prefix["episode_id"] == state.active_maintenance
+    assert refusal["episode_id"] == state.active_maintenance
+    assert refusal["failure"] == prefix["result"]["failure"]
+    assert refusal["failure"] == terminal["failure"]
+    assert refusal["failure"]["cause"] == "compaction_preparation_deadline"
+    assert refusal["failure"]["measurement_scope"] == nil
+    assert refusal["projection_state"] == "unavailable"
+    assert refusal["record_byte_cost"] == nil
+    assert terminal["outcome"] == "failed"
+    assert terminal["bound"] == nil
+    assert terminal["observed"] == nil
+    assert terminal["declared_limit"] == nil
+    assert prefix["result"]["disposition"] == "failed"
+    assert prefix["result"]["cleanup"] == "confirmed"
+    assert prefix["result"]["checkpoint_id"] == nil
+    assert prefix["result"]["usage"]["total_tokens"] == 0
+    assert ending.next.charged == state.charged
+    assert ending.next.deadlines == %{}
+    assert Enum.map(ending.events, & &1.kind) == ["run.finished", "session.settled"]
+    assert {:ok, recovered} = replay_ending(state, history, events, ending)
+    assert recovered.active_maintenance == nil
+    assert recovered.maintenance_terminal == nil
+    assert recovered.maintenance_episodes[state.active_maintenance]["result"] == prefix["result"]
+
+    for now <- [-1, @uint64_max + 1, nil] do
+      assert {:error, :invalid_maintenance_episode_transition} ==
+               SessionState.propose_maintenance_preparation_expiry(state, run, now)
+    end
+  end
+
+  test "episode terminal prefixes cannot be left at the head or interrupted by any row" do
+    {state, history, events} = admitted_state()
+
+    {:ok, ending} =
+      SessionState.propose_maintenance_preparation_expiry(state, state.active_run_id, 61_000)
+
+    {_next, rows} = commit(state, ending)
+    [prefix, refusal, terminal] = rows
+
+    for tail <- [[prefix], [prefix, refusal]] do
+      assert {:error, :incomplete_maintenance_terminal_transaction} ==
+               SessionState.recover(state.session_id, history ++ tail, events)
+    end
+
+    {:ok, steer} =
+      SessionState.propose(state, %{
+        type: :steer,
+        command_id: "steer",
+        run_id: state.active_run_id,
+        content: "later"
+      })
+
+    {_next, [command]} = commit(state, steer)
+
+    advance = %{
+      prefix
+      | payload: %{
+          :kind => "owner_advanced",
+          "prior_owner_epoch" => 1,
+          "owner_epoch" => 2,
+          "owner_incarnation_id" => "successor",
+          "owner_transaction_id" => "next-owner"
+        },
+        owner_epoch: 2,
+        owner_incarnation_id: "successor"
+    }
+
+    for inserted <- [prefix, command, advance] do
+      for before <- [1, 2] do
+        tail = List.insert_at(rows, before, inserted) |> restamp(state)
+
+        assert {:error, :incomplete_maintenance_terminal_transaction} ==
+                 SessionState.recover(state.session_id, history ++ tail, events)
+      end
+    end
+
+    assert {:error, _} =
+             SessionState.recover(
+               state.session_id,
+               history ++ restamp([prefix, terminal], state),
+               events
+             )
+
+    assert {:error, _} =
+             SessionState.recover(
+               state.session_id,
+               history ++ restamp([refusal, prefix, terminal], state),
+               events
+             )
+  end
+
+  test "replay rejects forged clock, result, identities and refusal attribution" do
+    {state, history, events} = admitted_state()
+
+    {:ok, ending} =
+      SessionState.propose_maintenance_preparation_expiry(state, state.active_run_id, 61_000)
+
+    {_next, rows} = commit(state, ending)
+    all_events = append_events(state, events, ending.events)
+
+    for changed <- [
+          put_in(rows, [Access.at(0), :payload, "episode_id"], "other"),
+          put_in(rows, [Access.at(0), :payload, "observed_at"], 60_999),
+          put_in(rows, [Access.at(0), :payload, "observed_at"], nil),
+          put_in(rows, [Access.at(0), :payload, "observed_at"], @uint64_max + 1),
+          put_in(rows, [Access.at(0), :payload, "extra"], true),
+          put_in(rows, [Access.at(0), :payload, "result", "extra"], true),
+          put_in(
+            rows,
+            [Access.at(0), :payload, "result", "failure", "cause"],
+            "compaction_no_progress"
+          ),
+          put_in(rows, [Access.at(0), :payload, "result", "usage", "total_tokens"], 1),
+          put_in(rows, [Access.at(0), :payload, "result", "cleanup"], "unknown"),
+          put_in(rows, [Access.at(0), :payload, "result", "checkpoint_id"], "invented"),
+          put_in(rows, [Access.at(1), :payload, "episode_id"], nil),
+          put_in(rows, [Access.at(1), :payload, "turn_id"], "other"),
+          put_in(rows, [Access.at(1), :payload, "failure", "cause"], "compaction_no_progress"),
+          put_in(rows, [Access.at(2), :payload, "failure", "cause"], "compaction_no_progress")
+        ] do
+      assert {:error, _} = SessionState.recover(state.session_id, history ++ changed, all_events)
+    end
+  end
+
+  test "deadline staging keeps its original pair and a distinct episode failure" do
+    {state, history, events} = admitted_state()
+
+    assert {:ok, ending} =
+             SessionState.propose_deadline_failure(
+               state,
+               state.active_run_id,
+               "deadline_addition_overflow"
+             )
+
+    assert [prefix, failure, terminal] = ending.records
+    assert prefix.kind == "maintenance_episode_terminal_v1"
+    assert failure.kind == "deadline_staging_failed_v1"
+    assert map_size(failure) == 4
+
+    assert terminal["failure"] == %{
+             "category" => "deadline_preflight_failed",
+             "retryable" => false
+           }
+
+    assert prefix["result"]["failure"]["cause"] == "maintenance_deadline_unrepresentable"
+    assert {:ok, _} = replay_ending(state, history, events, ending)
+  end
+
+  test "an admitted abort closes its episode with the same cancellation" do
+    {state, history, events} = admitted_state()
+    {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "abort"})
+    {state, rows} = commit(state, abort)
+
+    events =
+      append_events(
+        %{state | event_sequence: state.event_sequence - length(abort.events)},
+        events,
+        abort.events
+      )
+
+    assert {:ok, ending} =
+             SessionState.propose_run_terminal(state, state.active_run_id, "cancelled", %{})
+
+    assert [prefix, terminal] = ending.records
+    assert prefix["result"]["failure"] == %{"category" => "cancelled", "retryable" => false}
+    assert terminal["command_id"] == "abort"
+    assert {:ok, _} = replay_ending(state, history ++ rows, events, ending)
+
+    assert {:error, :invalid_maintenance_episode_transition} ==
+             SessionState.propose_maintenance_preparation_expiry(
+               state,
+               state.active_run_id,
+               61_000
+             )
+  end
+
+  test "the committed run cutoff wins only when it is earlier or equal" do
+    {base, _, _} = run_state()
+    run = base.active_run_id
+
+    for deadline <- [2_000, 61_000] do
+      prior = %{base | deadlines: %{run => deadline}}
+      {:ok, admission} = admit(prior, 1_000)
+      {state, _rows} = commit(prior, admission)
+
+      assert {:ok, ending} =
+               SessionState.propose_maintenance_preparation_expiry(state, run, deadline)
+
+      assert [prefix, terminal] = ending.records
+      assert terminal["outcome"] == "bound_reached"
+      assert terminal["bound"] == "deadline"
+      assert terminal["declared_limit"] == deadline
+      assert terminal["observed"] == deadline
+
+      assert prefix["result"]["failure"] == %{
+               "category" => "bound_reached",
+               "retryable" => false,
+               "bound" => "deadline_ms",
+               "declared_limit" => deadline,
+               "observed" => deadline,
+               "accounting_source" => nil
+             }
+    end
+
+    prior = %{base | deadlines: %{run => 61_001}}
+    {:ok, admission} = admit(prior, 1_000)
+    {state, _rows} = commit(prior, admission)
+    assert {:ok, ending} = SessionState.propose_maintenance_preparation_expiry(state, run, 70_000)
+    assert [prefix, _refusal, terminal] = ending.records
+    assert terminal["outcome"] == "failed"
+    assert prefix["result"]["failure"]["cause"] == "compaction_preparation_deadline"
+  end
+
+  test "a parent-bound ending rejects invented counters, ceilings and accounting" do
+    {base, _, _} = run_state()
+    run = base.active_run_id
+    prior = %{base | deadlines: %{run => 2_000}}
+    {:ok, admission} = admit(prior, 1_000)
+    {state, _rows} = commit(prior, admission)
+
+    for detail <- [
+          %{bound: "deadline", observed: -1, declared_limit: 2_000},
+          %{bound: "deadline", observed: 1_999, declared_limit: 2_000},
+          %{bound: "deadline", observed: 2_000, declared_limit: 60_000},
+          %{
+            bound: "deadline",
+            observed: 2_000,
+            declared_limit: 2_000,
+            accounting_source: "reported"
+          },
+          %{bound: "token_budget", observed: 10_000, declared_limit: 10_000},
+          %{bound: "max_turns", observed: 8, declared_limit: 8},
+          %{bound: "max_attempts", observed: 4, declared_limit: 4}
+        ] do
+      assert {:error, :invalid_maintenance_episode_transition} ==
+               SessionState.propose_run_terminal(state, run, "bound_reached", detail)
+    end
+  end
+
+  defp admitted_state do
+    {state, history, events} = run_state()
+    {:ok, proposal} = admit(state, 1_000)
+    {next, rows} = commit(state, proposal)
+    {next, history ++ rows, events}
+  end
+
+  defp replay_ending(state, history, events, proposal) do
+    {_next, rows} = commit(state, proposal)
+
+    SessionState.recover(
+      state.session_id,
+      history ++ rows,
+      append_events(state, events, proposal.events)
+    )
+  end
+
+  defp append_events(state, events, added) do
+    events ++
+      (Enum.with_index(added, state.event_sequence + 1)
+       |> Enum.map(fn {event, sequence} -> Map.put(event, :event_sequence, sequence) end))
+  end
+
+  defp restamp(rows, state) do
+    Enum.with_index(rows, state.journal_version + 1)
+    |> Enum.map(fn {row, version} -> %{row | journal_version: version} end)
   end
 
   defp admit(state, now),

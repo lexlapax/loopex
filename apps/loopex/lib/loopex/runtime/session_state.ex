@@ -206,6 +206,9 @@ defmodule Loopex.Runtime.SessionState do
           artifact_sources: map(),
           tool_result_sources: map(),
           artifact_preparations: map(),
+          maintenance_episodes: map(),
+          active_maintenance: binary() | nil,
+          maintenance_terminal: map() | nil,
           prepared_tool_results: map(),
           lineage_projection_revision: nil | 1,
           run_order: [binary()],
@@ -249,6 +252,7 @@ defmodule Loopex.Runtime.SessionState do
             artifact_preparations: %{},
             maintenance_episodes: %{},
             active_maintenance: nil,
+            maintenance_terminal: nil,
             prepared_tool_results: %{},
             lineage_projection_revision: nil,
             run_order: [],
@@ -336,6 +340,7 @@ defmodule Loopex.Runtime.SessionState do
   def recover(session_id, records, events)
       when is_binary(session_id) and is_list(records) and is_list(events) do
     with {:ok, state} <- replay_records(%__MODULE__{session_id: session_id}, records),
+         :ok <- complete_maintenance_pair(state),
          # Concept: half a refusal is not a settled session.
          #
          # Technical depth: reaching the durable head with the transient marker
@@ -1032,7 +1037,7 @@ defmodule Loopex.Runtime.SessionState do
       when stage in ["model_pending", "turn_settled"] ->
         if is_nil(state.aborting) and is_nil(state.open_interaction) and
              is_nil(state.context_refusal) and is_nil(work[:continuation_exchange]) and
-             preparation_ready?(state, run_id) do
+             not unproven_effect?(state, run_id) and preparation_ready?(state, run_id) do
           {:ok, work, parent}
         else
           {:error, :maintenance_not_quiescent}
@@ -3040,10 +3045,15 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp replay_record(state, %{payload: %{kind: kind}} = record) do
-    if is_nil(pending_attempt_settlement(state)) or kind == "run_terminal_committed" do
-      replay_admitted_record(state, record)
-    else
-      {:error, :incomplete_model_attempt_settlement_pair}
+    cond do
+      not maintenance_terminal_tail?(state, kind) ->
+        {:error, :incomplete_maintenance_terminal_transaction}
+
+      is_nil(pending_attempt_settlement(state)) or kind == "run_terminal_committed" ->
+        replay_admitted_record(state, record)
+
+      true ->
+        {:error, :incomplete_model_attempt_settlement_pair}
     end
   end
 
@@ -3215,6 +3225,7 @@ defmodule Loopex.Runtime.SessionState do
               "executor_receipt_committed_v2",
               "tool_result_preparation_state_v1",
               "maintenance_episode_admitted_v1",
+              "maintenance_episode_terminal_v1",
               "tool_result_reference_prepared",
               "tool_result_preparation_failed_v1",
               "outcome_unknown_committed",
@@ -3232,7 +3243,7 @@ defmodule Loopex.Runtime.SessionState do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
          incarnation == state.owner_incarnation_id and is_binary(incarnation) and
          context_refusal_tail?(state, kind) do
-      case apply_internal_record(state, record) do
+      case apply_admitted_internal_record(state, record) do
         {:ok, next, events} ->
           {:ok,
            %{
@@ -3791,8 +3802,14 @@ defmodule Loopex.Runtime.SessionState do
     do: internal_proposal(state, logical_tx_id, [record])
 
   defp internal_proposal(state, logical_tx_id, records) when is_list(records) do
+    build_internal_proposal(state, logical_tx_id, records, nil)
+  end
+
+  defp build_internal_proposal(state, logical_tx_id, records, observed_at) do
     with [_first | _rest] <- records,
-         {:ok, next, events} <- apply_internal_records(state, records) do
+         {:ok, records} <- maintenance_terminal_prefix(state, records, observed_at),
+         {:ok, next, events} <- apply_internal_records(state, records),
+         :ok <- complete_maintenance_pair(next) do
       tx_id = internal_transaction_id(state, logical_tx_id)
       next = %{next | expected_events: state.expected_events ++ events}
 
@@ -3806,12 +3823,232 @@ defmodule Loopex.Runtime.SessionState do
 
   defp apply_internal_records(state, records) do
     Enum.reduce_while(records, {:ok, state, []}, fn record, {:ok, current, events} ->
-      case apply_internal_record(current, record) do
+      case apply_admitted_internal_record(current, record) do
         {:ok, next, emitted} -> {:cont, {:ok, next, events ++ emitted}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
+
+  # Concept: an episode and its ending run become settled together.
+  # Technical depth: ADR 0043 permits one leading episode terminal and then
+  # either the run terminal or one existing consecutive refusal/settlement pair.
+  # The marker has no episode, accounting or public effect before that terminal.
+  # Every replayed row, including commands and owner succession, obeys its tail.
+  defp complete_maintenance_pair(%{maintenance_terminal: nil}), do: :ok
+
+  defp complete_maintenance_pair(_state),
+    do: {:error, :incomplete_maintenance_terminal_transaction}
+
+  defp maintenance_terminal_tail?(%{maintenance_terminal: nil}, _kind), do: true
+
+  defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :ending}}, kind),
+    do:
+      kind in [
+        "run_terminal_committed",
+        "context_admission_refused_v2",
+        "deadline_staging_failed_v1",
+        "model_attempt_settled_v3"
+      ]
+
+  defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :run_terminal}}, kind),
+    do: kind == "run_terminal_committed"
+
+  defp apply_admitted_internal_record(state, %{kind: kind} = record) do
+    if maintenance_terminal_tail?(state, kind) do
+      with {:ok, next, events} <- apply_internal_record(state, record) do
+        next =
+          case {state.maintenance_terminal, next.maintenance_terminal, kind} do
+            {%{}, %{} = marker, kind} when kind != "run_terminal_committed" ->
+              %{next | maintenance_terminal: %{marker | next: :run_terminal}}
+
+            _ ->
+              next
+          end
+
+        {:ok, next, events}
+      end
+    else
+      {:error, :incomplete_maintenance_terminal_transaction}
+    end
+  end
+
+  defp maintenance_terminal_prefix(%{active_maintenance: nil}, records, nil),
+    do: {:ok, records}
+
+  defp maintenance_terminal_prefix(state, records, observed_at) do
+    case List.last(records) do
+      %{kind: "run_terminal_committed"} = terminal ->
+        with {:ok, result} <- maintenance_run_result(state, terminal) do
+          prefix = %{
+            :kind => "maintenance_episode_terminal_v1",
+            "episode_id" => state.active_maintenance,
+            "observed_at" => observed_at,
+            "result" => result
+          }
+
+          {:ok, [prefix | records]}
+        end
+
+      _ ->
+        {:ok, records}
+    end
+  end
+
+  defp maintenance_run_result(state, terminal) do
+    episode = Map.get(state.maintenance_episodes, state.active_maintenance)
+
+    with %{"run_id" => run_id, "usage" => usage, "checkpoint_id" => checkpoint} <- episode,
+         true <- terminal["run_id"] == run_id,
+         true <- maintenance_parent_bound_agrees?(state, terminal),
+         {:ok, failure} <- maintenance_run_failure(terminal) do
+      {:ok,
+       %{
+         "disposition" => "failed",
+         "checkpoint_id" => checkpoint,
+         "failure" => failure,
+         "usage" => usage,
+         "cleanup" =>
+           if(terminal["outcome"] == "outcome_unknown", do: "unknown", else: "confirmed")
+       }}
+    else
+      _ -> {:error, :invalid_maintenance_episode_transition}
+    end
+  end
+
+  # Concept: an episode reports the bound its parent actually reached.
+  # Technical depth: copy the parent's captured ceiling and retained accounting,
+  # not an episode attempt limit or a fresh duration. The terminal remains in
+  # the parent's algebra, including its literal `deadline` branch.
+  defp maintenance_parent_bound_agrees?(state, %{"outcome" => "bound_reached"} = terminal) do
+    run_id = terminal["run_id"]
+    {declared, charged} = accounting(state, run_id)
+    observed = terminal["observed"]
+    source = charged.source && Atom.to_string(charged.source)
+
+    is_map(declared) and is_integer(observed) and observed >= 0 and
+      terminal["accounting_source"] == source and
+      case terminal["bound"] do
+        "deadline" ->
+          is_integer(declared.deadline) and terminal["declared_limit"] == declared.deadline and
+            observed >= declared.deadline
+
+        "token_budget" ->
+          terminal["declared_limit"] == declared.token_budget and observed == charged.tokens and
+            observed >= declared.token_budget
+
+        "max_turns" ->
+          terminal["declared_limit"] == declared.max_turns and
+            observed == get_in(state.pending_work, [run_id, :turn_number]) and
+            observed >= declared.max_turns
+
+        _ ->
+          false
+      end
+  end
+
+  defp maintenance_parent_bound_agrees?(_state, _terminal), do: true
+
+  defp maintenance_run_failure(%{"outcome" => "cancelled"}),
+    do: {:ok, %{"category" => "cancelled", "retryable" => false}}
+
+  defp maintenance_run_failure(%{"outcome" => "bound_reached"} = terminal) do
+    if terminal["bound"] in ["max_turns", "token_budget", "deadline"] do
+      {:ok,
+       %{
+         "category" => "bound_reached",
+         "retryable" => false,
+         "bound" =>
+           if(terminal["bound"] == "deadline", do: "deadline_ms", else: terminal["bound"]),
+         "observed" => terminal["observed"],
+         "declared_limit" => terminal["declared_limit"],
+         "accounting_source" => terminal["accounting_source"]
+       }}
+    else
+      {:error, :invalid_maintenance_episode_transition}
+    end
+  end
+
+  defp maintenance_run_failure(%{
+         "outcome" => "failed",
+         "failure" => %{"category" => "deadline_preflight_failed"}
+       }),
+       do:
+         {:ok,
+          %{
+            "version" => 2,
+            "category" => "context_preparation_failed",
+            "retryable" => false,
+            "measurement_scope" => nil,
+            "cause" => "maintenance_deadline_unrepresentable"
+          }}
+
+  defp maintenance_run_failure(%{"outcome" => "failed", "failure" => failure})
+       when is_map(failure),
+       do: {:ok, failure}
+
+  defp maintenance_run_failure(%{"outcome" => "failed", "reason" => reason})
+       when reason in ["model_call_failed", "unreadable_model_answer"],
+       do: {:ok, %{"category" => "model_call_failed", "retryable" => false}}
+
+  defp maintenance_run_failure(%{"outcome" => "outcome_unknown"}),
+    do: {:ok, %{"category" => "model_call_failed", "retryable" => false}}
+
+  defp maintenance_run_failure(_terminal),
+    do: {:error, :invalid_maintenance_episode_transition}
+
+  defp complete_maintenance_terminal(%{active_maintenance: nil} = state, _terminal),
+    do: {:ok, state}
+
+  defp complete_maintenance_terminal(state, terminal) do
+    with %{episode_id: id, result: retained, observed_at: observed} <- state.maintenance_terminal,
+         true <- id == state.active_maintenance,
+         true <- valid_maintenance_ending_clock?(state, terminal, observed),
+         {:ok, expected} <- maintenance_run_result(state, terminal),
+         true <- retained == expected do
+      episode =
+        state.maintenance_episodes
+        |> Map.fetch!(id)
+        |> Map.put("stage", "settled")
+        |> Map.put("result", retained)
+
+      {:ok,
+       %{
+         state
+         | active_maintenance: nil,
+           maintenance_terminal: nil,
+           maintenance_episodes: Map.put(state.maintenance_episodes, id, episode)
+       }}
+    else
+      _ -> {:error, :invalid_maintenance_episode_transition}
+    end
+  end
+
+  defp valid_maintenance_ending_clock?(state, terminal, observed) when is_integer(observed) do
+    episode = Map.fetch!(state.maintenance_episodes, state.active_maintenance)
+    deadline = Map.get(state.deadlines, episode["run_id"])
+
+    case terminal do
+      %{
+        "outcome" => "failed",
+        "failure" => %{"cause" => "compaction_preparation_deadline"}
+      } ->
+        episode["stage"] == "source_preparation" and episode["attempts"] == 0 and
+          observed >= episode["preparation_deadline"] and
+          (is_nil(deadline) or deadline > episode["preparation_deadline"])
+
+      %{"outcome" => "bound_reached", "bound" => "deadline"} ->
+        is_integer(deadline) and deadline <= episode["preparation_deadline"] and
+          observed >= deadline and terminal["observed"] == observed and
+          terminal["declared_limit"] == deadline
+
+      _ ->
+        false
+    end
+  end
+
+  defp valid_maintenance_ending_clock?(_state, terminal, nil),
+    do: get_in(terminal, ["failure", "cause"]) != "compaction_preparation_deadline"
 
   # Concept: a recovered artifact job must name the original committed source.
   # Technical depth: recompute resolution from frozen request definitions and
@@ -3883,11 +4120,38 @@ defmodule Loopex.Runtime.SessionState do
   # transaction. Until it clears the active marker, both proposal and replay
   # refuse an ordinary run terminal, including abort and deadline endings.
   defp apply_internal_record(
-         %{active_maintenance: episode},
+         %{active_maintenance: episode, maintenance_terminal: nil},
          %{kind: "run_terminal_committed"}
        )
        when is_binary(episode),
        do: {:error, :invalid_maintenance_episode_transition}
+
+  defp apply_internal_record(state, %{kind: "maintenance_episode_terminal_v1"} = record) do
+    with true <- closed_history_map?(record, [:kind, "episode_id", "observed_at", "result"]),
+         true <- is_binary(state.active_maintenance),
+         true <- record["episode_id"] == state.active_maintenance,
+         nil <- state.maintenance_terminal,
+         %{} = result <- record["result"],
+         true <-
+           closed_history_map?(result, ~w(disposition checkpoint_id failure usage cleanup)),
+         true <- result["disposition"] == "failed",
+         true <-
+           is_nil(record["observed_at"]) or
+             (is_integer(record["observed_at"]) and record["observed_at"] >= 0 and
+                record["observed_at"] <= 18_446_744_073_709_551_615),
+         {:ok, _} <- Store.admit_bounded(record) do
+      marker = %{
+        episode_id: record["episode_id"],
+        result: result,
+        observed_at: record["observed_at"],
+        next: :ending
+      }
+
+      {:ok, %{state | maintenance_terminal: marker}, []}
+    else
+      _ -> {:error, :invalid_maintenance_episode_transition}
+    end
+  end
 
   # Concept: a replayed episode is the same frozen admission, not a new one.
   # Technical depth: rebuild every derived identity, cutoff, bound and zero
@@ -4458,7 +4722,8 @@ defmodule Loopex.Runtime.SessionState do
            outcome in ["completed", "bound_reached", "outcome_unknown", "cancelled", "failed"],
          true <- terminal_admitted?(state, run_id, stage, outcome, bound),
          true <- is_nil(reason) or is_binary(reason),
-         {:ok, state, failure} <- consume_context_refusal(state, run_id, outcome, record) do
+         {:ok, state, failure} <- consume_context_refusal(state, run_id, outcome, record),
+         {:ok, state} <- complete_maintenance_terminal(state, record) do
       # Concept: bound_reached carries the bound and the observed value and
       # nothing else.
       #
@@ -8121,35 +8386,8 @@ defmodule Loopex.Runtime.SessionState do
       when stage in ["model_pending", "turn_settled"] ->
         turn = next_turn_number(work)
 
-        refusal = %{
-          "run_id" => run_id,
-          "turn_id" => stable_id("turn", run_id, turn),
-          "failure" => %{
-            "version" => 2,
-            "category" => "context_preparation_failed",
-            "retryable" => false,
-            "measurement_scope" => nil,
-            "cause" => Atom.to_string(cause)
-          },
-          "token_estimator" => "loopex.context_bytes.v2",
-          "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
-          "project_disposition" => "not_evaluated_required_failure",
-          "system_message_count" => nil,
-          "session_message_count" => nil,
-          "steer_message_count" => nil,
-          "tool_definition_count" => nil,
-          "provider_estimated_tokens" => nil,
-          "context_token_budget" => configuration["context_token_budget"],
-          "record_byte_cost" => nil,
-          "context_record_byte_ceiling" => Store.max_item_bytes(),
-          "ordered_descriptor_digest" => nil,
-          "configuration_version" => configuration["configuration_version"],
-          "episode_id" => nil,
-          "targets" => nil,
-          "projection_state" => "unavailable",
-          "measurement_scope" => nil,
-          :kind => "context_admission_refused_v2"
-        }
+        refusal =
+          unavailable_context_refusal(state, run_id, configuration, turn, Atom.to_string(cause))
 
         propose_context_refusal(state, run_id, refusal)
 
@@ -8159,6 +8397,100 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   def propose_context_preparation_failure(_, _, _), do: {:error, :invalid_context_refusal}
+
+  @doc false
+  @spec propose_maintenance_preparation_expiry(t(), binary(), integer()) ::
+          {:ok, proposal()} | {:error, atom()}
+  # Concept: downtime cannot renew a maintenance preparation allowance.
+  # Technical depth: the retained admission cutoff governs only pre-first-request
+  # source preparation. An earlier or equal committed run cutoff wins with its
+  # existing bound outcome. The leading terminal retains the exact unsigned
+  # clock observation; replay proves expiry without reading a new clock.
+  def propose_maintenance_preparation_expiry(state, run_id, now) do
+    with true <- is_integer(now) and now >= 0 and now <= 18_446_744_073_709_551_615,
+         nil <- state.aborting,
+         %{"run_id" => ^run_id, "stage" => "source_preparation", "attempts" => 0} = episode <-
+           Map.get(state.maintenance_episodes, state.active_maintenance),
+         %{stage: stage} = work <- Map.get(state.pending_work, run_id),
+         true <- stage in ["model_pending", "turn_settled"],
+         %{} = configuration <- run_configuration(state, run_id) do
+      deadline = Map.get(state.deadlines, run_id)
+
+      cond do
+        is_integer(deadline) and deadline <= episode["preparation_deadline"] and now >= deadline ->
+          {_bounds, charged} = accounting(state, run_id)
+
+          terminal =
+            run_terminal_record(state, run_id, "bound_reached", %{
+              bound: "deadline",
+              observed: now,
+              declared_limit: deadline,
+              accounting_source: charged.source && Atom.to_string(charged.source)
+            })
+
+          build_internal_proposal(state, episode["episode_id"] <> ":expiry", [terminal], now)
+
+        now >= episode["preparation_deadline"] ->
+          refusal =
+            unavailable_context_refusal(
+              state,
+              run_id,
+              configuration,
+              next_turn_number(work),
+              "compaction_preparation_deadline"
+            )
+
+          terminal =
+            state
+            |> run_terminal_record(run_id, "failed", %{})
+            |> Map.put("failure", context_failure(refusal))
+
+          build_internal_proposal(
+            state,
+            episode["episode_id"] <> ":expiry",
+            [refusal, terminal],
+            now
+          )
+
+        true ->
+          {:error, :maintenance_preparation_not_elapsed}
+      end
+    else
+      _ -> {:error, :invalid_maintenance_episode_transition}
+    end
+  end
+
+  defp unavailable_context_refusal(state, run_id, configuration, turn, cause) do
+    %{
+      "run_id" => run_id,
+      "turn_id" => stable_id("turn", run_id, turn),
+      "failure" => %{
+        "version" => 2,
+        "category" => "context_preparation_failed",
+        "retryable" => false,
+        "measurement_scope" => nil,
+        "cause" => cause
+      },
+      "token_estimator" => "loopex.context_bytes.v2",
+      "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
+      "project_disposition" => "not_evaluated_required_failure",
+      "system_message_count" => nil,
+      "session_message_count" => nil,
+      "steer_message_count" => nil,
+      "tool_definition_count" => nil,
+      "provider_estimated_tokens" => nil,
+      "context_token_budget" => configuration["context_token_budget"],
+      "record_byte_cost" => nil,
+      "context_record_byte_ceiling" => Store.max_item_bytes(),
+      "ordered_descriptor_digest" => nil,
+      "configuration_version" => configuration["configuration_version"],
+      "episode_id" => state.active_maintenance,
+      "targets" => nil,
+      "projection_state" => "unavailable",
+      "measurement_scope" => nil,
+      :kind => "context_admission_refused_v2"
+    }
+  end
 
   # Concept: the four fields an operator can act on, plus the one fact that
   # makes the ending final.
@@ -8180,6 +8512,43 @@ defmodule Loopex.Runtime.SessionState do
       "observed" => Map.fetch!(refusal, "observed"),
       "limit" => Map.fetch!(refusal, "limit")
     }
+  end
+
+  defp validate_preparation_failure_cause(state, run_id, "compaction_preparation_deadline") do
+    with %{observed_at: now} <- state.maintenance_terminal,
+         true <- run_id == state.active_run_id,
+         true <-
+           valid_maintenance_ending_clock?(
+             state,
+             %{
+               "outcome" => "failed",
+               "failure" => %{"cause" => "compaction_preparation_deadline"}
+             },
+             now
+           ) do
+      :ok
+    else
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp validate_preparation_failure_cause(state, run_id, expected) do
+    case preflight_run_history(state, run_id) do
+      {:error, cause}
+      when cause in [
+             :canonical_history_rendering_unsupported,
+             :context_projection_invalid,
+             :artifact_metadata_unrepresentable,
+             :artifact_preparation_count_exhausted,
+             :artifact_preparation_bytes_exhausted,
+             :artifact_preparation_deadline,
+             :artifact_preparation_failed
+           ] ->
+        if expected == Atom.to_string(cause), do: :ok, else: {:error, :invalid_context_refusal}
+
+      _ ->
+        {:error, :invalid_context_refusal}
+    end
   end
 
   defp validate_context_refusal(
@@ -8213,23 +8582,13 @@ defmodule Loopex.Runtime.SessionState do
          true <- refusal["projection_state"] == "unavailable",
          true <-
            Enum.all?(
-             ~w(episode_id targets measurement_scope system_message_count
+             ~w(targets measurement_scope system_message_count
                    session_message_count steer_message_count tool_definition_count
                    provider_estimated_tokens record_byte_cost ordered_descriptor_digest),
              &is_nil(refusal[&1])
            ),
-         {:error, cause} <- preflight_run_history(state, run_id),
-         true <-
-           cause in [
-             :canonical_history_rendering_unsupported,
-             :context_projection_invalid,
-             :artifact_metadata_unrepresentable,
-             :artifact_preparation_count_exhausted,
-             :artifact_preparation_bytes_exhausted,
-             :artifact_preparation_deadline,
-             :artifact_preparation_failed
-           ],
-         true <- failure["cause"] == Atom.to_string(cause) do
+         true <- refusal["episode_id"] == state.active_maintenance,
+         :ok <- validate_preparation_failure_cause(state, run_id, failure["cause"]) do
       :ok
     else
       _invalid -> {:error, :invalid_context_refusal}
