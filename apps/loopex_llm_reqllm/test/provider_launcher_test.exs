@@ -195,8 +195,27 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
 
       # The obstacle makes rmdir fail, independently of signal timing. Repeated
       # guard-only TERM interrupts its failure wait without cancelling the timer.
-      signals = interrupt_owned_guard(owned, 5)
-      observed = terminal_observation(port, monitor, deadline)
+      # Concept: guard fault injection and carrier observation share one deadline.
+      # Technical depth: sending five OS signals performs its own process
+      # inspections. Run that injection alongside the Port observer so those
+      # inspections cannot consume the observation window before it starts.
+      signaller = Task.async(fn -> interrupt_owned_guard(owned, 5) end)
+
+      {observed, signals} =
+        try do
+          observed = terminal_observation(port, monitor, deadline)
+
+          signals =
+            case Task.yield(signaller, max(deadline - System.monotonic_time(:millisecond), 0)) do
+              {:ok, signals} -> signals
+              nil -> flunk("guard signal injection did not finish inside the captured deadline")
+            end
+
+          {observed, signals}
+        after
+          Task.shutdown(signaller, :brutal_kill)
+        end
+
       members = live_group(owned.carrier)
 
       IO.inspect(

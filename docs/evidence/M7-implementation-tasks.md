@@ -325,6 +325,33 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: keep the provider-launcher interrupted-wait OS fault and terminal-Port
+  observation concurrent under the original captured 2,100-ms cutoff. The
+  previous sequential five-signal injector spent the same window doing `ps`,
+  `kill` and short sleeps before the observer could receive Port exit/DOWN;
+  the failed `e5f03ff8` run retained an already empty OS group with both Port
+  facts absent. The corrected test still requires all five successful TERM
+  attempts, an empty group, no false cleanup acknowledgement, nonzero exit and
+  Port DOWN inside that same cutoff. All eight provider-launcher tests pass on
+  both supported pairs. Complete outputs:
+  `/private/tmp/loopex-m7-provider-launcher-observer-current.log`, SHA-256
+  `2e5b193213541880eccb2d134f67bfc480737d550a6d121d404e2dbf2f3a7ec0`;
+  `/private/tmp/loopex-m7-provider-launcher-observer-floor.log`, SHA-256
+  `88250c97b911080488ef5d4d8418eb06f854fb51e6ab58e207297639117eaafe`.
+  This closes one added T16 subtask without extending its proof bound.
+  The next committed integration candidate still needs the fast check.
+
+- Check result: the clean `1611006366e04e14c9b3cbd7204707d1e104c383`
+  integration candidate ran `bash scripts/check.sh` once and failed only the
+  CLI stalled-stderr trace fixture (`555/556` CLI tests; other application
+  suites green). Complete output:
+  `/private/tmp/loopex-m7-16110063-fast-check.log`, SHA-256
+  `96ae3020a6fc086caa87a6ace8e4f8f4ace34ffeaa5bd299af6547a66b16f532`.
+  The fixture's trace hook uses ExUnit's implicit 100-ms message wait for an
+  asynchronous diagnostic writer, which turned a delayed writer under the
+  parallel suite into `trace_start_failed`. A maintainer decision on a bounded
+  fixture wait is pending; this failed run is not a pass or a retry.
+
 - Done: remove the retired `model_question_response_admitted_v1` and
   `model_question_settled_v1` replay/effect-index readers. Current v2 answer,
   expiry and cancellation paths remain; the historical-record fixtures now
@@ -7432,7 +7459,7 @@ or check was relaxed.
 - [x] Order diagnostic shutdown through its private supervisor before collecting writer/supervisor joins; prove a failing-before suspended-supervisor fault and unchanged delivery accounting, grace, existing loss/deadline assertions, ephemeral trace and real CLI signal/JSON behavior on both supported toolchains.
 - [x] Resolve the diagnostic owner/drain-loss test bound through the requested maintainer decision; apply and record an accepted captured-grace proof or retain the original waits and investigate, then verify the complete file on both pairs and run a new committed integration candidate once.
 - [x] Repair the provider-child supervisor-loss fixture's monitor/fault ordering; preserve exact killed termination and original assertion bounds, retaining the failed committed integration output and both-toolchain proof.
-- [ ] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
+- [x] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
 - [x] Resolve the repeated provider-call public-event identity decision; implement the accepted compatibility path and prove old replay, repeated calls, cancellation, reconciliation and mutation uncertainty without rewriting retained events.
 - [x] Adapt the composition authority inventory to the approved contextual question adapter; retain the failed no-callback assertion and verify absent/nil host refusal plus denied bare/contextual decisions for every shipped tool generation on both toolchains.
 - [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
