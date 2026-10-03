@@ -892,7 +892,15 @@ defmodule Loopex.Runtime.SessionState do
   @doc false
   @spec compaction_units(t(), binary()) ::
           {:ok, [map()]} | {:error, :context_projection_invalid}
-  def compaction_units(%__MODULE__{} = state, run_id) do
+  def compaction_units(%__MODULE__{} = state, run_id),
+    do:
+      compaction_units_from(
+        state,
+        run_id,
+        uncompacted_elements(state, lineage_elements(state, run_id))
+      )
+
+  defp compaction_units_from(state, run_id, elements) do
     if run_id in state.run_order do
       interaction = open_interaction_record(state)
       interaction_run = interaction && interaction.run_id
@@ -903,7 +911,7 @@ defmodule Loopex.Runtime.SessionState do
         end)
 
       Conversation.compaction_units(
-        uncompacted_elements(state, lineage_elements(state, run_id)),
+        elements,
         state.active_run_id,
         terminal_runs,
         Map.keys(frozen_lineage(state, state.active_run_id))
@@ -1106,12 +1114,7 @@ defmodule Loopex.Runtime.SessionState do
   @doc false
   def preflight_maintenance_request(state, eligible_count, now, check)
       when is_integer(eligible_count) and eligible_count > 0 and is_function(check, 0) do
-    with %{"stage" => "source_preparation", "attempts" => 0} = episode <-
-           state.maintenance_episodes[state.active_maintenance],
-         {:ok, _work, _parent} <- maintenance_admission_context(state, episode["run_id"]),
-         true <- is_nil(episode["checkpoint_id"]),
-         :ok <- maintenance_source_clock(state, episode, now),
-         :ok <- maintenance_request_capacity(state, episode),
+    with {:ok, episode} <- maintenance_source_episode(state, now, check),
          :ok <- maintenance_instruction_budget(episode),
          {:ok, deadline} <- maintenance_request_deadline(state, episode, now),
          {:ok, units} <- compaction_units(state, episode["run_id"]),
@@ -1122,7 +1125,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, choice} <-
            Loopex.Runtime.CompactionSource.select(
              streams,
-             nil,
+             maintenance_prior_summary(state),
              fn source, count ->
                case maintenance_request_candidate(
                       state,
@@ -1181,6 +1184,55 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: a further summary must consume new raw units after useful progress.
+  # Technical depth: derive its ordinal from the committed checkpoint, preserve
+  # the episode capture and deadline, and refuse another request when the current
+  # substitution already fits. The next request/open pair promotes this derived
+  # ordinal; no separate advancement fact or summary-only cycle is admitted.
+  defp maintenance_source_episode(state, now, check) do
+    with %{} = episode <- state.maintenance_episodes[state.active_maintenance],
+         {:ok, _work, _parent} <- maintenance_admission_context(state, episode["run_id"]),
+         :ok <- maintenance_source_clock(state, episode, now),
+         :ok <- maintenance_request_capacity(state, episode) do
+      case episode do
+        %{"stage" => "source_preparation", "attempts" => 0} ->
+          {:ok, episode}
+
+        %{"stage" => "checkpoint_committed", "checkpoint_id" => id} ->
+          cond do
+            id != state.active_checkpoint or now < state.checkpoints[id]["committed_at"] ->
+              {:error, :context_projection_invalid}
+
+            episode["attempts"] >= episode["bounds"]["max_attempts"] ->
+              {:error, :maintenance_attempts_exhausted}
+
+            true ->
+              case maintenance_checkpoint_completion_record(state, now, check) do
+                {:error, {:checkpoint_requires_more_progress, _refusal}} ->
+                  {:ok, Map.update!(episode, "summary_ordinal", &(&1 + 1))}
+
+                {:ok, _completion} ->
+                  {:error, :maintenance_targets_fit}
+
+                {:error, _} = error ->
+                  error
+              end
+          end
+
+        _ ->
+          {:error, :context_projection_invalid}
+      end
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :context_projection_invalid}
+    end
+  end
+
+  defp maintenance_prior_summary(%{active_checkpoint: nil}), do: nil
+
+  defp maintenance_prior_summary(state),
+    do: state.checkpoints[state.active_checkpoint]["summary"]
+
   defp maintenance_source_clock(state, episode, now) do
     cond do
       not is_integer(now) or now < episode["admitted_at"] or now > @uint64_max ->
@@ -1190,7 +1242,7 @@ defmodule Loopex.Runtime.SessionState do
           now >= state.deadlines[episode["run_id"]] ->
         {:error, :run_deadline_reached}
 
-      now >= episode["preparation_deadline"] ->
+      episode["attempts"] == 0 and now >= episode["preparation_deadline"] ->
         {:error, :compaction_preparation_deadline}
 
       true ->
@@ -1453,7 +1505,7 @@ defmodule Loopex.Runtime.SessionState do
 
   # Concept: a valid summary becomes useful only after exact substitution proves progress.
   # Technical depth: the pending reply is already settled and charged. This
-  # first-checkpoint probe authenticates its whole-unit cut against originals,
+  # pending-checkpoint probe authenticates its whole-unit cut against originals,
   # renders the owner-computed summary provenance, and measures both ordinary
   # q=0 candidates through the same complete record fixed point. It captures no
   # public or journal fact and consumes no provider attempt. Partial progress
@@ -1479,12 +1531,11 @@ defmodule Loopex.Runtime.SessionState do
     with %{
            "stage" => "checkpoint_pending",
            "summary" => summary,
-           "checkpoint_id" => nil,
            "trigger" => "ordinary_limit"
          } = episode <-
            state.maintenance_episodes[state.active_maintenance],
          true <- is_nil(state.aborting) and episode["run_id"] == state.active_run_id,
-         nil <- state.active_checkpoint,
+         true <- episode["prior_checkpoint_id"] == state.active_checkpoint,
          true <- is_integer(now) and now >= episode["request_staged_at"] and now <= @uint64_max,
          true <- is_integer(state.deadlines[episode["run_id"]]),
          true <- now < state.deadlines[episode["run_id"]],
@@ -1493,13 +1544,14 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, units} <- compaction_units(state, episode["run_id"]),
          count = episode["covered_range"]["unit_count"],
          true <- count > 0 and count <= length(Enum.take_while(units, &(not &1.protected?))),
-         {:ok, range} <- maintenance_covered_range(state, episode, units, count, check),
-         true <- range == episode["covered_range"],
+         {:ok, consumed} <- maintenance_covered_range(state, episode, units, count, check),
+         true <- consumed == episode["covered_range"],
+         {:ok, range} <- maintenance_checkpoint_coverage(state, episode, consumed, count, check),
          {:ok, captured} <-
            Loopex.Runtime.CompactionSummary.capture(
              summary,
              range["digest"],
-             nil,
+             maintenance_prior_summary(state),
              episode["source_excerpted"]
            ),
          checkpoint_id =
@@ -1533,8 +1585,9 @@ defmodule Loopex.Runtime.SessionState do
       {:ok,
        %{
          checkpoint_id: checkpoint_id,
-         prior_checkpoint_id: nil,
+         prior_checkpoint_id: state.active_checkpoint,
          covered_range: range,
+         consumed_range: consumed,
          summary: captured,
          entry: entry,
          before: before,
@@ -1747,7 +1800,7 @@ defmodule Loopex.Runtime.SessionState do
       "committed_at" => now,
       "lineage" => %{"session_id" => state.session_id, "through_run_id" => episode["run_id"]},
       "covered_range" => candidate.covered_range,
-      "consumed_range" => candidate.covered_range,
+      "consumed_range" => candidate.consumed_range,
       "prior_checkpoint_id" => candidate.prior_checkpoint_id,
       "summary" => candidate.summary,
       "strategy" => "loopex.compaction.reference",
@@ -1758,6 +1811,44 @@ defmodule Loopex.Runtime.SessionState do
       "usage" => episode["usage"],
       "source_digest" => episode["source_digest"]
     }
+  end
+
+  # Concept: cumulative coverage authenticates originals rather than summaries.
+  # Technical depth: the prior first-kept identity must begin the new raw cut.
+  # Rebuild the complete prefix from original lineage units and hash original
+  # journal records directly. Never hash a previous digest or trust a summed
+  # count without proving the exact source identities already substituted.
+  defp maintenance_checkpoint_coverage(
+         %{active_checkpoint: nil},
+         _episode,
+         consumed,
+         _count,
+         _check
+       ),
+       do: {:ok, consumed}
+
+  defp maintenance_checkpoint_coverage(state, episode, consumed, count, check) do
+    prior = state.checkpoints[state.active_checkpoint]
+    prior_count = prior["covered_range"]["unit_count"]
+
+    with true <- prior["covered_range"]["first_kept"] == consumed["first"],
+         {:ok, originals} <-
+           compaction_units_from(
+             state,
+             episode["run_id"],
+             lineage_elements(state, episode["run_id"])
+           ),
+         covered = originals |> Enum.take(prior_count) |> Enum.flat_map(& &1.elements),
+         true <- MapSet.new(covered, &Conversation.source_reference/1) == state.compacted_sources,
+         {:ok, range} <-
+           maintenance_covered_range(state, episode, originals, prior_count + count, check),
+         true <-
+           range["first_kept"] == consumed["first_kept"] and range["last"] == consumed["last"] do
+      {:ok, range}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :context_projection_invalid}
+    end
   end
 
   defp pending_checkpoint_capacity(state, episode) do
@@ -5503,7 +5594,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, _} <- Store.admit_bounded(record) do
       covered =
         units
-        |> Enum.take(candidate.covered_range["unit_count"])
+        |> Enum.take(candidate.consumed_range["unit_count"])
         |> Enum.flat_map(& &1.elements)
         |> Enum.map(&Conversation.source_reference/1)
         |> MapSet.new()
@@ -7213,22 +7304,24 @@ defmodule Loopex.Runtime.SessionState do
     with :ok <- ProviderAttempt.validate_opened(record),
          %{
            "stage" => "request_pending_attempt_open",
-           "attempts" => 0,
            "staged" => %{request: request, record: staged}
          } = episode <-
            state.maintenance_episodes[state.active_maintenance],
+         true <- episode["attempts"] < episode["bounds"]["max_attempts"],
          true <-
            record["attempt"] == 1 and record["purpose"] == "compaction" and
              record["episode_id"] == state.active_maintenance and
-             record["summary_ordinal"] == episode["summary_ordinal"] and
+             record["summary_ordinal"] == staged["summary_ordinal"] and
              record["operation_id"] == staged["operation_id"] and
              record["staged_request_digest"] == request.staged_request_digest do
       episode =
         episode
-        |> Map.delete("staged")
+        |> Map.drop(["staged", "summary", "summary_failure", "settlement", "next_attempt"])
         |> Map.merge(%{
           "stage" => "model_attempt_open",
-          "attempts" => 1,
+          "attempts" => episode["attempts"] + 1,
+          "summary_ordinal" => staged["summary_ordinal"],
+          "prior_checkpoint_id" => state.active_checkpoint,
           "request" => request,
           "request_staged_at" => staged["staged_at"],
           "request_context_receipt" => staged["context_receipt"],

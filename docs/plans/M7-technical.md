@@ -1657,8 +1657,13 @@ parent bounds win, retaining previously committed checkpoints. Measured
 non-progress endings now authenticate the last minimum ordinary projection and
 commit the episode, refusal and parent ending together, including all three live
 uncertainty phases and private-reader traversal without redispatch or recharge.
-Automatic triggering, new summary dispatch/cleanup, later prefixes and standalone
-compact remain open. The full fast
+Further-prefix reducer/reader proof now retains the exact prior checkpoint,
+separate consumed and cumulative coverage, original-record integrity digests and
+inherited omission. New ordinals preserve the original capture and deadline;
+physical retries spend the four-attempt ceiling, and later non-progress retains
+the useful prior checkpoint. Fitted substitutions refuse summary-only cycles.
+Automatic triggering, new summary dispatch/cleanup, exhausted-episode endings,
+thinking/rendering triggers and standalone compact remain open. The full fast
 check passes on d0dd8ec6 through shared ordinary staging/tail measurement; both
 supported pairs pass the later focused checkpoint reducer/reader selection.
 This is not a complete T07 workflow proof.

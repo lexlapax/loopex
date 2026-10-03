@@ -708,6 +708,51 @@ defmodule Loopex.EffectIntentsQueryTest do
     end
   end
 
+  test "successive checkpoints advance bounded private history and reject cycles or enlarged raw cuts",
+       context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    {records, events} = maintenance_history(session, :two_checkpoints)
+    assert {:ok, replayed} = SessionState.recover(session, records, events)
+    assert replayed.active_maintenance == nil
+    assert map_size(replayed.checkpoints) == 2
+
+    assert [first, second] =
+             Enum.filter(records, &(&1.payload.kind == "compaction_checkpoint_committed_v1"))
+
+    assert second.payload["prior_checkpoint_id"] == first.payload["checkpoint_id"]
+    assert second.payload["consumed_range"]["unit_count"] == 1
+    assert second.payload["covered_range"]["unit_count"] == 2
+    install_history(reference, records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert Enum.map(pages, & &1.scanned_through) == Enum.to_list(1..length(records))
+    assert Enum.all?(pages, &(&1.rows == []))
+    assert List.last(pages).next_cursor == nil
+
+    for forged <- [
+          Map.put(second.payload, "prior_checkpoint_id", second.payload["checkpoint_id"]),
+          Map.put(second.payload, "consumed_range", second.payload["covered_range"]),
+          put_in(second.payload, ["consumed_range", "unit_count"], 0),
+          put_in(second.payload, ["consumed_range", "first_kept"], %{})
+        ] do
+      altered = List.replace_at(records, second.journal_version - 1, %{second | payload: forged})
+      install_history(reference, altered)
+
+      cursor = %{
+        version: 1,
+        runtime_id: "agent-loop-runtime",
+        session_id: session,
+        through_version: length(records),
+        after_version: second.journal_version - 1
+      }
+
+      assert {:error, :invalid_history} = Runtime.effect_intents(runtime, session, cursor, 1)
+    end
+
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+  end
+
   test "maintenance history refuses malformed captured rows and request byte substitutions",
        context do
     %{runtime: runtime, session: session, reference: reference} = context
@@ -844,10 +889,11 @@ defmodule Loopex.EffectIntentsQueryTest do
           type: :prompt,
           command_id: "old",
           content:
-            if(ending in [:failed, :nonprogress],
-              do: "old facts",
-              else: String.duplicate("old", 1_000)
-            )
+            cond do
+              ending in [:failed, :nonprogress] -> "old facts"
+              ending == :two_checkpoints -> String.duplicate("old", 10_000)
+              true -> String.duplicate("old", 1_000)
+            end
         },
         bounds
       )
@@ -860,6 +906,27 @@ defmodule Loopex.EffectIntentsQueryTest do
       })
 
     {state, history, events} = retain(state, ended, history, events)
+
+    {state, history, events} =
+      if ending == :two_checkpoints do
+        {:ok, middle} =
+          SessionState.propose(
+            state,
+            %{type: :prompt, command_id: "middle", content: String.duplicate("middle", 5_000)},
+            bounds
+          )
+
+        {state, history, events} = retain(state, middle, history, events)
+
+        {:ok, terminal} =
+          SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
+            reason: "model_call_failed"
+          })
+
+        retain(state, terminal, history, events)
+      else
+        {state, history, events}
+      end
 
     {:ok, current} =
       SessionState.propose(
@@ -952,8 +1019,35 @@ defmodule Loopex.EffectIntentsQueryTest do
 
           {state, history, events} = retain(state, checkpoint, history, events)
 
+          {state, history, events} =
+            if ending == :two_checkpoints do
+              {:ok, request} =
+                SessionState.propose_maintenance_request(state, 1, 2_001, fn -> :ok end)
+
+              {state, history, events} = retain(state, request, history, events)
+              request = state.maintenance_episodes[state.active_maintenance]["request"]
+
+              reply = %{
+                reply
+                | canonical_request_bytes: request.canonical_request_bytes,
+                  staged_request_digest: request.staged_request_digest
+              }
+
+              {:ok, settlement} =
+                SessionState.propose_maintenance_attempt_settled(state, {:reply, reply})
+
+              {state, history, events} = retain(state, settlement, history, events)
+
+              {:ok, checkpoint} =
+                SessionState.propose_maintenance_checkpoint(state, 2_002, fn -> :ok end)
+
+              retain(state, checkpoint, history, events)
+            else
+              {state, history, events}
+            end
+
           {:ok, completed} =
-            SessionState.propose_maintenance_checkpoint_completion(state, 2_001, fn -> :ok end)
+            SessionState.propose_maintenance_checkpoint_completion(state, 2_003, fn -> :ok end)
 
           {_state, history, events} = retain(state, completed, history, events)
           {history, events}

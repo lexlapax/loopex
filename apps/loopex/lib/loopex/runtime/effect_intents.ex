@@ -485,7 +485,7 @@ defmodule Loopex.Runtime.EffectIntents do
       Enum.all?(~w(unit_count record_count source_count), &positive_version?(range[&1])) and
       range["record_count"] <= range["source_count"] and digest?(range["digest"]) and
       Enum.all?(~w(first last first_kept), &is_map(range[&1])) and
-      payload["consumed_range"] == range and is_nil(payload["prior_checkpoint_id"]) and
+      valid_consumed_checkpoint_range?(payload, range) and
       Loopex.Runtime.CompactionSummary.validate_prior(payload["summary"]) == :ok and
       payload["summary"]["covered_range_digest"] == range["digest"] and
       payload["strategy"] == "loopex.compaction.reference" and payload["strategy_revision"] == 3 and
@@ -513,6 +513,29 @@ defmodule Loopex.Runtime.EffectIntents do
   end
 
   defp neutral_values?(_record), do: true
+
+  # Concept: cumulative checkpoints preserve a strictly smaller new raw cut.
+  # Technical depth: this neutral reader checks closed ranges, identities,
+  # advancing counts and a shared last/first-kept boundary. Full State replay
+  # independently authenticates the prior chain and hashes original records.
+  defp valid_consumed_checkpoint_range?(payload, range) do
+    consumed = payload["consumed_range"]
+    prior = payload["prior_checkpoint_id"]
+
+    if is_nil(prior) do
+      consumed == range
+    else
+      identifier?(prior) and prior != payload["checkpoint_id"] and
+        closed?(consumed, ~w(unit_count record_count source_count first last first_kept digest)) and
+        Enum.all?(~w(unit_count record_count source_count), &positive_version?(consumed[&1])) and
+        consumed["record_count"] <= consumed["source_count"] and digest?(consumed["digest"]) and
+        Enum.all?(~w(first last first_kept), &is_map(consumed[&1])) and
+        consumed["unit_count"] < range["unit_count"] and
+        consumed["record_count"] <= range["record_count"] and
+        consumed["source_count"] < range["source_count"] and
+        consumed["last"] == range["last"] and consumed["first_kept"] == range["first_kept"]
+    end
+  end
 
   # Concept: a run-owned episode retains the parent's turn-bound vocabulary.
   # Technical depth: standalone compact has max_attempts instead. This private

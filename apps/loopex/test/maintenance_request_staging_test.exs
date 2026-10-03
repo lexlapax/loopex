@@ -837,6 +837,267 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
              )
   end
 
+  test "a second prefix inherits the checkpoint and authenticates cumulative original coverage" do
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("old", 10_000),
+        later_old_units: [String.duplicate("later", 2_000)],
+        ordinary_body: String.duplicate("s", 10_000),
+        system_class_tokens: 4_000,
+        context_token_budget: 4_000
+      )
+
+    episode = state.active_maintenance
+    raw = state.conversation
+    {:ok, first} = SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+    {state, rows, events} = commit(state, first, events)
+    history = history ++ rows
+    prior = state.checkpoints[state.active_checkpoint]
+    assert prior["summary"]["source_excerpted"] == true
+
+    assert {:error, {:checkpoint_requires_more_progress, _}} =
+             SessionState.propose_maintenance_checkpoint_completion(state, 2_001, fn -> :ok end)
+
+    assert {:ok, request} =
+             SessionState.propose_maintenance_request(state, 1, 2_001, fn -> :ok end)
+
+    assert [record, opened] = request.records
+    assert record["summary_ordinal"] == 2
+    assert opened["attempt"] == 1
+    refute record["operation_id"] == state.maintenance_episodes[episode]["operation_id"]
+    assert record["request"]["deadline"] == state.deadlines[state.active_run_id]
+    assert record["configuration_version"] == prior["configuration_version"]
+
+    assert record["captured_session_version"] ==
+             state.maintenance_episodes[episode]["session_version"]
+
+    assert record["covered_range"]["first"] == prior["covered_range"]["first_kept"]
+    assert record["source_excerpted"] == false
+
+    assert {:ok, source} =
+             Frame.decode(Enum.at(record["request"]["messages"], 1)["content"], 16_384)
+
+    assert source["prior_checkpoint"] == prior["summary"]
+    assert source["messages"]["kind"] == "complete"
+
+    assert source["messages"]["value"] == [
+             %{"role" => "user", "content" => String.duplicate("later", 2_000)}
+           ]
+
+    {state, rows, events} = commit(state, request, events)
+    history = history ++ rows
+    assert state.maintenance_episodes[episode]["attempts"] == 2
+    assert state.maintenance_episodes[episode]["summary_ordinal"] == 2
+    refute Map.has_key?(state.maintenance_episodes[episode], "settlement")
+    refute Map.has_key?(state.maintenance_episodes[episode], "summary")
+
+    {:ok, settlement} =
+      SessionState.propose_maintenance_attempt_settled(
+        state,
+        {:reply, summary_reply(state.maintenance_episodes[episode]["request"])}
+      )
+
+    {state, rows, events} = commit(state, settlement, events)
+    history = history ++ rows
+    {:ok, second} = SessionState.propose_maintenance_checkpoint(state, 2_002, fn -> :ok end)
+    assert [checkpoint] = second.records
+    assert checkpoint["prior_checkpoint_id"] == prior["checkpoint_id"]
+    assert checkpoint["consumed_range"] == record["covered_range"]
+    assert checkpoint["covered_range"]["unit_count"] == 2
+    assert checkpoint["covered_range"]["first"] == prior["covered_range"]["first"]
+    assert checkpoint["covered_range"]["digest"] == independent_coverage(state, 2)
+    assert checkpoint["covered_range"]["digest"] != prior["covered_range"]["digest"]
+    assert checkpoint["summary"]["source_excerpted"] == true
+    assert checkpoint["usage"]["attempts"] == 2
+    assert checkpoint["usage"]["total_tokens"] == 112
+    {state, rows, events} = commit(state, second, events)
+    history = history ++ rows
+    assert state.conversation == raw
+    assert MapSet.size(state.compacted_sources) == 2
+    assert {:ok, entries, nil} = SessionState.projected_lineage(state, state.active_run_id, 0)
+    assert length(entries) == 2
+    assert elem(hd(entries), 0)["checkpoint_id"] == checkpoint["checkpoint_id"]
+    assert elem(List.last(entries), 1)["content"] == "protected"
+
+    assert {:ok, completed} =
+             SessionState.propose_maintenance_checkpoint_completion(state, 2_003, fn -> :ok end)
+
+    {state, rows, events} = commit(state, completed, events)
+    history = history ++ rows
+    assert state.active_maintenance == nil
+    assert state.active_run_id != nil
+    assert state.charged[state.active_run_id].tokens == 112
+    assert {:ok, ^state} = SessionState.recover(state.session_id, history, events)
+  end
+
+  test "further checkpoint replay refuses changed prior identity raw cuts and cumulative digests" do
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("o", 30_000),
+        later_old_units: [String.duplicate("p", 30_000)]
+      )
+
+    {:ok, first} = SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+    {state, rows, events} = commit(state, first, events)
+    history = history ++ rows
+    {:ok, request} = SessionState.propose_maintenance_request(state, 1, 2_001, fn -> :ok end)
+    {state, rows, events} = commit(state, request, events)
+    history = history ++ rows
+
+    {:ok, settlement} =
+      SessionState.propose_maintenance_attempt_settled(
+        state,
+        {:reply, summary_reply(state.maintenance_episodes[state.active_maintenance]["request"])}
+      )
+
+    {state, rows, events} = commit(state, settlement, events)
+    history = history ++ rows
+    {:ok, second} = SessionState.propose_maintenance_checkpoint(state, 2_002, fn -> :ok end)
+    {_next, [row], all_events} = commit(state, second, events)
+    record = row.payload
+
+    for forged <- [
+          Map.put(record, "prior_checkpoint_id", nil),
+          Map.put(record, "prior_checkpoint_id", record["checkpoint_id"]),
+          Map.put(record, "covered_range", record["consumed_range"]),
+          Map.put(record, "consumed_range", record["covered_range"]),
+          put_in(record, ["covered_range", "digest"], record["consumed_range"]["digest"]),
+          put_in(record, ["consumed_range", "first"], record["covered_range"]["first"]),
+          put_in(record, ["summary", "source_excerpted"], false),
+          Map.put(record, "summary_ordinal", 1),
+          put_in(record, ["usage", "total_tokens"], 56)
+        ] do
+      assert {:error, :invalid_compaction_checkpoint_transition} =
+               SessionState.recover(
+                 state.session_id,
+                 history ++ [%{row | payload: forged}],
+                 all_events
+               )
+    end
+  end
+
+  test "a later nonprogress ending retains the useful prior checkpoint and charges each reply once" do
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("o", 30_000),
+        later_old_units: ["tiny"],
+        current_content: String.duplicate("p", 33_000),
+        context_token_budget: 16_384
+      )
+
+    {:ok, checkpoint} = SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+    {state, rows, events} = commit(state, checkpoint, events)
+    history = history ++ rows
+    prior = state.active_checkpoint
+    {:ok, request} = SessionState.propose_maintenance_request(state, 1, 2_001, fn -> :ok end)
+    {state, rows, events} = commit(state, request, events)
+    history = history ++ rows
+
+    reply =
+      state.maintenance_episodes[state.active_maintenance]["request"]
+      |> summary_reply()
+      |> Map.put(
+        :text,
+        summary_json(%{summary_output() | "summary" => String.duplicate("g", 1_000)})
+      )
+
+    {:ok, settlement} = SessionState.propose_maintenance_attempt_settled(state, {:reply, reply})
+    {state, rows, events} = commit(state, settlement, events)
+    history = history ++ rows
+
+    assert {:error, :compaction_no_progress} =
+             SessionState.propose_maintenance_checkpoint(state, 2_002, fn -> :ok end)
+
+    assert {:ok, ending} =
+             SessionState.propose_maintenance_nonprogress(state, 2_002, fn -> :ok end)
+
+    assert [prefix, refusal, _terminal] = ending.records
+    assert prefix["result"]["checkpoint_id"] == prior
+    assert prefix["result"]["usage"]["total_tokens"] == 112
+    assert refusal["session_message_count"] == 3
+    {next, rows, events} = commit(state, ending, events)
+    assert next.active_checkpoint == prior
+    assert next.checkpoints == state.checkpoints
+    assert next.conversation == state.conversation
+    assert next.charged[state.active_run_id].tokens == 112
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, events)
+  end
+
+  test "fitted checkpoints cannot open a summary-only cycle and physical retries spend the episode ceiling" do
+    {fit, _, events} = pending_checkpoint(String.duplicate("o", 3_000))
+    {:ok, proposal} = SessionState.propose_maintenance_checkpoint(fit, 2_000, fn -> :ok end)
+    {fit, _, _} = commit(fit, proposal, events)
+
+    assert {:error, :maintenance_targets_fit} =
+             SessionState.propose_maintenance_request(fit, 1, 2_001, fn -> :ok end)
+
+    {state, history, events} =
+      pending_checkpoint(String.duplicate("o", 10_000),
+        later_old_units: List.duplicate(String.duplicate("o", 10_000), 3),
+        ordinary_body: String.duplicate("s", 10_000),
+        system_class_tokens: 4_000,
+        context_token_budget: 4_000,
+        retry_not_sent: true
+      )
+
+    {state, history, events} =
+      Enum.reduce(1..3, {state, history, events}, fn ordinal, {state, history, events} ->
+        {:ok, checkpoint} =
+          SessionState.propose_maintenance_checkpoint(state, 2_000 + ordinal * 2, fn -> :ok end)
+
+        {state, rows, events} = commit(state, checkpoint, events)
+        history = history ++ rows
+        assert state.maintenance_episodes[state.active_maintenance]["attempts"] == ordinal + 1
+        assert state.maintenance_episodes[state.active_maintenance]["summary_ordinal"] == ordinal
+
+        if ordinal == 3 do
+          {state, history, events}
+        else
+          {:ok, request} =
+            SessionState.propose_maintenance_request(state, 1, 2_001 + ordinal * 2, fn -> :ok end)
+
+          {state, rows, events} = commit(state, request, events)
+          history = history ++ rows
+
+          {:ok, settlement} =
+            SessionState.propose_maintenance_attempt_settled(
+              state,
+              {:reply,
+               summary_reply(state.maintenance_episodes[state.active_maintenance]["request"])}
+            )
+
+          {state, rows, events} = commit(state, settlement, events)
+          {state, history ++ rows, events}
+        end
+      end)
+
+    assert state.maintenance_episodes[state.active_maintenance]["usage"] == %{
+             "attempts" => 4,
+             "reported_tokens" => 168,
+             "estimated_tokens" => 0,
+             "total_tokens" => 168
+           }
+
+    assert {:error, :maintenance_attempts_exhausted} =
+             SessionState.propose_maintenance_request(state, 1, 2_008, fn ->
+               flunk("spent episode entered preparation")
+             end)
+
+    assert state.active_checkpoint != nil
+    assert state.charged[state.active_run_id].tokens == 168
+    assert {:ok, ^state} = SessionState.recover(state.session_id, history, events)
+
+    assert {:error, :run_deadline_reached} =
+             SessionState.propose_maintenance_request(state, 1, 61_001, fn ->
+               flunk("elapsed parent entered exhausted-episode preparation")
+             end)
+
+    {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "exhausted-abort"})
+    {aborted, _, _} = commit(state, abort, events)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.propose_maintenance_request(aborted, 1, 2_008, fn ->
+               flunk("cancelled parent entered exhausted-episode preparation")
+             end)
+  end
+
   defp pending_checkpoint(old, options \\ []) do
     {state, history, events} =
       admitted([old] ++ Keyword.get(options, :later_old_units, []), options)
@@ -844,6 +1105,19 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     {:ok, opened} = propose(state, 1)
     {state, rows, events} = commit(state, opened, events)
     history = history ++ rows
+
+    {state, history, events} =
+      if Keyword.get(options, :retry_not_sent, false) do
+        {:ok, unsent} = SessionState.propose_maintenance_attempt_settled(state, :not_dispatched)
+        {state, rows, events} = commit(state, unsent, events)
+        history = history ++ rows
+        {:ok, retry} = SessionState.propose_maintenance_attempt_open(state)
+        {state, rows, events} = commit(state, retry, events)
+        {state, history ++ rows, events}
+      else
+        {state, history, events}
+      end
+
     request = state.maintenance_episodes[state.active_maintenance]["request"]
 
     {:ok, settled} =

@@ -325,6 +325,72 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: extend the run-owned ordinary-limit reducer and private history reader
+  across further raw prefixes. Each next request includes the exact prior
+  checkpoint, derives a new summary ordinal and operation identity, retains the
+  captured configuration and committed deadline, and opens only after the current
+  substitution still fails ordinary fit. Full coverage is recomputed from original
+  journal records; the prior first-kept identity begins the new contiguous raw
+  cut. The checkpoint retains separate cumulative and consumed ranges, one
+  rendered summary, inherited excerpt flags and every remaining raw fact.
+  Natural settlements charge once. A later growing summary ends non-progress
+  while retaining the useful prior checkpoint. Physical retries count toward the
+  four-attempt episode ceiling; cancellation, deadline and parent capacity remain
+  ahead of preparation. Fitted checkpoints cannot start summary-only cycles.
+
+  Private pages traverse two checkpoints without owner activation or effects,
+  rejecting self-cycles and enlarged/newly empty consumed cuts. This closes one
+  added T07 subtask. Originals remain 51 / 128 / 7 including T00; added totals
+  become 186 done / 10 todo, or 182 / 9 for T01–T19. Live next-prefix dispatch,
+  durable exhausted-episode endings, thinking/rendering triggers, explicit and
+  standalone compact, and real-Store/provider checkpoint proof remain open.
+
+  Final twenty-file selection: 282 Core tests and seven composition tests pass
+  on each pair; one existing Core long-bound exclusion remains. Current:
+  17.8 measured seconds,
+  `/private/tmp/loopex-m7-next-prefix-current-dev5.log`, SHA-256
+  `b9963eb4a37c1c0bad40dd9dc08f585b106ced37a6e49f6dbcc94c10bc6bb6a9`.
+  Floor: 18.2 measured seconds,
+  `/private/tmp/loopex-m7-next-prefix-floor-v3.log`, SHA-256
+  `6ad702b0ae69acfca745025369cdb54bfaa8c6676ae147b788e4002a22f65acb`.
+  Failed development outputs remain: current dev1
+  `/private/tmp/loopex-m7-next-prefix-current-dev1.log`, SHA-256
+  `469ac88c9ea294dc23e2dae91e8f6172a7b4905a11c700e9b0abe9cc70ab8daf`;
+  current dev3 `/private/tmp/loopex-m7-next-prefix-current-dev3.log`, SHA-256
+  `a475dc731193d3e1e3595138fff20454c77aae3b9da9ea624237ad5aa16eac5e`;
+  floor v1 `/private/tmp/loopex-m7-next-prefix-floor-v1.log`, SHA-256
+  `07a20a8f04b56ee560839d8520156dc2495fda90dc1ec0ff582e45f28e1af35b`.
+  Fixtures now capture a valid system/input ceiling and an actually refusing
+  ordinary candidate, and use the existing private-history cursor API. No
+  validator, deadline, retry or required proof was relaxed.
+
+  Formatting, warning-free compilation, dependency direction, bootstrap/status,
+  documentation and diff checks passed in 23.7 measured seconds:
+  `/private/tmp/loopex-m7-next-prefix-gates-v1.log`, SHA-256
+  `a3158afe9fa19310d66896dd0916e4c6a009dbbd7e997572db3011de60ae2d0f`.
+
+  The full fast check failed on exact
+  `e161bd57e118839744308e898c69355d819fb118` in 1,421.0 measured seconds.
+  All preliminary gates and ten application suites passed, including 1,058 Core
+  tests. Composition passed 476 of 479 tests, with one exclusion; three cases
+  failed because two fixture assertions still read the removed cutover cache.
+  Those missed callers now assert actual closed projection records from the
+  first request onward. All seven artifact-range session cases pass on both
+  pairs above, including real local Store restart and empty-registry recovery.
+  This extends T15's existing cleanup subtask without changing its tally.
+  Complete full-check output:
+  `/private/tmp/loopex-m7-e161bd57-fast-check.log`, SHA-256
+  `7ec0a29a02e367724acecd268e8cc8124a81bfba314adf7418c142246aac00a8`.
+  Execution handle 81549 is terminal and collected; never poll it or rerun this
+  failed candidate as a pass. No decision is pending.
+
+  Next integration work is a durable measured ending when four physical
+  maintenance attempts leave ordinary limits unmet, retaining partial checkpoints
+  and parent precedence. Then join bounded source preparation and new summary
+  dispatch/cleanup to the live serial owner. The current coordinator still stops
+  on a partial checkpoint requiring another prefix; pure proposal/reader proof
+  is not a live automatic or explicit workflow claim.
+
 - Done: remove the superseded lineage-projection cutover cache and historical
   inline staging fallback. Replay now asks the captured current lineage
   constructor whether a projection is required. Artifact-capable sessions retain
@@ -6752,6 +6818,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Extend run-owned ordinary-limit requests and checkpoints across contiguous new raw prefixes with the exact prior checkpoint, cumulative original-record digest, separate consumed range, inherited omission, fixed capture/deadline, ordinal/operation separation, usage-once accounting and physical four-attempt limit; prove fitted-cycle refusal, later non-progress retaining the prior checkpoint, tamper rejection and bounded private traversal on both toolchains. Live dispatch and exhausted-episode endings remain open.
 
 - [x] Retain and independently replay a measured non-progress episode/refusal/parent ending, authenticate the last minimum ordinary projection and exact terminal ordering, preserve settled usage and raw facts, prove abort/deadline/capacity precedence and all three live uncertainty phases without redispatch, and traverse bounded private history on both supported toolchains.
 

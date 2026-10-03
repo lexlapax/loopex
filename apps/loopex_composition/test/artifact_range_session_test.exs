@@ -206,8 +206,8 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     assert message in List.last(requests).messages
     assert {:ok, records} = Store.load_records(store, fixture.session, 0, 1_000)
     assert {:ok, events} = Store.load_events(store, fixture.session, 0, 1_000)
-    assert {:ok, recovered} = SessionState.recover(fixture.session, records, events)
-    assert recovered.lineage_projection_revision == 1
+    assert {:ok, _recovered} = SessionState.recover(fixture.session, records, events)
+    assert_projection_contract(records)
     refute File.exists?(fixture.artifact_root)
     assert :ok = Loopex.stop(runtime)
   end
@@ -447,10 +447,31 @@ defmodule LoopexComposition.ArtifactRangeSessionTest do
     assert {:ok, recovered} = SessionState.recover(session, records, events)
     assert recovered.artifact_sources[use] == resolved
     assert Enum.count(records, &(&1.payload.kind == "executor_receipt_committed_v2")) == 3
-    assert recovered.lineage_projection_revision == 1
+    assert_projection_contract(records)
     assert_excerpt_provenance(session, records, events, requests, source.payload)
     assert :sys.get_state(transfers).jobs == %{}
     assert :ok = Loopex.stop(runtime)
+  end
+
+  defp assert_projection_contract(records) do
+    requests =
+      Enum.filter(
+        records,
+        &(&1.payload.kind in [
+            "model_request_committed_v2",
+            "model_request_committed_resources_v2"
+          ])
+      )
+
+    assert requests != []
+
+    for row <- requests do
+      projection = row.payload["lineage_projection"]
+      assert Enum.sort(Map.keys(projection)) == ~w(allowance ranges revision)
+      assert projection["revision"] == 1
+      assert projection["allowance"] in 0..2_048
+      assert is_list(projection["ranges"])
+    end
   end
 
   defp assert_excerpt_provenance(session, records, events, requests, source) do
