@@ -1670,8 +1670,15 @@ maintenance. Abort/deadline precedence and current-format replay pass both pairs
 Live exhausted recovery also proves all three Store uncertainty phases, prepared
 pause, exact fenced-owner succession, one adjacent ending, unchanged partial
 checkpoints and no redispatch or recharge on both pairs.
-Automatic triggering and new summary dispatch/cleanup,
-thinking/rendering triggers and standalone compact remain open. The full fast
+Live retained source preparation now uses a supervised pure-proposal worker,
+exact DOWN, cutoff and current-version checks before request/open commitment.
+Newly adopted summaries dispatch their retained request and closed maintenance
+identity through Control and the existing provider cleanup; raw summary deltas
+stay private. First preparation and further-prefix tests cover all three staging
+uncertainty phases before captured ordinary continuation, preserving prior
+checkpoints and settling unresolved inherited attempts without redispatch.
+Automatic triggering, irreducible preparation/refusal endings, source-worker
+fault joins, thinking/rendering triggers and standalone compact remain open. The full fast
 check passes on d0dd8ec6 through shared ordinary staging/tail measurement; both
 supported pairs pass the later focused checkpoint reducer/reader selection.
 This is not a complete T07 workflow proof.

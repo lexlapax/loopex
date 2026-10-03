@@ -1165,6 +1165,37 @@ defmodule Loopex.Runtime.SessionState do
 
   def preflight_maintenance_request(_, _, _, _), do: {:error, :context_projection_invalid}
 
+  # Concept: source preparation uses the captured ordinary tail policy.
+  # Technical depth: this pure worker proposal selects q=0 whole units with the
+  # same configured request and fixed receipt cost as checkpoint completion. It
+  # grants no dispatch authority until the owner commits its request/open pair.
+  @doc false
+  def propose_selected_maintenance_request(state, now, check) do
+    with {:ok, episode} <- maintenance_source_episode(state, now, check),
+         {:ok, deadline} <- maintenance_request_deadline(state, episode, now),
+         staging = %{
+           run_id: episode["run_id"],
+           elements: lineage_elements(state, episode["run_id"]),
+           steer: episode["ordinary_steer"],
+           resources: state.run_resources[episode["run_id"]],
+           deadline: deadline,
+           excerpt_allowance: 0
+         },
+         project = %{
+           "class" => "project_resource",
+           "receipt_revision" => 2,
+           "disposition" => "not_evaluated_required_failure",
+           "detail" => nil
+         },
+         {:ok, choice} <- ordinary_compaction_tail(state, staging, :automatic, project, check),
+         true <- choice.eligible_unit_count > 0 do
+      propose_maintenance_request(state, choice.eligible_unit_count, now, check)
+    else
+      false -> {:error, :compaction_no_progress}
+      result -> result
+    end
+  end
+
   @doc false
   def propose_maintenance_request(state, eligible_count, now, check) do
     with {:ok, record} <- preflight_maintenance_request(state, eligible_count, now, check),

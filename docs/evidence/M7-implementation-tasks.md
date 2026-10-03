@@ -325,6 +325,78 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: join retained run-owned ordinary-limit source preparation and further
+  prefixes to the live serial owner. A supervised worker selects the q=0 tail
+  through the captured ordinary request/receipt constructor, streams bounded
+  source-v2 candidates and returns a pure request/open proposal. The owner waits
+  for that worker's exact DOWN, checks its cutoff and captured journal version,
+  and commits the pair before adopting the new attempt. Intervening mutation
+  discards prepared evidence for reselection; cancellation joins the effect-free
+  worker. First preparation uses the retained preparation/run cutoff and later
+  prefixes retain the committed run deadline.
+
+  Provider dispatch now uses the exact retained maintenance request and its
+  closed episode/ordinal/operation/attempt/digest binding through existing
+  Control authority and provider cleanup. Captured thinking-off selection,
+  instructions, 1,024-token output reserve, absent tools/continuation and prior
+  checkpoint provenance survive changed launch defaults. Raw summary deltas
+  create no ordinary answer stream. Inherited opens still settle owner loss;
+  only newly adopted opens dispatch, and the existing exact not-dispatched
+  retry uses the maintenance attempt reducer.
+
+  Eight live cases cover first source preparation and a further raw prefix,
+  each without a fault and through all three staging uncertainty phases. Known
+  commits dispatch one summary then one ordinary continuation only after the
+  prior provider callback exits, retaining one or two checkpoints and exact
+  58/114 reported token charges. Prepared recovery remains paused. An unresolved
+  commit joins the exact fenced owner, dispatches nothing, then a successor
+  settles the inherited attempt conservatively without another call; useful
+  prior checkpoints and raw facts remain. No executor job appears. Empty
+  in-flight work/streams and owner-worker children plus coordinator/control
+  joins complete every case. These tests use the fault Store fixture; real
+  persistent Store/provider witnesses remain open.
+
+  This closes one added T07 live-integration subtask. T01–T19 originals remain
+  51 done / 122 todo / 6 retired; added totals become 184 done / 9 todo.
+  Including T00: originals 51 / 128 / 7, added 188 / 10. Automatic trigger
+  admission, explicit/standalone compact, irreducible source/refusal endings,
+  source-worker cutoff/cancellation/owner-loss fault proof, public compaction
+  progress and real-provider workflows remain open. Unsupported preparation
+  results currently stop the owner without inventing a retained ending; they
+  require the accepted measured or named refusal paths before T07 closes.
+
+  Final twenty-file selection: 293 Core tests and seven composition tests pass
+  on each pair; one existing Core long-bound exclusion remains. Current:
+  16.7 measured seconds, `/private/tmp/loopex-m7-live-source-current-dev3.log`,
+  SHA-256 `9bfb20b83570bfb5fcbbadcabe9c50969e0559fa2edf9670d363d934a2d9a7cc`.
+  Floor: 16.1 measured seconds, `/private/tmp/loopex-m7-live-source-floor-v3.log`,
+  SHA-256 `0037134860f60f01cde72c976f6430428f96d3495d37f7c640e8a9f8d9d8bf3b`.
+  Failed development outputs remain: current
+  `/private/tmp/loopex-m7-live-source-current-dev1.log`, SHA-256
+  `2c055211fd45b917aeb186f7857b6a75cd16876a7b36881dc986ba2f0f8b6d47`;
+  floor `/private/tmp/loopex-m7-live-source-floor-v1.log`, SHA-256
+  `27f2fc1622369a859cf8b8174a7b3ba43cac097dc72caa0f6f4169638309791a`.
+  Fixtures now assert the actual source-v2 version and use the captured ordinary
+  ceiling for each old prompt; production validation and bounds were unchanged.
+  The two successful live paths then passed before additional uncertainty cases:
+  current `/private/tmp/loopex-m7-live-source-current-dev2.log`, SHA-256
+  `5e04d4b159b3b5f3c8176de1fc19a49a18f5477a4bc0c8b7488739a8ccfe13f7`;
+  floor `/private/tmp/loopex-m7-live-source-floor-v2.log`, SHA-256
+  `51a100f2dd009c5d4db31d9833a53820f2d37729fef98aa41fb29f90568419d4`.
+  Final focused handles 46693 and 57827 are terminal and collected. No decision
+  or agent is pending. The next integration candidate needs its full fast check;
+  no full check has run on this source yet.
+
+  Formatting, warning-free compilation, dependency direction, bootstrap/status,
+  documentation and diff gates passed in 24.6 measured seconds:
+  `/private/tmp/loopex-m7-live-source-gates-v1.log`, SHA-256
+  `ec2b0449911426bf2e039c02e85b53b1a74bc5203e41404475eef41bef8c73b7`.
+  Gate handle 54876 is terminal and collected. The full integration check of
+  this committed candidate will run once in the clean attached verification
+  checkout, retaining exact SHA and streamed output in
+  `/private/tmp/loopex-m7-live-source-fast-check.log`; that file's terminal result
+  and digest, rather than this launch intention, determine its evidence status.
+
 - Done: prove live exhausted-episode recovery through before-linearization,
   after-linearization-before-result and recovery-representation Store faults.
   The fixture uses public exact genesis, stops the initial owner and commits
@@ -6906,6 +6978,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Join captured ordinary-tail source selection to a supervised pure-proposal worker and exact request/open commitment after its DOWN; dispatch newly adopted maintenance requests through their retained closed Control binding and existing provider cleanup, keeping raw summary deltas private. Prove first preparation and further-prefix continuation across all three staging uncertainty phases with prepared pause, exact fenced-owner succession, captured configuration/deadline/prior checkpoint, guarded callback replacement, once-only usage and no executor jobs on both toolchains. Automatic triggers, irreducible refusals, source-worker fault joins and real-provider evidence remain open.
 
 - [x] Add and independently replay the run-owned four-physical-attempt exhaustion proposal, preserving useful partial checkpoints, original facts and once-only spending while retaining the last minimum ordinary numeric refusal and exact episode/refusal/parent ordering. Prove abort/deadline precedence and reject changed measurements, clocks and stripped episode identity on both toolchains. Prove all three live Store uncertainty phases with prepared pause, exact fenced-owner succession, one adjacent ending, unchanged partial checkpoints/raw facts, no redispatch or recharge and exact coordinator/control joins on both pairs. New summary dispatch and real persistent Store/provider fault witnesses remain open.
 

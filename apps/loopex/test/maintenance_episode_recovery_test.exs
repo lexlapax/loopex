@@ -579,6 +579,178 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     end
   end
 
+  for mode <- [:source_pending, :checkpoint_more],
+      phase <- [
+        :none,
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @mode mode
+    @phase phase
+    @expected_summaries if(mode == :checkpoint_more, do: 2, else: 1)
+    @expected_tokens if(phase == :recovery_representation,
+                       do: 10_000,
+                       else: if(mode == :checkpoint_more, do: 114, else: 58)
+                     )
+    @expected_source if(phase == :recovery_representation, do: :estimated, else: :reported)
+    @expected_checkpoints if(phase == :recovery_representation,
+                            do: @expected_summaries - 1,
+                            else: @expected_summaries
+                          )
+    test "live #{@mode} preparation resolves #{@phase} staging before any new dispatch" do
+      {fixture, session, episode} = retained_episode(@mode)
+      before = Fixture.records(fixture, session)
+      {:ok, original} = SessionState.recover(session, before, Fixture.events(fixture, session))
+
+      successor =
+        start(
+          store: fixture.store,
+          model: "changed:model",
+          tools: [],
+          progress_to: self(),
+          script: [
+            %{
+              text:
+                ~s({"summary":"live retained facts","carry_forward":{"files_read":[],"files_changed":[]}}),
+              usage: %{input_tokens: 37, output_tokens: 19},
+              deltas: ["PRIVATE_SUMMARY_DELTA"],
+              reply_overrides: %{completion: "natural", continuation: nil}
+            },
+            %{
+              text: "continued",
+              deltas: ["ordinary delta"],
+              require_previous_worker_down: true,
+              reply_overrides: %{completion: "natural", continuation: nil}
+            }
+          ]
+        )
+
+      unless @phase == :none do
+        :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
+      end
+
+      {:ok, {:prepared, activation}} =
+        Loopex.prepare_resume_session(successor.runtime, session, "resume-live-source")
+
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+      {:ok, children} = Loopex.Runtime.children(successor.runtime)
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      assert :sys.get_state(coordinator).in_flight == %{}
+      monitor = Process.monitor(coordinator)
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+
+      if @phase == :recovery_representation do
+        assert_receive {:DOWN, ^monitor, :process, ^coordinator,
+                        {:maintenance_preparation_commit_failed, :commit_unknown}},
+                       5_000
+
+        assert AgentLoopTestModel.dispatched(successor.model) == []
+
+        assert {:ok, ^session} =
+                 Loopex.resume_session(successor.runtime, session,
+                   command_id: "resolve-source-staging"
+                 )
+      end
+
+      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+
+      if @phase == :recovery_representation do
+        assert AgentLoopTestModel.dispatched(successor.model) == []
+        refute Enum.any?(rows, &(&1.payload.kind == "model_request_committed_v2"))
+
+        assert [ending] =
+                 Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+
+        assert ending.payload["result"]["disposition"] == "failed"
+        assert ending.payload["result"]["checkpoint_id"] == original.active_checkpoint
+        assert ending.payload["result"]["usage"]["total_tokens"] == 10_000
+        assert ending.payload["result"]["usage"]["attempts"] == @expected_summaries
+      else
+        assert [summary, ordinary] = AgentLoopTestModel.dispatched(successor.model)
+        assert summary.model == "scripted:v1"
+        assert summary.tools == []
+        assert summary.continuation == nil
+        assert summary.sampling["max_tokens"] == 1_024
+        assert summary.deadline == ordinary.deadline
+
+        assert {:ok, source} =
+                 LoopexProtocol.Frame.decode(Enum.at(summary.messages, 1)["content"], 16_384)
+
+        assert source["version"] == "loopex.compaction.source.v2"
+
+        assert source["prior_checkpoint"] ==
+                 if(original.active_checkpoint,
+                   do: original.checkpoints[original.active_checkpoint]["summary"],
+                   else: nil
+                 )
+
+        assert ordinary.model == "scripted:v1"
+        assert ordinary.tools == []
+
+        assert {:ok, provenance} =
+                 LoopexProtocol.Frame.decode(Enum.at(ordinary.messages, 1)["content"], 16_384)
+
+        assert provenance["kind"] == "compaction_summary"
+        assert provenance["summary"] == "live retained facts"
+        assert List.last(ordinary.messages) == %{"role" => "user", "content" => "retained"}
+        assert_receive {:loopex_progress, %{kind: :text_delta, text: "ordinary delta"}}, 5_000
+        refute_received {:loopex_progress, %{kind: :text_delta, text: "PRIVATE_SUMMARY_DELTA"}}
+
+        assert Enum.count(rows, &(&1.payload.kind == "model_request_committed_v2")) == 1
+
+        assert [ending] =
+                 Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+
+        assert ending.payload["result"]["disposition"] == "checkpointed"
+        assert ending.payload["result"]["usage"]["total_tokens"] == @expected_summaries * 56
+        assert provenance["checkpoint_id"] == ending.payload["result"]["checkpoint_id"]
+      end
+
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_request_committed_v1")) ==
+               @expected_summaries
+
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_opened_v1")) ==
+               @expected_summaries
+
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_settled_v3")) ==
+               @expected_summaries
+
+      assert Enum.count(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1")) ==
+               @expected_checkpoints
+
+      unless @phase == :none do
+        assert MapSet.member?(
+                 M1RuntimeTestStore.observed(fixture.store),
+                 {:session_journal_commit, @phase}
+               )
+      end
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, rows, Fixture.events(successor, session))
+
+      assert recovered.active_maintenance == nil
+      assert recovered.active_run_id == nil
+
+      assert recovered.charged[episode["run_id"]] == %{
+               tokens: @expected_tokens,
+               source: @expected_source
+             }
+
+      for old <- Enum.drop(recovered.run_order, -1) do
+        assert SessionState.elements(recovered, old) == SessionState.elements(original, old)
+      end
+
+      assert Agent.get(successor.executor, & &1.jobs) == []
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      live = :sys.get_state(coordinator)
+      assert live.in_flight == %{}
+      assert live.streams == %{}
+      assert Task.Supervisor.children(live.owner_workers) == []
+      stop_and_join(successor, session)
+    end
+  end
+
   defp await_parent_terminal(fixture, session, run, cutoff) do
     rows = Fixture.records(fixture, session)
 
@@ -645,6 +817,8 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                 if(
                   mode in [
                     :exhausted,
+                    :source_pending,
+                    :checkpoint_more,
                     :checkpoint_pending,
                     :checkpoint_committed,
                     :checkpoint_committed_aborted,
@@ -655,10 +829,11 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                     :checkpoint_spent_turns
                   ],
                   do:
-                    if(mode == :exhausted,
-                      do: String.duplicate("o", 10_000),
-                      else: String.duplicate("old", 1_000)
-                    ),
+                    cond do
+                      mode == :exhausted -> String.duplicate("o", 10_000)
+                      mode in [:source_pending, :checkpoint_more] -> String.duplicate("o", 30_000)
+                      true -> String.duplicate("old", 1_000)
+                    end,
                   else: "original facts"
                 )
             },
@@ -681,21 +856,23 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       end
 
     state =
-      if mode == :exhausted do
-        Enum.reduce(1..3, state, fn ordinal, state ->
+      if mode in [:exhausted, :checkpoint_more] do
+        count = if mode == :exhausted, do: 3, else: 1
+
+        Enum.reduce(1..count, state, fn ordinal, state ->
           {:ok, prompt} =
             SessionState.propose(
               state,
               %{
                 type: :prompt,
                 command_id: "old-#{ordinal}",
-                content: String.duplicate("o", 10_000)
+                content: String.duplicate("o", if(mode == :exhausted, do: 10_000, else: 30_000))
               },
               %{
                 max_turns: 8,
                 token_budget: 10_000,
                 deadline_ms: 60_000,
-                context_token_budget: 4_000
+                context_token_budget: configuration["context_token_budget"]
               }
             )
 
@@ -769,7 +946,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     state = retain(fixture, state, admission)
 
     state =
-      if mode in [:expired, :aborted] do
+      if mode in [:expired, :aborted, :source_pending] do
         state
       else
         {:ok, request} =
@@ -791,6 +968,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     state =
       if mode in [
            :exhausted,
+           :checkpoint_more,
            :invalid,
            :incomplete,
            :invalid_aborted,
@@ -836,6 +1014,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     state =
       if mode in [
            :exhausted,
+           :checkpoint_more,
            :checkpoint_committed,
            :checkpoint_committed_aborted,
            :checkpoint_committed_expired

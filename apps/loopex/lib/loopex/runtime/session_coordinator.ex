@@ -1010,6 +1010,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
               :interaction_expired,
               :policy_timeout,
               :artifact_preparation_deadline,
+              :maintenance_preparation_deadline,
               :model_reserve,
               :execute_result_reserve,
               :cleanup_settled
@@ -1127,6 +1128,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
         |> disarm_deadline(run_id)
         |> complete_policy_consultation(run_id, result)
 
+      {{:maintenance_preparation, run_id, pid, metadata}, remaining} ->
+        # Concept: prepared evidence is adopted only after its producer exits.
+        # Technical depth: Task result precedes its exact DOWN; retain it in
+        # memory without committing or opening a provider stream until that join.
+        metadata = Map.put(metadata, :result, result)
+
+        {:noreply,
+         put_in_flight(
+           %{state | in_flight: remaining},
+           reference,
+           {:maintenance_preparation, run_id, pid, metadata}
+         )}
+
       {{:artifact_preparation, run_id, pid, metadata}, remaining} ->
         # Concept: receipt storage finishes only after its worker has stopped.
         # Technical depth: retain the bounded result until this exact monitor's
@@ -1139,6 +1153,32 @@ defmodule Loopex.Runtime.SessionCoordinator do
            reference,
            {:artifact_preparation, run_id, pid, metadata}
          )}
+    end
+  end
+
+  defp handle_owner_info({:maintenance_preparation_deadline, reference, run_id}, state) do
+    case state.in_flight[reference] do
+      {:maintenance_preparation, ^run_id, _pid, metadata} ->
+        if System.system_time(:millisecond) < metadata.deadline do
+          timer =
+            arm_slice(
+              {:maintenance_preparation_deadline, reference, run_id},
+              metadata.deadline - System.system_time(:millisecond)
+            )
+
+          {:noreply,
+           put_in_flight(
+             state,
+             reference,
+             put_elem(state.in_flight[reference], 3, %{metadata | timer: timer})
+           )}
+        else
+          state = cancel_effect_free_preparation(state, run_id, :maintenance_preparation)
+          finish_maintenance_preparation_cutoff(state, run_id, metadata)
+        end
+
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -1449,6 +1489,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
           run_id,
           :receipt_lookup_failed
         )
+
+      {{:maintenance_preparation, run_id, _pid, metadata}, remaining} ->
+        Process.cancel_timer(metadata.timer)
+
+        result =
+          if reason == :normal,
+            do: Map.get(metadata, :result),
+            else: {:error, :context_projection_invalid}
+
+        finish_maintenance_preparation(%{state | in_flight: remaining}, run_id, metadata, result)
 
       {{:artifact_preparation, run_id, _pid, metadata}, remaining} ->
         Process.cancel_timer(metadata.timer)
@@ -3383,12 +3433,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
       SessionState.unproven_effect?(state.durable, work.run_id) ->
         finish_unknown(state, work.run_id)
 
-      maintenance_open_attempt?(state.durable, work.run_id) and
-          not MapSet.member?(state.adopted, work.run_id) ->
-        # Concept: an inherited summary attempt is settled, never redispatched.
-        # Technical depth: it shares the provider deadline, cleanup and retained
-        # settlement path, while its episode supplies the distinct identity.
+      maintenance_open_attempt?(state.durable, work.run_id) ->
+        # Concept: each summary uses its own committed request and identity.
+        # Technical depth: newly adopted attempts use the existing provider
+        # permit/cleanup path; inherited opens still settle owner loss there.
         before_run_deadline(state, work, &start_model_work/2)
+
+      match?(%{"stage" => "model_retry_permitted"}, episode) ->
+        before_run_deadline(state, work, &open_retry_attempt/2)
+
+      match?(%{"stage" => "source_preparation"}, episode) ->
+        before_deadline(state, work, &start_maintenance_preparation/2)
 
       match?(%{"stage" => "checkpoint_pending", "summary_failure" => _}, episode) ->
         # Concept: a retained invalid summary needs no replacement provider call.
@@ -3502,12 +3557,118 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       commit_checkpoint_phase(state, work, result)
     else
-      {:stop, {:maintenance_checkpoint_failed, :checkpoint_requires_dispatch}, state}
+      start_maintenance_preparation(state, work)
     end
   end
 
   defp commit_checkpoint_phase(state, _work, {:error, reason}),
     do: {:stop, {:maintenance_checkpoint_failed, reason}, state}
+
+  # Concept: preparation cannot occupy the serial owner or dispatch a model.
+  # Technical depth: the supervised worker reads only a captured reducer state,
+  # checks the retained cutoff throughout bounded selection and returns a pure
+  # proposal. Join its exact monitor before adoption; any intervening journal
+  # mutation discards that evidence and reselects against current truth.
+  defp start_maintenance_preparation(state, work) do
+    if map_size(state.in_flight) > 0 or cleaning_up?(state, work.run_id) do
+      {:noreply, state}
+    else
+      durable = state.durable
+      episode = durable.maintenance_episodes[durable.active_maintenance]
+      run_deadline = durable.deadlines[work.run_id]
+
+      {deadline, origin} =
+        if episode["attempts"] == 0 and
+             (is_nil(run_deadline) or episode["preparation_deadline"] < run_deadline),
+           do: {episode["preparation_deadline"], :preparation},
+           else: {run_deadline, :run}
+
+      check = fn ->
+        if System.system_time(:millisecond) < deadline,
+          do: :ok,
+          else:
+            {:error,
+             if(origin == :run, do: :run_deadline_reached, else: :compaction_preparation_deadline)}
+      end
+
+      task =
+        Task.Supervisor.async_nolink(state.owner_workers, fn ->
+          try do
+            SessionState.propose_selected_maintenance_request(
+              durable,
+              System.system_time(:millisecond),
+              check
+            )
+          rescue
+            _ -> {:error, :context_projection_invalid}
+          catch
+            _, _ -> {:error, :context_projection_invalid}
+          end
+        end)
+
+      metadata = %{
+        deadline: deadline,
+        origin: origin,
+        journal_version: durable.journal_version,
+        timer:
+          arm_slice(
+            {:maintenance_preparation_deadline, task.ref, work.run_id},
+            deadline - System.system_time(:millisecond)
+          )
+      }
+
+      {:noreply,
+       put_in_flight(state, task.ref, {:maintenance_preparation, work.run_id, task.pid, metadata})}
+    end
+  end
+
+  defp finish_maintenance_preparation(state, run_id, metadata, result) do
+    cond do
+      state.superseded ->
+        continue_after_owner_loss(state)
+
+      state.durable.active_run_id != run_id ->
+        {:noreply, state}
+
+      System.system_time(:millisecond) >= metadata.deadline ->
+        finish_maintenance_preparation_cutoff(state, run_id, metadata)
+
+      state.durable.journal_version != metadata.journal_version ->
+        send(self(), :advance_work)
+        {:noreply, state}
+
+      true ->
+        case result do
+          {:ok, proposal} ->
+            with {:ok, next} <- commit_internal(state, proposal) do
+              send(self(), :advance_work)
+              {:noreply, adopt_run(next, run_id)}
+            else
+              {:error, reason} -> {:stop, {:maintenance_preparation_commit_failed, reason}, state}
+            end
+
+          {:error, :maintenance_bounds_exhausted} ->
+            commit_checkpoint_phase(state, state.durable.pending_work[run_id], result)
+
+          {:error, reason}
+          when reason in [:run_deadline_reached, :compaction_preparation_deadline] ->
+            finish_maintenance_preparation_cutoff(state, run_id, metadata)
+
+          {:error, :context_projection_invalid} ->
+            commit_context_preparation_failure(state, run_id, :context_projection_invalid)
+
+          other ->
+            {:stop, {:maintenance_preparation_failed, other}, state}
+        end
+    end
+  end
+
+  defp finish_maintenance_preparation_cutoff(state, run_id, %{origin: :run}),
+    do: finish_at_deadline(state, run_id)
+
+  defp finish_maintenance_preparation_cutoff(state, run_id, %{origin: :preparation}),
+    do:
+      before_deadline(state, state.durable.pending_work[run_id], &start_maintenance_preparation/2)
 
   defp finish_pending_summary_failure(state, work) do
     cause =
@@ -4652,7 +4813,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
         settle_model_attempt(state, work.run_id, :owner_loss)
 
       true ->
-        dispatch_provider_attempt(state, work)
+        dispatch_provider_attempt(state, provider_work(state, work))
+    end
+  end
+
+  defp provider_work(state, work) do
+    if maintenance_open_attempt?(state.durable, work.run_id) do
+      episode = state.durable.maintenance_episodes[state.durable.active_maintenance]
+
+      {:ok, opened} =
+        Loopex.Runtime.ProviderAttempt.opened_record(%{
+          episode_id: episode["episode_id"],
+          summary_ordinal: episode["summary_ordinal"],
+          purpose: "compaction",
+          operation_id: episode["operation_id"],
+          attempt: episode["model_attempt"],
+          staged_request_digest: episode["request"].staged_request_digest
+        })
+
+      {:ok, binding} =
+        Loopex.Runtime.ProviderAttempt.binding_from_opened(state.session_id, opened)
+
+      Map.merge(work, %{
+        request: episode["request"],
+        model_attempt: episode["model_attempt"],
+        maintenance_binding: binding
+      })
+    else
+      work
     end
   end
 
@@ -4733,7 +4921,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
       deadline: deadline
     }
 
-    state = %{state | streams: Map.put(state.streams, {:model, run_id}, stream)}
+    state =
+      if stream,
+        do: %{state | streams: Map.put(state.streams, {:model, run_id}, stream)},
+        else: state
 
     state =
       put_in_flight(
@@ -5854,6 +6045,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # plus the session it belongs to, so Control, the coordinator, and the worker
   # all compare the same value and no two of them can hold different ideas of
   # which attempt is being authorized.
+  defp attempt_binding(_state, %{maintenance_binding: binding}), do: binding
+
   defp attempt_binding(state, work) do
     %{
       "session_id" => state.session_id,
@@ -5886,7 +6079,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp open_retry_attempt(state, work) do
-    case SessionState.propose_model_attempt_open(state.durable, work.run_id) do
+    proposal =
+      if state.durable.active_maintenance,
+        do: SessionState.propose_maintenance_attempt_open(state.durable),
+        else: SessionState.propose_model_attempt_open(state.durable, work.run_id)
+
+    case proposal do
       {:ok, proposal} ->
         case commit_internal(state, proposal) do
           {:ok, next} ->
@@ -6110,6 +6308,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # derivation of the same run and turn. A separately derived identity produces
   # a different domain for the same attempt, and a consumer then cannot bind a
   # delta to the settlement that produced it.
+  # Concept: raw summary deltas stay private to maintenance.
+  # Technical depth: a summary creates no ordinary turn stream or closure.
+  # Publication waits for its validated checkpoint; the transient compaction
+  # progress contract is a separate projection, not ordinary answer text.
+  defp model_progress_fun(_state, %{maintenance_binding: _binding}),
+    do: {nil, Loopex.Model.discard_progress()}
+
   defp model_progress_fun(state, work) do
     domain =
       StreamDomain.derive(
@@ -6390,8 +6595,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # it truthfully.
   defp terminate_superseded_effect_free_work(state) do
     Enum.reduce(state.in_flight, state, fn
-      {_reference, {:artifact_preparation, run_id, _pid, _metadata}}, next ->
-        cancel_artifact_preparation(next, run_id)
+      {_reference, {kind, run_id, _pid, _metadata}}, next
+      when kind in [:artifact_preparation, :maintenance_preparation] ->
+        cancel_effect_free_preparation(next, run_id, kind)
 
       {reference, {:model, run_id, pid, tree}}, next ->
         _ = Task.Supervisor.terminate_child(next.owner_workers, pid)
@@ -6894,6 +7100,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     else
       state = disarm_deadline(state, run_id)
       state = cancel_artifact_preparation(state, run_id)
+      state = cancel_effect_free_preparation(state, run_id, :maintenance_preparation)
       state = cancel_policy_consultation(state, run_id)
       {state, model} = cancel_model_attempt(state, run_id, purpose)
       job_id = dispatched_job_id(state, run_id)
@@ -7086,12 +7293,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Technical depth: kill and join the exact local Task monitor, draining its
   # preceding result signal. Adapter-owned orphan storage receives no committed
   # session membership. The same path handles abort, cutoff and owner loss.
-  defp cancel_artifact_preparation(state, run_id) do
+  defp cancel_artifact_preparation(state, run_id),
+    do: cancel_effect_free_preparation(state, run_id, :artifact_preparation)
+
+  defp cancel_effect_free_preparation(state, run_id, kind) do
     case Enum.find(state.in_flight, fn
-           {_, {:artifact_preparation, ^run_id, _, _}} -> true
+           {_, {^kind, ^run_id, _, _}} -> true
            _ -> false
          end) do
-      {reference, {:artifact_preparation, ^run_id, pid, metadata}} ->
+      {reference, {^kind, ^run_id, pid, metadata}} ->
         Process.cancel_timer(metadata.timer)
         Process.exit(pid, :kill)
         join_artifact_preparation(reference, pid)
