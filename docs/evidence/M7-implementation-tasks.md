@@ -325,6 +325,23 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: audit and close original T03's instruction-test obligation. Core's
+  capture, refusal, source/receipt and replay tests pass 70 cases on both
+  supported pairs; the CLI's exact file/environment byte limits, long workspace
+  path, changed-file capture, admitted/declined resources, live chat staging and
+  retained restart tests pass 59 on each pair. Complete outputs and SHA-256:
+  `/private/tmp/loopex-m7-t03-core-current.log`
+  `8a9e8b3de1181b3ae21598cca4e3da8d805015c7134376cae108678fc314b3ff`,
+  `/private/tmp/loopex-m7-t03-core-floor.log`
+  `75c89ffaed25cdf84029da9546a543534e9114d3b75f63d3d2a53ae59dd57515`,
+  `/private/tmp/loopex-m7-t03-cli-current.log`
+  `d618222fce3d95c676bbee8015ccf7c4961b670620d9667acb2bfdbde8c2b8ab`,
+  `/private/tmp/loopex-m7-t03-cli-floor.log`
+  `320934c1fe44f9f7624f255ecd974ae4956c1a8a95f9fc295b1b4e3633718c32`.
+  Original T01–T19 count becomes 52 done / 121 todo / 6 retired. Separate
+  helper-adapter authority and the pre-1.0 legacy instruction fallback cleanup
+  remain open.
+
 - Done: keep the provider-launcher interrupted-wait OS fault and terminal-Port
   observation concurrent under the original captured 2,100-ms cutoff. The
   previous sequential five-signal injector spent the same window doing `ps`,
@@ -6995,7 +7012,7 @@ or check was relaxed.
 - [x] Enforce the configured system ceiling and complete serialized-request limit.
 - [x] Implement receipt revision 4, including continuation costs and source/configuration binding.
 - [-] Preserve old receipt decoding.
-- [ ] Test admitted, declined, changed and oversized instructions, long paths, restart and exact staged bytes.
+- [x] Test admitted, declined, changed and oversized instructions, long paths, restart and exact staged bytes.
 - [ ] Prove instructions cannot widen policy or helper authority.
 
 ### Added implementation subtasks
@@ -7005,6 +7022,8 @@ or check was relaxed.
 - [x] Implement reference-host default/explicit/role capture, bounded regular-file reads and exact JSON environment byte/digest vectors; prove captured facts and immutable schemas in live chat staging. Public command startup and role-helper joins remain pending.
 
 - [x] Prove through live v3 owners and replay that exact host/role instruction sections cannot override a denying policy or enable unselected write/task calls; retain a successful admitted read as a positive control. Actual helper-adapter authority and nesting proof remain open.
+
+- [ ] Retire the v2-only session instruction fallback after current-format genesis migration, while retaining the reference host's authored default capture.
 
 ## T04 — Implement configuration, genesis and provider routing
 
