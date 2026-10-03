@@ -325,6 +325,60 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: standalone compact now measures its exact whole-session canonical
+  context and selects all eligible terminal units through the shared hard-limit
+  preflight. The transient seven-member Store sizing view binds the accepted
+  command, derived episode and current configuration to the actual request,
+  receipt and lineage projection; it has no invented run/turn/operation identity
+  and is rejected by journal recovery. Its byte cost is the exact deterministic
+  ETF fixed point. Numeric refusals retain the existing closed v2 schema and
+  precedence; structurally inadmissible candidates keep unresolved byte cost
+  zero rather than inventing a size. No thinking headroom, continuation or
+  fresh optional intake enters this standalone probe. Tail selection preserves
+  the prior checkpoint, releases fitting terminal history for explicit origin,
+  distinguishes hard overflow from rendering-only repair, and pins the last
+  original offending assistant source. Whole-tail and minimum-tail interruption
+  checks precede any selection result. Source records, usage, clocks and episodes
+  remain unchanged; this is preflight, not live capture or execution.
+  The final seven-file selection passes 174 cases on the current pair in
+  8.7 seconds and on the floor pair in 8.6 seconds. Retained complete outputs:
+  `/private/tmp/loopex-m7-standalone-preflight-current-v5.log`, SHA-256
+  `4508cacba56c080d4ed26d3409dec9bf9f3c6300ee9cc5b14dea2c6d26e0b244`;
+  `/private/tmp/loopex-m7-standalone-preflight-floor-v3.log`, SHA-256
+  `4d35f4c18cb107eac6c5aca49f1348023b2116898319cdc52158acb5f3763580`.
+  The complete current Core suite passes 1,133 tests with eight existing
+  exclusions in 213.2 seconds, complete output
+  `/private/tmp/loopex-m7-standalone-preflight-core-current.log`, SHA-256
+  `2f80f992b3314be97328a684c72a733914aa862398e4f913801f00b8ccd67864`. Warning-free compilation, formatting,
+  bootstrap/status, documentation ordering and dependency/version gates pass,
+  complete output `/private/tmp/loopex-m7-standalone-preflight-static.log`, SHA-256
+  `bfaa3e3722037de06da9b856b3e0a3c786be5336678b3ab8d80361411546ab87`.
+  These focused results do not replace the exact-candidate fast check or closure
+  matrix. Earlier development outputs remain separately retained below.
+  Original T01–T19 counts stay 54 done / 119 todo / 6 retired. This closes one
+  added T07 preflight subtask, making added counts 200 done / 8 todo and T07
+  added 33 done / 0 todo. Both maintainer decisions remain pending. Durable
+  standalone capture, source work, dispatch/spending, completion/snapshot and
+  cleanup remain open; no original complete-workflow item closes.
+
+  | Development output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-preflight-current-v1.log` | Failed four new fixture assumptions; 74/78 passed | `52c77e17ab7db78c117f6e15817bd8f81d22b5c7e1ad700a07b523790d1cffc9` |
+  | `/private/tmp/loopex-m7-standalone-preflight-current-v2.log` | Corrected focused probe selection; 78 passed, 3.2 seconds | `e36fafc9deee65099146534cddbe588e30f539c6daa5ccdde8aabb34b1569d6a` |
+  | `/private/tmp/loopex-m7-standalone-preflight-current-v3.log` | Expanded probe selection; 139 passed, 8.9 seconds | `1691f80606303522da354044cf990add2b3f7c372293f3aae2438130e894133e` |
+  | `/private/tmp/loopex-m7-standalone-preflight-floor-v1.log` | Same probe selection; 139 passed, 8.5 seconds | `0a0d82c65333e9d777ee98ac8055fb43c0773ae373f5ad8d0f0cf654818214f0` |
+  | `/private/tmp/loopex-m7-standalone-preflight-current-v4.log` | Failed two new source-key expectations; 172/174 passed | `8ba30c8ae9e33c4d2a83a7ef9e0595819e462fdd701de61e5bc83e95e380aee5` |
+  | `/private/tmp/loopex-m7-standalone-preflight-floor-v2.log` | Same two expectation failures; 172/174 passed | `9768165c4bf70437b64295af8e8ee144180e9f0aacbe378d0dd4679717a270c0` |
+
+  The first fixtures underestimated the byte-overflow input, used invalid
+  system/input ceiling combinations, and crossed the Model message ceiling
+  before the intended Store-cardinality boundary. They now exercise actual
+  oversized bytes, valid configuration and 1,024 messages plus a required tool
+  descriptor yielding 1,025 receipt blocks. Later source expectations now name
+  the existing `turn` member rather than `turn_number`. Production bounds and
+  guarantees were unchanged by those fixture repairs. Failed outputs remain
+  failed, separate from the final verification.
+
 - Done: standalone compaction can read the whole committed session through the
   existing lineage, unit-selection and projection paths using a transient
   `:session` scope. No new run, prompt or source identity is created. Selection
@@ -7435,6 +7489,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Measure standalone canonical context with the exact shared Store fixed point and hard-limit precedence, select explicit terminal-unit release with retained checkpoints, and pin the last original rendering offender; prove current/floor numeric, structural, cancellation, provenance and empty-history cases. Durable capture and live execution remain open.
 
 - [x] Admit and replay the standalone compact command without a clock, prompt or run; retain closed explicit bounds and exact episode identity, duplicate-first mutation fences and abort binding, traverse bounded private history, and prove all three live Store uncertainty phases plus paused owner succession on both toolchains. Standalone episode capture, execution, completion, snapshot and cleanup integration remain open.
 

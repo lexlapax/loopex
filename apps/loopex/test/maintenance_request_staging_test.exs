@@ -645,6 +645,39 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
 
     assert candidate.receipt["blocks"] |> Enum.at(1) |> Map.fetch!("source_reference") ==
              elem(hd(entries), 0)
+
+    assert {:ok, probe} = SessionState.preflight_standalone_context(state, 62_000, fn -> :ok end)
+    assert probe.failure == nil
+    assert probe.rendering == :ok
+    assert probe.request == candidate.request
+
+    assert probe.record["context_receipt"]["record_byte_cost"] ==
+             byte_size(:erlang.term_to_binary(probe.record, [:deterministic]))
+
+    assert {:ok, minimum} =
+             SessionState.preflight_standalone_context(state, 62_000, fn -> :ok end, %{
+               elements: [],
+               checkpoint_entries: [hd(entries)]
+             })
+
+    assert minimum.request.messages == [hd(probe.request.messages), elem(hd(entries), 1)]
+
+    assert minimum.receipt["blocks"] |> Enum.at(1) |> Map.fetch!("source_reference") ==
+             elem(hd(entries), 0)
+
+    assert minimum.receipt["record_byte_cost"] < probe.receipt["record_byte_cost"]
+
+    assert {:ok, plan} =
+             SessionState.preflight_standalone_compaction(state, 62_000, fn -> :ok end)
+
+    assert plan.trigger == "explicit"
+    assert plan.eligible_unit_count == 2
+    assert plan.retained_tail == []
+    assert plan.tail_tokens == 0
+    assert plan.before.request == probe.request
+    assert plan.before.receipt == probe.receipt
+    assert state.active_checkpoint == checkpoint_id
+    assert state.conversation_record_sources == originals
   end
 
   test "checkpoint and event commit together while exact raw facts remain readable" do

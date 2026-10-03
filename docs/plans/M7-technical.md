@@ -1772,6 +1772,25 @@ existing exclusions in 215.2 seconds. The checklist retains all outputs and
 digests, including the corrected new receipt assertion's failed first run.
 This does not establish live standalone execution or completion.
 
+Standalone preflight now measures the exact deterministic Store fixed point of
+its transient command-bound request/receipt/projection view. This seven-member
+view is outside the journal grammar and has no run/turn/operation identity;
+ordinary staging continues to use its existing durable record and the same
+hard-limit preflight. Standalone probes apply hard ceilings without thinking
+headroom or continuation. Explicit selection releases every eligible terminal
+unit even when the current model fits, retains the prior checkpoint, and pins
+the last original offending assistant source for rendering-only repair.
+Numeric and structural refusal precedence, interruption during whole and
+minimum-tail work, empty history and unchanged raw provenance pass the final
+174-case selection on both supported pairs. The checklist retains complete
+outputs, digests and failed development assertions separately. The same source
+passes the complete current Core suite, 1,133 tests with eight existing
+exclusions in 213.2 seconds, and the static compilation/format/status/documentation/
+dependency/version gates. These are development checks, not the complete
+exact-candidate fast check or closure matrix. Episode capture,
+dispatch/spending, result/snapshot and cleanup remain open; this measurement
+and selection does not claim any completed standalone workflow.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

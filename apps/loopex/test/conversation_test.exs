@@ -396,6 +396,37 @@ defmodule Loopex.ConversationTest do
              {:ok, false}
   end
 
+  test "rendering repair pins the last original offender and exposes earlier runs after completion" do
+    elements = [
+      user("first"),
+      assistant(1, [call("a")]),
+      result(1, "a"),
+      %{user("second") | run_id: "r2", command_id: "c2"},
+      %{assistant(1, [call("b")]) | run_id: "r2"},
+      %{result(1, "b") | run_id: "r2"},
+      %{assistant(2, [], "") | run_id: "r2"},
+      %{user("third") | run_id: "r3", command_id: "c3"},
+      %{assistant(1, [], "later completion") | run_id: "r3"}
+    ]
+
+    first = %{"kind" => "session_assistant", "run_id" => "r1", "turn" => 1}
+    last = %{"kind" => "session_assistant", "run_id" => "r2", "turn" => 1}
+    assert Conversation.last_terminal_tool_source(elements, ["r1", "r2", "r3"]) == {:ok, last}
+    assert Conversation.last_terminal_tool_source(elements, ["r1", "r3"]) == {:ok, first}
+    assert Conversation.last_terminal_tool_source(elements, ["r3"]) == {:ok, nil}
+
+    completed = elements ++ [%{assistant(3, [], "second completed") | run_id: "r2"}]
+    assert Conversation.last_terminal_tool_source(completed, ["r1", "r2", "r3"]) == {:ok, first}
+
+    assert Conversation.last_terminal_tool_source(
+             completed ++ [assistant(2, [], "first completed")],
+             ["r1", "r2", "r3"]
+           ) == {:ok, nil}
+
+    assert Conversation.last_terminal_tool_source([user("go"), assistant(1, [call("a")])], ["r1"]) ==
+             {:error, :context_projection_invalid}
+  end
+
   test "terminal history refuses incomplete or duplicated lineage" do
     unfinished = [user("go"), assistant(1, [call("a")])]
 

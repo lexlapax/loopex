@@ -367,29 +367,52 @@ defmodule Loopex.Conversation do
   @spec terminal_tool_history([element()], [binary()]) ::
           {:ok, boolean()} | {:error, :context_projection_invalid}
   def terminal_tool_history(elements, terminal_runs) when is_list(terminal_runs) do
+    with {:ok, source} <- last_terminal_tool_source(elements, terminal_runs),
+         do: {:ok, not is_nil(source)}
+  end
+
+  def terminal_tool_history(_, _), do: {:error, :context_projection_invalid}
+
+  # Concept: rendering repair identifies the last terminal tool group to cover.
+  # Technical depth: the original assistant source pins its whole compaction
+  # unit. Empty no-call messages do not complete an earlier tool turn, and a
+  # completion from another run never changes that run's rendering requirement.
+  @doc false
+  @spec last_terminal_tool_source([element()], [binary()]) ::
+          {:ok, map() | nil} | {:error, :context_projection_invalid}
+  def last_terminal_tool_source(elements, terminal_runs) when is_list(terminal_runs) do
     with {:ok, entries} <- lineage_entries(elements) do
+      terminal = MapSet.new(terminal_runs)
+
       last_assistants =
-        Enum.reduce(entries, %{}, fn
-          {%{"kind" => "session_assistant", "run_id" => run}, message}, acc ->
+        entries
+        |> Enum.with_index()
+        |> Enum.reduce(%{}, fn
+          {{%{"kind" => "session_assistant", "run_id" => run} = source, message}, index}, acc ->
             if message["content"] != "" or message["tool_calls"] != [],
-              do: Map.put(acc, run, message),
+              do: Map.put(acc, run, {index, source, message}),
               else: acc
 
           _entry, acc ->
             acc
         end)
 
-      {:ok,
-       Enum.any?(terminal_runs, fn run ->
-         case Map.get(last_assistants, run) do
-           nil -> false
-           message -> message["tool_calls"] != []
-         end
-       end)}
+      source =
+        last_assistants
+        |> Enum.filter(fn {run, {_, _, message}} ->
+          MapSet.member?(terminal, run) and message["tool_calls"] != []
+        end)
+        |> Enum.max_by(fn {_, {index, _, _}} -> index end, fn -> nil end)
+        |> case do
+          nil -> nil
+          {_, {_, source, _}} -> source
+        end
+
+      {:ok, source}
     end
   end
 
-  def terminal_tool_history(_, _), do: {:error, :context_projection_invalid}
+  def last_terminal_tool_source(_, _), do: {:error, :context_projection_invalid}
 
   @doc """
   ## Concept

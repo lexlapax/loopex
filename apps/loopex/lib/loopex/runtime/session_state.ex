@@ -1768,6 +1768,171 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: standalone compact measures its current canonical session directly.
+  # Technical depth: this transient Store sizing view binds the admitted command,
+  # derived episode and current configuration to the exact request, receipt and
+  # projection. Its seven members contain no run/turn/operation identity. The
+  # shared fixed point and hard-limit order apply; thinking headroom is disabled.
+  # Local tail/substitution probes may replace only elements/checkpoint entries.
+  # No clock is read, artifact fetched, record committed or attempt opened.
+  @doc false
+  @spec preflight_standalone_context(t(), integer(), function(), map()) ::
+          {:ok, map()} | {:error, term()}
+  def preflight_standalone_context(state, deadline, check, replacement \\ %{})
+
+  def preflight_standalone_context(%__MODULE__{} = state, deadline, check, replacement)
+      when is_integer(deadline) and deadline in 1..@uint64_max and is_function(check, 0) and
+             is_map(replacement) do
+    with %{"abort_command_id" => nil} = pending <- state.pending_compact,
+         true <- Enum.all?(Map.keys(replacement), &(&1 in [:elements, :checkpoint_entries])),
+         :ok <- check.(),
+         elements = Map.get(replacement, :elements, lineage_elements(state, :session)),
+         true <- is_list(elements),
+         staging =
+           replacement
+           |> Map.merge(%{
+             scope: :session,
+             elements: elements,
+             steer: nil,
+             deadline: deadline,
+             excerpt_allowance: 0
+           }),
+         project = %{
+           "class" => "project_resource",
+           "receipt_revision" => 2,
+           "disposition" => "not_evaluated_required_failure",
+           "detail" => nil
+         },
+         {:ok, candidate} <- reference_model_candidate(state, staging, [], project, nil),
+         :ok <- check.(),
+         record = %{
+           :kind => "compact_context_probe_v1",
+           "command_id" => pending["command_id"],
+           "episode_id" => pending["episode_id"],
+           "configuration_version" => state.configuration["configuration_version"],
+           "request" => encode_plain(candidate.request),
+           "context_receipt" => candidate.receipt,
+           "lineage_projection" => candidate.projection
+         },
+         {:ok, fixed, admission} <-
+           preflight_context_candidate(record, state.configuration, false),
+         :ok <- check.(),
+         rendering =
+           SessionConfiguration.preflight_history(
+             state.configuration,
+             uncompacted_elements(state, elements),
+             state.run_order
+           ),
+         :ok <- check.() do
+      failure =
+        case admission do
+          :ok ->
+            nil
+
+          {:refused, measurement} ->
+            Map.take(measurement, ~w(dimension observed limit))
+            |> Map.merge(%{
+              "version" => 2,
+              "category" => "context_budget_exceeded",
+              "retryable" => false,
+              "measurement_scope" => "ordinary",
+              "hard_limit" => measurement["limit"]
+            })
+        end
+
+      {:ok,
+       Map.merge(candidate, %{
+         receipt: fixed["context_receipt"],
+         record: fixed,
+         failure: failure,
+         rendering: rendering
+       })}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :context_projection_invalid}
+    end
+  end
+
+  def preflight_standalone_context(_, _, _, _), do: {:error, :context_projection_invalid}
+
+  # Concept: explicit compaction releases terminal history before summarizer work.
+  # Technical depth: hard failure wins over rendering-only repair; an already
+  # fitting history still releases every eligible terminal unit. The protected
+  # minimum keeps the prior checkpoint and must fit/render before host settings
+  # can justify a dispatch. Rendering repair pins the last original tool source.
+  # This measured plan is transient; episode admission retains its capture.
+  @doc false
+  @spec preflight_standalone_compaction(t(), integer(), function()) ::
+          {:ok, map()} | {:refused, term()} | {:error, term()}
+  def preflight_standalone_compaction(state, deadline, check) do
+    with {:ok, before} <- preflight_standalone_context(state, deadline, check),
+         {:ok, units} <- compaction_units(state, :session),
+         {:ok, choice} <-
+           Conversation.compaction_tail(units, :explicit, fn tail ->
+             elements = Enum.flat_map(tail, & &1.elements)
+
+             with {:ok, probe} <-
+                    preflight_standalone_context(state, deadline, check, %{elements: elements}) do
+               case {probe.failure, probe.rendering} do
+                 {nil, :ok} ->
+                   tokens =
+                     probe.receipt["blocks"]
+                     |> Enum.filter(
+                       &(&1["provenance_class"] == "session" and
+                           &1["source_reference"]["kind"] != "compaction_summary")
+                     )
+                     |> Enum.reduce(0, &(&1["token_cost"] + &2))
+
+                   {:ok, tokens}
+
+                 {%{} = failure, _} ->
+                   {:refused, failure}
+
+                 {nil, {:error, :canonical_history_rendering_unsupported}} ->
+                   {:refused, :canonical_history_rendering_unsupported}
+
+                 {nil, {:error, _} = error} ->
+                   error
+               end
+             end
+           end),
+         {:ok, last_tool_source} <-
+           Conversation.last_terminal_tool_source(
+             uncompacted_elements(state, lineage_elements(state, :session)),
+             state.run_order
+           ),
+         :ok <- check.() do
+      trigger =
+        cond do
+          is_map(before.failure) ->
+            "ordinary_limit"
+
+          before.rendering == {:error, :canonical_history_rendering_unsupported} ->
+            "canonical_rendering"
+
+          before.rendering == :ok ->
+            "explicit"
+
+          true ->
+            nil
+        end
+
+      if trigger do
+        {:ok,
+         Map.merge(choice, %{
+           origin: "explicit",
+           trigger: trigger,
+           targets: nil,
+           last_offending_source:
+             if(trigger == "canonical_rendering", do: last_tool_source, else: nil),
+           before: before
+         })}
+      else
+        {:error, :context_projection_invalid}
+      end
+    end
+  end
+
   # Concept: choose whole retained units against the ordinary request's real cost.
   # Technical depth: q=0 excludes removable excerpts and fresh optional bodies;
   # both legal empty resource headers must fit. Frozen context stays exact.
@@ -3125,6 +3290,24 @@ defmodule Loopex.Runtime.SessionState do
 
   defp admit_context_candidate(%{"context_receipt" => receipt} = record, state)
        when is_map(receipt) do
+    case preflight_context_candidate(
+           record,
+           run_configuration(state, record["run_id"]),
+           not is_nil(request_headroom_targets(state, record["run_id"]))
+         ) do
+      {:ok, fixed, :ok} -> {:ok, fixed}
+      {:ok, _fixed, {:refused, _} = refusal} -> refusal
+      {:error, _} = error -> error
+    end
+  end
+
+  defp admit_context_candidate(record, _state), do: resolve_record_byte_cost(record)
+
+  defp preflight_context_candidate(
+         %{"context_receipt" => receipt} = record,
+         configuration,
+         reserve
+       ) do
     observations = %{
       system_class_tokens: get_in(receipt, ["totals", "by_provenance", "system", "token_cost"]),
       provider_estimated_tokens: Map.get(receipt, "provider_estimated_tokens"),
@@ -3132,11 +3315,11 @@ defmodule Loopex.Runtime.SessionState do
       context_record_byte_ceiling: Store.max_item_bytes(),
       context_record_depth_limit: Store.max_item_depth(),
       context_record_cardinality_limit: Store.max_item_cardinality(),
-      reserve_thinking_exchange: not is_nil(request_headroom_targets(state, record["run_id"]))
+      reserve_thinking_exchange: reserve
     }
 
     observations =
-      case run_configuration(state, record["run_id"]) do
+      case configuration do
         nil ->
           observations
 
@@ -3156,13 +3339,14 @@ defmodule Loopex.Runtime.SessionState do
     # forbids manufacturing a dimension, terminal, or dispatch from it;
     # continuing with an unconverged record would stage a request whose receipt
     # states a byte cost of zero.
-    with {:ok, candidate} <- record_byte_cost_candidate(record),
-         :ok <- ContextAdmission.preflight_required_candidate(candidate, observations) do
-      {:ok, candidate}
+    with {:ok, candidate} <- record_byte_cost_candidate(record) do
+      case ContextAdmission.preflight_required_candidate(candidate, observations) do
+        :ok -> {:ok, candidate, :ok}
+        {:refused, _} = refusal -> {:ok, candidate, refusal}
+        {:error, _} = error -> error
+      end
     end
   end
-
-  defp admit_context_candidate(record, _state), do: resolve_record_byte_cost(record)
 
   # Concept: only a new ordinary exchange reserves continuation capacity.
   # Technical depth: an open exchange's immutable prefix uses its hard ceilings.

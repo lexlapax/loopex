@@ -315,6 +315,48 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
     candidate = maintenance_candidate(replayed)
     assert candidate["covered_range"]["source_count"] == 5
     assert candidate["covered_range"]["record_count"] == 4
+
+    {:ok, compact} =
+      SessionState.propose(replayed, %{
+        type: :compact,
+        command_id: "repair-rendering",
+        bounds: %{max_attempts: 4, deadline_ms: 60_000, token_budget: 32_768}
+      })
+
+    pending = commit_local(compact)
+
+    assert {:ok, probe} =
+             SessionState.preflight_standalone_context(pending, 61_000, fn -> :ok end)
+
+    assert probe.failure == nil
+    assert probe.rendering == {:error, :canonical_history_rendering_unsupported}
+
+    assert {:ok, minimum} =
+             SessionState.preflight_standalone_context(pending, 61_000, fn -> :ok end, %{
+               elements: []
+             })
+
+    assert minimum.failure == nil
+    assert minimum.rendering == :ok
+
+    assert {:ok, plan} =
+             SessionState.preflight_standalone_compaction(pending, 61_000, fn -> :ok end)
+
+    assert plan.trigger == "canonical_rendering"
+    assert plan.origin == "explicit"
+    assert plan.targets == nil
+
+    assert plan.last_offending_source == %{
+             "kind" => "session_assistant",
+             "run_id" => run,
+             "turn" => 1
+           }
+
+    assert plan.eligible_unit_count == 1
+    assert plan.retained_tail == []
+    assert plan.tail_tokens == 0
+    assert pending.conversation == replayed.conversation
+    assert pending.conversation_record_sources == replayed.conversation_record_sources
   end
 
   test "question answers bind the admitted response rather than a fabricated tool result" do
