@@ -107,6 +107,15 @@ did not resolve them. No paid provider calls were made during this check.
 
 
 
+- Running: the full fast check started once on exact clean combined checkpoint
+  `10c3fd5def1c58491f0d44e59fd51c6f06d8e1c4` in the detached verification
+  worktree `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Complete
+  streamed output is `/private/tmp/loopex-m7-10c3fd5d-fast-check.log`; its header
+  binds the SHA and its eventual footer records terminal exit and measured
+  duration. No result or digest is claimed while it runs. Collect its terminal
+  handle before hashing, retain any failure, and do not repeat the same bytes.
+  Later primary-checkout edits are outside this exact integration proof.
+
 - Done: retire provider settlement v1/v2 decoders, their legacy ambiguity-only
   accounting branches and session cutover bookkeeping. The current v3 decoder
   directly checks all retained reply members and complete accounting evidence.
