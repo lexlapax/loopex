@@ -88,22 +88,15 @@ defmodule Loopex.ModelQuestionRecordsTest do
         expiry.events
         |> Enum.with_index(state.event_sequence + 1)
         |> Enum.map(fn {event, sequence} ->
-          event =
-            if event.kind == "tool.finished",
-              do: %{event | event_id: "event-to_132fc47d65b9d9567395417f292355"},
-              else: event
-
           Map.put(event, :event_sequence, sequence)
         end)
 
-      assert {:ok, historical_expired} =
+      assert {:error, _} =
                SessionState.recover(
                  session,
                  records ++ [historical_expiry],
                  events ++ expiry_events
                )
-
-      assert historical_expired.open_interaction == nil
 
       assert pending == %{
                "producer" => "model_tool",
@@ -212,15 +205,8 @@ defmodule Loopex.ModelQuestionRecordsTest do
       historical_events =
         events
         |> Enum.take_while(&(&1.event_sequence <= settled.event_sequence))
-        |> Enum.map(fn
-          %{kind: "tool.finished"} = event ->
-            %{event | event_id: "event-to_132fc47d65b9d9567395417f292355"}
 
-          event ->
-            event
-        end)
-
-      assert {:ok, _historical_response} =
+      assert {:error, _} =
                SessionState.recover(session, historical_rows, historical_events)
 
       for {field, value} <- [

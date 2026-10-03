@@ -4773,7 +4773,6 @@ defmodule Loopex.Runtime.SessionState do
               "model_question_abort_admitted_v2",
               "prompt_admitted_v2",
               "prompt_admitted_v3",
-              "model_question_response_admitted_v1",
               "model_question_response_admitted_v2",
               "session_configuration_admitted_v1",
               "command_admission_refused_v1"
@@ -4839,7 +4838,6 @@ defmodule Loopex.Runtime.SessionState do
               "interaction_answer_admitted_v1",
               "interaction_resolved_v1",
               "model_question_requested_v1",
-              "model_question_settled_v1",
               "model_question_settled_v2"
             ] do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
@@ -4941,9 +4939,8 @@ defmodule Loopex.Runtime.SessionState do
         "run_id"
       ]) and record["command_type"] == "abort" and record["admission"] == "accepted"
 
-  defp admissible_command_kind?(kind, record)
-       when kind in ["model_question_response_admitted_v1", "model_question_response_admitted_v2"],
-       do: record["command_type"] == "interaction_answer" and record["admission"] == "accepted"
+  defp admissible_command_kind?("model_question_response_admitted_v2", record),
+    do: record["command_type"] == "interaction_answer" and record["admission"] == "accepted"
 
   defp admissible_command_kind?("session_configuration_admitted_v1", record),
     do: record["command_type"] == "configure"
@@ -5123,7 +5120,7 @@ defmodule Loopex.Runtime.SessionState do
          "accepted",
          command_id
        )
-       when kind in ["model_question_response_admitted_v1", "model_question_response_admitted_v2"] do
+       when kind == "model_question_response_admitted_v2" do
     with true <- map_size(record) == 9 and record["disposition"] in ["answered", "declined"],
          :ok <- model_question_command_binding(record),
          {:ok, next, events} <- settle_model_question(state, record) do
@@ -6952,8 +6949,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{kind: kind} = record)
-       when kind in ["model_question_settled_v1", "model_question_settled_v2"] do
+  defp apply_internal_record(state, %{kind: "model_question_settled_v2"} = record) do
     if map_size(record) == 5 and record["disposition"] == "expired" and is_nil(record["answer"]),
       do: settle_model_question(state, record),
       else: {:error, :invalid_model_question_transition}

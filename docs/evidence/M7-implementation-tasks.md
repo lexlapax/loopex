@@ -325,6 +325,22 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: remove the retired `model_question_response_admitted_v1` and
+  `model_question_settled_v1` replay/effect-index readers. Current v2 answer,
+  expiry and cancellation paths remain; the historical-record fixtures now
+  assert refusal against otherwise current histories and events. Four question,
+  interaction, configured-session and compaction-source files pass 65 tests on
+  each supported pair. Complete outputs:
+  `/private/tmp/loopex-m7-question-current-only-current.log`, SHA-256
+  `ab059202b66b1e549a28b60ae4a9a272037eb7c1e7887f6a60994a7d22c89717`;
+  `/private/tmp/loopex-m7-question-current-only-floor.log`, SHA-256
+  `2e205c81240ae13bd6ada52caf196d0b6d50e815bc75d4008bab8fc15f08062c`.
+  This closes one added T09 current-contract cleanup subtask. T01–T19
+  originals stay 51 done / 122 todo / 6 retired; added subtasks become
+  189 done / 9 todo. Including T00: originals 51 / 128 / 7 and added
+  193 / 10. Pending/response decoder vectors, public question event schemas
+  and complete public answer-path integration remain open.
+
 - Done: turn the captured summarizer system-limit refusal into the accepted
   measured v2 `maintenance` scope before source traversal. Its single exact
   system descriptor supplies the count, estimate and ordered digest; replay
@@ -7180,6 +7196,8 @@ or check was relaxed.
 - [x] Prove recovery retains the actual pending question identity.
 
 ### Added implementation subtasks
+
+- [x] Remove pre-1.0 model-question response/settlement v1 replay and effect-index readers, reject those exact retired kinds, and retain current v2 answer/expiry/cancellation recovery on both supported toolchains.
 
 - [x] Fence recovered answered-policy reevaluation with the existing prepared-run pause; prove matching and changed policy facts stay unchanged with no in-flight worker before activation, then positively observe reevaluation and its exact worker join after activation on both toolchains.
 

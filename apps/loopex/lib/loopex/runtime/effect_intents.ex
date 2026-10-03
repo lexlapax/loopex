@@ -82,11 +82,8 @@ defmodule Loopex.Runtime.EffectIntents do
     "model_question_requested_v1" =>
       {~w(producer interaction_id run_id turn tool_call_id argument_digest interaction_request interaction_request_digest created_at expires_at),
        []},
-    "model_question_response_admitted_v1" =>
-      {@command_keys ++ ~w(interaction_id answer disposition responded_at), []},
     "model_question_response_admitted_v2" =>
       {@command_keys ++ ~w(interaction_id answer disposition responded_at), []},
-    "model_question_settled_v1" => {~w(interaction_id disposition answer settled_at), []},
     "model_question_settled_v2" => {~w(interaction_id disposition answer settled_at), []}
   }
 
