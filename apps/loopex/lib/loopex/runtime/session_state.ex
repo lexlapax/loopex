@@ -1624,6 +1624,43 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: maintenance spending can end its parent before a checkpoint is admitted.
+  # Technical depth: derive the observed call units and token charge from the
+  # committed episode ledger. The existing episode/run terminal transaction
+  # validates these observations again and retains any useful partial checkpoint.
+  @doc false
+  @spec propose_maintenance_parent_bound(t(), binary()) :: {:ok, proposal()} | {:error, term()}
+  def propose_maintenance_parent_bound(state, run) do
+    {bounds, charged} = accounting(state, run)
+    calls = maintenance_parent_call_units(state, run)
+
+    detail =
+      cond do
+        charged.tokens >= bounds.token_budget ->
+          %{
+            bound: "token_budget",
+            observed: charged.tokens,
+            declared_limit: bounds.token_budget,
+            accounting_source: charged.source && Atom.to_string(charged.source)
+          }
+
+        calls >= bounds.max_turns ->
+          %{
+            bound: "max_turns",
+            observed: calls,
+            declared_limit: bounds.max_turns,
+            accounting_source: charged.source && Atom.to_string(charged.source)
+          }
+
+        true ->
+          nil
+      end
+
+    if detail,
+      do: propose_run_terminal(state, run, "bound_reached", detail),
+      else: {:error, :maintenance_bounds_not_reached}
+  end
+
   defp maintenance_checkpoint_record(state, candidate, now) do
     episode = state.maintenance_episodes[state.active_maintenance]
     configuration = episode["maintenance_configuration"]
@@ -6839,6 +6876,21 @@ defmodule Loopex.Runtime.SessionState do
   defp terminal_admitted?(%{aborting: %{run_id: run_id}}, run_id, _stage, outcome, _bound)
        when outcome in ["cancelled", "outcome_unknown"],
        do: true
+
+  # Concept: a summary can spend a parent bound before its first ordinary turn.
+  # Technical depth: only the consecutive run-owned episode-terminal marker
+  # admits this ending from model-pending or turn-settled. The completion reducer
+  # then authenticates exact parent limits, call units, token charge and source.
+  defp terminal_admitted?(
+         %{maintenance_terminal: %{episode_id: id}} = state,
+         run,
+         stage,
+         "bound_reached",
+         bound
+       )
+       when stage in ["model_pending", "turn_settled"] and bound in ["max_turns", "token_budget"] do
+    id == state.active_maintenance and state.maintenance_episodes[id]["run_id"] == run
+  end
 
   defp terminal_admitted?(_state, _run_id, "turn_settled", _outcome, _bound), do: true
 

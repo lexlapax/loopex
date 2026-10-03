@@ -1650,8 +1650,12 @@ while partial progress remains active and survives cancellation. The private
 history reader traverses checkpoint and completion without activation. Live
 successors finish inherited lost attempts and invalid/incomplete summaries
 without redispatch, including all three Store uncertainty phases and exact owner
-joins. Automatic triggering, new summary dispatch/cleanup, live checkpoint
-uncertainty, later prefixes and standalone compact remain open. The full fast
+joins. Live successors also finish pending/committed first checkpoints through
+all three uncertainty phases, with no ordinary dispatch while fenced, one
+summary charge and one captured ordinary continuation. Abort/deadline and spent
+parent bounds win, retaining previously committed checkpoints. Automatic
+triggering, new summary dispatch/cleanup, measured non-progress endings, later
+prefixes and standalone compact remain open. The full fast
 check passes on d0dd8ec6 through shared ordinary staging/tail measurement; both
 supported pairs pass the later focused checkpoint reducer/reader selection.
 This is not a complete T07 workflow proof.

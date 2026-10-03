@@ -325,6 +325,46 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: join the live successor to settled first-checkpoint commitment and
+  fitted episode completion through the existing owner fence and uncertainty
+  resolver. Prepared resume remains paused until activation. Six Store-fault
+  cases cover pending/committed checkpoints across all three uncertainty phases;
+  an unresolved owner is joined before succession, and no ordinary request is
+  dispatched while it remains fenced. Recovery retains one summary attempt,
+  settlement, checkpoint and event, then dispatches one ordinary request using
+  captured configuration and exact summary provenance. Usage charges 56 summary
+  tokens once and 2 ordinary tokens once. Abort, deadline and spent token/turn
+  bounds prevent new checkpoints or dispatch; previously committed checkpoints
+  survive cancellation and expiry. Exact coordinator/control joins finish each
+  live case. The private reader now admits the existing run-owned parent turn
+  result, while standalone compact keeps its separate attempt-bound vocabulary.
+  Later-prefix continuation, measured non-progress endings, automatic triggering,
+  new summary dispatch and standalone compact remain open. This extends the
+  completed T07 checkpoint subtask without changing either tally.
+
+  Final sixteen-file selection: 238 tests on each supported pair. Current:
+  10.7 measured runner seconds,
+  `/private/tmp/loopex-m7-checkpoint-recovery-current-dev5.log`, SHA-256
+  `4824ef812b786e006b2a7cd24c42b1248b1c1168bf83f9d3a1d3173211914e3b`.
+  Floor: 10.3 measured runner seconds,
+  `/private/tmp/loopex-m7-checkpoint-recovery-floor-v2.log`, SHA-256
+  `aae77faa465cb7b94afb710716df8b702739c4eb1316f13b7bf7b7af49898b82`.
+  Failed development output remains at
+  `/private/tmp/loopex-m7-checkpoint-recovery-current-dev1.log`, SHA-256
+  `2267a5ae7556b702d32b40a7786b438e0bd91eb5f4f15259d2d5b55ff39b619d`.
+  It exposed the missing authenticated parent-bound terminal gate and a wrong
+  fixture decoder arity. Floor v1 passed its assertions but failed warnings as
+  errors: `/private/tmp/loopex-m7-checkpoint-recovery-floor-v1.log`, SHA-256
+  `7f7362870393e2ff540b493b65564b0cdfd16d73f66e2ddf0abe0dfb820b6baf`.
+  Generated-case expectations now evaluate at definition time and assert exact
+  retained checkpoint identities. No warning, timeout, validator, cleanup proof
+  or required check was suppressed or weakened.
+
+  Formatting, warning-free compilation, dependency direction, bootstrap/status,
+  documentation and diff checks passed in 23.7 measured seconds. Complete output:
+  `/private/tmp/loopex-m7-checkpoint-recovery-gates-v1.log`, SHA-256
+  `25bb9e70669048ae0b04357f6fe7327dbe034c9ddd47955ad6c356098da71845`.
+
 - Done: commit a validated first ordinary-limit checkpoint and its
   `context.compacted` event in one owner proposal. Replay recomputes original
   coverage, settled summary, metadata and exact progress before accepting it.
@@ -6633,7 +6673,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Commit and replay a useful first ordinary-limit checkpoint with its event, exact original coverage, settled summary provenance and unchanged raw facts; substitute only covered source identities, retain the unsummarized tail, release fitted completion without a parent terminal or duplicate charge, reject partial success and forged fields, and traverse checkpoint/completion in bounded private history on both supported toolchains. Live Store uncertainty, later prefixes and standalone compact remain open.
+- [x] Commit and replay a useful first ordinary-limit checkpoint with its event, exact original coverage, settled summary provenance and unchanged raw facts; substitute only covered source identities, retain the unsummarized tail, release fitted completion without a parent terminal or duplicate charge, reject partial success and forged fields, and traverse checkpoint/completion in bounded private history on both supported toolchains. Later prefixes and standalone compact remain open. Extend the live owner to finish pending/committed first checkpoints through all three uncertainty phases, retain once-only usage before one captured ordinary dispatch, and preserve checkpoint identity across abort/deadline while refusing spent parent bounds. Exact owner joins and bounded private coverage pass both supported pairs.
 
 - [x] Select a contiguous retained tail from validated complete units, releasing terminal units oldest-first, preserving protected and frozen units, releasing all eligible units for explicit origin, and growing only unreleased tails within the 2,048-token preference and whole-request fit callback. Prove irreducible refusal, rendering refusal, exact preference, mandatory oversized tail, interruption and fixed-input measurement for empty history on both toolchains. The owner now shares exact configured request/receipt construction with the q=0 ordinary-limit probe. Thinking targets, captured rendering offender, prior-checkpoint substitution and live automatic triggering remain open.
 

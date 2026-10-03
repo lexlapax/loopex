@@ -500,7 +500,8 @@ defmodule Loopex.Runtime.EffectIntents do
   defp neutral_values?(%{payload: %{kind: "maintenance_episode_terminal_v1"} = payload}) do
     identifier?(payload["episode_id"]) and
       (is_nil(payload["observed_at"]) or version?(payload["observed_at"])) and
-      match?({:ok, _}, CompactResult.encode_wire(payload["result"]))
+      (match?({:ok, _}, CompactResult.encode_wire(payload["result"])) or
+         parent_turn_bound_result?(payload["result"]))
   end
 
   defp neutral_values?(%{payload: %{kind: "context_admission_refused_v2"} = payload}) do
@@ -512,6 +513,35 @@ defmodule Loopex.Runtime.EffectIntents do
   end
 
   defp neutral_values?(_record), do: true
+
+  # Concept: a run-owned episode retains the parent's turn-bound vocabulary.
+  # Technical depth: standalone compact has max_attempts instead. This private
+  # reader validates the existing parent result without changing the standalone
+  # wire codec; full reducer replay authenticates the observed ledger and limit.
+  defp parent_turn_bound_result?(result) do
+    with true <- closed?(result, ~w(disposition checkpoint_id failure usage cleanup)),
+         true <- result["disposition"] == "failed",
+         true <- is_nil(result["checkpoint_id"]) or identifier?(result["checkpoint_id"]),
+         true <- result["cleanup"] == "confirmed",
+         failure = result["failure"],
+         true <-
+           closed?(
+             failure,
+             ~w(category retryable bound observed declared_limit accounting_source)
+           ),
+         true <- failure["category"] == "bound_reached" and failure["retryable"] == false,
+         true <- failure["bound"] == "max_turns",
+         true <- version?(failure["observed"]) and positive_version?(failure["declared_limit"]),
+         true <- failure["observed"] >= failure["declared_limit"],
+         true <- failure["accounting_source"] in [nil, "reported", "estimated"],
+         usage = result["usage"],
+         true <- closed?(usage, ~w(attempts reported_tokens estimated_tokens total_tokens)),
+         true <- Enum.all?(Map.values(usage), &version?/1) do
+      usage["total_tokens"] == usage["reported_tokens"] + usage["estimated_tokens"]
+    else
+      _ -> false
+    end
+  end
 
   defp valid_request?(payload) do
     encoded = payload["request"]

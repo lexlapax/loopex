@@ -3309,7 +3309,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
         settle_model_attempt(state, run_id, :owner_loss)
 
       match?(
-        %{"run_id" => ^run_id, "stage" => "checkpoint_pending"},
+        %{"run_id" => ^run_id, "stage" => stage}
+        when stage in ["checkpoint_pending", "checkpoint_committed"],
         Map.get(state.durable.maintenance_episodes, state.durable.active_maintenance)
       ) and
           map_size(state.in_flight) == 0 ->
@@ -3395,10 +3396,84 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # Abort is handled at the scheduling gate; elapsed deadline still wins.
         before_run_deadline(state, work, &finish_pending_summary_failure/2)
 
+      match?(%{"stage" => "checkpoint_pending", "summary" => _}, episode) ->
+        before_run_deadline(state, work, &finish_pending_checkpoint/2)
+
+      match?(%{"stage" => "checkpoint_committed"}, episode) ->
+        before_run_deadline(state, work, &finish_committed_checkpoint/2)
+
       true ->
         dispatch_stage(state, work)
     end
   end
+
+  # Concept: a settled summary survives its owner and is never summarized again.
+  # Technical depth: checkpoint and completion reuse the existing owner Store
+  # fence and uncertainty resolver. Schedule the next phase only after current
+  # ownership adopts the receipt; prepared recovery remains paused above this
+  # branch. Check the committed deadline throughout exact progress measurement.
+  defp finish_pending_checkpoint(state, work) do
+    now = System.system_time(:millisecond)
+
+    result =
+      SessionState.propose_maintenance_checkpoint(
+        state.durable,
+        now,
+        checkpoint_clock_check(state, work.run_id)
+      )
+
+    commit_checkpoint_phase(state, work, result)
+  end
+
+  defp finish_committed_checkpoint(state, work) do
+    now = System.system_time(:millisecond)
+
+    result =
+      SessionState.propose_maintenance_checkpoint_completion(
+        state.durable,
+        now,
+        checkpoint_clock_check(state, work.run_id)
+      )
+
+    commit_checkpoint_phase(state, work, result)
+  end
+
+  defp checkpoint_clock_check(state, run) do
+    deadline = committed_deadline(state, run)
+
+    fn ->
+      if System.system_time(:millisecond) < deadline,
+        do: :ok,
+        else: {:error, :run_deadline_reached}
+    end
+  end
+
+  defp commit_checkpoint_phase(state, _work, {:ok, proposal}) do
+    case commit_internal(state, proposal) do
+      {:ok, next} ->
+        send(self(), :advance_work)
+        {:noreply, next}
+
+      {:error, reason} ->
+        {:stop, {:maintenance_checkpoint_failed, reason}, state}
+    end
+  end
+
+  defp commit_checkpoint_phase(state, work, {:error, :run_deadline_reached}),
+    do: finish_at_deadline(state, work.run_id)
+
+  defp commit_checkpoint_phase(state, work, {:error, :maintenance_bounds_exhausted}) do
+    with {:ok, proposal} <-
+           SessionState.propose_maintenance_parent_bound(state.durable, work.run_id),
+         {:ok, next} <- commit_internal(state, proposal) do
+      {:noreply, %{next | adopted: MapSet.delete(next.adopted, work.run_id)}}
+    else
+      {:error, reason} -> {:stop, {:maintenance_checkpoint_failed, reason}, state}
+    end
+  end
+
+  defp commit_checkpoint_phase(state, _work, {:error, reason}),
+    do: {:stop, {:maintenance_checkpoint_failed, reason}, state}
 
   defp finish_pending_summary_failure(state, work) do
     cause =
