@@ -1,0 +1,2033 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "pending_interaction",
+  "cases": [
+    {
+      "name": "model-choice",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d31"
+            },
+            "label": "Proceed"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d32"
+            },
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      }
+    },
+    {
+      "name": "model-text",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "text"
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "text"
+      }
+    },
+    {
+      "name": "policy-choice",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice"
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "ff"
+            },
+            "label": "Proceed"
+          },
+          {
+            "id": {
+              "opaque_hex": "61"
+            },
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice"
+      }
+    },
+    {
+      "name": "exact-large-turn",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d31"
+            },
+            "label": "Proceed"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d32"
+            },
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      }
+    },
+    {
+      "name": "zero-expiry",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [],
+        "expires_at": "0",
+        "producer": "model_tool",
+        "kind": "text"
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [],
+        "expires_at": "0",
+        "producer": "model_tool",
+        "kind": "text"
+      }
+    },
+    {
+      "name": "eight-ordered-model-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Label 1"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Label 2"
+          },
+          {
+            "id": "Y2hvaWNlLTM",
+            "label": "Label 3"
+          },
+          {
+            "id": "Y2hvaWNlLTQ",
+            "label": "Label 4"
+          },
+          {
+            "id": "Y2hvaWNlLTU",
+            "label": "Label 5"
+          },
+          {
+            "id": "Y2hvaWNlLTY",
+            "label": "Label 6"
+          },
+          {
+            "id": "Y2hvaWNlLTc",
+            "label": "Label 7"
+          },
+          {
+            "id": "Y2hvaWNlLTg",
+            "label": "Label 8"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d31"
+            },
+            "label": "Label 1"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d32"
+            },
+            "label": "Label 2"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d33"
+            },
+            "label": "Label 3"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d34"
+            },
+            "label": "Label 4"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d35"
+            },
+            "label": "Label 5"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d36"
+            },
+            "label": "Label 6"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d37"
+            },
+            "label": "Label 7"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d38"
+            },
+            "label": "Label 8"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      }
+    },
+    {
+      "name": "missing-interaction_id",
+      "input": {
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-run_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-turn",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-tool_call_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-status",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-prompt",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-expires_at",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-producer",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "missing-kind",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "extra-policy_identity",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice",
+        "policy_identity": "PRIVATE_POLICY_CANARY"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "extra-decision_ref",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice",
+        "decision_ref": "PRIVATE_POLICY_CANARY"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "extra-answer",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice",
+        "answer": {
+          "text": "not-pending"
+        }
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "extra-command_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice",
+        "command_id": "YQ"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "extra-settlement_sequence",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice",
+        "settlement_sequence": "1"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-producer-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "tenant",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-producer-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": null,
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-producer-2",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": {},
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-kind-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "other"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-kind-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": null
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-kind-2",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": {}
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-status-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-status-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "expired",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-status-2",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": null,
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-turn-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "0",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-turn-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "01",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-turn-2",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "+1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-turn-3",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1.0",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-turn-4",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1e0",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-turn-5",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": 1,
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-turn-6",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": null,
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-expires_at-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "-1",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-expires_at-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "01",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-expires_at-2",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551616",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-expires_at-3",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": 1,
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-expires_at-4",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": null,
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-prompt-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-prompt-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": null,
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-choices-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-choices-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": null,
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-choices-2",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": {},
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-interaction_id-0",
+      "input": {
+        "interaction_id": "",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-interaction_id-1",
+      "input": {
+        "interaction_id": "_w=",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-interaction_id-2",
+      "input": {
+        "interaction_id": "_x",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-interaction_id-3",
+      "input": {
+        "interaction_id": "*",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-interaction_id-4",
+      "input": {
+        "interaction_id": null,
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-interaction_id-5",
+      "input": {
+        "interaction_id": 1,
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-run_id-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-run_id-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w=",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-run_id-2",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_x",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-run_id-3",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "*",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-run_id-4",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": null,
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-run_id-5",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": 1,
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-tool_call_id-0",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-tool_call_id-1",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "_w=",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-tool_call_id-2",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "_x",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-tool_call_id-3",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "*",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-tool_call_id-4",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": null,
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "invalid-tool_call_id-5",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": 1,
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "policy-text",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "text"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "text-with-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "text"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "model-id-substitution",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "model-choice-order",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          },
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "model-duplicate-label",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "duplicate-policy-id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "_w",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "choice-extra",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed",
+            "private": "PRIVATE_CHOICE_CANARY"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "choice-empty-label",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": ""
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    },
+    {
+      "name": "nine-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          },
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          },
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          },
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Stop"
+          },
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice"
+      },
+      "error": "invalid_payload"
+    }
+  ]
+}

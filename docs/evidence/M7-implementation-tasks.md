@@ -325,6 +325,45 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: shared Elixir and independent Node codecs now pin the complete
+  revision-3 snapshot and its closed pending-question projection. The snapshot
+  has ten fixed members: the existing session/cursor/run/phase fields plus
+  required current configuration, nullable checkpoint, active maintenance,
+  pending interaction and last compact completion. Semantic revision 3 remains
+  an integer; observed quantities retain exact decimal domains. There is no
+  old-revision or unresolved-configuration branch. All nested definitions are
+  included in the literal schema, including both maintenance bound variants.
+
+  Pending questions preserve explicit model_tool versus policy_defer producer,
+  choice versus text kind, original opaque identities, ordered choices, exact
+  turn and uint64 expiry. The public pending projection carries no response,
+  command digest or private policy handle. Snapshot consistency checks cover
+  run/phase pairing, question/run identity and maintenance exclusion, actual
+  maintenance owner and configuration version, checkpoint version ordering,
+  and the empty cursor-zero views. Literal files pin 74 question and 47 complete
+  snapshot cases; independent Node proves 21 complete identity/UTF-8 boundaries.
+
+  The final complete protocol suite, including nine Node cases, passes all 127
+  tests on both supported pairs in 0.3 seconds each. Formatting, warning-free
+  compilation, documentation, status and dependency-direction checks pass.
+  The first metadata run rejected generic module dispatch and untracked new
+  sources. Explicit codec calls and staging resolve those checks without
+  changing any bound; both protocol suites pass on the resulting source. All
+  initial/final outputs, including the failed metadata run, are retained in
+  `/private/tmp/loopex-m7-snapshot-codec-proof-inventory.tsv`, SHA-256
+  `f3f382283c60166d7055e94311b5c6dbbc062c8dbba8d516fd54956f414bd4db`.
+
+  One added T05 subtask closes. T01–T19 originals remain 56 done / 117 todo /
+  6 retired; added subtasks are 227 done / 10 todo. These codecs are prepared
+  components, not yet the served snapshot or connection validators. The next
+  integration must supply current v3 genesis configuration, retire the existing
+  v2 writer/reader and fixtures under the pre-1.0 rule, publish the cursor
+  projection, complete both payload manifests and switch only foreground /3
+  and daemon /4 together with all consumers. Configure/compact routing,
+  authority inventories and independent live workflows remain required; do not
+  claim the old revision-2 snapshot or metadata-only digest satisfies M7.
+  No agent, check handle or maintainer decision is pending at this checkpoint.
+
 - Done: the bounded snapshot scan now retains latest configuration and
   checkpoint provenance at the same event cursor as run, question, maintenance
   and last compact. Initial configuration comes from exactly the immutable
@@ -8937,6 +8976,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Pin the complete revision-3 snapshot and both producers' closed pending-question projection in shared Elixir and independent Node codecs with fully embedded nested schema definitions, literal identities, every-member/privacy refusals, exact quantities, full identity/text byte boundaries and cross-view owner/cursor/configuration relations. Prove the complete protocol suite including Node on both pairs. Current-only genesis, actual publication, both coordinated manifests/servers and live clients remain separate open joins.
 
 - [x] Reduce immutable genesis configuration, committed configuration changes and checkpoint provenance at the exact public cursor with bounded current/anchor state; validate closed projections, settled version advancement, actual maintenance capture, prior checkpoint and inherited omissions, and compare replay against private configuration/checkpoint identity. Preserve model-question producer/kind in pending and historical attachments through every existing choice/text/decline vector on both toolchains. Expanded public snapshot and coordinated wire/Node joins remain open.
 

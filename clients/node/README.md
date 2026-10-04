@@ -31,6 +31,9 @@ imports anything outside Node's own standard library.
 | `configuration.mjs` | Decode the closed committed configuration and configuration-change payload, preserving exact quantities and instruction identity |
 | `checkpoint.mjs` | Decode the complete checkpoint projection, actual owner, original-source references and exact coverage/usage quantities |
 | `snapshot-payload-vectors.mjs` | Independently check configuration/checkpoint literals and every opaque identity and text byte boundary |
+| `pending-interaction.mjs` | Decode closed model-tool text/choice and policy-defer choice pending views with exact identities and quantities |
+| `snapshot.mjs` | Decode the complete revision-3 snapshot with shared closed views and cursor/owner/configuration consistency checks |
+| `snapshot-vectors.mjs` | Independently check pending-question and complete snapshot literals, privacy refusals and full identity/UTF-8 byte boundaries |
 
 Run the M7 answer payload checks with the pinned Node interpreter:
 
@@ -40,6 +43,7 @@ node clients/node/compact-result-vectors.mjs apps/loopex_protocol/priv/vectors/s
 node clients/node/checkpoint-owner-vectors.mjs apps/loopex_protocol/priv/vectors/checkpoint-owner.v1.json
 node clients/node/maintenance-view-vectors.mjs apps/loopex_protocol/priv/vectors/maintenance-view.v1.json
 node clients/node/snapshot-payload-vectors.mjs apps/loopex_protocol/priv/vectors/configuration-projection.v1.json apps/loopex_protocol/priv/vectors/checkpoint-projection.v1.json
+node clients/node/snapshot-vectors.mjs apps/loopex_protocol/priv/vectors/pending-interaction.v1.json apps/loopex_protocol/priv/vectors/session-snapshot.v3.json
 ```
 
 This checks payloads only. The foreground and daemon clients still require

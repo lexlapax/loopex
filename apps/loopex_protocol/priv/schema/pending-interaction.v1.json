@@ -1,0 +1,102 @@
+{
+  "format": "loopex.experimental.payload-contract/1",
+  "contract": "pending_interaction",
+  "authority": "docs/adr/0045-model-originated-questions-technical.md",
+  "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+  "closed": true,
+  "required": [
+    "interaction_id",
+    "run_id",
+    "turn",
+    "tool_call_id",
+    "status",
+    "prompt",
+    "choices",
+    "expires_at",
+    "producer",
+    "kind"
+  ],
+  "interaction_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 65536
+  },
+  "run_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 65536
+  },
+  "tool_call_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 65536
+  },
+  "turn": {
+    "encoding": "canonical_decimal_string",
+    "domain": "arbitrary_positive_integer"
+  },
+  "expires_at": {
+    "encoding": "canonical_decimal_string",
+    "minimum": "0",
+    "maximum": "18446744073709551615"
+  },
+  "status": "pending",
+  "producer": [
+    "model_tool",
+    "policy_defer"
+  ],
+  "kind": [
+    "choice",
+    "text"
+  ],
+  "prompt": {
+    "encoding": "utf8",
+    "minimum_bytes": 1,
+    "maximum_bytes": 2048
+  },
+  "choices": {
+    "kind": "array",
+    "minimum_length": 0,
+    "maximum_length": 8,
+    "member": {
+      "closed": true,
+      "required": [
+        "id",
+        "label"
+      ],
+      "id": {
+        "encoding": "canonical_unpadded_base64url",
+        "minimum_original_bytes": 1,
+        "maximum_original_bytes": 64
+      },
+      "label": {
+        "encoding": "utf8",
+        "minimum_bytes": 1,
+        "maximum_bytes": 256
+      }
+    },
+    "unique_by": "id"
+  },
+  "variants": {
+    "model_tool_text": {
+      "producer": "model_tool",
+      "kind": "text",
+      "choices_length": 0
+    },
+    "model_tool_choice": {
+      "producer": "model_tool",
+      "kind": "choice",
+      "minimum_choices": 1,
+      "maximum_choices": 8,
+      "id_by_original_position": "choice-1 through choice-8",
+      "unique_labels": true
+    },
+    "policy_defer_choice": {
+      "producer": "policy_defer",
+      "kind": "choice",
+      "minimum_choices": 1,
+      "maximum_choices": 8
+    }
+  },
+  "authority_granted": false
+}
