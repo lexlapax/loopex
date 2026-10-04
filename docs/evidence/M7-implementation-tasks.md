@@ -325,6 +325,69 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: bind a private trusted M7 fixture policy through the existing chat
+  composition seam, after ordinary explicit-file and closed registry-profile
+  validation. The capture binds the selected case, literal argv, physical
+  workspace, current tool generations and external file modes/digests into its
+  policy identity. Startup and each policy decision recheck the capture.
+  Alternate shell text, arguments, generations, leases, mutable paths and
+  workspace-owned runner/oracle pins refuse; review refuses mutations.
+  Ordinary chat supplies no fixture capture and the policy registry is unchanged.
+
+  Effective startup settings and chat status retain the closed harness policy
+  identity and manifest digest while the authored registry profile remains
+  separately visible. Diagnostic admission allows harness provenance only for
+  that exact four-field policy identity, preserving whole-row drop, queue,
+  writer, loss accounting and cleanup bounds. Pending and already-answered
+  policy questions require the independent capture's exact identity before
+  activation. Changed manifests abandon the prepared capability without
+  altering its journal or dispatching model/executor work.
+
+  A real Chat/Local Store/Local Executor witness commits the repair and its
+  exact approved oracle invocation, denies alternate raw shell text, checks
+  the committed successful receipt and scrubbed environment, joins all owned
+  processes, resumes the same session with retained tool settings despite
+  changed file defaults, and independently reruns the pinned oracle after
+  shutdown. Both runs execute its three assertions. File pins are rechecked
+  before and after the independent run and the fixture's allowed diff is
+  verified. The scripted Model port supplies no paid provider attempt.
+
+  All 52 affected chat/configuration/fixture tests pass on the current pair in
+  25.5 seconds and the floor pair in 26.3 seconds. All 20 diagnostic consumer
+  cases pass on each pair in 0.8 seconds. Final handles `95446`, `45923`,
+  `66091` and `51979` are terminal and collected. Failed/corrected outputs and
+  seven final source/test identities are retained in the 31-entry immutable
+  `/private/tmp/loopex-m7-fixture-policy-proof-inventory.tsv`, SHA-256
+  `89a298d5fc26335897e2a7216833bbfee72af34edf8174cf34ceedbd8b04c036`.
+
+  Earlier outputs remain failed evidence. Initial iterations repaired fixture
+  compilation, the actual session-directory API, genesis/root context budgets,
+  string-keyed settings rows and the existing cross-toolchain suite judge.
+  The line-filtered v5 invocation selected a neighbouring validation case after
+  formatting moved the declaration; it proves no real chat flow. Whole-file
+  v13 first proves that flow. The added resume v2 cases compared against a
+  baseline from before a second owner-advancing prepare; capture each exact
+  prepare's baseline instead. The v3 parallel runners collided in temporary
+  fixture roots because VM-local unique integers are not unique across VMs.
+  Final v4 commands give current/floor processes distinct TMPDIR roots as well
+  as distinct build caches. No timeout, assertion, required case or product
+  guarantee was relaxed; failed outputs are not relabeled.
+
+  Formatting, warning-free compilation, documentation ordering, status/index
+  links, dependency direction, whitespace and the original checklist denominator
+  pass in 16.4 measured seconds. Complete metadata output is
+  `/private/tmp/loopex-m7-fixture-policy-metadata-v1.log`, SHA-256
+  `8e4a17a9b015c279a4f27426f54cbde24b8a3de5628ceeacdb2a68b4a255f66c`. Handle `30912` is terminal and collected.
+  Every retained output and final source digest was reverified before commitment.
+
+  Two added T13 subtasks close. T01–T19 originals remain 67 done / 106 todo /
+  6 retired; added subtasks are 238 done / 10 todo. Including T00, originals
+  remain 67 / 112 / 7 and added are 242 / 11. The original trusted wrapper,
+  complete fixture flows and attended campaign remain open: the root command
+  and attempt-index admission must be joined before any paid execution.
+  The separate transport-creation decision remains pending; this checkpoint
+  implements no dependent transport change.
+
 - Done: implement the accepted attempts-index envelope's canonical framing and
   chain verification in the private M7 evidence helper `AttemptFrames`.
   Reuse the existing protocol sorted-key JSON encoder and duplicate-aware
@@ -9816,6 +9879,8 @@ candidate integration and focused floor proofs are retained there; items 9 and
 
 - [x] Pin the retained four coding fixtures in a closed source catalog with literal prompts, bounds, digests/modes, allowed changes, objective results and required model actions; protect complete workspace and immutable oracle inventories around actual deterministic oracle runs on both toolchains.
 - [x] Freeze each fixture catalog entry to its exact changed/created path policy; reject well-formed edits that broaden or remove the retained task allowance, with failing-before and both-toolchain proofs.
+- [x] Implement the private pinned fixture policy capture with exact argv, physical workspace and external file identity checks; deny alternate shell commands and mutable paths without broadening the ordinary registry.
+- [x] Join that capture to ordinary chat startup and prepared resume, retain closed harness settings/status provenance, prove pending-question identity refusal and actual committed/independent repair-oracle execution with owner cleanup on both toolchains.
 
 ## T14 — Implement attempts tracking and evidence validation
 

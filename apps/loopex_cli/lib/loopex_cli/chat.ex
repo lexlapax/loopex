@@ -70,13 +70,15 @@ defmodule LoopexCli.Chat do
           else: Interrupt.install_chat(driver, ref, grace)
       end,
       activate: &Interrupt.activate_prepared/1,
-      finish_signal: &Interrupt.finish_chat/2
+      finish_signal: &Interrupt.finish_chat/2,
+      fixture_policy: nil
     }
   end
 
   defp execute(argv, deps, tag) do
     with {:ok, parsed} <- ConfigOptions.parse(argv),
          {:ok, invocation} <- load(parsed, argv, deps),
+         {:ok, invocation} <- LoopexCli.Policy.M7Fixture.bind(invocation, deps.fixture_policy),
          {:ok, routes} <- ProviderBindings.validate(invocation.selection.profile["providers"]),
          {:ok, resources} <-
            deps.read_directories.(skills(invocation),
@@ -126,6 +128,45 @@ defmodule LoopexCli.Chat do
   defp root(invocation), do: invocation.selection.profile["paths"]["state_root"]
   defp grace(invocation), do: invocation.selection.profile["session"]["cleanup_grace_ms"]
 
+  defp policy(%{harness_fixture: capture}),
+    do: %{module: LoopexCli.Policy.M7Fixture, context: capture}
+
+  defp policy(invocation),
+    do: Map.fetch!(LoopexCli.AskOptions.policy_profiles(), invocation.selection.profile["policy"])
+
+  defp policy_identity(%{harness_fixture: capture}),
+    do: LoopexCli.Policy.M7Fixture.identity(capture)
+
+  defp policy_identity(invocation),
+    do: %{"id" => inspect(policy(invocation)), "revision" => "0.2.0"}
+
+  defp status_policy(%{harness_fixture: capture}), do: LoopexCli.Policy.M7Fixture.report(capture)
+  defp status_policy(_invocation), do: nil
+
+  defp settings_rows(invocation) do
+    rows = ConfigInspection.settings_rows(invocation.selection, %{})
+
+    case status_policy(invocation) do
+      nil ->
+        rows
+
+      policy ->
+        Enum.map(rows, fn row ->
+          if row["setting"] == "/policy_identity",
+            do:
+              Map.merge(row, %{
+                "value" =>
+                  Map.new(policy, fn {key, value} ->
+                    {Atom.to_string(key),
+                     if(key == :origin, do: Atom.to_string(value), else: value)}
+                  end),
+                "origin" => "harness"
+              }),
+            else: row
+        end)
+    end
+  end
+
   defp composition_options(invocation, resources, placement, consumer, deps) do
     profile = invocation.selection.profile
     configuration = Map.get(invocation.selection, :configuration, %{})
@@ -134,7 +175,8 @@ defmodule LoopexCli.Chat do
       runtime_id: placement,
       state_root: root(invocation),
       workspace: workspace(invocation),
-      policy: Map.fetch!(LoopexCli.AskOptions.policy_profiles(), profile["policy"]),
+      policy: policy(invocation),
+      policy_identity: policy_identity(invocation),
       provider_bindings: profile["providers"],
       provider_launch: deps.provider_launch.(),
       resource_manifest: resources.manifest,
@@ -155,7 +197,7 @@ defmodule LoopexCli.Chat do
 
         DiagnosticConsumer.settings_report(
           consumer,
-          ConfigInspection.settings_rows(prepared.selection, %{})
+          settings_rows(prepared)
         )
 
         with :ok <- trace(runtime, prepared),
@@ -163,6 +205,7 @@ defmodule LoopexCli.Chat do
                ChatDriver.start_link(runtime, session, deps.input, deps.output,
                  mode: deps.mode,
                  configuration: prepared,
+                 status_policy: status_policy(prepared),
                  cleanup_grace_ms: grace(prepared),
                  bounds: bounds(prepared)
                ) do

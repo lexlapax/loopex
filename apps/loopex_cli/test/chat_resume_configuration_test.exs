@@ -237,6 +237,85 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
     assert Agent.get(fixture.fixture.executor, & &1.jobs) == []
   end
 
+  for status <- [:pending, :answered] do
+    @harness_pending_status status
+    test "#{status} policy question binds the independent harness capture before activation", f do
+      profile = put_in(f.profile, ["session", "tools"], "coding")
+      File.write!(f.path, :json.encode(profile))
+      {:ok, prepared} = ChatConfiguration.load(["chat", "--config", f.path], f.root, nil)
+      workspace = prepared.selection.profile["paths"]["workspace"]
+      {:ok, stat} = File.stat("/bin/sh")
+
+      pins = %{
+        "/bin/sh" => %{
+          mode: Bitwise.band(stat.mode, 0o777),
+          sha256: LoopexProtocol.Canonical.digest_bytes(File.read!("/bin/sh"))
+        }
+      }
+
+      {:ok, capture} =
+        LoopexCli.Policy.M7Fixture.prepare(
+          "m7.repair",
+          String.duplicate("a", 64),
+          workspace,
+          ["/bin/sh"],
+          pins
+        )
+
+      expected = LoopexCli.Policy.M7Fixture.identity(capture)
+
+      fixture =
+        pending_policy_fixture(%{f | prepared: prepared}, expected, @harness_pending_status)
+
+      bound = %{f | fixture: fixture.fixture, session: fixture.session}
+      {:ok, invocation} = load(bound)
+      {:ok, invocation} = LoopexCli.Policy.M7Fixture.bind(invocation, capture)
+      activation = activation(fixture.fixture, fixture.session)
+
+      before =
+        {Fixture.records(fixture.fixture, fixture.session),
+         Fixture.events(fixture.fixture, fixture.session)}
+
+      assert {:ok, resumed} = ChatConfiguration.resume(invocation, activation)
+      assert resumed.startup.pending_policy_identity == expected
+      assert resumed.harness_fixture == capture
+
+      assert {Fixture.records(fixture.fixture, fixture.session),
+              Fixture.events(fixture.fixture, fixture.session)} == before
+
+      assert :ok = Loopex.abandon_resume(activation)
+
+      {:ok, changed} =
+        LoopexCli.Policy.M7Fixture.prepare(
+          "m7.repair",
+          String.duplicate("b", 64),
+          workspace,
+          ["/bin/sh"],
+          pins
+        )
+
+      {:ok, invocation} = load(bound)
+      {:ok, invocation} = LoopexCli.Policy.M7Fixture.bind(invocation, changed)
+      activation = activation(fixture.fixture, fixture.session)
+
+      before =
+        {Fixture.records(fixture.fixture, fixture.session),
+         Fixture.events(fixture.fixture, fixture.session)}
+
+      assert {:error, :chat_pending_policy_binding_conflict} =
+               ChatConfiguration.resume(invocation, activation)
+
+      assert {:error, :resume_activation_abandoned} = Loopex.prepared_session_startup(activation)
+
+      assert {Fixture.records(fixture.fixture, fixture.session),
+              Fixture.events(fixture.fixture, fixture.session)} == before
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.fixture.model) == []
+      assert Agent.get(fixture.fixture.executor, & &1.jobs) == []
+      refute_receive {:policy_reevaluation, _}, 0
+    end
+  end
+
   test "a pending run refuses a missing admitted-model route without consuming credentials", f do
     identity = %{"id" => inspect(LoopexCli.Policy.AllowAll), "revision" => "0.2.0"}
     fixture = pending_policy_fixture(f, identity, :pending)

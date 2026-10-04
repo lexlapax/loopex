@@ -86,6 +86,43 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
     end)
   end
 
+  test "harness settings admit only a closed policy identity with matching provenance" do
+    StringIO.open("", [encoding: :latin1], fn device ->
+      {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
+
+      policy = %{
+        "origin" => "harness",
+        "id" => "m7.fixture:m7.repair:captured",
+        "revision" => "1",
+        "fixture_manifest_digest" => String.duplicate("a", 64)
+      }
+
+      admitted = setting("/policy_identity", policy, "harness")
+
+      rejected = [
+        setting("/policy_identity", policy, "committed"),
+        setting("/policy_identity", %{policy | "origin" => "registry"}, "harness"),
+        setting("/policy_identity", %{policy | "origin" => "registry"}, "committed"),
+        setting("/policy_identity", %{policy | "fixture_manifest_digest" => nil}, "harness"),
+        setting(
+          "/policy_identity",
+          %{policy | "fixture_manifest_digest" => "bad-canary"},
+          "harness"
+        ),
+        setting("/policy_identity", Map.put(policy, "pins", "private-canary"), "harness"),
+        setting("/paths/workspace", "private-canary", "harness")
+      ]
+
+      assert :ok = DiagnosticConsumer.settings_report(consumer, rejected ++ [admitted])
+      await_idle(consumer)
+      assert {:ok, final} = DiagnosticConsumer.close(consumer, deadline())
+      assert final.counts.diagnostic == %{emitted: 1, dropped: length(rejected), unconfirmed: 0}
+      {"", bytes} = StringIO.contents(device)
+      assert {:ok, [^admitted]} = decode_rows(bytes)
+      refute bytes =~ "canary"
+    end)
+  end
+
   test "settings exact JSON line ceiling drops oversized rows whole" do
     StringIO.open("", [encoding: :latin1], fn device ->
       {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)

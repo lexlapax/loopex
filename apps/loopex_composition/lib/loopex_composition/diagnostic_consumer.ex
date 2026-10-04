@@ -117,6 +117,8 @@ defmodule LoopexComposition.DiagnosticConsumer do
   strings; arrays arrive as indexed rows. Provider rows contain reference form
   and validity, never credential names or values. Captured instructions,
   capabilities, mappings, role prompts and continuation are excluded.
+  Harness policy rows contain only the closed policy identity and a manifest
+  digest. Their origin is harness; other settings retain their selected origin.
 
   The existing queue, writer and diagnostic loss counters apply. A malformed or
   oversized row drops whole; its JSON line including LF must fit 4,096 bytes.
@@ -316,11 +318,17 @@ defmodule LoopexComposition.DiagnosticConsumer do
   defp valid_setting_row?(%{"setting" => setting, "value" => value, "origin" => origin} = row)
        when map_size(row) == 3 and is_binary(setting) and is_binary(origin) do
     text?(setting) and text?(origin) and
-      (origin in ~w(flag env default committed) or String.starts_with?(origin, "file#/")) and
+      setting_origin?(setting, value, origin) and
       valid_setting?(String.split(setting, "/", trim: false), setting, value)
   end
 
   defp valid_setting_row?(_), do: false
+
+  defp setting_origin?("/policy_identity", %{"origin" => "harness"}, origin),
+    do: origin == "harness"
+
+  defp setting_origin?(_, _, origin),
+    do: origin in ~w(flag env default committed) or String.starts_with?(origin, "file#/")
 
   defp valid_setting?(_, setting, value) when setting in @text_settings, do: text?(value)
 
@@ -379,6 +387,16 @@ defmodule LoopexComposition.DiagnosticConsumer do
       }
       when map_size(value) == 4 ->
         text?(id) and text?(revision)
+
+      %{
+        "origin" => "harness",
+        "id" => id,
+        "revision" => revision,
+        "fixture_manifest_digest" => digest
+      }
+      when map_size(value) == 4 ->
+        text?(id) and text?(revision) and is_binary(digest) and
+          Regex.match?(~r/\A[0-9a-f]{64}\z/, digest)
 
       _ ->
         false

@@ -1,0 +1,454 @@
+Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+
+defmodule LoopexCli.M7FixturePolicyTest do
+  use ExUnit.Case, async: false
+  @moduletag capture_log: true
+
+  alias LoopexCli.{Chat, ChatConfiguration}
+  alias LoopexCli.Policy.M7Fixture, as: Policy
+  alias LoopexComposition.WorkspaceIdentity
+  alias LoopexProtocol.{Canonical, ToolDefinition}
+  alias Mix.Tasks.Loopex.M7Evidence.FixtureManifest
+
+  @fixtures Path.expand("../../../test/fixtures/m7", __DIR__)
+
+  setup do
+    root = Path.join(System.tmp_dir!(), "m7-pinned-policy-#{System.unique_integer([:positive])}")
+    workspace = Path.join(root, "workspace")
+    trusted = Path.join(root, "trusted")
+    File.mkdir_p!(trusted)
+    File.cp_r!(Path.join(@fixtures, "repair/workspace"), workspace)
+    on_exit(fn -> File.rm_rf!(root) end)
+    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    oracle = Path.join(trusted, "oracle.exs")
+    File.cp!(Path.join(@fixtures, "repair/oracle.exs"), oracle)
+
+    assert Canonical.digest_bytes(File.read!(oracle)) ==
+             catalog["fixtures"]["repair"]["oracle"]["sha256"]
+
+    {:ok, elixir} =
+      WorkspaceIdentity.resolve_path(
+        Path.expand("../../bin/elixir", List.to_string(:code.lib_dir(:elixir)))
+      )
+
+    path =
+      Path.dirname(elixir) <>
+        ":" <> Path.join(List.to_string(:code.root_dir()), "bin") <> ":/usr/bin:/bin"
+
+    runner = Path.join(trusted, "run.sh")
+
+    File.write!(
+      runner,
+      "#!/bin/sh\nset -eu\ntest -z \"${M7_FIXTURE_HOST_SENTINEL:-}\"\nexec /usr/bin/env -i PATH=" <>
+        shell_quote(path) <>
+        " M7_WORKSPACE=" <>
+        shell_quote(workspace) <> " " <> shell_quote(elixir) <> " " <> shell_quote(oracle) <> "\n"
+    )
+
+    argv = ["/bin/sh", runner]
+    pins = Map.new(["/bin/sh", runner, oracle, elixir], &{&1, pin(&1)})
+    digest = Canonical.digest_bytes(File.read!(Path.join(@fixtures, "manifest.json")))
+    {:ok, capture} = Policy.prepare("m7.repair", digest, workspace, argv, pins)
+
+    profile = %{
+      "schema_version" => 1,
+      "providers" => %{
+        "anthropic" => %{"credential" => %{"env" => "M7_UNUSED_FIXTURE_REFERENCE"}}
+      },
+      "policy" => "shell-allowlist",
+      "paths" => %{"workspace" => workspace, "state_root" => Path.join(root, "state")},
+      "session" => %{
+        "model" => "anthropic:claude-haiku-4-5",
+        "tools" => "coding",
+        "system_class_tokens" => 8000,
+        "bounds" => %{"max_turns" => 8, "deadline_ms" => 15_000, "token_budget" => 100_000}
+      }
+    }
+
+    config = Path.join(root, "config.json")
+    File.write!(config, :json.encode(profile))
+
+    %{
+      root: root,
+      workspace: workspace,
+      runner: runner,
+      oracle: oracle,
+      argv: argv,
+      pins: pins,
+      capture: capture,
+      digest: digest,
+      config: config,
+      profile: profile
+    }
+  end
+
+  test "only exact argv, current generations and the selected lease permit dispatch", f do
+    request = request("loopex.bash", %{"argv" => f.argv})
+    assert Policy.decide(request, f.capture) == {:allow, nil}
+    assert Policy.decide(request) == {:deny, :policy_unavailable}
+
+    for changed <- [
+          %{request | arguments: %{"argv" => f.argv ++ ["extra"]}},
+          %{request | arguments: %{"command" => Enum.join(f.argv, " ")}},
+          %{request | arguments: %{"argv" => f.argv, "command" => nil}},
+          %{request | workspace_lease: "another"},
+          %{request | effect_class: "invented"},
+          %{request | generation: {"loopex.bash", "old", String.duplicate("0", 64)}}
+        ] do
+      assert Policy.decide(changed, f.capture) == {:deny, :policy_denied}
+    end
+
+    assert {:ok, review} = Policy.prepare("m7.review", f.digest, f.workspace, f.argv, f.pins)
+
+    assert Policy.decide(request("loopex.write", %{"path" => "file", "content" => "x"}), review) ==
+             {:deny, :policy_denied}
+
+    assert Policy.decide(request("loopex.read", %{"path" => "lib/ledger.ex"}), review) ==
+             {:allow, nil}
+  end
+
+  test "changed runner, oracle, modes, targets and incomplete captures fail closed", f do
+    original = File.read!(f.runner)
+    File.write!(f.runner, original <> "# changed\n")
+    assert Policy.check(f.capture) == {:error, :fixture_policy_unavailable}
+
+    assert Policy.decide(request("loopex.bash", %{"argv" => f.argv}), f.capture) ==
+             {:deny, :policy_unavailable}
+
+    File.write!(f.runner, original)
+    File.chmod!(f.runner, 0o755)
+    assert Policy.check(f.capture) == {:error, :fixture_policy_unavailable}
+    File.chmod!(f.runner, f.pins[f.runner].mode)
+    File.rm!(f.oracle)
+    File.ln_s!(Path.join(@fixtures, "repair/oracle.exs"), f.oracle)
+    assert Policy.check(f.capture) == {:error, :fixture_policy_unavailable}
+    assert Policy.check(%{}) == {:error, :fixture_policy_unavailable}
+  end
+
+  test "harness pins cannot select task-owned files or unpinned executables", f do
+    task_file = Path.join(f.workspace, "lib/ledger.ex")
+
+    assert Policy.prepare(
+             "m7.repair",
+             f.digest,
+             f.workspace,
+             f.argv,
+             Map.put(f.pins, task_file, pin(task_file))
+           ) == {:error, :fixture_policy_unavailable}
+
+    assert Policy.prepare("m7.repair", f.digest, f.workspace, ["/bin/echo", "x"], f.pins) ==
+             {:error, :fixture_policy_unavailable}
+
+    assert Policy.prepare("other", f.digest, f.workspace, f.argv, f.pins) ==
+             {:error, :fixture_policy_unavailable}
+  end
+
+  test "ordinary profile validation precedes the trusted override and owned startup", f do
+    File.write!(f.config, :json.encode(put_in(f.profile, ["policy"], "invented")))
+    {:ok, input} = StringIO.open("/quit\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    assert Chat.run(["chat", "--config", f.config],
+             cwd: f.root,
+             home: nil,
+             fixture_policy: f.capture,
+             input: input,
+             output: output,
+             acquire_placement: fn _, _ -> flunk("invalid authored profile reached placement") end
+           ) == 1
+
+    assert StringIO.contents(input) == {"/quit\n", ""}
+  end
+
+  test "real chat commits the agent oracle, refuses alternate shell, reports harness and independently reruns unchanged bytes",
+       f do
+    isolated_signal_manager()
+
+    script = [
+      %{
+        text: "repair",
+        calls: [
+          %{
+            id: "fix",
+            name: "write",
+            arguments: %{
+              "path" => "lib/ledger.ex",
+              "content" =>
+                "defmodule Ledger do\n  def total(entries), do: Enum.sum(entries)\nend\n"
+            }
+          }
+        ]
+      },
+      %{
+        text: "refused",
+        calls: [%{id: "wrong", name: "bash", arguments: %{"command" => Enum.join(f.argv, " ")}}]
+      },
+      %{text: "test", calls: [%{id: "oracle", name: "bash", arguments: %{"argv" => f.argv}}]},
+      %{text: "done", calls: []}
+    ]
+
+    {:ok, input} = StringIO.open("repair\n/wait\n/status\n/quit\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, diagnostic} = StringIO.open("", encoding: :latin1)
+    parent = self()
+
+    opts = [
+      cwd: f.root,
+      home: nil,
+      input: input,
+      output: output,
+      diagnostic_device: diagnostic,
+      mode: :pipe,
+      fixture_policy: f.capture,
+      provider_launch: fn -> [] end,
+      acquire_placement: fn _, _ -> {:ok, :test_lock} end,
+      release_placement: fn _, _ -> :ok end,
+      placement_id: fn _ -> {:ok, "fixture-real-runtime"} end,
+      with_runtime: fn options, callback ->
+        with_stack(f, script, options, callback, parent)
+      end
+    ]
+
+    prior = System.get_env("M7_FIXTURE_HOST_SENTINEL")
+    System.put_env("M7_FIXTURE_HOST_SENTINEL", "must-not-reach-job")
+
+    try do
+      result = Chat.run(["chat", "--config", f.config], opts)
+
+      fault =
+        receive do
+          {:fixture_failure, reason} -> reason
+        after
+          0 -> nil
+        end
+
+      assert result == 0,
+             inspect(%{
+               output: StringIO.contents(output),
+               diagnostics: StringIO.contents(diagnostic),
+               fault: fault
+             })
+    after
+      if prior,
+        do: System.put_env("M7_FIXTURE_HOST_SENTINEL", prior),
+        else: System.delete_env("M7_FIXTURE_HOST_SENTINEL")
+    end
+
+    assert_receive {:committed, session, rows, stats, _requests}
+    assert Enum.count(rows, &(&1.payload.kind == "effect_intent_committed_v2")) == 2
+    assert Enum.count(rows, &(&1.payload.kind == "executor_receipt_committed_v2")) == 2
+
+    assert Enum.any?(
+             rows,
+             &(&1.payload.kind == "tool_result_committed_v2" and &1.payload["outcome"] == "denied")
+           )
+
+    assert Enum.sum(Map.values(stats.dispatches)) == 2
+
+    receipts =
+      for row <- rows,
+          row.payload.kind == "executor_receipt_committed_v2",
+          do: row.payload["receipt"]
+
+    assert [oracle_receipt] = Enum.filter(receipts, &(&1["tool_call_id"] == "oracle"))
+    assert oracle_receipt["outcome"] == "completed"
+    assert oracle_receipt["cleanup_confirmation"] == "confirmed"
+    assert oracle_receipt["child_environment_names"] == ["PATH"]
+    assert_suite(oracle_receipt["output"], Path.join(f.root, "trusted/agent.log"))
+
+    {_, stdout} = StringIO.contents(output)
+    controls = for "@loopex " <> bytes <- String.split(stdout, "\n"), do: :json.decode(bytes)
+    assert Enum.find(controls, &(&1["event"] == "status"))["policy"]["origin"] == "harness"
+    assert List.last(controls)["cleanup"] == "confirmed"
+    {_, report} = StringIO.contents(diagnostic)
+    assert report =~ "harness" and report =~ "shell-allowlist" and report =~ f.digest, report
+    refute report =~ "M7_UNUSED_FIXTURE_REFERENCE"
+
+    {:ok, resumed_input} =
+      StringIO.open("remember the repair\n/wait\n/status\n/quit\n", encoding: :latin1)
+
+    File.write!(f.config, :json.encode(put_in(f.profile, ["session", "tools"], "none")))
+
+    resumed_options =
+      opts
+      |> Keyword.put(:input, resumed_input)
+      |> Keyword.put(:with_runtime, fn options, callback ->
+        with_stack(f, [%{text: "retained repair", calls: []}], options, callback, parent)
+      end)
+
+    assert Chat.run(["chat", "--config", f.config, "--resume", session], resumed_options) == 0
+    assert_receive {:committed, ^session, resumed_rows, resumed_stats, [resumed_request]}
+    assert resumed_stats.dispatches == %{}
+    assert Enum.count(resumed_rows, &(&1.payload.kind == "effect_intent_committed_v2")) == 2
+    assert Enum.any?(resumed_request.messages, &(&1["content"] == "repair"))
+    assert Enum.any?(resumed_request.messages, &(&1["content"] == "remember the repair"))
+    {_, resumed_stdout} = StringIO.contents(output)
+
+    resumed_controls =
+      for "@loopex " <> bytes <- String.split(resumed_stdout, "\n"), do: :json.decode(bytes)
+
+    resumed_status = resumed_controls |> Enum.filter(&(&1["event"] == "status")) |> List.last()
+    assert resumed_status["policy"]["id"] == Policy.identity(f.capture)["id"]
+    assert resumed_status["policy"]["fixture_manifest_digest"] == f.digest
+    assert List.last(resumed_controls)["cleanup"] == "confirmed"
+
+    assert Policy.check(f.capture) == :ok
+
+    {independent, code} =
+      System.cmd("/usr/bin/env", ["-i", "PATH=/usr/bin:/bin" | f.argv],
+        cd: f.workspace,
+        stderr_to_stdout: true
+      )
+
+    assert code == 0
+    assert_suite(independent, Path.join(f.root, "trusted/independent.log"))
+    assert Policy.check(f.capture) == :ok
+    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    assert FixtureManifest.verify_workspace(catalog["fixtures"]["repair"], f.workspace) == :ok
+  end
+
+  defp request(id, arguments) do
+    definition =
+      Enum.find(
+        ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("coding")),
+        &(&1["tool_id"] == id)
+      )
+
+    %{
+      generation: ToolDefinition.generation(definition),
+      arguments: arguments,
+      effect_class: definition["effect_class"],
+      workspace_lease: "workspace"
+    }
+  end
+
+  defp with_stack(f, script, options, callback, parent) do
+    assert options[:policy] == %{module: Policy, context: f.capture}
+    assert options[:policy_identity] == Policy.identity(f.capture)
+    stack = start_stack(f, script, options)
+
+    try do
+      result = callback.(stack.runtime)
+      {:ok, [session]} = Loopex.list_sessions(Path.join(f.root, "state"))
+      {:ok, rows} = Loopex.Store.load_records(stack.store, session.session_id, 0, 1000)
+
+      send(
+        parent,
+        {:committed, session.session_id, rows, Loopex.Executor.Local.stats(stack.executor),
+         Loopex.AgentLoopTestModel.dispatched(stack.model)}
+      )
+
+      result
+    after
+      stop_stack(stack)
+    end
+  rescue
+    error ->
+      send(parent, {:fixture_failure, Exception.format(:error, error, __STACKTRACE__)})
+      reraise error, __STACKTRACE__
+  end
+
+  defp start_stack(f, script, options) do
+    File.mkdir_p!(Path.join(f.root, "state"))
+    {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(f.root, "state/store.log"))
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+
+    {:ok, lease} =
+      Loopex.Executor.Local.WorkspaceLease.start_link(
+        id: "workspace",
+        path: f.workspace,
+        fencing_token: 1
+      )
+
+    {:ok, executor} =
+      Loopex.Executor.Local.start_link(
+        identity: "fixture-executor",
+        epoch: 1,
+        fencing_token: 1,
+        workspace_leases: %{"workspace" => lease},
+        ledger_root: Path.join(f.root, "state/receipts")
+      )
+
+    model = Loopex.AgentLoopTestModel.start(script)
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "fixture-real-runtime",
+        context_token_budget: 8192,
+        store: store,
+        policy: options[:policy],
+        policy_identity: options[:policy_identity],
+        model: %{
+          module: Loopex.AgentLoopTestModel,
+          model: options[:model],
+          options: [script: model]
+        },
+        executor: %{
+          module: Loopex.Executor.Local,
+          reference: executor,
+          identity: "fixture-executor",
+          epoch: 1,
+          fencing_token: 1,
+          workspace_ref: f.capture.workspace_ref,
+          workspace_lease: "workspace"
+        },
+        tools: ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("coding")),
+        cleanup_grace_ms: options[:cleanup_grace_ms]
+      )
+
+    %{
+      runtime: runtime,
+      store: store,
+      adapter: adapter,
+      lease: lease,
+      executor: executor,
+      model: model
+    }
+  end
+
+  defp stop_stack(stack) do
+    runtime_monitor = Process.monitor(stack.runtime.supervisor)
+    assert :ok == Loopex.stop(stack.runtime)
+    assert_receive {:DOWN, ^runtime_monitor, :process, _, _}, 1000
+
+    for pid <- [stack.executor, stack.lease, stack.adapter, stack.model] do
+      Process.unlink(pid)
+      ref = Process.monitor(pid)
+      if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1000)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 1000
+    end
+  end
+
+  defp pin(path) do
+    {:ok, physical} = WorkspaceIdentity.resolve_path(path)
+    {:ok, stat} = File.stat(physical)
+    %{mode: Bitwise.band(stat.mode, 0o7777), sha256: Canonical.digest_bytes(File.read!(physical))}
+  end
+
+  defp assert_suite(bytes, log) do
+    File.write!(log, bytes)
+    script = Path.expand("../../../scripts/suite-summary.sh", __DIR__)
+    assert {"3\n", 0} = System.cmd("/bin/bash", [script, log, "--count"], stderr_to_stdout: true)
+  end
+
+  defp isolated_signal_manager do
+    original = Process.whereis(:erl_signal_server)
+    {:ok, manager} = :gen_event.start()
+    :ok = :gen_event.add_handler(manager, :erl_signal_handler, [])
+    Process.unregister(:erl_signal_server)
+    true = Process.register(manager, :erl_signal_server)
+
+    on_exit(fn ->
+      if Process.whereis(:erl_signal_server) == manager,
+        do: Process.unregister(:erl_signal_server)
+
+      if Process.alive?(manager), do: :gen_event.stop(manager)
+
+      if is_pid(original) and Process.alive?(original),
+        do: Process.register(original, :erl_signal_server)
+    end)
+  end
+
+  defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
+end

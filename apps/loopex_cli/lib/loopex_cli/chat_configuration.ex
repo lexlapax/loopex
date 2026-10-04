@@ -17,8 +17,9 @@ defmodule LoopexCli.ChatConfiguration do
   Resume has a separate configuration preparation path using the capability
   holder's retained reads. New chat captures the physical workspace identity;
   resume requires that binding and checks every retained pending effect against
-  it. The selected registry policy must match a retained policy question, and
-  admitted model identities must have configured provider routes. These checks
+  it. The selected registry policy or independently captured harness policy
+  must match a retained policy question, and admitted model identities must
+  have configured provider routes. These checks
   resolve no credential or catalog entry. Activation and enabled delegation
   remain outer-host integration obligations.
   """
@@ -157,7 +158,7 @@ defmodule LoopexCli.ChatConfiguration do
   end
 
   defp resume_configuration(
-         %{selection: selection, flags: flags, resume_session_id: session},
+         %{selection: selection, flags: flags, resume_session_id: session} = invocation,
          activation
        )
        when is_map(flags) and is_binary(session) do
@@ -170,7 +171,7 @@ defmodule LoopexCli.ChatConfiguration do
              startup.admitted_workspace_refs
            ),
          :ok <-
-           pending_policy_binding(startup.pending_policy_identity, selection.profile["policy"]),
+           pending_policy_binding(startup.pending_policy_identity, invocation),
          :ok <- admitted_model_routes(startup.admitted_models, selection.profile["providers"]),
          %{"definitions" => definitions} <- retained.tool_selection,
          configuration when is_map(configuration) <- retained.configuration,
@@ -242,19 +243,23 @@ defmodule LoopexCli.ChatConfiguration do
         |> Map.put("/delegation/enabled", "committed")
         |> Map.put("/delegation/roles", "committed")
 
-      {:ok,
-       %{
-         selection:
-           selection
-           |> Map.put(:profile, profile)
-           |> Map.put(:configuration, configuration)
-           |> Map.put(:maintenance_model, maintenance)
-           |> Map.put(:origins, origins),
-         retained: retained,
-         startup: startup,
-         resume_session_id: session,
-         active_tools: Enum.map(definitions, & &1["tool_id"])
-       }}
+      prepared = %{
+        selection:
+          selection
+          |> Map.put(:profile, profile)
+          |> Map.put(:configuration, configuration)
+          |> Map.put(:maintenance_model, maintenance)
+          |> Map.put(:origins, origins),
+        retained: retained,
+        startup: startup,
+        resume_session_id: session,
+        active_tools: Enum.map(definitions, & &1["tool_id"])
+      }
+
+      case Map.fetch(invocation, :harness_fixture) do
+        {:ok, capture} -> LoopexCli.Policy.M7Fixture.bind(prepared, capture)
+        :error -> {:ok, prepared}
+      end
     else
       {:error, _} = error -> error
       _ -> {:error, :chat_resume_configuration_unavailable}
@@ -264,13 +269,21 @@ defmodule LoopexCli.ChatConfiguration do
   defp resume_configuration(_, _), do: {:error, :invalid_chat_resume_invocation}
 
   # Concept: a pending policy question continues under the same host identity.
-  # Technical depth: names select fixed trusted registry modules; they do not
-  # invent identities or adopt a retained policy. With no policy interaction,
+  # Technical depth: names select fixed trusted registry modules, or the
+  # harness supplies its independently pinned fixture capture. Neither path
+  # adopts a retained identity. With no policy interaction,
   # a newly selected policy remains the host's choice for subsequent work.
   defp pending_policy_binding(nil, _policy), do: :ok
 
-  defp pending_policy_binding(retained, policy) do
-    case Map.fetch(LoopexCli.AskOptions.policy_profiles(), policy) do
+  defp pending_policy_binding(retained, %{harness_fixture: capture}) do
+    if LoopexCli.Policy.M7Fixture.check(capture) == :ok and
+         retained == LoopexCli.Policy.M7Fixture.identity(capture),
+       do: :ok,
+       else: {:error, :chat_pending_policy_binding_conflict}
+  end
+
+  defp pending_policy_binding(retained, invocation) do
+    case Map.fetch(LoopexCli.AskOptions.policy_profiles(), invocation.selection.profile["policy"]) do
       {:ok, module} ->
         if retained == %{"id" => inspect(module), "revision" => "0.2.0"},
           do: :ok,
