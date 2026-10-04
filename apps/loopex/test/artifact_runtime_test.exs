@@ -1147,6 +1147,7 @@ defmodule Loopex.ArtifactRuntimeTest do
       Fixture.start(
         Keyword.merge(options,
           tools: [Fixture.tool_definition(), range["definition"]],
+          tool_progress_gate: self(),
           script: [
             %{
               text: "work",
@@ -1178,6 +1179,20 @@ defmodule Loopex.ArtifactRuntimeTest do
 
     assert {:accepted, "prompt"} =
              Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "go"})
+
+    # Concept: retention faults begin after the original tool has finished.
+    # Technical depth: the existing executor gate separates prerequisite
+    # scheduling from the unchanged retention/commit waits. Run and preparation
+    # deadlines stay captured by the owner; the real run-cutoff case is unchanged.
+    assert_receive {:tool_progress_emitted, _call_id, executor}, 5_000
+
+    refute Enum.any?(
+             Fixture.records(fixture, session),
+             &(&1.payload.kind == "executor_receipt_committed_v2")
+           )
+
+    refute_received {:artifact_put, _, _, _}
+    send(executor, :release)
 
     {fixture, session, attachment}
   end

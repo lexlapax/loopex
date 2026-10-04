@@ -1900,6 +1900,21 @@ full fast check of these bytes, provider lanes or closure matrix. Successful sta
 checkpoint emission, continuation/results, snapshots, complete runtime cleanup
 and real-provider evidence remain open. No complete T07 workflow is claimed.
 
+The full current-pair fast check of clean `14a54d1f` failed the artifact-abort
+fixture's 1,000-ms initial retention receive. Ten other suites passed; Core
+passed 1,216/1,217 with eight exclusions. A controlled held-predecessor probe
+shows that the old receive measured a permitted preceding executor callback,
+then proves original-bound retention and abort cleanup after its explicit
+release. The live fixture now uses that existing progress gate, its declared
+5,000-ms prerequisite allowance, and proves no receipt or artifact IO before
+release. Original retention/commit waits, exact DOWN assertions and actual
+1,000-ms run / 60,000-ms preparation cutoffs remain unchanged. The complete
+artifact file and four surrounding files pass 50 cases with one existing
+long-bound exclusion on both toolchains. This is focused fixture evidence;
+the failed candidate remains failed and the next committed candidate needs
+its own full integration check. Complete outputs and digests are indexed in
+the implementation checklist.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

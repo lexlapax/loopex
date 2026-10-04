@@ -325,6 +325,68 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Failed: the full current-pair fast check ran once from clean, pushed
+  `14a54d1f6cd18994bdbdf5f4a6fbbd495b5a94f6`. Ten application suites passed;
+  Core passed 1,216 of 1,217 with eight exclusions. The aggregate is 3,685
+  passed, one failed and 39 excluded, not PASS. The artifact-abort test at
+  `test/artifact_runtime_test.exs:184` did not receive its retention-worker
+  notification within the existing 1,000-ms allowance. Core finished after
+  238 seconds; the retained log's creation-to-final-write span is 926.020
+  seconds, not a separately captured command stopwatch. Complete failed output
+  is retained read-only at `/private/tmp/loopex-m7-14a54d1f-fast-check.log`,
+  SHA-256 `16f207a8d36d2b652488397092779e32a8c2e8ee674700f8c7dd315e4c7fcd07`.
+  This failed candidate will not be rerun into green.
+
+- Done: the artifact-retention live fixture now establishes its original
+  executor callback before beginning retention/commit waits. The existing
+  executor progress gate has its already-declared 5,000-ms prerequisite
+  allowance. Before releasing that exact worker, the fixture proves no executor
+  receipt or artifact IO exists. Its original 1,000-ms retention/commit waits,
+  exact retention-worker DOWN checks, 60,000-ms preparation cutoff and actual
+  1,000-ms run deadline stay unchanged. This separates prerequisite scheduling
+  from the cancellation/retention phase; no production contract or required
+  assertion is relaxed.
+
+  A bounded diagnostic comparison deliberately holds the permitted predecessor.
+  The original receive fails after 1,000 ms, while the explicit-release branch
+  reaches retention and proves the exact killed worker, cancelled terminal,
+  zero retained objects and no second model dispatch under the original waits.
+  The two-case probe ends nonzero: one expected diagnostic failure, one passing
+  comparison and eighteen filtered base-file cases. It is not an aggregate pass
+  or a replacement for the required file. The probe and complete output are
+  retained read-only:
+
+  | Retained reference | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-artifact-abort-prerequisite-probe_test.exs` | Controlled prerequisite diagnostic source | `bca2973f4194208de929cb9fd1572e9ff9420dbe4db64bff9c1c0fd7d7a6a196` |
+  | `/private/tmp/loopex-m7-artifact-abort-prerequisite-probe-current-v1.log` | FAIL as designed, 1/2 passed, eighteen excluded, 2.3 seconds; old receive fails under a held predecessor | `495b5aa3077a96ad1c45b2708dcc40831eaf89223e58015aa04d9495b38e5df4` |
+
+  The repaired complete artifact file and four surrounding capability,
+  admission, excerpt and reference files pass 50 cases with one existing
+  long-bound exclusion on both supported pairs, in 3.2 and 3.3 seconds.
+  Warning-free compilation, formatting, bootstrap/status, compiled documentation,
+  dependency direction and version checks pass. This closes one added T16 fixture
+  repair subtask. T01–T19 originals remain 54 done / 119 todo / 6 retired;
+  added subtasks become 208 done / 9 todo, including T16's 36 done / 1 todo.
+  The failed integration evidence remains failed and a new committed candidate
+  needs its own full check. No original item closes here.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-artifact-retention-barrier-focused-current-v1.log` | PASS, 50 cases, one excluded, 3.2 seconds | `7d339774d599636225e0f4d1b8e4fed87c9211e9f50f8e1c0d2937d470332ae2` |
+  | `/private/tmp/loopex-m7-artifact-retention-barrier-focused-floor-v1.log` | PASS, 50 cases, one excluded, 3.3 seconds | `baee44d88f8a66946d8b629a4c46bca700519665eb20f168ab51c49f2af1ef42` |
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-artifact-retention-barrier-static-current-v1.log` | PASS, compilation/format/bootstrap/docs/dependencies/version | `1a54d3c437d1b19203b3d1a198b4382f8afb6533981cdd8a5154c427884dd627` |
+
+  The final metadata bootstrap and compiled-documentation checks also pass;
+  this retained-output identity is appended after collecting that result.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-artifact-retention-barrier-docs-current-v1.log` | PASS, final metadata bootstrap/docs | `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8` |
+
 - Done: live standalone source preparation, provider dispatch and failed
   completion now follow the actual compact command through the shared maintenance
   worker, Control permit, provider guard and settlement path. The tagged command
@@ -8310,6 +8372,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Separate artifact-retention fixture prerequisites with the existing exact executor progress gate before the unchanged retention/commit waits; preserve original worker joins, source accounting, unknown-commit proofs and actual run/preparation cutoffs, retain the failed integration and controlled prerequisite comparison, and verify the complete artifact and surrounding files on both supported toolchains.
 
 - [x] Reject premature interaction expiry by rechecking the retained wall-clock cutoff and re-arming against the same instant; reproduce the owner-exit defect before the fix and strengthen the existing live deadline test without changing its real two-second bound, completion cutoff, single settlement/ending, replay or no-redispatch proof.
 
