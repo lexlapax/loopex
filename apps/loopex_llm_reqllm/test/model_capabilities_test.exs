@@ -69,12 +69,20 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilitiesTest do
                "thinking" => thinking
              }
 
+      {:ok, instructions} =
+        Instructions.capture(%{
+          "version" => "host.v1",
+          "base" => "Captured fixture instructions.",
+          "environment" => "",
+          "appendix" => ""
+        })
+
       declaration = %{
         "model" => model,
         "reasoning" => level,
         "configuration_version" => 1,
         "max_tokens" => 8192,
-        "instructions" => Instructions.legacy()
+        "instructions" => instructions
       }
 
       assert {:ok, configuration} =

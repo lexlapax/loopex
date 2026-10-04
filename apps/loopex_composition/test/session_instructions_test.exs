@@ -101,7 +101,12 @@ defmodule LoopexComposition.SessionInstructionsTest do
   test "the reference default is captured without file or ambient values", %{root: root} do
     assert {:ok, captured} = SessionInstructions.capture(root, "coding")
     assert captured["version"] == "loopex.reference.v1"
-    assert captured["base"] == Instructions.legacy()["base"]
+
+    assert captured["base"] ==
+             "You are a coding agent working in a real workspace. " <>
+               "Use the tools you are given to inspect and change files, and run commands " <>
+               "when you need to. Continue until the task is done, then stop."
+
     assert captured["appendix"] == ""
     assert map_size(captured) == 5
     assert {:ok, rendered} = Instructions.render(captured)

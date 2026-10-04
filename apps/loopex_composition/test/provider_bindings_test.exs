@@ -162,12 +162,20 @@ defmodule LoopexComposition.ProviderBindingsTest do
   end
 
   defp declaration(model, level) do
+    {:ok, instructions} =
+      Loopex.Runtime.Instructions.capture(%{
+        "version" => "host.v1",
+        "base" => "Captured fixture instructions.",
+        "environment" => "",
+        "appendix" => ""
+      })
+
     %{
       "model" => model,
       "reasoning" => level,
       "configuration_version" => 1,
       "max_tokens" => 8192,
-      "instructions" => Loopex.Runtime.Instructions.legacy()
+      "instructions" => instructions
     }
   end
 

@@ -464,11 +464,19 @@ defmodule Loopex.Runtime.SessionGenesisV3Test do
   end
 
   defp configuration do
+    {:ok, instructions} =
+      Instructions.capture(%{
+        "version" => "host.v1",
+        "base" => "Captured fixture instructions.",
+        "environment" => "",
+        "appendix" => ""
+      })
+
     %{
       "model" => "fixture:model.v1",
       "reasoning" => "default",
       "configuration_version" => 1,
-      "instructions" => Instructions.legacy(),
+      "instructions" => instructions,
       "max_tokens" => 1_024,
       "context_token_budget" => 8_192,
       "system_class_tokens" => 1_000,

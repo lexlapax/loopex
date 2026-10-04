@@ -18,16 +18,6 @@ defmodule Loopex.Runtime.Instructions do
 
   @input_keys Enum.sort(~w(version base environment appendix))
   @captured_keys Enum.sort(~w(version base environment appendix digest))
-  @legacy %{
-    "version" => "loopex.system.v1",
-    "base" =>
-      "You are a coding agent working in a real workspace. " <>
-        "Use the tools you are given to inspect and change files, and run commands " <>
-        "when you need to. Continue until the task is done, then stop.",
-    "environment" => "",
-    "appendix" => ""
-  }
-
   @typedoc """
   ## Concept
 
@@ -100,22 +90,6 @@ defmodule Loopex.Runtime.Instructions do
   @spec render(term()) :: {:ok, binary()} | {:error, :invalid_instructions}
   def render(captured) do
     with :ok <- validate(captured), do: {:ok, render_sections(captured)}
-  end
-
-  @doc """
-  ## Concept
-
-  The immutable compatibility instructions for legacy callers.
-
-  ## Technical depth
-
-  Version loopex.system.v1 preserves the complete pre-M7 system text. It supplies
-  no host environment facts and does not refresh already staged requests.
-  """
-  @spec legacy() :: captured()
-  def legacy do
-    {:ok, captured} = capture(@legacy)
-    captured
   end
 
   defp valid_sections?(input) do

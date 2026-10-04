@@ -107,12 +107,4 @@ defmodule Loopex.Runtime.InstructionsTest do
       assert Instructions.render(changed) == {:error, :invalid_instructions}
     end
   end
-
-  test "legacy fallback remains the complete historical system text" do
-    assert Instructions.render(Instructions.legacy()) ==
-             {:ok,
-              "loopex.system.v1: You are a coding agent working in a real workspace. " <>
-                "Use the tools you are given to inspect and change files, and run commands " <>
-                "when you need to. Continue until the task is done, then stop."}
-  end
 end

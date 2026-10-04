@@ -325,6 +325,44 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: remove Core's compiled instruction compatibility text and public
+  `Instructions.legacy/0`, the configuration-less request builder and its
+  duplicate source/message/sampling helpers. The coordinator uses the current
+  pure captured request constructor; reply reservation comes only from the
+  run's retained configuration and tool lookup uses immutable captured selection.
+  There is no substitution from current model options or runtime sampling.
+
+  Remaining provider, CLI, composition and pure genesis fixture callers capture
+  explicit host sections. The reference default remains in host composition;
+  its test pins literal text independently of Core and proves exact captured
+  digest/environment facts. Retire only the obsolete Core fallback-positive
+  case under the existing pre-1.0 disposition. Current instruction shape,
+  UTF-8, exact section limits, tampering, renderer bytes and current restart
+  proofs remain. ADR 0042's pair and embedding docs now describe the same
+  captured-only boundary and host-owned default.
+
+  Both supported pairs pass all 299 focused cases across four applications:
+  Core 257 in 34.6 current / 34.4 floor measured runner seconds, composition
+  22 in 9.8 / 10.6, provider mapping six in 8.6 / 6.1 and CLI configuration
+  fourteen in 3.2 / 6.8. Core covers ordinary effect loops, owner loss,
+  uncertain publication, configured requests, refusal/optional-intake order,
+  automatic/standalone maintenance and its provider authority. No paid provider
+  lane or long-bound/full integration pass is claimed. Eight complete outputs
+  and eleven immutable source copies are retained in
+  `/private/tmp/loopex-m7-captured-request-proof-inventory.tsv`, SHA-256
+  `d63d311fdfc56899b8868bcf939a23715bf1905030397c75ed7fd484a7e78f49`.
+  Handles `11413`, `7869` and `97448` are terminal and collected.
+  Formatting, warning-free compilation, documentation, status, dependency
+  direction, whitespace and the task reporter pass in 18.4 measured seconds.
+  Complete output is `/private/tmp/loopex-m7-captured-request-metadata-v1.log`,
+  SHA-256 `0a6beb72df9383535f616b33880ac075881fc007f5696790ad0b2dc4bdd10e6d`; handle `54778` is terminal and collected.
+
+  One bounded added T05 subtask closes. T01–T19 originals stay 70 done / 103 todo /
+  6 retired; added work is 247 done / 12 todo. Including T00, originals stay
+  70 / 109 / 7 and added work is 251 / 13. Configuration-less journal branches,
+  edge/transport fixtures, protocol /3 and /4 and the next full exact-candidate
+  check remain open. No maintainer decision is pending.
+
 - Done: remove superseded v2 genesis resolution/normalization and recovery
   admission. Core and effect-history queries require complete current v3;
   creation provenance validates version 3 only, and both shipped Stores derive
@@ -9961,6 +9999,7 @@ or check was relaxed.
 
 - [x] Migrate context-admission fixtures to valid captured current configuration, revision-4 receipts and refusal-v2; preserve first-failure order, exact fixed-point bytes, no optional work on required refusal, owner-loss/prepared abandonment, inherited budgets and replay-tampering baselines on both toolchains. Initial system overflow refuses at current creation before Control or Store rather than creating an invalid legacy session.
 - [x] Remove v2 genesis resolution/normalization and recovery admission, require current version-3 creation provenance in both Stores, and migrate pure genesis/resource/query fixtures while preserving exact byte ceilings, captured cleanup, no-default replay, command identity, immutable read cuts and physical Store conformance on both toolchains. Superseded genesis and provenance refuse; configuration-less request readers remain separate open work.
+- [x] Remove Core compiled legacy instructions and the separate configuration-less request builder, migrate every remaining instruction caller to explicit captures, and prove captured-only request/reservation/tool selection plus the host-owned literal default across Core, composition, provider and CLI on both toolchains. Superseded journal readers/writers remain separate open work.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow

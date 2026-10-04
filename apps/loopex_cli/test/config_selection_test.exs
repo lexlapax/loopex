@@ -34,7 +34,15 @@ defmodule LoopexCli.ConfigSelectionTest do
     loaded = load(fixture, profile)
     flags = parse(fixture, ["--model=anthropic:claude-fable-5-1", "--tools=none"])
     assert {:ok, selection} = ConfigSelection.compose(loaded, flags, fixture.invocation, nil)
-    instructions = Loopex.Runtime.Instructions.legacy()
+
+    {:ok, instructions} =
+      Loopex.Runtime.Instructions.capture(%{
+        "version" => "host.v1",
+        "base" => "Captured fixture instructions.",
+        "environment" => "",
+        "appendix" => ""
+      })
+
     assert {:ok, unconfigured} = ConfigSelection.resolve_session(selection, instructions, [])
     assert unconfigured.configuration["provider_mapping"]["continuation_required"]
     assert unconfigured.maintenance_model == nil
@@ -114,7 +122,15 @@ defmodule LoopexCli.ConfigSelectionTest do
       parse(fixture, ["--context-token-budget=9000", "--system-class-tokens=900", "--tools=none"])
 
     assert {:ok, selected} = ConfigSelection.compose(loaded, flags, fixture.invocation, nil)
-    instructions = Loopex.Runtime.Instructions.legacy()
+
+    {:ok, instructions} =
+      Loopex.Runtime.Instructions.capture(%{
+        "version" => "host.v1",
+        "base" => "Captured fixture instructions.",
+        "environment" => "",
+        "appendix" => ""
+      })
+
     assert {:ok, prepared} = ConfigSelection.resolve_session(selected, instructions, [])
     assert prepared.configuration["context_token_budget"] == 9000
     assert prepared.configuration["system_class_tokens"] == 900

@@ -18,8 +18,9 @@ Technical depth: [Host-composed instructions](0042-host-composed-instructions-te
 Technical depth: [Contract](0042-host-composed-instructions-technical.md#technical-adr-0042-decision).
 
 The host supplies exact instruction bytes as plain bounded data. Core owns
-staging, provenance, receipt and digest, not task prompt selection. It retains
-only the immutable legacy fallback for callers that supply no instructions.
+staging, provenance, receipt and digest, not task prompt selection. Core requires
+captured instructions in current session configuration. The reference host
+owns its compiled default text and captures it before creation.
 
 The block has base instructions, environment facts and an optional trusted
 appendix, in that order. Project files and skills keep their separate provenance
@@ -36,7 +37,7 @@ Commit exact bytes, version and digest with session configuration. Replace
 them only through ADR 0044's atomic settled `configure` command. An active run
 retains its configuration; restart never rereads a file to reconstruct it.
 Version the receipt so each instruction block is bound to that captured source;
-old receipt bytes retain their original validation contract.
+superseded receipt generations refuse under the current-only contract.
 A host may explicitly set the system-class ceiling to any positive value within the context budget.
 The strict admission rule remains observed tokens less than the ceiling.
 
@@ -54,10 +55,12 @@ trust decision; a filename alone never promotes project content.
 
 Technical depth: [Compatibility mechanics](0042-host-composed-instructions-technical.md#technical-adr-0042-compatibility).
 
-Missing legacy instructions use the existing fallback and 1,000-token ceiling.
-Already committed model requests are unchanged. New configuration records carry
-instructions; old readers must be checked against exact fixtures before any
-rollback claim. New projections can differ under ADR 0041.
+The [pre-1.0 maintainer disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+retires the Core instruction fallback and superseded request/receipt readers.
+Current genesis requires exact instruction captures; current staged requests
+remain immutable, and restart uses retained configuration without rereading
+files or substituting startup defaults. The reference host's omitted-instruction
+option selects its own captured default and 1,000-token system ceiling.
 
 ## Governance Record
 

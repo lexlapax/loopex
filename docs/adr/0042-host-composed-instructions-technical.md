@@ -22,15 +22,16 @@ sections. Core does no templating. Retain bytes/digest in configuration and
 record the version/digest in the context receipt. Unknown fields, oversize
 sections and a projected system class at or above the selected ceiling refuse
 creation/configure before its mutation commits. Count actual model-facing tool
-definitions in the system class. The ceiling defaults to 1,000 for legacy
-callers; an explicit positive host value cannot exceed the input context budget.
+definitions in the system class. The reference host captures its 1,000 default;
+Core requires a declared positive value within the input context budget.
 The full model-request record still must fit ADR 0017's byte bound.
 ADR 0043's refusal revision 2 validates the captured configurable ceiling;
-historical v1 failures still require exactly 1,000. A host override is explicit
-configuration and never silently applied to meet the reference target.
+superseded v1 failures refuse under the pre-1.0 current-only disposition.
+A host override is explicit configuration and never silently applied to meet
+the reference target.
 Ephemeral `start_session/1` and `run/2` accept the same `instructions` map and
 positive `system_class_tokens` as startup options under ADR 0044's combined
-closed inventory; omission keeps the fallback text and the 1,000 ceiling, and
+closed inventory; omission captures the reference host default and the 1,000 ceiling, and
 neither is a per-call option.
 
 M7 uses fresh context-provider receipt revision 4. Revision 3 already belongs to
@@ -43,7 +44,7 @@ record-relative validation, subject to ADR 0043's maintenance-only resource
 dispositions and ADR 0044's continuation accounting below. Revision 4 adds
 ADR 0044's mandatory `continuation_cost` member to either outer shape, making
 seventeen or eighteen keys respectively. Change `provider_revision` to 4 and
-extend the closed source-reference union without removing earlier variants.
+use the closed current source-reference union.
 Host instructions use exactly `{kind: "host_instructions", version, digest}`,
 where version is the captured instruction identifier and digest is SHA-256 of
 the exact rendered instruction bytes. Bind both to the owning request's frozen
@@ -51,12 +52,11 @@ configuration. The descriptor remains `system` /
 `host_owned_trusted_brain_content`; its content digest/cost measures the full
 canonical system message, not just its text. ADR 0043 uses the same variant for
 captured maintenance instructions and adds its two conversation-source variants.
-This changes no trust class or grant. Preserve old receipt revisions 2 and 3 and
-their staged request validation; never relabel a legacy receipt as revision 4
-on replay. New variants are not valid under either old revision.
+This changes no trust class or grant. Superseded receipt revisions refuse;
+replay never relabels their bytes as revision 4.
 
-The reference default lives in the CLI host; reusable composition accepts
-explicit bytes or the fallback. Environment facts are captured at creation or
+The reference default lives in reusable host composition; Core accepts only
+captured bytes. Environment facts are captured at creation or
 explicit configuration, not regenerated on replay. The configuration transaction
 in ADR 0044 validates model, instructions, ceilings and immutable tool definitions
 together. Prompt-file paths do not enter the instruction record. Workspace and
@@ -80,8 +80,9 @@ refuses. No clock, ambient env values or credential references are included.
 Explicit instruction reconfiguration refreshes mutable host facts while keeping
 the immutable tool/catalog facts equal to the session binding.
 
-Legacy fallback text and request revisions are handled explicitly in decoder
-fixtures, without rewriting already staged requests.
+The [pre-1.0 disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+removes the Core fallback and superseded readers. Fixtures capture explicit
+host sections; the reference-default proof pins the host's literal text.
 
 <a id="technical-adr-0042-evidence"></a>
 ### Evidence
@@ -91,9 +92,9 @@ Concept: [Observable consequences](0042-host-composed-instructions.md#concept-ad
 - Exact staging and digest change for a one-byte edit; no project/skill promotion.
 - Unknown field, UTF-8, section and strict system-ceiling boundary negatives.
 - One atomic model/instruction update; active-run refusal and restart retention.
-- Legacy fallback test and immutable previously staged request vectors.
+- Exact captured host default and immutable current staged request vectors.
 - Revision-4 instruction source binding and record-relative receipt validation;
-  mismatched version/digest, unknown variants and relabelled legacy bytes refuse.
+  mismatched version/digest, unknown variants and superseded generations refuse.
 - Retain measurements for the default and each demonstrated opt-in tool set;
   before profile integration, retain exact instruction/tool/environment/catalog
   preimages and assert the reference target below 1,000. Before provider work,
@@ -110,7 +111,7 @@ Concept: [Observable consequences](0042-host-composed-instructions.md#concept-ad
 
 Concept: [Compatibility and rollback](0042-host-composed-instructions.md#concept-adr-0042-compatibility).
 
-Keep the fallback solely for compatibility. Per-model prompt selection,
-project discovery and templating stay out of core. Raising the host ceiling
+Remove the Core fallback; hosts own any compiled defaults they capture.
+Per-model prompt selection, project discovery and templating stay out of core. Raising the host ceiling
 changes a declared configuration, not the stored-request byte bound. M7 adds
 no new resource-admission authority.

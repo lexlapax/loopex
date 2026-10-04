@@ -886,7 +886,7 @@ Before activation, `prepared_session_configuration/1` lets the current unspent
 capability holder read the exact retained configuration, immutable tool selection,
 policy-defer mode and cleanup grace. Captured instruction bytes are available to
 this trusted host caller; ordinary status still exposes only their version and
-digest. Legacy v2 configuration and selection remain nil. The read changes no
+digest. Current genesis always retains complete captures. The read changes no
 session fact and schedules no work. Transferring the capability revokes the former
 holder's access; abandonment, activation, abort and supersession refuse later
 reads through the same holder and current-owner checks.

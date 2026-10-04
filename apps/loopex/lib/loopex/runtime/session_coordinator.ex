@@ -30,7 +30,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Interaction
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
-  alias Loopex.Runtime.Instructions
   alias Loopex.Runtime.SessionConfiguration
   alias Loopex.Runtime.ProviderLifetime
   alias Loopex.Runtime.ResourceContext
@@ -4876,71 +4875,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp model_candidate(state, staging, selected, project_receipt, resource_header) do
-    case SessionState.run_configuration(state.durable, staging.run_id) do
-      nil ->
-        legacy_model_candidate(state, staging, selected, project_receipt, resource_header)
-
-      _configuration ->
-        SessionState.reference_model_candidate(
-          state.durable,
-          staging,
-          selected,
-          project_receipt,
-          resource_header
-        )
-    end
-  end
-
-  defp legacy_model_candidate(state, staging, selected, project_receipt, resource_header) do
-    {blocks, sources} = Enum.unzip(selected)
-
-    with {:ok, entries, projection} <-
-           SessionState.projected_lineage(
-             state.durable,
-             staging.run_id,
-             Map.get(staging, :excerpt_allowance, 2_048),
-             staging.elements
-           ),
-         messages =
-           [%{"role" => "system", "content" => system_block(state, staging.run_id)}] ++
-             Enum.map(blocks, &%{"role" => "user", "content" => &1}) ++
-             Enum.map(entries, &elem(&1, 1)),
-         messages = messages ++ steer_message(staging.steer),
-         {:ok, continuation} <-
-           SessionState.model_continuation(
-             state.durable,
-             staging.run_id,
-             messages,
-             staging.steer && staging.steer.command_id,
-             projection
-           ),
-         {:ok, request} <-
-           Model.request(
-             request_model(state, staging.run_id),
-             messages,
-             continuation: continuation,
-             tools: request_tools(state, staging.run_id),
-             sampling: request_sampling(state, staging),
-             deadline: staging.deadline
-           ),
-         {:ok, receipt} <-
-           SessionState.reference_context_receipt(
-             request,
-             context_sources(
-               state,
-               sources,
-               entries,
-               staging.steer,
-               staging.run_id
-             ),
-             project_receipt,
-             SessionState.context_token_budget(state.durable, staging.run_id),
-             resource_header
-           ) do
-      {:ok, %{request: request, receipt: receipt, projection: projection}}
-    end
-  end
+  defp model_candidate(state, staging, selected, project_receipt, resource_header),
+    do:
+      SessionState.reference_model_candidate(
+        state.durable,
+        staging,
+        selected,
+        project_receipt,
+        resource_header
+      )
 
   defp commit_deadline_failure(state, run_id, category) do
     state = disarm_deadline(state, run_id)
@@ -5067,25 +5010,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Technical depth: the project sources are the ones the staged blocks actually
-  # carry, not the ones the receipt's resolution would imply. A required-only
-  # candidate measured under an eligible resolution keeps that resolution in its
-  # receipt while contributing no descriptor, and a source list derived from the
-  # receipt alone would describe a message the request does not contain.
-  defp context_sources(state, project_sources, session_entries, steer, run_id) do
-    reference =
-      case SessionState.run_configuration(state.durable, run_id) do
-        nil -> %{"kind" => "system", "identity" => "loopex.system.v1"}
-        configuration -> SessionConfiguration.instruction_source(configuration)
-      end
-
-    [source(reference, "system")] ++
-      project_sources ++
-      Enum.map(session_entries, fn {source_reference, _message} ->
-        source(source_reference, "session")
-      end) ++ steer_sources(steer, run_id)
-  end
-
   defp project_sources(%{
          "disposition" => "staged",
          "detail" => %{
@@ -5108,16 +5032,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp project_sources(_declined), do: []
-
-  defp steer_sources(nil, _run_id), do: []
-
-  defp steer_sources(%{command_id: command_id}, run_id),
-    do: [
-      source(
-        %{"kind" => "session_steer", "run_id" => run_id, "command_id" => command_id},
-        "session"
-      )
-    ]
 
   # Concept: a source reference is structured data, not a delimiter-joined
   # string.
@@ -5146,9 +5060,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
       "trust_class" => trust_class
     }
   end
-
-  defp steer_message(nil), do: []
-  defp steer_message(%{content: content}), do: [%{"role" => "user", "content" => content}]
 
   defp commit_terminal(state, run_id, outcome, detail) do
     state = disarm_deadline(state, run_id)
@@ -5197,7 +5108,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Concept: the output allowance every request declares.
   #
   # Technical depth: read from the runtime's declared sampling configuration, or
-  # from the model options where a host set one there. There is no fallback
+  # from the run's retained configuration. There is no fallback
   # invented here: if neither declares a bound the request is refused rather than
   # truncated at dispatch by a number no record names.
   # Concept: the run's absolute deadline, fixed by its first turn.
@@ -5242,19 +5153,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp declared_max_tokens(state, run_id) do
     case SessionState.run_configuration(state.durable, run_id) do
-      nil -> legacy_max_tokens(state)
+      nil -> {:error, :undeclared_sampling_bound}
       configuration -> {:ok, configuration["max_tokens"]}
-    end
-  end
-
-  defp legacy_max_tokens(state) do
-    configured =
-      Keyword.get(state.model.options, :max_tokens) ||
-        get_in(state.sampling, ["max_tokens"])
-
-    case configured do
-      max_tokens when is_integer(max_tokens) and max_tokens > 0 -> {:ok, max_tokens}
-      _absent -> {:error, :undeclared_sampling_bound}
     end
   end
 
@@ -5272,42 +5172,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: the versioned block that opens every conversation.
-  #
-  # Technical depth: carried inside the staged bytes and therefore covered by
-  # `staged_request_digest`, so a change to it is a visible change of what was
-  # dispatched rather than an invisible drift in how the model was instructed.
-  defp system_block(state, run_id) do
-    instructions =
-      case SessionState.run_configuration(state.durable, run_id) do
-        nil -> Instructions.legacy()
-        configuration -> configuration["instructions"]
-      end
-
-    {:ok, text} = Instructions.render(instructions)
-    text
-  end
-
-  defp request_model(state, run_id) do
-    case SessionState.run_configuration(state.durable, run_id) do
-      nil -> state.model.model
-      configuration -> configuration["model"]
-    end
-  end
-
-  defp request_tools(state, run_id) do
-    case SessionState.run_configuration(state.durable, run_id) do
-      nil -> state.active_tools
-      _configuration -> state.durable.tool_selection["definitions"]
-    end
-  end
-
-  defp request_sampling(state, staging) do
-    case SessionState.run_configuration(state.durable, staging.run_id) do
-      nil -> %{"max_tokens" => staging.max_tokens}
-      configuration -> SessionConfiguration.sampling(configuration)
-    end
-  end
+  defp request_tools(state, _run_id), do: state.durable.tool_selection["definitions"]
 
   # Concept: the operator's deadline is checked before a provider is called, not
   # only in the gaps between turns.
