@@ -757,6 +757,7 @@ defmodule Loopex.AgentLoopTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults: Fixture.creation_defaults(definitions),
         runtime_id: "progress-runtime-#{System.unique_integer([:positive])}",
         store: store,
         progress_to: self(),
@@ -1467,7 +1468,7 @@ defmodule Loopex.AgentLoopTest do
 
     staged =
       Fixture.records(restarted, session_id)
-      |> Enum.filter(&(&1.payload.kind == "model_request_committed"))
+      |> Enum.filter(&(&1.payload.kind == "model_request_committed_v2"))
 
     assert length(staged) == 2
 
@@ -1657,7 +1658,7 @@ defmodule Loopex.AgentLoopTest do
     committed =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed_v2"))
 
     assert length(committed) == length(dispatched)
 
@@ -1692,7 +1693,7 @@ defmodule Loopex.AgentLoopTest do
     [record] =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed_v2"))
 
     assert record.payload["request"]["tools"] == [definition]
   end
@@ -2057,7 +2058,7 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "prompt_admitted_v2",
+        "prompt_admitted_v3",
         self()
       )
 
@@ -2073,7 +2074,7 @@ defmodule Loopex.AgentLoopTest do
         send(parent, {:prompt_caller_finished, self(), result})
       end)
 
-    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v2",
+    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v3",
                     :session_journal_commit, {:committed, "prompt-1", _receipt}},
                    5_000
 
@@ -2110,8 +2111,8 @@ defmodule Loopex.AgentLoopTest do
     assert request.deadline <= System.system_time(:millisecond) + duration_ms
 
     records = Fixture.records(fixture, session_id)
-    admitted = Enum.find(records, &(&1.payload[:kind] == "prompt_admitted_v2"))
-    staged = Enum.find(records, &(&1.payload[:kind] == "model_request_committed"))
+    admitted = Enum.find(records, &(&1.payload[:kind] == "prompt_admitted_v3"))
+    staged = Enum.find(records, &(&1.payload[:kind] == "model_request_committed_v2"))
 
     assert admitted.payload["deadline_ms"] == duration_ms
     refute Map.has_key?(admitted.payload, "deadline")
@@ -2126,7 +2127,13 @@ defmodule Loopex.AgentLoopTest do
     _events = drain(attachment)
 
     [request] = AgentLoopTestModel.dispatched(fixture.model)
-    assert request.sampling == %{"max_tokens" => 512}
+
+    mapping =
+      Fixture.creation_defaults(fixture.definitions, max_tokens: 512)["initial_configuration"][
+        "provider_mapping"
+      ]
+
+    assert request.sampling == %{"max_tokens" => 512, "provider_mapping" => mapping}
     assert Loopex.Model.max_tokens(request) == 512
 
     # The declared value is inside the committed bytes, so it is covered by the
@@ -2134,16 +2141,15 @@ defmodule Loopex.AgentLoopTest do
     [record] =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed_v2"))
 
-    assert record.payload["request"]["sampling"] == %{"max_tokens" => 512}
+    assert record.payload["request"]["sampling"] == request.sampling
 
-    # And a prompt that declares no bounds at all is refused outright.
     {:ok, other} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "create-2")
     {:ok, other_attachment} = Loopex.attach(fixture.runtime, other, after_event_sequence: 0)
 
     # A prompt that names no bounds still commits declared values, taken from the
-    # runtime's configuration rather than invented at dispatch.
+    # session's captured configuration rather than invented at dispatch.
     assert {:accepted, "unbounded"} =
              Loopex.command(other_attachment, %{
                type: :prompt,
@@ -2181,9 +2187,9 @@ defmodule Loopex.AgentLoopTest do
     committed =
       fixture
       |> Fixture.records(elem(Fixture.run_ids(fixture), 0))
-      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed_v2"))
 
-    assert length(committed) <= 2
+    assert length(committed) == 1
   end
 
   test "the retry allowance a run has already spent is not handed back by a succession" do
@@ -2814,7 +2820,7 @@ defmodule Loopex.AgentLoopTest do
     assert retained_reply["delta_count"] == 2
     assert retained_reply["streamed"]
 
-    staged = Enum.find(records, &(&1.payload[:kind] == "model_request_committed"))
+    staged = Enum.find(records, &(&1.payload[:kind] == "model_request_committed_v2"))
 
     # ADR 0018 technical:203-207: the echoed request bytes are validated for
     # byte-for-byte equality and then omitted, so the committed request record
@@ -4044,6 +4050,7 @@ defmodule Loopex.AgentLoopTest do
       Loopex.start_link(
         [
           context_token_budget: 8_192,
+          session_creation_defaults: Fixture.creation_defaults(definitions, options),
           runtime_id: "answering-runtime-#{System.unique_integer([:positive])}",
           store: store,
           model: %{

@@ -47,6 +47,72 @@ defmodule Loopex.RuntimeCreationDefaultsTest do
     on_exit(fn -> join_stop(runtime.supervisor, fn -> Loopex.stop(runtime) end) end)
     assert captured(runtime) == nil
     assert captured(start!(fixture, nil, runtime_id: "nil")) == nil
+
+    assert Loopex.create_session(runtime, %{}, command_id: "unconfigured") ==
+             {:error, :invalid_session_creation}
+
+    assert Runtime.lookup_create_result(runtime, "unconfigured", %{}) == {:ok, :unexpected}
+    assert TestStore.inspect_state(fixture.store_pid).sessions == %{}
+  end
+
+  test "implicit create and lookup bind normalized metadata and the complete captured template",
+       fixture do
+    selected = defaults([])
+    runtime = start!(fixture, selected)
+    assert Runtime.lookup_create_result(runtime, "create", %{tenant: "one"}) == {:ok, :absent}
+    assert {:ok, session} = Loopex.create_session(runtime, %{tenant: "one"}, command_id: "create")
+
+    assert {:ok, ^session} =
+             Loopex.create_session(runtime, %{"tenant" => "one"}, command_id: "create")
+
+    assert Runtime.lookup_create_result(runtime, "create", %{tenant: "one"}) ==
+             {:ok, {:historical, session}}
+
+    assert Runtime.lookup_create_result(runtime, "create", %{tenant: "two"}) == {:ok, :conflict}
+    [first | _] = TestStore.inspect_state(fixture.store_pid).sessions[session].records
+
+    assert first.payload ==
+             Map.merge(selected, %{
+               :kind => "session_genesis_v3",
+               "options" => %{"tenant" => "one"}
+             })
+
+    join_stop(runtime.supervisor, fn -> Loopex.stop(runtime) end)
+    changed = defaults([], Captured.configuration("Changed current host defaults."))
+    next = start!(fixture, changed)
+    {:ok, %{control: control}} = Runtime.children(next)
+    assert :sys.get_state(control).sessions == %{}
+    assert Runtime.lookup_create_result(next, "create", %{tenant: "one"}) == {:ok, :conflict}
+
+    assert Runtime.lookup_create_result(next, "create", %{tenant: "one"}, first.payload) ==
+             {:ok, {:historical, session}}
+
+    assert {:ok, ^session} =
+             Loopex.create_session(next, %{tenant: "one"},
+               command_id: "create",
+               genesis: first.payload
+             )
+
+    assert :sys.get_state(control).sessions == %{}
+  end
+
+  test "explicit current genesis needs no defaults and superseded genesis cannot be written",
+       fixture do
+    runtime = start!(fixture, nil)
+    genesis = Captured.genesis([])
+    assert {:ok, _} = Loopex.create_session(runtime, %{}, command_id: "current", genesis: genesis)
+
+    old = %{
+      :kind => "session_genesis_v2",
+      "options" => %{},
+      "runtime_configuration" => %{"cleanup_grace_ms" => 5_000}
+    }
+
+    assert Loopex.create_session(runtime, %{}, command_id: "old", genesis: old) ==
+             {:error, :invalid_session_creation}
+
+    assert Runtime.lookup_create_result(runtime, "old", %{}, old) == {:ok, :unexpected}
+    assert map_size(TestStore.inspect_state(fixture.store_pid).sessions) == 1
   end
 
   test "the startup template has exactly four current plain settings", fixture do

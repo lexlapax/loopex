@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.RuntimeTest do
   use ExUnit.Case, async: false
@@ -12,10 +13,20 @@ defmodule Loopex.RuntimeTest do
     {store_b_pid, store_b} = M1RuntimeTestStore.start_store(label: "store-b")
 
     {:ok, runtime_a} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: "runtime-a", store: store_a)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: "runtime-a",
+        store: store_a,
+        session_creation_defaults: creation_defaults()
+      )
 
     {:ok, runtime_b} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: "runtime-b", store: store_b)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: "runtime-b",
+        store: store_b,
+        session_creation_defaults: creation_defaults()
+      )
 
     on_exit(fn -> stop_runtime(runtime_a) end)
     on_exit(fn -> stop_runtime(runtime_b) end)
@@ -71,7 +82,12 @@ defmodule Loopex.RuntimeTest do
     {store_pid, store} = M1RuntimeTestStore.start_store()
 
     {:ok, runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: "explicit-runtime", store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: "explicit-runtime",
+        store: store,
+        session_creation_defaults: creation_defaults()
+      )
 
     on_exit(fn -> Application.delete_env(:loopex, :runtime) end)
     on_exit(fn -> stop_runtime(runtime) end)
@@ -175,6 +191,9 @@ defmodule Loopex.RuntimeTest do
 
     eventually(fn -> Enum.all?(Map.values(replacements), &(not Process.alive?(&1))) end)
   end
+
+  defp creation_defaults,
+    do: Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"])
 
   defp eventually(assertion, attempts \\ 200)
 

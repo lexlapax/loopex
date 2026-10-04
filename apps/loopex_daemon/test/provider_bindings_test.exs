@@ -71,6 +71,22 @@ defmodule LoopexDaemon.ProviderBindingsTest do
     assert control.active_tools == []
     assert control.sampling == %{"max_tokens" => 2048}
     assert control.bounds.max_turns == 3
+    defaults = control.session_creation_defaults
+    assert defaults == state.options[:session_creation_defaults]
+
+    assert Enum.sort(Map.keys(defaults)) ==
+             ~w(initial_configuration policy_defer_mode runtime_configuration tool_selection)
+
+    assert defaults["initial_configuration"]["model"] == "openai:test"
+    assert defaults["initial_configuration"]["max_tokens"] == 2048
+
+    assert defaults["tool_selection"] == %{
+             "definitions" => [],
+             "names" => %{},
+             "artifact_read" => nil
+           }
+
+    assert defaults["runtime_configuration"] == %{"cleanup_grace_ms" => 5_000}
 
     assert {:ok, instructions} =
              Loopex.Runtime.MaintenanceConfiguration.capture_instructions(

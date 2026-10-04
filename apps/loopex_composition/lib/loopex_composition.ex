@@ -76,16 +76,23 @@ defmodule LoopexComposition do
   without their tools in the current host registry. Public attachment transfers
   and executor jobs share that process's capacity.
 
+  Before owned startup effects, composition captures reference instructions,
+  model capabilities, reply/context bounds and the selected tool generations
+  into one current session-creation template. Core retains that template for
+  implicit creation. A supplied captured template is validated and retained
+  without refreshing its instructions or model facts. Reopened sessions keep
+  their committed settings even when the new runtime uses different defaults.
+
   `:model` selects a hosted `provider:model` string; Ollama is refused by this
   credential-backed durable profile. `:bounds` accepts positive unsigned-64-bit
   `:max_turns`, `:token_budget` and `:deadline_ms` members. `:sampling` accepts
   exactly `%{"max_tokens" => n}` for 1 through 1,000,000. `:active_tools` accepts
   unique defined tool ids, including an empty list; omission keeps the four
-  coding tools active. Default policy identity retains revision `"0.2.0"` for
-  recovery compatibility; hosts may supply their own `:policy_identity`.
+  coding tools active. Default policy identity names revision `"0.2.0"`;
+  hosts may supply their own `:policy_identity`.
   Explicit `"loopex.ask"` adds the fixed interaction definition. The session
   owner handles its question through policy without an executor grant or job;
-  omission preserves the released tool registry and active selection.
+  omission leaves it outside the active selection.
 
   Optional `:maintenance_instructions` accepts the closed version/body map from
   ADR 0043. Validation precedes owned effects, and Core captures its exact bytes
@@ -234,8 +241,8 @@ defmodule LoopexComposition do
   # Technical depth: accepted ADR 0024 compares this identity when a recovered
   # owner resumes an interaction, so the runtime refuses a launch that names a
   # policy without one. This reference host names its own: the module an
-  # embedder chose, paired with the fixed 0.2.0 revision ADR 0039 requires for
-  # upgrade and rollback. A host-supplied identity takes precedence.
+  # embedder chose, paired with this host's fixed policy revision. A host-supplied
+  # identity takes precedence and governs current recovery checks.
   defp policy_identity(_options, nil), do: nil
 
   defp policy_identity(options, policy) do
@@ -251,17 +258,15 @@ defmodule LoopexComposition do
         Map.get(credential_plane, :excluded_env_names, [ReqLLM.credential_variable()])
     ]
 
-  # Concept: the reference stack ships a working context-admission ceiling, and
-  # an operator who names their own value gets exactly that value.
-  #
-  # Technical depth: ADR 0017 inserts 8,192 estimated tokens only when the host
-  # omits the option. This is a bounded reference policy, not a claim about
-  # Store safety or a selected model's context window, and it is a top-level
-  # Runtime option that never enters `:bounds`. An explicitly supplied
-  # malformed, non-positive, or above-uint64 value is refused by Runtime under
-  # its own name rather than silently replaced by this default.
+  # Concept: startup and new sessions use the same captured context capacity.
+  # Technical depth: host resolution retains authored ceilings or derives the
+  # input allowance from model facts. Core never substitutes its former generic
+  # default for that captured value; context capacity remains outside `:bounds`.
   defp context_token_budget(options),
-    do: [context_token_budget: Keyword.get(options, :context_token_budget, 8_192)]
+    do: [
+      context_token_budget:
+        options[:session_creation_defaults]["initial_configuration"]["context_token_budget"]
+    ]
 
   defp start_applications do
     Enum.find_value([:loopex, :loopex_store_local, :loopex_executor_local], :ok, fn app ->

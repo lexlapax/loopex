@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.SlowControl do
   @moduledoc false
@@ -258,7 +259,7 @@ defmodule Loopex.SessionLifecycleTest do
     assert genesis.journal_version == 1
     assert genesis.owner_epoch == 0
     assert genesis.owner_incarnation_id == nil
-    assert genesis.payload.kind == "session_genesis_v2"
+    assert genesis.payload.kind == "session_genesis_v3"
     assert genesis.payload["options"] == %{"workspace" => "one"}
     assert owner.journal_version == 2
     assert owner.payload.kind == "owner_advanced"
@@ -308,7 +309,7 @@ defmodule Loopex.SessionLifecycleTest do
       |> Map.fetch!("s_test_1")
 
     assert Enum.map(initial_session.records, & &1.payload.kind) == [
-             "session_genesis_v2",
+             "session_genesis_v3",
              "owner_advanced"
            ]
 
@@ -377,10 +378,10 @@ defmodule Loopex.SessionLifecycleTest do
       |> Map.fetch!(:records)
 
     assert Enum.map(records, & &1.payload.kind) == [
-             "session_genesis_v2",
+             "session_genesis_v3",
              "owner_advanced",
              "owner_advanced",
-             "prompt_admitted_v2"
+             "prompt_admitted_v3"
            ]
   end
 
@@ -543,7 +544,7 @@ defmodule Loopex.SessionLifecycleTest do
     assert Enum.count(session.events, &(&1.kind == "run.started")) == 0
     assert Enum.count(session.events, &(&1.kind == "run.finished")) == 1
     assert Enum.count(session.records, &(&1.payload.kind == "command_admitted")) == 2
-    assert Enum.count(session.records, &(&1.payload.kind == "prompt_admitted_v2")) == 1
+    assert Enum.count(session.records, &(&1.payload.kind == "prompt_admitted_v3")) == 1
   end
 
   test "only one coordinator owns a session at a time after durable succession", fixture do
@@ -843,6 +844,8 @@ defmodule Loopex.SessionLifecycleTest do
     {:ok, restarted} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: fixture.runtime_id,
         store: fixture.store
       )
@@ -867,7 +870,13 @@ defmodule Loopex.SessionLifecycleTest do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: runtime_id)
 
     {:ok, runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: runtime_id,
+        store: store
+      )
 
     %{runtime: runtime, runtime_id: runtime_id, store: store, store_pid: store_pid}
   end

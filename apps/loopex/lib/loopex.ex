@@ -74,9 +74,9 @@ defmodule Loopex do
 
   ## Technical depth
 
-  Session options become the `options` member of the `session_genesis_v2`
-  payload of the Store's atomic runtime-control transaction; the runtime's
-  committed cleanup period becomes its `runtime_configuration`. The complete
+  Session options become the `options` member of the current v3 genesis,
+  joined to this runtime's host-captured `session_creation_defaults`. Omission
+  of those defaults refuses implicit creation before Store mutation. The complete
   canonical item is measured before the transaction, so an oversized
   configuration is `session_configuration_too_large` rather than an incidental
   Store error after session authority was acquired. Acknowledgement waits for
@@ -84,13 +84,13 @@ defmodule Loopex do
   re-presentation returns the retained session ID; changed canonical genesis
   conflicts.
 
-  An explicit `:genesis` option submits the host's complete prepared v2/v3
+  An explicit `:genesis` option submits the host's complete prepared v3
   genesis through the same exact-creation writer. Its normalized options must
   equal `session_options`; it supplies no runtime defaults. Creation identity
   binds the original options and exact genesis, and a duplicate is resolved
   before consulting current tool registrations or model routes. Present nil or
-  malformed genesis refuses rather than selecting legacy creation. Omission
-  retains the existing v2 path. The genesis is bounded plain data validated by
+  malformed or superseded genesis refuses. Omission uses the captured template,
+  without inferring model facts or instructions. The genesis is bounded plain data validated by
   `Loopex.Runtime.SessionGenesis`, never host handles or credentials.
   """
   @spec create_session(Runtime.t(), map(), keyword()) :: {:ok, binary()} | {:error, term()}

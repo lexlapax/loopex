@@ -251,6 +251,7 @@ defmodule LoopexDaemon.Service do
              step(state, :credential_plane_start_failed, fn state ->
                prepare_bindings(state, credential_supplied)
              end),
+           {:ok, state} <- step(state, :composition_start_failed, &prepare_creation_defaults/1),
            {:ok, state} <- step(state, :placement_lock_failed, &acquire_placement/1),
            {:ok, state} <- step(state, :credential_plane_start_failed, plane),
            {:ok, state} <- step(state, :composition_start_failed, &start_composition/1),
@@ -360,6 +361,23 @@ defmodule LoopexDaemon.Service do
       end
     else
       {:ok, state}
+    end
+  end
+
+  # Concept: creation configuration is fixed before placement or credential custody.
+  # Technical depth: the captured plain template passes through composition
+  # unchanged. Later startup never refreshes its catalog or instruction facts.
+  defp prepare_creation_defaults(state) do
+    with :ok <- DurableOptions.validate(state.options),
+         {:ok, defaults} <- DurableOptions.capture_defaults(state.options) do
+      options =
+        state.options
+        |> Keyword.put(:session_creation_defaults, defaults)
+        |> Keyword.put(:model, defaults["initial_configuration"]["model"])
+
+      {:ok, %{state | options: options}}
+    else
+      _ -> {:stop, {:fatal, :composition_start_failed}, state}
     end
   end
 
@@ -487,7 +505,8 @@ defmodule LoopexDaemon.Service do
         :sampling,
         :active_tools,
         :maintenance_instructions,
-        :maintenance_model
+        :maintenance_model,
+        :session_creation_defaults
       ])
       |> Keyword.put(:progress_to, {:session, self()})
       |> Keyword.merge(

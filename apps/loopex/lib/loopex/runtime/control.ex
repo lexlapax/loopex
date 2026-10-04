@@ -2270,22 +2270,21 @@ defmodule Loopex.Runtime.Control do
     |> Map.put(:log, [])
   end
 
-  # Concept: the session's committed cleanup period is written into the record
-  # that creates the session, and the complete record is measured before
-  # anything acquires authority over that session.
-  #
-  # Technical depth: ADR 0016 fixes `session_genesis_v2` with two closed key
-  # sets and a 65,536-byte ceiling on the complete canonical item. The
-  # measurement happens here, before `Store.create_session/3` and therefore
-  # before any owner is started, so an over-ceiling configuration receives its
-  # declared `session_configuration_too_large` refusal rather than an incidental
-  # Store error attributed to a session that already exists. The period is this
-  # runtime's option, which ADR 0016 makes a default for new sessions only:
-  # recovery reconstructs the committed value from this record instead.
-  defp create_session(state, command_id, session_options, from, mode, supplied_genesis \\ :legacy) do
+  # Concept: implicit creation binds metadata to the host's captured defaults.
+  # Technical depth: the complete current v3 record is validated and measured
+  # before Store mutation. Explicit genesis uses the same exact writer; absent
+  # defaults refuse rather than manufacturing settings or an older record.
+  defp create_session(
+         state,
+         command_id,
+         session_options,
+         from,
+         mode,
+         supplied_genesis \\ :runtime_defaults
+       ) do
     with true <- valid_identifier?(command_id),
          {:ok, genesis} <-
-           creation_genesis(session_options, state.cleanup_grace_ms, supplied_genesis),
+           creation_genesis(session_options, state.session_creation_defaults, supplied_genesis),
          {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis),
          {:ok, fresh?} <- create_command_absent?(state, command_id, transaction),
          :ok <- validate_fresh_selection(state, genesis, fresh?) do
@@ -2421,10 +2420,20 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  defp creation_genesis(options, grace, :legacy), do: session_genesis(options, grace)
+  defp creation_genesis(options, defaults, :runtime_defaults) when is_map(defaults) do
+    creation_genesis(
+      options,
+      defaults,
+      Map.merge(defaults, %{:kind => "session_genesis_v3", "options" => options})
+    )
+  end
 
-  defp creation_genesis(options, _grace, supplied) when is_map(options) do
+  defp creation_genesis(_options, _defaults, :runtime_defaults),
+    do: {:error, :invalid_session_creation}
+
+  defp creation_genesis(options, _defaults, supplied) when is_map(options) do
     with {:ok, genesis} <- SessionGenesis.normalize(supplied),
+         true <- genesis.kind == "session_genesis_v3",
          {:ok, normalized, _bytes} <-
            Store.normalize_and_measure_item(:record, %{
              "options" => options,
@@ -2438,14 +2447,13 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  defp creation_genesis(_options, _grace, _supplied), do: {:error, :invalid_session_creation}
+  defp creation_genesis(_options, _defaults, _supplied), do: {:error, :invalid_session_creation}
 
   # Concept: historical creation replays without reacquiring current selections.
   # Technical depth: only a proved fresh create checks the runtime's admitted
   # definitions and model route. The transaction binds complete captured genesis
   # and its normalized original options, never current cleanup defaults.
   defp validate_fresh_selection(_state, _genesis, false), do: :ok
-  defp validate_fresh_selection(_state, %{kind: "session_genesis_v2"}, true), do: :ok
 
   defp validate_fresh_selection(state, %{kind: "session_genesis_v3"} = genesis, true) do
     definitions = genesis["tool_selection"]["definitions"]
@@ -2507,10 +2515,15 @@ defmodule Loopex.Runtime.Control do
     }
   end
 
-  defp lookup_create_result(state, command_id, session_options, supplied_genesis \\ :legacy) do
+  defp lookup_create_result(
+         state,
+         command_id,
+         session_options,
+         supplied_genesis \\ :runtime_defaults
+       ) do
     with true <- valid_identifier?(command_id),
          {:ok, genesis} <-
-           creation_genesis(session_options, state.cleanup_grace_ms, supplied_genesis),
+           creation_genesis(session_options, state.session_creation_defaults, supplied_genesis),
          {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis) do
       command = create_command(state.runtime_id, command_id, transaction)
 
@@ -2534,57 +2547,6 @@ defmodule Loopex.Runtime.Control do
       _invalid -> :unexpected
     end
   end
-
-  @genesis_item_bytes 65_536
-  @uint64_max 18_446_744_073_709_551_615
-
-  # Technical depth: the period is checked again on the way into the genesis,
-  # because this is the last clause before `Store.create_session/3` and therefore
-  # the last place a value outside ADR 0016's `1..2^64-1` can be stopped from
-  # becoming durable. Replay enforces the same domain, so a record naming a
-  # larger period is a session that exists and can never be owned. The refusal is
-  # this path's own `invalid_session_creation`: the create is what is refused,
-  # and no new reason enters the public reply shape.
-  defp session_genesis(_session_options, cleanup_grace_ms)
-       when not (is_integer(cleanup_grace_ms) and cleanup_grace_ms > 0 and
-                   cleanup_grace_ms <= @uint64_max),
-       do: {:error, :invalid_session_creation}
-
-  defp session_genesis(session_options, cleanup_grace_ms) when is_map(session_options) do
-    genesis = %{
-      "options" => session_options,
-      "runtime_configuration" => %{"cleanup_grace_ms" => cleanup_grace_ms},
-      kind: "session_genesis_v2"
-    }
-
-    if canonical_item_bytes(genesis) <= @genesis_item_bytes do
-      case SessionGenesis.resolve(session_options, %{
-             genesis_version: "session_genesis_v2",
-             runtime_configuration: %{"cleanup_grace_ms" => cleanup_grace_ms}
-           }) do
-        {:error, :invalid_session_genesis} ->
-          # Concept: malformed legacy options keep their existing refusal.
-          # Technical depth: the old v2 path reported the pure Store traversal's
-          # invalid-item/structure result. Its closed genesis shape and grace
-          # were already checked here, so only options can cause this branch.
-          case Store.normalize_and_measure_item(:record, genesis) do
-            {:error, reason} -> {:error, reason}
-            _invalid -> {:error, :invalid_session_creation}
-          end
-
-        result ->
-          result
-      end
-    else
-      {:error, :session_configuration_too_large}
-    end
-  end
-
-  defp session_genesis(_session_options, _cleanup_grace_ms),
-    do: {:error, :invalid_session_creation}
-
-  defp canonical_item_bytes(item),
-    do: item |> :erlang.term_to_binary([:deterministic]) |> byte_size()
 
   defp start_owner(
          %{quiescing: quiescing} = state,

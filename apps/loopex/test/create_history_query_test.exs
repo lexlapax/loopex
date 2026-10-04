@@ -9,141 +9,126 @@ defmodule Loopex.CreateHistoryQueryTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.M5QueryFaultStore
   alias Loopex.Runtime
-  alias Loopex.Runtime.SessionGenesis
   alias Loopex.Store
   alias LoopexProtocol.ToolDefinition
 
-  test "retained v2 and v3 lookup survives changed defaults and unavailable current routes" do
-    for version <- [2, 3] do
-      fixture =
-        Loopex.AgentLoopFixture.start(
-          tools: [ToolDefinition.question_definition()],
-          cleanup_grace_ms: 1_500,
-          script: []
-        )
+  test "retained current genesis lookup survives changed defaults and unavailable current routes" do
+    fixture =
+      Loopex.AgentLoopFixture.start(
+        tools: [ToolDefinition.question_definition()],
+        cleanup_grace_ms: 1_500,
+        script: []
+      )
 
-      on_exit(fn -> Loopex.AgentLoopFixture.stop(fixture) end)
-      options = %{purpose: "retained"}
+    on_exit(fn -> Loopex.AgentLoopFixture.stop(fixture) end)
+    options = %{purpose: "retained"}
 
-      before_invalid_create = M1RuntimeTestStore.inspect_state(fixture.store)
+    before_invalid_create = M1RuntimeTestStore.inspect_state(fixture.store)
 
-      for invalid <- [:legacy, nil, [], "session_genesis_v2"] do
-        assert {:error, :invalid_session_creation} =
-                 Loopex.create_session(fixture.runtime, options,
-                   command_id: "invalid",
-                   genesis: invalid
-                 )
-      end
-
-      assert before_invalid_create == M1RuntimeTestStore.inspect_state(fixture.store)
-
-      genesis =
-        case version do
-          2 ->
-            {:ok, resolved} =
-              SessionGenesis.resolve(options, %{
-                genesis_version: "session_genesis_v2",
-                runtime_configuration: %{"cleanup_grace_ms" => 1_500}
-              })
-
-            resolved
-
-          3 ->
-            Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions)
-            |> Map.put("options", %{"purpose" => "retained"})
-            |> put_in(["runtime_configuration", "cleanup_grace_ms"], 1_500)
-        end
-
-      assert {:ok, session} =
-               Loopex.create_session(fixture.runtime, options,
-                 command_id: "exact",
-                 genesis: genesis
-               )
-
-      assert {:ok, ^session} =
-               Loopex.create_session(fixture.runtime, options,
-                 command_id: "exact",
-                 genesis: genesis
-               )
-
-      before_conflict = M1RuntimeTestStore.inspect_state(fixture.store)
-      changed = put_in(genesis, ["runtime_configuration", "cleanup_grace_ms"], 1_501)
-
-      assert {:error, :tx_id_conflict} =
-               Loopex.create_session(fixture.runtime, options,
-                 command_id: "exact",
-                 genesis: changed
-               )
-
+    for invalid <- [:legacy, nil, [], "session_genesis_v2"] do
       assert {:error, :invalid_session_creation} =
-               Loopex.create_session(fixture.runtime, %{},
-                 command_id: "mismatched",
-                 genesis: genesis
+               Loopex.create_session(fixture.runtime, options,
+                 command_id: "invalid",
+                 genesis: invalid
                )
-
-      assert {:error, :command_id_required} =
-               Loopex.create_session(fixture.runtime, options, genesis: genesis)
-
-      assert {:error, :invalid_session_creation} =
-               Loopex.create_session(fixture.runtime, options, ["not-keyword"])
-
-      assert before_conflict == M1RuntimeTestStore.inspect_state(fixture.store)
-
-      :ok = Loopex.stop(fixture.runtime)
-      {:ok, store} = Store.new(M1RuntimeTestStore, fixture.store)
-
-      # No selected tools or model route exist in this successor. Historical
-      # lookup must require neither fresh registration nor coordinator startup.
-      {:ok, successor} =
-        Loopex.start_link(
-          runtime_id: "agent-loop-runtime",
-          context_token_budget: 8_192,
-          cleanup_grace_ms: 3_000,
-          store: store
-        )
-
-      on_exit(fn -> stop_runtime(successor) end)
-      {:ok, %{sessions: supervisor}} = Runtime.children(successor)
-      assert DynamicSupervisor.which_children(supervisor) == []
-      before = M1RuntimeTestStore.inspect_state(fixture.store)
-
-      assert {:ok, {:historical, ^session}} =
-               Runtime.lookup_create_result(successor, "exact", options, genesis)
-
-      assert {:ok, {:historical, ^session}} =
-               Runtime.lookup_create_result(
-                 successor,
-                 "exact",
-                 %{"purpose" => "retained"},
-                 genesis
-               )
-
-      assert {:ok, :conflict} = Runtime.lookup_create_result(successor, "exact", options)
-      assert {:ok, :absent} = Runtime.lookup_create_result(successor, "missing", options, genesis)
-
-      altered = put_in(genesis, ["runtime_configuration", "cleanup_grace_ms"], 1_501)
-      assert {:ok, :conflict} = Runtime.lookup_create_result(successor, "exact", options, altered)
-
-      for invalid <- [
-            :legacy,
-            nil,
-            %{},
-            Map.put(genesis, "extra", true),
-            Map.delete(genesis, "options")
-          ] do
-        assert {:ok, :unexpected} =
-                 Runtime.lookup_create_result(successor, "exact", options, invalid)
-      end
-
-      for invalid <- [nil, %{"purpose" => "other"}, %{purpose: self()}] do
-        assert {:ok, :unexpected} =
-                 Runtime.lookup_create_result(successor, "exact", invalid, genesis)
-      end
-
-      assert {:ok, :unexpected} = Runtime.lookup_create_result(successor, "", options, genesis)
-      assert before == M1RuntimeTestStore.inspect_state(fixture.store)
-      assert DynamicSupervisor.which_children(supervisor) == []
     end
+
+    assert before_invalid_create == M1RuntimeTestStore.inspect_state(fixture.store)
+
+    genesis =
+      Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions)
+      |> Map.put("options", %{"purpose" => "retained"})
+      |> put_in(["runtime_configuration", "cleanup_grace_ms"], 1_500)
+
+    assert {:ok, session} =
+             Loopex.create_session(fixture.runtime, options,
+               command_id: "exact",
+               genesis: genesis
+             )
+
+    assert {:ok, ^session} =
+             Loopex.create_session(fixture.runtime, options,
+               command_id: "exact",
+               genesis: genesis
+             )
+
+    before_conflict = M1RuntimeTestStore.inspect_state(fixture.store)
+    changed = put_in(genesis, ["runtime_configuration", "cleanup_grace_ms"], 1_501)
+
+    assert {:error, :tx_id_conflict} =
+             Loopex.create_session(fixture.runtime, options,
+               command_id: "exact",
+               genesis: changed
+             )
+
+    assert {:error, :invalid_session_creation} =
+             Loopex.create_session(fixture.runtime, %{},
+               command_id: "mismatched",
+               genesis: genesis
+             )
+
+    assert {:error, :command_id_required} =
+             Loopex.create_session(fixture.runtime, options, genesis: genesis)
+
+    assert {:error, :invalid_session_creation} =
+             Loopex.create_session(fixture.runtime, options, ["not-keyword"])
+
+    assert before_conflict == M1RuntimeTestStore.inspect_state(fixture.store)
+
+    :ok = Loopex.stop(fixture.runtime)
+    {:ok, store} = Store.new(M1RuntimeTestStore, fixture.store)
+
+    # No selected tools or model route exist in this successor. Historical
+    # lookup must require neither fresh registration nor coordinator startup.
+    {:ok, successor} =
+      Loopex.start_link(
+        runtime_id: "agent-loop-runtime",
+        context_token_budget: 8_192,
+        cleanup_grace_ms: 3_000,
+        store: store
+      )
+
+    on_exit(fn -> stop_runtime(successor) end)
+    {:ok, %{sessions: supervisor}} = Runtime.children(successor)
+    assert DynamicSupervisor.which_children(supervisor) == []
+    before = M1RuntimeTestStore.inspect_state(fixture.store)
+
+    assert {:ok, {:historical, ^session}} =
+             Runtime.lookup_create_result(successor, "exact", options, genesis)
+
+    assert {:ok, {:historical, ^session}} =
+             Runtime.lookup_create_result(
+               successor,
+               "exact",
+               %{"purpose" => "retained"},
+               genesis
+             )
+
+    assert {:ok, :unexpected} = Runtime.lookup_create_result(successor, "exact", options)
+    assert {:ok, :absent} = Runtime.lookup_create_result(successor, "missing", options, genesis)
+
+    altered = put_in(genesis, ["runtime_configuration", "cleanup_grace_ms"], 1_501)
+    assert {:ok, :conflict} = Runtime.lookup_create_result(successor, "exact", options, altered)
+
+    for invalid <- [
+          :legacy,
+          nil,
+          %{},
+          Map.put(genesis, "extra", true),
+          Map.delete(genesis, "options")
+        ] do
+      assert {:ok, :unexpected} =
+               Runtime.lookup_create_result(successor, "exact", options, invalid)
+    end
+
+    for invalid <- [nil, %{"purpose" => "other"}, %{purpose: self()}] do
+      assert {:ok, :unexpected} =
+               Runtime.lookup_create_result(successor, "exact", invalid, genesis)
+    end
+
+    assert {:ok, :unexpected} = Runtime.lookup_create_result(successor, "", options, genesis)
+    assert before == M1RuntimeTestStore.inspect_state(fixture.store)
+    assert DynamicSupervisor.which_children(supervisor) == []
   end
 
   test "exact create history is returned without a write or coordinator start" do
@@ -193,7 +178,7 @@ defmodule Loopex.CreateHistoryQueryTest do
     assert {:ok, :conflict} = Runtime.lookup_create_result(runtime, "cross-kind", %{})
 
     assert {:ok, :conflict} =
-             Runtime.lookup_create_result(runtime, "cross-kind", %{}, v2_genesis())
+             Runtime.lookup_create_result(runtime, "cross-kind", %{}, current_genesis())
   end
 
   test "Store unavailability and malformed output remain domain results" do
@@ -206,7 +191,7 @@ defmodule Loopex.CreateHistoryQueryTest do
                Runtime.lookup_create_result(runtime, "create", %{})
 
       assert {:ok, :store_unavailable} =
-               Runtime.lookup_create_result(runtime, "create", %{}, v2_genesis())
+               Runtime.lookup_create_result(runtime, "create", %{}, current_genesis())
     end
   end
 
@@ -225,25 +210,22 @@ defmodule Loopex.CreateHistoryQueryTest do
     on_exit(fn -> stop_runtime(runtime) end)
 
     assert {:error, :runtime_unavailable} =
-             Runtime.lookup_create_result(runtime, "create", %{}, v2_genesis())
+             Runtime.lookup_create_result(runtime, "create", %{}, current_genesis())
 
     assert {:error, :runtime_unavailable} =
-             Runtime.lookup_create_result(nil, "create", %{}, v2_genesis())
+             Runtime.lookup_create_result(nil, "create", %{}, current_genesis())
   end
 
-  defp v2_genesis do
-    {:ok, genesis} =
-      SessionGenesis.resolve(%{}, %{
-        genesis_version: "session_genesis_v2",
-        runtime_configuration: %{"cleanup_grace_ms" => 5_000}
-      })
-
-    genesis
-  end
+  defp current_genesis, do: Loopex.ConfiguredGenesisFixture.genesis([])
 
   defp start_runtime!(runtime_id, store) do
     {:ok, runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: runtime_id,
+        store: store,
+        session_creation_defaults: Map.drop(current_genesis(), [:kind, "options"])
+      )
 
     runtime
   end

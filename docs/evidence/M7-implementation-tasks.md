@@ -325,6 +325,61 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: implicit create and lookup consume the approved runtime-local current-v3
+  template. Unconfigured implicit creation and superseded explicit genesis refuse
+  before Store mutation; the cleanup-only v2 writer is removed. Normalized
+  metadata and complete captured genesis retain exact command identity, changed
+  settings conflict, and historical replay starts no coordinator. Explicit exact
+  genesis remains usable without current runtime defaults.
+
+  Reference composition captures instructions, canonical model facts, reply and
+  context bounds, immutable selected tools and cleanup before owned startup
+  effects. All three constructors forward the same closed template. Daemon
+  startup captures it before placement/custody and forwards it unchanged;
+  maintenance selection stays at its existing composition boundary. Physical
+  Local Store reopen proves unchanged journal/head and no activation for exact
+  duplicates, changed-default conflict, original-genesis lookup and retained
+  prepared-resume settings. Runtime/embedding documentation now names this
+  current creation behavior.
+
+  Final focused groups pass on each supported pair: 31 runtime/genesis cases,
+  153 loop/configuration cases, 27 creation/lifecycle cases, 30 constructor,
+  physical Store recovery and composition-kernel cases, 52 daemon lifecycle
+  cases and 20 foreground host/policy cases. These are 313 focused cases per
+  pair, not a full integration check. Measured current/floor runner seconds are
+  respectively 1.9/1.7, 31.9/31.7, 22.7/22.5, 39.8/42.1, 160.0/158.2 and
+  9.8/9.2. All four execution handles `56199`, `56867`, `24649` and `61704`
+  are terminal and collected; no agent or maintainer decision is pending.
+
+  Nine failed outputs remain failed evidence. Corrections bind canonical model
+  aliases, test known-model reserve refusal separately from numeric grammar,
+  keep the reference system ceiling at 1,000, capture shared immutable model
+  facts once for all 384 constructor combinations within their original
+  60-second bound, check physical identity before fixture removal, and use actual
+  borrowed-plane admission for refusal witnesses. Core fixtures now declare
+  their scripted canonical-history renderer and exact cleanup/reply bounds;
+  assertions read current prompt/request records, retain exact request bytes
+  and require exactly one committed request for a provider retry. The removed
+  legacy-status witness now proves captured settings before dispatch. Daemon
+  capture no longer passes an already-resolved maintenance descriptor back to
+  its string resolver. Current recovery assertions remain intact.
+
+  Twenty-one complete output logs and seventeen final source identities are
+  retained in `/private/tmp/loopex-m7-central-creation-proof-inventory.tsv`,
+  SHA-256 `d1d1f2e1b5aab0272d2a324b7effe80aad099d65f8e99b041aa42c37ac8c6134`.
+  Formatting, warning-free compilation, documentation, status, dependency
+  direction, staged/unstaged whitespace and the task reporter pass in 16.4
+  measured seconds. Complete output is retained at
+  `/private/tmp/loopex-m7-central-creation-metadata-v1.log`, SHA-256
+  `4338300a33c9408abc28c879b5cf538345ee87f2d9ab3fd31f83a5d1d56ad2b7`;
+  handle `27031` is terminal and collected.
+  This closes one added T04 subtask. T01–T19 originals stay 70 done / 103 todo /
+  6 retired; added work is 243 done / 12 todo, including one newly explicit
+  remaining caller/reader migration. Including T00, originals stay 70 / 109 / 7
+  and added work is 247 / 13. Remaining Core callers and superseded decoders,
+  coordinated protocol /3 and /4 schemas/servers/clients, and the next full
+  exact-candidate check remain open. No original row or milestone closes.
+
 - Done: admit and retain the approved centralized captured creation template at
   Core startup through optional `session_creation_defaults`. Its exactly four
   string-key settings pass current v3 normalization and the complete genesis
@@ -9724,6 +9779,8 @@ or check was relaxed.
 
 - [x] Admit the approved centralized captured current-v3 creation defaults at Core startup, validate closed plain settings and exact model/tool bindings before children start, retain the template across Control restart and exclude it from informational configuration. Prove runtime isolation, malformed/credential-field refusal, exact oversized genesis and existing runtime/genesis cases on both supported toolchains. Implicit creation, v2 retirement and both transport hosts remain open.
 
+- [x] Consume captured defaults in implicit create/lookup, refuse unconfigured and superseded creation before Store mutation, remove the Core v2 writer, capture and forward the template through all three reference constructors and actual daemon startup, and prove physical Store reopen/resume and exact no-activation replay on both toolchains. Migrate shared loop and creation/lifecycle fixtures to current captures while preserving request-byte, command-binding, retry, ownership and cleanup proofs. Remaining callers/readers and coordinated wire generations stay open.
+
 ## T05 — Update records, protocols and independent clients
 
 ### Original checklist
@@ -9758,6 +9815,8 @@ or check was relaxed.
 - [x] Implement the approved closed checkpoint-owner schema, shared Elixir codec and independent Node decoder/vectors; project both actual owner kinds through foreground and daemon events using opaque identity bytes and refuse superseded aliases. Prove 36 literal cases and complete identity boundaries on both toolchains; complete generation-3/4 manifests, snapshots and live negotiated workflows remain open.
 
 - [x] Pin the accepted standalone compact-result schema and literal vectors, and implement an independent Node consumer; prove every closed failure branch, arbitrary exact usage, threshold/accounting relations, opaque checkpoint boundaries and unchanged legacy schema identities on both supported toolchains. Coordinated generation-3/4 contracts and live maintenance remain open.
+
+- [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove v2 genesis and old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate.
 
 ## T06 — Build the first complete chat workflow
 

@@ -264,14 +264,17 @@ They were explicitly approved by the maintainer on 2026-10-02.
 `create_session/3` and `resume_session/3` require a `:command_id`; an exact
 re-presentation returns the retained result, and changed content under the same
 identity conflicts. `create_session/3` optionally accepts `genesis: payload`,
-where payload is a complete normalized v2/v3 genesis prepared by
+where payload is a complete normalized current v3 genesis prepared by
 `Loopex.Runtime.SessionGenesis.resolve/2` or validated by `normalize/1`.
 Its normalized `options` must equal the submitted session options. The exact
 payload supplies the captured settings without re-expanding runtime defaults;
 its digest joins the original options in the command identity. A present nil
-or malformed genesis refuses before a create mutation. Omitting the option
-retains ordinary v2 creation. This public option was selected by the maintainer
-on 2026-10-02 and reuses the existing exact-genesis writer.
+or malformed or superseded genesis refuses before a create mutation. Omitting
+the option combines submitted options with the runtime's captured
+`session_creation_defaults`. An unconfigured runtime refuses implicit creation;
+Core manufactures no instructions or model facts. Explicit exact genesis
+remains available without runtime defaults. This follows the
+[centralized configuration decision](agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04).
 `command/2` accepts maps with `:type` and `:command_id`:
 `:prompt`, `:steer`, and `:follow_up` carry binary `:content`; `:abort` carries
 nothing else; `:interaction_answer`, `:admit_resources`, and `:activate_skill`

@@ -32,6 +32,9 @@ defmodule LoopexComposition.DurableOptions do
          :ok <- LoopexComposition.ResourcePacks.validate_launch_option(options),
          :ok <- LoopexComposition.WorkspaceIdentity.validate_manifest(options, workspace),
          {:ok, options} <- resolve(options),
+         {:ok, defaults} <- capture_defaults(options),
+         options = Keyword.put(options, :session_creation_defaults, defaults),
+         options = Keyword.put(options, :model, defaults["initial_configuration"]["model"]),
          do: {:ok, {options, root, workspace, id, policy}}
   end
 
@@ -39,34 +42,74 @@ defmodule LoopexComposition.DurableOptions do
   # Technical depth: adapter defaults and compiled definitions stay in composition;
   # the resulting plain genesis contains no credential reference or value.
   @doc false
+  def capture_defaults(options) do
+    case Keyword.fetch(options, :session_creation_defaults) do
+      {:ok, defaults} -> retained_defaults(defaults, options)
+      :error -> capture_new_defaults(options)
+    end
+  end
+
+  defp capture_new_defaults(options) do
+    with {:ok, genesis} <- capture_genesis(options, %{}) do
+      {:ok, Map.drop(genesis, [:kind, "options"])}
+    end
+  end
+
+  defp retained_defaults(defaults, options) when is_map(defaults) do
+    with true <-
+           Enum.sort(Map.keys(defaults)) ==
+             ~w(initial_configuration policy_defer_mode runtime_configuration tool_selection),
+         {:ok, genesis} <-
+           SessionGenesis.normalize(
+             Map.merge(defaults, %{:kind => "session_genesis_v3", "options" => %{}})
+           ),
+         true <-
+           genesis["initial_configuration"]["model"] ==
+             Keyword.get(options, :model, Loopex.LLM.ReqLLM.default_model()),
+         admitted = definitions(options),
+         true <- Enum.all?(genesis["tool_selection"]["definitions"], &(&1 in admitted)) do
+      {:ok, Map.drop(genesis, [:kind, "options"])}
+    else
+      _ -> {:error, :invalid_session_genesis}
+    end
+  end
+
+  defp retained_defaults(_, _), do: {:error, :invalid_session_genesis}
+
+  @doc false
   def capture_genesis(options, session_options) do
     model = Keyword.get(options, :model) || Loopex.LLM.ReqLLM.default_model()
     [provider, _] = String.split(model, ":", parts: 2)
-    ids = Keyword.fetch!(options, :active_tools)
+    ids = Keyword.get(options, :active_tools, @coding)
 
     definitions =
       Enum.filter(
-        Loopex.Executor.Local.CodingTools.definitions(),
+        definitions(options),
         &(&1["tool_id"] in ids)
       )
 
-    profile = Keyword.fetch!(options, :tool_profile)
+    profile = Keyword.get(options, :tool_profile, instruction_profile(ids))
 
-    bindings = %{
-      provider => %{"credential" => %{"env" => Loopex.LLM.ReqLLM.credential_variable()}}
-    }
+    bindings =
+      Keyword.get(options, :provider_bindings, %{
+        provider => %{"credential" => %{"env" => Loopex.LLM.ReqLLM.credential_variable()}}
+      })
 
     with {:ok, instructions} <-
            SessionInstructions.capture(Keyword.fetch!(options, :workspace), profile),
          {:ok, configuration} <-
            ProviderBindings.resolve_configuration(
-             %{
-               "model" => model,
-               "reasoning" => "default",
-               "configuration_version" => 1,
-               "instructions" => instructions,
-               "max_tokens" => 4096
-             },
+             Map.merge(
+               %{
+                 "model" => model,
+                 "reasoning" => "default",
+                 "configuration_version" => 1,
+                 "instructions" => instructions,
+                 "max_tokens" =>
+                   Keyword.get(options, :sampling, %{"max_tokens" => 4096})["max_tokens"]
+               },
+               declared_context(options)
+             ),
              bindings,
              definitions
            ),
@@ -81,7 +124,9 @@ defmodule LoopexComposition.DurableOptions do
            SessionGenesis.resolve(session_options, %{
              genesis_version: "session_genesis_v3",
              runtime_configuration: %{
-               "cleanup_grace_ms" => Loopex.Executor.default_cleanup_grace_ms()
+               "cleanup_grace_ms" =>
+                 Keyword.get(options, :cleanup_grace_ms) ||
+                   Loopex.Executor.default_cleanup_grace_ms()
              },
              initial_configuration: configuration,
              tool_selection: %{"definitions" => definitions, "names" => names},
@@ -91,6 +136,21 @@ defmodule LoopexComposition.DurableOptions do
     else
       _ -> {:error, :invalid_session_genesis}
     end
+  end
+
+  defp declared_context(options) do
+    case Keyword.fetch(options, :context_token_budget) do
+      {:ok, value} -> %{"context_token_budget" => value}
+      :error -> %{}
+    end
+  end
+
+  defp instruction_profile([]), do: "none"
+
+  defp instruction_profile(ids) do
+    if Enum.any?(ids, &(&1 in ~w(loopex.write loopex.edit loopex.bash))),
+      do: "coding",
+      else: "read-only"
   end
 
   # An assertion about the world is refused unless it was actually made, rather
@@ -194,7 +254,13 @@ defmodule LoopexComposition.DurableOptions do
     active = Keyword.get(options, :active_tools, @coding)
 
     [active_tools: active] ++
-      for key <- [:bounds, :sampling, :maintenance_instructions, :maintenance_model],
+      for key <- [
+            :bounds,
+            :sampling,
+            :maintenance_instructions,
+            :maintenance_model,
+            :session_creation_defaults
+          ],
           {:ok, value} <- [Keyword.fetch(options, key)],
           do: {key, value}
   end

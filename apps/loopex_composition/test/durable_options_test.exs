@@ -226,11 +226,17 @@ defmodule LoopexComposition.DurableOptionsTest do
   end
 
   test "all 128 active-id subsets retain their selection with current read and search" do
+    {:ok, seed} =
+      LoopexComposition.DurableOptions.capture_genesis(
+        [workspace: System.tmp_dir!(), active_tools: []],
+        %{}
+      )
+
     subsets = Enum.reduce(@ids, [[]], fn id, sets -> sets ++ Enum.map(sets, &[id | &1]) end)
     assert length(subsets) == 128
 
     for entry <- @entries, ids <- subsets do
-      options = capture(entry, active_tools: ids)
+      options = capture(entry, [active_tools: ids], {2_000, seed})
       assert options[:active_tools] == ids
       definitions = Enum.map(options[:tools], &{&1["tool_id"], &1["tool_version"]})
 
@@ -283,28 +289,75 @@ defmodule LoopexComposition.DurableOptionsTest do
       assert capture(entry, bounds: %{})[:bounds] == %{}
 
       for n <- [1, 1_000_000] do
-        assert capture(entry, sampling: %{"max_tokens" => n})[:sampling] == %{"max_tokens" => n}
+        assert capture(entry,
+                 model: "openai:unregistered-fixture",
+                 sampling: %{"max_tokens" => n}
+               )[:sampling] == %{"max_tokens" => n}
       end
     end
   end
 
-  test "default wiring pairs with the released tag and explicit identities win" do
-    {released, 0} =
-      System.cmd("git", ["show", "v0.2.0:apps/loopex_composition/lib/loopex_composition.ex"])
-
-    {version, 0} = System.cmd("git", ["show", "v0.2.0:VERSION"])
-    assert released =~ ~s|"revision" => Loopex.version()|
-    assert String.trim(version) == "0.2.0"
-
+  test "current host defaults bind the canonical model and explicit identities win" do
     for entry <- @entries do
       defaults = capture(entry, [])
-      assert defaults[:model].model == "anthropic:claude-haiku-4-5"
+      assert defaults[:model].model == "anthropic:claude-haiku-4-5-20251001"
+
+      assert defaults[:session_creation_defaults]["initial_configuration"]["model"] ==
+               defaults[:model].model
+
       assert defaults[:active_tools] == Enum.take(@ids, 4)
       refute Keyword.has_key?(defaults, :bounds)
       refute Keyword.has_key?(defaults, :sampling)
       assert defaults[:policy_identity] == %{"id" => inspect(Policy), "revision" => "0.2.0"}
       identity = %{"id" => "host", "revision" => "explicit"}
       assert capture(entry, policy_identity: identity)[:policy_identity] == identity
+    end
+  end
+
+  test "every constructor captures selected tools, authored limits and host instructions before startup" do
+    for entry <- @entries do
+      options =
+        capture(entry,
+          model: "openai:unregistered-fixture",
+          active_tools: ~w(loopex.read loopex.ask),
+          sampling: %{"max_tokens" => 512},
+          context_token_budget: 32_000,
+          cleanup_grace_ms: 137
+        )
+
+      template = options[:session_creation_defaults]
+      configuration = template["initial_configuration"]
+      assert configuration["model"] == options[:model].model
+      assert configuration["max_tokens"] == 512
+      assert configuration["context_token_budget"] == 32_000
+      assert configuration["budget_origins"]["context_token_budget"] == "explicit"
+      assert template["runtime_configuration"] == %{"cleanup_grace_ms" => 137}
+      assert template["policy_defer_mode"] == "admit"
+
+      assert Enum.map(template["tool_selection"]["definitions"], & &1["tool_id"]) ==
+               ~w(loopex.read loopex.ask)
+
+      environment = JSON.decode!(configuration["instructions"]["environment"])
+      assert environment["tool_profile"] == "read-only"
+      assert Path.type(environment["workspace"]) == :absolute
+
+      assert configuration["instructions"]["version"] == "loopex.reference.v1"
+
+      assert Enum.sort(Map.keys(template)) ==
+               ~w(initial_configuration policy_defer_mode runtime_configuration tool_selection)
+    end
+  end
+
+  test "known model limits refuse an oversized reply reserve before constructor effects" do
+    for entry <- @entries do
+      assert creation_refusal(entry, sampling: %{"max_tokens" => 1_000_000}) ==
+               {:error, :invalid_session_genesis}
+    end
+  end
+
+  test "a selected tool set that exceeds the reference system ceiling refuses before effects" do
+    for entry <- @entries do
+      assert creation_refusal(entry, active_tools: @ids) == {:error, :invalid_session_genesis}
     end
   end
 
@@ -334,7 +387,7 @@ defmodule LoopexComposition.DurableOptionsTest do
     end
   end
 
-  defp capture(entry, extra) do
+  defp capture(entry, extra, fixture_system_ceiling \\ nil) do
     Process.delete(@effect)
     test = self()
     marker = make_ref()
@@ -358,6 +411,11 @@ defmodule LoopexComposition.DurableOptionsTest do
           workspace: workspace,
           runtime_id: "durable-options"
         ]
+
+    options =
+      if fixture_system_ceiling,
+        do: fixture_template(options, fixture_system_ceiling),
+        else: options
 
     try do
       case entry do
@@ -401,6 +459,56 @@ defmodule LoopexComposition.DurableOptionsTest do
     end
   end
 
+  # Concept: tool-wiring cases supply an explicitly sufficient current host configuration.
+  # Technical depth: the complete selection exceeds the reference default's
+  # system ceiling. Capture a bounded fixture ceiling before startup; the
+  # separate refusal test retains that default's strict admission obligation.
+  defp fixture_template(options, {ceiling, seed}) do
+    alias Loopex.Runtime.{SessionGenesis, SessionConfiguration}
+    alias LoopexComposition.{DurableOptions, SessionInstructions}
+    alias LoopexProtocol.ToolDefinition
+    ids = Keyword.fetch!(options, :active_tools)
+    definitions = Enum.filter(DurableOptions.definitions(options), &(&1["tool_id"] in ids))
+
+    profile =
+      cond do
+        ids == [] -> "none"
+        Enum.any?(ids, &(&1 in ~w(loopex.write loopex.edit loopex.bash))) -> "coding"
+        true -> "read-only"
+      end
+
+    {:ok, instructions} = SessionInstructions.capture(options[:workspace], profile)
+
+    configuration =
+      seed["initial_configuration"]
+      |> Map.put("instructions", instructions)
+      |> Map.put("system_class_tokens", ceiling)
+      |> put_in(["budget_origins", "system_class_tokens"], "explicit")
+
+    assert SessionConfiguration.validate(configuration, definitions) == :ok
+
+    names =
+      Map.new(definitions, fn definition ->
+        {id, version, digest} = ToolDefinition.generation(definition)
+
+        {definition["name"],
+         %{"tool_id" => id, "tool_version" => version, "definition_digest" => digest}}
+      end)
+
+    {:ok, genesis} =
+      SessionGenesis.resolve(%{}, %{
+        genesis_version: "session_genesis_v3",
+        initial_configuration: configuration,
+        runtime_configuration: seed["runtime_configuration"],
+        policy_defer_mode: "admit",
+        tool_selection: %{"definitions" => definitions, "names" => names}
+      })
+
+    options
+    |> Keyword.put(:session_creation_defaults, Map.drop(genesis, [:kind, "options"]))
+    |> Keyword.put(:model, configuration["model"])
+  end
+
   defp assert_bounds(runtime, extra) do
     assert {:ok, configuration} = Loopex.Runtime.configuration(runtime)
     defaults = %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}
@@ -413,6 +521,17 @@ defmodule LoopexComposition.DurableOptionsTest do
              )
 
     assert :sys.get_state(children.control).maintenance_instructions == expected
+    control = :sys.get_state(children.control)
+
+    environment =
+      JSON.decode!(
+        control.session_creation_defaults["initial_configuration"]["instructions"]["environment"]
+      )
+
+    assert {:ok, reference} =
+             LoopexComposition.WorkspaceIdentity.reference(environment["workspace"])
+
+    assert control.executor.workspace_ref == reference
     refute Map.has_key?(configuration, :maintenance_instructions)
   end
 
@@ -441,6 +560,16 @@ defmodule LoopexComposition.DurableOptionsTest do
   defp stop_process(pid) do
     Process.unlink(pid)
     if Process.alive?(pid), do: GenServer.stop(pid)
+  end
+
+  defp creation_refusal(entry, extra) do
+    {plane, owned} = credential_plane()
+
+    try do
+      refusal(entry, [{:credential_plane, plane} | extra])
+    after
+      Enum.each(owned, &stop_process/1)
+    end
   end
 
   defp refusal(entry, extra) do

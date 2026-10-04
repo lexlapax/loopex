@@ -1544,14 +1544,27 @@ defmodule Loopex.ConfiguredSessionTest do
     assert finished.active_bounds == nil
   end
 
-  test "legacy status reports unresolved configuration without adopting host launch defaults" do
+  test "implicit creation reports captured configuration before any dispatch" do
     fixture = start(script: [], max_tokens: 3)
 
     assert {:ok, session} =
-             Loopex.create_session(fixture.runtime, %{}, command_id: "legacy-create")
+             Loopex.create_session(fixture.runtime, %{}, command_id: "captured-create")
 
     assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
-    assert status.configuration == nil
+
+    captured =
+      Fixture.creation_defaults(fixture.definitions, max_tokens: 3)["initial_configuration"]
+
+    assert status.configuration == %{
+             "configuration_version" => 1,
+             "model" => "scripted:v1",
+             "reasoning" => "default",
+             "max_tokens" => 3,
+             "context_token_budget" => 8_192,
+             "system_class_tokens" => 5_000,
+             "instructions" => Map.take(captured["instructions"], ["version", "digest"])
+           }
+
     assert AgentLoopTestModel.dispatched(fixture.model) == []
     assert Agent.get(fixture.executor, & &1.jobs) == []
   end

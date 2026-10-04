@@ -1,6 +1,7 @@
 _ = System.fetch_env!("LOOPEX_HOME")
 
 Code.require_file("agent_loop_adapters.exs", __DIR__)
+Code.require_file("configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.AgentLoopFixture do
   @moduledoc false
@@ -36,6 +37,31 @@ defmodule Loopex.AgentLoopFixture do
     Map.merge(
       %{max_turns: 8, token_budget: 1_000_000, deadline_ms: 600_000},
       overrides
+    )
+  end
+
+  # Concept: the scripted host declares the settings its adapter consumes.
+  # Technical depth: this adapter reads canonical typed history directly. Its
+  # captured renderer supports terminal tool history without provider-native
+  # continuation, and each session retains the declared reply and cleanup bounds.
+  def creation_defaults(definitions, options \\ []) do
+    model_id = Keyword.get(options, :model, "scripted:v1")
+
+    configuration =
+      Loopex.ConfiguredGenesisFixture.configuration()
+      |> Map.put("model", model_id)
+      |> Map.put("max_tokens", Keyword.get(options, :max_tokens, 256))
+      |> put_in(["model_capabilities", "model"], model_id)
+      |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
+      |> put_in(["provider_mapping", "mapping_revision"], "loopex.test.scripted.mapping.v1")
+      |> put_in(["provider_mapping", "renderer_revision"], "loopex.test.scripted.renderer.v1")
+      |> put_in(["provider_mapping", "canonical_terminal_tool_history"], true)
+
+    Loopex.ConfiguredGenesisFixture.genesis(definitions, configuration)
+    |> Map.drop([:kind, "options"])
+    |> put_in(
+      ["runtime_configuration", "cleanup_grace_ms"],
+      Keyword.get(options, :cleanup_grace_ms) || 5_000
     )
   end
 
@@ -79,6 +105,7 @@ defmodule Loopex.AgentLoopFixture do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults: creation_defaults(definitions, options),
         runtime_id: Keyword.get(options, :runtime_id, "agent-loop-runtime"),
         store: store,
         cleanup_grace_ms: Keyword.get(options, :cleanup_grace_ms),
