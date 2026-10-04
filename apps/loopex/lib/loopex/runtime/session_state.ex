@@ -621,14 +621,14 @@ defmodule Loopex.Runtime.SessionState do
 
   The requested anchor is either a non-negative durable cursor or `nil` for the
   Store tail observed by the scan. The accumulator retains only positions and
-  run, interaction and maintenance projections, never event pages.
+  run, interaction, maintenance and last-compact projections, never event pages.
   """
   @spec start_snapshot_scan(binary(), non_neg_integer() | nil) :: {:ok, map()} | {:error, term()}
   def start_snapshot_scan(session_id, requested_anchor)
       when is_binary(session_id) and
              (is_nil(requested_anchor) or
                 (is_integer(requested_anchor) and requested_anchor >= 0)) do
-    anchor_projection = if requested_anchor == 0, do: {:set, {nil, nil, nil}}, else: :pending
+    anchor_projection = if requested_anchor == 0, do: {:set, {nil, nil, nil, nil}}, else: :pending
 
     {:ok,
      %{
@@ -638,6 +638,7 @@ defmodule Loopex.Runtime.SessionState do
        active_run: nil,
        open_interaction: nil,
        active_maintenance: nil,
+       last_compact: nil,
        anchor_projection: anchor_projection
      }}
   end
@@ -684,7 +685,8 @@ defmodule Loopex.Runtime.SessionState do
              required(:snapshot) => map(),
              required(:tail) => non_neg_integer(),
              required(:open_interaction) => map() | nil,
-             required(:active_maintenance) => map() | nil
+             required(:active_maintenance) => map() | nil,
+             required(:last_compact) => map() | nil
            }}
           | {:error, term()}
   def finish_snapshot_scan(%{
@@ -694,6 +696,7 @@ defmodule Loopex.Runtime.SessionState do
         active_run: active_run,
         open_interaction: open_interaction,
         active_maintenance: active_maintenance,
+        last_compact: last_compact,
         anchor_projection: anchor_projection
       }) do
     case {requested_anchor, anchor_projection} do
@@ -703,17 +706,20 @@ defmodule Loopex.Runtime.SessionState do
            tail: tail,
            snapshot: public_snapshot(session_id, tail, active_run),
            open_interaction: open_interaction,
-           active_maintenance: active_maintenance
+           active_maintenance: active_maintenance,
+           last_compact: last_compact
          }}
 
-      {anchor, {:set, {anchor_active_run, anchor_interaction, anchor_maintenance}}}
+      {anchor,
+       {:set, {anchor_active_run, anchor_interaction, anchor_maintenance, anchor_compact}}}
       when anchor <= tail ->
         {:ok,
          %{
            tail: tail,
            snapshot: public_snapshot(session_id, anchor, anchor_active_run),
            open_interaction: anchor_interaction,
-           active_maintenance: anchor_maintenance
+           active_maintenance: anchor_maintenance,
+           last_compact: anchor_compact
          }}
 
       {_anchor, _projection} ->
@@ -7718,6 +7724,10 @@ defmodule Loopex.Runtime.SessionState do
          command_id = record["command_id"],
          %{} = binding <- state.commands[command_id],
          false <- Map.has_key?(binding, :result),
+         {:ok, _} <-
+           LoopexProtocol.Session.CompactResult.encode_completion(
+             Map.take(record, ~w(episode_id command_id result))
+           ),
          {:ok, state} <- complete_standalone_episode(state, record) do
       completed = Map.take(record, ~w(episode_id command_id result))
 
@@ -10274,10 +10284,18 @@ defmodule Loopex.Runtime.SessionState do
 
     with {:ok, active_run} <- advance_public_projection(scan.active_run, event, expected),
          {:ok, maintenance} <- advance_maintenance_projection(scan.active_maintenance, event),
-         :ok <- valid_public_maintenance_owner(maintenance, active_run, open_interaction) do
+         :ok <- valid_public_maintenance_owner(maintenance, active_run, open_interaction),
+         {:ok, last_compact} <-
+           advance_compact_projection(
+             scan.last_compact,
+             event,
+             maintenance,
+             active_run,
+             open_interaction
+           ) do
       anchor_projection =
         if scan.requested_anchor == expected,
-          do: {:set, {active_run, open_interaction, maintenance}},
+          do: {:set, {active_run, open_interaction, maintenance, last_compact}},
           else: scan.anchor_projection
 
       {:ok,
@@ -10287,6 +10305,7 @@ defmodule Loopex.Runtime.SessionState do
            active_run: active_run,
            open_interaction: open_interaction,
            active_maintenance: maintenance,
+           last_compact: last_compact,
            anchor_projection: anchor_projection
        }}
     end
@@ -10335,6 +10354,34 @@ defmodule Loopex.Runtime.SessionState do
 
   defp valid_public_maintenance_owner(_maintenance, _run, _interaction),
     do: {:error, :invalid_public_maintenance_transition}
+
+  # Concept: retain only the last completed compact command at this cursor.
+  # Technical depth: the result shares the closed event codec, including its
+  # actual episode/command identity and exact usage. Completion follows release
+  # of the maintenance view and cannot overlap a run or question. A repeated
+  # last command refuses without retaining a growing command-history index;
+  # recovery authenticates every row against the private owner's derived outbox.
+  defp advance_compact_projection(
+         current,
+         %{kind: "context.compaction_finished"} = event,
+         maintenance,
+         run,
+         interaction
+       ) do
+    payload = Map.drop(event, [:kind, :event_id, :event_sequence])
+
+    with {:ok, _} <- LoopexProtocol.Session.CompactResult.encode_completion(payload),
+         true <- is_nil(maintenance) and is_nil(run) and is_nil(interaction),
+         true <- is_nil(current) or current["command_id"] != payload["command_id"] do
+      {:ok, payload}
+    else
+      :error -> {:error, :invalid_public_compact_completion}
+      false -> {:error, :invalid_public_compact_transition}
+    end
+  end
+
+  defp advance_compact_projection(current, _event, _maintenance, _run, _interaction),
+    do: {:ok, current}
 
   # Concept: the question that is open at this point in history, if any.
   #

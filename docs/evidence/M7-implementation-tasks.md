@@ -325,6 +325,42 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: share the existing three-member compact completion across the serial
+  writer, both event transports and independent Node connection validators.
+  The shared result codec now encodes/decodes required opaque episode/command
+  identities beside the entire closed result union. A literal complete schema
+  and 160 vectors pin nested result definitions, privacy refusals and exact
+  quantities. Both outer identity ceilings receive full-byte boundary checks.
+  The existing paged scan retains just the latest completion at the requested
+  cursor, preserving the previous result during a new episode. Duplicate last
+  completions and completion overlapping maintenance, runs or questions refuse.
+  Public snapshot publication and generation-3/4 negotiation remain open.
+
+  Owner/recovery/cursor tests pass 190 cases on each supported pair in 14.0
+  seconds. The complete protocol suite, including all seven independent Node
+  cases, passes 114 on each pair in 0.3 seconds. Foreground projection passes
+  10 on each pair in 0.5 seconds; daemon projection passes 5 on each pair in
+  0.04 seconds. Complete outputs and their SHA-256 digests are retained in
+  `/private/tmp/loopex-m7-compact-completion-proof-inventory.tsv`, SHA-256
+  `fd01f3dcb6c0710c39d531cd316d9c671071c77439187ae16582c57e78bd9057`.
+  The inventory preserves both initial transport failures. Their new fixture
+  filter used boolean `not` on nil; an explicit nil test fixes the fixture
+  without changing production code or the refusal proof. An initial format
+  command also used repository-relative paths from an application directory
+  and failed before tests; the root-directory command corrected those paths.
+  This closes one bounded added T05 subtask. T01–T19 originals remain
+  56 done / 117 todo / 6 retired; added subtasks are 224 done / 10 todo.
+  A full integration check of the combined scan/completion source is pending.
+
+  Formatting, warning-free compilation, documentation, status and dependency
+  checks pass in `/private/tmp/loopex-m7-compact-completion-metadata-v2.log`,
+  SHA-256 `b0f3ae4c79903fca991bb806078178051bb9377fdb1441d4b967339b6139e9d9`.
+  The initial root formatting check found a new test's argument layout before
+  compilation; its failed output is retained at
+  `/private/tmp/loopex-m7-compact-completion-metadata-v1.log`, SHA-256
+  `f20e79810774b5151a9d6f3d26dc3a10b9ed6d5124c0a9090ff1813598150572`.
+  The corrected layout changes no assertion or bound.
+
 - Done within the open T05 snapshot join: the existing paged scan retains one
   maintenance view at its tail and one at the requested public cursor. Both
   actual owner kinds use the closed native codec. Duplicate unchanged rows,
@@ -8792,6 +8828,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Share the closed episode/command/result compact completion through the serial writer, both transport event projections and independent Node decoders; pin the complete nested schema and literal variants, and reduce one last completion at every paged cursor with exact identity/usage and private-field/overlap refusal on both supported pairs. Publishing last_compact in the coordinated public snapshot and live negotiated workflow proof remain open.
 
 - [x] Derive durable changed maintenance views in the shared serial reducer for proposal/recovery, with journal-position event identities, closed capture projection and no unchanged-stage/succession duplicates; join both transport projections and independent connection validators, prove privacy/tamper rejection and once-only admission/terminal views through all three Store fault phases on both supported pairs. Snapshot, manifest/negotiation and live independent workflow joins remain open.
 

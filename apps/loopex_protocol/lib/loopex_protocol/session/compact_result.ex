@@ -44,6 +44,44 @@ defmodule LoopexProtocol.Session.CompactResult do
   @spec decode_wire(term()) :: {:ok, map()} | :error
   def decode_wire(value), do: project(value, :decode)
 
+  @doc """
+  ## Concept
+
+  Encode the completed compact command for its event and last-result snapshot.
+
+  ## Technical depth
+
+  Require exactly episode_id, command_id and result. Both identities are
+  nonempty opaque binaries under the Wire ceiling. The result uses the same
+  closed completion codec as inspection; no run identity is manufactured.
+  """
+  @spec encode_completion(term()) :: {:ok, map()} | :error
+  def encode_completion(value), do: completion(value, :encode)
+
+  @doc """
+  ## Concept
+
+  Decode a completed compact command without losing its result or identity.
+
+  ## Technical depth
+
+  Reject unknown members, noncanonical or null identities and malformed nested
+  results. Decoding does not prove durable completion or grant authority.
+  """
+  @spec decode_completion(term()) :: {:ok, map()} | :error
+  def decode_completion(value), do: completion(value, :decode)
+
+  defp completion(value, mode) do
+    with true <- closed?(value, ~w(episode_id command_id result)),
+         {:ok, episode} when not is_nil(episode) <- identity(value["episode_id"], mode),
+         {:ok, command} when not is_nil(command) <- identity(value["command_id"], mode),
+         {:ok, result} <- project(value["result"], mode) do
+      {:ok, %{"episode_id" => episode, "command_id" => command, "result" => result}}
+    else
+      _ -> :error
+    end
+  end
+
   defp project(value, mode) do
     with true <- closed?(value, ~w(disposition checkpoint_id failure usage cleanup)),
          true <- value["disposition"] in ~w(checkpointed unchanged failed),

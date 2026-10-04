@@ -190,8 +190,8 @@ defmodule Loopex.AppServer.Delivery do
   # Concept: a durable event, with only the members its kind carries.
   #
   # Technical depth: the event's own identity and sequence move into the
-  # envelope. Maintenance views and checkpoint owners use their closed codecs; other
-  # data members keep the runtime's names and values.
+  # envelope. Maintenance views, compact completions and checkpoint owners use
+  # their closed codecs; other data members keep the runtime's names and values.
   defp event_record(session_id, event) do
     data = Map.drop(event, [:kind, :event_id, :event_sequence])
 
@@ -206,6 +206,10 @@ defmodule Loopex.AppServer.Delivery do
         "context.maintenance_changed" ->
           {:ok, view} = LoopexProtocol.Session.MaintenanceView.encode_wire(data)
           view
+
+        "context.compaction_finished" ->
+          {:ok, completion} = LoopexProtocol.Session.CompactResult.encode_completion(data)
+          completion
 
         _ ->
           data

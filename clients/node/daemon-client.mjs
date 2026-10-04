@@ -21,6 +21,7 @@ import net from "node:net";
 import { wire } from "./loopex-client.mjs";
 import { decodeCheckpointOwner } from "./checkpoint-owner.mjs";
 import { decodeMaintenanceView } from "./maintenance-view.mjs";
+import { decodeCompactCompletion } from "./compact-result.mjs";
 
 export const GENERATION = "loopex.experimental/2";
 
@@ -134,6 +135,8 @@ export class DaemonConnection {
            Object.hasOwn(record.event.data, "run_id"))) throw new Error("invalid checkpoint owner");
       if (record.event.kind === "context.maintenance_changed" &&
           decodeMaintenanceView(record.event.data) === null) throw new Error("invalid maintenance view");
+      if (record.event.kind === "context.compaction_finished" &&
+          decodeCompactCompletion(record.event.data) === null) throw new Error("invalid compact completion");
       this.#events.push(record.event);
       this.#release();
       return;

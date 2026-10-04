@@ -104,6 +104,36 @@ defmodule Loopex.AppServer.DeliveryTest do
     end
   end
 
+  test "completed compaction events preserve each closed result and refuse private data" do
+    path =
+      Path.join(:code.priv_dir(:loopex_protocol), "vectors/standalone-compact-completion.v1.json")
+
+    cases = JSON.decode!(File.read!(path))["cases"]
+
+    for vector <- cases, is_nil(vector["error"]) do
+      wire = vector["input"]
+      assert {:ok, native} = LoopexProtocol.Session.CompactResult.decode_completion(wire)
+
+      event =
+        Map.merge(native, %{
+          kind: "context.compaction_finished",
+          event_id: "finished",
+          event_sequence: 1
+        })
+
+      {[record], _} = Delivery.new("session", 0) |> Delivery.event(event) |> Delivery.take()
+      assert record["event"]["data"] == wire
+      assert {:ok, _} = LoopexProtocol.Frame.encode(record)
+
+      assert_raise MatchError, fn ->
+        Delivery.event(
+          Delivery.new("session", 0),
+          Map.put(event, "source", "PRIVATE_COMPLETION_CANARY")
+        )
+      end
+    end
+  end
+
   test "durable records are emitted ahead of progress" do
     [event | _rest] = committed_events()
 

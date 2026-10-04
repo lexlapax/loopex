@@ -10,6 +10,21 @@
 import { decodeContextFailure } from "./context-failure.mjs";
 
 const u64 = 18446744073709551615n;
+
+// Concept
+// Decode the same completed command used by events and the last-result view.
+// Technical depth
+// Both outer identities are required and opaque; the nested result retains its
+// closed failure/accounting union. No outer private or run member is admitted.
+export function decodeCompactCompletion(value) {
+  if (!closed(value, ["episode_id", "command_id", "result"])) return null;
+  const episode = identity(value.episode_id);
+  const command = identity(value.command_id);
+  const result = decodeCompactResult(value.result);
+  return episode === null || command === null || result === null ? null :
+    { episode_id: episode, command_id: command, result };
+}
+
 export function decodeCompactResult(value) {
   if (!closed(value, ["disposition", "checkpoint_id", "failure", "usage", "cleanup"])) return null;
   if (!["checkpointed", "unchanged", "failed"].includes(value.disposition) ||

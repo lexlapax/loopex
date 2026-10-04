@@ -22,6 +22,7 @@
 import { spawn } from "node:child_process";
 import { decodeCheckpointOwner } from "./checkpoint-owner.mjs";
 import { decodeMaintenanceView } from "./maintenance-view.mjs";
+import { decodeCompactCompletion } from "./compact-result.mjs";
 
 const GENERATION = "loopex.experimental/1";
 
@@ -168,6 +169,8 @@ export class Connection {
            Object.hasOwn(record.event.data, "run_id"))) throw new Error("invalid checkpoint owner");
       if (record.event.kind === "context.maintenance_changed" &&
           decodeMaintenanceView(record.event.data) === null) throw new Error("invalid maintenance view");
+      if (record.event.kind === "context.compaction_finished" &&
+          decodeCompactCompletion(record.event.data) === null) throw new Error("invalid compact completion");
       this.#events.push(record.event);
       this.#release();
       return;

@@ -267,8 +267,9 @@ defmodule LoopexDaemon.WireRecords do
 
   ## Technical depth
 
-  The event's identity and sequence move into the envelope. Maintenance views
-  and checkpoint owners use their closed codecs; other data keeps its native members.
+  The event's identity and sequence move into the envelope. Maintenance views,
+  compact completions and checkpoint owners use their closed codecs; other data
+  keeps its native members.
   """
   @spec event(binary(), map()) :: map()
   def event(session_id, event) when is_binary(session_id) and is_map(event) do
@@ -285,6 +286,10 @@ defmodule LoopexDaemon.WireRecords do
         "context.maintenance_changed" ->
           {:ok, view} = LoopexProtocol.Session.MaintenanceView.encode_wire(data)
           view
+
+        "context.compaction_finished" ->
+          {:ok, completion} = LoopexProtocol.Session.CompactResult.encode_completion(data)
+          completion
 
         _ ->
           data

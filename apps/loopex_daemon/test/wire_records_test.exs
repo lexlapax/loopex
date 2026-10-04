@@ -95,4 +95,31 @@ defmodule LoopexDaemon.WireRecordsTest do
       assert {:ok, _} = Frame.encode(record)
     end
   end
+
+  test "completed compaction events preserve each closed result and refuse private data" do
+    path =
+      Path.join(:code.priv_dir(:loopex_protocol), "vectors/standalone-compact-completion.v1.json")
+
+    cases = JSON.decode!(File.read!(path))["cases"]
+
+    for vector <- cases, is_nil(vector["error"]) do
+      wire = vector["input"]
+      assert {:ok, native} = LoopexProtocol.Session.CompactResult.decode_completion(wire)
+
+      event =
+        Map.merge(native, %{
+          kind: "context.compaction_finished",
+          event_id: "finished",
+          event_sequence: 1
+        })
+
+      record = WireRecords.event("session", event)
+      assert record["event"]["data"] == wire
+      assert {:ok, _} = Frame.encode(record)
+
+      assert_raise MatchError, fn ->
+        WireRecords.event("session", Map.put(event, "source", "PRIVATE_COMPLETION_CANARY"))
+      end
+    end
+  end
 end

@@ -46,7 +46,7 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
 
         assert Map.keys(scan) |> Enum.sort() ==
                  Enum.sort(
-                   ~w(session_id requested_anchor tail active_run open_interaction active_maintenance anchor_projection)a
+                   ~w(session_id requested_anchor tail active_run open_interaction active_maintenance last_compact anchor_projection)a
                  )
 
         refute Map.has_key?(scan, :events)
@@ -79,6 +79,79 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
     assert {:ok, at_tail} = events |> scan(nil, 2) |> SessionState.finish_snapshot_scan()
     assert at_tail.snapshot.active_run_phase == "started"
     assert at_tail.active_maintenance == admitted
+  end
+
+  test "last compact retains one exact result at every cursor through successive episodes" do
+    first = view("compact")
+
+    second = %{
+      first
+      | "episode_id" => <<1, 255>>,
+        "owner" => %{"kind" => "compact", "id" => <<2, 255>>}
+    }
+
+    first_completion = completion(first)
+    second_completion = completion(second)
+
+    events =
+      stamp([
+        change(first),
+        change(nil),
+        row("context.compaction_finished", first_completion),
+        change(second),
+        change(nil),
+        row("context.compaction_finished", second_completion)
+      ])
+
+    expected = [
+      nil,
+      nil,
+      nil,
+      first_completion,
+      first_completion,
+      first_completion,
+      second_completion
+    ]
+
+    for width <- 1..length(events), anchor <- 0..length(events) do
+      assert {:ok, result} = events |> scan(anchor, width) |> SessionState.finish_snapshot_scan()
+      assert result.last_compact == Enum.at(expected, anchor)
+      assert result.snapshot.event_sequence == anchor
+    end
+
+    assert {:ok, result} = events |> scan(nil, 1) |> SessionState.finish_snapshot_scan()
+    assert result.last_compact == second_completion
+    assert result.active_maintenance == nil
+  end
+
+  test "malformed, duplicate or overlapping compact completions refuse" do
+    compact = view("compact")
+    run = view("run")
+    complete = completion(compact)
+    finish = row("context.compaction_finished", complete)
+    {:ok, initial} = SessionState.start_snapshot_scan("session", nil)
+
+    for poisoned <- [
+          Map.put(complete, "private", "PRIVATE_LAST_COMPACT_CANARY"),
+          put_in(complete, ["result", "source"], "PRIVATE_LAST_COMPACT_CANARY"),
+          put_in(complete, ["result", "usage", "total_tokens"], 1),
+          Map.put(complete, "episode_id", nil)
+        ] do
+      assert {:error, :invalid_public_compact_completion} =
+               SessionState.scan_snapshot_page(
+                 initial,
+                 stamp([row("context.compaction_finished", poisoned)])
+               )
+    end
+
+    for events <- [
+          [finish, finish],
+          [change(compact), finish],
+          [row("user.message_appended", %{"run_id" => run["owner"]["id"]}), finish]
+        ] do
+      assert {:error, :invalid_public_compact_transition} =
+               SessionState.scan_snapshot_page(initial, stamp(events))
+    end
   end
 
   test "unbounded exact run quantities survive scanning without private additions" do
@@ -199,6 +272,25 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
 
   defp change(value), do: row("context.maintenance_changed", %{"active_maintenance" => value})
   defp row(kind, data), do: Map.put(data, :kind, kind)
+
+  defp completion(view) do
+    %{
+      "episode_id" => view["episode_id"],
+      "command_id" => view["owner"]["id"],
+      "result" => %{
+        "disposition" => "unchanged",
+        "checkpoint_id" => nil,
+        "failure" => nil,
+        "cleanup" => "confirmed",
+        "usage" => %{
+          "attempts" => 0,
+          "reported_tokens" => 0,
+          "estimated_tokens" => 0,
+          "total_tokens" => 0
+        }
+      }
+    }
+  end
 
   defp view(kind) do
     path = Path.join(:code.priv_dir(:loopex_protocol), "vectors/maintenance-view.v1.json")
