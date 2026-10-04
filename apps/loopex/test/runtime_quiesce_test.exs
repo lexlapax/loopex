@@ -1336,6 +1336,211 @@ defmodule Loopex.RuntimeQuiesceTest do
              )
   end
 
+  for mode <- [:expired_before_cancel, :held_until_cancel] do
+    @fence_start_mode mode
+    test "Control confirms #{@fence_start_mode} cleanup without a delivered fence startup notice" do
+      fixture = fixture("quiesce-late-fence-start-#{@fence_start_mode}")
+      session = create_session(fixture.runtime, "create-late-fence")
+      {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+      observer = self()
+
+      relay =
+        spawn_link(fn ->
+          Process.flag(:trap_exit, true)
+          hold_fence_start(control, observer, %{})
+        end)
+
+      children = Supervisor.which_children(fixture.runtime.supervisor)
+
+      children =
+        Enum.map(children, fn
+          {id, ^control, type, modules} -> {id, relay, type, modules}
+          entry -> entry
+        end)
+
+      root = spawn_link(fn -> quiesce_projection_root(children) end)
+
+      on_exit(fn ->
+        for pid <- [relay, root], Process.alive?(pid) do
+          monitor = Process.monitor(pid)
+          Process.exit(pid, :kill)
+          assert_receive {:DOWN, ^monitor, :process, ^pid, :killed}, 5_000
+        end
+      end)
+
+      started_at = System.monotonic_time(:millisecond)
+
+      task =
+        Task.async(fn ->
+          Quiesce.run(
+            root,
+            fixture.runtime.token,
+            fast_bounds(%{fence_budget_ms: 500, fence_reap_ms: 100})
+          )
+        end)
+
+      assert_receive {:held_fence_start, ^session, worker}, 5_000
+      worker_monitor = Process.monitor(worker)
+      before = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session]
+
+      reason =
+        if @fence_start_mode == :held_until_cancel do
+          assert true = :erlang.suspend_process(worker)
+          :killed
+        else
+          :normal
+        end
+
+      assert {:ok, result} = Task.await(task, 10_000)
+      assert result.fences == %{session => {:unknown, :no_head}}
+      assert result.unsettled == [session]
+      assert result.settled == []
+      assert_receive {:DOWN, ^worker_monitor, :process, ^worker, ^reason}, 1_000
+      elapsed_ms = System.monotonic_time(:millisecond) - started_at
+      assert elapsed_ms >= 400
+      assert elapsed_ms < 10_000
+      assert M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session] == before
+      assert :sys.get_state(control).quiesce_fences == %{}
+
+      for pid <- [relay, root] do
+        monitor = Process.monitor(pid)
+        send(pid, :stop)
+        assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 1_000
+      end
+    end
+  end
+
+  test "a cancellation with a foreign phase owner cannot acknowledge an existing fence" do
+    Process.flag(:trap_exit, true)
+    fixture = fixture("quiesce-foreign-fence-cancellation")
+    session = create_session(fixture.runtime, "create-foreign-fence")
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    drain = "foreign-cancel-drain"
+    {:ok, [_entry]} = Control.begin_quiesce(control, fixture.runtime.token, drain, 5_000)
+    operation = make_ref()
+    deadline = System.monotonic_time(:millisecond) + 5_000
+
+    :ok =
+      Control.start_quiesce_fence(
+        control,
+        fixture.runtime.token,
+        drain,
+        operation,
+        self(),
+        session,
+        deadline,
+        :known
+      )
+
+    assert_receive {:loopex_quiesce_fence_started, ^operation, ^session, worker}, 1_000
+    worker_monitor = Process.monitor(worker)
+    observer = self()
+
+    foreign =
+      spawn_link(fn ->
+        receive do
+          {:loopex_quiesce_fence_cancelled, ^operation} ->
+            send(observer, {:foreign_cancellation_ack, operation})
+            receive do: (:stop -> :ok)
+
+          :stop ->
+            :ok
+        end
+      end)
+
+    foreign_monitor = Process.monitor(foreign)
+
+    on_exit(fn ->
+      for pid <- [worker, foreign], Process.alive?(pid) do
+        monitor = Process.monitor(pid)
+        Process.exit(pid, :kill)
+        assert_receive {:DOWN, ^monitor, :process, ^pid, :killed}, 5_000
+      end
+    end)
+
+    :ok = Control.cancel_quiesce_fence(control, fixture.runtime.token, drain, operation, foreign)
+    refute_receive {:foreign_cancellation_ack, ^operation}, 100
+    assert Process.alive?(worker)
+    assert :sys.get_state(control).quiesce_fences[operation].phase_owner == self()
+    :ok = Control.cancel_quiesce_fence(control, fixture.runtime.token, drain, operation, self())
+    assert_receive {:loopex_quiesce_fence_cancelled, ^operation}, 1_000
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 1_000
+    send(foreign, :stop)
+    assert_receive {:DOWN, ^foreign_monitor, :process, ^foreign, :normal}, 1_000
+    assert :sys.get_state(control).quiesce_fences == %{}
+  end
+
+  # Concept: delay the private startup delivery while preserving real fence cleanup.
+  # Technical depth: every admission/projection and fence action delegates to the
+  # actual runtime Control. The relay keeps only private operation identities and
+  # forwards Control's actual DOWN-backed cleanup notice; no Store effect or
+  # provider is substituted. The root projects the original child inventory with
+  # this one transport delay, leaving session termination and Store truth real.
+  defp hold_fence_start(control, observer, owners) do
+    receive do
+      {:"$gen_call", from, request} ->
+        GenServer.reply(from, GenServer.call(control, request, 5_000))
+        hold_fence_start(control, observer, owners)
+
+      {:start_quiesce_fence, token, drain, operation, owner, session, deadline, resolution} ->
+        :ok =
+          Control.start_quiesce_fence(
+            control,
+            token,
+            drain,
+            operation,
+            self(),
+            session,
+            deadline,
+            resolution
+          )
+
+        hold_fence_start(control, observer, Map.put(owners, operation, owner))
+
+      {:loopex_quiesce_fence_started, _operation, session, pid} ->
+        send(observer, {:held_fence_start, session, pid})
+        hold_fence_start(control, observer, owners)
+
+      {:cancel_quiesce_fence, token, drain, operation, owner} ->
+        if owners[operation] == owner do
+          :ok = Control.cancel_quiesce_fence(control, token, drain, operation, self())
+        end
+
+        hold_fence_start(control, observer, owners)
+
+      message
+      when is_tuple(message) and
+             elem(message, 0) in [
+               :loopex_quiesce_fence_failed,
+               :loopex_quiesce_fence_cancelled,
+               :loopex_quiesce_fence_closed,
+               :loopex_quiesce_fence_refused
+             ] ->
+        if owner = owners[elem(message, 1)], do: send(owner, message)
+        hold_fence_start(control, observer, owners)
+
+      {:EXIT, ^observer, _reason} ->
+        exit(:shutdown)
+
+      :stop ->
+        :ok
+
+      _other ->
+        hold_fence_start(control, observer, owners)
+    end
+  end
+
+  defp quiesce_projection_root(children) do
+    receive do
+      {:"$gen_call", from, :which_children} ->
+        GenServer.reply(from, children)
+        quiesce_projection_root(children)
+
+      :stop ->
+        :ok
+    end
+  end
+
   defp fixture(runtime_id) do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: runtime_id)
 

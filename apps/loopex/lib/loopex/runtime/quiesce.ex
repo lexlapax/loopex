@@ -894,7 +894,7 @@ defmodule Loopex.Runtime.Quiesce do
           operations =
             operations
             |> ensure_cutoff_fence_result(operation_ref)
-            |> mark_fence_closed(operation_ref)
+            |> mark_fence_cancelled(operation_ref)
 
           await_fences(
             context,
@@ -1016,6 +1016,24 @@ defmodule Loopex.Runtime.Quiesce do
     case Map.get(operations, operation_ref) do
       nil -> operations
       operation -> Map.put(operations, operation_ref, %{operation | closed: true})
+    end
+  end
+
+  # Concept: Control's cancellation acknowledgement also closes an unannounced fence.
+  # Technical depth: Control acknowledges only after its worker monitor goes DOWN
+  # or the operation is absent. Without a startup notice, this owner has no PID
+  # or monitor to join. For an announced PID, retain the independent local DOWN
+  # requirement; neither a cutoff nor Control's acknowledgement replaces it.
+  defp mark_fence_cancelled(operations, operation_ref) do
+    case Map.get(operations, operation_ref) do
+      nil ->
+        operations
+
+      %{pid: nil} = operation ->
+        Map.put(operations, operation_ref, %{operation | closed: true, down: true})
+
+      operation ->
+        Map.put(operations, operation_ref, %{operation | closed: true})
     end
   end
 

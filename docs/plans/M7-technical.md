@@ -2058,3 +2058,22 @@ checkpoint snapshots remain open. The full current-pair check of the preceding
 shared-cutoff quiesce failure and 40 exclusions. That failure remains open;
 focused capacity proof does not replace full integration. Exact failed and
 passing outputs and digests are indexed in the task record.
+
+Quiesce now closes a cancelled fence whose startup notice has not arrived using
+Control's existing DOWN/absence-backed acknowledgement. Announced workers still
+require the phase owner's exact local monitor join. A transport-delay witness
+with real Control and real fence workers fails before the fix for both expiry
+and cancellation; both pairs now pass all 30 active quiesce cases. The unchanged
+63-reader production fence cutoff also passes on both pairs, in 126.1 and 126.0
+seconds. Captured deadlines, Store ownership and existing cleanup/population
+proofs remain unchanged. Complete outputs, failed evidence and exact source patch
+are indexed in the task record. The original full-run schedule was not traced;
+this proves a reachable cause of the same symptom. Combined full integration and
+the separate Task.Supervisor cleanup diagnostic remain open.
+
+Control's cancellation now also distinguishes actual absence from a registered
+fence with a foreign binding. A failing-before real-worker witness proves the
+former false acknowledgement; the retained owner still cancels and joins its
+worker. The final complete quiesce selection passes 31 active cases on each
+supported pair. Exact outputs and the final three-file source patch are retained
+in the task record; combined full integration remains the next step.

@@ -1481,6 +1481,9 @@ defmodule Loopex.Runtime.Control do
         {:cancel_quiesce_fence, token, drain_id, operation_ref, phase_owner},
         state
       ) do
+    # Concept: cancellation confirms cleanup only for the retained fence owner.
+    # Technical depth: absence can acknowledge a completed operation. A live
+    # operation with another binding is not absent and cannot acknowledge cleanup.
     case Map.get(state.quiesce_fences, operation_ref) do
       %{phase_owner: ^phase_owner, drain_id: ^drain_id, pid: pid} = fence
       when token == state.token ->
@@ -1488,11 +1491,14 @@ defmodule Loopex.Runtime.Control do
 
         {:noreply, put_in(state.quiesce_fences[operation_ref], %{fence | status: :cancelling})}
 
-      _other ->
+      nil ->
         if token == state.token and state.quiescing == drain_id do
           send(phase_owner, {:loopex_quiesce_fence_cancelled, operation_ref})
         end
 
+        {:noreply, state}
+
+      _foreign_fence ->
         {:noreply, state}
     end
   end

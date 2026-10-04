@@ -325,16 +325,17 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: investigate the shared-cutoff quiesce failure from the full
-  `520ff308328f9bf033abf87fce57f8b1e6dec254` integration check, then join the
-  current protocol/snapshot contracts. Standalone pre-dispatch capacity completion
+- Running: verify the combined standalone-capacity and quiesce startup-order
+  repair from the next clean committed integration candidate, then join the
+  current protocol/snapshot contracts. The full `520ff308` failure remains
+  recorded as FAIL; the reproduced private-handshake defect is repaired below. Standalone pre-dispatch capacity completion
   is implemented and passes the focused selection on both supported pairs.
   The separate concurrent owner-stop Task.Supervisor diagnostic remains open.
   The callback/discovery integration is complete at clean pushed
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  219 done / 9 todo. The goal remains active. The maintainer requested the
+  220 done / 9 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
   and the narrow reply-reserve preparation refusal, then approved the captured
   1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
@@ -344,6 +345,77 @@ did not resolve them. No paid provider calls were made during this check.
   implemented with focused proof below. Full protocol/snapshot integration
   remains open. The cleanup repair is committed
   and pushed at `052e0e01`.
+
+- Done: a quiesce cancellation confirmed by Control now closes a fence whose
+  startup notice has not arrived. Previously the phase owner waited for its own
+  DOWN even though it had no PID or monitor. Control's acknowledgement already
+  proves its worker DOWN or absence. Announced workers still require the phase
+  owner's independent exact monitor join. Deadlines, Store ownership, authority,
+  existing population tests and production bounds are unchanged.
+
+  The failing-before transport-delay witness uses actual Control, the original
+  runtime child inventory, real session termination and a real fence worker.
+  It delays only the private startup notice and forwards Control's actual
+  cleanup disposition. Both an expired worker and one suspended until cancellation
+  reproduced `runtime_unavailable`; all 28 existing active cases passed. Complete
+  failing output `/private/tmp/loopex-m7-quiesce-late-fence-start-before-v2.log`,
+  SHA-256 `1ed2221c998d6a43f5594f418d9bf53295de565ebb5cfa19e12a099d9284c213`.
+  The first post-fix current/floor outputs remain FAIL because the new fixture
+  compared Store state before the legitimate durable idle-abort admission.
+  The final fixture captures unchanged facts at the exact fence-start gate,
+  preserving all outcome, elapsed-cutoff and worker/relay/root join assertions.
+
+  Final complete-file current proof: 30 pass, four long-bound exclusions in
+  7.2 seconds, `/private/tmp/loopex-m7-quiesce-late-fence-start-current-v2.log`,
+  SHA-256 `23bdc93f6e4cd03b51fed0d5a29dec104b90d12aace1ce6e2ed29f2d7d4eea77`.
+  Floor proof: 30 pass, four exclusions in 6.9 seconds,
+  `/private/tmp/loopex-m7-quiesce-late-fence-start-floor-v2.log`, SHA-256
+  `5ea1f7ea81789a98356b90d79c221734ecf3cb7e59248be4001910b89b2afa71`.
+  The unchanged production-cutoff case separately passes on both pairs: 63 actual
+  blocked Store readers are reaped and the sibling completes within the original
+  elapsed/cutoff bounds. Current in 126.1 seconds,
+  `/private/tmp/loopex-m7-quiesce-production-fence-current-v1.log`, SHA-256
+  `dcd94e64f15124f1d0a4005a0b44b4ca34576a4fcc485bfc82124a253b5e6c63`;
+  floor in 126.0 seconds,
+  `/private/tmp/loopex-m7-quiesce-production-fence-floor-v1.log`, SHA-256
+  `d7c0001ea5f7f005442f6e1638a8067b6a703ab20cba67776a6d1ace20a7beb5`.
+  These focused long-bound cases do not replace the complete release lane.
+
+  Final binding review also reproduced an acknowledgement sent to a foreign
+  phase owner while the operation was still registered. Control now acknowledges
+  an absent operation only from its nil lookup; a live mismatched binding is
+  refused without acknowledgement or worker termination. The legitimate owner's
+  cancellation still joins the exact killed worker and empties the inventory.
+  Failing complete-file proof: 30 of 31 pass,
+  `/private/tmp/loopex-m7-quiesce-foreign-cancellation-before-v1.log`, SHA-256
+  `175a23d7398b0d4ae97b736f074d23009bbd3a1023dee33bcee171ef407dbe98`.
+  The final combined complete-file selection passes 31 active cases, four
+  long-bound exclusions, in 7.2 seconds on each pair. Current output:
+  `/private/tmp/loopex-m7-quiesce-ordering-current-v3.log`, SHA-256
+  `937c721cfafa2570cbe45434486d8654c5fded032b73263ae71bc2ea8dbe4574`;
+  floor output `/private/tmp/loopex-m7-quiesce-ordering-floor-v3.log`, SHA-256
+  `d33e337b1373b4346a2319c1b61ff5f049acbc70fbc519b6ff8342f9a3936295`.
+  The production-cutoff results above cover the preceding startup-order fix;
+  the later binding guard leaves that legitimate cancellation branch unchanged.
+  Full release/closure proof of the final candidate remains required.
+  Final warning-free compilation, formatting, status, compiled documentation
+  and dependency checks pass. Complete immutable output:
+  `/private/tmp/loopex-m7-quiesce-ordering-metadata-v2.log`, SHA-256
+  `c1df0005869b25ebe9304e954313fda5684d798417995a0365551c5e601f6026`.
+
+  Prior diagnostic passes did not resolve the integration failure. Runtime
+  tracing's first broad selection hit its existing rate ceiling. The two attempts
+  using twelve ExUnit cases/modules ran the inspected fence phases serially;
+  their names do not prove concurrent load. The task-owned twelve-runtime probe
+  used concurrent tasks and passed, but its diagnostic sink belonged to the parent
+  and its per-task retained trace files are empty. None proves the original
+  full-run failure's precise schedule. The controlled startup-order witness
+  establishes a reachable defect producing the same symptom, not a trace of
+  that historical failure. The next combined full integration run remains required.
+  All failed/passing diagnostic source, observations, redacted traces, final
+  proof and exact source patch are retained in
+  `/private/tmp/loopex-m7-quiesce-ordering-proof-inventory-v3.tsv`, SHA-256
+  `347e6e8af95751e52d43108977b1a7ebe44f746ed2a02ce6a223b817898b7db6`.
 
 - Done: standalone pre-dispatch capacity endings derive the captured attempt
   and token allowances without waiting for the command deadline. A useful partial
@@ -383,7 +455,8 @@ did not resolve them. No paid provider calls were made during this check.
   once. All eleven application suites completed: 3,718 passed, one failed,
   40 excluded. The failure is RuntimeQuiesceTest's sixty-three blocked fences
   sharing one cutoff while a sibling completes; `Quiesce.run/3` returned
-  `{:error, :runtime_unavailable}`. No cause has yet been established. Additional
+  `{:error, :runtime_unavailable}`. Its exact failed schedule was not traced;
+  the reachable startup-order defect and repair are recorded above. Additional
   focused current/floor VMs ran during part of this integration run; that fact
   does not establish resource contention as the cause. This candidate remains
   FAIL and must not be rerun or relabeled as passing. Complete immutable output:
@@ -8963,6 +9036,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Reproduce and repair quiesce cancellation closure when a fence startup notice has not arrived; accept only Control's DOWN/absence-backed acknowledgement for an unannounced worker, refuse a foreign binding without falsely acknowledging absence, retain independent exact local DOWN for announced workers, prove expired/suspended-worker cases before and after the fix, and verify the complete quiesce file plus the unchanged real production fence cutoff on both supported pairs. Keep combined full integration and the original untraced failure schedule distinct.
 
 - [ ] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
 
