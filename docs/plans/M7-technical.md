@@ -1915,6 +1915,14 @@ the failed candidate remains failed and the next committed candidate needs
 its own full integration check. Complete outputs and digests are indexed in
 the implementation checklist.
 
+The clean repaired candidate `6635cb490c978030b9b163fe40f347dbf9db19d4`
+then passed its single full current-pair fast check across all eleven
+applications: 3,686 tests passed, 39 expected exclusions, 924 reported check
+seconds and 923 independently captured shell seconds. Complete immutable output
+and SHA-256 are retained in the task checklist. The failed parent stays failed;
+this proof covers only that exact repaired implementation and does not replace
+the floor full check or release matrix required for closure.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

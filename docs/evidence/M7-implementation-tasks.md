@@ -325,6 +325,26 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the full current-pair fast check ran once from clean, pushed
+  `6635cb490c978030b9b163fe40f347dbf9db19d4` and passed all eleven application
+  suites: 3,686 tests passed and 39 expected exclusions. The check reports
+  924 seconds; its separately captured shell stopwatch reports 923 seconds.
+  The exact artifact-abort fixture that failed on the parent is included in
+  Core's 1,217 passing cases. Complete output is retained read-only at
+  `/private/tmp/loopex-m7-6635cb49-fast-check.log`, SHA-256
+  `e04a78fc6ec036b14fb837cbd67ed656463626cff115357a7c9ed741e73a4498`.
+  Execution handle `43022` is terminal and collected; do not poll or rerun it.
+  The failed `14a54d1f` run below remains failed. This current-pair integration
+  proof claims no floor full check, release matrix or milestone closure.
+  T01–T19 originals remain 54 done / 119 todo / 6 retired; added subtasks
+  become 209 done / 9 todo, including T16's 37 done / 1 todo. No original
+  item closes from this intermediate integration candidate.
+
+  The evidence-only update passes bootstrap/status and compiled-documentation
+  checks. Complete output is retained read-only at
+  `/private/tmp/loopex-m7-6635cb49-integration-evidence-docs-v1.log`, SHA-256
+  `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8`.
+
 - Failed: the full current-pair fast check ran once from clean, pushed
   `14a54d1f6cd18994bdbdf5f4a6fbbd495b5a94f6`. Ten application suites passed;
   Core passed 1,216 of 1,217 with eight exclusions. The aggregate is 3,685
@@ -8372,6 +8392,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Run the standalone-dispatch and artifact-retention repair integration candidate once from a clean committed checkout; retain its exact SHA, complete terminal output, both measured durations and SHA-256, while preserving the failed parent's evidence.
 
 - [x] Separate artifact-retention fixture prerequisites with the existing exact executor progress gate before the unchanged retention/commit waits; preserve original worker joins, source accounting, unknown-commit proofs and actual run/preparation cutoffs, retain the failed integration and controlled prerequisite comparison, and verify the complete artifact and surrounding files on both supported toolchains.
 
