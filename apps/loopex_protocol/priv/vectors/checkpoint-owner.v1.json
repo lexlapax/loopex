@@ -1,0 +1,298 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "checkpoint_owner",
+  "cases": [
+    {
+      "name": "run-00ff0a",
+      "input": {
+        "kind": "run",
+        "id": "AP8K"
+      },
+      "decoded": {
+        "kind": "run",
+        "id": {
+          "opaque_hex": "00ff0a"
+        }
+      }
+    },
+    {
+      "name": "run-636f6d70616374",
+      "input": {
+        "kind": "run",
+        "id": "Y29tcGFjdA"
+      },
+      "decoded": {
+        "kind": "run",
+        "id": {
+          "opaque_hex": "636f6d70616374"
+        }
+      }
+    },
+    {
+      "name": "compact-00ff0a",
+      "input": {
+        "kind": "compact",
+        "id": "AP8K"
+      },
+      "decoded": {
+        "kind": "compact",
+        "id": {
+          "opaque_hex": "00ff0a"
+        }
+      }
+    },
+    {
+      "name": "compact-636f6d70616374",
+      "input": {
+        "kind": "compact",
+        "id": "Y29tcGFjdA"
+      },
+      "decoded": {
+        "kind": "compact",
+        "id": {
+          "opaque_hex": "636f6d70616374"
+        }
+      }
+    },
+    {
+      "name": "refuse-1",
+      "input": null,
+      "error": true
+    },
+    {
+      "name": "refuse-2",
+      "input": [],
+      "error": true
+    },
+    {
+      "name": "refuse-3",
+      "input": {},
+      "error": true
+    },
+    {
+      "name": "refuse-4",
+      "input": "owner",
+      "error": true
+    },
+    {
+      "name": "refuse-5",
+      "input": 1,
+      "error": true
+    },
+    {
+      "name": "refuse-6",
+      "input": {
+        "kind": "run"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-7",
+      "input": {
+        "id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-8",
+      "input": {
+        "run_id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-9",
+      "input": {
+        "command_id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-10",
+      "input": {
+        "kind": "run",
+        "id": "AP8K",
+        "run_id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-11",
+      "input": {
+        "kind": "compact",
+        "id": "AP8K",
+        "command_id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-12",
+      "input": {
+        "kind": "compact",
+        "id": "AP8K",
+        "secret": "canary"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-13",
+      "input": {
+        "kind": null,
+        "id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-14",
+      "input": {
+        "kind": 1,
+        "id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-15",
+      "input": {
+        "kind": [],
+        "id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-16",
+      "input": {
+        "kind": {},
+        "id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-17",
+      "input": {
+        "kind": "unknown",
+        "id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-18",
+      "input": {
+        "kind": "Run",
+        "id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-19",
+      "input": {
+        "kind": "COMPACT",
+        "id": "AP8K"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-20",
+      "input": {
+        "kind": "run",
+        "id": null
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-21",
+      "input": {
+        "kind": "run",
+        "id": 1
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-22",
+      "input": {
+        "kind": "run",
+        "id": []
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-23",
+      "input": {
+        "kind": "run",
+        "id": {}
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-24",
+      "input": {
+        "kind": "run",
+        "id": ""
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-25",
+      "input": {
+        "kind": "run",
+        "id": "_x"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-26",
+      "input": {
+        "kind": "run",
+        "id": "_w="
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-27",
+      "input": {
+        "kind": "run",
+        "id": "_w=="
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-28",
+      "input": {
+        "kind": "run",
+        "id": "AP8K="
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-29",
+      "input": {
+        "kind": "run",
+        "id": "AP8K\n"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-30",
+      "input": {
+        "kind": "run",
+        "id": "+w"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-31",
+      "input": {
+        "kind": "run",
+        "id": "/w"
+      },
+      "error": true
+    },
+    {
+      "name": "refuse-32",
+      "input": {
+        "kind": "run",
+        "id": "a"
+      },
+      "error": true
+    }
+  ]
+}

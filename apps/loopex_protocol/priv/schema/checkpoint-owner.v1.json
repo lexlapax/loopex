@@ -1,0 +1,14 @@
+{
+  "contract": "checkpoint_owner",
+  "revision": 1,
+  "required": ["kind", "id"],
+  "additional_members": "refuse",
+  "kind": ["run", "compact"],
+  "id": {
+    "encoding": "unpadded_base64url_of_original_opaque_bytes",
+    "original_min_bytes": 1,
+    "original_max_bytes": 65536
+  },
+  "authority": "none; owning episode authenticates the binding",
+  "superseded_owning_run_id": "refuse"
+}

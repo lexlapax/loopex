@@ -1682,6 +1682,135 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
     assert state.deadlines == %{}
   end
 
+  test "standalone checkpoint authenticates its command and completes without a synthetic run" do
+    {state, history, events} = settled_checkpoint([String.duplicate("f", 8_000)])
+    original = state
+
+    assert {:ok, proposal} =
+             SessionState.propose_maintenance_checkpoint(state, 2_001, fn -> :ok end)
+
+    assert [record] = proposal.records
+    assert record.kind == "standalone_compaction_checkpoint_committed_v1"
+    assert record["command_id"] == "compact"
+    refute Map.has_key?(record, "run_id")
+    assert record["lineage"]["through_run_id"] == List.last(state.run_order)
+    assert record["covered_range"]["first_kept"] == nil
+    assert [event] = proposal.events
+    assert event["owner"] == %{"kind" => "compact", "id" => "compact"}
+    refute Map.has_key?(event, "run_id")
+    {checkpoint, checkpoint_history, checkpoint_events} = commit(state, proposal, history, events)
+
+    assert {:ok, ^checkpoint} =
+             SessionState.recover(state.session_id, checkpoint_history, checkpoint_events)
+
+    assert checkpoint.conversation == original.conversation
+    assert checkpoint.charged == original.charged
+    assert checkpoint.deadlines == %{}
+    assert checkpoint.active_run_id == nil
+    assert checkpoint.run_order == original.run_order
+
+    for owner <- [
+          %{"kind" => "run", "id" => "compact"},
+          %{"kind" => "compact", "id" => "different"},
+          %{"kind" => "compact", "id" => "compact", "run_id" => "alias"}
+        ] do
+      altered = List.update_at(checkpoint_events, -1, &Map.put(&1, "owner", owner))
+      assert {:error, _} = SessionState.recover(state.session_id, checkpoint_history, altered)
+    end
+
+    for mutation <- [
+          Map.put(record, "command_id", "different"),
+          Map.put(record, :kind, "compaction_checkpoint_committed_v1"),
+          Map.put(record, "run_id", List.last(state.run_order)),
+          put_in(record, ["lineage", "through_run_id"], "synthetic-run")
+        ] do
+      altered = List.update_at(checkpoint_history, -1, &%{&1 | payload: mutation})
+      assert {:error, _} = SessionState.recover(state.session_id, altered, checkpoint_events)
+    end
+
+    assert {:ok, completion} =
+             SessionState.propose_maintenance_checkpoint_completion(checkpoint, 2_002, fn ->
+               :ok
+             end)
+
+    assert [prefix, completed] = completion.records
+    assert prefix.kind == "maintenance_episode_terminal_v1"
+    assert completed.kind == "compact_command_completed_v1"
+    assert completed["result"]["disposition"] == "checkpointed"
+    assert completed["result"]["checkpoint_id"] == record["checkpoint_id"]
+
+    assert completed["result"]["usage"] ==
+             state.maintenance_episodes[state.active_maintenance]["usage"]
+
+    {next, final_history, final_events} =
+      commit(checkpoint, completion, checkpoint_history, checkpoint_events)
+
+    assert {:ok, ^next} = SessionState.recover(state.session_id, final_history, final_events)
+    assert next.pending_compact == nil
+    assert next.active_maintenance == nil
+    assert next.charged == original.charged
+    assert next.deadlines == %{}
+    assert next.conversation == original.conversation
+    assert next.commands["compact"].result == completed["result"]
+    assert List.last(final_events).kind == "context.compaction_finished"
+
+    assert {:error, _} =
+             SessionState.recover(state.session_id, Enum.drop(final_history, -1), final_events)
+  end
+
+  test "standalone abort and expiry after a committed checkpoint retain its usage and raw facts" do
+    for action <- [:abort, :deadline] do
+      {state, history, events} = settled_checkpoint([String.duplicate("f", 8_000)])
+      original = state
+      {:ok, checkpoint} = SessionState.propose_maintenance_checkpoint(state, 2_001, fn -> :ok end)
+      {state, history, events} = commit(state, checkpoint, history, events)
+      episode = state.maintenance_episodes[state.active_maintenance]
+
+      {state, history, events, failure, clock} =
+        if action == :abort do
+          {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "stop"})
+          {state, history, events} = commit(state, abort, history, events)
+          {state, history, events, %{"category" => "cancelled", "retryable" => false}, 2_002}
+        else
+          failure = %{
+            "category" => "bound_reached",
+            "retryable" => false,
+            "bound" => "deadline_ms",
+            "observed" => episode["deadline"],
+            "declared_limit" => episode["deadline"],
+            "accounting_source" => "reported"
+          }
+
+          {state, history, events, failure, episode["deadline"]}
+        end
+
+      assert {:ok, completion} =
+               SessionState.propose_standalone_compact_failure(state, failure, clock)
+
+      assert [prefix, completed] = completion.records
+      assert prefix.kind == "maintenance_episode_terminal_v1"
+      assert completed.kind == "compact_command_completed_v1"
+
+      assert completed["result"] == %{
+               "disposition" => "failed",
+               "checkpoint_id" => state.active_checkpoint,
+               "failure" => failure,
+               "usage" => episode["usage"],
+               "cleanup" => "confirmed"
+             }
+
+      {next, history, events} = commit(state, completion, history, events)
+      assert {:ok, ^next} = SessionState.recover(state.session_id, history, events)
+      assert next.active_checkpoint == state.active_checkpoint
+      assert next.active_maintenance == nil
+      assert next.pending_compact == nil
+      assert next.charged == original.charged
+      assert next.conversation == original.conversation
+      assert next.run_order == original.run_order
+      assert next.deadlines == original.deadlines
+    end
+  end
+
   test "standalone pending checkpoint uses hard ceilings after a source excerpt" do
     {state, _, _} =
       settled_checkpoint([String.duplicate("f", 8_000)],

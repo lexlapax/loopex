@@ -912,6 +912,111 @@ defmodule Loopex.EffectIntentsQueryTest do
     refute_received {:forbidden_store_call, _}
   end
 
+  test "standalone checkpoint and completion advance private coverage without owner acquisition",
+       context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    {history, events} = maintenance_history(session, :parent_turn_bound)
+    {:ok, state} = SessionState.recover(session, history, events)
+    before = state
+
+    {:ok, compact} =
+      SessionState.propose(state, %{
+        type: :compact,
+        command_id: "compact",
+        bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+      })
+
+    {state, history, events} = retain(state, compact, history, events)
+    configuration = state.configuration
+
+    selection = %{
+      "model" => configuration["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{
+        configuration["model_capabilities"]
+        | "reasoning_levels" => ["none"]
+      },
+      "provider_mapping" => %{configuration["provider_mapping"] | "thinking_disabled" => true}
+    }
+
+    {:ok, instructions} =
+      MaintenanceConfiguration.capture_instructions(%{
+        "version" => "summary.v1",
+        "body" => "Retain facts"
+      })
+
+    {:ok, admitted} =
+      SessionState.propose_standalone_maintenance_episode(
+        state,
+        selection,
+        instructions,
+        3_000,
+        fn -> :ok end
+      )
+
+    {state, history, events} = retain(state, admitted, history, events)
+
+    {:ok, request} =
+      SessionState.propose_selected_maintenance_request(state, 3_001, fn -> :ok end)
+
+    {state, history, events} = retain(state, request, history, events)
+    captured = state.maintenance_episodes[state.active_maintenance]["request"]
+
+    reply = %{
+      text: ~s({"summary":"retained facts","carry_forward":{"files_read":[],"files_changed":[]}}),
+      identity: %{provider: "scripted", model: captured.model, endpoint: "in-process"},
+      usage: %{input_tokens: 37, output_tokens: 19},
+      tool_calls: [],
+      delta_count: 0,
+      streamed: false,
+      provider_response_id: nil,
+      canonical_request_bytes: captured.canonical_request_bytes,
+      staged_request_digest: captured.staged_request_digest,
+      completion: "natural",
+      continuation: nil
+    }
+
+    {:ok, settled} =
+      SessionState.propose_maintenance_attempt_settled(state, {:reply, reply}, 4_000)
+
+    {state, history, events} = retain(state, settled, history, events)
+    {:ok, checkpoint} = SessionState.propose_maintenance_checkpoint(state, 4_001, fn -> :ok end)
+    {state, history, events} = retain(state, checkpoint, history, events)
+
+    {:ok, completed} =
+      SessionState.propose_maintenance_checkpoint_completion(state, 4_002, fn -> :ok end)
+
+    {state, history, events} = retain(state, completed, history, events)
+    assert {:ok, ^state} = SessionState.recover(session, history, events)
+    assert state.charged == before.charged
+    assert state.run_order == before.run_order
+    assert state.commands["compact"].result["disposition"] == "checkpointed"
+    install_history(reference, history)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert Enum.all?(pages, &(&1.rows == []))
+    assert Enum.map(pages, & &1.scanned_through) == Enum.to_list(1..length(history))
+    assert List.last(pages).next_cursor == nil
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+
+    completed_row = List.last(history)
+
+    for payload <- [
+          Map.put(completed_row.payload, "run_id", "invented"),
+          put_in(completed_row.payload, ["result", "checkpoint_id"], nil),
+          put_in(completed_row.payload, ["result", "usage"], %{
+            "attempts" => 0,
+            "reported_tokens" => 0,
+            "estimated_tokens" => 0,
+            "total_tokens" => 0
+          })
+        ] do
+      install_history(reference, List.update_at(history, -1, &%{&1 | payload: payload}))
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+  end
+
   test "bounded maintenance coverage requires current closed headroom targets", context do
     %{runtime: runtime, session: session, reference: reference} = context
     {records, _events} = maintenance_history(session)

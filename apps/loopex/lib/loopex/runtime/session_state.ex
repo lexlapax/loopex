@@ -2789,11 +2789,11 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  # Concept: a fitted committed checkpoint releases its parent staging identity.
-  # Technical depth: run-owned completion has no run terminal or second charge.
-  # Rebuild the required ordinary projection from committed checkpoint truth,
-  # retaining the admission's steer and q=0 header. Partial progress remains an
-  # active episode until further maintenance or a truthful ending settles it.
+  # Concept: a fitted checkpoint releases its run or completes its compact command.
+  # Technical depth: remeasure each owner's captured projection. Run completion
+  # has no run terminal; standalone completion shares the episode-terminal
+  # transaction. Neither charges again. Partial progress keeps the same episode,
+  # capture and deadline until further maintenance or a truthful ending settles it.
   @doc false
   @spec propose_maintenance_checkpoint_completion(t(), integer(), function()) ::
           {:ok, proposal()} | {:error, term()}
@@ -2809,22 +2809,50 @@ defmodule Loopex.Runtime.SessionState do
   defp maintenance_checkpoint_completion_record(state, now, check) do
     with {:ok, episode, measurement} <- committed_checkpoint_measurement(state, now, check),
          {:ok, _} <- measurement.admission do
-      {:ok,
-       %{
-         :kind => "maintenance_episode_terminal_v1",
-         "episode_id" => episode["episode_id"],
-         "observed_at" => now,
-         "result" => %{
-           "disposition" => "checkpointed",
-           "checkpoint_id" => episode["checkpoint_id"],
-           "failure" => nil,
-           "usage" => episode["usage"],
-           "cleanup" => "confirmed"
-         }
-       }}
+      result = %{
+        "disposition" => "checkpointed",
+        "checkpoint_id" => episode["checkpoint_id"],
+        "failure" => nil,
+        "usage" => episode["usage"],
+        "cleanup" => "confirmed"
+      }
+
+      record = %{
+        :kind => "maintenance_episode_terminal_v1",
+        "episode_id" => episode["episode_id"],
+        "observed_at" => now,
+        "result" => result
+      }
+
+      if episode.kind == "standalone_maintenance_episode_admitted_v1",
+        do:
+          {:ok,
+           record
+           |> Map.put(:kind, "compact_command_completed_v1")
+           |> Map.put("command_id", episode["command_id"])},
+        else: {:ok, record}
     else
       {:refused, refusal} -> {:error, {:checkpoint_requires_more_progress, refusal}}
       {:error, _} = error -> error
+    end
+  end
+
+  defp committed_checkpoint_measurement(%{pending_compact: %{}} = state, now, check) do
+    with %{
+           :kind => "standalone_maintenance_episode_admitted_v1",
+           "stage" => "checkpoint_committed"
+         } = episode <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <- episode["checkpoint_id"] == state.active_checkpoint,
+         true <-
+           is_integer(now) and now >= state.checkpoints[state.active_checkpoint]["committed_at"],
+         :ok <- pending_checkpoint_owner(state, episode, now),
+         :ok <- pending_checkpoint_capacity(state, episode),
+         {:ok, measurement} <- standalone_checkpoint_projection(state, episode, %{}, check) do
+      {:ok, episode, measurement}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :no_committed_maintenance_checkpoint}
     end
   end
 
@@ -2957,18 +2985,39 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: checkpoint ownership and original conversation lineage are distinct.
+  # Technical depth: the authenticated episode chooses the private kind and
+  # actual owner. Standalone lineage ends at the last original run traversed;
+  # its command identity creates no run, deadline or run-accounting entry.
   defp maintenance_checkpoint_record(state, candidate, now) do
     episode = state.maintenance_episodes[state.active_maintenance]
     configuration = episode["maintenance_configuration"]
 
-    %{
-      :kind => "compaction_checkpoint_committed_v1",
+    owner =
+      case episode.kind do
+        "standalone_maintenance_episode_admitted_v1" ->
+          %{
+            :kind => "standalone_compaction_checkpoint_committed_v1",
+            "command_id" => episode["command_id"]
+          }
+
+        "maintenance_episode_admitted_v1" ->
+          %{:kind => "compaction_checkpoint_committed_v1", "run_id" => episode["run_id"]}
+      end
+
+    Map.merge(owner, %{
       "checkpoint_id" => candidate.checkpoint_id,
       "episode_id" => episode["episode_id"],
-      "run_id" => episode["run_id"],
       "summary_ordinal" => episode["summary_ordinal"],
       "committed_at" => now,
-      "lineage" => %{"session_id" => state.session_id, "through_run_id" => episode["run_id"]},
+      "lineage" => %{
+        "session_id" => state.session_id,
+        "through_run_id" =>
+          if(episode.kind == "standalone_maintenance_episode_admitted_v1",
+            do: List.last(state.run_order),
+            else: episode["run_id"]
+          )
+      },
       "covered_range" => candidate.covered_range,
       "consumed_range" => candidate.consumed_range,
       "prior_checkpoint_id" => candidate.prior_checkpoint_id,
@@ -2980,7 +3029,7 @@ defmodule Loopex.Runtime.SessionState do
       "configuration_version" => episode["configuration_version"],
       "usage" => episode["usage"],
       "source_digest" => episode["source_digest"]
-    }
+    })
   end
 
   # Concept: cumulative coverage authenticates originals rather than summaries.
@@ -4405,7 +4454,8 @@ defmodule Loopex.Runtime.SessionState do
            episode["stage"] in [
              "settlement_pending_terminal",
              "model_retry_permitted",
-             "checkpoint_pending"
+             "checkpoint_pending",
+             "checkpoint_committed"
            ],
          true <-
            is_integer(observed_at) and observed_at >= episode["request_staged_at"] and
@@ -6031,6 +6081,7 @@ defmodule Loopex.Runtime.SessionState do
               "compact_command_completed_v1",
               "maintenance_episode_terminal_v1",
               "compaction_checkpoint_committed_v1",
+              "standalone_compaction_checkpoint_committed_v1",
               "maintenance_request_committed_v1",
               "maintenance_attempt_opened_v1",
               "maintenance_attempt_settled_v3",
@@ -6943,8 +6994,11 @@ defmodule Loopex.Runtime.SessionState do
 
   defp compact_completion_record(%{pending_compact: %{}} = state, record)
        when record.kind == "compact_command_completed_v1" do
-    case state.maintenance_episodes[state.active_maintenance] do
-      %{"attempts" => attempts} when attempts > 0 ->
+    case {record["result"]["disposition"], state.maintenance_episodes[state.active_maintenance]} do
+      {"checkpointed", %{kind: "standalone_maintenance_episode_admitted_v1"}} ->
+        maintenance_checkpoint_completion_record(state, record["observed_at"], fn -> :ok end)
+
+      {_, %{"attempts" => attempts}} when attempts > 0 ->
         standalone_settlement_completion_record(state, record["observed_at"])
 
       _ ->
@@ -7327,12 +7381,17 @@ defmodule Loopex.Runtime.SessionState do
        when is_binary(episode),
        do: {:error, :invalid_maintenance_episode_transition}
 
-  defp apply_internal_record(state, %{kind: "compaction_checkpoint_committed_v1"} = record) do
+  defp apply_internal_record(state, %{kind: kind} = record)
+       when kind in [
+              "compaction_checkpoint_committed_v1",
+              "standalone_compaction_checkpoint_committed_v1"
+            ] do
     with {:ok, candidate} <-
            preflight_maintenance_checkpoint(state, record["committed_at"], fn -> :ok end),
          true <- record == maintenance_checkpoint_record(state, candidate, record["committed_at"]),
          false <- Map.has_key?(state.checkpoints, candidate.checkpoint_id),
-         {:ok, units} <- compaction_units(state, record["run_id"]),
+         episode = state.maintenance_episodes[state.active_maintenance],
+         {:ok, units} <- compaction_units(state, maintenance_scope(episode)),
          {:ok, _} <- Store.admit_bounded(record) do
       covered =
         units
@@ -7358,7 +7417,14 @@ defmodule Loopex.Runtime.SessionState do
       event =
         Map.take(
           record,
-          ~w(checkpoint_id episode_id run_id covered_range prior_checkpoint_id strategy strategy_revision model reasoning configuration_version usage)
+          ~w(checkpoint_id episode_id covered_range prior_checkpoint_id strategy strategy_revision model reasoning configuration_version usage)
+        )
+        |> Map.put(
+          "owner",
+          if(kind == "compaction_checkpoint_committed_v1",
+            do: %{"kind" => "run", "id" => record["run_id"]},
+            else: %{"kind" => "compact", "id" => record["command_id"]}
+          )
         )
         |> Map.put("source_excerpted", candidate.summary["source_excerpted"])
         |> Map.put(:kind, "context.compacted")
@@ -7374,7 +7440,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(
-         state,
+         %{pending_compact: nil} = state,
          %{
            :kind => "maintenance_episode_terminal_v1",
            "result" => %{"disposition" => "checkpointed"}
@@ -7410,7 +7476,9 @@ defmodule Loopex.Runtime.SessionState do
          %{} = result <- record["result"],
          true <-
            closed_history_map?(result, ~w(disposition checkpoint_id failure usage cleanup)),
-         true <- result["disposition"] == "failed",
+         true <-
+           result["disposition"] == "failed" or
+             (result["disposition"] == "checkpointed" and is_map(state.pending_compact)),
          true <-
            is_nil(record["observed_at"]) or
              (is_integer(record["observed_at"]) and record["observed_at"] >= 0 and

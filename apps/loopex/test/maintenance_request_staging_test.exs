@@ -704,6 +704,8 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     assert record["reasoning"] == "none"
     assert [event] = proposal.events
     assert event.kind == "context.compacted"
+    assert event["owner"] == %{"kind" => "run", "id" => state.active_run_id}
+    refute Map.has_key?(event, "run_id")
     assert event["checkpoint_id"] == record["checkpoint_id"]
     assert event["source_excerpted"] == false
     refute Map.has_key?(event, "summary")

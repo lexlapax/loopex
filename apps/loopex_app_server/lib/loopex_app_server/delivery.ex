@@ -190,10 +190,21 @@ defmodule Loopex.AppServer.Delivery do
   # Concept: a durable event, with only the members its kind carries.
   #
   # Technical depth: the event's own identity and sequence move into the
-  # envelope, and everything else stays in `data` exactly as the runtime
-  # published it. This layer does not rename a member or add one: a client and a
-  # facade reader must be looking at the same fact.
+  # envelope. Checkpoint owners use their shared opaque identity codec; other
+  # data members keep the runtime's names and values.
   defp event_record(session_id, event) do
+    data = Map.drop(event, [:kind, :event_id, :event_sequence])
+
+    data =
+      if event.kind == "context.compacted" do
+        {:ok, owner} =
+          LoopexProtocol.Session.CheckpointOwner.encode_wire(Map.fetch!(data, "owner"))
+
+        Map.put(data, "owner", owner)
+      else
+        data
+      end
+
     %{
       "type" => "event",
       "session_id" => Wire.encode_identity(session_id),
@@ -201,7 +212,7 @@ defmodule Loopex.AppServer.Delivery do
         "kind" => Map.fetch!(event, :kind),
         "event_id" => Wire.encode_identity(Map.fetch!(event, :event_id)),
         "event_sequence" => Wire.encode_u64(Map.fetch!(event, :event_sequence)),
-        "data" => Map.drop(event, [:kind, :event_id, :event_sequence])
+        "data" => data
       }
     }
   end

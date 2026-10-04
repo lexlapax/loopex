@@ -2039,5 +2039,13 @@ passes the full current-pair fast check, 3,703 cases with 39 expected exclusions
 in 925 seconds, and the selected Node release workflow in 373 measured runner
 seconds. Its fresh-source archive and all four consumer lanes pass; complete
 retained outputs, manifest bytes and digests are indexed in the task record.
-The full closure matrix remains open. Explicit standalone checkpoint ownership
-is approved but not yet implemented.
+The full closure matrix remains open. Approved standalone checkpoint ownership
+and successful completion are now implemented. Run and compact checkpoints have
+distinct authenticated private owners; public events share the closed opaque
+owner codec. Both supported pairs pass 171 focused core cases, including
+three-prefix repair, all six checkpoint/completion uncertainty cases, restart
+and private coverage. Both transports and the independent Node owner vectors
+pass their focused selections; exact outputs and digests are indexed in the
+task record. Standalone pre-dispatch bound completion, full generation-3/4
+manifests and checkpoint snapshots remain open. These focused results do not
+replace the next clean candidate's full integration checks.

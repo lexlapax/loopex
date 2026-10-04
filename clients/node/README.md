@@ -24,12 +24,15 @@ imports anything outside Node's own standard library.
 | `terminal-outcome-vectors.mjs` | Independently check terminal outcome vectors and reference boundaries |
 | `compact-result.mjs` | Decode standalone compaction results with exact usage, closed failures and opaque checkpoints |
 | `compact-result-vectors.mjs` | Independently check compaction result vectors, accounting and checkpoint boundaries |
+| `checkpoint-owner.mjs` | Decode closed run/compact checkpoint owners and opaque identity bytes; both connections validate checkpoint events |
+| `checkpoint-owner-vectors.mjs` | Independently check literal owner vectors, superseded aliases and identity boundaries |
 
 Run the M7 answer payload checks with the pinned Node interpreter:
 
 ```bash
 node clients/node/question-answer-vectors.mjs apps/loopex_protocol/priv/vectors/question-answer.v1.json
 node clients/node/compact-result-vectors.mjs apps/loopex_protocol/priv/vectors/standalone-compact-result.v1.json
+node clients/node/checkpoint-owner-vectors.mjs apps/loopex_protocol/priv/vectors/checkpoint-owner.v1.json
 ```
 
 This checks payloads only. The foreground and daemon clients still require

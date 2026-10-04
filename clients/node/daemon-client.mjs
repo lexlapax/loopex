@@ -19,6 +19,7 @@
 
 import net from "node:net";
 import { wire } from "./loopex-client.mjs";
+import { decodeCheckpointOwner } from "./checkpoint-owner.mjs";
 
 export const GENERATION = "loopex.experimental/2";
 
@@ -127,6 +128,9 @@ export class DaemonConnection {
 
   #deliver(record) {
     if (record.type === "event") {
+      if (record.event.kind === "context.compacted" &&
+          (decodeCheckpointOwner(record.event.data?.owner) === null ||
+           Object.hasOwn(record.event.data, "run_id"))) throw new Error("invalid checkpoint owner");
       this.#events.push(record.event);
       this.#release();
       return;

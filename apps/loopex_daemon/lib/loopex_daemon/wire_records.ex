@@ -267,11 +267,23 @@ defmodule LoopexDaemon.WireRecords do
 
   ## Technical depth
 
-  The event's identity and sequence move into the envelope and everything else
-  stays in `data` exactly as core published it.
+  The event's identity and sequence move into the envelope. Checkpoint owners
+  use the shared opaque identity codec; other data keeps its native members.
   """
   @spec event(binary(), map()) :: map()
   def event(session_id, event) when is_binary(session_id) and is_map(event) do
+    data = Map.drop(event, [:kind, :event_id, :event_sequence])
+
+    data =
+      if event.kind == "context.compacted" do
+        {:ok, owner} =
+          LoopexProtocol.Session.CheckpointOwner.encode_wire(Map.fetch!(data, "owner"))
+
+        Map.put(data, "owner", owner)
+      else
+        data
+      end
+
     %{
       "type" => "event",
       "session_id" => Wire.encode_identity(session_id),
@@ -279,7 +291,7 @@ defmodule LoopexDaemon.WireRecords do
         "kind" => Map.fetch!(event, :kind),
         "event_id" => Wire.encode_identity(Map.fetch!(event, :event_id)),
         "event_sequence" => Wire.encode_u64(Map.fetch!(event, :event_sequence)),
-        "data" => Map.drop(event, [:kind, :event_id, :event_sequence])
+        "data" => data
       }
     }
   end

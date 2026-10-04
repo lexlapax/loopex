@@ -50,4 +50,20 @@ defmodule LoopexDaemon.WireRecordsTest do
     assert {:ok, encoded} = Frame.encode(record)
     IO.iodata_to_binary(encoded)
   end
+
+  test "both checkpoint owner kinds preserve opaque bytes in the daemon envelope" do
+    for kind <- ["run", "compact"] do
+      event = %{
+        :kind => "context.compacted",
+        :event_id => "event",
+        :event_sequence => 1,
+        "owner" => %{"kind" => kind, "id" => <<0, 255, 10>>}
+      }
+
+      record = WireRecords.event("session", event)
+      assert record["event"]["data"] == %{"owner" => %{"kind" => kind, "id" => "AP8K"}}
+      assert record["event"]["event_sequence"] == "1"
+      assert {:ok, _} = Frame.encode(record)
+    end
+  end
 end

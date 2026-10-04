@@ -75,6 +75,9 @@ defmodule Loopex.Runtime.EffectIntents do
     "compaction_checkpoint_committed_v1" =>
       {~w(checkpoint_id episode_id run_id summary_ordinal committed_at lineage covered_range consumed_range prior_checkpoint_id summary strategy strategy_revision model reasoning configuration_version usage source_digest),
        []},
+    "standalone_compaction_checkpoint_committed_v1" =>
+      {~w(checkpoint_id episode_id command_id summary_ordinal committed_at lineage covered_range consumed_range prior_checkpoint_id summary strategy strategy_revision model reasoning configuration_version usage source_digest),
+       []},
     "deadline_staging_failed_v1" => {~w(run_id turn_id category), []},
     "run_terminal_committed" =>
       {~w(run_id outcome bound observed declared_limit accounting_source reconciliation_ref cleanup_grace_ms command_id),
@@ -513,18 +516,19 @@ defmodule Loopex.Runtime.EffectIntents do
   # Concept: compact completion adds command evidence without an executor effect.
   # Technical depth: the bounded reader validates the current closed result and
   # clock. Undispatched completion still requires zero usage and confirmed cleanup;
-  # full replay proves attempt spending, winning failure and terminal adjacency.
+  # spent checkpoint/failure results require positive attempts. Full replay
+  # proves checkpoint ownership, spending, winning failure and terminal adjacency.
   defp neutral_values?(%{payload: %{kind: "compact_command_completed_v1"} = payload}) do
     result = payload["result"]
 
     identifier?(payload["episode_id"]) and identifier?(payload["command_id"]) and
       (is_nil(payload["observed_at"]) or version?(payload["observed_at"])) and
       match?({:ok, _}, LoopexProtocol.Session.CompactResult.encode_wire(result)) and
-      result["disposition"] in ~w(unchanged failed) and
+      result["disposition"] in ~w(unchanged checkpointed failed) and
       ((result["usage"]["attempts"] == 0 and is_nil(result["checkpoint_id"]) and
           result["cleanup"] == "confirmed" and result["usage"]["total_tokens"] == 0 and
           zero_attempt_completion_clock?(payload)) or
-         (result["disposition"] == "failed" and result["usage"]["attempts"] > 0 and
+         (result["disposition"] in ~w(checkpointed failed) and result["usage"]["attempts"] > 0 and
             version?(payload["observed_at"])))
   end
 
@@ -558,18 +562,28 @@ defmodule Loopex.Runtime.EffectIntents do
     end
   end
 
-  defp neutral_values?(%{payload: %{kind: "compaction_checkpoint_committed_v1"} = payload}) do
+  defp neutral_values?(%{payload: %{kind: kind} = payload})
+       when kind in [
+              "compaction_checkpoint_committed_v1",
+              "standalone_compaction_checkpoint_committed_v1"
+            ] do
     range = payload["covered_range"]
     lineage = payload["lineage"]
+    standalone = kind == "standalone_compaction_checkpoint_committed_v1"
+    owner_key = if standalone, do: "command_id", else: "run_id"
 
-    Enum.all?(~w(checkpoint_id episode_id run_id), &identifier?(payload[&1])) and
+    Enum.all?(["checkpoint_id", "episode_id", owner_key], &identifier?(payload[&1])) and
       positive_version?(payload["summary_ordinal"]) and version?(payload["committed_at"]) and
       closed?(lineage, ~w(session_id through_run_id)) and identifier?(lineage["session_id"]) and
-      lineage["through_run_id"] == payload["run_id"] and
+      if(standalone,
+        do: identifier?(lineage["through_run_id"]),
+        else: lineage["through_run_id"] == payload["run_id"]
+      ) and
       closed?(range, ~w(unit_count record_count source_count first last first_kept digest)) and
       Enum.all?(~w(unit_count record_count source_count), &positive_version?(range[&1])) and
       range["record_count"] <= range["source_count"] and digest?(range["digest"]) and
-      Enum.all?(~w(first last first_kept), &is_map(range[&1])) and
+      Enum.all?(~w(first last), &is_map(range[&1])) and
+      (is_map(range["first_kept"]) or (standalone and is_nil(range["first_kept"]))) and
       valid_consumed_checkpoint_range?(payload, range) and
       Loopex.Runtime.CompactionSummary.validate_prior(payload["summary"]) == :ok and
       payload["summary"]["covered_range_digest"] == range["digest"] and
@@ -655,7 +669,10 @@ defmodule Loopex.Runtime.EffectIntents do
         closed?(consumed, ~w(unit_count record_count source_count first last first_kept digest)) and
         Enum.all?(~w(unit_count record_count source_count), &positive_version?(consumed[&1])) and
         consumed["record_count"] <= consumed["source_count"] and digest?(consumed["digest"]) and
-        Enum.all?(~w(first last first_kept), &is_map(consumed[&1])) and
+        Enum.all?(~w(first last), &is_map(consumed[&1])) and
+        (is_map(consumed["first_kept"]) or
+           (payload.kind == "standalone_compaction_checkpoint_committed_v1" and
+              is_nil(consumed["first_kept"]))) and
         consumed["unit_count"] < range["unit_count"] and
         consumed["record_count"] <= range["record_count"] and
         consumed["source_count"] < range["source_count"] and

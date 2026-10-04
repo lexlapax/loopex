@@ -20,6 +20,13 @@ has turns remaining, and has 1–1,023 unspent tokens. Its failed outcome retain
 actual usage and any prior checkpoint. It uses no new public bound. The
 [approved ADR 0043 amendment](agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
 changes the current schemas, Elixir codec and independent Node decoder together.
+Checkpoint events now identify their actual owner with the closed
+`{kind: "run" | "compact", id}` object; foreground and daemon projections
+encode its opaque identity with the existing base64url codec. The
+[approved owner amendment](agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
+removes the public owning `run_id` alias. Literal vectors cover both kinds,
+malformed shapes and the complete identity ceiling. The complete M7 negotiated
+generation and checkpoint snapshot integration remain in progress.
 Breaking an experimental API in a minor release carries an explicit migration
 note under the vision's 0.x policy. This page lists what an embedder, a client
 author, or an operator can reach today, what each surface consists of, which

@@ -659,6 +659,27 @@ absent from all failure projections.
 checkpoint ID if any, first-kept identity, summary/carry-forward bytes, strategy
 `loopex.compaction.reference` revision 3, exact model/reasoning/configuration
 version, usage, summary-input digest and ordered covered-record integrity digest.
+Run-owned records use `compaction_checkpoint_committed_v1` with `run_id`;
+standalone records use `standalone_compaction_checkpoint_committed_v1` with
+`command_id`, replacing that one owning member and retaining the same common
+checkpoint fields. Replay authenticates the kind and identity against the
+active episode and actual command or run. `lineage.through_run_id` is the
+last original conversation run traversed, never the compact command or an
+invented run. Standalone coverage may consume the complete eligible history,
+with null `first_kept`; automatic coverage retains the protected run tail.
+
+Public checkpoint events and snapshots use exactly
+`owner: {kind: "run" | "compact", id}` for ownership. Encode `id` with the
+existing opaque identity codec: canonical unpadded base64url of 1–65,536
+original bytes. No owning `run_id` alias or older owner decoder remains.
+The closed schema and literal vectors are
+`apps/loopex_protocol/priv/schema/checkpoint-owner.v1.json` and
+`apps/loopex_protocol/priv/vectors/checkpoint-owner.v1.json`; the shared Elixir
+codec and independent Node decoder reject unknown members/kinds and
+noncanonical or oversized identities. The approved
+[owner disposition](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
+records the amendment authority.
+
 Ranges extend contiguously without gaps/cycles and never split tool/result groups.
 Retain the owner-computed boolean `source_excerpted`: the prior checkpoint's
 value, or false when absent, OR this source's `serialized_excerpt` kind. It is

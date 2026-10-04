@@ -657,6 +657,260 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
+  test "live standalone checkpoint completes and replays without a synthetic run or redispatch" do
+    {fixture, session} =
+      live_history(
+        [
+          %{
+            text: summary(),
+            reply_overrides: natural(),
+            usage: %{input_tokens: 37, output_tokens: 19}
+          }
+        ],
+        history_content: String.duplicate("f", 8_000)
+      )
+
+    before = recover(fixture, session)
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    assert {:accepted, "compact"} = Loopex.command(attachment, command())
+    completed = await_completed(fixture, session)
+    result = completed.commands["compact"].result
+
+    assert result == %{
+             "disposition" => "checkpointed",
+             "checkpoint_id" => completed.active_checkpoint,
+             "failure" => nil,
+             "cleanup" => "confirmed",
+             "usage" => %{
+               "attempts" => 1,
+               "reported_tokens" => 56,
+               "estimated_tokens" => 0,
+               "total_tokens" => 56
+             }
+           }
+
+    assert is_binary(result["checkpoint_id"])
+    assert completed.active_maintenance == nil
+    assert completed.conversation == before.conversation
+    assert completed.run_order == before.run_order
+    assert completed.charged == before.charged
+    assert completed.deadlines == before.deadlines
+    assert completed.active_run_id == nil
+    assert completed.pending_work == %{}
+    checkpoint = completed.checkpoints[result["checkpoint_id"]]
+    assert checkpoint.kind == "standalone_compaction_checkpoint_committed_v1"
+    assert checkpoint["command_id"] == "compact"
+    refute Map.has_key?(checkpoint, "run_id")
+    assert checkpoint["lineage"]["through_run_id"] == List.last(before.run_order)
+    compacted = Enum.find(Fixture.events(fixture, session), &(&1.kind == "context.compacted"))
+    assert compacted["owner"] == %{"kind" => "compact", "id" => "compact"}
+    refute Map.has_key?(compacted, "run_id")
+
+    assert Enum.map(Enum.take(Fixture.records(fixture, session), -3), & &1.payload.kind) ==
+             [
+               "standalone_compaction_checkpoint_committed_v1",
+               "maintenance_episode_terminal_v1",
+               "compact_command_completed_v1"
+             ]
+
+    coordinator = :sys.get_state(owner(fixture, session))
+    assert coordinator.in_flight == %{}
+    assert coordinator.pending_cleanup == %{}
+    assert Task.Supervisor.children(coordinator.owner_workers) == []
+    assert ^result = Loopex.command(attachment, command())
+
+    kill_owner(fixture, session)
+    {:ok, _} = Loopex.prepare_resume_session(fixture.runtime, session, "checkpoint-result")
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    assert ^result = Loopex.command(resumed, command())
+    assert recover(fixture, session).active_checkpoint == result["checkpoint_id"]
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "context.compacted")) == 1
+
+    assert Enum.count(
+             Fixture.events(fixture, session),
+             &(&1.kind == "context.compaction_finished")
+           ) == 1
+  end
+
+  test "live standalone hard-limit repair continues through contiguous checkpoint prefixes" do
+    contents = for letter <- ["a", "b", "c", "d"], do: String.duplicate(letter, 18_000)
+
+    replies =
+      for _ <- 1..4,
+          do: %{
+            text: summary(),
+            reply_overrides: natural(),
+            usage: %{input_tokens: 37, output_tokens: 19}
+          }
+
+    {fixture, session} = live_history(replies, history_contents: contents)
+    before = recover(fixture, session)
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    assert {:accepted, "compact"} = Loopex.command(attachment, command())
+    completed = await_completed(fixture, session)
+    result = completed.commands["compact"].result
+    assert result["disposition"] == "checkpointed"
+    episode = completed.maintenance_episodes |> Map.values() |> hd()
+    assert episode["trigger"] == "ordinary_limit"
+    assert episode["attempts"] == 3
+
+    assert result["usage"] == %{
+             "attempts" => 3,
+             "reported_tokens" => 168,
+             "estimated_tokens" => 0,
+             "total_tokens" => 168
+           }
+
+    checkpoints = completed.checkpoints |> Map.values() |> Enum.sort_by(& &1["summary_ordinal"])
+    assert length(checkpoints) == 3
+    assert Enum.map(checkpoints, & &1["summary_ordinal"]) == [1, 2, 3]
+    assert Enum.map(checkpoints, & &1["covered_range"]["unit_count"]) == [1, 2, 3]
+    assert Enum.map(checkpoints, & &1["consumed_range"]["unit_count"]) == [1, 1, 1]
+
+    for {prior, next} <- Enum.zip(checkpoints, tl(checkpoints)) do
+      assert next["prior_checkpoint_id"] == prior["checkpoint_id"]
+      assert next["consumed_range"]["first"] == prior["covered_range"]["first_kept"]
+    end
+
+    assert List.last(checkpoints)["checkpoint_id"] == completed.active_checkpoint
+    assert Enum.all?(checkpoints, &(&1["command_id"] == "compact"))
+    assert completed.conversation == before.conversation
+    assert completed.charged == before.charged
+    assert completed.run_order == before.run_order
+    assert completed.deadlines == before.deadlines
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 3
+
+    assert Enum.count(
+             Fixture.events(fixture, session),
+             &(&1.kind == "context.compaction_finished")
+           ) == 1
+  end
+
+  for boundary <- [
+        "standalone_compaction_checkpoint_committed_v1",
+        "maintenance_episode_terminal_v1"
+      ],
+      phase <- [
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @checkpoint_boundary boundary
+    @checkpoint_phase phase
+    test "standalone #{@checkpoint_boundary} resolves #{@checkpoint_phase} without a second summary" do
+      {fixture, session} =
+        live_history(
+          [
+            %{
+              text: summary(),
+              reply_overrides: natural(),
+              hold: self(),
+              usage: %{input_tokens: 37, output_tokens: 19}
+            }
+          ],
+          history_content: String.duplicate("f", 8_000)
+        )
+
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      assert {:accepted, "compact"} = Loopex.command(attachment, command())
+      assert_receive {:holding, callback}, 5_000
+      callback_monitor = Process.monitor(callback)
+      predecessor = owner(fixture, session)
+      before = recover(fixture, session)
+      episode = before.maintenance_episodes[before.active_maintenance]
+
+      assert :ok =
+               M1RuntimeTestStore.hold_next_record_before_linearization(
+                 fixture.store,
+                 @checkpoint_boundary,
+                 self()
+               )
+
+      send(callback, :release)
+      assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 5_000
+
+      assert_receive {:record_held_before_linearization, waiter, _, @checkpoint_boundary,
+                      transaction},
+                     5_000
+
+      if @checkpoint_boundary == "maintenance_episode_terminal_v1" do
+        assert Enum.map(transaction.records, & &1.kind) ==
+                 ["maintenance_episode_terminal_v1", "compact_command_completed_v1"]
+
+        assert List.last(transaction.records)["result"]["disposition"] == "checkpointed"
+      else
+        assert [record] = transaction.records
+        assert record["command_id"] == "compact"
+        refute Map.has_key?(record, "run_id")
+      end
+
+      assert :ok =
+               M1RuntimeTestStore.inject(
+                 fixture.store,
+                 {:session_journal_commit, @checkpoint_phase}
+               )
+
+      M1RuntimeTestStore.release(waiter)
+      await_worker_adoption(predecessor, System.monotonic_time(:millisecond) + 5_000)
+      kill_owner(fixture, session)
+
+      assert {:ok, {:prepared, activation}} =
+               Loopex.prepare_resume_session(fixture.runtime, session, "resolve-checkpoint")
+
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+      completed = await_completed(fixture, session)
+      result = completed.commands["compact"].result
+      assert result["disposition"] == "checkpointed"
+      assert result["checkpoint_id"] == completed.active_checkpoint
+
+      assert result["usage"] == %{
+               "attempts" => 1,
+               "reported_tokens" => 56,
+               "estimated_tokens" => 0,
+               "total_tokens" => 56
+             }
+
+      assert result["cleanup"] == "confirmed"
+      retained_episode = completed.maintenance_episodes[episode["episode_id"]]
+
+      for key <- [
+            "deadline",
+            "bounds",
+            "maintenance_configuration",
+            "configuration_version",
+            "command_id"
+          ] do
+        assert retained_episode[key] == episode[key]
+      end
+
+      assert completed.conversation == before.conversation
+      assert completed.charged == before.charged
+      assert completed.run_order == before.run_order
+      assert completed.deadlines == before.deadlines
+
+      for kind <- [
+            "maintenance_attempt_settled_v3",
+            "standalone_compaction_checkpoint_committed_v1",
+            "maintenance_episode_terminal_v1",
+            "compact_command_completed_v1"
+          ] do
+        assert Enum.count(Fixture.records(fixture, session), &(&1.payload.kind == kind)) == 1
+      end
+
+      for kind <- ["context.compacted", "context.compaction_finished"] do
+        assert Enum.count(Fixture.events(fixture, session), &(&1.kind == kind)) == 1
+      end
+
+      assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+      assert MapSet.member?(
+               M1RuntimeTestStore.observed(fixture.store),
+               {:session_journal_commit, @checkpoint_phase}
+             )
+    end
+  end
+
   test "live standalone valid but nonprogressing summary ends without checkpoint or another call" do
     {fixture, session} =
       live_history([
@@ -777,6 +1031,7 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
         [
           %{
             text: summary(),
+            hold: self(),
             reply_overrides: natural(),
             usage: %{input_tokens: 37, output_tokens: 19}
           }
@@ -786,23 +1041,53 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
 
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
     assert {:accepted, "compact"} = Loopex.command(attachment, command(1_000))
+    assert_receive {:holding, callback}, 5_000
+    callback_monitor = Process.monitor(callback)
+    before = recover(fixture, session)
+    episode = before.maintenance_episodes[before.active_maintenance]
 
-    settled =
-      await_state(fixture, session, fn state ->
-        state.maintenance_episodes[state.active_maintenance]["stage"] == "checkpoint_pending"
-      end)
+    assert :ok =
+             M1RuntimeTestStore.hold_next_record_before_linearization(
+               fixture.store,
+               "maintenance_attempt_settled_v3",
+               self()
+             )
 
-    episode = settled.maintenance_episodes[settled.active_maintenance]
+    send(callback, :release)
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 5_000
+
+    assert_receive {:record_held_before_linearization, waiter, _,
+                    "maintenance_attempt_settled_v3", transaction},
+                   5_000
+
+    assert [settlement] = transaction.records
+
+    assert settlement["accounting"] == %{
+             "source" => "reported",
+             "input_tokens" => 37,
+             "output_tokens" => 19
+           }
+
+    await_wall_cutoff(episode["deadline"], System.monotonic_time(:millisecond) + 5_000)
+    M1RuntimeTestStore.release(waiter)
     completed = await_completed(fixture, session)
     result = completed.commands["compact"].result
     assert result["failure"]["bound"] == "deadline_ms"
     assert result["failure"]["observed"] >= episode["deadline"]
     assert result["failure"]["declared_limit"] == episode["deadline"]
     assert result["failure"]["accounting_source"] == "reported"
-    assert result["usage"] == episode["usage"]
+
+    assert result["usage"] == %{
+             "attempts" => 1,
+             "reported_tokens" => 56,
+             "estimated_tokens" => 0,
+             "total_tokens" => 56
+           }
+
+    assert result["usage"] == completed.maintenance_episodes[episode["episode_id"]]["usage"]
     assert result["cleanup"] == "confirmed"
     assert completed.active_checkpoint == nil
-    assert completed.conversation == settled.conversation
+    assert completed.conversation == before.conversation
 
     assert Enum.count(
              Fixture.records(fixture, session),
@@ -1009,36 +1294,44 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
     assert :ok = Loopex.stop(prior.runtime)
     state = recover(prior, session)
 
-    {:ok, prompt} =
-      SessionState.propose(
-        state,
-        %{
-          type: :prompt,
-          command_id: "old",
-          content: Keyword.get(options, :history_content, "retain this fact")
-        },
-        %{
-          max_turns: 8,
-          deadline_ms: 60_000,
-          token_budget: 10_000,
-          context_token_budget: state.configuration["context_token_budget"]
-        }
-      )
+    contents =
+      Keyword.get(options, :history_contents, [
+        Keyword.get(options, :history_content, "retain this fact")
+      ])
 
-    state = retain(prior, state, prompt)
+    _ =
+      Enum.reduce(Enum.with_index(contents), state, fn {content, index}, state ->
+        {:ok, prompt} =
+          SessionState.propose(
+            state,
+            %{
+              type: :prompt,
+              command_id: if(index == 0, do: "old", else: "old-#{index}"),
+              content: content
+            },
+            %{
+              max_turns: 8,
+              deadline_ms: 60_000,
+              token_budget: 10_000,
+              context_token_budget: state.configuration["context_token_budget"]
+            }
+          )
 
-    {:ok, terminal} =
-      SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
-        reason: "model_call_failed"
-      })
+        state = retain(prior, state, prompt)
 
-    _ = retain(prior, state, terminal)
+        {:ok, terminal} =
+          SessionState.propose_run_terminal(state, state.active_run_id, "failed", %{
+            reason: "model_call_failed"
+          })
+
+        retain(prior, state, terminal)
+      end)
 
     source_live? = Keyword.get(options, :source_preparation) == :live
 
     options =
       options
-      |> Keyword.drop([:configuration, :source_preparation, :history_content])
+      |> Keyword.drop([:configuration, :source_preparation, :history_content, :history_contents])
       |> Enum.map(fn
         {:maintenance_model, :eligible} ->
           {:maintenance_model, model()}

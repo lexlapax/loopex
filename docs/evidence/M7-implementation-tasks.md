@@ -325,20 +325,88 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: implement approved standalone checkpoint ownership and successful
-  compact completion, then join the current protocol/snapshot contracts.
+- Running: finish standalone pre-dispatch bound completion after partial
+  checkpoints, then join the current protocol/snapshot contracts.
   The separate concurrent owner-stop Task.Supervisor diagnostic remains open.
   The callback/discovery integration is complete at clean pushed
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  216 done / 9 todo. The goal remains active. The maintainer requested the
+  218 done / 9 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
   and the narrow reply-reserve preparation refusal, then approved the captured
   1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
   decisions are resolved. The reply-reserve implementation and focused proof
-  are complete. Combined integration also passes; standalone checkpoint
-  ownership remains open. The cleanup repair is committed and pushed at `052e0e01`.
+  are complete. Combined integration also passes at its named revision. The
+  approved standalone checkpoint owner and successful completion are now
+  implemented with focused proof below. Full protocol/snapshot integration and
+  pre-dispatch bound completion remain open. The cleanup repair is committed
+  and pushed at `052e0e01`.
+
+- Done: approved standalone checkpoint ownership and live completion use the
+  actual command ID, distinct private checkpoint kind and shared public owner
+  codec. Original conversation, run identities, run charges and deadlines are
+  unchanged. Three-prefix hard-limit repair retains contiguous original coverage
+  and cumulative usage. All three Store uncertainty phases at checkpoint and
+  terminal/completion boundaries recover exactly once without another summary.
+  Duplicate completion and owner restart retain the checkpoint/result. Abort and
+  expiry retain actual usage; the useful-settlement expiry fixture now pauses
+  the exact Store settlement across its existing 1,000-ms command cutoff rather
+  than depending on the former missing checkpoint phase. Provider callback and
+  worker joins preserve existing fixture and product bounds. No new timeout or
+  compatibility reader is introduced.
+
+  The final four-file core selection passes 171 cases on each supported pair;
+  it includes rejection of forged checkpoint owners in private rows and public
+  events and complete private-reader pagination without acquiring an owner.
+  The approved public payload passes four protocol cases on each pair, including
+  the independent Node consumer of 36 literal vectors and four identity/shape
+  boundary checks. Foreground delivery passes eight cases and daemon records
+  three on each pair. Both transport projections encode the owner's original
+  opaque bytes; both Node connections validate checkpoint owners and reject the
+  old owning `run_id` alias. Complete retained outputs are immutable:
+
+  | Selection | Output under `/private/tmp/` | SHA-256 |
+  | --- | --- | --- |
+  | Core current, 171 pass, 9.7 s | `loopex-m7-standalone-checkpoint-owner-core-current-v9.log` | `bc5d6e6e414da2cdcea8a2897e672b5249675c210d94e035ad0250fd8d2d6157` |
+  | Core floor, 171 pass, 9.4 s | `loopex-m7-standalone-checkpoint-owner-core-floor-v3.log` | `fcf06a7444dc0215e74c5ba1acceea4423aa25d46338995932ee7a3759730005` |
+  | Protocol current, Node included | `loopex-m7-checkpoint-owner-protocol-current-v1.log` | `c8fc33a4356b33633f71f29b15fb0703b8d9903833aa4ac2ab68929841d551bb` |
+  | Protocol floor, Node included | `loopex-m7-checkpoint-owner-protocol-floor-v1.log` | `1bcf4c13d51dd2f9c16975bd04645ae052db37d5a1fbfb43848e9e6e3f8f057d` |
+  | Foreground current | `loopex-m7-checkpoint-owner-foreground-current-v1.log` | `5b15fdc44a0b8927d376cb7768cdaabee50f663f535c01dbe27b72e7936e53d1` |
+  | Foreground floor | `loopex-m7-checkpoint-owner-foreground-floor-v1.log` | `eb9efebe3db93e21de41c00656fc429841ce1f43beff9cf88828668b0ddd70a2` |
+  | Daemon current | `loopex-m7-checkpoint-owner-daemon-current-v1.log` | `f05fedf1673b04a9a562e1cab611556bd100044bc6c318cb6e37c50e4b078289` |
+  | Daemon floor | `loopex-m7-checkpoint-owner-daemon-floor-v1.log` | `22e2c87285273ea8e481acda1d53ac19de7fd26e103c455ccde5001c102b8d72` |
+
+  Development failures remain failures of their tested bytes. Core current v1
+  passed 138/139 and exposed the old implicit expiry stall;
+  `loopex-m7-standalone-checkpoint-owner-core-current-v1.log`, SHA-256
+  `9cafae062759f24cece7ab094f3905255b57e54f7e1873b7486632f20ab51879`.
+  v2 could not acquire Mix's sandboxed TCP lock and provides unavailable evidence;
+  digest `e10cbee50e01b07ab2cf163c0fede103c5bb7cfbb8a51f2ee434856106979efb`.
+  v5 passed 145/147: the fault-injection Store lacks the optional provenance read
+  callback, so pagination moved to the existing query-capable Store fixture;
+  digest `32d990f6621583548ee4e0d539fafe0a0f7d8ab151bef52ed3dc30d464cfd1bb`.
+  v6 passed 169/170 and found the private reader still refusing checkpointed
+  completion; the current validator now admits positive-attempt checkpointed
+  results and retains malformed/zero-attempt rejection;
+  digest `df9eca10d175983912d2910335d84d27b57e7e049aba4a6d844b2e324b0ae88b`.
+  Each version uses the same `loopex-m7-standalone-checkpoint-owner-core-current-vN.log`
+  path pattern. Earlier successful intermediate selections remain retained but
+  do not replace the final selections above. No full fast/release check of the
+  new source, generation-3/4 snapshot integration or milestone closure is claimed.
+  Compilation, formatting, bootstrap/status and documentation gates pass in
+  `loopex-m7-checkpoint-owner-gates-v1.log`, SHA-256
+  `a5aba128de75c20487fb4bb378521beb46e00d04effc73a788d30e4fd396cf77`.
+  That aggregate run ends FAIL at the dependency gate because its new source
+  file was not yet staged as a tracked ordinary blob. Staging the six new
+  source/fixture files satisfies that prerequisite; the dependency-only rerun
+  passes at `loopex-m7-checkpoint-owner-deps-gate-v2.log`, SHA-256
+  `afd19a5ac98446e7ac7567baf3c06d8e74e030617bf1e577d421806d438a6d55`.
+  Both outputs are retained under `/private/tmp/`; the first remains FAIL.
+  Final warning-free compilation, formatting, status and documentation checks
+  pass in 11.2 measured seconds; complete output
+  `/private/tmp/loopex-m7-checkpoint-owner-final-metadata-v1.log`, SHA-256
+  `a5907b2b56caf81d301873ed69f15edda922c2dd32565334cb7ecf0beded112a`.
 
 - Done: combined integration at clean pushed
   `b4bee93bfd05f120c5c8cf87ec93e0469fc25a97` passes all eleven applications,
@@ -8455,6 +8523,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Implement the approved closed checkpoint-owner schema, shared Elixir codec and independent Node decoder/vectors; project both actual owner kinds through foreground and daemon events using opaque identity bytes and refuse superseded aliases. Prove 36 literal cases and complete identity boundaries on both toolchains; complete generation-3/4 manifests, snapshots and live negotiated workflows remain open.
+
 - [x] Pin the accepted standalone compact-result schema and literal vectors, and implement an independent Node consumer; prove every closed failure branch, arbitrary exact usage, threshold/accounting relations, opaque checkpoint boundaries and unchanged legacy schema identities on both supported toolchains. Coordinated generation-3/4 contracts and live maintenance remain open.
 
 ## T06 — Build the first complete chat workflow
@@ -8520,7 +8590,8 @@ or check was relaxed.
 
 - [x] Join standalone initial capture and unchanged/zero-attempt failure completion to the live owner; capture one cutoff, join exact pure workers before adoption, preserve prepared-resume pause, commit admitted-episode terminal/completion together, and prove abort, worker loss, deadline, bounded reader, duplicate results and all three capture/completion uncertainty phases on both toolchains. Provider dispatch, spent/checkpoint results, snapshots and complete cleanup remain open.
 
-- [ ] Join standalone captured source selection, request/permit staging, provider dispatch, settlement/spending, checkpoint continuation and final completion to one live workflow using the actual compact identity; prove restart, unknown commits, immutable captures and bounded cleanup without a synthetic run.
+- [x] Join standalone captured source selection, request/permit staging, provider dispatch, settlement/spending, checkpoint continuation and final completion to one live workflow using the actual compact identity; prove restart, unknown commits, immutable captures and bounded cleanup without a synthetic run.
+- [ ] Finish standalone pre-dispatch bound completion for initial source, retries and further prefixes after a useful checkpoint; derive captured attempt/token capacity, preserve actual usage and partial checkpoint, prevent another dispatch, and prove truthful terminal/replay and cleanup at the remaining reserve boundaries.
 
 - [x] Retain unchanged standalone completion and its exact event in one replay-checked proposal without an episode, return the completed five-member result on duplicate lookup while preserving admission observation, release the pending slot, validate bounded private coverage, and prove strict result/history/event/cancellation refusal on both toolchains. Live owner scheduling, Store uncertainty, snapshots and failed/cancelled completion remain open.
 

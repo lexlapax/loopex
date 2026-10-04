@@ -11,6 +11,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Also extends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with explicit maintenance instructions and model selection; its one-shot interface, credential audience and cleanup guarantees remain unchanged
 - **Maintenance resource receipts:** Narrowly amends [ADR 0017](0017-durable-context-admission-budget.md#concept) and [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) so a successful maintenance request can explicitly record that optional resource intake was skipped; ordinary admission and older receipt validation remain unchanged
 - **Reply-reserve amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03); retained decision packet `sha256:781a4f41a08564326c3dceba2660aa5f871cf436611bce8fd06f4c961047453d`
+- **Checkpoint-owner amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03); retained decision packet `sha256:1b16d7d5fc31f5b42a6c807ac46b7ec2064f55e76683993bb5a8353f8601c9d5`
 - **Prerequisite for:** M7 outcome 3
 
 <a id="concept-adr-0043-decision"></a>
@@ -22,6 +23,12 @@ Compaction substitutes a model-written summary for an old contiguous range of
 conversation while retaining all raw facts. It never changes receipts, authority,
 outcomes or tool evidence. The session owner commits each checkpoint before it
 publishes or stages against it.
+
+Each checkpoint belongs to its actual run or standalone compact command.
+Its public owner identifies that kind and opaque identity. Standalone work
+creates no synthetic run and changes no ordinary run accounting or deadline.
+Lineage still identifies the original conversation runs traversed. The
+current contract replaces the public owning `run_id` member without an alias.
 
 Automatic compaction runs at initial or later model staging when eligible
 history would exceed a token or record-byte limit, or would leave insufficient

@@ -59,6 +59,22 @@ defmodule Loopex.AppServer.DeliveryTest do
     assert Delivery.cursor(unchanged) == event.event_sequence
   end
 
+  test "both checkpoint owner kinds preserve opaque bytes in the foreground envelope" do
+    for kind <- ["run", "compact"] do
+      event = %{
+        :kind => "context.compacted",
+        :event_id => "event",
+        :event_sequence => 1,
+        "owner" => %{"kind" => kind, "id" => <<0, 255, 10>>}
+      }
+
+      {[record], drained} = Delivery.new("session", 0) |> Delivery.event(event) |> Delivery.take()
+      assert record["event"]["data"] == %{"owner" => %{"kind" => kind, "id" => "AP8K"}}
+      assert Delivery.cursor(drained) == 1
+      assert {:ok, _} = LoopexProtocol.Frame.encode(record)
+    end
+  end
+
   test "durable records are emitted ahead of progress" do
     [event | _rest] = committed_events()
 

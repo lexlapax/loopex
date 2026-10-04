@@ -3523,13 +3523,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:noreply, state}
 
       {:ok, _candidate} ->
-        # Concept: checkpoint emission requires the pending owner-schema decision.
-        # Technical depth: the settled summary stays bounded by the same cutoff;
-        # this branch writes no unapproved private record or public owner field.
-        {:noreply, state}
+        commit_compact_phase(
+          state,
+          SessionState.propose_maintenance_checkpoint(
+            state.durable,
+            System.system_time(:millisecond),
+            checkpoint_clock_check(state, {:compact, state.durable.pending_compact["command_id"]})
+          )
+        )
 
       {:error, reason} ->
         {:stop, {:compact_checkpoint_failed, reason}, state}
+    end
+  end
+
+  defp advance_compact_episode(state, %{"stage" => "checkpoint_committed"}, work) do
+    result =
+      SessionState.propose_maintenance_checkpoint_completion(
+        state.durable,
+        System.system_time(:millisecond),
+        checkpoint_clock_check(state, {:compact, state.durable.pending_compact["command_id"]})
+      )
+
+    case result do
+      {:error, {:checkpoint_requires_more_progress, _}} ->
+        start_maintenance_preparation(state, work)
+
+      result ->
+        commit_compact_phase(state, result)
     end
   end
 
