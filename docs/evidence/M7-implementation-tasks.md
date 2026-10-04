@@ -325,6 +325,57 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: implement the accepted attempts-index envelope's canonical framing and
+  chain verification in the private M7 evidence helper `AttemptFrames`.
+  Reuse the existing protocol sorted-key JSON encoder and duplicate-aware
+  configuration decoder. The exact six-field envelope covers its five unsigned
+  members with SHA-256, without LF, and bounds the complete JSON object to
+  65,536 bytes. Verified chains require sequence one/null predecessor and
+  matching campaign, consecutive sequences and exact preceding digests.
+  A trailing incomplete append returns the verified preceding head and exact
+  unresolved tail as an error, including an otherwise complete JSON object
+  missing its LF; it is never acknowledged as a complete index.
+
+  Seven new tests pin an independently computed literal Python-stdlib JSON/SHA
+  vector, nested ordering, exact multibyte boundary, every truncation position,
+  gaps/reorder/repeated rows/forks/foreign campaigns, duplicate and escaped
+  duplicate keys, changed/unknown/missing envelope fields, malformed hashes,
+  unsupported implementation terms, floats, invalid Unicode, excess nesting
+  and exact integers above the floating-point precision range. With the eight
+  adjacent decoder cases, all fifteen pass warning-free on both supported
+  toolchains, 0.06 seconds each. The first current invocation passed its seven
+  assertions but emitted a compiler warning for an unpinned bitstring size;
+  it remains failed warning-free evidence. Pin the existing size variable and
+  retain that output beside the separate corrected proofs. Handles `39538`,
+  `79707` and `9498` are terminal and collected.
+
+  Complete failed/corrected outputs and final source/test hashes are retained
+  in `/private/tmp/loopex-m7-attempt-frames-proof-inventory.tsv`, SHA-256
+  `1f44753e49801211e5d280e2749ea750cac23cfa95a975cb6e722f86a49647d7`.
+  This helper verifies only the already accepted frame and chain contract.
+  Event-body schemas, ownership/transition admission, locked IO, fsync-before-
+  dispatch, handoff, redaction and runner selection remain open. It opens no
+  file, dispatches no case and supplies no authority from a valid frame.
+  No campaign or new event-body schema was pinned by this implementation.
+
+  Formatting, warning-free compilation, documentation ordering, status,
+  dependency direction, staged whitespace and task-denominator checks pass in
+  15.9 measured seconds. Complete immutable output is
+  `/private/tmp/loopex-m7-attempt-frames-metadata-v2.log`, SHA-256
+  `376c17435de7d141e1e19956188d3c5dd3d45c3c303ec178aed95f7fe440d58c`. The first metadata
+  invocation correctly refused the not-yet-tracked new source at the dependency
+  gate. Its complete failed output remains retained at
+  `/private/tmp/loopex-m7-attempt-frames-metadata.log`, SHA-256
+  `69b8f65d29530ece6f10a54f3effe05c3910680773e09691920ce4c07d6cab60`. Staging the new
+  ordinary source files supplies the gate's existing prerequisite; no gate was
+  changed. Handles `87879` and `12712` are terminal and collected.
+
+  One added T14 subtask closes; all ten original T14 rows remain open.
+  T01–T19 originals remain 67 done / 106 todo / 6 retired; added are
+  236 done / 10 todo. Including T00, originals remain 67 / 112 / 7 and
+  added are 240 / 11. No paid provider call or dependent transport-creation
+  implementation has begun. M7 remains In progress.
+
 - Done: the single full current-pair fast check of clean committed
   `217b8b90a455aa4ccb3fbd2aae668fbe33405811` passes all eleven applications,
   3,814 cases with 44 exclusions, in 1,015.7 measured wrapper seconds and
@@ -9780,6 +9831,10 @@ candidate integration and focused floor proofs are retained there; items 9 and
 - [ ] Add the M7 evidence validator to the existing two check commands.
 - [ ] Implement M7 lane selectors while preserving all legacy cases.
 - [ ] Test truncation, forks, duplicate writers, interrupted handoff, resume, abandonment, redaction and every verdict route.
+
+### Added implementation subtasks
+
+- [x] Implement the accepted private attempts-index canonical envelope and complete-chain framing; reuse sorted JSON and duplicate-aware decoding, pin an independent exact-byte/hash vector, refuse malformed/noncanonical/oversized/forked records and preserve unresolved truncated tails on both supported toolchains. Event admission, writer ownership, fsync and runner dispatch integration remain open.
 
 ## T15 — Prove migration and rollback
 
