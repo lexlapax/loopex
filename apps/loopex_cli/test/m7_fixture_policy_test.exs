@@ -308,6 +308,171 @@ defmodule LoopexCli.M7FixturePolicyTest do
     assert FixtureManifest.verify_workspace(catalog["fixtures"]["repair"], f.workspace) == :ok
   end
 
+  for {choice, default} <- [{"choice-1", "empty"}, {"choice-2", "literal_null"}] do
+    @feature_choice choice
+    @feature_default default
+    test "feature commits its nil question and #{@feature_choice} before effects and passes both immutable oracle modes",
+         f do
+      File.rm_rf!(f.workspace)
+      File.cp_r!(Path.join(@fixtures, "feature/workspace"), f.workspace)
+      File.cp!(Path.join(@fixtures, "feature/oracle.exs"), f.oracle)
+      runner = File.read!(f.runner)
+
+      File.write!(
+        f.runner,
+        String.replace(
+          runner,
+          " M7_WORKSPACE=",
+          " M7_NIL_DEFAULT=#{@feature_default} M7_WORKSPACE="
+        )
+      )
+
+      pins = Map.new(Map.keys(f.pins), &{&1, pin(&1)})
+      {:ok, capture} = Policy.prepare("m7.feature", f.digest, f.workspace, f.argv, pins)
+      f = %{f | capture: capture, pins: pins}
+      {:ok, catalog} = FixtureManifest.load(@fixtures)
+      spec = catalog["fixtures"]["feature"]
+      assert Canonical.digest_bytes(File.read!(f.oracle)) == spec["oracle"]["sha256"]
+      [%{"arguments" => question}] = spec["required_model_actions"]
+
+      code = """
+      defmodule RowEncoder do
+        def encode(values, options \\\\ []) do
+          mode = Keyword.get(options, :nil_mode, :#{@feature_default})
+          Enum.map_join(values, ",", &value(&1, mode))
+        end
+        defp value(nil, :empty), do: ""
+        defp value(nil, :literal_null), do: "null"
+        defp value(value, _mode), do: to_string(value)
+      end
+      """
+
+      script = [
+        %{
+          text: "ask before editing",
+          calls: [%{id: "nil-choice", name: "ask", arguments: question}]
+        },
+        %{
+          text: "implement chosen default",
+          calls: [
+            %{
+              id: "feature-write",
+              name: "write",
+              arguments: %{"path" => "lib/row_encoder.ex", "content" => code}
+            }
+          ]
+        },
+        %{text: "verify", calls: [%{id: "oracle", name: "bash", arguments: %{"argv" => f.argv}}]},
+        %{text: "done", calls: []}
+      ]
+
+      {:ok, prepared} = ChatConfiguration.load(["chat", "--config", f.config], f.root, nil)
+
+      options = [
+        policy: %{module: Policy, context: capture},
+        policy_identity: Policy.identity(capture),
+        model: prepared.selection.configuration["model"],
+        cleanup_grace_ms: 1000
+      ]
+
+      parent = self()
+
+      callback = fn runtime ->
+        {:ok, session} =
+          Loopex.create_session(runtime, prepared.session_options,
+            command_id: "feature-create",
+            genesis: prepared.genesis
+          )
+
+        :ok = Loopex.track_session(Path.join(f.root, "state"), session, "fixture-real-runtime")
+        {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
+        [prompt] = spec["prompts"]
+
+        assert {:accepted, "feature-prompt"} =
+                 Loopex.command(attachment, %{
+                   type: :prompt,
+                   command_id: "feature-prompt",
+                   content: prompt
+                 })
+
+        pending = await_event(attachment, "interaction.requested", deadline())
+        assert pending["producer"] == "model_tool"
+        assert pending["prompt"] == question["question"]
+        assert Enum.map(pending["choices"], & &1["label"]) == question["choices"]
+        {:ok, status} = Loopex.session_status(runtime, session)
+        assert status.open_interaction["interaction_id"] == pending["interaction_id"]
+
+        assert {:accepted, "feature-answer"} =
+                 Loopex.command(attachment, %{
+                   type: :interaction_answer,
+                   command_id: "feature-answer",
+                   interaction_id: pending["interaction_id"],
+                   choice_id: @feature_choice
+                 })
+
+        terminal = await_event(attachment, "run.finished", deadline())
+        assert terminal["outcome"] == "completed"
+        0
+      end
+
+      assert with_stack(f, script, options, callback, parent) == 0
+      assert_receive {:committed, _session, rows, stats, requests}
+      assert Enum.sum(Map.values(stats.dispatches)) == 2
+      assert length(requests) == 4
+
+      pending = Enum.find(rows, &(&1.payload.kind == "model_question_requested_v1"))
+      answer = Enum.find(rows, &(&1.payload.kind == "model_question_response_admitted_v2"))
+      first_effect = Enum.find(rows, &(&1.payload.kind == "effect_intent_committed_v2"))
+      assert pending != nil and answer != nil
+      assert pending.journal_version < answer.journal_version
+      assert answer.journal_version < first_effect.journal_version
+      assert answer.payload["answer"]["choice_id"] == @feature_choice
+
+      assert Enum.any?(
+               Enum.at(requests, 1).messages,
+               &(&1["role"] == "tool" and &1["content"] == @feature_default)
+             )
+
+      receipt =
+        Enum.find_value(rows, fn row ->
+          if row.payload.kind == "executor_receipt_committed_v2" and
+               row.payload["receipt"]["tool_call_id"] == "oracle",
+             do: row.payload["receipt"]
+        end)
+
+      assert receipt["outcome"] == "completed", receipt["output"]
+      assert receipt["cleanup_confirmation"] == "confirmed"
+      assert_suite(receipt["output"], Path.join(f.root, "trusted/feature-agent.log"))
+      assert Policy.check(capture) == :ok
+
+      {independent, 0} =
+        System.cmd("/usr/bin/env", ["-i", "PATH=/usr/bin:/bin" | f.argv],
+          cd: f.workspace,
+          stderr_to_stdout: true
+        )
+
+      assert_suite(independent, Path.join(f.root, "trusted/feature-independent.log"))
+      assert Policy.check(capture) == :ok
+      assert FixtureManifest.verify_workspace(spec, f.workspace) == :ok
+    end
+  end
+
+  defp deadline, do: System.monotonic_time(:millisecond) + 5000
+
+  defp await_event(attachment, kind, deadline) do
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: ^kind} = event} ->
+        event
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: flunk("fixture did not commit #{kind}")
+
+        Process.sleep(1)
+        await_event(attachment, kind, deadline)
+    end
+  end
+
   defp request(id, arguments) do
     definition =
       Enum.find(

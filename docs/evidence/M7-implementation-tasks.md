@@ -325,6 +325,44 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: complete the feature fixture's required nil-mode question through
+  actual committed model-question and explicit operator-answer records before
+  any file effect. Two cases select choice-1/empty and choice-2/literal_null
+  from the catalog's exact question and choices. The next Model-port request
+  contains the selected answer. A real Local Executor writes only the permitted
+  feature file and runs the exact pinned external runner/oracle; successful
+  cleanup-confirmed receipts retain all three passing oracle assertions.
+  After runtime, Store, executor and lease joins, the independent same-argv
+  oracle also passes. Each oracle covers the selected default, both explicit
+  modes and unchanged ordinary rows. Runner/oracle pins and complete allowed
+  workspace diffs are checked around the independent run.
+
+  The seven-case fixture-policy group passes warning-free on current in
+  5.6 seconds and floor in 5.5 seconds. Handles `24348` and `41795` are terminal
+  and collected. Six failed/corrected logs and the final test identity are in
+  `/private/tmp/loopex-m7-feature-question-proof-inventory.tsv`, SHA-256
+  `6bde8b45456471da50376c5e30b988373cfc1176fe94599f0285efbe3a3a06f1`.
+  Earlier failed witnesses used a nonexistent detach facade, incorrect private
+  record kinds/answer field and an incorrectly escaped generated default-argument
+  expression; they remain failed evidence. Runtime-owned attachment cleanup and
+  exact supervisor/process joins are retained. No production code or timeout
+  changes, paid calls or attended evidence are introduced.
+
+  Formatting, warning-free compilation, documentation ordering, status/index
+  links, whitespace and the original checklist denominator pass in 15.5 seconds.
+  Complete output is `/private/tmp/loopex-m7-feature-question-metadata-v1.log`,
+  SHA-256 `008deea1b6e6c279785f1f8f67e3adadebba4a2e888c1f4edbbc36f2c26e29a6`.
+  Handle `33447` is terminal and collected. All seven retained inventory digests
+  were reverified before commitment.
+
+  T13 original item 2 and one added proof subtask close. T01–T19 originals are
+  68 done / 105 todo / 6 retired; added subtasks are 239 done / 10 todo.
+  Including T00, originals are 68 / 111 / 7 and added are 243 / 11.
+  The scripted Model port and explicit test-operator answers prove the fixture's
+  required behavior; the separate human-attended campaign remains open.
+  The exact `0823aa5061620b9506ce7399f89f5fee8c52e3d2` full fast check remains
+  running under handle `41618`; its result is not claimed for this test child.
+
 - Done: bind a private trusted M7 fixture policy through the existing chat
   composition seam, after ordinary explicit-file and closed registry-profile
   validation. The capture binds the selected case, literal argv, physical
@@ -9865,7 +9903,7 @@ candidate integration and focused floor proofs are retained there; items 9 and
 ### Original checklist
 
 - [x] Implement the repair fixture and its independent sum assertions.
-- [ ] Implement the feature fixture requiring the nil-encoding question.
+- [x] Implement the feature fixture requiring the nil-encoding question.
 - [x] Implement the review fixture with the exact duplicate-fee finding and call chain.
 - [ ] Implement the long fixture preserving the required facts through compaction and restart.
 - [ ] Implement the trusted fixture wrapper and exact approved test-command policy.
@@ -9881,6 +9919,7 @@ candidate integration and focused floor proofs are retained there; items 9 and
 - [x] Freeze each fixture catalog entry to its exact changed/created path policy; reject well-formed edits that broaden or remove the retained task allowance, with failing-before and both-toolchain proofs.
 - [x] Implement the private pinned fixture policy capture with exact argv, physical workspace and external file identity checks; deny alternate shell commands and mutable paths without broadening the ordinary registry.
 - [x] Join that capture to ordinary chat startup and prepared resume, retain closed harness settings/status provenance, prove pending-question identity refusal and actual committed/independent repair-oracle execution with owner cleanup on both toolchains.
+- [x] Prove both feature defaults through committed nil-mode questions and exact operator answers before effects, with real executor receipts, independent immutable oracle reruns, preserved explicit modes and owner cleanup on both toolchains.
 
 ## T14 — Implement attempts tracking and evidence validation
 
