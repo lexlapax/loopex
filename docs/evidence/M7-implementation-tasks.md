@@ -325,6 +325,64 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: complete the physical Local Store crash campaign for both automatic
+  and standalone maintenance. Thirty cases kill the actual Store at five
+  boundaries, preparation capture, request/open staging, settlement,
+  checkpoint and publication, at each of before-linearization,
+  after-linearization-before-result and exact recovery re-presentation. The
+  existing Local fault probe changes no stored frame, receipt, clock or
+  authority. Independent reopened-record checks pin the precise preceding or
+  committed record kind, raw record/event prefixes, atomic outbox, once-only
+  summaries/checkpoints/settlements/charges, safe continuation, conservative
+  failure without ambiguous redispatch, stale-writer recovery and exact result
+  replay. Runtime, Store, model, executor and probe actors are joined.
+
+  This exposed and repaired a cleanup-truth defect: a run-owned episode
+  inherited an unsettled provider attempt yet reported confirmed cleanup.
+  Derive uncertainty from the authenticated attempt-owner epoch and retained
+  owner-loss/abort/deadline settlement, using the existing unknown result
+  variant. Parent outcome, spending, result keys, persistent fields and limits
+  stay unchanged. Seven existing successor cases now pin inherited open,
+  abort and deadline cleanup as unknown, preserve completed-reply/source
+  cleanup, and reject both directions of forged cleanup during strict replay.
+  This corrects implementation of the existing cleanup invariant; it adds no
+  public or persistent schema and no compatibility fallback.
+
+  Final paired proof passes all 313 ordinary Core maintenance cases, with the
+  two existing production-cutoff exclusions, in 14.1 current / 13.6 floor
+  seconds. The 30 new crash cases, two physical reopen cases and eighteen
+  adjacent creation/question cases pass all 50 in 19.3 current / 17.8 floor
+  seconds. Complete outputs, including fixture/expected-refusal errors, the
+  reproduced production defect and warning-gate failures, are retained in
+  `/private/tmp/loopex-m7-maintenance-local-crash-proof-inventory.tsv`, SHA-256
+  `d896bf0a449566a07506bd08541181da5e4415f9075cad75a7ca9dd266193ec8`.
+  A run with passing test assertions but compiler warnings remains FAIL;
+  generated-case predicates now expand before function compilation and both
+  pairs remain warning-free. No cutoff was inflated and no check was relaxed.
+
+  Original T07 item 10 closes, plus two added subtasks for the disk campaign
+  and cleanup repair. T01–T19 originals are 64 done / 109 todo / 6 retired;
+  added are 233 done / 10 todo. Including T00, originals are 64 / 115 / 7 and
+  added are 237 / 11. Item 11 remains open for complete current-surface
+  preservation; coordinated transport generation and real-provider long
+  conversation remain open. The transport-creation decision below is still
+  unanswered. Next verification is one full current-pair fast check from the
+  clean committed integration candidate, preserving all complete output and
+  its exact SHA. This paired component proof is not a full fast/release or
+  closure matrix result.
+
+  Formatting, warning-free compilation, compiled documentation order,
+  status/index links, dependency direction, whitespace and the unchanged
+  original-checklist denominator pass. Complete output:
+  `/private/tmp/loopex-m7-maintenance-local-crash-metadata.log`, SHA-256
+  `54f1cf187bb8ff007e2f638b4d8cc5b492c100cd89ca5c5207c86ffad35d5af7`.
+  Final Core handles `91039`/`88753`, composition handles `75909`/`37345`
+  and metadata handle `97430` are terminal and collected. The attached
+  `m7-trace-check` verification checkout was inspected clean and detached at
+  `a160e5b073206fa453f208c569012ddf6e4f8402`; reuse it for the candidate's full
+  check after switching to that exact committed SHA. Keep the pending
+  transport decision separate from this independent completed work.
+
 - Done: prove standalone and automatic compaction through a physical Local
   Store close, reopen and public session resume. The new composition cases use
   the actual disk Store and public commands, with the reusable scripted Model
@@ -9263,7 +9321,7 @@ or check was relaxed.
 - [x] Implement bounded attempts, refusal records, terminal ordering and standalone compact results.
 - [x] Resolve uncertain checkpoint commits before publication and charge usage once.
 - [x] Test oversized oldest/newest groups, small problematic groups, trailing inputs, omitted content, length stops and non-progress.
-- [ ] Inject crashes around preparation, staging, settlement, checkpoint and publication.
+- [x] Inject crashes around preparation, staging, settlement, checkpoint and publication.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 <a id="t07-original-item-evidence"></a>
@@ -9284,12 +9342,16 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 | 7, attempts/refusal/terminal/result | [Provider attempts](../../apps/loopex/test/maintenance_provider_attempt_test.exs), request staging and both live owners prove bounded physical retry, exhausted/partial endings, leading episode-terminal ordering and exact five-member standalone result without a synthetic run. |
 | 8, unknown checkpoint and once-only usage | Live automatic pending/committed checkpoint cases cover before-linearization, after-linearization-before-result and recovery-representation uncertainty. Standalone owner cases hold actual checkpoint/completion transactions, join the provider callback, kill/recover the owner and prove one checkpoint, settlement, event and charge without redispatch. These use the fault-injecting Store fixture, not a disk-fault claim. |
 | 9, required problematic content | Source and request staging cases cover oldest whole-unit excerpts, oversized protected tails, small prefixes followed by oversized units, queued/trailing input, inherited omission, non-progress and length-stop refusal. Standalone projection/owner cases cover the same bounded-source and result paths. |
-| 10, open complete crash campaign | Live process/fault-injecting Store phases and real cutoff joins pass; complete persistent-Local-Store process/fault coverage across preparation, staging, settlement, checkpoint and publication remains open. |
+| 10, complete crash campaign | Live Core process/fault-injecting Store phases and real cutoff joins pass. [Physical Local Store crash cases](../../apps/loopex_composition/test/maintenance_store_restart_test.exs) kill the actual Store for both ownership modes at preparation, staging, settlement, checkpoint and publication across all three declared uncertainty phases, reopen the log and recover through the public facade. Precise preceding/committed record checks prove each cut. Raw records/outbox, once-only usage/checkpoints, conservative ambiguous failure, safe continuation, stale-writer recovery and process joins pass on both pairs. The campaign also exposed and repaired false run-owned cleanup confirmation after inherited open attempts; strict replay rejects forged confirmation. |
 | 11, open complete preservation proof | Live automatic/standalone owner succession retains raw facts, checkpoints, usage, deadlines and result identity. [Physical Local Store restart](../../apps/loopex_composition/test/maintenance_store_restart_test.exs) now proves exact log/raw prefixes, checkpoint/configuration/usage/deadline replay, standalone result identity and continued summary projection with no redispatch. Complete current live-surface preservation still needs its integrated proof; real-provider long conversation remains an M7 closure obligation. |
 
 ### Added implementation subtasks
 
-- [x] Prove automatic and standalone compaction through a real Local Store close/reopen and public resume, retaining exact raw records/events/log bytes, checkpoint/configuration/deadline/usage state, standalone command replay and the next ordinary summary projection without redispatch or duplicate charges; join all runtime, Store and fixture actors on both supported toolchain pairs. The broader physical crash campaign and current-surface preservation remain open.
+- [x] Complete the real Local Store maintenance crash matrix for automatic and standalone ownership at preparation, staging, settlement, checkpoint and publication across before-linearization, after-linearization-before-result and exact recovery re-presentation; prove precise durable cuts, atomic outbox, raw prefixes, conservative ambiguous spending/no redispatch, safe summary continuation, stale-writer recovery, exact results and process joins on both toolchains.
+
+- [x] Repair run-owned maintenance cleanup confirmation for inherited unsettled provider attempts using their authenticated owner epoch and retained termination evidence, without changing result keys, persistence fields, parent outcome or usage; pin owner-loss/abort/deadline uncertainty, retain confirmed completed-reply/source cleanup and reject forged claims under strict replay on both toolchains.
+
+- [x] Prove automatic and standalone compaction through a real Local Store close/reopen and public resume, retaining exact raw records/events/log bytes, checkpoint/configuration/deadline/usage state, standalone command replay and the next ordinary summary projection without redispatch or duplicate charges; join all runtime, Store and fixture actors on both supported toolchain pairs. The physical crash campaign closes separately above; current-surface preservation remains open.
 
 - [x] Implement the approved maintenance_reply_reserve_unavailable v2 preparation refusal when positive remaining run tokens cannot fit the fixed summary reserve; preserve actual budget/turn exhaustion precedence, actual usage, zero summary dispatch and atomic episode/refusal/run ending, and prove exact replay, forged-cause refusal, boundary vectors and live recovery on both supported pairs.
 

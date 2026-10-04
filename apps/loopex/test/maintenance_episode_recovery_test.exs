@@ -727,6 +727,14 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         :invalid_expired
       ] do
     @mode mode
+    @expected_cleanup if(mode in [:open, :open_aborted, :open_expired],
+                        do: "unknown",
+                        else: "confirmed"
+                      )
+    @forged_cleanup if(mode in [:open, :open_aborted, :open_expired],
+                      do: "confirmed",
+                      else: "unknown"
+                    )
     test "live successor completes retained #{@mode} maintenance without another provider call" do
       {fixture, session, episode} = retained_episode(@mode)
       before = Fixture.records(fixture, session)
@@ -739,7 +747,8 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       assert [prefix] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
       assert prefix.payload["episode_id"] == episode["episode_id"]
       assert prefix.payload["result"]["checkpoint_id"] == nil
-      assert prefix.payload["result"]["cleanup"] == "confirmed"
+
+      assert prefix.payload["result"]["cleanup"] == @expected_cleanup
       usage = prefix.payload["result"]["usage"]
       assert usage["attempts"] == 1
       reported = summary_reply_retained?(@mode)
@@ -787,6 +796,19 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       assert recovered.active_maintenance == nil
       assert recovered.active_run_id == nil
       assert length(rows) > length(before)
+
+      forged =
+        Enum.map(rows, fn
+          %{payload: %{kind: "maintenance_episode_terminal_v1"}} = row ->
+            put_in(row, [:payload, "result", "cleanup"], @forged_cleanup)
+
+          row ->
+            row
+        end)
+
+      assert {:error, :invalid_run_terminal_transition} =
+               SessionState.recover(session, forged, Fixture.events(successor, session))
+
       stop_and_join(successor, session)
     end
   end

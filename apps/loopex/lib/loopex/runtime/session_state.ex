@@ -7275,11 +7275,28 @@ defmodule Loopex.Runtime.SessionState do
          "failure" => failure,
          "usage" => usage,
          "cleanup" =>
-           if(terminal["outcome"] == "outcome_unknown", do: "unknown", else: "confirmed")
+           if(
+             terminal["outcome"] == "outcome_unknown" or
+               unconfirmed_predecessor_cleanup?(state, episode),
+             do: "unknown",
+             else: "confirmed"
+           )
        }}
     else
       _ -> {:error, :invalid_maintenance_episode_transition}
     end
+  end
+
+  # Concept: a failed run cannot confirm an inherited provider's cleanup.
+  # Technical depth: the authenticated opening stamp binds the attempt to its
+  # predecessor. Owner loss, or an abort/deadline that wins over that loss, has
+  # no predecessor callback join. Completed reply settlements and episodes
+  # without an opened attempt retain their existing confirmed cleanup proof.
+  defp unconfirmed_predecessor_cleanup?(state, episode) do
+    is_integer(episode["attempt_owner_epoch"]) and
+      episode["attempt_owner_epoch"] != state.owner_epoch and
+      is_map(episode["settlement"]) and
+      episode["settlement"]["termination"] in ~w(owner_loss abort deadline)
   end
 
   # Concept: an episode reports the bound its parent actually reached.
