@@ -325,6 +325,50 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: prove standalone and automatic compaction through a physical Local
+  Store close, reopen and public session resume. The new composition cases use
+  the actual disk Store and public commands, with the reusable scripted Model
+  port as the provider witness. They retain exact raw record/event prefixes and
+  log bytes, recover the complete checkpoint/configuration/usage/deadline state,
+  replay the standalone command result, and dispatch the next ordinary prompt
+  with the exact retained summary provenance. All runtime, Store and fixture
+  actors are new on reopen. No summary redispatch or duplicate checkpoint/event/
+  maintenance charge occurs, and every actor is stopped and joined.
+
+  The two new cases and eighteen adjacent durable-creation/question-restart
+  cases pass on both pairs: 20 current in 9.9 seconds and 20 floor in 9.6
+  seconds. Initial fixture failures remain retained: the first automatic
+  genesis used a system ceiling above its context ceiling; the corrected
+  genesis then exposed an irreducible oversized current input. The fixture now
+  selects a current input that fits while the combined history overflows.
+  Product admission limits and all original test cutoffs remain unchanged.
+  The initial sandbox Mix TCP-lock failure is evidence unavailable, not PASS.
+
+  Complete immutable outputs and the final test-source digest are retained in
+  `/private/tmp/loopex-m7-maintenance-local-restart-proof-inventory.tsv`, SHA-256
+  `6679af81621ed3edacceed2d866a948f52d7deacf15e80dfe2c2a5e091a29124`.
+  One added T07 subtask closes. T01–T19 original counts remain 63 done /
+  110 todo / 6 retired; added counts are 231 done / 10 todo. Including T00,
+  originals remain 63 / 116 / 7 and added are 235 / 11. The two broader T07
+  originals remain open for physical Store/process crash cuts and complete
+  current-surface preservation; real-provider long-conversation and closure
+  evidence remain separate. The transport-creation decision below is still
+  unanswered. This proof introduces no dependent transport implementation.
+
+  Formatting, warning-free compilation, compiled documentation ordering,
+  status/index links, dependency direction and both staged/unstaged whitespace
+  checks pass. Metadata outputs are retained in
+  `/private/tmp/loopex-m7-maintenance-local-restart-metadata-inventory.tsv`,
+  SHA-256 `2dddfa53f3c4c2bd70ca17b43cf7f1b7210f6202de2f8612e0d5b9344812e2a6`.
+  The first metadata invocation used the nonexistent `loopex.docs` task after
+  successful format/compile; the remaining commands then passed using the
+  actual `loopex.docs_check` task. Neither invocation is a full fast/release
+  check. Test handles `24508` and `9873` and metadata handles `93179` and
+  `84948` are terminal and collected. Next independent work is the persistent
+  Local Store crash matrix at the declared transaction fault points, preserving
+  exact unknown-commit identity, dispatch permits, writer fencing and original
+  cleanup bounds.
+
 - Done: audit the original T07 checklist against the complete current
   maintenance implementation at clean
   `1259d0df62e5de649b3cf0c14f61bc7e0ec51eea`. Owner-selected bounded excerpts,
@@ -9241,9 +9285,11 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 | 8, unknown checkpoint and once-only usage | Live automatic pending/committed checkpoint cases cover before-linearization, after-linearization-before-result and recovery-representation uncertainty. Standalone owner cases hold actual checkpoint/completion transactions, join the provider callback, kill/recover the owner and prove one checkpoint, settlement, event and charge without redispatch. These use the fault-injecting Store fixture, not a disk-fault claim. |
 | 9, required problematic content | Source and request staging cases cover oldest whole-unit excerpts, oversized protected tails, small prefixes followed by oversized units, queued/trailing input, inherited omission, non-progress and length-stop refusal. Standalone projection/owner cases cover the same bounded-source and result paths. |
 | 10, open complete crash campaign | Live process/fault-injecting Store phases and real cutoff joins pass; complete persistent-Local-Store process/fault coverage across preparation, staging, settlement, checkpoint and publication remains open. |
-| 11, open complete preservation proof | Live automatic/standalone owner succession retains raw facts, checkpoints, usage, deadlines and result identity. Complete persistent-Store reopen and current live-surface preservation still need their integrated proof; real-provider long conversation remains an M7 closure obligation. |
+| 11, open complete preservation proof | Live automatic/standalone owner succession retains raw facts, checkpoints, usage, deadlines and result identity. [Physical Local Store restart](../../apps/loopex_composition/test/maintenance_store_restart_test.exs) now proves exact log/raw prefixes, checkpoint/configuration/usage/deadline replay, standalone result identity and continued summary projection with no redispatch. Complete current live-surface preservation still needs its integrated proof; real-provider long conversation remains an M7 closure obligation. |
 
 ### Added implementation subtasks
+
+- [x] Prove automatic and standalone compaction through a real Local Store close/reopen and public resume, retaining exact raw records/events/log bytes, checkpoint/configuration/deadline/usage state, standalone command replay and the next ordinary summary projection without redispatch or duplicate charges; join all runtime, Store and fixture actors on both supported toolchain pairs. The broader physical crash campaign and current-surface preservation remain open.
 
 - [x] Implement the approved maintenance_reply_reserve_unavailable v2 preparation refusal when positive remaining run tokens cannot fit the fixed summary reserve; preserve actual budget/turn exhaustion precedence, actual usage, zero summary dispatch and atomic episode/refusal/run ending, and prove exact replay, forged-cause refusal, boundary vectors and live recovery on both supported pairs.
 
