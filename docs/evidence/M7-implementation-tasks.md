@@ -325,6 +325,59 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Failed: the one full fast check of clean pushed
+  `0823aa5061620b9506ce7399f89f5fee8c52e3d2` finishes exit 1 in 1,016.0 measured
+  runner seconds. All ten other application suites pass. Core passes 1,265 of
+  1,266 cases; aggregate is 3,828 passed / one failed / 44 excluded. The
+  expired-before-cancel quiesce witness receives no held fence-start notice
+  within its existing five seconds. Its mailbox instead contains the quiesce
+  task's `runtime_unavailable` result and normal DOWN: the observed failure is
+  before the expected fence-worker startup, not the cleanup acknowledgement
+  already repaired in the earlier checkpoint. Complete immutable output is
+  `/private/tmp/loopex-m7-0823aa50-fast-check.log`, SHA-256
+  `80d0d5de7771e8288d9b48e024a9d87115d225e4677e2abe57ed53f4121d1576`.
+  Handle `41618` is terminal and collected. Do not rerun these failed bytes
+  into green or claim this integration result for later test children.
+
+  The fixture now acknowledges relay/root startup, proves the projected child
+  inventory and observes the actual disabled-trace reply through the relay
+  before quiesce arms its existing 50-ms initial gate. This establishes an
+  explicit fixture prerequisite. Its existing 500-ms fence, 100-ms reap,
+  startup/worker DOWN waits, elapsed upper/lower bounds, exact fence result,
+  empty Control fence inventory, unchanged Store state and actor joins remain
+  unchanged. Production code and production phase bounds are untouched.
+  All 31 fast quiesce cases pass on both pairs in 7.2/7.1 seconds with the four
+  existing long-bound exclusions. Final handles `2259` and `85597` are terminal
+  and collected. The first readiness version also passed each pair; v2's
+  added responsiveness witness incorrectly expected an active trace result,
+  and fails both pairs with the actual `no_trace_session` response. V3 asserts
+  that exact disabled response. Those failures remain failed evidence.
+
+  Six complete focused outputs, the failed candidate's original fixture and
+  the final test identity are retained in
+  `/private/tmp/loopex-m7-quiesce-fixture-readiness-proof-inventory.tsv`, SHA-256
+  `725e9d7815f010f514c8fa5967430256e3c5f675866d5ffdb5f19cae2461ac16`.
+  These focused passes do not establish the untraced combined-load failure's
+  exact phase or cause. Record a new open T16 investigation rather than marking
+  the full candidate fixed. The earlier sixty-three-fence scheduling issue and
+  concurrent Task.Supervisor/OwnerGroup diagnostics remain separately open.
+
+  Formatting, warning-free compilation, documentation ordering, status/index
+  links, dependency direction, whitespace and the original checklist denominator
+  pass in 16.1 seconds. Complete output is
+  `/private/tmp/loopex-m7-quiesce-fixture-readiness-metadata-v1.log`, SHA-256
+  `0a81d1613cc7c64fe19505e00ba5cf163b157eb71e2bcb85f39f0900474d9f82`. Handle `36988` is
+  terminal and collected. All eight inventory digests were reverified before
+  commitment; the failed full output was rehashed separately.
+
+  T01–T19 originals remain 69 done / 104 todo / 6 retired. Added subtasks are
+  239 done / 11 todo. Including T00, originals are 69 / 110 / 7 and added
+  are 243 / 12. No original item closes from this prerequisite change.
+  Next work is bounded runtime observation of the failed pre-fence path and
+  exact process joins under combined load, preserving its captured deadlines.
+  The separate transport-creation question remains pending; dependent transport
+  implementation and indexed paid campaigns remain unopened.
+
 - Done: audit and close original T04 item 4, file/flag precedence,
   validation and effective-value display. ConfigSelection owns flag over the
   permitted LOOPEX_HOME state-root value over file over harmless literal defaults;
@@ -10030,6 +10083,7 @@ open.
 - [x] Reproduce and repair quiesce cancellation closure when a fence startup notice has not arrived; accept only Control's DOWN/absence-backed acknowledgement for an unannounced worker, refuse a foreign binding without falsely acknowledging absence, retain independent exact local DOWN for announced workers, prove expired/suspended-worker cases before and after the fix, and verify the complete quiesce file plus the unchanged real production fence cutoff on both supported pairs. Keep combined full integration and the original untraced failure schedule distinct.
 
 - [ ] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
+- [ ] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
 
 - [x] Verify the combined caller-monitor cleanup and maintenance reply-reserve amendment from one clean committed integration candidate; retain exact SHA, full fast-check output and selected Node release workflow, preserve failed evidence and keep the separate concurrent owner-stop diagnostic open.
 

@@ -1347,6 +1347,7 @@ defmodule Loopex.RuntimeQuiesceTest do
       relay =
         spawn_link(fn ->
           Process.flag(:trap_exit, true)
+          send(observer, {:fence_relay_ready, self()})
           hold_fence_start(control, observer, %{})
         end)
 
@@ -1358,7 +1359,11 @@ defmodule Loopex.RuntimeQuiesceTest do
           entry -> entry
         end)
 
-      root = spawn_link(fn -> quiesce_projection_root(children) end)
+      root =
+        spawn_link(fn ->
+          send(observer, {:fence_projection_ready, self()})
+          quiesce_projection_root(children)
+        end)
 
       on_exit(fn ->
         for pid <- [relay, root], Process.alive?(pid) do
@@ -1368,6 +1373,14 @@ defmodule Loopex.RuntimeQuiesceTest do
         end
       end)
 
+      # Concept: the measured fence witness starts with its fixture transports ready.
+      # Technical depth: both actors enter their receive loops before Quiesce
+      # arms its existing 50-ms initial gate. Startup scheduling is a prerequisite,
+      # separate from the unchanged 500-ms fence and 100-ms reap cutoffs.
+      assert_receive {:fence_relay_ready, ^relay}, 5_000
+      assert_receive {:fence_projection_ready, ^root}, 5_000
+      assert Supervisor.which_children(root) == children
+      assert {:error, :no_trace_session} = Control.trace_status(relay, fixture.runtime.token)
       started_at = System.monotonic_time(:millisecond)
 
       task =
