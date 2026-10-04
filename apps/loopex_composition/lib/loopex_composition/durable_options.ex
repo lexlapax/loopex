@@ -8,7 +8,14 @@ defmodule LoopexComposition.DurableOptions do
 
   Checks follow the released stages. Keyword lookup preserves first duplicate
   values. Empty active selections remove definitions for core inheritance.
+  Reference host genesis capture resolves compiled adapter facts and selected
+  tool definitions before placement or credential custody. Command callers
+  forward the captured data without importing concrete implementations.
   """
+  alias Loopex.Runtime.SessionGenesis
+  alias LoopexComposition.{ProviderBindings, SessionInstructions}
+  alias LoopexProtocol.ToolDefinition
+
   @coding ~w(loopex.read loopex.write loopex.edit loopex.bash)
   @tools @coding ++ ~w(loopex.grep loopex.find loopex.ls loopex.ask)
   @uint64 18_446_744_073_709_551_615
@@ -26,6 +33,64 @@ defmodule LoopexComposition.DurableOptions do
          :ok <- LoopexComposition.WorkspaceIdentity.validate_manifest(options, workspace),
          {:ok, options} <- resolve(options),
          do: {:ok, {options, root, workspace, id, policy}}
+  end
+
+  # Concept: the reference host captures current settings before owned effects.
+  # Technical depth: adapter defaults and compiled definitions stay in composition;
+  # the resulting plain genesis contains no credential reference or value.
+  @doc false
+  def capture_genesis(options, session_options) do
+    model = Keyword.get(options, :model) || Loopex.LLM.ReqLLM.default_model()
+    [provider, _] = String.split(model, ":", parts: 2)
+    ids = Keyword.fetch!(options, :active_tools)
+
+    definitions =
+      Enum.filter(
+        Loopex.Executor.Local.CodingTools.definitions(),
+        &(&1["tool_id"] in ids)
+      )
+
+    profile = Keyword.fetch!(options, :tool_profile)
+
+    bindings = %{
+      provider => %{"credential" => %{"env" => Loopex.LLM.ReqLLM.credential_variable()}}
+    }
+
+    with {:ok, instructions} <-
+           SessionInstructions.capture(Keyword.fetch!(options, :workspace), profile),
+         {:ok, configuration} <-
+           ProviderBindings.resolve_configuration(
+             %{
+               "model" => model,
+               "reasoning" => "default",
+               "configuration_version" => 1,
+               "instructions" => instructions,
+               "max_tokens" => 4096
+             },
+             bindings,
+             definitions
+           ),
+         names <-
+           Map.new(definitions, fn definition ->
+             {id, version, digest} = ToolDefinition.generation(definition)
+
+             {definition["name"],
+              %{"tool_id" => id, "tool_version" => version, "definition_digest" => digest}}
+           end),
+         {:ok, genesis} <-
+           SessionGenesis.resolve(session_options, %{
+             genesis_version: "session_genesis_v3",
+             runtime_configuration: %{
+               "cleanup_grace_ms" => Loopex.Executor.default_cleanup_grace_ms()
+             },
+             initial_configuration: configuration,
+             tool_selection: %{"definitions" => definitions, "names" => names},
+             policy_defer_mode: "admit"
+           }) do
+      {:ok, genesis}
+    else
+      _ -> {:error, :invalid_session_genesis}
+    end
   end
 
   # An assertion about the world is refused unless it was actually made, rather

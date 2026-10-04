@@ -325,6 +325,49 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: durable `ask` captures complete current v3 genesis before placement or
+  credential custody. Composition owns adapter defaults, capability resolution
+  and compiled tool definitions; the command forwards prepared plain data. The
+  approved public create receives the canonical model, exact captured reference
+  instructions, derived context capacity, reply reserve and immutable selected
+  tools together. Runtime composition uses the same model and capacity. No
+  credential reference or value enters genesis.
+
+  Cases prove capture refusal before later authority, all three tool profiles,
+  exact retained creation through the real public facade and Local Store, and
+  Store reopen/resume despite changed runtime context defaults. The remaining
+  workflow, trace, resource-admission and cleanup cases keep their existing
+  bounds. The old CLI ephemeral resource-fault fixture now prepares current
+  genesis before owner activation and supplies it to its fake facade, so it
+  reaches the original catalog/activation fault again.
+
+  Final focused CLI proof passes 42 cases on the current pair in 30.7 seconds.
+  Floor proof passes the same 41 workflow cases in 30.1 seconds and the
+  command-boundary case separately in 1.4 seconds: the floor Mix line selector
+  selected only that one case when combined with unqualified files. Durable
+  composition/provider-binding cases pass 30 each in 15.8 current-pair and
+  13.8 floor-pair seconds. Formatting, warning-free compilation, documentation,
+  status and dependency checks pass.
+
+  The first complete CLI runs remain FAIL: 548 of 550 cases passed on current
+  in 663.0 seconds; floor reported 554 tests, two failures and six exclusions
+  in 682.1 seconds. Both failures were the superseded ephemeral fixture and
+  the new command's concrete-adapter imports. The fixture was migrated and
+  capture moved into composition without changing the boundary check. Corrected
+  focused cases prove both repairs; no corrected complete CLI or eleven-app,
+  release or closure result is claimed. Earlier focused failure output is also
+  retained. No paid provider call was made.
+
+  Exact source hashes and eleven complete outputs are retained in
+  `/private/tmp/loopex-m7-durable-ask-genesis-proof-inventory.tsv`, SHA-256
+  `abc5184c79b5e71fd8951c01624456a55fbe542c388f95ddcebfd97e1d7f1e7f`.
+  This closes one added T04 host-migration subtask. T01–T19 originals remain
+  56 done / 117 todo / 6 retired; added counts are 230 done / 10 todo.
+  Including T00, originals are 56 / 123 / 7 and added are 234 / 11.
+  Transport and older command creation paths still need current genesis before
+  Core v2 readers/writers and the instruction fallback can be removed. No
+  maintainer decision is pending; M7 remains In progress.
+
 - Done: ephemeral preflight now prepares complete current v3 genesis before
   owner activation. The accepted startup instructions, reasoning and system
   ceiling options pass through the shared configuration validator. Omitted
@@ -9018,6 +9061,8 @@ or check was relaxed.
 - [x] Prove configuration inspection reads no credentials and starts no runtime or provider call.
 
 ### Added implementation subtasks
+
+- [x] Prepare durable ask's complete current v3 genesis before placement and credential custody, retain canonical model/instructions/derived capacity and exact selected tools through the public create facade, keep concrete adapter imports in composition, and prove real Local Store create/reopen/resume, capture refusal, tool profiles, resource and cleanup cases on both supported pairs. Retain failed complete CLI outputs and their focused repairs; other host creation paths and Core v2 removal remain open.
 
 - [x] Prepare complete current ephemeral genesis before owner activation, join the accepted instructions/reasoning/system-ceiling options and derived context origins, share reference instruction capture with chat/inspection, and forward exact genesis through the private facade actor with one retained selected-tool inventory. Prove exact repeated HTTP staging, route privacy, admission negatives, question/call-owner lifetime and cleanup through the complete composition suite and affected CLI cases on both supported pairs without changing production limits or test time bounds. Other host creation paths and Core v2 removal remain open.
 

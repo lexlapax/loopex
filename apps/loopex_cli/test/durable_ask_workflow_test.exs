@@ -352,13 +352,29 @@ defmodule LoopexCli.DurableAskWorkflowTest do
     composition = Agent.get(calls, & &1.composition)
 
     assert Keyword.keys(composition) ==
-             ~w(runtime_id state_root workspace policy active_tools resource_manifest provider_launch recover_stale_writer credential_plane)a
+             ~w(runtime_id state_root workspace policy active_tools resource_manifest provider_launch recover_stale_writer credential_plane model context_token_budget sampling)a
 
     assert composition[:runtime_id] == "placement-1"
     assert composition[:state_root] == @root
     assert composition[:workspace] == @cwd
     assert composition[:active_tools] == ~w(loopex.read loopex.write loopex.edit loopex.bash)
     assert composition[:credential_plane] == :plane
+    genesis = Agent.get(calls, & &1.genesis)
+    configuration = genesis["initial_configuration"]
+    assert genesis.kind == "session_genesis_v3"
+    assert configuration["model"] == "anthropic:claude-haiku-4-5-20251001"
+    assert composition[:model] == configuration["model"]
+
+    assert composition[:context_token_budget] ==
+             configuration["model_capabilities"]["context_window"] - 4096
+
+    assert composition[:sampling] == %{"max_tokens" => 4096}
+    assert configuration["budget_origins"]["context_token_budget"] == "model_window"
+    assert configuration["instructions"]["version"] == "loopex.reference.v1"
+
+    assert Enum.map(genesis["tool_selection"]["definitions"], & &1["tool_id"]) ==
+             composition[:active_tools]
+
     assert %{"packs" => []} = composition[:resource_manifest]
   end
 
@@ -599,6 +615,102 @@ defmodule LoopexCli.DurableAskWorkflowTest do
              DurableAsk.run(%{options() | model: "ollama:local"}, @cwd, "prompt", seams)
 
     assert Agent.get(calls, & &1.calls) == [:skills]
+  end
+
+  test "instruction capture refusal precedes placement and credential custody" do
+    workspace = "/" <> String.duplicate("a", 4_096)
+    {seams, calls} = harness(&completed_events/1, workspace: workspace)
+
+    assert %{status: 1, stdout: "", stderr: "loopex: composition_unavailable\n"} =
+             DurableAsk.run(options(), workspace, "prompt", seams)
+
+    assert Agent.get(calls, & &1.calls) == [:skills]
+    assert Agent.get(calls, & &1.genesis) == nil
+  end
+
+  test "durable ask genesis crosses real facade creation and Local Store restart" do
+    root = Path.join(System.tmp_dir!(), "ask-genesis-#{System.unique_integer([:positive])}")
+    path = Path.join(root, "store.log")
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    {seams, calls} = harness(&completed_events/1)
+    fake_facade = Keyword.fetch!(seams, :facade)
+    {:ok, adapter} = Loopex.Store.Local.start_link(path: path)
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+
+    {:ok, runtime} =
+      Loopex.start_link(runtime_id: "ask-genesis", store: store, context_token_budget: 8192)
+
+    try do
+      facade = fn
+        Loopex, :create_session, [:runtime, options, create_options] = arguments ->
+          assert {:ok, session_id} = Loopex.create_session(runtime, options, create_options)
+
+          assert {:ok, [%{payload: retained}]} =
+                   Loopex.Store.load_records(store, session_id, 0, 1)
+
+          assert retained == create_options[:genesis]
+          Agent.update(calls, &Map.put(&1, :real_session, session_id))
+          fake_facade.(Loopex, :create_session, arguments)
+
+        module, function, arguments ->
+          fake_facade.(module, function, arguments)
+      end
+
+      assert %{status: 0} =
+               DurableAsk.run(
+                 %{options() | tools: :none},
+                 @cwd,
+                 "prompt",
+                 Keyword.put(seams, :facade, facade)
+               )
+    after
+      Loopex.stop(runtime)
+      GenServer.stop(adapter)
+    end
+
+    session_id = Agent.get(calls, & &1.real_session)
+    genesis = Agent.get(calls, & &1.genesis)
+    {:ok, restarted_adapter} = Loopex.Store.Local.start_link(path: path)
+    {:ok, restarted_store} = Loopex.Store.new(Loopex.Store.Local, restarted_adapter)
+
+    {:ok, restarted_runtime} =
+      Loopex.start_link(
+        runtime_id: "ask-genesis",
+        store: restarted_store,
+        context_token_budget: 128
+      )
+
+    try do
+      assert {:ok, [%{payload: ^genesis}]} =
+               Loopex.Store.load_records(restarted_store, session_id, 0, 1)
+
+      assert {:ok, ^session_id} =
+               Loopex.resume_session(restarted_runtime, session_id, command_id: "resume")
+    after
+      Loopex.stop(restarted_runtime)
+      GenServer.stop(restarted_adapter)
+    end
+  end
+
+  test "current genesis retains only the host-selected tool profile" do
+    for {profile, ids} <- [
+          {:none, []},
+          {:read_only, ~w(loopex.read loopex.grep loopex.find loopex.ls)},
+          {:coding, ~w(loopex.read loopex.write loopex.edit loopex.bash)}
+        ] do
+      {seams, calls} = harness(&completed_events/1)
+      assert %{status: 0} = DurableAsk.run(%{options() | tools: profile}, @cwd, "prompt", seams)
+      genesis = Agent.get(calls, & &1.genesis)
+      definitions = genesis["tool_selection"]["definitions"]
+      assert Enum.map(definitions, & &1["tool_id"]) == ids
+
+      assert Enum.sort(Map.keys(genesis["tool_selection"]["names"])) ==
+               Enum.sort(Enum.map(definitions, & &1["name"]))
+
+      refute "loopex.ask" in ids
+    end
   end
 
   test "each postcomposition boundary refuses without retrying its command" do
@@ -1081,7 +1193,8 @@ defmodule LoopexCli.DurableAskWorkflowTest do
           prompt_id: nil,
           attachment_count: 0,
           ids: 0,
-          composition: nil
+          composition: nil,
+          genesis: nil
         }
       end)
 
@@ -1092,8 +1205,12 @@ defmodule LoopexCli.DurableAskWorkflowTest do
         record.(:runtime_id)
         Keyword.get(overrides, :runtime_id, {:ok, "placement-1"})
 
-      Loopex, :create_session, [:runtime, %{"surface" => "cli"}, [command_id: id]] ->
+      Loopex,
+      :create_session,
+      [:runtime, %{"surface" => "cli"}, [command_id: id, genesis: genesis]] ->
         record.(:create)
+        assert {:ok, ^genesis} = Loopex.Runtime.SessionGenesis.normalize(genesis)
+        Agent.update(calls, &%{&1 | genesis: genesis})
         assert String.match?(id, ~r/\Acli-[0-9a-f]{32}\z/)
         Keyword.get(overrides, :create, {:ok, "session-1"})
 
@@ -1184,7 +1301,8 @@ defmodule LoopexCli.DurableAskWorkflowTest do
     end
 
     seams = [
-      read_directories: fn _paths, [workspace: @cwd] ->
+      read_directories: fn _paths, [workspace: workspace] ->
+        assert workspace == Keyword.get(overrides, :workspace, @cwd)
         record.(:skills)
 
         Keyword.get(

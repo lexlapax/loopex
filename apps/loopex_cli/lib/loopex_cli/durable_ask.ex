@@ -16,6 +16,11 @@ defmodule LoopexCli.DurableAsk do
   consumer and seals delivery before composition teardown. The consumer's
   certificate and every captured process DOWN must arrive within the original
   cleanup cutoff; missing proof discards the provisional answer.
+
+  Host instruction capture and model capability resolution produce exact v3
+  genesis before acquiring placement or credential custody. Creation retains
+  that configuration and the selected tool definitions; the composition uses
+  the same canonical model, context capacity and reply reserve.
   """
 
   alias LoopexCli.AskResult
@@ -84,6 +89,7 @@ defmodule LoopexCli.DurableAsk do
        when is_binary(root) and is_binary(cwd) and is_binary(prompt) do
     with {:ok, resources} <- read_directories(skills, cwd, deps),
          :ok <- model_supported(options.model),
+         {:ok, genesis} <- prepare_genesis(options, cwd),
          {:ok, lock} <- acquire_placement(root, deps) do
       try do
         with {:ok, placement} <- placement_id(root, deps),
@@ -92,10 +98,18 @@ defmodule LoopexCli.DurableAsk do
           try do
             case protected(fn ->
                    composition_options =
-                     composition_options(options, cwd, resources.manifest, placement, plane, deps)
+                     composition_options(
+                       options,
+                       cwd,
+                       resources.manifest,
+                       placement,
+                       plane,
+                       deps,
+                       genesis
+                     )
 
                    with_diagnostics(options, composition_options, deps, fn runtime ->
-                     callback(runtime, options, cwd, prompt, resources, placement, deps)
+                     callback(runtime, options, genesis, prompt, resources, placement, deps)
                    end)
                  end) do
               {:ok, result} -> composition_result(result)
@@ -240,7 +254,24 @@ defmodule LoopexCli.DurableAsk do
     end
   end
 
-  defp composition_options(options, cwd, manifest, placement, plane, deps) do
+  defp prepare_genesis(options, cwd) do
+    profile = if options.tools == :read_only, do: "read-only", else: Atom.to_string(options.tools)
+
+    case LoopexComposition.DurableOptions.capture_genesis(
+           [
+             model: options.model,
+             workspace: cwd,
+             active_tools: active_tools(options.tools),
+             tool_profile: profile
+           ],
+           %{"surface" => "cli"}
+         ) do
+      {:ok, genesis} -> {:ok, genesis}
+      {:error, _} -> {:diagnostic, :composition_unavailable}
+    end
+  end
+
+  defp composition_options(options, cwd, manifest, placement, plane, deps, genesis) do
     base = [
       runtime_id: placement,
       state_root: options.state_root,
@@ -253,9 +284,16 @@ defmodule LoopexCli.DurableAsk do
       credential_plane: plane
     ]
 
-    model = if is_nil(options.model), do: [], else: [model: options.model]
+    configuration = genesis["initial_configuration"]
+
+    resolved = [
+      model: configuration["model"],
+      context_token_budget: configuration["context_token_budget"],
+      sampling: %{"max_tokens" => configuration["max_tokens"]}
+    ]
+
     bounds = bounds(options)
-    base ++ model ++ if(bounds == %{}, do: [], else: [bounds: bounds])
+    base ++ resolved ++ if(bounds == %{}, do: [], else: [bounds: bounds])
   end
 
   defp active_tools(:none), do: []
@@ -282,11 +320,11 @@ defmodule LoopexCli.DurableAsk do
 
   defp composition_result(_), do: {:diagnostic, :composition_unavailable}
 
-  defp callback(runtime, options, _cwd, prompt, resources, placement, deps) do
+  defp callback(runtime, options, genesis, prompt, resources, placement, deps) do
     root = options.state_root
 
     with {:ok, create_id} <- command_id(deps),
-         {:ok, session_id} <- create(runtime, create_id, deps),
+         {:ok, session_id} <- create(runtime, create_id, genesis, deps),
          :ok <- track(root, session_id, placement, deps),
          {:ok, attachment} <- attach(runtime, session_id, deps),
          :ok <- admit_resources(runtime, session_id, attachment, resources.manifest, deps),
@@ -319,8 +357,12 @@ defmodule LoopexCli.DurableAsk do
     end
   end
 
-  defp create(runtime, id, deps) do
-    case facade(deps, Loopex, :create_session, [runtime, %{"surface" => "cli"}, [command_id: id]]) do
+  defp create(runtime, id, genesis, deps) do
+    case facade(deps, Loopex, :create_session, [
+           runtime,
+           genesis["options"],
+           [command_id: id, genesis: genesis]
+         ]) do
       {:ok, session_id} when is_binary(session_id) ->
         if bounded_id?(session_id),
           do: {:ok, session_id},

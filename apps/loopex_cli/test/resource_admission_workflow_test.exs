@@ -18,7 +18,11 @@ defmodule LoopexCli.ResourceAdmissionWorkflowTest do
   defmodule EphemeralFacade do
     @moduledoc false
 
-    def create_session(runtime, %{"surface" => "embedded"}, command_id: "create") do
+    def create_session(runtime, %{"surface" => "embedded"},
+          command_id: "create",
+          genesis: genesis
+        ) do
+      {:ok, ^genesis} = Loopex.Runtime.SessionGenesis.normalize(genesis)
       send(runtime.token.test, :ephemeral_created)
       {:ok, "session-1"}
     end
@@ -305,6 +309,13 @@ defmodule LoopexCli.ResourceAdmissionWorkflowTest do
           group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end
         }
       }
+
+      {:ok, genesis} =
+        Ephemeral.Preflight.genesis(configuration, workspace, %{
+          "ollama" => %{"credential" => %{"none" => true}}
+        })
+
+      configuration = Map.put(configuration, :genesis, genesis)
 
       {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
       {:ok, activation} = OwnerActivation.start(supervisor)

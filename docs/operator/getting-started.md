@@ -212,6 +212,12 @@ through the existing session commands. See
 [tools and policy](tools-and-policy.md#concept)
 before allowing writes or shell commands.
 
+Durable `ask` captures the reference instructions and workspace facts before
+opening credential custody. It retains the canonical model and selected tools
+with those instructions. Its context capacity derives from the captured model
+window minus the 4,096-token reply reserve, or uses 8,192 when the window is
+unknown. A rejected instruction capture creates no session.
+
 An Elixir host can make the same local call without the command. From the
 Loopex source checkout, save this as `ephemeral.exs`, then run
 `mix run ephemeral.exs` while Ollama serves `llama3.2`:
