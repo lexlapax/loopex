@@ -325,6 +325,70 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: T11's accepted private retained-genesis codec is implemented for
+  parent creation objects and child reservation objects. It writes exactly
+  `encoding`, padded base64 `bytes` and lowercase `sha256`, using the normalized
+  current v3 plain map rather than protocol Canonical's tagged tree. Readers
+  enforce the 65,536-byte decoded core limit and canonical base64 before
+  existing-atom-only, complete-consumption ETF decoding, then invoke the shared
+  core genesis validator. Compressed ETF, unsafe terms, forged settings,
+  trailing bytes and superseded genesis refuse. No ledger IO, new facade,
+  session creation, defaults lookup or launch authority is introduced.
+
+  Both supported pairs pass all 28 cases in the new codec, fixed helper
+  declaration and session-admission files without warnings: current 2.7 seconds,
+  floor 2.8 seconds. The first current run also passed assertions but emitted
+  a test-syntax warning; it is not warning-free evidence. Direct binary-part
+  access replaces that syntax without changing the pad-bit refusal assertion.
+  Tests prove opaque non-UTF-8 values, exact core create-transaction identity,
+  both retained writer fixtures, valid alternate ETF bytes without re-encoding
+  equality, atom noncreation, encoded representation checks and exact
+  65,535/65,536/65,537-byte boundaries. Complete JSON counts base64 expansion.
+  The framing/credit, writer fencing, bindings/catalogs, router, allowance,
+  classification and actual helper execution remain open; no original T11
+  item closes from this codec slice.
+
+  Actual current and floor writers each produced a 1,463-byte payload and
+  2,088-byte complete JSON object. Their payload SHA-256 is
+  `eda2b1dd1e4263aa3b974bf12adaf0c47d71fb27c47c3c02d4bb4b40da1c8a35`.
+  The independently written
+  [current fixture](../../apps/loopex_composition/test/fixtures/delegation/genesis-current-v1.json)
+  and [floor fixture](../../apps/loopex_composition/test/fixtures/delegation/genesis-floor-v1.json)
+  have identical complete-file SHA-256
+  `80e5beb24bee2e8bbd94df1edf7f9c1e0535b9a78fd3a927b1cdb70b69f22f81`.
+  Each pair reads both fixtures. Their equality is observed evidence, not a
+  cross-major writer-stability requirement; the alternate-encoding positive
+  control proves acceptance does not depend on re-encoding equality.
+
+  Complete retained outputs and the writer source are read-only:
+
+  | Retained reference | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-genesis-vector-writer.exs` | Actual-pair fixture writer source | `f39c32bf2ea07a894bac677d69fc0f8f2a89f6f87f55d4a00df89633d18f78d3` |
+  | `/private/tmp/loopex-m7-genesis-vector-writer-current-v1.log` | PASS, actual current writer and immediate read | `6d8bda8d66c3bd90642b4f13b40ff8d6d37693a9d6cacea35b4f8ded8dcafeca` |
+  | `/private/tmp/loopex-m7-genesis-vector-writer-floor-v1.log` | PASS, actual floor writer and immediate read | `5e370b5c7ccb45388c36dbe6cd2535cee4bdfc7c9772dfe4b9d406f7f70a4f49` |
+  | `/private/tmp/loopex-m7-helper-genesis-codec-focused-current-v1.log` | 28 assertions passed, 2.7 seconds; test warning, not warning-free proof | `5245f0ede490454165c256e2b883b473fa5ad63914f330dd8ff3b6ee3a81e8ad` |
+  | `/private/tmp/loopex-m7-helper-genesis-codec-focused-current-v2.log` | PASS, 28 cases, 2.7 seconds, warning-free | `d389ef5098c60c84daa57bb0fb5420d1d603a80cc947043e03f5a9dad509e0eb` |
+  | `/private/tmp/loopex-m7-helper-genesis-codec-focused-floor-v1.log` | PASS, 28 cases, 2.8 seconds, warning-free | `b0565659dcf036de5b5dc850e827f23ca26c8656b8960d6a92320e296086402f` |
+  | `/private/tmp/loopex-m7-helper-genesis-codec-static-current-v1.log` | FAIL, new production file not yet tracked in the Git index; earlier compile/format/bootstrap/docs passed | `813f768854007114c28076476430a782e62c17cfab7bf94e5c0dad8e4ce823c4` |
+
+  The existing dependency gate requires compile sources to be tracked ordinary
+  100644 blobs. Staging the new files satisfies that admission condition; the
+  gate is unchanged. After staging, warning-free compilation, formatting,
+  bootstrap/status, compiled documentation, dependency direction and version
+  checks all pass. Complete output is retained read-only at
+  `/private/tmp/loopex-m7-helper-genesis-codec-static-current-v2.log`, SHA-256
+  `a1a19310d07d01925d0e62c1bd81761c9563efc2b9615f52f267bcba6334170b`.
+  One added T11 codec subtask closes: T11 added becomes 6 done / 0 todo.
+  T01–T19 originals remain 54 done / 119 todo / 6 retired; added becomes
+  210 done / 9 todo. No original row closes. Final metadata checks and the
+  new committed candidate's integration proof remain separate from these
+  both-pair focused and static results. Final metadata bootstrap/status,
+  compiled-documentation, exact-denominator reporter and diff checks also pass.
+  Complete output is retained read-only at
+  `/private/tmp/loopex-m7-helper-genesis-codec-docs-current-v1.log`, SHA-256
+  `ff78515843c09c85bf861dcf272548514cb61945e39caf65e1c7e1064dd3a7de`.
+
 - Done: the full current-pair fast check ran once from clean, pushed
   `6635cb490c978030b9b163fe40f347dbf9db19d4` and passed all eleven application
   suites: 3,686 tests passed and 39 expected exclusions. The check reports
@@ -8275,6 +8339,8 @@ or check was relaxed.
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
 
 ### Added implementation subtasks
+
+- [x] Implement ADR 0046's bounded current-genesis private object codec shared by parent and child retention; prove exact plain ETF/base64/hash representation, owning schema validation, unsafe/compressed/trailing refusal, no input atom creation, encoded-size limits and actual current/floor cross-reading without re-encoding equality.
 
 - [x] Implement accepted exact-genesis read-only create-result lookup; preserve the legacy query, refuse sentinel substitution before exact creation, and prove changed defaults, absent current registrations, distinct uncertainty and actual local log reopen through both shipped Stores on both supported pairs.
 - [x] Implement accepted bounded creation-provenance point/page queries and optional Store callback with replay-derived per-runtime ordinals; prove complete captured cuts, later creates, exact/changed repetitions, unsupported history, damaged indexes, closed/duplicate-safe decoding, unavailable callbacks, no activation/writes and local log reopen on both supported pairs.

@@ -1932,6 +1932,21 @@ the first request, while current sessions without that capability keep their nul
 projection. Self-consistent old encodings refuse; current restart/source-binding,
 resource class/header bounds and exact record-cost reservation remain required.
 
+T11's private retained-genesis codec now implements ADR 0046's exact
+three-member object with normalized plain current v3 genesis, deterministic
+uncompressed ETF, canonical padded base64 and the original-byte SHA-256. The
+65,536-byte core payload limit applies before safe, complete-consumption
+decoding; the shared genesis validator owns all nested settings checks. Both
+actual toolchain writers produced retained fixtures read by both pairs, and
+an alternate valid ETF encoding proves readers do not require re-encoding
+equality. Unsafe terms, compression, trailing bytes, malformed encodings,
+input atom creation, changed schemas and exact size overages refuse. The
+three focused composition files pass 28 cases without warnings on each pair.
+Complete outputs and fixture/source identities are retained in the task
+checklist. This prepares parent/child retained objects; ledger framing and
+closing credit, host bindings, allowance, routing, classification and live
+helper execution remain open.
+
 The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes the older-reader, upgrade and cross-version rollback bullets above.
 The old archive runner, helpers and exclusive fixtures have been removed.
