@@ -325,6 +325,39 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: admit and retain the approved centralized captured creation template at
+  Core startup through optional `session_creation_defaults`. Its exactly four
+  string-key settings pass current v3 normalization and the complete genesis
+  ceiling, exact registered tool-generation membership, selected model-route
+  binding and pure canonical request validation before any child starts.
+  Core resolves no catalog, file or credential. The normalized template is
+  runtime-local, survives Control restart and stays out of the informational
+  runtime configuration read. Nil/omission remain explicitly unconfigured.
+
+  Six new tests plus related runtime/genesis cases pass: 29 on current in
+  1.1 measured seconds and 29 on floor in 1.0. Current handle `54550` is
+  terminal and collected; the floor v2 run completed inline. Both failed v1
+  handles `59782` and `15331` are also terminal and collected. Initial v1 witnesses used an already-invalid oversized
+  configuration; the corrected witness first proves its nested configuration
+  valid and its complete canonical genesis exactly 65,537 bytes before testing
+  startup refusal. Both failed v1 logs remain failed evidence. Four complete
+  logs, three source files and the embedding reference are retained in
+  `/private/tmp/loopex-m7-runtime-defaults-startup-proof-inventory.tsv`, SHA-256
+  `1c26fc02db5a4bce06c619ebf9e9fedbf9eb172a2110d1ae23b9d02156921517`.
+  Formatting, warning-free compilation, documentation, status, dependency
+  direction, whitespace and the task reporter pass in 17.2 seconds. Complete
+  output is retained at `/private/tmp/loopex-m7-runtime-defaults-startup-metadata-v1.log`,
+  SHA-256 `7355116cb9d4db141257137ee61df5818131ef271322457497c1a6f4a03e5cba`; handle `66578` is terminal and collected.
+
+  This completes startup admission/retention only. Implicit create/lookup still
+  need to consume the template, refuse when unconfigured and retire the v2
+  writer with its callers. Foreground and daemon hosts must capture and supply
+  the template before owned startup effects; coordinated current transport
+  schemas/clients and real Store recovery proofs remain open. No original row
+  closes. One added T04 subtask closes: T01–T19 originals stay 70 done /
+  103 todo / 6 retired; added work is 242 done / 11 todo. Including T00,
+  originals are 70 / 109 / 7 and added are 246 / 12.
+
 - Done: verify a complete attempts chain against an exact previously committed
   campaign/sequence/digest head using the existing private frame verifier.
   Authenticated stale copies, shorter history, foreign campaigns and a valid
@@ -9688,6 +9721,8 @@ or check was relaxed.
 - [ ] Finish provider bindings and captured exclusions through chat, daemon-command and remaining ask/helper entrypoints, including discovery and helper preparation.
 
 - [x] Join config validate/show to the actual command entry, resolving every saved role and whole parent genesis before a redacted effective report; prove aliases, exact quantities, origins, child costs, cold credential-free startup and Unicode output on both supported toolchains. Public chat startup and committed-resume reporting remain open.
+
+- [x] Admit the approved centralized captured current-v3 creation defaults at Core startup, validate closed plain settings and exact model/tool bindings before children start, retain the template across Control restart and exclude it from informational configuration. Prove runtime isolation, malformed/credential-field refusal, exact oversized genesis and existing runtime/genesis cases on both supported toolchains. Implicit creation, v2 retirement and both transport hosts remain open.
 
 ## T05 — Update records, protocols and independent clients
 

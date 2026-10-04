@@ -356,6 +356,7 @@ defmodule Loopex.Runtime.Control do
        tool: Keyword.fetch!(options, :tool),
        tools: Keyword.get(options, :tools, []),
        active_tools: Keyword.get(options, :active_tools, []),
+       session_creation_defaults: Keyword.get(options, :session_creation_defaults),
        bounds: Keyword.get(options, :bounds),
        policy: Keyword.get(options, :policy),
        policy_identity: Keyword.get(options, :policy_identity),

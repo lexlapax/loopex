@@ -165,6 +165,7 @@ Optional options:
 | `:bounds` | `%{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}`; supplied keys override. |
 | `:sampling` | `%{"max_tokens" => 4_096}`. |
 | `:cleanup_grace_ms` | `Loopex.Executor.default_cleanup_grace_ms/0`, `5_000`; the committed cleanup period every job and terminal carries. |
+| `:session_creation_defaults` | `nil`, or the host's closed captured v3 template with exactly the string keys `initial_configuration`, `tool_selection`, `policy_defer_mode` and `runtime_configuration`. Startup validates the complete settings, selected model and exact registered tool generations before children start. |
 | `:progress_to` | A pid receiving `{:loopex_progress, item}`, or `{:session, pid}` receiving `{:loopex_progress, session_id, item}` so a host serving many sessions can route each item. |
 | `:diagnostics_to` | A pid receiving `{:loopex_diagnostic, item}`. |
 | `:attachment_capacity` | `64` queued events per attachment, at most `65_536`. |
@@ -185,6 +186,12 @@ The root supervisor is unnamed; the runtime reference holds its pid and an
 unforgeable runtime-local token, so two runtimes in one VM hold independent tool
 sets, sessions, and trace sessions. `start_link/1` returns only once the event
 dispatcher can serve, so a resume issued at once is not refused as unavailable.
+
+Captured creation defaults belong to one runtime and survive its Control child
+restart. They contain no credential references, handles or callbacks and stay
+out of `Runtime.configuration/1`. The host resolves model facts and captures
+instructions before supplying them; Core performs no catalog or file discovery.
+Admission of this template does not write a session or change retained history.
 
 Prompt admission records the run's deadline as a duration, and a queued
 follow-up inherits it at promotion. The first staged model request turns that

@@ -29,6 +29,7 @@ defmodule Loopex.Runtime do
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.Quiesce
   alias Loopex.Runtime.SessionCoordinator
+  alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Store
 
@@ -89,6 +90,7 @@ defmodule Loopex.Runtime do
           | {:tool, map() | nil}
           | {:tools, [LoopexProtocol.ToolDefinition.t()]}
           | {:active_tools, [binary() | {binary(), binary()}]}
+          | {:session_creation_defaults, map() | nil}
           | {:bounds, map()}
           | {:policy, Loopex.Policy.adapter() | nil}
           | {:project_manifest, map() | nil}
@@ -111,6 +113,13 @@ defmodule Loopex.Runtime do
   maintenance_instructions is its explicit version/body block. Nil remains
   unconfigured. The runtime captures instruction bytes once and forwards both
   settings privately to its coordinators, independently of ordinary models.
+
+  Optional session_creation_defaults is the host's captured plain v3 template:
+  initial_configuration, tool_selection, policy_defer_mode and
+  runtime_configuration, all string keys. Startup validates the closed settings,
+  exact registered tool generations and selected model route before children
+  start. The template is runtime-local and retained across Control restarts;
+  catalog resolution, instruction capture and credentials remain host-owned.
   """
   @spec start_link([option()]) :: {:ok, t()} | {:error, term()}
   def start_link(options) when is_list(options) do
@@ -981,6 +990,7 @@ defmodule Loopex.Runtime do
              tool: nil,
              tools: [],
              active_tools: [],
+             session_creation_defaults: nil,
              bounds: nil,
              sampling: nil,
              policy: nil,
@@ -1013,6 +1023,8 @@ defmodule Loopex.Runtime do
          {:ok, executor} <- validate_executor(validated[:executor]),
          {:ok, tool} <- validate_tool(validated[:tool]),
          {:ok, tools} <- validate_tools(inherited_tool_set(validated)),
+         {:ok, session_creation_defaults} <-
+           validate_creation_defaults(validated[:session_creation_defaults], model, tools),
          active_tools = inherited_active_tools(validated, tools),
          {:ok, bounds} <- validate_bounds(validated[:bounds]),
          {:ok, policy} <-
@@ -1051,6 +1063,7 @@ defmodule Loopex.Runtime do
          tools: tools,
          declared_tools: inherited_tool_set(validated),
          active_tools: active_tools,
+         session_creation_defaults: session_creation_defaults,
          bounds: bounds,
          sampling: sampling,
          policy: policy,
@@ -1088,6 +1101,37 @@ defmodule Loopex.Runtime do
         {:error, :invalid_runtime_options}
     end
   end
+
+  defp validate_creation_defaults(nil, _model, _tools), do: {:ok, nil}
+
+  defp validate_creation_defaults(defaults, model, tools) when is_map(defaults) do
+    with true <-
+           Enum.sort(Map.keys(defaults)) ==
+             ~w(initial_configuration policy_defer_mode runtime_configuration tool_selection),
+         {:ok, genesis} <-
+           SessionGenesis.normalize(
+             Map.merge(defaults, %{:kind => "session_genesis_v3", "options" => %{}})
+           ),
+         definitions = genesis["tool_selection"]["definitions"],
+         configuration = genesis["initial_configuration"],
+         true <- Enum.all?(definitions, &(&1 in tools)),
+         true <- is_nil(model) or model.model == configuration["model"],
+         {:ok, text} <- Loopex.Runtime.Instructions.render(configuration["instructions"]),
+         {:ok, _request} <-
+           Loopex.Model.request(
+             configuration["model"],
+             [%{"role" => "system", "content" => text}],
+             tools: definitions,
+             sampling: Loopex.Runtime.SessionConfiguration.sampling(configuration),
+             deadline: 0
+           ) do
+      {:ok, Map.drop(genesis, [:kind, "options"])}
+    else
+      _ -> {:error, :invalid_session_creation_defaults}
+    end
+  end
+
+  defp validate_creation_defaults(_, _, _), do: {:error, :invalid_session_creation_defaults}
 
   defp fetch_identifier(options, key) do
     case Keyword.fetch(options, key) do
