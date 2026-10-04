@@ -2034,6 +2034,10 @@ independent pinned Node consumer pass 19 cases on each pair, including 158
 terminal and 120 compact literal vectors. Exact bytes, development failures
 and complete outputs are indexed in the
 [task record](../evidence/M7-implementation-tasks.md#current-work). This is
-focused implementation proof; combined fast integration and selected Node
-release workflow remain pending. Explicit standalone checkpoint ownership is
-approved but not yet implemented.
+focused implementation proof. The clean combined candidate `b4bee93b` now
+passes the full current-pair fast check, 3,703 cases with 39 expected exclusions
+in 925 seconds, and the selected Node release workflow in 373 measured runner
+seconds. Its fresh-source archive and all four consumer lanes pass; complete
+retained outputs, manifest bytes and digests are indexed in the task record.
+The full closure matrix remains open. Explicit standalone checkpoint ownership
+is approved but not yet implemented.

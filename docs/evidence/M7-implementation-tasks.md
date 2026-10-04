@@ -325,20 +325,75 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: verify combined cleanup and reply-reserve integration, then implement
-  approved standalone checkpoint ownership.
+- Running: implement approved standalone checkpoint ownership and successful
+  compact completion, then join the current protocol/snapshot contracts.
   The separate concurrent owner-stop Task.Supervisor diagnostic remains open.
   The callback/discovery integration is complete at clean pushed
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  215 done / 10 todo. The goal remains active. The maintainer requested the
+  216 done / 9 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
   and the narrow reply-reserve preparation refusal, then approved the captured
   1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
   decisions are resolved. The reply-reserve implementation and focused proof
-  are complete. Standalone checkpoint ownership and combined integration remain
-  open. The cleanup repair is committed and pushed at `052e0e01`.
+  are complete. Combined integration also passes; standalone checkpoint
+  ownership remains open. The cleanup repair is committed and pushed at `052e0e01`.
+
+- Done: combined integration at clean pushed
+  `b4bee93bfd05f120c5c8cf87ec93e0469fc25a97` passes all eleven applications,
+  3,703 cases with 39 expected exclusions, in 925 measured runner/check seconds.
+  This is the only full fast check of that candidate. Complete immutable output
+  `/private/tmp/loopex-m7-b4bee93b-fast-check.log`, SHA-256
+  `493710000d90ff1a98cefe30656e91c5118c9abf46faee4b35ad5667ee2d71b5`.
+  Execution handle `72770` is terminal and collected; do not poll or repeat it.
+  The selected Node release workflow of that same clean candidate passes all
+  four consumer lanes after a fresh source build: app-server 4, protocol 4,
+  daemon 1 and CLI 1 executed cases. It reports 372 check seconds and measures
+  373 runner seconds. Complete output
+  `/private/tmp/loopex-m7-b4bee93b-node-release-v2.log`, SHA-256
+  `c8f640534b6d4a82ed09a0b52b78036eb028b967107755d78395803dfb2f6560`.
+  Handle `75782` is terminal and collected. The initial selected attempt refused
+  before extraction because its external retained-output directory did not
+  exist; creating that directory changed only the prerequisite. That refusal
+  remains unavailable evidence at `/private/tmp/loopex-m7-b4bee93b-node-release.log`,
+  SHA-256 `9fee65dc363edc0f0d1230b9e408ac3408917fa8da1af8ba72837528e2c3ae52`.
+  Neither run is the floor/provider/attended/long-bound/full closure matrix.
+  The separate concurrent owner-stop Task.Supervisor diagnostic remains open.
+  The documentation-only integration record check passes in 17 seconds, retained
+  at `/private/tmp/loopex-m7-b4bee93b-integration-record-docs-v1.log`, SHA-256
+  `10e2b243c911e79eec3940eb170e3ac6722e1ba90d13e69cc4c46135913be60d`.
+
+  The fresh-source lane verifies 1,137 pre-build archive records against the
+  exact candidate. Its complete retained producer bytes and other outputs are
+  under `/private/tmp/loopex-m7-b4bee93b-node-release-retained/`:
+
+  | Retained file | SHA-256 |
+  | --- | --- |
+  | `source-archive-manifest` | `d95b581e2de208bf2f4591c0aebf76cd97ebb7f8ca987e7818df9cb1891011a0` |
+  | `source-archive-manifest.after` | `ad53e9ba8fab3dd84c58283f595eea552eddd445e244892a1be95368eb6faf2b` |
+  | `source-archive-manifest.source-identity` | `90dd1779f9732d36fc6cb594dbd8caa7ebb0a8e270386439e6d0f4ba58366f98` |
+  | `source-inventory` | `02b2b994951c0201e1d05cfa0283d02557158a1c1e586b5c3cc49e8bd3db2fca` |
+  | `fresh-source-build.log` | `15543c5c60a7b59c642b1c8cd68f1bccf0c13383ef47e51b3c53df85b34b0834` |
+  | `escript-inventory.log` | `58719360a2dd2a350eb49a2df2a9891a222b47767ec018dbe83dcfb9403f4a3b` |
+  | `node-client-loopex_app_server.log` | `020005740a436b857c6cf89d3372b50438e02bfe057287f16303516ecc560724` |
+  | `node-client-loopex_protocol.log` | `234ff5b29bebcb1e602f00f905b3a97f59aa930d58c020dacae8fd78725c28fd` |
+  | `node-client-loopex_daemon.log` | `bc5645f3e463385dfa25f2fe1aee3929f4556b1da33380d7c8fa299bd47d61cd` |
+  | `node-client-loopex_cli.log` | `2e307f5cdd22a45149cc7f03401f3c8aebe6ece88f6dd34ca107e6a6033c1619` |
+
+  Resume standalone work at `SessionState.maintenance_checkpoint_record/3`,
+  its replay branch, `EffectIntents`' closed checkpoint schema/neutral reader,
+  and `SessionCoordinator.advance_compact_episode/3`. The current successful
+  compact branch intentionally emits nothing pending ownership implementation.
+  Add the already-approved distinct command-owned private variant and shared
+  public owner object; derive lineage from the last actual original run. The
+  whole-session range may have null `first_kept`, unlike the current run-owned
+  reader. A successful compact must use its existing command cutoff and episode
+  usage, retain a verified checkpoint and complete through the existing leading
+  episode/completion transaction. No synthetic run is permitted. Current public
+  checkpoint schemas/vectors and snapshot/protocol integration remain required.
+  Read-only exploration introduces no further decision. All three sequential
+  questions are resolved; no maintainer answer, agent or check is pending.
 
 - Approved: the captured 1,000-ms stalled-stderr writer-start cutoff and exact
   writer exit/join under the
@@ -8790,7 +8845,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Verify the combined caller-monitor cleanup and maintenance reply-reserve amendment from one clean committed integration candidate; retain exact SHA, full fast-check output and selected Node release workflow, preserve failed evidence and keep the separate concurrent owner-stop diagnostic open.
+- [x] Verify the combined caller-monitor cleanup and maintenance reply-reserve amendment from one clean committed integration candidate; retain exact SHA, full fast-check output and selected Node release workflow, preserve failed evidence and keep the separate concurrent owner-stop diagnostic open.
 
 
 - [x] Apply the approved single captured 1,000-ms CLI stalled-stderr writer-start cutoff and exact writer/device joins; fix the exposed foreign-monitor DOWN consumption by matching the captured PID/reference in the receive guard, preserve production queue/drop/drain/cleanup limits and JSON separation, retain failed proof and prove the affected workflow and shared chat cleanup on both supported pairs.
