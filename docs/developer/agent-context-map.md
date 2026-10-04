@@ -6598,3 +6598,20 @@ All three sequential questions are resolved: explicit checkpoint ownership,
 the narrow maintenance reply-reserve refusal, and this fixture startup cutoff.
 Implementation and relevant current/floor proofs remain required; no milestone
 closure, merge, release or publication is authorized.
+
+<a id="disposition-m7-durable-maintenance-view-2026-10-03"></a>
+### M7 durable maintenance view, 2026-10-03
+
+The maintainer explicitly selected "Durable view accepted" in this chat.
+Add `context.maintenance_changed` with the closed `{active_maintenance}` payload
+specified in ADR 0043, committing each changed allowlisted view with its private
+transition. Snapshots reduce that view at their existing public event cursor;
+no second journal cursor or current-private-state substitution is introduced.
+The accepted packet is `/private/tmp/loopex-m7-maintenance-snapshot-decision.md`,
+SHA-256 `25cfb3719f9c1811b54c4b37c5d75234d0ef712dfcf62b6d862fba4b31b9401c`.
+Its concrete schema and proof obligations are retained in the amended ADR pair.
+This expands the public event inventory and requires coordinated generation-3/4
+schemas, both transport projections, independent clients, privacy canaries and
+unknown-commit proof. Preserve only the current contract, with no older decoder
+or alias. No private capture or instruction text becomes public, no authority
+changes, and no milestone closure, main merge or publication is authorized.

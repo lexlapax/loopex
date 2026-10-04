@@ -12,6 +12,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Maintenance resource receipts:** Narrowly amends [ADR 0017](0017-durable-context-admission-budget.md#concept) and [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) so a successful maintenance request can explicitly record that optional resource intake was skipped; ordinary admission and older receipt validation remain unchanged
 - **Reply-reserve amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03); retained decision packet `sha256:781a4f41a08564326c3dceba2660aa5f871cf436611bce8fd06f4c961047453d`
 - **Checkpoint-owner amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03); retained decision packet `sha256:1b16d7d5fc31f5b42a6c807ac46b7ec2064f55e76683993bb5a8353f8601c9d5`
+- **Maintenance-view amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03); retained decision packet `sha256:25cfb3719f9c1811b54c4b37c5d75234d0ef712dfcf62b6d862fba4b31b9401c`
 - **Prerequisite for:** M7 outcome 3
 
 <a id="concept-adr-0043-decision"></a>
@@ -29,6 +30,15 @@ Its public owner identifies that kind and opaque identity. Standalone work
 creates no synthetic run and changes no ordinary run accounting or deadline.
 Lineage still identifies the original conversation runs traversed. The
 current contract replaces the public owning `run_id` member without an alias.
+
+The durable public `context.maintenance_changed` event records each change to
+the closed active-maintenance view in the same serial-owner transaction.
+Attachment snapshots reduce these events at their existing public event cursor,
+so snapshot and replay describe the same point in history. The view exposes
+only episode identity, actual owner, captured model and thinking-off setting,
+configuration version and admission bounds. It excludes private instructions,
+source/summary text, provider mappings, routes and recovery envelopes.
+Duplicate handling and restart do not invent another view transition.
 
 Automatic compaction runs at initial or later model staging when eligible
 history would exceed a token or record-byte limit, or would leave insufficient
@@ -163,8 +173,8 @@ Technical depth: [Compatibility mechanics](0043-context-compaction-checkpoint-te
 Wire compaction joins ADR 0044's coordinated new-generation-only contract.
 Operators update clients with the server; old negotiation refuses before session work.
 
-Checkpoints, maintenance state and usage are new durable records, with two new
-public events (checkpoint committed, standalone completion), a new progress kind
+Checkpoints, maintenance state and usage are new durable records, with three new
+public events (checkpoint committed, maintenance view changed, standalone completion), a new progress kind
 and new snapshot members for the checkpoint, active maintenance and the last
 standalone result. An unsupported reader must refuse before
 mutation where its decoder supports that guarantee; exact old-reader fixtures

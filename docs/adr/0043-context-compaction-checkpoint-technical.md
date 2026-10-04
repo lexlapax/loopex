@@ -655,6 +655,72 @@ transaction; failure to retain it means Store unavailable, never a fabricated
 terminal or acknowledgement. Detailed provider blocks and descriptors remain
 absent from all failure projections.
 
+**Active maintenance public view.** The maintainer accepted the durable-view
+option in the [maintenance-view disposition](../developer/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03). The closed event kind is `context.maintenance_changed`,
+with exactly one payload member:
+
+
+```json
+{"active_maintenance": null}
+```
+
+or:
+
+```json
+{
+  "active_maintenance": {
+    "episode_id": "<opaque identity>",
+    "owner": {"kind": "run", "id": "<opaque identity>"},
+    "model": "<captured model identity>",
+    "reasoning": "none",
+    "configuration_version": "1",
+    "bounds": {
+      "max_attempts": "4",
+      "max_turns": "8",
+      "token_budget": "10000",
+      "deadline_ms": "60000",
+      "run_deadline": null
+    }
+  }
+}
+```
+
+Every object is closed. The non-null view has exactly those six members.
+`owner` uses the approved checkpoint-owner codec. All opaque identities use its
+existing canonical unpadded base64url encoding of 1–65,536 original bytes. Model
+identity is nonempty UTF-8 under the existing 131,072-byte wire string ceiling;
+whole event/snapshot limits still apply. Reasoning is exactly `none`.
+Configuration version and ordinary turn/token allowances are canonical positive
+decimal strings without uint64 narrowing. Relative deadlines are canonical
+positive uint64 decimal strings; a captured run deadline is null or a canonical
+nonnegative uint64 decimal string. Run bounds have exactly the five members
+shown and max_attempts exactly `4`.
+
+For owner.kind `compact`, bounds instead have exactly `max_attempts`,
+`deadline_ms`, `token_budget`. Max attempts is a canonical decimal `1` through
+`4`; relative deadline is a canonical decimal `1` through `60000`, and token
+allowance is a canonical decimal `1` through `32768`, preserving standalone
+admission's existing domains. They do not inherit run turn limits or a run identity. The
+view describes retained admission bounds, not fabricated remaining capacity.
+No stage, instructions, source text, summary text, native continuation, routes,
+credential references, permits or model capability envelopes enter this view.
+
+The serial owner computes the allowlisted projection before/after an existing
+transition and emits an event only when that projection changes. Event data is
+validated and independently replay-derived from the same private records before
+adoption. An admitted episode emits the non-null view; terminal closure emits
+null. Duplicate handling and owner succession emit no duplicate admission or
+terminal. Unknown commits retain the existing mutation fence: no view event or
+snapshot may publish until resolution. Snapshot scans retain only the last view
+at the requested anchor, never all episode records. Progress never changes it.
+
+Required implementation proof covers both owner kinds, privacy canaries, exact
+numeric/opaque domains, closed-schema rejection, same-cursor paged replay,
+mid-transaction event anchors, duplicate/succession behavior, all three Store
+uncertainty phases and both independent Node workflows. Complete generation-3/4
+manifests and snapshot schema changes remain under T05. This decision does not
+claim those implementations or proofs already exist.
+
 **Checkpoint.** Retain original lineage/range, newly consumed raw range, prior
 checkpoint ID if any, first-kept identity, summary/carry-forward bytes, strategy
 `loopex.compaction.reference` revision 3, exact model/reasoning/configuration

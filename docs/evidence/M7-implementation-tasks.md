@@ -325,9 +325,27 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: verify the combined standalone-capacity and quiesce startup-order
-  repair from the next clean committed integration candidate, then join the
-  current protocol/snapshot contracts. The full `520ff308` failure remains
+- Done: the clean committed candidate
+  `a160e5b073206fa453f208c569012ddf6e4f8402` passed its one full current-pair
+  `bash scripts/check.sh` run. All eleven application suites passed, with
+  3,737 tests passing and 40 lane-selected exclusions. The suite step took
+  831 seconds; the runner took 903 seconds. Complete immutable output is
+  `/private/tmp/loopex-m7-a160e5b0-fast-check.log`, SHA-256
+  `a4e4f15e259075eda8261a583adaf1e4b233de749c3b4c83b3f5313b9cc2abaf`.
+  This verifies the combined source changes. It does not establish the exact
+  untraced schedule of the failed `520ff308` parent, resolve Task.Supervisor
+  cleanup diagnostics, or replace the floor/closure release matrix.
+
+- Accepted, implementation open: the maintainer selected the durable
+  `context.maintenance_changed` view. ADR 0043 and the
+  [decision disposition](../developer/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03)
+  retain its exact closed projection and same-cursor snapshot/replay obligations.
+  Add no private captures to the public plane. This adds a T05 subtask and
+  closes no original item.
+
+- Running: join the accepted durable maintenance view to current
+  protocol/snapshot contracts. The combined standalone-capacity and quiesce
+  startup-order repair passes the exact-candidate full check below. The full `520ff308` failure remains
   recorded as FAIL; the reproduced private-handshake defect is repaired below. Standalone pre-dispatch capacity completion
   is implemented and passes the focused selection on both supported pairs.
   The separate concurrent owner-stop Task.Supervisor diagnostic remains open.
@@ -335,7 +353,7 @@ did not resolve them. No paid provider calls were made during this check.
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  220 done / 9 todo. The goal remains active. The maintainer requested the
+  221 done / 10 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
   and the narrow reply-reserve preparation refusal, then approved the captured
   1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
@@ -8644,6 +8662,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Implement the approved closed `context.maintenance_changed` event and active-maintenance snapshot view; authenticate both actual owners and retained admission bounds, emit only changed safe projections in serial-owner transactions, reduce snapshots at the same public cursor, and prove closed numeric/opaque domains, privacy canaries, paged/mid-transaction anchors, duplicate/succession and all three Store uncertainty phases with both independent Node workflows.
+
 - [x] Implement the approved closed checkpoint-owner schema, shared Elixir codec and independent Node decoder/vectors; project both actual owner kinds through foreground and daemon events using opaque identity bytes and refuse superseded aliases. Prove 36 literal cases and complete identity boundaries on both toolchains; complete generation-3/4 manifests, snapshots and live negotiated workflows remain open.
 
 - [x] Pin the accepted standalone compact-result schema and literal vectors, and implement an independent Node consumer; prove every closed failure branch, arbitrary exact usage, threshold/accounting relations, opaque checkpoint boundaries and unchanged legacy schema identities on both supported toolchains. Coordinated generation-3/4 contracts and live maintenance remain open.
@@ -9036,6 +9056,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Verify the combined standalone-capacity and quiesce startup-order/binding repairs in one full fast check from the clean committed a160e5b0 candidate; retain the exact SHA, complete terminal output, measured durations and digest, while preserving the untraced failed-parent schedule and separate cleanup investigation as open obligations.
 
 - [x] Reproduce and repair quiesce cancellation closure when a fence startup notice has not arrived; accept only Control's DOWN/absence-backed acknowledgement for an unannounced worker, refuse a foreign binding without falsely acknowledging absence, retain independent exact local DOWN for announced workers, prove expired/suspended-worker cases before and after the fix, and verify the complete quiesce file plus the unchanged real production fence cutoff on both supported pairs. Keep combined full integration and the original untraced failure schedule distinct.
 

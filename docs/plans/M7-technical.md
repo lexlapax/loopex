@@ -145,6 +145,12 @@ The integration owner updates the foreground `Mapping`, daemon `Request`,
 All new daemon mutations join the controller checks and succession/capacity
 inventory; merely adding a parser branch cannot bypass or omit lease fencing.
 Retained command IDs and prior refusal/unknown facts keep their original meaning.
+The [approved durable maintenance view](../developer/agent-context-map.md#disposition-m7-durable-maintenance-view-2026-10-03)
+adds `context.maintenance_changed` with ADR 0043's closed allowlist. Commit it
+with each changed private view and reduce it at the same public event cursor
+in snapshots; progress cannot change that view. Both owner kinds, private-field
+canaries and unknown-commit fencing require independent replay/Node proof.
+
 Version the attachment snapshot beyond current revision 2. It contains the
 latest configuration, zero or one active maintenance view and zero or one open
 interaction, within the existing bounded frame/record envelope. Terminal
