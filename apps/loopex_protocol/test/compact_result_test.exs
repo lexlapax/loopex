@@ -7,7 +7,7 @@ defmodule LoopexProtocol.CompactResultTest do
     fixture = read_contract("vectors/standalone-compact-result.v1.json")
     assert fixture["format"] == "loopex.experimental.payload-vectors/1"
     assert fixture["contract"] == "standalone_compact_result"
-    assert length(fixture["cases"]) == 119
+    assert length(fixture["cases"]) == 120
 
     for vector <- fixture["cases"] do
       if vector["error"] do
@@ -50,15 +50,15 @@ defmodule LoopexProtocol.CompactResultTest do
     assert schema["failure"]["bound_reached"]["max_attempts_accounting_source"] == nil
     assert schema["failure"]["numeric_v2"]["context_record_bytes_hard_limit"] == "65536"
     assert schema["failure"]["preparation_v2"]["measurement_scope"] == [nil, "ordinary"]
-    assert length(schema["failure"]["preparation_v2"]["causes"]) == 17
+    assert length(schema["failure"]["preparation_v2"]["causes"]) == 18
   end
 
   test "the complete schema and literal vector bytes have retained identities" do
     for {relative, digest} <- [
           {"schema/standalone-compact-result.v1.json",
-           "b0f47ab083166328d9c66d5f084daa52d0e5aaea59182af1649a108fe3ab026f"},
+           "275db7a32e86e944725d99002b1fa40ec12b97df82dc17b8bc40f7af1021f948"},
           {"vectors/standalone-compact-result.v1.json",
-           "f25445cd209927d8166744db843cfc81a2e16ed9f527e2b1867030cc07454982"}
+           "8c18c0c85af184b3a3fd90344cb5929c2b0508be4f39f36db436756d859d02f5"}
         ] do
       path = Path.join([:code.priv_dir(:loopex_protocol), relative])
       assert :crypto.hash(:sha256, File.read!(path)) |> Base.encode16(case: :lower) == digest
@@ -78,7 +78,7 @@ defmodule LoopexProtocol.CompactResultTest do
     assert status == 0, output
 
     assert {:ok,
-            %{"contract" => "standalone_compact_result", "checked" => 119, "boundary_checks" => 4}} =
+            %{"contract" => "standalone_compact_result", "checked" => 120, "boundary_checks" => 4}} =
              Frame.decode(String.trim_trailing(output, "\n"), 65_536)
   end
 

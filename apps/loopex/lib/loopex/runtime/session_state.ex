@@ -2912,7 +2912,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  # Concept: maintenance spending can end its parent before a checkpoint is admitted.
+  # Concept: maintenance capacity can end its parent before another summary dispatch.
   # Technical depth: derive the observed call units and token charge from the
   # committed episode ledger. The existing episode/run terminal transaction
   # validates these observations again and retains any useful partial checkpoint.
@@ -2944,9 +2944,17 @@ defmodule Loopex.Runtime.SessionState do
           nil
       end
 
-    if detail,
-      do: propose_run_terminal(state, run, "bound_reached", detail),
-      else: {:error, :maintenance_bounds_not_reached}
+    cond do
+      detail ->
+        propose_run_terminal(state, run, "bound_reached", detail)
+
+      validate_preparation_failure_cause(state, run, "maintenance_reply_reserve_unavailable") ==
+          :ok ->
+        propose_context_preparation_failure(state, run, :maintenance_reply_reserve_unavailable)
+
+      true ->
+        {:error, :maintenance_bounds_not_reached}
+    end
   end
 
   defp maintenance_checkpoint_record(state, candidate, now) do
@@ -11967,6 +11975,7 @@ defmodule Loopex.Runtime.SessionState do
              :artifact_preparation_failed,
              :maintenance_summary_invalid,
              :maintenance_summary_incomplete,
+             :maintenance_reply_reserve_unavailable,
              :maintenance_model_unconfigured,
              :maintenance_instructions_unconfigured,
              :maintenance_reasoning_unsupported,
@@ -12119,6 +12128,39 @@ defmodule Loopex.Runtime.SessionState do
          true <- is_nil(state.aborting),
          {:error, cause} <- maintenance_summary(record),
          true <- Atom.to_string(cause) == expected do
+      :ok
+    else
+      _ -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  # Concept: insufficient summary reservation retains the actual unspent balance.
+  # Technical depth: derive both remaining capacity and turn precedence from the
+  # committed run ledger. Only an undispatched run-owned episode can refuse;
+  # a caller-supplied cause cannot end a different owner or an open attempt.
+  defp validate_preparation_failure_cause(state, run_id, "maintenance_reply_reserve_unavailable") do
+    {bounds, charged} = accounting(state, run_id)
+
+    with true <- run_id == state.active_run_id,
+         nil <- state.aborting,
+         %{"run_id" => ^run_id, "stage" => stage, kind: "maintenance_episode_admitted_v1"} <-
+           state.maintenance_episodes[state.active_maintenance],
+         true <-
+           stage in ~w(source_preparation checkpoint_committed model_retry_permitted),
+         true <-
+           stage != "checkpoint_committed" or
+             match?(
+               {:error, {:checkpoint_requires_more_progress, _}},
+               maintenance_checkpoint_completion_record(
+                 state,
+                 state.checkpoints[state.active_checkpoint]["committed_at"],
+                 fn -> :ok end
+               )
+             ),
+         true <- is_map(bounds),
+         remaining = bounds.token_budget - charged.tokens,
+         true <- remaining > 0 and remaining < 1_024,
+         true <- maintenance_parent_call_units(state, run_id) < bounds.max_turns do
       :ok
     else
       _ -> {:error, :invalid_context_refusal}

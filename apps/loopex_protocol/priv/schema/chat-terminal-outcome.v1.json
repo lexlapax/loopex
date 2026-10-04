@@ -115,6 +115,7 @@
         "maintenance_deadline_unrepresentable",
         "maintenance_summary_incomplete",
         "maintenance_summary_invalid",
+        "maintenance_reply_reserve_unavailable",
         "canonical_history_rendering_unsupported",
         "artifact_read_unavailable",
         "artifact_metadata_unrepresentable",

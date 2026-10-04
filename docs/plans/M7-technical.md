@@ -1803,7 +1803,7 @@ cancellation admit no episode. Both-pair selection covers all three standalone
 triggers, declaration endpoints, rehashed substitutions, owner succession and
 bounded one-record private-history traversal without effects. These constructors now join initial live owner capture as described below;
 standalone summary dispatch, spent results, snapshots and complete cleanup remain
-open, together with the separately pending reply-reserve decision.
+open. The reply-reserve decision is approved and implemented as recorded below.
 
 Empty fitting standalone commands now produce a durable unchanged completion
 proposal with no episode or provider attempt. The accepted five-member result
@@ -2021,3 +2021,19 @@ does not implement M8's backup commands.
 No installer, tag, publication or compatibility freeze is part of M7. A release
 label is separately selected. Accepted historical plans and evidence remain
 records of their own revisions.
+
+The approved `maintenance_reply_reserve_unavailable` preparation cause now
+ends eligible run-owned preparation before another summary dispatch. Exact
+replay derives the positive unspent interval below 1,024, retained phase and
+turn precedence; a fitted checkpoint cannot claim this cause. The existing
+leading episode/refusal/run-terminal transaction retains actual usage and useful
+checkpoints. Both-pair focused reducer/live checks pass 114 cases with two
+existing long-bound exclusions; all three ending Store-uncertainty phases prove
+no new summary or ordinary dispatch. Current terminal/compact codecs and their
+independent pinned Node consumer pass 19 cases on each pair, including 158
+terminal and 120 compact literal vectors. Exact bytes, development failures
+and complete outputs are indexed in the
+[task record](../evidence/M7-implementation-tasks.md#current-work). This is
+focused implementation proof; combined fast integration and selected Node
+release workflow remain pending. Explicit standalone checkpoint ownership is
+approved but not yet implemented.

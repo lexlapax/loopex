@@ -16,7 +16,7 @@ const preparationCauses = new Set([
   "maintenance_reasoning_unsupported", "compaction_excerpt_budget_too_small",
   "compaction_no_progress", "compaction_preparation_deadline",
   "maintenance_deadline_unrepresentable", "maintenance_summary_incomplete",
-  "maintenance_summary_invalid", "canonical_history_rendering_unsupported",
+  "maintenance_summary_invalid", "maintenance_reply_reserve_unavailable", "canonical_history_rendering_unsupported",
   "artifact_read_unavailable", "artifact_metadata_unrepresentable",
   "artifact_preparation_count_exhausted", "artifact_preparation_bytes_exhausted",
   "artifact_preparation_deadline", "artifact_preparation_failed",
@@ -64,4 +64,3 @@ function plain(value) {
 function closed(value, keys) {
   return plain(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 }
-

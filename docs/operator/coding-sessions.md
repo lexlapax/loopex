@@ -190,6 +190,13 @@ loopex: failed model_call_failed
 Only those members reach your terminal. The private context, descriptors and
 provider text behind a failure never do.
 
+Configured maintenance reserves 1,024 reply tokens for each summary. If another
+summary is needed but only 1–1,023 run tokens remain, the run fails with
+`maintenance_reply_reserve_unavailable` and makes no summary request. Actual
+spending and any useful checkpoint remain retained. Start a new run with a
+larger token budget. Actual token or turn exhaustion keeps its existing bound
+outcome.
+
 <a id="operator-sessions-cancel"></a>
 ## `loopex cancel` Is Narrow
 

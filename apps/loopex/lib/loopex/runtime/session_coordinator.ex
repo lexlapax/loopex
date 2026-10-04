@@ -6712,6 +6712,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
             {:stop, {:model_attempt_failed, reason}, state}
         end
 
+      {:error, :maintenance_bounds_exhausted} when not is_nil(state.durable.active_maintenance) ->
+        commit_checkpoint_phase(state, work, {:error, :maintenance_bounds_exhausted})
+
       {:error, reason} ->
         {:stop, {:model_attempt_failed, reason}, state}
     end

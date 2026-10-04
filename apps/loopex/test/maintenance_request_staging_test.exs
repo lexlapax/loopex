@@ -2160,6 +2160,123 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     end
   end
 
+  test "insufficient summary reserve fails atomically with honest charge and exact replay" do
+    for remaining <- [1, 500, 1_023] do
+      charge = 10_000 - remaining
+
+      {state, history, events} =
+        pending_checkpoint(String.duplicate("a", 30_000),
+          later_old_units: [String.duplicate("b", 30_000)],
+          usage: %{input_tokens: charge - 1, output_tokens: 1}
+        )
+
+      assert {:ok, checkpoint} =
+               SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+      {state, checkpoint_rows, events} = commit(state, checkpoint, events)
+      history = history ++ checkpoint_rows
+
+      run = state.active_run_id
+      episode = state.active_maintenance
+
+      assert {:error, :maintenance_bounds_exhausted} =
+               SessionState.propose_selected_maintenance_request(state, 2_001, fn -> :ok end)
+
+      assert {:ok, proposal} = SessionState.propose_maintenance_parent_bound(state, run)
+      assert [prefix, refusal, terminal] = proposal.records
+      assert prefix.kind == "maintenance_episode_terminal_v1"
+      assert refusal.kind == "context_admission_refused_v2"
+
+      assert refusal["failure"] == %{
+               "version" => 2,
+               "category" => "context_preparation_failed",
+               "retryable" => false,
+               "measurement_scope" => nil,
+               "cause" => "maintenance_reply_reserve_unavailable"
+             }
+
+      assert terminal["outcome"] == "failed"
+      assert terminal["failure"] == refusal["failure"]
+      assert prefix["result"]["usage"]["total_tokens"] == charge
+      assert prefix["result"]["checkpoint_id"] == state.active_checkpoint
+      {next, rows, final_events} = commit(state, proposal, events)
+      assert next.charged[run] == %{tokens: charge, source: :reported}
+      assert next.active_run_id == nil
+      assert next.active_maintenance == nil
+      assert next.maintenance_episodes[episode]["usage"]["total_tokens"] == charge
+      assert {:ok, ^next} = SessionState.recover(state.session_id, history ++ rows, final_events)
+
+      for incomplete <- [Enum.take(rows, 1), Enum.take(rows, 2), Enum.drop(rows, 1)] do
+        assert {:error, _} =
+                 SessionState.recover(state.session_id, history ++ incomplete, final_events)
+      end
+    end
+  end
+
+  test "summary reserve refusal cannot override reached bounds or invent insufficient capacity" do
+    for {charge, turns, expected} <- [
+          {8_976, 8, nil},
+          {9_500, 1, "max_turns"},
+          {10_000, 8, "token_budget"}
+        ] do
+      {state, history, events} =
+        pending_checkpoint("small",
+          max_turns: turns,
+          usage: %{input_tokens: charge - 1, output_tokens: 1}
+        )
+
+      run = state.active_run_id
+
+      assert {:error, :invalid_context_refusal} =
+               SessionState.propose_context_preparation_failure(
+                 state,
+                 run,
+                 :maintenance_reply_reserve_unavailable
+               )
+
+      case expected do
+        nil ->
+          assert {:error, :maintenance_bounds_not_reached} =
+                   SessionState.propose_maintenance_parent_bound(state, run)
+
+          assert {:error, :compaction_no_progress} =
+                   SessionState.preflight_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+        bound ->
+          assert {:ok, proposal} = SessionState.propose_maintenance_parent_bound(state, run)
+          assert [_, terminal] = proposal.records
+          assert terminal["outcome"] == "bound_reached"
+          assert terminal["bound"] == bound
+          {next, rows, final_events} = commit(state, proposal, events)
+
+          assert {:ok, ^next} =
+                   SessionState.recover(state.session_id, history ++ rows, final_events)
+      end
+    end
+  end
+
+  test "a fitted checkpoint cannot claim an unnecessary reply-reserve failure" do
+    {state, _, events} =
+      pending_checkpoint(String.duplicate("a", 3_000),
+        usage: %{input_tokens: 9_000, output_tokens: 500}
+      )
+
+    assert {:ok, checkpoint} =
+             SessionState.propose_maintenance_checkpoint(state, 2_000, fn -> :ok end)
+
+    {state, _, _} = commit(state, checkpoint, events)
+
+    assert {:ok, _} =
+             SessionState.propose_maintenance_checkpoint_completion(state, 2_001, fn -> :ok end)
+
+    assert {:error, :invalid_context_refusal} =
+             SessionState.propose_context_preparation_failure(
+               state,
+               state.active_run_id,
+               :maintenance_reply_reserve_unavailable
+             )
+  end
+
   test "owner loss and malformed replies charge the remaining allowance without retry or checkpoint" do
     {state, history, events} = opened()
     episode_id = state.active_maintenance

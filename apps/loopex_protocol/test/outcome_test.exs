@@ -14,7 +14,7 @@ defmodule LoopexProtocol.Session.OutcomeTest do
         &read_contract/1
       )
 
-    assert Enum.map(fixtures, &length(&1["cases"])) == [64, 93]
+    assert Enum.map(fixtures, &length(&1["cases"])) == [64, 94]
     assert Enum.all?(fixtures, &(&1["contract"] == "chat_terminal_outcome"))
 
     for vector <- Enum.flat_map(fixtures, & &1["cases"]) do
@@ -160,7 +160,7 @@ defmodule LoopexProtocol.Session.OutcomeTest do
     assert status == 0, output
 
     assert {:ok,
-            %{"contract" => "chat_terminal_outcome", "checked" => 157, "boundary_checks" => 2}} =
+            %{"contract" => "chat_terminal_outcome", "checked" => 158, "boundary_checks" => 2}} =
              Frame.decode(String.trim_trailing(output, "\n"), 65_536)
   end
 

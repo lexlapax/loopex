@@ -10,6 +10,7 @@ Technical depth: [Bounded context compaction checkpoints](0043-context-compactio
 - **Depends on:** [ADR 0041](0041-session-lineage-projection-and-context-budget.md#concept), [ADR 0042](0042-host-composed-instructions.md#concept), [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept) and [ADR 0048](0048-host-provider-routing-and-credential-bindings.md#concept)
 - **Also extends:** [ADR 0039](0039-ephemeral-embedded-profile.md#concept)'s closed startup options with explicit maintenance instructions and model selection; its one-shot interface, credential audience and cleanup guarantees remain unchanged
 - **Maintenance resource receipts:** Narrowly amends [ADR 0017](0017-durable-context-admission-budget.md#concept) and [ADR 0025](0025-resource-packs-and-skill-admission.md#concept) so a successful maintenance request can explicitly record that optional resource intake was skipped; ordinary admission and older receipt validation remain unchanged
+- **Reply-reserve amendment:** Maintainer-approved [disposition](../developer/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03); retained decision packet `sha256:781a4f41a08564326c3dceba2660aa5f871cf436611bce8fd06f4c961047453d`
 - **Prerequisite for:** M7 outcome 3
 
 <a id="concept-adr-0043-decision"></a>
@@ -102,6 +103,14 @@ Active maintenance consumes the run's call/turn, token and deadline budgets.
 In a helper session, that usage is part of the child's total and therefore its
 delegation charge. Maintenance in the delegating parent spends only that parent's
 run budget, not the separate helper allowance.
+Before summary dispatch, actual token or turn exhaustion keeps its existing
+run-bound outcome. When turns remain but only 1–1,023 tokens remain, the fixed
+1,024-token summary reply cannot be reserved. The run instead fails with
+`maintenance_reply_reserve_unavailable`, preserving its actual spending and
+any useful checkpoint. No summary is dispatched; a new run with a larger
+budget is the remedy. This is the
+[maintainer-approved amendment](../developer/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
+to the closed preparation-failure causes.
 Run-owned source preparation before each episode's first maintenance request
 also has its own fixed 60-second cutoff, independent of the run's declared
 deadline; its expiry ends the run with a named preparation failure, not a

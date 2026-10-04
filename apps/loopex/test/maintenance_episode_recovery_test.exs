@@ -1019,6 +1019,94 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
     end
   end
 
+  for phase <- [
+        :none,
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @phase phase
+    test "live reply-reserve refusal resolves #{@phase} without dispatch or invented spending" do
+      {fixture, session, episode} = retained_episode(:reserve_unavailable)
+
+      {:ok, original} =
+        SessionState.recover(
+          session,
+          Fixture.records(fixture, session),
+          Fixture.events(fixture, session)
+        )
+
+      assert original.charged[episode["run_id"]] == %{tokens: 9_500, source: :reported}
+      assert original.active_checkpoint != nil
+      successor = start(store: fixture.store, script: [], tools: [])
+
+      {:ok, {:prepared, activation}} =
+        Loopex.prepare_resume_session(successor.runtime, session, "resume")
+
+      {:ok, children} = Loopex.Runtime.children(successor.runtime)
+      coordinator = :sys.get_state(children.control).sessions[session].coordinator
+      monitor = Process.monitor(coordinator)
+      assert :sys.get_state(coordinator).in_flight == %{}
+
+      if @phase != :none,
+        do: M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
+
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+
+      if @phase == :recovery_representation do
+        assert_receive {:DOWN, ^monitor, :process, ^coordinator,
+                        {:maintenance_checkpoint_failed, :commit_unknown}},
+                       5_000
+
+        assert {:ok, ^session} =
+                 Loopex.resume_session(successor.runtime, session, command_id: "resolve-reserve")
+      end
+
+      rows = await_parent_terminal(successor, session, episode["run_id"], now() + 5_000)
+      assert [prefix] = Enum.filter(rows, &(&1.payload.kind == "maintenance_episode_terminal_v1"))
+
+      assert [refusal, terminal] =
+               rows
+               |> Enum.drop_while(&(&1.journal_version <= prefix.journal_version))
+               |> Enum.take(2)
+
+      assert refusal.payload.kind == "context_admission_refused_v2"
+      assert refusal.payload["failure"]["cause"] == "maintenance_reply_reserve_unavailable"
+      assert refusal.payload["measurement_scope"] == nil
+      assert refusal.payload["provider_estimated_tokens"] == nil
+      assert terminal.payload.kind == "run_terminal_committed"
+      assert terminal.payload["outcome"] == "failed"
+      assert terminal.payload["failure"] == refusal.payload["failure"]
+      assert prefix.payload["result"]["failure"] == refusal.payload["failure"]
+      assert prefix.payload["result"]["usage"]["total_tokens"] == 9_500
+      assert prefix.payload["result"]["checkpoint_id"] == original.active_checkpoint
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_opened_v1")) == 1
+      assert Enum.count(rows, &(&1.payload.kind == "maintenance_attempt_settled_v3")) == 1
+      assert Enum.count(rows, &(&1.payload.kind == "context_admission_refused_v2")) == 1
+
+      assert Enum.count(
+               rows,
+               &(&1.payload.kind == "run_terminal_committed" and
+                   &1.payload["run_id"] == episode["run_id"])
+             ) == 1
+
+      refute Enum.any?(rows, &(&1.payload.kind == "model_request_committed_v2"))
+      assert AgentLoopTestModel.dispatched(successor.model) == []
+      assert Agent.get(successor.executor, & &1.jobs) == []
+
+      assert {:ok, recovered} =
+               SessionState.recover(session, rows, Fixture.events(successor, session))
+
+      assert recovered.charged == original.charged
+      assert recovered.checkpoints == original.checkpoints
+      assert recovered.active_checkpoint == original.active_checkpoint
+      assert recovered.active_run_id == nil
+      assert recovered.active_maintenance == nil
+      stop_and_join(successor, session)
+      Process.demonitor(monitor, [:flush])
+    end
+  end
+
   for mode <- [:nonprogress, :exhausted],
       phase <- [
         :before_linearization,
@@ -1732,6 +1820,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                     :exhausted,
                     :source_pending,
                     :checkpoint_more,
+                    :reserve_unavailable,
                     :checkpoint_source_numeric,
                     :checkpoint_pending,
                     :checkpoint_committed,
@@ -1747,7 +1836,12 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
                       mode == :exhausted ->
                         String.duplicate("o", 10_000)
 
-                      mode in [:source_pending, :checkpoint_more, :checkpoint_source_numeric] ->
+                      mode in [
+                        :source_pending,
+                        :checkpoint_more,
+                        :reserve_unavailable,
+                        :checkpoint_source_numeric
+                      ] ->
                         String.duplicate("o", 30_000)
 
                       true ->
@@ -1775,7 +1869,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       end
 
     state =
-      if mode in [:exhausted, :checkpoint_more] do
+      if mode in [:exhausted, :checkpoint_more, :reserve_unavailable] do
         count = if mode == :exhausted, do: 3, else: 1
 
         Enum.reduce(1..count, state, fn ordinal, state ->
@@ -1888,6 +1982,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       if mode in [
            :exhausted,
            :checkpoint_more,
+           :reserve_unavailable,
            :checkpoint_source_numeric,
            :invalid,
            :incomplete,
@@ -1923,10 +2018,11 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
           )
           |> Map.put(
             :usage,
-            if(mode == :checkpoint_spent_tokens,
-              do: %{},
-              else: %{input_tokens: 37, output_tokens: 19}
-            )
+            cond do
+              mode == :checkpoint_spent_tokens -> %{}
+              mode == :reserve_unavailable -> %{input_tokens: 9_000, output_tokens: 500}
+              true -> %{input_tokens: 37, output_tokens: 19}
+            end
           )
           |> Map.put(:completion, if(mode == :incomplete, do: "limit", else: "natural"))
 
@@ -1940,6 +2036,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
       if mode in [
            :exhausted,
            :checkpoint_more,
+           :reserve_unavailable,
            :checkpoint_source_numeric,
            :checkpoint_committed,
            :checkpoint_committed_aborted,

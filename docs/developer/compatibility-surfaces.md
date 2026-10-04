@@ -14,6 +14,12 @@ Every surface Loopex exposes is unfrozen. M6's new embedding and command
 contracts and the exact wire-protocol generations are experimental; the other
 reachable source interfaces in this inventory are described as unstable.
 None claims release-candidate or stable status or a deprecation window.
+The current v2 preparation-failure union includes
+`maintenance_reply_reserve_unavailable` for a run that needs another summary,
+has turns remaining, and has 1–1,023 unspent tokens. Its failed outcome retains
+actual usage and any prior checkpoint. It uses no new public bound. The
+[approved ADR 0043 amendment](agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
+changes the current schemas, Elixir codec and independent Node decoder together.
 Breaking an experimental API in a minor release carries an explicit migration
 note under the vision's 0.x policy. This page lists what an embedder, a client
 author, or an operator can reach today, what each surface consists of, which
@@ -256,6 +262,11 @@ one exists. Delivery is fenced by resolution as well as commit; cursors,
 sequences, and gap semantics are otherwise plain. Progress items and
 diagnostics are transient, are not this surface, and carry no compatibility
 expectation.
+The shared `ContextFailure` codec pins the new reserve cause in the terminal
+and compact-result schema union. The runtime admits it only for eligible
+run-owned maintenance. Literal current vectors and their exact-byte assertions
+retain it with null measurement scope; replay derives the unspent interval and
+refuses a fitted checkpoint or actually exhausted bound.
 
 **Tool definition contract.** The nine required fields, the evaluable schema
 subset, the generation triple, the reserved `loopex.` namespace, and the

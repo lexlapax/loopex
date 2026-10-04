@@ -216,7 +216,16 @@ fallback for an unknown window. Retain the parent's strict system-class ceiling
 as a separate check, not permission to exceed the maintenance input ceiling.
 Require a positive derived input allowance. A system-class overflow is the
 version-2 numeric failure with the captured parent system ceiling, before intent.
-Insufficient remaining run spending uses the existing run-bound outcome.
+Actual token or turn exhaustion uses the existing run-bound outcome. When
+turns remain and `0 < token_budget - charged.tokens < 1_024`, use the v2
+`maintenance_reply_reserve_unavailable` preparation failure. Derive this
+interval from committed accounting and captured bounds, not a supplied cause.
+Only an undispatched run-owned source/retry phase, or a committed checkpoint
+that still requires further progress, may retain it. A fitted checkpoint
+completes normally. The leading episode terminal, unavailable v2 refusal and
+failed run terminal share one existing Store fence; usage and the last useful
+checkpoint remain unchanged. Replay rederives capacity and phase eligibility.
+No summary dispatch or fictitious token-budget exhaustion is admitted.
 Source, complete request, depth and cardinality caps remain unchanged. This
 adds no context/reply/spending knobs. Ordinary `max_tokens` governs ordinary
 requests; maintenance has its own fixed 1,024-token reply allowance even when
@@ -533,7 +542,8 @@ The new `failure` is one of these exact closed objects:
   `maintenance_instructions_unconfigured`, `maintenance_reasoning_unsupported`,
   `compaction_excerpt_budget_too_small`, `compaction_no_progress`,
   `compaction_preparation_deadline`, `maintenance_deadline_unrepresentable`,
-  `maintenance_summary_incomplete`, `maintenance_summary_invalid`, and
+  `maintenance_summary_incomplete`, `maintenance_summary_invalid`,
+  `maintenance_reply_reserve_unavailable`, and
   `canonical_history_rendering_unsupported`, `artifact_read_unavailable`,
   `artifact_metadata_unrepresentable`, `artifact_preparation_count_exhausted`,
   `artifact_preparation_bytes_exhausted`, `artifact_preparation_deadline`,

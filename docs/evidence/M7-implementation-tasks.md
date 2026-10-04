@@ -325,18 +325,20 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: integrate the proved stalled-stderr fixture and monitor-message repair.
+- Running: verify combined cleanup and reply-reserve integration, then implement
+  approved standalone checkpoint ownership.
   The separate concurrent owner-stop Task.Supervisor diagnostic remains open.
   The callback/discovery integration is complete at clean pushed
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  214 done / 10 todo. The goal remains active. The maintainer requested the
+  215 done / 10 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
   and the narrow reply-reserve preparation refusal, then approved the captured
   1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
-  decisions are resolved. The two compaction contract implementations remain
-  open; the fixture proof is the current task.
+  decisions are resolved. The reply-reserve implementation and focused proof
+  are complete. Standalone checkpoint ownership and combined integration remain
+  open. The cleanup repair is committed and pushed at `052e0e01`.
 
 - Approved: the captured 1,000-ms stalled-stderr writer-start cutoff and exact
   writer exit/join under the
@@ -388,6 +390,51 @@ did not resolve them. No paid provider calls were made during this check.
   The documentation-only check passes in 18 reported seconds. Complete output:
   `/private/tmp/loopex-m7-checkpoint-owner-decision-docs-v1.log`, SHA-256
   `8e6f27409661195b4c4a227a1ff7ebf8dfd006fed2cb809e31cc82d815c8c73f`.
+
+- Done: the approved reply-reserve refusal now derives eligible phase,
+  remaining turns and the exact positive 1–1,023-token interval from committed
+  accounting. Actual bound exhaustion keeps its prior outcome; a fitted
+  checkpoint cannot claim an unnecessary reservation failure. The existing
+  episode/refusal/run-terminal transaction retains honest usage and its useful
+  checkpoint. Live resumed owners prove zero new summary/ordinary dispatch,
+  exact replay and all three ending Store-uncertainty phases. Current and floor
+  selections pass 114 cases with two unchanged long-bound exclusions in 8.1 and
+  7.3 seconds. The shared Elixir/Node codecs, closed schemas and literal vectors
+  carry the approved cause. Both-pair protocol checks pass 19 cases, including
+  actual pinned Node execution of 158 terminal and 120 compact vectors, in 0.3
+  and 0.1 seconds. The standalone owner implementation and combined integration
+  remain open.
+
+  Development failures remain failed: the first reducer run passes 44/46 cases
+  because new tests incorrectly expected pending-checkpoint capacity to require
+  another reservation and treated the initial cancellation check as traversal.
+  The corrected test commits useful progress before requiring another summary.
+  The first protocol run passes 13/17 cases with two excluded because literal
+  counts and exact-byte identities still named the superseded union. Their
+  current identities now include the added case; every prior vector remains.
+  No production bound, timeout, assertion or cleanup proof is weakened.
+  The first two static runs refuse an extra governance row because ADR records
+  require exactly their original Acceptance row. The amendment now retains
+  maintainer authority and the approved packet identity in existing metadata,
+  preserving that immutable Acceptance row. The corrected static gates pass.
+
+  | Retained static output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-maintenance-reserve-static-current-v1.log` | FAIL, misplaced additional governance row | `54fb84ed644ec2d72cd29d314799b29228dea8eb2586fa3641fe33e5ccd364fc` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-static-current-v2.log` | FAIL, additional governance row still violates exact table | `32522589437f6a876e166f3551a911672a746ce9e9f0d917f676b1a1379c275b` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-static-current-v3.log` | PASS, compile/format/bootstrap/docs/dependencies/version/reporter | `8f7d22b4e270873944d229d3aaa165ecd2079173e28ef005fb4050abc62576d1` |
+
+  | Complete retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-maintenance-reserve-reducer-current-v1.log` | FAIL, 44/46 | `aad4b315c55b1c1b8321397205cfaff55891738c7def6db1eace28a1bca1a700` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-reducer-current-v2.log` | PASS, 46 | `8cadc8b1d094cd7b661d61bc1445cbd433c8e49e9c955a5134a05e7188539d49` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-core-current-v1.log` | PASS, 113, two excluded; before fitted-checkpoint guard | `d877c11ac4d0eeb8a1dfdb8df1218ac5297148a4e2b3481dbdeafd415c8721bb` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-core-current-v2.log` | PASS, 114, two excluded | `fee31cf9df08ba1cc7204bfd637b2ded402b5d08605e23aad5af60491b4a36f4` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-core-floor-v1.log` | PASS, 114, two excluded | `d8f96113d1b67d9417d935ce3ca4b62b8d3112cf98ba414d8abe362d97e00633` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-protocol-current-v1.log` | FAIL, 13/17, two excluded | `25d66efe18152abdc43686b26c68981141298ed1dfe4ed8e2abe2f10e5bed9d6` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-protocol-current-v2.log` | PASS, 19 including Node | `2ca172d00fe5236398c0c525fa3f518ba73c68e5f530845fa5b86108ffbebdf8` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-protocol-floor-v1.log` | PASS, 19 including Node | `a9d4f7a3f1ce6c4774ceb072cc8a45cebfd8fbb0ce7b563bbc2f91524786b311` |
+  | `/private/tmp/loopex-m7-maintenance-reserve-node-v1.log` | PASS, 94 context-terminal and 120 compact vectors plus boundaries | `e01a7d17fcd4725c0b08a6439628632fa92d3baf0828cb2a3790f91be210629e` |
 
 - Approved: `maintenance_reply_reserve_unavailable` in the existing v2
   preparation-failure cause union. The
@@ -8405,7 +8452,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Implement the approved maintenance_reply_reserve_unavailable v2 preparation refusal when positive remaining run tokens cannot fit the fixed summary reserve; preserve actual budget/turn exhaustion precedence, actual usage, zero summary dispatch and atomic episode/refusal/run ending, and prove exact replay, forged-cause refusal, boundary vectors and live recovery on both supported pairs.
+- [x] Implement the approved maintenance_reply_reserve_unavailable v2 preparation refusal when positive remaining run tokens cannot fit the fixed summary reserve; preserve actual budget/turn exhaustion precedence, actual usage, zero summary dispatch and atomic episode/refusal/run ending, and prove exact replay, forged-cause refusal, boundary vectors and live recovery on both supported pairs.
 
 - [x] Join standalone captured source preparation and guarded provider dispatch to the existing actual-command owner path; prove zero-attempt measured/named refusals, reported/conservative spending, exact not-dispatched retry, source/provider joins, prepared-expiry pause and all three request/failed-settlement uncertainty phases on both toolchains, without a synthetic run or new checkpoint schema. Successful checkpoint continuation/results, snapshots and full standalone workflow remain open.
 
@@ -8742,6 +8789,9 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Verify the combined caller-monitor cleanup and maintenance reply-reserve amendment from one clean committed integration candidate; retain exact SHA, full fast-check output and selected Node release workflow, preserve failed evidence and keep the separate concurrent owner-stop diagnostic open.
+
 
 - [x] Apply the approved single captured 1,000-ms CLI stalled-stderr writer-start cutoff and exact writer/device joins; fix the exposed foreign-monitor DOWN consumption by matching the captured PID/reference in the receive guard, preserve production queue/drop/drain/cleanup limits and JSON separation, retain failed proof and prove the affected workflow and shared chat cleanup on both supported pairs.
 
