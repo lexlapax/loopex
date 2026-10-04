@@ -75,6 +75,23 @@ defmodule Loopex.ModelQuestionRecordsTest do
 
       assert_model_question_event(requested, vector, pending, "pending")
 
+      expected_open =
+        requested
+        |> Map.take(
+          ~w(interaction_id run_id turn tool_call_id prompt choices expires_at producer)
+        )
+        |> Map.put("status", "pending")
+        |> Map.put("kind", requested["interaction_kind"])
+
+      assert {:ok, pending_attachment} =
+               Loopex.attach(fixture.runtime, session,
+                 after_event_sequence: requested.event_sequence
+               )
+
+      assert pending_attachment.open_interaction == expected_open
+      assert expected_open["producer"] == "model_tool"
+      assert expected_open["kind"] == vector["interaction_request"]["kind"]
+
       assert {:ok, state} = SessionState.recover(session, records, events)
       assert state.open_interaction == @vectors["interaction_id"]
 
@@ -191,6 +208,20 @@ defmodule Loopex.ModelQuestionRecordsTest do
       await_event(attachment, "run.finished")
       records = Fixture.records(fixture, session)
       events = Fixture.events(fixture, session)
+
+      assert {:ok, historical_attachment} =
+               Loopex.attach(fixture.runtime, session,
+                 after_event_sequence: requested.event_sequence
+               )
+
+      assert historical_attachment.open_interaction == expected_open
+
+      assert {:ok, settled_attachment} =
+               Loopex.attach(fixture.runtime, session,
+                 after_event_sequence: settled.event_sequence
+               )
+
+      assert settled_attachment.open_interaction == nil
 
       response_row =
         Enum.find(records, &(&1.payload.kind == "model_question_response_admitted_v2"))

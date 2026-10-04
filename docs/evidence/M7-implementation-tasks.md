@@ -325,6 +325,47 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the bounded snapshot scan now retains latest configuration and
+  checkpoint provenance at the same event cursor as run, question, maintenance
+  and last compact. Initial configuration comes from exactly the immutable
+  first private genesis row inside the existing attachment scan worker;
+  subsequent changes come only from the acknowledged public outbox. Recovery
+  independently compares reduced configuration and checkpoint identity with
+  private state. Closed configuration changes require the next version and a
+  settled prefix. Checkpoints require the captured episode/owner/model/version,
+  the correct prior identity and inherited omission, excluding summaries and
+  raw source records. Only current and requested-anchor projections are kept.
+
+  Model-question attachments now retain producer and question kind. All three
+  existing choice/text/decline vectors prove pending attachment, the same
+  historical cursor after terminal settlement, and null at the terminal cursor.
+  Four new tests cover every cursor/page width through configuration and
+  checkpoint changes, exact large versions, privacy canaries, ownership/capture
+  mismatch, version gaps, prior-chain and omission refusal. The 20-file
+  configuration/maintenance/question/attachment/recovery selection passes
+  373 tests with two long-bound exclusions on each pair, in 23.3 current / 22.9
+  floor seconds. After aligning the snapshot kind with the existing public
+  interaction view, the three model-question cases pass again in 1.9 / 1.7
+  seconds. Complete outputs, including the initial failed new-fixture run, are
+  inventoried in `/private/tmp/loopex-m7-cursor-projection-proof-inventory.tsv`.
+  Its SHA-256 is
+  `0e9eecb8e8773dc30e34da26a4d652179d8843fe8bc905c709be27e09ac3d441`.
+  The first run's three new-fixture failures used duration_ms instead of the
+  accepted deadline_ms; correcting the fixture changes no required bound.
+  An earlier focused development run also identified the accumulator inventory
+  needing its two newly retained fields. No retry of unchanged failing bytes
+  counts as proof.
+
+  One added T05 subtask closes. T01–T19 originals remain 56 done / 117 todo /
+  6 retired; added subtasks are 226 done / 10 todo. The public snapshot still
+  emits revision 2; publishing the new projections, complete protocol manifests,
+  negotiated foreground /3 and daemon /4, and independent live workflows remain
+  open. No full integration, release or closure result is claimed for this unit.
+  Repository formatting, warning-free compilation, documentation ordering,
+  status and dependency-direction checks pass; their collected terminal output
+  is `/private/tmp/loopex-m7-cursor-projection-metadata-v1.log`, SHA-256
+  `9a00b8df50ad1dbb7034b2185ab25ca140e84e3a18c13a290185dc3016d4d3cc`.
+
 - Done: closed configuration/change and complete checkpoint codecs now share
   the accepted native projection with future snapshot and event consumers.
   Configuration carries seven public settings/provenance members, exact
@@ -8896,6 +8937,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Reduce immutable genesis configuration, committed configuration changes and checkpoint provenance at the exact public cursor with bounded current/anchor state; validate closed projections, settled version advancement, actual maintenance capture, prior checkpoint and inherited omissions, and compare replay against private configuration/checkpoint identity. Preserve model-question producer/kind in pending and historical attachments through every existing choice/text/decline vector on both toolchains. Expanded public snapshot and coordinated wire/Node joins remain open.
 
 - [x] Pin the complete closed configuration/change and checkpoint projections in shared Elixir codecs, literal schemas/vectors and independent Node decoders; preserve exact domains, all original-source variants, actual owners and full identity/text byte limits. Join native serial-owner validation and prove configuration, checkpoint, replay and Store uncertainty on both supported pairs. Coordinated wire emission, snapshot reduction and live negotiated workflows remain open.
 

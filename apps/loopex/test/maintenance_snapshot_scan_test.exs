@@ -46,7 +46,7 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
 
         assert Map.keys(scan) |> Enum.sort() ==
                  Enum.sort(
-                   ~w(session_id requested_anchor tail active_run open_interaction active_maintenance last_compact anchor_projection)a
+                   ~w(session_id requested_anchor tail active_run open_interaction configuration checkpoint active_maintenance last_compact anchor_projection)a
                  )
 
         refute Map.has_key?(scan, :events)

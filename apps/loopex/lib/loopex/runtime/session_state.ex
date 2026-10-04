@@ -375,9 +375,12 @@ defmodule Loopex.Runtime.SessionState do
          :ok <- complete_attempt_pair(state),
          {:ok, event_sequence} <- replay_event_sequences(events),
          true <- expected_public_history?(events, state.expected_events),
-         {:ok, projection} <- replay_projection(events, event_sequence),
+         {:ok, initial_configuration} <- initial_public_configuration(records),
+         {:ok, projection} <- replay_projection(events, event_sequence, initial_configuration),
          true <- projection.active_run_id == state.active_run_id,
-         true <- projection.active_maintenance == maintenance_public_view(state) do
+         true <- projection.active_maintenance == maintenance_public_view(state),
+         true <- projection.configuration == SessionConfiguration.public_view(state.configuration),
+         true <- checkpoint_projection_id(projection.checkpoint) == state.active_checkpoint do
       {:ok, %{state | event_sequence: event_sequence}}
     else
       false -> {:error, :private_public_projection_mismatch}
@@ -621,29 +624,53 @@ defmodule Loopex.Runtime.SessionState do
 
   The requested anchor is either a non-negative durable cursor or `nil` for the
   Store tail observed by the scan. The accumulator retains only positions and
-  run, interaction, maintenance and last-compact projections, never event pages.
+  run, interaction, configuration, checkpoint, maintenance and last-compact
+  projections, never event pages. The two-argument entry point has no initial
+  configuration; callers possessing immutable genesis use the explicit seed.
   """
   @spec start_snapshot_scan(binary(), non_neg_integer() | nil) :: {:ok, map()} | {:error, term()}
-  def start_snapshot_scan(session_id, requested_anchor)
+  def start_snapshot_scan(session_id, requested_anchor),
+    do: start_snapshot_scan(session_id, requested_anchor, nil)
+
+  @doc """
+  ## Concept
+
+  Seed the cursor reduction with the immutable initial public configuration.
+
+  ## Technical depth
+
+  Accept only the closed configuration allowlist or an explicitly unconfigured
+  session. Never seed this reduction from mutable current private state. Later
+  settings come exclusively from consecutive committed session.configured rows.
+  The requested anchor keeps its own bounded projection while scanning the tail.
+  """
+  @spec start_snapshot_scan(binary(), non_neg_integer() | nil, map() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def start_snapshot_scan(session_id, requested_anchor, initial_configuration)
       when is_binary(session_id) and
              (is_nil(requested_anchor) or
                 (is_integer(requested_anchor) and requested_anchor >= 0)) do
-    anchor_projection = if requested_anchor == 0, do: {:set, {nil, nil, nil, nil}}, else: :pending
+    projection = %{
+      active_run: nil,
+      open_interaction: nil,
+      configuration: initial_configuration,
+      checkpoint: nil,
+      active_maintenance: nil,
+      last_compact: nil
+    }
 
-    {:ok,
-     %{
-       session_id: session_id,
-       requested_anchor: requested_anchor,
-       tail: 0,
-       active_run: nil,
-       open_interaction: nil,
-       active_maintenance: nil,
-       last_compact: nil,
-       anchor_projection: anchor_projection
-     }}
+    with :ok <- valid_initial_public_configuration(initial_configuration) do
+      {:ok,
+       Map.merge(projection, %{
+         session_id: session_id,
+         requested_anchor: requested_anchor,
+         tail: 0,
+         anchor_projection: if(requested_anchor == 0, do: {:set, projection}, else: :pending)
+       })}
+    end
   end
 
-  def start_snapshot_scan(_session_id, _requested_anchor),
+  def start_snapshot_scan(_session_id, _requested_anchor, _initial_configuration),
     do: {:error, :invalid_snapshot_anchor}
 
   @doc """
@@ -685,6 +712,8 @@ defmodule Loopex.Runtime.SessionState do
              required(:snapshot) => map(),
              required(:tail) => non_neg_integer(),
              required(:open_interaction) => map() | nil,
+             required(:configuration) => map() | nil,
+             required(:checkpoint) => map() | nil,
              required(:active_maintenance) => map() | nil,
              required(:last_compact) => map() | nil
            }}
@@ -695,6 +724,8 @@ defmodule Loopex.Runtime.SessionState do
         tail: tail,
         active_run: active_run,
         open_interaction: open_interaction,
+        configuration: configuration,
+        checkpoint: checkpoint,
         active_maintenance: active_maintenance,
         last_compact: last_compact,
         anchor_projection: anchor_projection
@@ -706,21 +737,19 @@ defmodule Loopex.Runtime.SessionState do
            tail: tail,
            snapshot: public_snapshot(session_id, tail, active_run),
            open_interaction: open_interaction,
+           configuration: configuration,
+           checkpoint: checkpoint,
            active_maintenance: active_maintenance,
            last_compact: last_compact
          }}
 
-      {anchor,
-       {:set, {anchor_active_run, anchor_interaction, anchor_maintenance, anchor_compact}}}
+      {anchor, {:set, projection}}
       when anchor <= tail ->
         {:ok,
-         %{
+         Map.merge(Map.delete(projection, :active_run), %{
            tail: tail,
-           snapshot: public_snapshot(session_id, anchor, anchor_active_run),
-           open_interaction: anchor_interaction,
-           active_maintenance: anchor_maintenance,
-           last_compact: anchor_compact
-         }}
+           snapshot: public_snapshot(session_id, anchor, projection.active_run)
+         })}
 
       {_anchor, _projection} ->
         {:error, :cursor_expired}
@@ -10272,17 +10301,45 @@ defmodule Loopex.Runtime.SessionState do
     end)
   end
 
-  defp replay_projection(events, anchor) do
-    with {:ok, scan} <- start_snapshot_scan("replay", anchor),
+  defp initial_public_configuration([%{payload: payload} | _records]) do
+    with {:ok, genesis} <- SessionGenesis.normalize(payload) do
+      {:ok, SessionConfiguration.public_view(genesis["initial_configuration"])}
+    end
+  end
+
+  defp initial_public_configuration([]), do: {:ok, nil}
+
+  defp valid_initial_public_configuration(nil), do: :ok
+
+  defp valid_initial_public_configuration(configuration) do
+    case LoopexProtocol.Session.Configuration.encode_wire(configuration) do
+      {:ok, _wire} -> :ok
+      :error -> {:error, :invalid_public_configuration}
+    end
+  end
+
+  defp checkpoint_projection_id(nil), do: nil
+  defp checkpoint_projection_id(checkpoint), do: checkpoint["checkpoint_id"]
+
+  defp replay_projection(events, anchor, initial_configuration) do
+    with {:ok, scan} <- start_snapshot_scan("replay", anchor, initial_configuration),
          {:ok, scan} <- scan_snapshot_page(scan, events),
          {:ok,
           %{
             snapshot: %{active_run_id: active_run_id, event_sequence: ^anchor},
-            active_maintenance: active_maintenance
+            active_maintenance: active_maintenance,
+            configuration: configuration,
+            checkpoint: checkpoint
           }} <-
            finish_snapshot_scan(scan) do
       {:ok,
-       %{active_run_id: active_run_id, active_maintenance: active_maintenance, sequence: anchor}}
+       %{
+         active_run_id: active_run_id,
+         active_maintenance: active_maintenance,
+         configuration: configuration,
+         checkpoint: checkpoint,
+         sequence: anchor
+       }}
     else
       {:error, :cursor_expired} -> {:error, :snapshot_cursor_unavailable}
       {:error, reason} -> {:error, reason}
@@ -10297,6 +10354,15 @@ defmodule Loopex.Runtime.SessionState do
     with {:ok, active_run} <- advance_public_projection(scan.active_run, event, expected),
          {:ok, maintenance} <- advance_maintenance_projection(scan.active_maintenance, event),
          :ok <- valid_public_maintenance_owner(maintenance, active_run, open_interaction),
+         {:ok, configuration} <-
+           advance_configuration_projection(
+             scan.configuration,
+             event,
+             active_run,
+             maintenance,
+             open_interaction
+           ),
+         {:ok, checkpoint} <- advance_checkpoint_projection(scan.checkpoint, event, maintenance),
          {:ok, last_compact} <-
            advance_compact_projection(
              scan.last_compact,
@@ -10305,9 +10371,18 @@ defmodule Loopex.Runtime.SessionState do
              active_run,
              open_interaction
            ) do
+      projection = %{
+        active_run: active_run,
+        open_interaction: open_interaction,
+        configuration: configuration,
+        checkpoint: checkpoint,
+        active_maintenance: maintenance,
+        last_compact: last_compact
+      }
+
       anchor_projection =
         if scan.requested_anchor == expected,
-          do: {:set, {active_run, open_interaction, maintenance, last_compact}},
+          do: {:set, projection},
           else: scan.anchor_projection
 
       {:ok,
@@ -10316,12 +10391,69 @@ defmodule Loopex.Runtime.SessionState do
          | tail: expected,
            active_run: active_run,
            open_interaction: open_interaction,
+           configuration: configuration,
+           checkpoint: checkpoint,
            active_maintenance: maintenance,
            last_compact: last_compact,
            anchor_projection: anchor_projection
        }}
     end
   end
+
+  # Concept: configuration changes affect only cursors at or after their fact.
+  # Technical depth: the shared codec rejects private fields and malformed
+  # quantities. The next version advances exactly once, while the public prefix
+  # is settled. The immutable seed and one latest change suffice; no history
+  # index or live coordinator configuration is read by this reduction.
+  defp advance_configuration_projection(
+         current,
+         %{kind: "session.configured"} = event,
+         run,
+         maintenance,
+         interaction
+       ) do
+    payload = Map.drop(event, [:kind, :event_id, :event_sequence])
+
+    with {:ok, _} <- LoopexProtocol.Session.Configuration.encode_change(payload),
+         true <- is_nil(run) and is_nil(maintenance) and is_nil(interaction),
+         next = payload["configuration"],
+         prior_version = if(is_nil(current), do: 0, else: current["configuration_version"]),
+         true <- next["configuration_version"] == prior_version + 1 do
+      {:ok, next}
+    else
+      :error -> {:error, :invalid_public_configuration}
+      false -> {:error, :invalid_public_configuration_transition}
+    end
+  end
+
+  defp advance_configuration_projection(current, _event, _run, _maintenance, _interaction),
+    do: {:ok, current}
+
+  # Concept: a snapshot retains the latest checkpoint's public provenance.
+  # Technical depth: admit only a closed checkpoint from the currently captured
+  # episode and owner. Its prior identity must match the previous checkpoint,
+  # and inherited omissions cannot disappear. Summary bytes and source records
+  # never enter the accumulator. Private recovery separately authenticates the
+  # complete event against the owner's expected outbox.
+  defp advance_checkpoint_projection(current, %{kind: "context.compacted"} = event, maintenance) do
+    payload = Map.drop(event, [:kind, :event_id, :event_sequence])
+
+    with {:ok, _} <- LoopexProtocol.Session.Checkpoint.encode_wire(payload),
+         true <- is_map(maintenance),
+         true <-
+           Enum.all?(~w(episode_id owner model reasoning configuration_version), fn key ->
+             payload[key] == maintenance[key]
+           end),
+         true <- payload["prior_checkpoint_id"] == checkpoint_projection_id(current),
+         true <- is_nil(current) or not current["source_excerpted"] or payload["source_excerpted"] do
+      {:ok, payload}
+    else
+      :error -> {:error, :invalid_public_checkpoint}
+      false -> {:error, :invalid_public_checkpoint_transition}
+    end
+  end
+
+  defp advance_checkpoint_projection(current, _event, _maintenance), do: {:ok, current}
 
   # Concept: historical maintenance comes from the same cursor as the run view.
   # Technical depth: retain one allowlisted view, plus the requested anchor's
@@ -10415,6 +10547,15 @@ defmodule Loopex.Runtime.SessionState do
       "expires_at" => Map.get(event, "expires_at"),
       "status" => "pending"
     }
+    |> then(fn projected ->
+      if event["producer"] == "model_tool" do
+        projected
+        |> Map.put("producer", "model_tool")
+        |> Map.put("kind", event["interaction_kind"])
+      else
+        projected
+      end
+    end)
   end
 
   defp advance_open_interaction(%{"interaction_id" => open} = current, %{kind: kind} = event)

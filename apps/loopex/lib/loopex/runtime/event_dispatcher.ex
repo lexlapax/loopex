@@ -1446,9 +1446,24 @@ defmodule Loopex.Runtime.EventDispatcher do
   # own, so no row of its reconstructed outbox is withheld.
   defp scan_bound(state, session_id), do: Map.get(state.acknowledged, session_id, :unbounded)
 
+  # Concept: configuration at cursor zero is immutable creation truth.
+  # Technical depth: read exactly the first private row in the existing scan
+  # worker, then retain only its public configuration allowlist. Later private
+  # rows may be newer than the requested or acknowledged cursor and are never
+  # read by this path; subsequent changes come from the fenced public pages.
   defp scan_attachment(store, session_id, requested_anchor, bound) do
-    with {:ok, scan} <- SessionState.start_snapshot_scan(session_id, requested_anchor) do
+    with {:ok, [%{journal_version: 1, payload: payload}]} <-
+           Store.load_records(store, session_id, 0, 1),
+         {:ok, genesis} <- Loopex.Runtime.SessionGenesis.normalize(payload),
+         configuration =
+           Loopex.Runtime.SessionConfiguration.public_view(genesis["initial_configuration"]),
+         {:ok, scan} <-
+           SessionState.start_snapshot_scan(session_id, requested_anchor, configuration) do
       scan_event_pages(store, session_id, 0, scan, bound)
+    else
+      :unavailable -> {:error, :store_unavailable}
+      {:error, reason} -> {:error, reason}
+      _invalid -> {:error, :invalid_store_page}
     end
   end
 
