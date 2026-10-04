@@ -325,6 +325,50 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: audit the original T07 checklist against the complete current
+  maintenance implementation at clean
+  `1259d0df62e5de649b3cf0c14f61bc7e0ec51eea`. Owner-selected bounded excerpts,
+  frozen dispatch capture, absent/invalid summarizer distinction, complete
+  natural output and progress admission, bounded attempts/terminal results,
+  uncertainty before publication and once-only usage, and the required
+  oversized/small/trailing/omission/length/non-progress cases are implemented
+  and proved. The evidence map below ties each original row to its actual
+  source and tests rather than inferring completion from added-subtask counts.
+
+  All twelve current Core maintenance/source/standalone files pass 313
+  ordinary cases on each pair, with two production-cutoff lane exclusions:
+  current 14.2 seconds, floor 13.5 seconds. Both excluded cases were then run
+  explicitly with `--only long_bound`: two pass on each pair, current 126.8
+  seconds and floor 126.1 seconds. Captured 60,000-ms deadlines, exact worker
+  joins, retained checkpoints/raw facts/usage and original fixture grace stay
+  unchanged. This is focused proof, not a complete release run.
+
+  Complete immutable outputs and the pending transport proposal are retained in
+  `/private/tmp/loopex-m7-t07-original-audit-proof-inventory.tsv`, SHA-256
+  `8c19ddf0f3d111663e17c2a3df276c8cf7761155ed5ef5deed864fc697741188`.
+  Seven original T07 boxes close; its two broader persistent-Store fault and
+  end-to-end preservation proofs remain open. T01–T19 originals are now
+  63 done / 110 todo / 6 retired; added counts stay 230 done / 10 todo.
+  Including T00, originals are 63 / 116 / 7 and added are 234 / 11.
+
+- Pending maintainer decision: select the entry point for host-captured v3
+  transport creation settings. Recommended constructor context supplies
+  initial_configuration, immutable tool_selection, policy_defer_mode and
+  runtime_configuration.cleanup_grace_ms alongside the runtime to foreground
+  and daemon constructors. Core gains no default-setting state; transport
+  embedders update constructor calls. Alternative runtime defaults add the same
+  bounded plain template to Core startup and implicit creation, retaining
+  simpler transport constructors but adding a public runtime option and
+  per-runtime defaults. Both preserve exact metadata/genesis identity,
+  historical no-activation replay, unknown-commit fences, original relay
+  dispositions and cleanup bounds. Hosts resolve model facts/instructions;
+  neither admits client-authored capability facts, credential references or
+  superseded genesis. The public/cross-app contract needs approval under
+  AGENTS.md and the repository ADR skill. The one unanswered question and its
+  concrete proposal are retained at
+  `/private/tmp/loopex-m7-transport-creation-decision.md`; dependent transport
+  implementation has not begun. The T07 audit is independent of that decision.
+
 - Done: durable `ask` captures complete current v3 genesis before placement or
   credential custody. Composition owns adapter defaults, capability resolution
   and compiled tool definitions; the command forwards prepared plain data. The
@@ -9168,15 +9212,36 @@ or check was relaxed.
 
 - [x] Select complete eligible conversation groups.
 - [x] Protect open exchanges and their complete native prefixes from compaction or re-rendering.
-- [ ] Have the owner select and encode bounded source excerpts; have the model produce the summary.
-- [ ] Capture maintenance model, route, instructions, deadlines, origin and targets before dispatch.
-- [ ] Distinguish missing summarizer configuration from invalid configuration.
-- [ ] Require complete natural termination, valid output, size limits and progress before committing a checkpoint.
-- [ ] Implement bounded attempts, refusal records, terminal ordering and standalone compact results.
-- [ ] Resolve uncertain checkpoint commits before publication and charge usage once.
-- [ ] Test oversized oldest/newest groups, small problematic groups, trailing inputs, omitted content, length stops and non-progress.
+- [x] Have the owner select and encode bounded source excerpts; have the model produce the summary.
+- [x] Capture maintenance model, route, instructions, deadlines, origin and targets before dispatch.
+- [x] Distinguish missing summarizer configuration from invalid configuration.
+- [x] Require complete natural termination, valid output, size limits and progress before committing a checkpoint.
+- [x] Implement bounded attempts, refusal records, terminal ordering and standalone compact results.
+- [x] Resolve uncertain checkpoint commits before publication and charge usage once.
+- [x] Test oversized oldest/newest groups, small problematic groups, trailing inputs, omitted content, length stops and non-progress.
 - [ ] Inject crashes around preparation, staging, settlement, checkpoint and publication.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
+
+<a id="t07-original-item-evidence"></a>
+### Original item evidence — 2026-10-04
+
+The original item numbers below preserve their order above. This audit proves
+implementation and focused component behavior at `1259d0df`; it does not claim
+the still-open real-provider, live protocol, persistent-fault or closure lanes.
+
+| Original item | Evidence or remaining proof |
+| --- | --- |
+| 1, complete eligible groups | [Original-record grouping](../../apps/loopex/test/compaction_record_sources_test.exs), [whole-session selection](../../apps/loopex/test/standalone_compact_projection_test.exs) and the live owner cases retain indivisible tool groups and terminal inputs. |
+| 2, open/native protection | The same grouping/projection cases and [live recovery](../../apps/loopex/test/maintenance_episode_recovery_test.exs) retain whole open exchanges and exact native-prefix sources. |
+| 3, bounded owner source and model summary | [Source selection](../../apps/loopex/test/compaction_source_test.exs) independently pins encoded bytes, excerpts, disjoint UTF-8 ends and quota order. [Live automatic recovery](../../apps/loopex/test/maintenance_episode_recovery_test.exs) and [standalone owner](../../apps/loopex/test/standalone_compact_owner_test.exs) dispatch the selected source through the actual Model port and commit its admitted summary. |
+| 4, frozen dispatch capture | [Episode admission](../../apps/loopex/test/maintenance_episode_admission_test.exs) authenticates every captured field and targets. Live owner/recovery cases retain model, configuration, request, prior checkpoint and absolute cutoff through changed defaults, held workers and succession. |
+| 5, absent versus invalid selection | [Maintenance configuration](../../apps/loopex/test/maintenance_configuration_test.exs) rejects malformed supplied settings before startup. Automatic and standalone live cases report absent/unsupported summarizers before attempts without inheriting ordinary defaults. |
+| 6, complete natural bounded progress | [Summary admission](../../apps/loopex/test/compaction_summary_test.exs) rejects limit/unknown termination, extra fields, duplicate keys, tools, continuation and encoded cap overflow. [Whole-record checkpoint staging](../../apps/loopex/test/maintenance_request_staging_test.exs) and standalone projection prove strict progress or captured rendering repair before checkpoint commitment. |
+| 7, attempts/refusal/terminal/result | [Provider attempts](../../apps/loopex/test/maintenance_provider_attempt_test.exs), request staging and both live owners prove bounded physical retry, exhausted/partial endings, leading episode-terminal ordering and exact five-member standalone result without a synthetic run. |
+| 8, unknown checkpoint and once-only usage | Live automatic pending/committed checkpoint cases cover before-linearization, after-linearization-before-result and recovery-representation uncertainty. Standalone owner cases hold actual checkpoint/completion transactions, join the provider callback, kill/recover the owner and prove one checkpoint, settlement, event and charge without redispatch. These use the fault-injecting Store fixture, not a disk-fault claim. |
+| 9, required problematic content | Source and request staging cases cover oldest whole-unit excerpts, oversized protected tails, small prefixes followed by oversized units, queued/trailing input, inherited omission, non-progress and length-stop refusal. Standalone projection/owner cases cover the same bounded-source and result paths. |
+| 10, open complete crash campaign | Live process/fault-injecting Store phases and real cutoff joins pass; complete persistent-Local-Store process/fault coverage across preparation, staging, settlement, checkpoint and publication remains open. |
+| 11, open complete preservation proof | Live automatic/standalone owner succession retains raw facts, checkpoints, usage, deadlines and result identity. Complete persistent-Store reopen and current live-surface preservation still need their integrated proof; real-provider long conversation remains an M7 closure obligation. |
 
 ### Added implementation subtasks
 
