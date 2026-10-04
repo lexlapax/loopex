@@ -325,6 +325,73 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done repairs after failed integration: the single full current-pair fast
+  check of clean committed `c45af18217a34d70a50d31e031c06afe49f4bc3f`
+  completed with exit 1. All eleven applications ran: 3,808 cases pass, six
+  fail and 44 are excluded. Core has three binding-read fixture failures;
+  ReqLLM has three packaged-host fixture failures. All nine other application
+  suites pass. Complete immutable output is
+  `/private/tmp/loopex-m7-c45af182-fast-check.log`, SHA-256
+  `f60887cfddd9de590fe8be0947472c01c144d3f3211acf5f0043a6f636b306c6`.
+  Its last progress clock reports 1,018 seconds; the CLI suite reports 677
+  seconds. Handle `81426` is terminal and collected. This candidate remains
+  FAIL and will not be rerun into a pass.
+
+  The binding-read fixture selected any one-record page and therefore held a
+  snapshot's genesis read rather than Control's provider-attempt binding.
+  Target the actual `model_attempt_opened_v1` row within the existing Store
+  callback, retaining the exact session and journal position in the observer
+  message. The timeout case now additionally joins that exact killed reader.
+  All seven original regression cases pass on both pairs, 6.9 seconds each,
+  with the original 700-ms authority, 800-ms hold, 1,000-ms read allowance,
+  cleanup waits, sibling progress and supersession/effect assertions unchanged.
+  No production source or public contract changes.
+
+  The packaged-host fixtures still expect the superseded compiled system
+  instruction and an undated response identity for the captured dated Haiku
+  alias. Migrate their independent exact request oracle to current host
+  instructions/environment and current alias/reply identity. Retain real
+  production escript builds, plain OTP extraction, catalog controls, ambient
+  dotenv negatives and separate application-startup checks. Driver compilation
+  deliberately lacks the host graph; runtime API invocation replaces static
+  undefined-function calls without disabling warnings. Paired packaged v1
+  passes three of five cases and fails two on each pair, current 109.5 and
+  floor 107.0 seconds. Those remaining exact-body failures expose superseded
+  string-form Anthropic messages and an explicit false stream field. Pin the
+  current registered Haiku's native text blocks and absent buffered stream
+  control separately from the current generic unknown-model route. Keep both
+  v1 outputs and fixture-source copies as failed evidence. V1 handles `99770`
+  and `63492` are terminal and collected. Corrected v2 passes all five cases
+  on both pairs, current 114.9 and floor 116.9 seconds. All original routes,
+  including unknown-model generic rendering, and catalog/startup controls remain
+  covered. Builds use the exact archived c45af182 production source; the final
+  separately compiled test/driver bytes are retained by digest. V2 handles
+  `62841` and `55925` are terminal and collected. No production request,
+  credential, catalog, cleanup or packaging behavior was changed.
+
+  The twelve focused cases pass on each pair. Complete outputs, failed v1
+  sources and final verified fixture hashes are retained in
+  `/private/tmp/loopex-m7-current-host-fixture-proof-inventory.tsv`, SHA-256
+  `42dc63b4294c1f9aebbc4b102de466523cb40a4c074225df841f7756c4fd40b3`.
+  The original failed full candidate is not relabeled. Commit/push these
+  repairs and run one full fast check from the new clean exact candidate.
+
+  Formatting, warning-free compilation, compiled documentation ordering,
+  status/index links, dependency direction, whitespace and the original task
+  denominator pass in 18.9 measured seconds. Complete immutable metadata output
+  is `/private/tmp/loopex-m7-current-host-fixture-metadata.log`, SHA-256
+  `6b647f8e5ca67e95e77df57d6c8466635cbfdf57a913748746b146c9a63cf61a`.
+  Metadata handle `83166` is terminal and collected; both Core proof handles
+  `63637` and `11414` are terminal and collected. All twelve retained output
+  and source digests were verified against the inventory before commitment.
+
+  Two added T16 repairs close. Original T01–T19 counts remain
+  64 done / 109 todo / 6 retired; added counts are 235 done / 10 todo.
+  Including T00, originals remain 64 / 115 / 7 and added are 239 / 11.
+  Transport creation still awaits
+  the separately retained maintainer decision. No dependent transport work
+  or paid provider call has begun.
+
 - Done: complete the physical Local Store crash campaign for both automatic
   and standalone maintenance. Thirty cases kill the actual Store at five
   boundaries, preparation capture, request/open staging, settlement,
@@ -9691,6 +9758,9 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Repair the c45af182 binding-read regressions by targeting the actual provider-attempt-open row rather than a shared one-record page size; prove exact session/position observation, elapsed-deadline refusal, timeout reader DOWN, Control-loss cleanup and unchanged positive/supersession/effect cases on both supported pairs without changing any production bound.
+- [x] Repair the c45af182 packaged-host failures with independent exact current host-instruction/environment and dated-alias response oracles; remove static undefined-host API calls from the separately compiled driver and prove every real escript/plain-OTP route, catalog control, application-startup and ambient dotenv negative on both pairs, retaining failed evidence and unchanged isolation/cleanup limits.
 
 - [x] Verify the combined standalone-capacity and quiesce startup-order/binding repairs in one full fast check from the clean committed a160e5b0 candidate; retain the exact SHA, complete terminal output, measured durations and digest, while preserving the untraced failed-parent schedule and separate cleanup investigation as open obligations.
 

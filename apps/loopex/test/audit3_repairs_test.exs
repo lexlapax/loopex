@@ -9,12 +9,11 @@ defmodule Loopex.Audit3HoldingStore do
   #
   # Technical depth: the hole this exists to observe is real time passing
   # *inside* the dispatch handler, between the deadline check and the send. Only
-  # the binding read can take that time, and it is the only `load_records` call
-  # in the runtime that asks for a single record -- replay and recovery page in
-  # `@page_size` records -- so the limit selects it without the store having to
-  # know why it is being called. One arming holds one such read: the caller is
-  # named to the observer and waits to be released, so the case decides how long
-  # the read takes instead of racing a sleep against it.
+  # the binding read can take that time. Select its actual attempt-open record,
+  # not just its one-row page size: snapshot genesis reads also request one row.
+  # One arming holds one such result inside the Store callback before it returns
+  # to Control. The observer receives the caller and exact journal position, so
+  # the case proves which read it delayed instead of racing a sleep against it.
 
   @behaviour Loopex.Store
 
@@ -42,21 +41,30 @@ defmodule Loopex.Audit3HoldingStore do
 
   @impl Store
   def load_records({store, holder}, session_id, after_version, limit) do
-    if limit == 1, do: hold(holder)
-    Store.load_records(store, session_id, after_version, limit)
+    result = Store.load_records(store, session_id, after_version, limit)
+
+    case {limit, result} do
+      {1, {:ok, [%{journal_version: version, payload: %{kind: "model_attempt_opened_v1"}}]}} ->
+        hold(holder, session_id, version)
+
+      _other ->
+        :ok
+    end
+
+    result
   end
 
   @impl Store
   def load_events({store, _holder}, session_id, after_sequence, limit),
     do: Store.load_events(store, session_id, after_sequence, limit)
 
-  defp hold(holder) do
+  defp hold(holder, session_id, version) do
     case Agent.get_and_update(holder, fn observer -> {observer, nil} end) do
       nil ->
         :ok
 
       observer ->
-        send(observer, {:audit3_position_read_held, self()})
+        send(observer, {:audit3_position_read_held, self(), session_id, version})
 
         receive do
           :audit3_release -> :ok
@@ -109,9 +117,11 @@ defmodule Loopex.Audit3RepairsTest do
     # 1,000 ms read bound.
     {session_id, attachment, _reply} = Fixture.run(fixture, "go", %{deadline_ms: 700})
 
-    assert_receive {:audit3_position_read_held, reader},
+    assert_receive {:audit3_position_read_held, reader, ^session_id, version},
                    5_000,
                    "Control never read the attempt-open row while authorizing the attempt"
+
+    assert version > 1
 
     # Longer than the run's whole authority (the deadline was committed before
     # this read began) and inside Control's own read bound, so the read answers
@@ -148,7 +158,9 @@ defmodule Loopex.Audit3RepairsTest do
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
 
-    assert_receive {:audit3_position_read_held, reader}, 5_000
+    assert_receive {:audit3_position_read_held, reader, ^session_id, version}, 5_000
+    assert version > 1
+    reader_monitor = Process.monitor(reader)
 
     started = System.monotonic_time(:millisecond)
     events = drain(attachment, 20_000)
@@ -161,6 +173,7 @@ defmodule Loopex.Audit3RepairsTest do
     assert elapsed < 5_000,
            "the run waited #{elapsed}ms on a store read that never answered"
 
+    assert_receive {:DOWN, ^reader_monitor, :process, ^reader, :killed}, 1_000
     send(reader, :audit3_release)
 
     assert [{1, "not_dispatched", nil} | _rest] = settlements(fixture, session_id),
@@ -186,11 +199,13 @@ defmodule Loopex.Audit3RepairsTest do
     :ok = Audit3HoldingStore.arm(holder, self())
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
 
-    {_session_id, _attachment, _reply} = Fixture.run(fixture, "go")
+    {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
 
-    assert_receive {:audit3_position_read_held, reader},
+    assert_receive {:audit3_position_read_held, reader, ^session_id, version},
                    5_000,
                    "Control never entered the held Store read"
+
+    assert version > 1
 
     control_monitor = Process.monitor(control)
     reader_monitor = Process.monitor(reader)
@@ -215,7 +230,8 @@ defmodule Loopex.Audit3RepairsTest do
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
 
-    assert_receive {:audit3_position_read_held, reader}, 5_000
+    assert_receive {:audit3_position_read_held, reader, ^session_id, version}, 5_000
+    assert version > 1
     send(reader, :audit3_release)
 
     events = drain(attachment)

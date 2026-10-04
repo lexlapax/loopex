@@ -25,7 +25,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
     "req/ebin/req.app",
     "finch/ebin/finch.app"
   ]
-  @system "loopex.system.v1: You are a coding agent working in a real workspace. " <>
+  @system "loopex.reference.v1: You are a coding agent working in a real workspace. " <>
             "Use the tools you are given to inspect and change files, and run commands " <>
             "when you need to. Continue until the task is done, then stop."
   @prompt "Answer with fixture reply."
@@ -234,6 +234,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
 
     workspace = Path.join(fixture.extracted, "workspace-#{System.unique_integer([:positive])}")
     File.mkdir!(workspace)
+    {physical_workspace, 0} = System.cmd("pwd", ["-P"], cd: workspace)
+    workspace = String.trim(physical_workspace)
     File.write!(Path.join(workspace, ".env"), "LOOPEX_PACKAGED_DOTENV_CANARY=bad\n")
     base = "#{scheme}://localhost:#{port}" <> if(type in [:chat, :responses], do: "/v1", else: "")
     variable = credential_variable(model)
@@ -254,7 +256,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
 
         if mode == "ask_ephemeral",
           do: assert_ask_request(request, model, path, synthetic),
-          else: assert_request(request, model, path, type, synthetic)
+          else: assert_request(request, model, path, type, synthetic, workspace)
       end
 
       assert_receive {:packaged_server_done, ^reference}, 2_000
@@ -369,7 +371,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
       id: "msg-packaged",
       type: "message",
       role: "assistant",
-      model: String.replace_prefix(model, "anthropic:", ""),
+      model: selected_model(model),
       content: [%{type: "text", text: "packaged answer"}],
       stop_reason: "end_turn",
       stop_sequence: nil,
@@ -412,10 +414,11 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
     })
   end
 
-  defp assert_request(request, model, path, type, synthetic) do
+  defp assert_request(request, model, path, type, synthetic, workspace) do
     assert request.head == "POST #{path} HTTP/1.1"
     {:ok, body} = JSON.decode(request.body)
-    selected_model = model |> String.split(":", parts: 2) |> List.last()
+    selected_model = selected_model(model)
+    system = reference_system(workspace)
 
     expected =
       case type do
@@ -423,7 +426,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
           chat = %{
             "model" => selected_model,
             "messages" => [
-              %{"role" => "system", "content" => @system},
+              %{"role" => "system", "content" => system},
               %{"role" => "user", "content" => @prompt}
             ],
             "max_tokens" => 32,
@@ -436,17 +439,27 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
           %{
             "model" => selected_model,
             "input" => [
-              %{"role" => "system", "content" => [%{"type" => "input_text", "text" => @system}]},
+              %{"role" => "system", "content" => [%{"type" => "input_text", "text" => system}]},
               %{"role" => "user", "content" => [%{"type" => "input_text", "text" => @prompt}]}
             ],
             "max_output_tokens" => 32,
             "stream" => false
           }
 
+        :anthropic when selected_model == "claude-haiku-4-5-20251001" ->
+          %{
+            "model" => selected_model,
+            "system" => [%{"type" => "text", "text" => system}],
+            "messages" => [
+              %{"role" => "user", "content" => [%{"type" => "text", "text" => @prompt}]}
+            ],
+            "max_tokens" => 32
+          }
+
         :anthropic ->
           %{
             "model" => selected_model,
-            "system" => @system,
+            "system" => system,
             "messages" => [%{"role" => "user", "content" => @prompt}],
             "max_tokens" => 32,
             "stream" => false
@@ -462,6 +475,35 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
       _ -> assert request.headers =~ "authorization: Bearer #{synthetic}\r\n"
     end
   end
+
+  # Concept: the packaged host supplies its current reference instructions.
+  # Technical depth: construct the exact independent sorted-key environment
+  # oracle from the child VM's selected workspace and shared physical platform;
+  # no composition capture or runtime rendering helper supplies expected bytes.
+  defp reference_system(workspace) do
+    os =
+      case :os.type() do
+        {:unix, :darwin} -> "darwin"
+        {:unix, :linux} -> "linux"
+        _ -> "other"
+      end
+
+    architecture = :erlang.system_info(:system_architecture) |> List.to_string()
+
+    architecture =
+      cond do
+        String.starts_with?(architecture, "aarch64") -> "aarch64"
+        String.starts_with?(architecture, "x86_64") -> "x86_64"
+        true -> "other"
+      end
+
+    @system <>
+      "\n\n{\"platform\":{\"architecture\":\"#{architecture}\",\"os\":\"#{os}\"}," <>
+      "\"tool_profile\":\"none\",\"workspace\":#{JSON.encode!(workspace)}}"
+  end
+
+  defp selected_model("anthropic:claude-haiku-4-5"), do: "claude-haiku-4-5-20251001"
+  defp selected_model(model), do: model |> String.split(":", parts: 2) |> List.last()
 
   defp assert_ask_request(request, model, path, synthetic) do
     assert request.head == "POST #{path} HTTP/1.1"

@@ -197,7 +197,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
     assert_project_apps([], started)
 
     result =
-      LoopexCli.Ask.run(
+      run_packaged_ask(
         [
           "ask",
           "--policy",
@@ -215,7 +215,9 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
         finish_interrupt: fn _, _ -> {:ok, :ordinary} end,
         start_session: fn options ->
           assert_project_apps([], started)
-          LoopexComposition.Ephemeral.start_session(Keyword.put(options, :base_url, base))
+          apply(LoopexComposition.Ephemeral, :start_session, [
+            Keyword.put(options, :base_url, base)
+          ])
         end
       )
 
@@ -232,7 +234,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
     case mode do
       "ask_invalid" ->
         for command <- ["ask", "-p"] do
-          result = LoopexCli.Ask.run([command, "--output", "wrong", "fixture"])
+          result = run_packaged_ask([command, "--output", "wrong", "fixture"])
 
           unless result.status == 1 and result.stdout == "" and
                    result.stderr == "loopex: invalid_output\n" do
@@ -244,7 +246,7 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
 
       "ask_durable" ->
         result =
-          LoopexCli.Ask.run(
+          run_packaged_ask(
             ["-p", "--policy", "allow-all", "--state-root", Path.join(workspace, "root"), "fixture"],
             durable_run: fn _, _, _ ->
               assert_project_apps(@durable_apps, started)
@@ -262,6 +264,13 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagedDriver do
 
     IO.puts("M6_PACKAGED_#{String.upcase(mode)}_OK")
   end
+
+  # Concept: this driver resolves host APIs from the extracted escript graph.
+  # Technical depth: its compiler VM intentionally has no CLI/composition code
+  # path. Invoke the exact public API at runtime rather than statically checking
+  # that deliberately absent graph or suppressing undefined-function warnings.
+  defp run_packaged_ask(arguments, options \\ []),
+    do: apply(LoopexCli.Ask, :run, [arguments, options])
 
   defp assert_project_apps(expected, started) do
     actual = Enum.filter(@project_apps, &(&1 in started.()))
