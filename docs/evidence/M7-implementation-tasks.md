@@ -325,6 +325,52 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: migrate the complete twenty-six-case context-admission fixture to
+  captured current configuration and current admission/request/refusal records.
+  The host declares its actual `fixture:v1` route, canonical-history renderer,
+  4,096 reply reserve, explicit context origin and immutable selected tools.
+  The reference byte vectors now measure the captured instruction text and
+  retain exact complete-record fixed-point arithmetic; the instruction-source
+  golden binds the literal current host version/digest.
+
+  The former one-token fixtures could not create a valid current session:
+  captured system content must fit strictly below S, with S <= C. They now
+  capture C/S=64 and supply enough prompt content to force the same runtime
+  total-context refusal. Pure admission still proves the exact one-token
+  boundary. The 321- and 700-token owner-loss, prepared-abandonment, promotion
+  and retained-budget proofs keep their original values and clock bounds.
+  Numeric replay corpora now bind the genesis configuration and prompt budget,
+  then mutate nested refusal-v2 failures while preserving adjacent terminal
+  and public-event relations. Every unmutated corpus replays first.
+
+  Initial system overflow now refuses at current creation before Control,
+  Store mutation or optional intake; a valid startup and eligible nonempty
+  project staging remain the positive controls. This replaces the obsolete
+  fixture that created an already-invalid system class, as required by the
+  approved captured creation contract. Traced required-token/record failures
+  still prove zero optional measurement, admission and resource reads, with
+  exact absent/changed/revoked project dispositions. Captured instructions,
+  selected tools and committed prompts resist substitutions even with matching
+  receipt arithmetic; fresh project intake retains its matching positive control.
+
+  Final v6 focused checks pass all twenty-six cases on both supported pairs in
+  3.5 current / 3.2 floor measured runner seconds. Four failed development
+  outputs remain failed; the support-file load-order mistake is corrected.
+  Eight complete outputs and three immutable final source copies are retained
+  in `/private/tmp/loopex-m7-context-proof-inventory.tsv`, SHA-256
+  `ff0ce1d3c67e66ef5078813462266e273d7c58413a628bba85f12d75bb17ee54`.
+  Handles `9332`, `41630`, `19918`, `36090`, `57035`, `6695`, `44193` and
+  `15742` are terminal and collected. Formatting, warning-free compilation, documentation, status, dependency
+  direction, whitespace and the task reporter pass in 16.2 measured seconds.
+  Complete output is `/private/tmp/loopex-m7-context-metadata-v1.log`, SHA-256
+  `d761487c69e9cda1f09f39844e8bef4bab61382e46f98ad601a43950affd93ad`; handle `12559` is terminal and collected.
+
+  One bounded added T05 subtask closes. T01–T19 originals stay 70 done / 103 todo /
+  6 retired; added work is 245 done / 12 todo. Including T00, originals stay
+  70 / 109 / 7 and added work is 249 / 13. Superseded genesis/configuration-less
+  decoder removal, edge and transport joins, protocol /3 and /4 and the next
+  full exact-candidate check remain open. No maintainer decision is pending.
+
 - Done: migrate the remaining headless Core fixture hosts and scripted
   cancellation, provider-attempt, resource and skill hosts in twenty-four source
   files to captured current creation. Request/admission selectors now read the
@@ -9870,7 +9916,8 @@ or check was relaxed.
 
 - [x] Migrate headless Core and scripted cancellation/provider/resource/skill fixture hosts to captured creation, retain explicit context origins, current instruction provenance and complete prepared captures, and prove exact complete-genesis byte limits, cleanup bounds, owner handoff, command/retry identity, uncertain publication and resource staging on both toolchains. Retain failed aggregate outputs and the corrected complete skill proof; context-admission fixtures and superseded reader removal remain separate open work.
 
-- [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove v2 genesis and old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop fixture phase is complete; current context-admission fixtures, decoders and edge/transport joins remain.
+- [x] Migrate context-admission fixtures to valid captured current configuration, revision-4 receipts and refusal-v2; preserve first-failure order, exact fixed-point bytes, no optional work on required refusal, owner-loss/prepared abandonment, inherited budgets and replay-tampering baselines on both toolchains. Initial system overflow refuses at current creation before Control or Store rather than creating an invalid legacy session.
+- [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove v2 genesis and old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
 

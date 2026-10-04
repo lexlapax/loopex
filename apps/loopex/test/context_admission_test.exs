@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.ContextAdmissionTestModel do
   @moduledoc false
@@ -485,14 +486,14 @@ defmodule Loopex.ContextAdmissionTest do
     assert M1RuntimeTestStore.inspect_state(fixture.store) == store_before
     assert Loopex.ContextAdmissionTestModel.requests(fixture.model) == requests_before
 
-    live = start_fixture(context_token_budget: 1, script: [%{text: "must not dispatch"}])
+    live = start_fixture(context_token_budget: 64, script: [%{text: "must not dispatch"}])
     {session_id, attachment} = create_attached_session(live)
 
     assert {:accepted, "live-context-first-failure"} =
              Loopex.command(attachment, %{
                type: :prompt,
                command_id: "live-context-first-failure",
-               content: "required context exceeds the committed total"
+               content: String.duplicate("required context exceeds the committed total ", 40)
              })
 
     assert await_event(attachment, "run.finished")["failure"]["dimension"] == "context_tokens"
@@ -500,10 +501,10 @@ defmodule Loopex.ContextAdmissionTest do
 
     assert Enum.map(
              Enum.filter(records(live, session_id), fn record ->
-               record_kind(record) in ["context_admission_refused_v1", "run_terminal_committed"]
+               record_kind(record) in ["context_admission_refused_v2", "run_terminal_committed"]
              end),
              &record_kind/1
-           ) == ["context_admission_refused_v1", "run_terminal_committed"]
+           ) == ["context_admission_refused_v2", "run_terminal_committed"]
   end
 
   test "a dead preparer makes real Core abandonment unconfirmed without activation or dispatch" do
@@ -743,7 +744,7 @@ defmodule Loopex.ContextAdmissionTest do
     assert request.deadline >= before_staging + 59_000
 
     deadline_records = records(deadline_fixture, deadline_session)
-    assert Enum.any?(deadline_records, &kind?(&1, "prompt_admitted_v2"))
+    assert Enum.any?(deadline_records, &kind?(&1, "prompt_admitted_v3"))
   end
 
   test "deadline staging checks clock domain and absolute uint64 addition before dispatch and replays one exact pair" do
@@ -1002,8 +1003,8 @@ defmodule Loopex.ContextAdmissionTest do
       |> Enum.map(&Bounds.estimate/1)
       |> Enum.sum()
 
-    assert provider_bytes == 2_731
-    assert provider_tokens == 911
+    assert provider_bytes == 2_597
+    assert provider_tokens == 867
 
     retained_components =
       [
@@ -1011,8 +1012,8 @@ defmodule Loopex.ContextAdmissionTest do
         | Enum.map(definitions, &ToolDefinition.canonical_bytes/1)
       ]
 
-    assert Enum.sum(Enum.map(retained_components, &byte_size/1)) == 4_774
-    assert Enum.sum(Enum.map(retained_components, &Bounds.estimate/1)) == 1_593
+    assert Enum.sum(Enum.map(retained_components, &byte_size/1)) == 4_640
+    assert Enum.sum(Enum.map(retained_components, &Bounds.estimate/1)) == 1_549
 
     project_message = %{
       "role" => "user",
@@ -1028,7 +1029,7 @@ defmodule Loopex.ContextAdmissionTest do
     [committed] =
       fixture
       |> records(session_id)
-      |> Enum.filter(&kind?(&1, "model_request_committed"))
+      |> Enum.filter(&kind?(&1, "model_request_committed_v2"))
 
     receipt = committed.payload["context_receipt"]
     assert Enum.sort(Map.keys(receipt)) == Enum.sort(@context_receipt_keys)
@@ -1066,7 +1067,7 @@ defmodule Loopex.ContextAdmissionTest do
 
     malformed_project_receipt_records =
       Enum.map(records(fixture, session_id), fn
-        %{payload: %{kind: "model_request_committed"} = payload} = record ->
+        %{payload: %{kind: "model_request_committed_v2"} = payload} = record ->
           malformed_project =
             payload
             |> get_in(["context_receipt", "project_resource"])
@@ -1099,7 +1100,7 @@ defmodule Loopex.ContextAdmissionTest do
     [replayed] =
       fixture
       |> records(session_id)
-      |> Enum.filter(&kind?(&1, "model_request_committed"))
+      |> Enum.filter(&kind?(&1, "model_request_committed_v2"))
 
     assert replayed.payload == before_recovery
   end
@@ -1246,17 +1247,12 @@ defmodule Loopex.ContextAdmissionTest do
     assert compact["project_disposition"] == "no_manifest"
   end
 
-  # Concept: an optional project that was never weighed is not charged for a
-  # failure it had no part in.
-  #
-  # Technical depth: the strict `system` class ceiling is decided over required
-  # content alone, so ADR 0017 evaluation step 3 reaches it before the optional
-  # class is added at step 6. The retained refusal therefore carries the
-  # required-only estimate and counts -- identical to the same request staged
-  # with no manifest at all -- and `not_evaluated_required_failure` is a true
-  # statement rather than a label on a project that was already staged, measured
-  # and charged. The control staging proves the withheld class was not empty.
-  test "a system class refusal beside a staged project retains the required-only estimate" do
+  # Concept: an invalid captured system class refuses before optional intake.
+  # Technical depth: current genesis preflights the frozen instructions and
+  # tools. The host cannot create a session whose initial system class already
+  # reaches its ceiling. No Control, Store transaction or optional resolution
+  # may run; the positive control proves the project contains eligible content.
+  test "captured system overflow refuses before Control Store or optional intake" do
     manifest = %{
       entries: [project_entry(String.duplicate("q", 4_000))],
       workspace: project_workspace()
@@ -1265,38 +1261,60 @@ defmodule Loopex.ContextAdmissionTest do
     {:ok, manifest_digest, _entries} = ProjectResource.digest(manifest)
     tools = @reference_tool_definitions ++ [padded_tool_definition()]
 
-    with_project =
-      system_class_refusal("system-class-with-project", tools,
-        project_manifest: manifest,
-        project_decision: project_decision(manifest_digest)
+    fixture =
+      start_fixture(
+        context_token_budget: @uint64_max,
+        script: [],
+        tools: tools,
+        system_class_tokens: 5_000
       )
 
-    without_project = system_class_refusal("system-class-without-project", tools, [])
+    :ok = Loopex.stop(fixture.runtime)
+    template = fixture.runtime_options[:session_creation_defaults]
+    invalid = put_in(template, ["initial_configuration", "system_class_tokens"], 1_000)
+    runtime_options = Keyword.put(fixture.runtime_options, :context_token_budget, @uint64_max)
+    runtime_options = Keyword.put(runtime_options, :session_creation_defaults, invalid)
+    store_pid = fixture.store
 
-    for observed <- [with_project, without_project] do
-      assert observed.failure == %{
-               "category" => "context_budget_exceeded",
-               "retryable" => false,
-               "dimension" => "system_class_tokens",
-               "observed" => with_project.failure["observed"],
-               "limit" => 1_000
-             }
+    boundaries = [
+      {Loopex.Runtime.Control, :start_link, 1},
+      {M1RuntimeTestStore, :transact, 2},
+      {ProjectResource, :resolve, 2},
+      {ResourceSnapshot, :content, 3}
+    ]
 
-      assert observed.refusal["system_message_count"] == 1
-      assert observed.refusal["session_message_count"] == 1
-      assert observed.refusal["steer_message_count"] == 0
-      assert observed.refusal["tool_definition_count"] == length(tools)
-
-      assert observed.refusal["system_message_count"] + observed.refusal["session_message_count"] +
-               observed.refusal["steer_message_count"] +
-               observed.refusal["tool_definition_count"] == length(tools) + 2
+    for {module, _, _} = boundary <- boundaries do
+      Code.ensure_loaded!(module)
+      assert :erlang.trace_pattern(boundary, true, [:local]) > 0
     end
 
-    assert with_project.refusal["provider_estimated_tokens"] ==
-             without_project.refusal["provider_estimated_tokens"]
+    :erlang.trace(self(), true, [:call, :set_on_spawn])
 
-    assert with_project.refusal["project_disposition"] == "not_evaluated_required_failure"
-    assert without_project.refusal["project_disposition"] == "no_manifest"
+    try do
+      for options <- [
+            [],
+            [project_manifest: manifest, project_decision: project_decision(manifest_digest)]
+          ] do
+        before_store = M1RuntimeTestStore.inspect_state(store_pid)
+
+        assert {:error, :invalid_session_genesis} =
+                 Loopex.Runtime.SessionGenesis.normalize(
+                   Map.merge(
+                     invalid,
+                     %{:kind => "session_genesis_v3", "options" => %{}}
+                   )
+                 )
+
+        assert {:error, :invalid_runtime_options} =
+                 Loopex.start_link(Keyword.merge(runtime_options, options))
+
+        assert M1RuntimeTestStore.inspect_state(store_pid) == before_store
+        refute_receive {:trace, _, :call, _}, 0
+      end
+    after
+      :erlang.trace(self(), false, [:call, :set_on_spawn])
+      for boundary <- boundaries, do: :erlang.trace_pattern(boundary, false, [:local])
+    end
 
     control = run_project_stage("system-class-control", manifest, @uint64_max)
     assert control.project["disposition"] == "staged"
@@ -1315,7 +1333,8 @@ defmodule Loopex.ContextAdmissionTest do
         [Map.put(first, "source_reference", nested_value(@max_item_depth - 3)) | rest]
       end)
 
-    assert {:refused, %{"dimension" => "context_record_depth", "record_byte_cost" => nil}} =
+    assert {:refused,
+            %{"failure" => %{"dimension" => "context_record_depth"}, "record_byte_cost" => nil}} =
              SessionState.propose_model_request(
                required_only.state,
                required_only.run_id,
@@ -1353,7 +1372,7 @@ defmodule Loopex.ContextAdmissionTest do
     [committed] =
       fixture
       |> records(session_id)
-      |> Enum.filter(&kind?(&1, "model_request_committed"))
+      |> Enum.filter(&kind?(&1, "model_request_committed_v2"))
 
     receipt = committed.payload["context_receipt"]
     blocks = receipt["blocks"]
@@ -1484,7 +1503,7 @@ defmodule Loopex.ContextAdmissionTest do
 
     assert_receive {:context_model_invoked, _worker, request}, 5_000
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
-    prefix = records_through_kind(records(fixture, session_id), "model_request_committed")
+    prefix = records_through_kind(records(fixture, session_id), "model_request_committed_v2")
     public_prefix = recoverable_event_prefix(session_id, prefix, events(fixture, session_id))
     assert {:ok, _baseline} = SessionState.recover(session_id, prefix, public_prefix)
 
@@ -1571,7 +1590,8 @@ defmodule Loopex.ContextAdmissionTest do
     assert_receive {:context_model_invoked, _worker, request}, 5_000
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
-    record_prefix = records_through_kind(records(fixture, session_id), "model_request_committed")
+    record_prefix =
+      records_through_kind(records(fixture, session_id), "model_request_committed_v2")
 
     event_prefix =
       recoverable_event_prefix(session_id, record_prefix, events(fixture, session_id))
@@ -1642,9 +1662,9 @@ defmodule Loopex.ContextAdmissionTest do
       # Technical depth: replay folds every refusal on this path into one
       # transition reason, so naming the reason cannot tell the receipt relation
       # from a guard ahead of it, and this loop has twice passed on such a guard.
-      # A matching receipt isolates the descriptor relation for system, tool
-      # and project members. Session content additionally binds committed
-      # lineage, so that substitution must still refuse with matching arithmetic.
+      # The eligible project is fresh host intake, so a matching descriptor
+      # isolates its receipt relation. Instructions and selected tools are
+      # captured configuration; session content binds committed lineage.
       matching =
         mutate_model_request(record_prefix, fn payload ->
           {fixed, _bytes} =
@@ -1657,15 +1677,18 @@ defmodule Loopex.ContextAdmissionTest do
           fixed
         end)
 
-      if label == :session_message do
-        # Concept: matching arithmetic cannot replace committed session truth.
-        # Technical depth: the current lineage check derives the prompt bytes
-        # independently of both substituted request and recomputed descriptors.
-        assert {:error, :invalid_model_request_transition} =
-                 SessionState.recover(session_id, matching, event_prefix)
+      # Concept: matching arithmetic cannot replace captured or committed truth.
+      # Technical depth: instructions, selected definitions and prompt lineage
+      # are derived independently. Fresh optional project intake has no earlier
+      # frozen record, so its matching receipt remains the positive control.
+      result = SessionState.recover(session_id, matching, event_prefix)
+
+      if label == :project_message do
+        assert match?({:ok, _}, result),
+               "fresh project substitution with a matching receipt failed before that relation"
       else
-        assert {:ok, _matching} = SessionState.recover(session_id, matching, event_prefix),
-               "#{label} substitution with a matching receipt was refused ahead of the relation"
+        assert match?({:error, :invalid_model_request_transition}, result),
+               "#{label} replaced captured context despite a matching receipt"
       end
     end
 
@@ -1695,13 +1718,13 @@ defmodule Loopex.ContextAdmissionTest do
   end
 
   test "a required-context refusal retains only the compact safe projection and calls no provider" do
-    fixture = start_fixture(context_token_budget: 1, script: [%{text: "unreachable"}])
+    fixture = start_fixture(context_token_budget: 64, script: [%{text: "unreachable"}])
     {session_id, attachment} = create_attached_session(fixture)
 
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         fixture.store,
-        "context_admission_refused_v1",
+        "context_admission_refused_v2",
         self()
       )
 
@@ -1709,15 +1732,15 @@ defmodule Loopex.ContextAdmissionTest do
              Loopex.command(attachment, %{
                type: :prompt,
                command_id: "context-refusal",
-               content: "required context cannot fit"
+               content: String.duplicate("required context cannot fit ", 40)
              })
 
     assert_receive {:record_held_before_linearization, waiter, _store,
-                    "context_admission_refused_v1", transaction},
+                    "context_admission_refused_v2", transaction},
                    5_000
 
     assert Enum.map(transaction.records, &record_kind/1) == [
-             "context_admission_refused_v1",
+             "context_admission_refused_v2",
              "run_terminal_committed"
            ]
 
@@ -1730,7 +1753,7 @@ defmodule Loopex.ContextAdmissionTest do
 
     [refusal, terminal] =
       Enum.filter(all_records, fn record ->
-        kind?(record, "context_admission_refused_v1") or
+        kind?(record, "context_admission_refused_v2") or
           kind?(record, "run_terminal_committed")
       end)
 
@@ -1739,8 +1762,12 @@ defmodule Loopex.ContextAdmissionTest do
                :kind,
                "run_id",
                "turn_id",
-               "category",
-               "dimension",
+               "configuration_version",
+               "episode_id",
+               "failure",
+               "measurement_scope",
+               "projection_state",
+               "targets",
                "token_estimator",
                "descriptor_canonicalization_version",
                "project_disposition",
@@ -1752,30 +1779,38 @@ defmodule Loopex.ContextAdmissionTest do
                "context_token_budget",
                "record_byte_cost",
                "context_record_byte_ceiling",
-               "ordered_descriptor_digest",
-               "observed",
-               "limit"
+               "ordered_descriptor_digest"
              ])
 
-    assert refusal.payload["category"] == "context_budget_exceeded"
-    assert refusal.payload["dimension"] == "context_tokens"
-    assert refusal.payload["limit"] == 1
+    assert refusal.payload["failure"]["category"] == "context_budget_exceeded"
+    assert refusal.payload["failure"]["dimension"] == "context_tokens"
+    assert refusal.payload["failure"]["limit"] == 64
     refute Map.has_key?(refusal.payload, "blocks")
     refute Map.has_key?(refusal.payload, "content")
 
     failure = %{
+      "version" => 2,
       "category" => "context_budget_exceeded",
       "retryable" => false,
+      "measurement_scope" => "ordinary",
       "dimension" => "context_tokens",
-      "observed" => refusal.payload["observed"],
-      "limit" => 1
+      "observed" => refusal.payload["failure"]["observed"],
+      "limit" => 64,
+      "hard_limit" => 64
     }
+
+    assert refusal.payload["failure"] == failure
+    assert refusal.payload["configuration_version"] == 1
+    assert refusal.payload["episode_id"] == nil
+    assert refusal.payload["targets"] == nil
+    assert refusal.payload["projection_state"] == "measured"
+    assert refusal.payload["measurement_scope"] == "ordinary"
 
     assert terminal.payload["failure"] == failure
     assert finished["failure"] == failure
     assert Loopex.ContextAdmissionTestModel.requests(fixture.model) == []
     refute Enum.any?(events(fixture, session_id), &(record_kind(&1) == "run.started"))
-    refute Enum.any?(all_records, &kind?(&1, "model_request_committed"))
+    refute Enum.any?(all_records, &kind?(&1, "model_request_committed_v2"))
   end
 
   test "context refusal promotion and recovery preserve the predecessor budget into its successor" do
@@ -1840,18 +1875,18 @@ defmodule Loopex.ContextAdmissionTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         fixture.store,
-        "context_admission_refused_v1",
+        "context_admission_refused_v2",
         self()
       )
 
     send(first_worker, :release)
 
     assert_receive {:record_held_before_linearization, waiter, _store,
-                    "context_admission_refused_v1", transaction},
+                    "context_admission_refused_v2", transaction},
                    5_000
 
     assert Enum.map(transaction.records, &record_kind/1) == [
-             "context_admission_refused_v1",
+             "context_admission_refused_v2",
              "run_terminal_committed"
            ]
 
@@ -1862,7 +1897,7 @@ defmodule Loopex.ContextAdmissionTest do
            ]
 
     [refusal, terminal] = transaction.records
-    assert refusal["dimension"] == "context_tokens"
+    assert refusal["failure"]["dimension"] == "context_tokens"
     assert terminal["failure"]["dimension"] == "context_tokens"
     assert length(Loopex.ContextAdmissionTestModel.requests(fixture.model)) == 1
     refute Enum.any?(transaction.outbox, &(record_kind(&1) in ["run.started", "session.settled"]))
@@ -1916,14 +1951,14 @@ defmodule Loopex.ContextAdmissionTest do
   end
 
   test "context refusal replay validates every compact dimension relation and rejects every broken pair" do
-    fixture = start_fixture(context_token_budget: 1, script: [%{text: "unreachable"}])
+    fixture = start_fixture(context_token_budget: 64, script: [%{text: "unreachable"}])
     {session_id, attachment} = create_attached_session(fixture)
 
     assert {:accepted, "replay-context-refusal"} =
              Loopex.command(attachment, %{
                type: :prompt,
                command_id: "replay-context-refusal",
-               content: "refuse"
+               content: String.duplicate("refuse ", 40)
              })
 
     assert await_event(attachment, "run.finished")["outcome"] == "failed"
@@ -1941,12 +1976,12 @@ defmodule Loopex.ContextAdmissionTest do
          %{"limit" => 999},
          %{"record_byte_cost" => 1_000}
        ]},
-      {"context_tokens", 2, 1, nil, 2, 1,
+      {"context_tokens", 65, 64, nil, 65, 64,
        [
-         %{"observed" => 3},
-         %{"observed" => 1},
-         %{"limit" => 2},
-         %{"record_byte_cost" => 2}
+         %{"observed" => 66},
+         %{"observed" => 64},
+         %{"limit" => 65},
+         %{"record_byte_cost" => 65}
        ]},
       {"context_record_bytes", @record_limit + 1, @record_limit, @record_limit + 1, 2, 8_192,
        [
@@ -2008,7 +2043,7 @@ defmodule Loopex.ContextAdmissionTest do
              "#{dimension} accepted the wrong committed context budget"
     end
 
-    refusal_index = Enum.find_index(base_records, &kind?(&1, "context_admission_refused_v1"))
+    refusal_index = Enum.find_index(base_records, &kind?(&1, "context_admission_refused_v2"))
     terminal_index = refusal_index + 1
     refusal = Enum.at(base_records, refusal_index)
     terminal = Enum.at(base_records, terminal_index)
@@ -2055,7 +2090,7 @@ defmodule Loopex.ContextAdmissionTest do
     # Technical depth: the mutants above this pair are each refused before the
     # tail guard runs, so replacing its body with `true` left them green.
     # `:validly_stamped_intervening` re-presents the admitted
-    # `context_admission_refused_v1` payload and `:intervening_command` a
+    # `context_admission_refused_v2` payload and `:intervening_command` a
     # no-effect `command_admission_refused_v1` row; both are correctly stamped,
     # both apply cleanly on their own, and the corpus is renumbered around them,
     # so position is the only objection left. These two controls prove that:
@@ -2085,7 +2120,7 @@ defmodule Loopex.ContextAdmissionTest do
            "the same command row is inadmissible even clear of the pair"
   end
 
-  test "revision two phase and cross version replay fail closed in both directions" do
+  test "current snapshot retains each phase and rejects an unversioned admission" do
     fixture =
       start_fixture(
         context_token_budget: 8_192,
@@ -2097,7 +2132,7 @@ defmodule Loopex.ContextAdmissionTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         fixture.store,
-        "model_request_committed",
+        "model_request_committed_v2",
         self()
       )
 
@@ -2109,7 +2144,7 @@ defmodule Loopex.ContextAdmissionTest do
              })
 
     assert_receive {:record_held_before_linearization, staging_waiter, _store,
-                    "model_request_committed", _transaction},
+                    "model_request_committed_v2", _transaction},
                    5_000
 
     admitted_events = events(fixture, session_id)
@@ -2176,31 +2211,30 @@ defmodule Loopex.ContextAdmissionTest do
     assert historical_admitted == admitted_snapshot
     assert historical_started == started_snapshot
 
-    legacy_records =
+    unversioned_records =
       Enum.map(records(fixture, session_id), fn record ->
-        if kind?(record, "prompt_admitted_v2") do
-          legacy_payload =
+        if kind?(record, "prompt_admitted_v3") do
+          unversioned_payload =
             record.payload
             |> Map.delete("context_token_budget")
             |> Map.put(:kind, "command_admitted")
 
-          %{record | payload: legacy_payload}
+          %{record | payload: unversioned_payload}
         else
           record
         end
       end)
 
-    assert Enum.any?(legacy_records, &kind?(&1, "command_admitted"))
-    assert {:error, _reason} = SessionState.recover(session_id, legacy_records, complete_events)
+    assert Enum.any?(unversioned_records, &kind?(&1, "command_admitted"))
 
-    # The opposite-direction assertion requires the bound pre-R reducer binary;
-    # this current-tree selector deliberately does not counterfeit that runtime.
+    assert {:error, _reason} =
+             SessionState.recover(session_id, unversioned_records, complete_events)
   end
 
   test "page-size-one replay survives a crash after the refusal row and applies its terminal once" do
     fixture =
       start_fixture(
-        context_token_budget: 1,
+        context_token_budget: 64,
         script: [%{text: "must never dispatch"}],
         page_size_one: true
       )
@@ -2211,7 +2245,7 @@ defmodule Loopex.ContextAdmissionTest do
              Loopex.command(attachment, %{
                type: :prompt,
                command_id: "page-one-refusal",
-               content: "refuse before provider"
+               content: String.duplicate("refuse before provider ", 40)
              })
 
     assert await_event(attachment, "run.finished")["outcome"] == "failed"
@@ -2219,7 +2253,7 @@ defmodule Loopex.ContextAdmissionTest do
     [refusal] =
       fixture
       |> records(session_id)
-      |> Enum.filter(&kind?(&1, "context_admission_refused_v1"))
+      |> Enum.filter(&kind?(&1, "context_admission_refused_v2"))
 
     Agent.update(fixture.page_control, fn _old -> refusal.journal_version end)
     :ok = Loopex.stop(fixture.runtime)
@@ -2267,7 +2301,7 @@ defmodule Loopex.ContextAdmissionTest do
 
     assert Loopex.ContextAdmissionTestModel.requests(fixture.model) == []
 
-    assert Enum.count(records(fixture, session_id), &kind?(&1, "context_admission_refused_v1")) ==
+    assert Enum.count(records(fixture, session_id), &kind?(&1, "context_admission_refused_v2")) ==
              1
 
     assert Enum.count(records(fixture, session_id), &kind?(&1, "run_terminal_committed")) == 1
@@ -2282,7 +2316,7 @@ defmodule Loopex.ContextAdmissionTest do
 
     {session_id, attachment} = create_attached_session(fixture)
 
-    :ok = M1RuntimeTestStore.delay_after_record(fixture.store, "prompt_admitted_v2", self())
+    :ok = M1RuntimeTestStore.delay_after_record(fixture.store, "prompt_admitted_v3", self())
 
     prepared_prompt =
       Task.async(fn ->
@@ -2296,7 +2330,7 @@ defmodule Loopex.ContextAdmissionTest do
     # ADR 0018: an attempt inherited open and dispatched settles as owner loss,
     # so the first owner dies at the durable prompt admission, before any attempt
     # opens; the activated successor is the one that opens and holds.
-    assert_receive {:record_linearized, admission_waiter, _store, "prompt_admitted_v2",
+    assert_receive {:record_linearized, admission_waiter, _store, "prompt_admitted_v3",
                     _transition, {:committed, _tx_id, _receipt}},
                    5_000
 
@@ -2626,9 +2660,9 @@ defmodule Loopex.ContextAdmissionTest do
     # permits this single lookup while optional evaluation remains prohibited.
     assert overflow.trace.project_resolutions == 1
     assert overflow.trace.optional_resource_reads == 0
-    assert overflow.refusal["dimension"] == "context_record_bytes"
+    assert overflow.refusal["failure"]["dimension"] == "context_record_bytes"
     assert overflow.refusal["project_disposition"] == "not_evaluated_required_failure"
-    assert overflow.refusal["observed"] == overflow.refusal["record_byte_cost"]
+    assert overflow.refusal["failure"]["observed"] == overflow.refusal["record_byte_cost"]
   end
 
   test "required token and record refusals retain absent changed and revoked project decisions" do
@@ -2658,7 +2692,7 @@ defmodule Loopex.ContextAdmissionTest do
              }
 
       for {bytes, budget, dimension} <- [
-            {100, 1, "context_tokens"},
+            {100, 64, "context_tokens"},
             {32_000, @uint64_max, "context_record_bytes"}
           ] do
         refused = observe_required_first(bytes, decision: decision, context_token_budget: budget)
@@ -2669,8 +2703,8 @@ defmodule Loopex.ContextAdmissionTest do
         assert refused.trace.optional_measurements == 0
         assert refused.trace.optional_admissions == 0
         assert refused.trace.optional_resource_reads == 0
-        assert refused.refusal["dimension"] == dimension
-        assert map_size(refused.refusal) == 19
+        assert refused.refusal["failure"]["dimension"] == dimension
+        assert map_size(refused.refusal) == 21
       end
     end
   end
@@ -2698,7 +2732,7 @@ defmodule Loopex.ContextAdmissionTest do
       assert refused.trace.optional_measurements == 0
       assert refused.trace.optional_admissions == 0
       assert refused.trace.optional_resource_reads == 0
-      assert refused.refusal["dimension"] == "context_record_bytes"
+      assert refused.refusal["failure"]["dimension"] == "context_record_bytes"
       assert refused.refusal["project_disposition"] == disposition
     end
   end
@@ -2779,12 +2813,12 @@ defmodule Loopex.ContextAdmissionTest do
       })
 
     all_records = records(fixture, session_id)
-    refusal = Enum.find(all_records, &kind?(&1, "context_admission_refused_v1"))
+    refusal = Enum.find(all_records, &kind?(&1, "context_admission_refused_v2"))
 
     staged =
       Enum.find(all_records, fn record ->
-        kind?(record, "model_request_committed") or
-          kind?(record, "model_request_committed_resources_v1")
+        kind?(record, "model_request_committed_v2") or
+          kind?(record, "model_request_committed_resources_v2")
       end)
 
     %{
@@ -2946,7 +2980,15 @@ defmodule Loopex.ContextAdmissionTest do
         project_decision: Keyword.get(options, :project_decision),
         resource_manifest: Keyword.get(options, :resource_manifest),
         tools: tools,
-        active_tools: Enum.map(tools, &Map.fetch!(&1, "tool_id"))
+        active_tools: Enum.map(tools, &Map.fetch!(&1, "tool_id")),
+        session_creation_defaults:
+          Loopex.AgentLoopFixture.creation_defaults(tools,
+            model: "fixture:v1",
+            max_tokens: 4_096,
+            context_token_budget: context_token_budget,
+            system_class_tokens:
+              Keyword.get(options, :system_class_tokens, min(1_000, context_token_budget))
+          )
       ]
 
     runtime = start_runtime(runtime_options, context_token_budget)
@@ -3096,7 +3138,7 @@ defmodule Loopex.ContextAdmissionTest do
 
   defp required_context_candidate(blocks) do
     %{
-      :kind => "model_request_committed",
+      :kind => "model_request_committed_v2",
       "run_id" => "r_required_context",
       "turn_id" => "t_required_context",
       "request" => %{
@@ -3153,7 +3195,11 @@ defmodule Loopex.ContextAdmissionTest do
     candidate =
       required_context_candidate([
         %{
-          "source_reference" => %{"kind" => "system", "identity" => "loopex.system.v1"},
+          "source_reference" => %{
+            "kind" => "host_instructions",
+            "version" => "host.v1",
+            "digest" => "a5d2d4fae514aebf0fa59ddf41df74b288bea67918272bfc2c7904dd4e9731ad"
+          },
           "provenance_class" => "system",
           "trust_class" => "host_owned_trusted_brain_content",
           "content_digest" => String.duplicate("0", 64),
@@ -3229,29 +3275,40 @@ defmodule Loopex.ContextAdmissionTest do
          context_token_budget
        ) do
     failure = %{
+      "version" => 2,
       "category" => "context_budget_exceeded",
       "retryable" => false,
+      "measurement_scope" => "ordinary",
       "dimension" => dimension,
       "observed" => observed,
-      "limit" => limit
+      "limit" => limit,
+      "hard_limit" => limit
     }
 
     records =
       Enum.map(records, fn record ->
         case record_kind(record) do
-          "context_admission_refused_v1" ->
+          "context_admission_refused_v2" ->
             payload =
               record.payload
-              |> Map.put("dimension", dimension)
-              |> Map.put("observed", observed)
-              |> Map.put("limit", limit)
+              |> Map.put("failure", failure)
               |> Map.put("record_byte_cost", record_byte_cost)
               |> Map.put("provider_estimated_tokens", provider_estimated_tokens)
               |> Map.put("context_token_budget", context_token_budget)
 
             %{record | payload: payload}
 
-          "prompt_admitted_v2" ->
+          "session_genesis_v3" ->
+            configuration = record.payload["initial_configuration"]
+
+            updated =
+              configuration
+              |> Map.put("context_token_budget", context_token_budget)
+              |> Map.put("system_class_tokens", min(1_000, context_token_budget))
+
+            %{record | payload: Map.put(record.payload, "initial_configuration", updated)}
+
+          "prompt_admitted_v3" ->
             %{
               record
               | payload: Map.put(record.payload, "context_token_budget", context_token_budget)
@@ -3280,22 +3337,24 @@ defmodule Loopex.ContextAdmissionTest do
   defp mutate_context_relation(records, events, updates) do
     records =
       Enum.map(records, fn record ->
-        if kind?(record, "context_admission_refused_v1") do
-          %{record | payload: Map.merge(record.payload, updates)}
+        if kind?(record, "context_admission_refused_v2") do
+          {failure_updates, outer_updates} =
+            Map.split(updates, ~w(category dimension observed limit))
+
+          payload =
+            record.payload
+            |> Map.merge(outer_updates)
+            |> Map.update!("failure", &Map.merge(&1, failure_updates))
+
+          %{record | payload: payload}
         else
           record
         end
       end)
 
-    refusal = Enum.find(records, &kind?(&1, "context_admission_refused_v1"))
+    refusal = Enum.find(records, &kind?(&1, "context_admission_refused_v2"))
 
-    failure = %{
-      "category" => refusal.payload["category"],
-      "retryable" => false,
-      "dimension" => refusal.payload["dimension"],
-      "observed" => refusal.payload["observed"],
-      "limit" => refusal.payload["limit"]
-    }
+    failure = refusal.payload["failure"]
 
     records =
       Enum.map(records, fn record ->
@@ -3320,7 +3379,7 @@ defmodule Loopex.ContextAdmissionTest do
 
   defp mutate_model_request(records, mutate) do
     Enum.map(records, fn record ->
-      if kind?(record, "model_request_committed") do
+      if kind?(record, "model_request_committed_v2") do
         %{record | payload: mutate.(record.payload)}
       else
         record
@@ -3504,9 +3563,13 @@ defmodule Loopex.ContextAdmissionTest do
   defp source_reference_goldens do
     [
       {
-        %{"kind" => "system", "identity" => "loopex.system.v1"},
-        "836802770a6c6f6f7065785f6d61706c0000000268026d000000046b696e646d0000000673797374656d68026d000000086964656e746974796d000000106c6f6f7065782e73797374656d2e76316a",
-        "b6e6abe0e0f9b949ee1b80df797c06fb88137821ce4f743d56957dfcba0dd64f"
+        %{
+          "kind" => "host_instructions",
+          "version" => "host.v1",
+          "digest" => "a5d2d4fae514aebf0fa59ddf41df74b288bea67918272bfc2c7904dd4e9731ad"
+        },
+        "836802770a6c6f6f7065785f6d61706c0000000368026d000000046b696e646d00000011686f73745f696e737472756374696f6e7368026d000000066469676573746d000000406135643264346661653531346165626630666135396464663431646637346232383862656136373931383237326266633263373930346464346539373331616468026d0000000776657273696f6e6d00000007686f73742e76316a",
+        "66f888271c8f9fd15098468f48548cd1d6d7fe4f037c35f3aa3da5c5b9a2480d"
       },
       {
         %{
@@ -3638,7 +3701,7 @@ defmodule Loopex.ContextAdmissionTest do
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
     all_records = records(fixture, session_id)
-    staged = records_through_kind(all_records, "model_request_committed")
+    staged = records_through_kind(all_records, "model_request_committed_v2")
     prefix = Enum.take(staged, length(staged) - 1)
     event_prefix = recoverable_event_prefix(session_id, prefix, events(fixture, session_id))
 
@@ -3652,36 +3715,6 @@ defmodule Loopex.ContextAdmissionTest do
       request: request,
       receipt: committed.payload["context_receipt"]
     }
-  end
-
-  defp system_class_refusal(label, tools, options) do
-    fixture =
-      start_fixture(
-        [
-          context_token_budget: @uint64_max,
-          script: [%{text: "must not dispatch"}],
-          tools: tools
-        ] ++ options
-      )
-
-    {session_id, attachment} = create_attached_session(fixture)
-
-    assert {:accepted, ^label} =
-             Loopex.command(attachment, %{
-               type: :prompt,
-               command_id: label,
-               content: "one required system class over its ceiling"
-             })
-
-    finished = await_event(attachment, "run.finished")
-    assert Loopex.ContextAdmissionTestModel.requests(fixture.model) == []
-
-    [refusal] =
-      fixture
-      |> records(session_id)
-      |> Enum.filter(&kind?(&1, "context_admission_refused_v1"))
-
-    %{failure: finished["failure"], refusal: refusal.payload}
   end
 
   # Technical depth: tool projections are `system` provenance, so one more
@@ -3719,7 +3752,7 @@ defmodule Loopex.ContextAdmissionTest do
     [committed] =
       fixture
       |> records(session_id)
-      |> Enum.filter(&kind?(&1, "model_request_committed"))
+      |> Enum.filter(&kind?(&1, "model_request_committed_v2"))
 
     receipt = committed.payload["context_receipt"]
 
