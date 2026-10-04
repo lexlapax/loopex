@@ -325,6 +325,21 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the clean pushed event-writer candidate
+  `da1ba2b49a510d43c33dfd30047ade17def81d9d` passed its one full current-pair
+  `bash scripts/check.sh` integration run. All eleven application suites pass,
+  with 3,745 tests passing and 41 lane-selected exclusions. The suite step took
+  834 seconds; the runner took 905 seconds. Complete immutable output
+  `/private/tmp/loopex-m7-da1ba2b4-fast-check.log`, SHA-256
+  `d1c246fb0a79dcbcac5a2c7bb73e36c22095a346c9127e4d131aac0b713f2413`.
+  Core passes all 1,254 tests on these exact bytes, including the updated
+  overflow terminal inventory. The earlier complete Core failure remains a
+  failed run of its prior fixture bytes. No source change or suite rerun is
+  made by this evidence-only child. Counts remain original T01–T19
+  56 done / 117 todo / 6 retired; added 223 done / 10 todo. Snapshot reduction,
+  complete generation-3/4 negotiation and independent live maintenance proof
+  remain open, as do cleanup diagnostics and the closure matrix.
+
 - Done: the serial reducer derives `context.maintenance_changed` from the
   authenticated before/after episode allowlist for both actual owners. It emits
   one non-null admission and one null terminal view, preserving retained
