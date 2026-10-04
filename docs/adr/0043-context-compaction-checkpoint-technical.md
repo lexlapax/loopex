@@ -685,6 +685,13 @@ or:
 }
 ```
 
+The current payload schema and vectors are
+`apps/loopex_protocol/priv/schema/maintenance-view.v1.json` and
+`apps/loopex_protocol/priv/vectors/maintenance-view.v1.json`. Shared
+`LoopexProtocol.Session.MaintenanceView` and the independent Node consumer
+validate this payload for events and snapshots; the codec authenticates no
+retained episode or authority. The serial reducer must derive that binding.
+
 Every object is closed. The non-null view has exactly those six members.
 `owner` uses the approved checkpoint-owner codec. All opaque identities use its
 existing canonical unpadded base64url encoding of 1–65,536 original bytes. Model

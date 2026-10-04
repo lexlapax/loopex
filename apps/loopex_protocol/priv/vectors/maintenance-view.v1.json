@@ -1,0 +1,4689 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "maintenance_view",
+  "cases": [
+    {
+      "name": "inactive",
+      "input": {
+        "active_maintenance": null
+      },
+      "decoded": {
+        "active_maintenance": null
+      }
+    },
+    {
+      "name": "run-captured-null-deadline",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "compact-captured-ceilings",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "compact",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      }
+    },
+    {
+      "name": "run-unbounded-configuration_version",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "run-unbounded-bounds.max_turns",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "run-unbounded-bounds.token_budget",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "run-absolute-deadline-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": "0"
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": "0"
+          }
+        }
+      }
+    },
+    {
+      "name": "run-absolute-deadline-18446744073709551615",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": "18446744073709551615"
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": "18446744073709551615"
+          }
+        }
+      }
+    },
+    {
+      "name": "run-deadline_ms-18446744073709551615",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "18446744073709551615",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "18446744073709551615",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "run-max_turns-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "1",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "1",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "run-token_budget-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "1",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "1",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "compact-max_attempts-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "1",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "compact",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "1",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      }
+    },
+    {
+      "name": "compact-max_attempts-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "2",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "compact",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "2",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      }
+    },
+    {
+      "name": "compact-max_attempts-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "3",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "compact",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "3",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      }
+    },
+    {
+      "name": "compact-deadline_ms-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "1",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "compact",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "1",
+            "token_budget": "32768"
+          }
+        }
+      }
+    },
+    {
+      "name": "compact-token_budget-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "1"
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "compact",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "model-78",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "x",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "x",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "model-00",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "\u0000",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "\u0000",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "model-656d6f6a692df09f9982",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "emoji-🙂",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "emoji-🙂",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "outer-invalid-19",
+      "input": null,
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "outer-invalid-20",
+      "input": [],
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "outer-invalid-21",
+      "input": false,
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "outer-invalid-22",
+      "input": 1,
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "outer-invalid-23",
+      "input": "inactive",
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "outer-invalid-24",
+      "input": {},
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "outer-invalid-25",
+      "input": {
+        "active_maintenance": null,
+        "instructions": "private"
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "outer-invalid-26",
+      "input": {
+        "active_maintenance": null,
+        "stage": "terminal"
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-view-missing-episode_id",
+      "input": {
+        "active_maintenance": {
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-view-missing-owner",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-view-missing-model",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-view-missing-reasoning",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-view-missing-configuration_version",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-view-missing-bounds",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1"
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-view-private-member",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          },
+          "instructions": "PRIVATE_CANARY"
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-owner-missing-kind",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-owner-missing-id",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-owner-private-member",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w",
+            "instructions": "PRIVATE_CANARY"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-bounds-missing-max_attempts",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-bounds-missing-max_turns",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-bounds-missing-token_budget",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-bounds-missing-deadline_ms",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-bounds-missing-run_deadline",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-bounds-private-member",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null,
+            "instructions": "PRIVATE_CANARY"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "0",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "01",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "+1",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "-1",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "1.0",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "1e2",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "1\n",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": " 1",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-8",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "١",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-9",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": 1,
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-10",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": false,
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-11",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": null,
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-12",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": {},
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-malformed-13",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": [],
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "0",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "01",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "+1",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "-1",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "1.0",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "1e2",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "1\n",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": " 1",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-8",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "١",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-9",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": 1,
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-10",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": false,
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-11",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": null,
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-12",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": {},
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_turns-malformed-13",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": [],
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "0",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "01",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "+1",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "-1",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "1.0",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "1e2",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "1\n",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": " 1",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-8",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "١",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-9",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": 1,
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-10",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": false,
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-11",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": null,
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-12",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": {},
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-token_budget-malformed-13",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": [],
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "0",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "01",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "+1",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "-1",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "1.0",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "1e2",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "1\n",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": " 1",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-8",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "١",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-9",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": 1,
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-10",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": false,
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-11",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": null,
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-12",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": {},
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-malformed-13",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": [],
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-run_deadline-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": "18446744073709551616"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-run_deadline-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": "-1"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-run_deadline-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": "00"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-run_deadline-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": "1\n"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-run_deadline-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": 0
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-run_deadline-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": false
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-run_deadline-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": {}
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-run_deadline-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": []
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-view-missing-episode_id",
+      "input": {
+        "active_maintenance": {
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-view-missing-owner",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-view-missing-model",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-view-missing-reasoning",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-view-missing-configuration_version",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-view-missing-bounds",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1"
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-view-private-member",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          },
+          "instructions": "PRIVATE_CANARY"
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-owner-missing-kind",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-owner-missing-id",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-owner-private-member",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w",
+            "instructions": "PRIVATE_CANARY"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-bounds-missing-max_attempts",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-bounds-missing-deadline_ms",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-bounds-missing-token_budget",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-bounds-private-member",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768",
+            "instructions": "PRIVATE_CANARY"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "0",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "01",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "+1",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "-1",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "1.0",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "1e2",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "1\n",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": " 1",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-8",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "١",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-9",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": 1,
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-10",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": false,
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-11",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": null,
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-12",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": {},
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-malformed-13",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": [],
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "0",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "01",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "+1",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "-1",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "1.0",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "1e2",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "1\n",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": " 1",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-8",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "١",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-9",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": 1,
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-10",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": false,
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-11",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": null,
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-12",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": {},
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-malformed-13",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": [],
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "0"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "01"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "+1"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "-1"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "1.0"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "1e2"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "1\n"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": " 1"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-8",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "١"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-9",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": 1
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-10",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": false
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-11",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-12",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": {}
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-malformed-13",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": []
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-out-of-domain-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "3",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-max_attempts-out-of-domain-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "5",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-deadline_ms-out-of-domain-18446744073709551616",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "18446744073709551616",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-max_attempts-out-of-domain-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "5",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-deadline_ms-out-of-domain-60001",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60001",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-token_budget-out-of-domain-32769",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32769"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "compact-with-run-bounds",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "run-with-compact-bounds",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "configuration-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "0",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "configuration-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "01",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "configuration-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "+1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "configuration-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1.0",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "configuration-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": 1,
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "configuration-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": false,
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "configuration-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": null,
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "configuration-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1\n",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "model-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "model-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": null,
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "model-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": 1,
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "model-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": [],
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "model-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": {},
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "reasoning-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "low",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "reasoning-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": null,
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "reasoning-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": false,
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "reasoning-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": {},
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "reasoning-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "NONE",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "episode_id-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "episode_id-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": null,
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "episode_id-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "_x",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "episode_id-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "_w=",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "episode_id-malformed-4",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "+w",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "episode_id-malformed-5",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "/w",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "episode_id-malformed-6",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AA\n",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "episode_id-malformed-7",
+      "input": {
+        "active_maintenance": {
+          "episode_id": 1,
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "owner-malformed-0",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "task",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "owner-malformed-1",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_x"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "owner-malformed-2",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": null,
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    },
+    {
+      "name": "owner-malformed-3",
+      "input": {
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {},
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "error": "invalid_maintenance_view"
+    }
+  ]
+}

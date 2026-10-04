@@ -325,6 +325,46 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the exact clean `a160e5b073206fa453f208c569012ddf6e4f8402`
+  selected Node release lane passed in 342 seconds under Node 22.14.0.
+  Fresh-source extraction/build and independent Git-tree/archive checks took
+  156 seconds; foreground, protocol, daemon and CLI lanes executed 4, 5, 1
+  and 1 tests respectively. The CLI case joins controller loss and takeover.
+  Complete output is `/private/tmp/loopex-m7-a160e5b0-node-check.log`, SHA-256
+  `5eba6ade0f87802cfbc21f6cc9c7550f1c40f30ef8734dd463e059d84b6fcf8f`.
+  All retained lane/build/inventory/source-identity outputs and exact
+  NUL-delimited manifest bytes are inventoried in
+  `/private/tmp/loopex-m7-a160e5b0-node-proof-inventory.tsv`, SHA-256
+  `54c0972f1b73d3af73a0309e652482fc5ff0c8785960e511c5a590a6cac45ea3`. The pre-build source manifest digest is
+  `536b868c45d2451282a0648f6bb84c0553344262e9b739ad73ecd3cc861fbc10`.
+  This is selection-only evidence for that candidate, not the full closure
+  matrix or live maintenance under the pending generation-3/4 negotiation.
+
+- Done: the approved maintenance-view payload has a shared Elixir encoder/decoder,
+  an independent Node decoder and 201 literal vectors. Run allowances and
+  configuration versions remain unbounded exact positive integers; only
+  retained deadlines and standalone bounds use their specified ceilings.
+  Null inactive views, both owners, unknown/private fields, malformed decimals,
+  canonical identities and complete UTF-8/opaque byte ceilings are proved.
+  All 109 protocol tests, including six Node cases, pass on each supported pair
+  in 0.3 seconds. Current output
+  `/private/tmp/loopex-m7-maintenance-view-protocol-current-v1.log`, SHA-256
+  `e05113f00725f77afa2fde5ef8fcab65bd3eb416a61886e8e680745dd89d9637`;
+  floor output `/private/tmp/loopex-m7-maintenance-view-protocol-floor-v1.log`,
+  SHA-256 `3bc779fa079bb73a1689de5a8439e7c2893d3c6586691969e52f6d287564aeee`.
+  The new independent consumer executes all 201 literals plus 15 full-boundary
+  and non-plain-object checks. No event writer, snapshot reducer or live
+  transport has adopted the new view yet; those T05 obligations remain open.
+  Formatting, warning-free current compilation, status/documentation and
+  dependency direction pass on the staged source. Complete metadata output
+  `/private/tmp/loopex-m7-maintenance-view-metadata-v2.log`, SHA-256
+  `d5c95ffbd92dd2ce0457bf2ed19540952c4f5af985877d36846e312afbe32948`.
+  The first dependency check correctly refused the then-untracked new source;
+  its failing diagnostic remains `/private/tmp/loopex-m7-maintenance-view-metadata-v1.log`,
+  SHA-256 `d58ef8592279d0425a9ba94c85aff7a3506ef2c48aea97bd3e3d4b944112adca`.
+  Staging supplies the ordinary 100644 blob required by that check. No source
+  behavior or dependency budget was changed to obtain the passing result.
+
 - Done: the clean committed candidate
   `a160e5b073206fa453f208c569012ddf6e4f8402` passed its one full current-pair
   `bash scripts/check.sh` run. All eleven application suites passed, with
@@ -353,7 +393,7 @@ did not resolve them. No paid provider calls were made during this check.
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  221 done / 10 todo. The goal remains active. The maintainer requested the
+  222 done / 10 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
   and the narrow reply-reserve preparation refusal, then approved the captured
   1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
@@ -8661,6 +8701,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Pin the approved closed maintenance-view payload in a shared Elixir codec, independent Node decoder and literal schema/vectors; verify both owner bound domains, unbounded exact run/configuration quantities, null inactivity, closed/privacy refusals and complete opaque/UTF-8 byte boundaries on both supported toolchains. Live emission, snapshot reduction, negotiated generation-3/4 workflows and Store uncertainty proofs remain separate open work.
 
 - [ ] Implement the approved closed `context.maintenance_changed` event and active-maintenance snapshot view; authenticate both actual owners and retained admission bounds, emit only changed safe projections in serial-owner transactions, reduce snapshots at the same public cursor, and prove closed numeric/opaque domains, privacy canaries, paged/mid-transaction anchors, duplicate/succession and all three Store uncertainty phases with both independent Node workflows.
 
