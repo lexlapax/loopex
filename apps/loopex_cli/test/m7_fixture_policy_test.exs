@@ -11,6 +11,21 @@ defmodule LoopexCli.M7FixturePolicyTest do
   alias LoopexProtocol.{Canonical, ToolDefinition}
   alias Mix.Tasks.Loopex.M7Evidence.FixtureManifest
 
+  defmodule PurposeModel do
+    @moduledoc false
+    @behaviour Loopex.Model
+
+    @impl true
+    def complete(request, options, progress) do
+      script =
+        if request.tools == [],
+          do: Keyword.fetch!(options, :maintenance_script),
+          else: Keyword.fetch!(options, :script)
+
+      Loopex.AgentLoopTestModel.complete(request, [script: script], progress)
+    end
+  end
+
   @fixtures Path.expand("../../../test/fixtures/m7", __DIR__)
 
   setup do
@@ -457,6 +472,208 @@ defmodule LoopexCli.M7FixturePolicyTest do
     end
   end
 
+  test "long fixture retains raw facts through automatic and explicit checkpoints and physical restart",
+       f do
+    File.rm_rf!(f.workspace)
+    File.cp_r!(Path.join(@fixtures, "long/workspace"), f.workspace)
+    File.cp!(Path.join(@fixtures, "long/oracle.exs"), f.oracle)
+    pins = Map.new(Map.keys(f.pins), &{&1, pin(&1)})
+    {:ok, capture} = Policy.prepare("m7.long", f.digest, f.workspace, f.argv, pins)
+    f = %{f | capture: capture, pins: pins}
+    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    spec = catalog["fixtures"]["long"]
+    assert Canonical.digest_bytes(File.read!(f.oracle)) == spec["oracle"]["sha256"]
+    [facts, explain, recall, outputs] = spec["prompts"]
+
+    profile =
+      f.profile
+      |> put_in(["session", "max_tokens"], 4096)
+      |> put_in(["session", "context_token_budget"], 4000)
+      |> put_in(["session", "system_class_tokens"], 3000)
+      |> Map.put("maintenance", %{"model" => f.profile["session"]["model"]})
+
+    File.write!(f.config, :json.encode(profile))
+    {:ok, prepared} = ChatConfiguration.load(["chat", "--config", f.config], f.root, nil)
+    parent = self()
+
+    summary = %{
+      text: fn request ->
+        assert_fact_input(request)
+
+        ~s({"summary":"release_prefix=amber; batch_size=3","carry_forward":{"files_read":[],"files_changed":[]}})
+      end,
+      usage: %{input_tokens: 37, output_tokens: 19},
+      reply_overrides: %{completion: "natural", continuation: nil}
+    }
+
+    options = [
+      policy: %{module: Policy, context: capture},
+      policy_identity: Policy.identity(capture),
+      model: prepared.selection.configuration["model"],
+      model_module: PurposeModel,
+      maintenance_model: prepared.selection.maintenance_model,
+      maintenance_instructions: %{
+        "version" => "m7.fixture.v1",
+        "body" => "Keep exact release_prefix and batch_size facts."
+      },
+      maintenance_script: List.duplicate(summary, 8),
+      cleanup_grace_ms: 1000
+    ]
+
+    script = [
+      %{text: "release_prefix=amber; batch_size=3", calls: []},
+      %{
+        text: String.duplicate("Keep dependent release steps consistent. ", 300),
+        calls: [],
+        usage: %{input_tokens: 1500, output_tokens: 3000}
+      },
+      %{
+        text: fn request ->
+          assert_fact_input(request)
+          "release_prefix=amber; batch_size=3"
+        end,
+        calls: []
+      }
+    ]
+
+    callback = fn runtime ->
+      {:ok, session} =
+        Loopex.create_session(runtime, prepared.session_options,
+          command_id: "long-create",
+          genesis: prepared.genesis
+        )
+
+      :ok = Loopex.track_session(Path.join(f.root, "state"), session, "fixture-real-runtime")
+      {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
+
+      for {prompt, index} <- Enum.with_index([facts, explain, recall], 1) do
+        command = "long-prompt-#{index}"
+
+        assert {:accepted, ^command} =
+                 Loopex.command(attachment, %{type: :prompt, command_id: command, content: prompt})
+
+        assert await_event(attachment, "run.finished", deadline())["outcome"] == "completed"
+      end
+
+      assert {:accepted, "long-compact"} =
+               Loopex.command(attachment, %{
+                 type: :compact,
+                 command_id: "long-compact",
+                 bounds: %{"deadline_ms" => 15_000, "max_attempts" => 4, "token_budget" => 10_000}
+               })
+
+      ending = await_event(attachment, "context.compaction_finished", deadline())
+      assert ending["result"]["disposition"] == "checkpointed", inspect(ending)
+      send(parent, {:long_session, session})
+      0
+    end
+
+    assert with_stack(f, script, options, callback, parent) == 0
+    assert_receive {:long_session, session}
+    assert_receive {:committed, ^session, before, stats, requests}
+    assert stats.dispatches == %{}
+    assert length(requests) == 3
+    assert Enum.any?(before, &(&1.payload.kind == "compaction_checkpoint_committed_v1"))
+
+    assert Enum.any?(
+             before,
+             &(&1.payload.kind == "standalone_compaction_checkpoint_committed_v1")
+           )
+
+    raw_fact =
+      Enum.find(
+        before,
+        &(&1.payload.kind == "prompt_admitted_v3" and &1.payload["command_id"] == "long-prompt-1")
+      )
+
+    assert raw_fact.payload["content"] == facts
+    assert_receive {:maintenance_requests, summaries}
+    assert length(summaries) >= 2
+    assert Enum.all?(summaries, &(&1.tools == [] and &1.sampling["max_tokens"] == 1024))
+
+    final_script = [
+      %{
+        text: fn request ->
+          assert_fact_input(request)
+          "write retained facts"
+        end,
+        calls: [
+          %{
+            id: "release",
+            name: "write",
+            arguments: %{"path" => "release.txt", "content" => "amber\n"}
+          },
+          %{
+            id: "batches",
+            name: "write",
+            arguments: %{
+              "path" => "batches.txt",
+              "content" => "amber-001\namber-002\namber-003\n"
+            }
+          }
+        ]
+      },
+      %{text: "verify", calls: [%{id: "oracle", name: "bash", arguments: %{"argv" => f.argv}}]},
+      %{text: "done", calls: []}
+    ]
+
+    resumed = fn runtime ->
+      {:ok, {:prepared, activation}} =
+        Loopex.prepare_resume_session(runtime, session, "long-resume")
+
+      assert {:ok, retained} = Loopex.prepared_session_configuration(activation)
+      assert retained.configuration == prepared.selection.configuration
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+      {:ok, attachment} = Loopex.attach(runtime, session)
+
+      assert {:accepted, "long-output"} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "long-output",
+                 content: outputs
+               })
+
+      assert await_event(attachment, "run.finished", deadline())["outcome"] == "completed"
+      0
+    end
+
+    assert with_stack(f, final_script, options, resumed, parent) == 0
+    assert_receive {:committed, ^session, after_restart, stats, [first | _]}
+    assert Enum.sum(Map.values(stats.dispatches)) == 3
+    assert Enum.take(after_restart, length(before)) == before
+    assert Enum.find(after_restart, &(&1.journal_version == raw_fact.journal_version)) == raw_fact
+    assert_fact_input(first)
+    refute Enum.any?(first.messages, &(&1["role"] == "user" and &1["content"] == facts))
+
+    receipt =
+      Enum.find_value(after_restart, fn row ->
+        if row.payload.kind == "executor_receipt_committed_v2" and
+             row.payload["receipt"]["tool_call_id"] == "oracle",
+           do: row.payload["receipt"]
+      end)
+
+    assert receipt["outcome"] == "completed", receipt["output"]
+    assert receipt["cleanup_confirmation"] == "confirmed"
+    assert_suite(receipt["output"], Path.join(f.root, "trusted/long-agent.log"), 2)
+    assert Policy.check(capture) == :ok
+
+    {independent, 0} =
+      System.cmd("/usr/bin/env", ["-i", "PATH=/usr/bin:/bin" | f.argv],
+        cd: f.workspace,
+        stderr_to_stdout: true
+      )
+
+    assert_suite(independent, Path.join(f.root, "trusted/long-independent.log"), 2)
+    assert Policy.check(capture) == :ok
+    assert FixtureManifest.verify_workspace(spec, f.workspace) == :ok
+  end
+
+  defp assert_fact_input(request) do
+    input = Enum.map_join(request.messages, "\n", & &1["content"])
+    assert input =~ "release_prefix=amber"
+    assert input =~ "batch_size=3"
+  end
+
   defp deadline, do: System.monotonic_time(:millisecond) + 5000
 
   defp await_event(attachment, kind, deadline) do
@@ -504,6 +721,13 @@ defmodule LoopexCli.M7FixturePolicyTest do
          Loopex.AgentLoopTestModel.dispatched(stack.model)}
       )
 
+      if stack.maintenance_script do
+        send(
+          parent,
+          {:maintenance_requests, Loopex.AgentLoopTestModel.dispatched(stack.maintenance_script)}
+        )
+      end
+
       result
     after
       stop_stack(stack)
@@ -537,6 +761,10 @@ defmodule LoopexCli.M7FixturePolicyTest do
 
     model = Loopex.AgentLoopTestModel.start(script)
 
+    maintenance_script =
+      if options[:maintenance_script],
+        do: Loopex.AgentLoopTestModel.start(options[:maintenance_script])
+
     {:ok, runtime} =
       Loopex.start_link(
         runtime_id: "fixture-real-runtime",
@@ -545,10 +773,12 @@ defmodule LoopexCli.M7FixturePolicyTest do
         policy: options[:policy],
         policy_identity: options[:policy_identity],
         model: %{
-          module: Loopex.AgentLoopTestModel,
+          module: options[:model_module] || Loopex.AgentLoopTestModel,
           model: options[:model],
-          options: [script: model]
+          options: [script: model, maintenance_script: maintenance_script]
         },
+        maintenance_model: options[:maintenance_model],
+        maintenance_instructions: options[:maintenance_instructions],
         executor: %{
           module: Loopex.Executor.Local,
           reference: executor,
@@ -568,7 +798,8 @@ defmodule LoopexCli.M7FixturePolicyTest do
       adapter: adapter,
       lease: lease,
       executor: executor,
-      model: model
+      model: model,
+      maintenance_script: maintenance_script
     }
   end
 
@@ -577,7 +808,11 @@ defmodule LoopexCli.M7FixturePolicyTest do
     assert :ok == Loopex.stop(stack.runtime)
     assert_receive {:DOWN, ^runtime_monitor, :process, _, _}, 1000
 
-    for pid <- [stack.executor, stack.lease, stack.adapter, stack.model] do
+    for pid <-
+          Enum.filter(
+            [stack.executor, stack.lease, stack.adapter, stack.model, stack.maintenance_script],
+            &is_pid/1
+          ) do
       Process.unlink(pid)
       ref = Process.monitor(pid)
       if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1000)
@@ -591,10 +826,12 @@ defmodule LoopexCli.M7FixturePolicyTest do
     %{mode: Bitwise.band(stat.mode, 0o7777), sha256: Canonical.digest_bytes(File.read!(physical))}
   end
 
-  defp assert_suite(bytes, log) do
+  defp assert_suite(bytes, log, count \\ 3) do
     File.write!(log, bytes)
     script = Path.expand("../../../scripts/suite-summary.sh", __DIR__)
-    assert {"3\n", 0} = System.cmd("/bin/bash", [script, log, "--count"], stderr_to_stdout: true)
+
+    assert {Integer.to_string(count) <> "\n", 0} ==
+             System.cmd("/bin/bash", [script, log, "--count"], stderr_to_stdout: true)
   end
 
   defp isolated_signal_manager do

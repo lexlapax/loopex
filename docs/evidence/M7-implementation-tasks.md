@@ -325,6 +325,52 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: complete original T13's long fixture through real automatic
+  compaction, explicit compaction and a physical Local Store restart. The
+  catalog's four exact prompts establish release_prefix=amber and batch_size=3,
+  produce a bounded 12,000-byte settled explanation, recall the facts after
+  automatic compaction, then create the required outputs after standalone
+  compaction and restart. Both private checkpoint kinds are actually committed.
+  The original fact admission remains exact across the complete retained journal
+  prefix. The resumed ordinary request contains the facts but no longer contains
+  that original prompt. Every scripted summary asserts those facts are present
+  in its actual received source before producing a natural, closed summary.
+
+  The selected ordinary and maintenance scripts share the existing Model port
+  through a test-only purpose router. The ordinary profile captures K=4096,
+  C=4000 and S=3000; maintenance requests use empty tools and the fixed 1024-token
+  reply reserve. Their actor and all runtime/Store/executor/lease actors are joined
+  before reopening the same journal. The real executor creates only release.txt
+  and batches.txt and commits the successful cleanup-confirmed oracle receipt.
+  Both its oracle and the independent same-argv immutable oracle pass their two
+  exact assertions. File pins are checked around the rerun and the complete
+  fixture inventory refuses any unallowed change, including WORKSPACE.md.
+
+  All 55 affected fixture/chat/resume/settings tests pass on current in
+  32.6 seconds and floor in 33.8 seconds. Handles `88179` and `8193` are terminal
+  and collected. Five failed/corrected complete logs and the final test identity
+  are retained in `/private/tmp/loopex-m7-long-fixture-proof-inventory.tsv`,
+  SHA-256 `38227749d6c1550d8d96980176819dca396a313575ea9d3e8e3429a2c5b938d6`.
+  Initial witnesses incorrectly read a top-level compaction disposition and
+  selected the generic command kind instead of current prompt_admitted_v3;
+  those failures remain failed evidence. The corrected whole fixture file first
+  passes eight cases in 7.1 seconds before the broader 55-case proofs.
+  No production code, timeout, paid-provider case or attended proof is changed.
+  Formatting, warning-free compilation, documentation, status, dependency
+  direction, whitespace and the task reporter pass in 18.1 seconds. Complete
+  output is retained at `/private/tmp/loopex-m7-long-fixture-metadata-v1.log`,
+  SHA-256 `9cc59aa9ec2eb981e3edd4865c7d93a93443f43a636136ab43638cd530ee06b9`; handle `28043` is terminal and collected.
+
+  Original T13 item 4 and one added long-runtime proof close. T01–T19 originals
+  are 70 done / 103 todo / 6 retired; added are 240 done / 11 todo.
+  Including T00, originals are 70 / 109 / 7 and added are 244 / 12.
+  The real-provider fact-preservation/campaign obligation of original T07 remains
+  open; this credential-free fixture proof does not replace it. Review's required
+  investigate/review helper dispatches remain dependent on T11, and no counted
+  fixture attempt is manufactured before T14 campaign admission exists.
+  The exact a8af6e99 full fast check remains live under handle `96751`, separate
+  from these later test bytes. The transport-creation decision remains pending.
+
 - Running: the one full fast check of clean committed and pushed
   `a8af6e99bec3d4a4d60c53d937d72c79b87bd7e2` started from the existing detached
   verification checkout, `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`.
@@ -10014,7 +10060,7 @@ candidate integration and focused floor proofs are retained there; items 9 and
 - [x] Implement the repair fixture and its independent sum assertions.
 - [x] Implement the feature fixture requiring the nil-encoding question.
 - [x] Implement the review fixture with the exact duplicate-fee finding and call chain.
-- [ ] Implement the long fixture preserving the required facts through compaction and restart.
+- [x] Implement the long fixture preserving the required facts through compaction and restart.
 - [ ] Implement the trusted fixture wrapper and exact approved test-command policy.
 - [ ] Let the agent run approved tests; independently rerun immutable oracles and inspect allowed changes.
 - [ ] Pin and execute the maintainer-selected external repository task.
@@ -10029,6 +10075,7 @@ candidate integration and focused floor proofs are retained there; items 9 and
 - [x] Implement the private pinned fixture policy capture with exact argv, physical workspace and external file identity checks; deny alternate shell commands and mutable paths without broadening the ordinary registry.
 - [x] Join that capture to ordinary chat startup and prepared resume, retain closed harness settings/status provenance, prove pending-question identity refusal and actual committed/independent repair-oracle execution with owner cleanup on both toolchains.
 - [x] Prove both feature defaults through committed nil-mode questions and exact operator answers before effects, with real executor receipts, independent immutable oracle reruns, preserved explicit modes and owner cleanup on both toolchains.
+- [x] Prove the long fixture through live automatic/explicit checkpoints, exact retained raw facts, physical Local Store restart, summary-only resumed model input, actual bounded file effects and both immutable oracle runs with owner joins on both toolchains.
 
 ## T14 — Implement attempts tracking and evidence validation
 
