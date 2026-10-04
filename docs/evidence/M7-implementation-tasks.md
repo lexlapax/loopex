@@ -325,6 +325,66 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the single full current-pair fast check of clean committed
+  `217b8b90a455aa4ccb3fbd2aae668fbe33405811` passes all eleven applications,
+  3,814 cases with 44 exclusions, in 1,015.7 measured wrapper seconds and
+  1,016 reported check seconds. Complete immutable output is
+  `/private/tmp/loopex-m7-217b8b90-fast-check.log`, SHA-256
+  `eb1b710379d9e7acd90acd9fccf004b07d642fe2799f6ec7fe04fd3b31753fe9`.
+  Handle `74828` is terminal and collected. This proves the repaired current
+  candidate; the preceding c45af182 full run remains FAIL. The detached
+  verification checkout is clean at the tested SHA. No floor full check,
+  release matrix, attended witness or milestone closure is claimed.
+
+  Audit the original checklist against that candidate's implementation and
+  actual tests. T12 items 1 and 2 close: the closed startup options and captured
+  v3 configuration forward instructions, canonical model/reasoning, provider
+  references, maintenance, question and trace selections. Real startup checks
+  inspect the admitted Core coordinator's exact maintenance instructions/model
+  and route references. Public embedded-session HTTP cases preserve the exact
+  host system text through two prompts and beyond the startup ticket, plus
+  question/trace continuation and bounded actor joins. The ReqLLM wire cases
+  retain buffered responses, one request per call, native provider controls,
+  verified local TLS and synthetic selected-key checks. Credential cleanup's
+  separate production-cutoff/release guarantees and the attended question
+  witness remain open under T12 items 9 and 10.
+
+  T15 item 2 closes: the actual Local Store/Executor restart cases inject a
+  fault after the effect receipt and before the public fact, then either
+  reconcile the exact receipt or remove its file and report outcome_unknown.
+  The first executor dispatches once; the successor dispatch map stays empty.
+  Workspace bytes, once-only public events, solicited identity validation and
+  exact owned-process joins are checked. Current-format backup/restore remains
+  open; this closes only the nonredispatch guarantee.
+
+  Current-pair evidence comes from the exact candidate's passing complete
+  Composition, ReqLLM and ReferenceClient suites. Additional floor-toolchain
+  audits pass 67 option/preflight/public-model/trace cases in 42.2 seconds,
+  eighteen real-startup cases in 17.7 seconds, five buffered wire cases in
+  5.8 seconds and 21 ReferenceClient cases in 4.0 seconds, with two existing
+  real-provider exclusions. The first floor ReferenceClient invocation could
+  not start Mix.PubSub because sandbox TCP access returned eperm. It ran no
+  tests and remains an environment failure; the separately named authorized
+  local-TCP invocation supplies the passing proof. All six complete outputs
+  and ten audited source hashes are retained in
+  `/private/tmp/loopex-m7-original-support-audit-proof-inventory.tsv`, SHA-256
+  `41e952867c01f9157e4eff85170ed48a43e2fddf27580290121ed206c5fbb9c9`.
+  Handles `64314`, `11167`, `7815` and `49567` are terminal and collected.
+
+  The documentation-only checkpoint passes formatting, warning-free
+  compilation, structure/status/dependency gates and documentation ordering
+  in eighteen reported seconds. Complete immutable output is
+  `/private/tmp/loopex-m7-original-support-audit-docs-check.log`, SHA-256
+  `df8f302f5b2d350d0f14062a0c943706ec3f71ae2677056bfd4199b9fcb52834`. Handle `89701` is terminal and collected.
+
+  Three original rows close, with no added subtask or denominator changes.
+  T01–T19 originals are 67 done / 106 todo / 6 retired; added are
+  235 done / 10 todo. Including T00, originals are 67 / 112 / 7 and added
+  are 239 / 11. No product source changed during this evidence audit.
+  The transport-creation decision remains pending, separately from the
+  maintainer's accepted durable view. No dependent transport work or paid
+  provider call has begun. M7 remains In progress.
+
 - Done repairs after failed integration: the single full current-pair fast
   check of clean committed `c45af18217a34d70a50d31e031c06afe49f4bc3f`
   completed with exit 1. All eleven applications ran: 3,808 cases pass, six
@@ -9652,8 +9712,8 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Original checklist
 
-- [ ] Forward accepted instruction, model, reasoning, provider-binding, maintenance, question and trace options.
-- [ ] Preserve reusable embedded sessions and buffered transport.
+- [x] Forward accepted instruction, model, reasoning, provider-binding, maintenance, question and trace options.
+- [x] Preserve reusable embedded sessions and buffered transport.
 - [x] Keep questions opt-in and preserve old tool selections.
 - [x] Implement tagged choice, text and decline answers.
 - [x] Consume the question responder only in the one-call API; reject unsupported combinations.
@@ -9662,6 +9722,11 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Test blocked, invalid, failed and late callbacks, cancellation, expiry and cleanup uncertainty.
 - [ ] Preserve the existing credential and transport-cleanup guarantees.
 - [ ] Complete the attended ephemeral-question witness.
+
+Items 1 and 2 map to the audited startup, public model/question/trace and
+buffered-wire cases recorded under [Current work](#current-work). Exact current
+candidate integration and focused floor proofs are retained there; items 9 and
+10 keep their separate credential-cleanup and attended obligations.
 
 ### Added implementation subtasks
 
@@ -9721,7 +9786,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 ### Original checklist
 
 - [-] Upgrade exact settled and unresolved M6 roots without changing staged requests.
-- [ ] Prove unknown effects are not redispatched.
+- [x] Prove unknown effects are not redispatched.
 - [-] Observe the actual historical reader against disposable new-format roots.
 - [-] Preserve the existing v0.2.0↔v0.3.0 rollback proof.
 - [-] Add the separate v0.3.0↔M7 proof.
@@ -9729,6 +9794,12 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [ ] Restore into an empty root and compare complete manifests.
 - [ ] Restore workspace state separately from runtime state.
 - [-] Join automated rollback artifacts to attended restore inspection without rerunning the case.
+
+Item 2 maps to `EndToEndRecoveryTest`'s actual effect/restart cases, exact receipt
+reconciliation and removed-receipt outcome_unknown control. The current
+candidate integration and floor proof, source hashes and output digests are
+retained under [Current work](#current-work). Backup/restore obligations remain
+open.
 
 ### Added implementation subtasks
 
