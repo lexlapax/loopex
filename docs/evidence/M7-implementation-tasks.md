@@ -325,6 +325,39 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: audit and close original T04 item 4, file/flag precedence,
+  validation and effective-value display. ConfigSelection owns flag over the
+  permitted LOOPEX_HOME state-root value over file over harmless literal defaults;
+  file paths remain config-relative, flags use invocation cwd, arrays replace
+  earlier arrays and no-helpers only narrows delegation. Authored validation
+  runs before overrides and merged relationship validation runs afterward.
+  ConfigInspection resolves actual selected model/instruction/role costs before
+  reporting, emits ordered escaped pointers and exact decimal quantities with
+  selected origins, and excludes credential slot names/values and private
+  captures. Actual command dispatch and a separate cold OS entrypoint exercise
+  config validate/show without acquiring a runtime, credentials or provider call.
+
+  The complete six file/grammar/selection/schema/inspection/duplicate-aware JSON
+  suites pass all 64 cases on current in 10.5 seconds and floor in 10.4 seconds.
+  Handles `14064` and `45986` are terminal and collected. Two complete logs and
+  thirteen unchanged production/test source identities are retained in
+  `/private/tmp/loopex-m7-t04-precedence-audit-proof-inventory.tsv`, SHA-256
+  `da38203de5fca1b1c3251d1398a78ac20187f9c4baa58e91d07935c5bf9a9e18`.
+  This audit changes no production or test code. T04's role/delegation retention,
+  maintenance changes and remaining constructor/cleanup joins remain open;
+  inspection role captures do not claim a durable helper binding.
+
+  The documentation-only repository check passes in 19 reported seconds.
+  Complete output is `/private/tmp/loopex-m7-t04-precedence-audit-docs-v1.log`,
+  SHA-256 `734cc1673db0ccba4e56a397020f1418930185d987904ae1a0cb8e27ff614845`.
+  Handle `58024` is terminal and collected; all fifteen inventory digests were
+  reverified before commitment. No full suite is rerun for this prose-only child.
+
+  T01–T19 originals are 69 done / 104 todo / 6 retired; added remain
+  239 done / 10 todo. Including T00, originals are 69 / 110 / 7 and added
+  are 243 / 11. The separate exact-0823aa50 integration run remains under
+  handle `41618`; later feature tests have their own focused evidence above.
+
 - Done: complete the feature fixture's required nil-mode question through
   actual committed model-question and explicit operator-answer records before
   any file effect. Two cases select choice-1/empty and choice-2/literal_null
@@ -9476,7 +9509,7 @@ or check was relaxed.
 - [x] Implement the shared pure genesis resolver and validator.
 - [x] Support exact-genesis creation, finding duplicates before expanding changed defaults.
 - [x] Implement the closed configuration-file schema and command-line grammar.
-- [ ] Implement file/flag precedence, validation and effective-value display.
+- [x] Implement file/flag precedence, validation and effective-value display.
 - [x] Require explicit conversation bounds in the file, including when flags override them.
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
 - [ ] Allow maintenance settings to change new episodes while preserving already admitted episodes.
