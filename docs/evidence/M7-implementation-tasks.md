@@ -325,14 +325,58 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: commit the proved maintenance fixture repair, then run the next
-  clean exact integration candidate once. The added T15 callback migration is
-  complete again after correcting the dynamic `Map.drop` control missed by the
-  literal AST inventory. Original T08 production-contract and native-fidelity
-  proof rows remain complete. Current T01–T19 tally is original
-  56 done / 117 todo / 6 retired; added 212 done / 10 todo. The goal remains
-  active. The three recorded maintainer decisions were presented together
-  again and await answers; no dependent contract changes are implemented.
+- Running: investigate the now-reproduced concurrent owner-stop Task.Supervisor
+  diagnostics. The callback/discovery integration is complete at clean pushed
+  `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
+  and native-fidelity proofs and added T15 callback migration remain complete.
+  Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
+  213 done / 9 todo. The goal remains active. The three recorded maintainer
+  decisions were presented together again and await answers; no dependent
+  contract changes are implemented. No test/check process remains running.
+
+- Done: the single full current-pair fast check of clean pushed
+  `6058eb95b7b312905e55c7baa0401e6af18ceba1` passes all eleven application
+  suites: 3,696 cases pass, 39 expected exclusions. The wrapper measures
+  916 seconds; the check's rounded step clock reports 917 seconds. Complete
+  immutable output: `/private/tmp/loopex-m7-6058eb95-fast-check.log`, SHA-256
+  `c93a4ad28b8e7d3a93e9b9929ec682059dbe424c2f9893be0e7cc5b5f756d532`.
+  Handle `97582` is terminal and collected. This resolves the added T16
+  callback/discovery integration obligation, including Core's formerly obsolete
+  summary control. Both failed parents below remain failed. This current-pair
+  integration is not the floor/provider/fresh-source closure matrix.
+
+- Investigating: an external actual-runtime shutdown probe narrows the open
+  T16 cleanup diagnostic. It monitors each held provider callback, private task
+  children, worker supervisor, owner group and runtime root. The serial matrix
+  joins all observed processes for 32 explicit stops and 32 normal parent exits
+  without shutdown reports. A concurrent batch of 32 normal parent exits also
+  joins every captured process within one 1,000-ms cutoff, but reports three
+  Task.Supervisor shutdown_error/noproc entries for Task.Supervised children.
+  The complete v2 probe therefore fails its diagnostic assertion, 1/2 cases
+  pass in 0.7 seconds. No cleanup limit or logger error filter was changed.
+  The installed Elixir 1.20.3 shutdown code uses a new monitor, unlinks a child,
+  then reads an immediately available linked EXIT before dispatching shutdown;
+  a late-exit race remains a hypothesis until a fix proves the actual trigger.
+  Do not close T16's investigation from successful process joins alone.
+  The same retained v2 probe passes both cases on Elixir 1.18.5/OTP 27.3.4
+  in 0.7 seconds without reproducing a diagnostic. That floor observation
+  does not erase the current-pair failure or establish a production repair.
+
+  The initial probe's 64 serial joins pass, but its non-test filename triggers
+  a discovery warning and exit 1 under warnings-as-errors. It is retained as
+  failed evidence; v2 corrects that filename and adds the concurrent batch.
+  Source and complete output identities are retained below. These temporary
+  probes add no shipped test, production code or required-check substitution.
+
+  | Retained source/output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-held-provider-shutdown-probe.exs` | Initial serial probe source | `1aad2cd049fc93f336cc971525308e86c46b781e300f3e2c0d5d8a11d5282d54` |
+  | `/private/tmp/loopex-m7-held-provider-shutdown-probe-current-v1.log` | FAIL, discovery warning despite one assertion case passing | `b1088b39dd3180d67cee8b9a51ed17e323760df8076e2885fe52213c0666f280` |
+  | `/private/tmp/loopex-m7-held-provider-shutdown-probe-v2_test.exs` | Corrected serial/concurrent probe source | `7f8df08c4b4c02c3fd1a26387d22b9c090f95c9f549770dadce5be3e09f9c044` |
+  | `/private/tmp/loopex-m7-held-provider-shutdown-probe-current-v2.log` | FAIL, concurrent shutdown diagnostics, serial case passes | `627f5941f15abb4323567ce2d0f4d8e97c23118f0e30c02b3f735185733c235f` |
+  | `/private/tmp/loopex-m7-held-provider-shutdown-probe-floor-v1.log` | PASS, two cases; no diagnostic observed on the floor | `47eed383d00f7c9fb91a56bb1d4074ef38224fa792928e557503ec1d12b28392` |
+  | `/private/tmp/loopex-m7-6058eb95-integration-record-docs-v1.log` | PASS, documentation-only checkpoint and tally | `8153ccbb5fc1f48c379984de2392976c83178b2732b6a1e1ae940bf1e31b3c23` |
+  | `/private/tmp/loopex-m7-6058eb95-integration-record-final-metadata-v1.log` | PASS, final bootstrap/status/docs/whitespace after floor observation | `1104c7dccbcf5f3261657a4817a893f2e9dca9db84d84967977b5fde5d589873` |
 
 - Failed: the single full current-pair fast check of clean pushed
   `bad9f2203e8e346d25309e95d6e94a773741a9bb` ended exit 1 after 924 measured
@@ -8628,7 +8672,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Verify the combined current-only callback and helper-fixture-discovery integration from a clean committed candidate, once per candidate; retain exact SHA, complete terminal output, measured duration and digest, preserving failed discovery and maintenance candidates and the focused buffered predecessor.
+- [x] Verify the combined current-only callback and helper-fixture-discovery integration from a clean committed candidate, once per candidate; retain exact SHA, complete terminal output, measured duration and digest, preserving failed discovery and maintenance candidates and the focused buffered predecessor.
 
 - [x] Declare the support-only retained-genesis fixture in composition's existing discovery ignore list; preserve every codec/admission case, automatic test-load patterns and warnings-as-errors, retain the failed exact-candidate integration and verify the unchanged focused case count on both supported pairs.
 

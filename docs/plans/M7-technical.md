@@ -1994,6 +1994,19 @@ Complete failed and focused outputs are retained in the task checklist; the
 failed candidate will not be rerun into green. Existing Task.Supervisor cleanup
 diagnostics remain a separate open T16 investigation.
 
+The subsequent clean pushed implementation `6058eb95` passes its single full
+current-pair fast check: all eleven suites, 3,696 passed and 39 excluded,
+916 measured wrapper seconds and 917 rounded check seconds. The added
+callback/discovery integration obligation is complete. An external actual-runtime
+probe joins held callbacks, task children, worker supervisors, owner groups and
+roots for serial and concurrent normal owner exits, but the concurrent case
+still emits three Task.Supervisor shutdown_error/noproc reports. Its diagnostic
+assertion fails; the T16 cleanup investigation remains open. Complete immutable
+outputs and both probe-source identities are retained in the task checklist.
+The unchanged retained probe passes both cases on the supported floor pair
+in 0.7 seconds without observing a diagnostic. This does not resolve the
+current-pair failure; no production repair is claimed.
+
 The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes the older-reader, upgrade and cross-version rollback bullets above.
 The old archive runner, helpers and exclusive fixtures have been removed.
