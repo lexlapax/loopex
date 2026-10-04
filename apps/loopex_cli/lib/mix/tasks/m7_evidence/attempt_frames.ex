@@ -19,7 +19,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptFrames do
   Chain verification starts at sequence one with a null predecessor and checks
   every subsequent campaign, sequence and digest. An incomplete trailing line
   returns its verified preceding head and exact unresolved bytes. It never
-  presents that prefix as a complete index. No file is opened or written.
+  presents that prefix as a complete index. Verification against a committed
+  head additionally requires that exact campaign, sequence and digest in the
+  chain, so a valid stale copy or fork cannot satisfy the retained anchor.
+  No file is opened or written.
   """
 
   alias LoopexCli.ConfigJson
@@ -65,21 +68,41 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptFrames do
   def decode(_), do: {:error, :invalid_attempt_frame}
 
   @doc false
-  def verify(bytes) when is_binary(bytes), do: verify_lines(bytes, nil)
+  def verify(bytes) when is_binary(bytes), do: verify_lines(bytes, nil, nil, false)
   def verify(_), do: {:error, :invalid_attempt_chain}
 
-  defp verify_lines(<<>>, nil), do: {:error, :empty_attempt_chain}
-  defp verify_lines(<<>>, head), do: {:ok, head}
+  @doc false
+  def verify(bytes, committed_head) when is_binary(bytes) do
+    if head?(committed_head) do
+      verify_lines(bytes, nil, committed_head, false)
+    else
+      {:error, :invalid_committed_attempt_head}
+    end
+  end
 
-  defp verify_lines(bytes, head) do
+  def verify(_, _), do: {:error, :invalid_committed_attempt_head}
+
+  defp verify_lines(<<>>, nil, _, _), do: {:error, :empty_attempt_chain}
+  defp verify_lines(<<>>, head, nil, _), do: {:ok, head}
+  defp verify_lines(<<>>, head, _, true), do: {:ok, head}
+  defp verify_lines(<<>>, _, _, false), do: {:error, :committed_attempt_head_mismatch}
+
+  defp verify_lines(bytes, head, committed_head, anchored?) do
     case :binary.match(bytes, "\n") do
       {length, 1} when length <= @limit ->
         <<line::binary-size(^length), "\n", remaining::binary>> = bytes
 
         with {:ok, record} <- decode(line),
-             true <- follows?(record, head) do
-          verify_lines(remaining, Map.take(record, ~w(campaign_id sequence digest)))
+             true <- follows?(record, head),
+             {:ok, anchored?} <- anchor(record, committed_head, anchored?) do
+          verify_lines(
+            remaining,
+            Map.take(record, ~w(campaign_id sequence digest)),
+            committed_head,
+            anchored?
+          )
         else
+          {:error, :committed_attempt_head_mismatch} = error -> error
           _ -> {:error, :invalid_attempt_chain}
         end
 
@@ -89,6 +112,31 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptFrames do
       _ ->
         {:error, :invalid_attempt_chain}
     end
+  end
+
+  defp anchor(_, nil, anchored?), do: {:ok, anchored?}
+
+  defp anchor(record, committed_head, anchored?) do
+    cond do
+      record["campaign_id"] != committed_head["campaign_id"] ->
+        {:error, :committed_attempt_head_mismatch}
+
+      record["sequence"] == committed_head["sequence"] ->
+        if record["digest"] == committed_head["digest"],
+          do: {:ok, true},
+          else: {:error, :committed_attempt_head_mismatch}
+
+      true ->
+        {:ok, anchored?}
+    end
+  end
+
+  defp head?(head) do
+    is_map(head) and not is_struct(head) and
+      Enum.sort(Map.keys(head)) == ~w(campaign_id digest sequence) and
+      is_binary(head["campaign_id"]) and byte_size(head["campaign_id"]) > 0 and
+      String.valid?(head["campaign_id"]) and is_integer(head["sequence"]) and
+      head["sequence"] > 0 and digest?(head["digest"])
   end
 
   defp follows?(record, nil),

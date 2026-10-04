@@ -6615,3 +6615,30 @@ schemas, both transport projections, independent clients, privacy canaries and
 unknown-commit proof. Preserve only the current contract, with no older decoder
 or alias. No private capture or instruction text becomes public, no authority
 changes, and no milestone closure, main merge or publication is authorized.
+
+<a id="disposition-m7-runtime-creation-defaults-2026-10-04"></a>
+### M7 centralized runtime creation defaults, 2026-10-04
+
+After reviewing the long-term consequences of both alternatives, the maintainer
+selected option B in this chat:
+
+> Let's go with option b. I like centralized configuration ala config central.
+
+The host captures the bounded plain current-v3 session-creation template at
+runtime startup. Core validates and retains it for implicit session creation;
+foreground and daemon transport constructors continue receiving the runtime.
+The template contains initial_configuration, immutable tool_selection,
+policy_defer_mode and runtime_configuration.cleanup_grace_ms. Hosts still own
+model/capability discovery, instruction capture, tool selection and credentials.
+No credential, callback or host routing handle enters the template. Without a
+template, implicit creation refuses; explicit exact-genesis creation and
+read-only/attached operation remain available. Exact duplicate identity binds
+normalized metadata and complete captured genesis. Preserve historical
+no-activation replay, uncertain-commit fences, activation dispositions, relay
+capacity and cleanup bounds. Keep only the current contract, removing the
+superseded v2 implicit writer rather than retaining a fallback.
+The selected alternative is retained at
+`/private/tmp/loopex-m7-transport-creation-decision.md`, SHA-256
+`0caba84dcca0b4952f30d7ec4dc425d39349b52c5f6760656f84f2501b18464b`. This authorizes the Core startup/default contract and
+coordinated transport implementation; it does not close M7 or authorize merge,
+release or publication.

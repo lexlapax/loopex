@@ -133,6 +133,103 @@ defmodule LoopexCli.M7AttemptFramesTest do
     assert {:ok, ^record} = Frames.decode(String.trim_trailing(line, "\n"))
   end
 
+  test "every committed position must occur exactly in the complete extended chain" do
+    {:ok, first, one} = Frames.encode("campaign", 1, nil, %{"label" => "first"})
+    {:ok, second, two} = Frames.encode("campaign", 2, one["digest"], %{"label" => "second"})
+    {:ok, third, three} = Frames.encode("campaign", 3, two["digest"], %{"label" => "third"})
+    bytes = first <> second <> third
+
+    for record <- [one, two, three] do
+      assert Frames.verify(bytes, head(record)) == {:ok, head(three)}
+    end
+
+    assert Frames.verify(first <> second, head(two)) == {:ok, head(two)}
+    assert Frames.verify(first, head(two)) == {:error, :committed_attempt_head_mismatch}
+
+    assert Frames.verify(first <> second, head(three)) ==
+             {:error, :committed_attempt_head_mismatch}
+  end
+
+  test "a fully authenticated fork or foreign campaign cannot replace the committed head" do
+    {:ok, first, one} = Frames.encode("campaign", 1, nil, %{})
+    {:ok, second, two} = Frames.encode("campaign", 2, one["digest"], %{"answer" => "original"})
+
+    {:ok, fork, fork_record} =
+      Frames.encode("campaign", 2, one["digest"], %{"answer" => "changed"})
+
+    {:ok, fork_tail, _} = Frames.encode("campaign", 3, fork_record["digest"], %{})
+    {:ok, foreign, foreign_record} = Frames.encode("other", 1, nil, %{})
+
+    assert {:ok, _} = Frames.verify(first <> fork <> fork_tail)
+    assert {:ok, _} = Frames.verify(foreign)
+
+    assert Frames.verify(first <> fork <> fork_tail, head(two)) ==
+             {:error, :committed_attempt_head_mismatch}
+
+    assert Frames.verify(foreign, head(one)) == {:error, :committed_attempt_head_mismatch}
+
+    assert Frames.verify(first <> second, head(foreign_record)) ==
+             {:error, :committed_attempt_head_mismatch}
+  end
+
+  test "reaching the anchor never turns an incomplete append into a complete index" do
+    {:ok, first, one} = Frames.encode("campaign", 1, nil, %{})
+    {:ok, second, two} = Frames.encode("campaign", 2, one["digest"], %{})
+    {:ok, third, _} = Frames.encode("campaign", 3, two["digest"], %{"note" => "next"})
+
+    for length <- 1..(byte_size(third) - 1) do
+      tail = binary_part(third, 0, length)
+
+      assert Frames.verify(first <> second <> tail, head(one)) ==
+               {:error, {:incomplete_attempt_append, head(two), tail}}
+    end
+
+    tail = String.trim_trailing(second, "\n")
+
+    assert Frames.verify(first <> tail, head(two)) ==
+             {:error, {:incomplete_attempt_append, head(one), tail}}
+  end
+
+  test "a committed head grants no exception to canonical framing and chain continuity" do
+    {:ok, first, one} = Frames.encode("campaign", 1, nil, %{})
+    {:ok, second, two} = Frames.encode("campaign", 2, one["digest"], %{})
+    {:ok, third, _} = Frames.encode("campaign", 3, two["digest"], %{})
+
+    for bytes <- [first <> first, first <> third, second, first <> "\n", " " <> first] do
+      assert Frames.verify(bytes, head(one)) == {:error, :invalid_attempt_chain}
+    end
+
+    assert Frames.verify("", head(one)) == {:error, :empty_attempt_chain}
+  end
+
+  test "anchors contain exactly a valid campaign, positive integer sequence and lower-case digest" do
+    {:ok, first, one} = Frames.encode("campaign", 1, nil, %{})
+    original = head(one)
+
+    for invalid <- [
+          nil,
+          [],
+          %{},
+          one,
+          Map.put(original, "extra", nil),
+          Map.delete(original, "sequence"),
+          Map.put(original, "sequence", 0),
+          Map.put(original, "sequence", 1.0),
+          Map.put(original, "campaign_id", ""),
+          Map.put(original, "campaign_id", <<255>>),
+          Map.put(original, "campaign_id", :atom),
+          Map.put(original, "digest", String.upcase(original["digest"])),
+          Map.put(original, "digest", <<255>>),
+          Map.put(original, "digest", self())
+        ] do
+      assert Frames.verify(first, invalid) == {:error, :invalid_committed_attempt_head}
+    end
+
+    assert Frames.verify(nil, original) == {:error, :invalid_committed_attempt_head}
+  end
+
+  defp head(record), do: Map.take(record, ~w(campaign_id sequence digest))
+
   defp rendered(record) do
     {:ok, io} = Frame.encode(record)
     io |> IO.iodata_to_binary() |> String.trim_trailing("\n")

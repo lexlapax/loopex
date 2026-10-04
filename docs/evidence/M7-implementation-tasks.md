@@ -325,6 +325,30 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: verify a complete attempts chain against an exact previously committed
+  campaign/sequence/digest head using the existing private frame verifier.
+  Authenticated stale copies, shorter history, foreign campaigns and a valid
+  alternate branch cannot satisfy the anchor. Reaching it does not authorize
+  a truncated trailing append. Five additional tests exercise every anchor
+  position, forks, incomplete tails, malformed heads and unchanged framing
+  refusal. All 20 frame/duplicate-aware JSON tests pass on both supported pairs.
+  Complete current/floor logs and both source identities are retained in
+  `/private/tmp/loopex-m7-attempt-anchor-proof-inventory.tsv`, SHA-256
+  `ec6ee45b4d48a5dfdfb4d839b81ad1a50c0056f8e33311359571d43e1787baad`. Greatest committed-head selection, body/ownership
+  admission, fsync and dispatch integration remain open; no original T14 row
+  closes. One added subtask closes, bringing T01–T19 added work to 241 done /
+  11 todo; original work stays 70 done / 103 todo / 6 retired.
+  Formatting, warning-free compilation, documentation, status, dependency
+  direction, whitespace and the task reporter pass in 16.4 seconds. Complete
+  output is retained at `/private/tmp/loopex-m7-attempt-anchor-metadata-v1.log`,
+  SHA-256 `65d02818750fc038f0e08c08c5f33d3d9c158fcaf4d90a2b23db1d6ebe7cff4d`; handle `1872` is terminal and collected.
+
+- Decision recorded: the maintainer selected option B, centralized captured
+  runtime defaults, after reviewing both alternatives. The
+  [disposition](../developer/agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04)
+  retains the selected template, host ownership and exact-create safeguards.
+  Transport implementation is now authorized; this question is resolved.
+
 - Done: complete original T13's long fixture through real automatic
   compaction, explicit compaction and a physical Local Store restart. The
   catalog's four exact prompts establish release_prefix=amber and batch_size=3,
@@ -368,31 +392,21 @@ did not resolve them. No paid provider calls were made during this check.
   open; this credential-free fixture proof does not replace it. Review's required
   investigate/review helper dispatches remain dependent on T11, and no counted
   fixture attempt is manufactured before T14 campaign admission exists.
-  The exact a8af6e99 full fast check remains live under handle `96751`, separate
-  from these later test bytes. The transport-creation decision remains pending.
+  The exact a8af6e99 full fast check is terminal and collected below, separate
+  from these later test bytes. The transport-creation decision is resolved above.
 
-- Running: the one full fast check of clean committed and pushed
-  `a8af6e99bec3d4a4d60c53d937d72c79b87bd7e2` started from the existing detached
-  verification checkout, `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`.
-  Complete output streams to `/private/tmp/loopex-m7-a8af6e99-fast-check.log`;
-  execution handle `96751` is live. Resume by collecting that handle, not by
-  starting another run of these bytes. No result or final digest is claimed
-  while it is running. The parent 0823aa50 failure remains immutable below.
-  This exact candidate includes both feature-choice proofs and the explicitly
-  ready quiesce fixture transports. All preceding focused and metadata handles
-  have been terminally collected; no agent or other proof lane is active.
-
-  The prose-only repository check for this running-state record passes;
-  complete output is `/private/tmp/loopex-m7-a8af6e99-running-state-docs-v1.log`,
-  SHA-256 `b5e840438f6ac83f0e5d339844e830b62001db79d2da8027368ee3a1f5648f1f`. Metadata handle `92497` is terminal
-  and collected. The implementation check remains the separate live handle above.
-
-  The administrative progress child changes only this ledger. T01–T19 remain
-  original 69 done / 104 todo / 6 retired; added 239 done / 11 todo.
-  T04 is original 6 / 5 / 0, T13 is 3 / 7 / 0, and T16 is original 1 / 8 / 0,
-  added 45 / 3. Other rows retain the immediately preceding reporter output.
-  M7 and the implementation goal remain in progress; no closure, main merge,
-  tag or publication is authorized by this running check.
+- Done: the one full fast check of clean committed and pushed
+  `a8af6e99bec3d4a4d60c53d937d72c79b87bd7e2` passes all eleven applications:
+  3,831 passed and 44 excluded in 1,023.0 measured seconds. Complete output is
+  immutable at `/private/tmp/loopex-m7-a8af6e99-fast-check.log`, SHA-256
+  `8cd513c618ad0fc1631570a0d73f957dc3f10109dd0f2eace6b245ce028d1e03`. Handle `96751` is terminal and collected. The run used the
+  detached verification checkout `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`.
+  No full check was repeated for these bytes. This evidence predates the later
+  long-fixture test child, whose separate focused current/floor proofs remain
+  recorded above. The failed 0823aa50 run remains failed; the green successor
+  does not establish the exact cause of its untraced pre-fence failure. Its
+  investigation and the separate Task.Supervisor/OwnerGroup diagnostics stay
+  open. No floor full check, release matrix, closure or publication is claimed.
 
 - Failed: the one full fast check of clean pushed
   `0823aa5061620b9506ce7399f89f5fee8c52e3d2` finishes exit 1 in 1,016.0 measured
@@ -887,7 +901,7 @@ did not resolve them. No paid provider calls were made during this check.
   63 done / 110 todo / 6 retired; added counts stay 230 done / 10 todo.
   Including T00, originals are 63 / 116 / 7 and added are 234 / 11.
 
-- Pending maintainer decision: select the entry point for host-captured v3
+- Historical decision packet, resolved by the 2026-10-04 disposition above: select the entry point for host-captured v3
   transport creation settings. Recommended constructor context supplies
   initial_configuration, immutable tool_selection, policy_defer_mode and
   runtime_configuration.cleanup_grace_ms alongside the runtime to foreground
@@ -900,10 +914,10 @@ did not resolve them. No paid provider calls were made during this check.
   dispositions and cleanup bounds. Hosts resolve model facts/instructions;
   neither admits client-authored capability facts, credential references or
   superseded genesis. The public/cross-app contract needs approval under
-  AGENTS.md and the repository ADR skill. The one unanswered question and its
+  AGENTS.md and the repository ADR skill. The original question and its
   concrete proposal are retained at
   `/private/tmp/loopex-m7-transport-creation-decision.md`; dependent transport
-  implementation has not begun. The T07 audit is independent of that decision.
+  implementation had not begun when this packet was recorded. The T07 audit is independent of that decision.
 
 - Done: durable `ask` captures complete current v3 genesis before placement or
   credential custody. Composition owns adapter defaults, capability resolution
@@ -10095,6 +10109,8 @@ candidate integration and focused floor proofs are retained there; items 9 and
 ### Added implementation subtasks
 
 - [x] Implement the accepted private attempts-index canonical envelope and complete-chain framing; reuse sorted JSON and duplicate-aware decoding, pin an independent exact-byte/hash vector, refuse malformed/noncanonical/oversized/forked records and preserve unresolved truncated tails on both supported toolchains. Event admission, writer ownership, fsync and runner dispatch integration remain open.
+
+- [x] Verify a complete attempts chain contains the exact previously committed campaign/sequence/digest head; refuse stale copies, missing history, authenticated forks and malformed anchors without resolving incomplete tails or granting dispatch authority. Prove on both supported toolchains. Greatest-head selection and runner admission remain open.
 
 ## T15 — Prove migration and rollback
 
