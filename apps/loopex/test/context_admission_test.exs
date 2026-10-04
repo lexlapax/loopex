@@ -49,6 +49,8 @@ defmodule Loopex.ContextAdmissionTestModel do
 
       :error ->
         reply = %{
+          completion: "unknown",
+          continuation: nil,
           text: Map.get(step, :text, "done"),
           identity: %{provider: "fixture", model: request.model, endpoint: "in-process"},
           usage: Map.get(step, :usage, %{input_tokens: 3, output_tokens: 2}),

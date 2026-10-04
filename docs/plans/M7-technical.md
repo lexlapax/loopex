@@ -1932,6 +1932,26 @@ the first request, while current sessions without that capability keep their nul
 projection. Self-consistent old encodings refuse; current restart/source-binding,
 resource class/header bounds and exact record-cost reservation remain required.
 
+The model boundary now admits only eleven-field current v3 callbacks and
+projects ten-field canonical replies. The obsolete public two-argument
+projection and nine-field callback fallback are removed after migrating all
+current producers, fixture callers, public reply types and conformance checks.
+Raw Store admission precedes projection and usage classification, excludes only
+exactly echoed request bytes and still counts all supplied usage/capsule data.
+Current v3 settlement replay refuses retired kinds at every retry/terminal
+position and retains exact source binding, once-only accounting and current
+restart. Both pairs pass 416 selected cases with two real-provider exclusions.
+Native array/string/order/ID/argument fidelity is compared exactly through the
+shared expander, both renderer modes and actual streaming HTTP/buffered TLS
+for all nine registered cells. A failed buffered predecessor is retained: its
+one-byte key `k` collides with current completion `unknown`. The corrected
+fixture proves that exact post-dispatch rejection and a noncolliding one-byte
+success while preserving missing/empty/65,537-byte refusal, 65,536-byte success,
+recursive echo rejection, host-request exceptions and exact cleanup. No screen,
+credential bound, stop table or deadline changes. Complete outputs, AST audit,
+static checks and original T08 proof mappings live in the task checklist;
+counted real-provider demonstrations and complete M7 integration remain open.
+
 T11's private retained-genesis codec now implements ADR 0046's exact
 three-member object with normalized plain current v3 genesis, deterministic
 uncompressed ETF, canonical padded base64 and the original-byte SHA-256. The

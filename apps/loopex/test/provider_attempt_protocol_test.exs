@@ -219,6 +219,8 @@ defmodule Loopex.ProviderAttemptRegisteredLifetimeModel do
 
       {:ok,
        %{
+         completion: "unknown",
+         continuation: nil,
          text: "registered resource completed",
          identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
          usage: %{input_tokens: 1, output_tokens: 1},
@@ -261,6 +263,8 @@ defmodule Loopex.ProviderAttemptUnlinkingModel do
       :return ->
         {:ok,
          %{
+           completion: "unknown",
+           continuation: nil,
            text: "detached callback completed",
            identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
            usage: %{input_tokens: 1, output_tokens: 1},
@@ -357,6 +361,8 @@ defmodule Loopex.ProviderBinaryUsageMalformedModel do
   def complete(request, _options, _progress) do
     {:ok,
      %{
+       "completion" => "unknown",
+       "continuation" => nil,
        "text" => "invalid binary-keyed reply",
        "identity" => %{
          "provider" => nil,
@@ -5398,7 +5404,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     :erlang.garbage_collect()
     {:memory, before} = Process.info(self(), :memory)
-    result = ProviderAttempt.canonical_reply(raw, request)
+    result = ProviderAttempt.canonical_reply(raw, request, false)
     {:memory, after_projection} = Process.info(self(), :memory)
 
     assert result == {:error, :unreadable_model_answer}
@@ -5407,16 +5413,16 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     wide_usage =
       Map.new(1..(@record_cardinality_limit + 1), fn index -> {"member-#{index}", index} end)
 
-    assert ProviderAttempt.canonical_reply(Map.put(raw, "usage", wide_usage), request) ==
+    assert ProviderAttempt.canonical_reply(Map.put(raw, "usage", wide_usage), request, false) ==
              {:error, :unreadable_model_answer}
 
     wide_reply = Map.new(1..(@record_cardinality_limit + 1), fn i -> {"member-#{i}", i} end)
 
-    assert ProviderAttempt.canonical_reply(wide_reply, request) ==
+    assert ProviderAttempt.canonical_reply(wide_reply, request, false) ==
              {:error, :unreadable_model_answer}
 
     assert {:ok, projected} =
-             ProviderAttempt.canonical_reply(adapter_reply(request, [call]), request)
+             ProviderAttempt.canonical_reply(adapter_reply(request, [call]), request, false)
 
     assert projected["tool_calls"] == [call]
   end
@@ -5450,7 +5456,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     heavy_call = %{"id" => "call-1", "name" => "tool", "arguments" => container_heavy}
 
-    assert ProviderAttempt.canonical_reply(adapter_reply(request, [heavy_call]), request) ==
+    assert ProviderAttempt.canonical_reply(adapter_reply(request, [heavy_call]), request, false) ==
              {:error, :unreadable_model_answer}
 
     over_key = %{
@@ -5459,7 +5465,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       "arguments" => %{String.duplicate("k", @identifier_limit + 1) => "v"}
     }
 
-    assert ProviderAttempt.canonical_reply(adapter_reply(request, [over_key]), request) ==
+    assert ProviderAttempt.canonical_reply(adapter_reply(request, [over_key]), request, false) ==
              {:error, :unreadable_model_answer}
 
     at_key = %{
@@ -5469,7 +5475,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     }
 
     assert {:ok, projected} =
-             ProviderAttempt.canonical_reply(adapter_reply(request, [at_key]), request)
+             ProviderAttempt.canonical_reply(adapter_reply(request, [at_key]), request, false)
 
     assert projected["tool_calls"] == [at_key]
   end
@@ -5495,7 +5501,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     assert ProviderAttempt.canonical_reply(
              Map.put(raw, "usage", %{overlong_key => 1}),
-             request
+             request,
+             false
            ) == {:error, :unreadable_model_answer}
 
     oversized_value = String.duplicate("x", @record_limit)
@@ -5513,11 +5520,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
       assert ProviderAttempt.canonical_reply(
                Map.put(raw, "usage", oversized_usage),
-               request
+               request,
+               false
              ) == {:error, :unreadable_model_answer}
     end
 
-    assert {:ok, projected} = ProviderAttempt.canonical_reply(raw, request)
+    assert {:ok, projected} = ProviderAttempt.canonical_reply(raw, request, false)
 
     assert projected["usage"] == %{
              "status" => "reported",
@@ -5550,11 +5558,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert {:ok, @record_limit} = Store.admit_bounded(Map.put(measured, "text", fitting))
 
     assert {:ok, projected} =
-             ProviderAttempt.canonical_reply(Map.put(raw, "text", fitting), request)
+             ProviderAttempt.canonical_reply(Map.put(raw, "text", fitting), request, false)
 
     assert projected["text"] == fitting
 
-    assert ProviderAttempt.canonical_reply(Map.put(raw, "text", fitting <> "x"), request) ==
+    assert ProviderAttempt.canonical_reply(Map.put(raw, "text", fitting <> "x"), request, false) ==
              {:error, :unreadable_model_answer}
   end
 
@@ -5574,24 +5582,28 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     raw = adapter_reply(request, [])
 
-    assert ProviderAttempt.canonical_reply(Map.put(raw, "usage", :malformed_usage), request) ==
+    assert ProviderAttempt.canonical_reply(
+             Map.put(raw, "usage", :malformed_usage),
+             request,
+             false
+           ) ==
              {:error, :unreadable_model_answer}
 
     sentinel = Map.put(raw, "usage", %{"input_tokens" => :absent, "output_tokens" => 10})
 
-    assert ProviderAttempt.canonical_reply(sentinel, request) ==
+    assert ProviderAttempt.canonical_reply(sentinel, request, false) ==
              {:error, :unreadable_model_answer}
 
     assert Store.admit_bounded(%{"input_tokens" => :absent}) == {:error, :invalid_item}
 
     absent = Map.put(raw, "usage", %{"output_tokens" => 10})
 
-    assert {:ok, partial} = ProviderAttempt.canonical_reply(absent, request)
+    assert {:ok, partial} = ProviderAttempt.canonical_reply(absent, request, false)
     assert partial["usage"] == %{"status" => "unreported", "category" => "partial"}
 
     elsewhere = %{"id" => "call-1", "name" => "tool", "arguments" => %{"a" => :absent}}
 
-    assert ProviderAttempt.canonical_reply(adapter_reply(request, [elsewhere]), request) ==
+    assert ProviderAttempt.canonical_reply(adapter_reply(request, [elsewhere]), request, false) ==
              {:error, :unreadable_model_answer}
   end
 
@@ -5911,6 +5923,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
   defp adapter_reply(request, calls) do
     %{
+      "completion" => "unknown",
+      "continuation" => nil,
       "text" => "",
       "identity" => %{
         "provider" => "scripted",

@@ -367,6 +367,8 @@ defmodule Loopex.ProviderAccountingProvenanceTest do
 
   defp raw_reply(c, input, output) do
     %{
+      completion: "unknown",
+      continuation: nil,
       text: "",
       identity: %{provider: "scripted", model: "scripted:v1", endpoint: "in-process"},
       usage: %{input_tokens: input, output_tokens: output},

@@ -125,8 +125,8 @@ defmodule Loopex.Model do
   coordinator close that attempt's progress domain with the producer's own
   statement of how many items it emitted.
 
-  V2 replies contain exactly nine members, including `provider_response_id`
-  when nil. V3 replies contain those nine plus `completion` and `continuation`.
+  Current v3 replies contain exactly eleven members, including
+  `provider_response_id` and `continuation` when nil.
   Completion is `natural` for an admitted provider end, `limit` for truncation,
   or `unknown` when the end is unproved. Continuation is nil or a bounded native
   content-reference capsule.
@@ -134,31 +134,19 @@ defmodule Loopex.Model do
   refuses mixed or extra fields before accounting or tool admission, as fixed
   by ADR 0044.
   """
-  @type reply ::
-          %{
-            required(:text) => binary(),
-            required(:identity) => map(),
-            required(:usage) => map(),
-            required(:tool_calls) => [map()],
-            required(:delta_count) => non_neg_integer(),
-            required(:streamed) => boolean(),
-            required(:provider_response_id) => binary() | nil,
-            required(:canonical_request_bytes) => binary(),
-            required(:staged_request_digest) => binary()
-          }
-          | %{
-              required(:completion) => binary(),
-              required(:continuation) => map() | nil,
-              required(:text) => binary(),
-              required(:identity) => map(),
-              required(:usage) => map(),
-              required(:tool_calls) => [map()],
-              required(:delta_count) => non_neg_integer(),
-              required(:streamed) => boolean(),
-              required(:provider_response_id) => binary() | nil,
-              required(:canonical_request_bytes) => binary(),
-              required(:staged_request_digest) => binary()
-            }
+  @type reply :: %{
+          required(:completion) => binary(),
+          required(:continuation) => map() | nil,
+          required(:text) => binary(),
+          required(:identity) => map(),
+          required(:usage) => map(),
+          required(:tool_calls) => [map()],
+          required(:delta_count) => non_neg_integer(),
+          required(:streamed) => boolean(),
+          required(:provider_response_id) => binary() | nil,
+          required(:canonical_request_bytes) => binary(),
+          required(:staged_request_digest) => binary()
+        }
 
   @typedoc """
   ## Concept

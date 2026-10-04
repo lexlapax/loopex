@@ -181,9 +181,12 @@ takes an explicit credential and returns provider options containing it; a
 direct caller owns that secret-bearing value and must not log or retain it. The
 credential source is `LOOPEX_PROVIDER_API_KEY`, at most 65,536 bytes; empty and
 oversized credentials refuse. Provider-side raw diagnostics are unavailable
-rather than forwarded for secret-dependent scrubbing. The generic Model reply
-accepts an optional non-empty UTF-8 `provider_response_id` of at most 256 bytes
-and retains it unchanged.
+rather than forwarded for secret-dependent scrubbing. The current Model callback
+requires exactly eleven fields, including `provider_response_id`, `completion`
+and `continuation`. The response identifier is nil or non-empty UTF-8 of at most
+256 bytes and is retained unchanged. Completion is `natural`, `limit` or
+`unknown`; continuation is nil or the admitted private native capsule. Superseded
+callback shapes are refused under the current-contract-only rule.
 
 **The shipped local executor.** It requires executable `/bin/bash` for its
 internal carrier and cleanup guard on Darwin and Linux under

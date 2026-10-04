@@ -126,8 +126,15 @@ defmodule Loopex.LLM.ReqLLM do
   all. These producer facts survive private-channel backpressure unchanged.
   The coordinator's transient domain closes with its own accepted-item count,
   which can be smaller when the best-effort channel dropped a delta.
+
+  The current callback has exactly eleven fields. Completion is natural, limit
+  or unknown according to the validated native mapping; generic completion is
+  unknown. Continuation is nil or the admitted private native capsule. Neither
+  field is omitted when its value is unknown or nil.
   """
   @type reply :: %{
+          completion: String.t(),
+          continuation: map() | nil,
           text: String.t(),
           identity: identity(),
           provider_response_id: String.t() | nil,

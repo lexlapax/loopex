@@ -33,6 +33,8 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
       {:ok,
        %{
+         completion: "unknown",
+         continuation: nil,
          text: Enum.join(chunks),
          identity: %{provider: "streaming", model: request.model, endpoint: "in-process"},
          usage: %{},
@@ -54,6 +56,8 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     def complete(request, _options, _progress \\ nil) do
       {:ok,
        %{
+         completion: "unknown",
+         continuation: nil,
          text: "no stream",
          identity: %{provider: "silent", model: request.model, endpoint: "in-process"},
          usage: %{},
@@ -1011,6 +1015,9 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
           :tool_calls,
           :delta_count,
           :streamed,
+          :provider_response_id,
+          :completion,
+          :continuation,
           :canonical_request_bytes,
           :staged_request_digest
         ] do
@@ -1020,25 +1027,21 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     refute :canonical_request_digest in declared
   end
 
-  test "the model reply contract requires the response identifier in exact v2 and v3 shapes" do
+  test "the model reply contract requires exactly the eleven current callback fields" do
     {:ok, types} = Code.Typespec.fetch_types(Loopex.Model)
 
-    {:type, {:reply, {:type, _line, :union, variants}, []}} =
+    {:type, {:reply, {:type, _line, :map, fields}, []}} =
       Enum.find(types, &match?({:type, {:reply, _definition, []}}, &1))
 
-    common =
-      ~w(text identity usage tool_calls delta_count streamed provider_response_id canonical_request_bytes staged_request_digest)a
-
     declared =
-      for {:type, _line, :map, fields} <- variants do
-        Enum.map(fields, fn
-          {:type, _line, :map_field_exact, [{:atom, _key_line, key}, _value]} -> key
-        end)
-        |> Enum.sort()
-      end
+      Enum.map(fields, fn
+        {:type, _line, :map_field_exact, [{:atom, _key_line, key}, _value]} -> key
+      end)
 
     assert Enum.sort(declared) ==
-             Enum.sort([Enum.sort(common), Enum.sort([:completion, :continuation | common])])
+             Enum.sort(
+               ~w(text identity usage tool_calls delta_count streamed provider_response_id canonical_request_bytes staged_request_digest completion continuation)a
+             )
   end
 
   defp declared_reply_fields do
@@ -1157,6 +1160,8 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
         {:ok,
          %{
+           completion: "unknown",
+           continuation: nil,
            text: "AUTHORITATIVE",
            identity: %{provider: "divergent", model: request.model, endpoint: "in-process"},
            usage: %{},

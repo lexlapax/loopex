@@ -35,6 +35,8 @@ defmodule LoopexComposition.ModelQuestionRestartTest do
 
       {:ok,
        %{
+         completion: "unknown",
+         continuation: nil,
          text: "done",
          identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
          usage: %{input_tokens: 1, output_tokens: 1},

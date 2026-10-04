@@ -325,21 +325,96 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: remove the remaining pre-1.0 model callback compatibility path
-  under the maintainer's current-contract-only disposition. The current core
-  still accepts nine-field callbacks through `canonical_reply/3` and exposes
-  the older eight-field canonical projection through `/2`; those paths keep
-  the original T08 exact-reply item open. A read-only AST inventory identifies
-  twenty complete nine-field callback literals and nineteen old projection
-  calls across fifteen files, plus the adapter and core reply types. Migrate
-  current producers/fixtures and calls before deleting the old decoder/API.
-  Retain eleven-field v3 callbacks, ten-field canonical replies, current v3
-  settlements, exact request echo, raw admission before projection, captured
-  continuation requirements and whole-reply accounting. No new wire generation,
-  persistent kind, stop classification, deadline or compatibility shim is added.
-  Original native block/string/order/identity/argument fidelity also has a
-  source-to-test audit in progress; original rows remain open until their full
-  proof mappings and current both-pair results are recorded.
+- Running: verify the combined current-only callback and support-fixture
+  discovery integration candidate once after its clean commit/push. All focused
+  handles are terminal and collected. No full check has started for these bytes;
+  no earlier full-check result covers them. Preserve the failed `3aa21960`
+  discovery result and its repaired focused proof below. The goal remains active
+  on `m7`; the three recorded maintainer decisions remain pending.
+
+- Done: migrate the model boundary to exact eleven-field current v3 callbacks
+  and ten-field canonical replies, under the pre-1.0 current-contract decision.
+  Remove public `ProviderAttempt.canonical_reply/2`, its eight-field projection
+  and the nine-field fallback in `/3`. Current adapters, fixtures, types and
+  conformance callers now emit/require all eleven members, including nil response
+  identity and continuation. Generic mapping retains its previously normalized
+  unknown/nil outcome; native capture supplies its validated completion/capsule.
+  Store raw byte/depth/cardinality/plain-data admission still precedes content
+  traversal, normalization and accounting, excluding only exactly echoed request
+  bytes from measurement. Captured continuation requirements, exact digest/echo,
+  collision refusal and once-only accounting remain. No wire generation,
+  persistence kind, stop classification, deadline or compatibility shim changes.
+
+  The summary validator now refuses superseded nine/eight-field callbacks rather
+  than converting plausible usage into readable incomplete evidence. The current
+  v3 settlement writer/replay proofs refuse retired generations at every retry
+  and terminal position, malformed whole records and changed source/capsule data;
+  live current restart, cancellation, permit/reconciliation and exact Store
+  admission ceilings remain proved. The original monotonic-generation obligation
+  is satisfied by the only admitted current generation, with cross-generation
+  acceptance superseded by the maintainer override.
+
+  Original T08 native fidelity maps to `native_content_test.exs`'s exact complete
+  array reconstruction, `native_stream_test.exs`'s ordered assembly/signatures
+  and every parser byte boundary, `native_request_test.exs`'s exact native arrays
+  and original result IDs in both render modes, `native_transport_test.exs`'s
+  actual streaming local HTTP for all nine cells, and
+  `in_process_caller_wire_test.exs`'s actual buffered local TLS for all nine cells.
+  These compare Unicode/empty text blocks, native field sets/order, thinking
+  signatures, redacted blocks, IDs and parsed object arguments exactly, including
+  literal data resembling references; unknown fields and malformed arguments
+  refuse without repair. Core `model_continuation_test.exs` validates bounded
+  reference consumption and source bindings. The counted provider thinking
+  demonstrations and remaining broader T08 outcomes stay open.
+
+  The first additional buffered proof failed because the fixture selected the
+  one-byte credential `k`, which occurs in the now-required completion `unknown`.
+  The existing exact-selected-value screen correctly refuses that mapped reply.
+  Retain this failure. The fixture now explicitly proves its post-dispatch
+  rejection/one write and uses noncolliding `z` for the one-byte success control;
+  missing/empty/65,537-byte rejection and 65,536-byte success remain unchanged.
+  Recursive key/value echoes, native-private echoes, host-request exceptions,
+  actual TLS and exact cleanup all remain tested. No production screening or
+  credential bound changes. Current v2 buffered output was invoked from the
+  umbrella, which found the selected file only in ReqLLM and ran its five cases;
+  all other applications reported unmatched paths and ran no cases.
+
+  Each supported pair passes 416 selected cases with two expected real-provider
+  exclusions; no external provider call, floor full check, release matrix or
+  milestone closure is claimed. The final read-only AST audit finds zero complete
+  retired callback literals or old projection calls/captures in 642 files. Its
+  retained source is `/private/tmp/loopex-m7-current-callback-audit.exs`, SHA-256
+  `79b70554daaba7cc216129ed4ee09d2bb8713eeea40894e532cc6e1ba4e06ee6`.
+  The first audit result remains valid for the pre-fixture-repair source; the
+  v2 result below covers final fixture edits. Initial formatting found a comma
+  inserted at a multiline call boundary; correction preceded all test runs.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-current-callback-core-current-v1.log` | PASS, 239 cases, 47.9 seconds | `fc425ec01e028df06d82a0e14a06322a2adf62e3cbb889c1b71f00dbaf6dcd9d` |
+  | `/private/tmp/loopex-m7-current-callback-core-floor-v1.log` | PASS, 239 cases, 47.9 seconds | `e976793d8615d398375648a07963f1dc7c9b411e4804287ead6c23696d9e177c` |
+  | `/private/tmp/loopex-m7-current-callback-reqllm-current-v1.log` | PASS, 110 cases, 16.3 seconds | `113fd0fd0a38725dd1b67da57b77e584802d5f1f300fb94ddf97bb8228d930cf` |
+  | `/private/tmp/loopex-m7-current-callback-reqllm-floor-v1.log` | PASS, 110 cases, 16.1 seconds | `bd4cd8352cc7d27a0e07726e82c7711dbf7e846aa55c0a053cdeeedb3979a5e6` |
+  | `/private/tmp/loopex-m7-current-callback-buffered-current-v1.log` | FAIL, 4/5 cases; selected one-byte key collides with required completion | `e06c65f4552a3d0563e19922dea9bec6775a5d640f5ed9e16d74c60d6ef83ba3` |
+  | `/private/tmp/loopex-m7-current-callback-buffered-current-v2.log` | PASS, 5 cases, 6.1 seconds; explicit collision refusal and unchanged key bounds | `c410f7146fc84df235048a6d36747db105bcdb48104c2be56eed99d2a049e74c` |
+  | `/private/tmp/loopex-m7-current-callback-buffered-floor-v1.log` | PASS, 5 cases, 6.1 seconds | `26188a9b3c08563cc85ef6163bb460aab96e72f94a91bd22231346ce793b6fbe` |
+  | `/private/tmp/loopex-m7-current-callback-composition-current-v1.log` | PASS, 42 cases, 5.0 seconds | `6c888a60d55a756f0403673705bf7f62aca0a5a17b2bdcad9e1802fd3976b66a` |
+  | `/private/tmp/loopex-m7-current-callback-composition-floor-v1.log` | PASS, 42 cases, 5.1 seconds | `13e234a40a823da73744f9df08a5db13d6e689987c029b468f8f885b1860640b` |
+  | `/private/tmp/loopex-m7-current-callback-reference-current-v1.log` | PASS, 20 cases, two excluded, 3.8 seconds | `2932f6c9460ccf30639678ccbc2789f95243e87b23f6b0cb773e84b24496122a` |
+  | `/private/tmp/loopex-m7-current-callback-reference-floor-v1.log` | PASS, 20 cases, two excluded, 3.7 seconds | `d5a9687f63e03bb0d265404509c39641cff9e9a4f8876de78305554d858429d0` |
+  | `/private/tmp/loopex-m7-current-callback-audit-v2.log` | PASS, 642 parsed application source/test files, zero retired callback literals or two-argument calls/captures | `95e61c046cdbeb9c75dec1e2a4bd4dd49bd17cfc17deb91c1d4480d0935aa15e` |
+  | `/private/tmp/loopex-m7-current-callback-static-current-v1.log` | PASS, compilation, formatting, bootstrap/status, docs, dependency direction and versions | `f8bfde7561d513c3954cb28a6b66ec369865417df06a7666a18d71bd86922d90` |
+
+  Final metadata bootstrap, compiled documentation, formatting, checklist
+  reporter and whitespace checks pass. Complete immutable output is
+  `/private/tmp/loopex-m7-current-callback-final-metadata-v1.log`, SHA-256
+  `cfdd5db0125ed44cc1c54cc88c93aca4361ba7da196af81d88a41120c147a52c`. This identity is recorded after collecting the terminal result.
+
+  Two original T08 rows close, leaving T08 original 7 done / 4 todo. The added
+  T15 callback migration closes, leaving T15 added 7 done / 2 todo. A separate
+  added T16 integration proof is open, leaving T16 added 38 done / 2 todo.
+  T01–T19 originals are 56 done / 117 todo / 6 retired; added is 212 done /
+  10 todo. Every milestone outcome remains Open; no other original row closes.
 
 - Failed: the single full current-pair fast check of clean, pushed
   `3aa219605d46748dbf8d3e6b777cf44321ad90bf` ended with exit 1 after 925
@@ -8257,9 +8332,9 @@ or check was relaxed.
 ### Original checklist
 
 - [x] Implement committed per-run model/reasoning configuration and the permitted configure fields.
-- [ ] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
+- [x] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
 - [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
-- [ ] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
+- [x] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
 - [ ] Implement continuation accounting, reserves and compaction headroom targets.
 - [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
 - [x] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
@@ -8486,7 +8561,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Migrate current model adapters, fixtures, conformance callers and reply types to exact eleven-field v3 callbacks; remove the nine-field callback fallback and old two-argument canonical projection, preserving current ten-field replies, v3 settlement, raw-admission order, exact echoes, captured requirements and once-only accounting on both supported toolchains.
+- [x] Migrate current model adapters, fixtures, conformance callers and reply types to exact eleven-field v3 callbacks; remove the nine-field callback fallback and old two-argument canonical projection, preserving current ten-field replies, v3 settlement, raw-admission order, exact echoes, captured requirements and once-only accounting on both supported toolchains.
 
 - [x] Remove the historical lineage-projection cutover cache and fallback; require the captured current artifact projection from the first request, preserve current null-projection sessions, and prove unchanged restart plus null/missing-first/missing-later/fully-removed provenance refusal and adjacent artifact/maintenance/accounting behavior on both supported toolchains.
 - [x] Remove model-request v1 and receipt revision 2/3 readers, old per-run conversation query and lineage bypass; migrate current resource/source-binding fixtures and prove self-consistent retired-version refusal, exact unchanged bounds and current recovery on both toolchains.
@@ -8512,6 +8587,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Verify the combined current-only callback and helper-fixture-discovery integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest, preserving the failed discovery candidate and focused buffered predecessor.
 
 - [x] Declare the support-only retained-genesis fixture in composition's existing discovery ignore list; preserve every codec/admission case, automatic test-load patterns and warnings-as-errors, retain the failed exact-candidate integration and verify the unchanged focused case count on both supported pairs.
 

@@ -15,7 +15,7 @@ defmodule Loopex.ProviderAttemptCeilingOrderTest do
   #
   # Technical depth: cardinality was applied to the raw collections, but bytes
   # and depth were not applied until `attempt_result/3` measured the settlement,
-  # which is after `canonical_reply/2` has normalised keys, projected identity
+  # which is after `canonical_reply/3` has normalised keys, projected identity
   # and usage, and walked and rebuilt every tool call. So an answer carrying the
   # full 1,024 admitted tool calls with a megabyte of argument text each, or an
   # arguments map nested ten thousand levels deep, was projected in full and
@@ -66,7 +66,9 @@ defmodule Loopex.ProviderAttemptCeilingOrderTest do
     # the witness.
     for {name, raw} <- [{"byte", wide}, {"depth", deep}] do
       {elapsed, result} =
-        :timer.tc(fn -> traced(fn -> ProviderAttempt.canonical_reply(raw, request) end) end)
+        :timer.tc(fn ->
+          traced(fn -> ProviderAttempt.canonical_reply(raw, request, false) end)
+        end)
 
       assert result == {:error, :unreadable_model_answer},
              "the #{name} ceiling did not refuse the raw reply"
@@ -81,7 +83,7 @@ defmodule Loopex.ProviderAttemptCeilingOrderTest do
 
     assert {:ok, projected} =
              traced(fn ->
-               ProviderAttempt.canonical_reply(adapter_reply(request, [ordinary]), request)
+               ProviderAttempt.canonical_reply(adapter_reply(request, [ordinary]), request, false)
              end)
 
     # The witness is armed: an admitted reply does enter the projection.
@@ -126,6 +128,8 @@ defmodule Loopex.ProviderAttemptCeilingOrderTest do
 
   defp adapter_reply(request, calls) do
     %{
+      "completion" => "unknown",
+      "continuation" => nil,
       "text" => "",
       "identity" => %{
         "provider" => "scripted",

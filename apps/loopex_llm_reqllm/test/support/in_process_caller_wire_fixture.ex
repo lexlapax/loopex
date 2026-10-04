@@ -736,7 +736,18 @@ defmodule Loopex.LLM.ReqLLM.InProcessCallerWireFixture do
       stop(call)
     end
 
-    for key <- ["k", String.duplicate("k", 65_536)] do
+    # Concept: admitted credentials still cannot appear in a mapped reply.
+    # Technical depth: the required current completion value `unknown` contains
+    # the one-byte key `k`. Prove that post-dispatch rejection, then use `z` for
+    # the one-byte success control without changing either credential bound.
+    System.put_env("OPENAI_API_KEY", "k")
+    collision = start(runtime, "openai:gpt-4", wire(:chat, "bounded"), tls: trusted)
+    {result, collision} = collision |> begin() |> result()
+    assert result == {:error, {:dispatched_or_unknown, "model_call_failed"}}
+    assert_one_write(collision)
+    stop(collision)
+
+    for key <- ["z", String.duplicate("k", 65_536)] do
       System.put_env("OPENAI_API_KEY", key)
       call = start(runtime, "openai:gpt-4", wire(:chat, "bounded"), tls: trusted)
       {result, call} = call |> begin() |> result()

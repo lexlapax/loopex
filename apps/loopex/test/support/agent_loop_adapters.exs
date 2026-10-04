@@ -98,6 +98,8 @@ defmodule Loopex.AgentLoopTestModel do
               end
 
             reply = %{
+              completion: "unknown",
+              continuation: nil,
               text: text,
               identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
               # ADR 0018: a dispatched attempt whose usage is not a complete reported

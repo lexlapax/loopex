@@ -183,15 +183,13 @@ defmodule Loopex.Runtime.CompactionSummaryTest do
     end
   end
 
-  test "nine-key v2 is incomplete and eight-key callbacks are unreadable" do
+  test "superseded nine-key and eight-key callbacks are unreadable" do
     request = request()
     v2 = Map.drop(reply(request), [:completion, :continuation])
     assert map_size(v2) == 9
 
-    assert {:ok, canonical, {:error, :maintenance_summary_incomplete}} =
-             CompactionSummary.admit(v2, request)
-
-    assert canonical["usage"]["status"] == "reported"
+    assert CompactionSummary.admit(v2, request) ==
+             {:error, :unreadable_model_answer}
 
     assert CompactionSummary.admit(Map.delete(v2, :provider_response_id), request) ==
              {:error, :unreadable_model_answer}

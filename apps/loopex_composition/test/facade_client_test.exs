@@ -36,6 +36,8 @@ defmodule LoopexComposition.FacadeClientTest do
     def complete(request, _options, _progress) do
       {:ok,
        %{
+         completion: "unknown",
+         continuation: nil,
          text: "facade answer",
          tool_calls: [],
          identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},

@@ -3,10 +3,10 @@ defmodule Loopex.Runtime.ProviderReplyV3Test do
   alias Loopex.Model
   alias Loopex.Runtime.ProviderAttempt
 
-  test "exact v2 becomes canonical v3 with explicit nil continuation and unknown completion" do
+  test "only eleven-field current callbacks produce the ten-field canonical reply" do
     request = request()
     raw = reply(request)
-    assert map_size(raw) == 9
+    assert map_size(raw) == 11
     assert {:ok, projected} = ProviderAttempt.canonical_reply(raw, request, false)
     assert map_size(projected) == 10
     assert projected["continuation"] == nil
@@ -24,16 +24,25 @@ defmodule Loopex.Runtime.ProviderReplyV3Test do
 
     assert {:error, :unreadable_model_answer} =
              ProviderAttempt.canonical_reply(raw, request, true)
+
+    retired = Map.drop(raw, ~w(completion continuation))
+    assert map_size(retired) == 9
+
+    for required <- [false, true] do
+      assert ProviderAttempt.canonical_reply(retired, request, required) ==
+               {:error, :unreadable_model_answer}
+    end
   end
 
-  test "eight-key callbacks, mixed generations and extra keys reject before accounting" do
+  test "retired, incomplete and extra callback members reject before accounting" do
     request = request()
     raw = reply(request)
 
     for invalid <- [
           Map.delete(raw, "provider_response_id"),
-          Map.put(raw, "completion", "natural"),
-          Map.put(raw, "continuation", nil),
+          Map.delete(raw, "completion"),
+          Map.delete(raw, "continuation"),
+          Map.drop(raw, ~w(completion continuation provider_response_id)),
           Map.put(raw, "extra", "unused"),
           Map.merge(raw, %{"completion" => "natural", "continuation" => nil, "extra" => nil})
         ] do
@@ -41,10 +50,11 @@ defmodule Loopex.Runtime.ProviderReplyV3Test do
                ProviderAttempt.canonical_reply(invalid, request, false)
     end
 
-    assert {:ok, historical} = ProviderAttempt.canonical_reply(raw, request)
-    assert map_size(historical) == 8
-    refute Map.has_key?(historical, "continuation")
-    refute Map.has_key?(historical, "completion")
+    assert {:ok, current} = ProviderAttempt.canonical_reply(raw, request, false)
+    assert map_size(current) == 10
+    assert current["continuation"] == nil
+    assert current["completion"] == "unknown"
+    refute function_exported?(ProviderAttempt, :canonical_reply, 2)
   end
 
   test "nil-capsule v3 preserves the closed completion class" do
@@ -292,6 +302,8 @@ defmodule Loopex.Runtime.ProviderReplyV3Test do
 
   defp reply(request),
     do: %{
+      "completion" => "unknown",
+      "continuation" => nil,
       "text" => "é",
       "identity" => %{
         "provider" => "anthropic",

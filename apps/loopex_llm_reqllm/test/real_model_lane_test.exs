@@ -18,6 +18,8 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
              Enum.filter(request.messages, &(Map.get(&1, "role") == "user")) do
         {:ok,
          %{
+           completion: "unknown",
+           continuation: nil,
            text: "deterministic:" <> content,
            identity: %{provider: "deterministic", model: request.model, endpoint: "in-process"},
            usage: %{input_tokens: nil, output_tokens: nil},

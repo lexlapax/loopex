@@ -47,6 +47,8 @@ defmodule Loopex.ReferenceClientTestModel do
 
     {:ok,
      %{
+       completion: "unknown",
+       continuation: nil,
        text: text,
        identity: %{
          provider: "deterministic",

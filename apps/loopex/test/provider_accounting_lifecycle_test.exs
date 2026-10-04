@@ -46,6 +46,8 @@ defmodule Loopex.ProviderAccountingLifecycleTest do
         end
 
       raw = %{
+        completion: "unknown",
+        continuation: nil,
         text: "late valid reply",
         identity: %{provider: "scripted", model: "scripted:v1", endpoint: "in-process"},
         usage: %{input_tokens: 43, output_tokens: 17},

@@ -509,34 +509,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
   defp ordinary_settlement?(record),
     do: Map.get(record, :kind, Map.get(record, "kind")) == @settled_v3_kind
 
-  @doc """
-  ## Concept
-
-  The exact durable reply: the adapter's nine-key callback map with only its
-  echoed request bytes removed.
-
-  ## Technical depth
-
-  The raw answer is admitted by `Loopex.Store.admit_bounded/1` before anything
-  is projected, so it faces the Store's own plain-data, key, depth, cardinality
-  and byte rules rather than a second opinion about them, and no answer reaches
-  projection that the Store would afterwards refuse.
-
-  The echoed `canonical_request_bytes` is compared byte-for-byte with the
-  already committed request and then excluded from that measurement, so a
-  staged request and a durable reply that each fit their own record do not have
-  to fit one item together. Every other supplied member, including every raw
-  usage key and value, passes Store admission before key normalisation or
-  projection. Usage classification then retains only ADR 0018's closed reported
-  or unreported shape; every other member is retained exactly as supplied after
-  key normalisation. Atom and binary keys both reach the same closed set, and a
-  collision between them refuses the reply.
-  """
-  @spec canonical_reply(term(), map()) :: {:ok, map()} | {:error, term()}
-  def canonical_reply(reply, request) when is_map(reply) and not is_struct(reply) do
-    with :ok <- admitted_raw_reply(reply),
-         {:ok, encoded} <- stringify(reply),
-         :ok <- callback_keys(encoded),
+  defp project_callback_fields(encoded, request) do
+    with :ok <- callback_keys(encoded),
          {:ok, identity} <- reply_identity(Map.get(encoded, "identity")),
          {:ok, calls} <- reply_tool_calls(Map.get(encoded, "tool_calls")),
          {:ok, usage} <- reply_usage(Map.get(encoded, "usage")),
@@ -563,8 +537,6 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
-  def canonical_reply(_reply, _request), do: {:error, :unreadable_model_answer}
-
   @doc """
   ## Concept
 
@@ -573,22 +545,27 @@ defmodule Loopex.Runtime.ProviderAttempt do
   ## Technical depth
 
   The owner supplies continuation_required from its captured mapping, never from
-  adapter data. Nine-field v2 callbacks become nil continuation and unknown
-  completion only when continuation is not required. Eleven-field v3 callbacks
-  require all fields and preserve their declared completion. A required capsule
-  must bind the staged model, consume the canonical text/calls and declare natural
-  completion with the matching open/closed relation. The entire raw callback and
+  adapter data. Exactly eleven current v3 fields are required, including nil
+  provider response identity and continuation, and completion is preserved.
+  A required capsule must bind the staged model, consume the canonical text/calls
+  and declare natural completion with the matching open/closed relation.
+  The entire raw callback and
   capsule are admitted before normalized usage may supply accounting evidence.
-  The two-argument projection retains the historical reply generation's shape.
+  Store's raw plain-data, key, depth, cardinality and byte admission precedes
+  normalization, content traversal and usage classification. Echoed request bytes
+  are compared exactly with the committed request and excluded only from that
+  raw measurement. Every other supplied member, including usage and capsule,
+  counts before projection. Atom/binary key collisions refuse. Superseded
+  callback shapes have no projection or compatibility path.
   """
   @spec canonical_reply(term(), map(), boolean()) :: {:ok, map()} | {:error, term()}
   def canonical_reply(reply, request, continuation_required)
       when is_map(reply) and not is_struct(reply) and is_boolean(continuation_required) do
     with :ok <- admitted_raw_reply(reply),
          {:ok, encoded} <- stringify(reply),
-         {:ok, completion, capsule} <- callback_v3_fields(encoded, continuation_required),
+         {:ok, completion, capsule} <- callback_v3_fields(encoded),
          {:ok, projected} <-
-           canonical_reply(Map.drop(encoded, ~w(completion continuation)), request),
+           project_callback_fields(Map.drop(encoded, ~w(completion continuation)), request),
          :ok <-
            validate_reply_capsule(projected, request, completion, capsule, continuation_required) do
       {:ok, Map.merge(projected, %{"completion" => completion, "continuation" => capsule})}
@@ -599,19 +576,14 @@ defmodule Loopex.Runtime.ProviderAttempt do
 
   def canonical_reply(_, _, _), do: {:error, :unreadable_model_answer}
 
-  defp callback_v3_fields(encoded, continuation_required) do
+  defp callback_v3_fields(encoded) do
     keys = Map.keys(encoded) |> Enum.sort()
 
-    cond do
-      keys == Enum.sort(@callback_keys) and not continuation_required ->
-        {:ok, "unknown", nil}
-
-      keys == Enum.sort(@callback_keys ++ ~w(completion continuation)) and
-          encoded["completion"] in ~w(natural limit unknown) ->
-        {:ok, encoded["completion"], encoded["continuation"]}
-
-      true ->
-        {:error, :unreadable_model_answer}
+    if keys == Enum.sort(@callback_keys ++ ~w(completion continuation)) and
+         encoded["completion"] in ~w(natural limit unknown) do
+      {:ok, encoded["completion"], encoded["continuation"]}
+    else
+      {:error, :unreadable_model_answer}
     end
   end
 
@@ -1165,7 +1137,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # reply, and only the values inside it are classified rather than refused.
   #
   # Technical depth: ADR 0018 admits no extra key at any level of
-  # `bounded_adapter_reply_v2`, and its normalized usage is built from exactly
+  # `bounded_adapter_reply_v3`, and its normalized usage is built from exactly
   # `input_tokens` and `output_tokens`. A member outside that pair is an
   # unreadable answer here rather than a value `normalize_usage/1` silently
   # drops, because dropping it retains a usage the provider did not state and

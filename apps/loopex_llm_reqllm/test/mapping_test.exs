@@ -168,6 +168,8 @@ defmodule Loopex.LLM.ReqLLM.MappingTest do
     metadata = %{headers: [{"request-id", "req_é"}], usage: %{input_tokens: 2, output_tokens: 3}}
 
     assert Mapping.reply(request, identity, metadata, "text", [], 0) == %{
+             completion: "unknown",
+             continuation: nil,
              text: "text",
              identity: identity,
              provider_response_id: "req_é",

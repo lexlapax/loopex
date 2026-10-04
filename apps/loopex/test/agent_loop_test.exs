@@ -3328,10 +3328,10 @@ defmodule Loopex.AgentLoopTest do
   end
 
   test "nested provider fields are projected out of valid late evidence" do
-    # ADR 0018 technical:200-201 accepts no extra key at any level of
-    # `bounded_adapter_reply_v2`, and :162-165 fixes usage as the exact reported
-    # or unreported pair. A nested provider field is therefore refused as an
-    # unreadable answer; it is never projected out of an otherwise valid reply.
+    # ADR 0044's current v3 callback accepts no extra key at any level, retaining
+    # ADR 0018's exact reported or unreported usage pair. A nested provider field
+    # is refused as an unreadable answer; it is never projected out of an
+    # otherwise valid reply.
     secret = "sk-live-nested-provider-secret"
 
     {_run_id, events, records, evidence} =
