@@ -325,6 +325,31 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: clean pushed source `1c9ac8c8a552afa55d92bea8e117cf3b4dba7cc4`
+  passed its one full current-pair fast integration check. All eleven suites
+  pass: 3,759 tests with 42 lane-selected exclusions. The suite step took
+  843 seconds and the runner took 918 seconds. Complete immutable output
+  `/private/tmp/loopex-m7-1c9ac8c8-fast-check.log`, SHA-256
+  `6ee6426b6a1f48b5322eaa000dd935d6cb67a81e19d122b2651f96858c14ecad`.
+  Execution handle `83415` is terminal and collected. Do not poll it or rerun
+  the full check on these bytes. This evidence-only child changes no source.
+  Focused current/floor and independent Node proofs are retained below; no
+  floor full check, selected live maintenance workflow, full release check or
+  milestone closure is claimed. T01–T19 originals remain 56 done / 117 todo /
+  6 retired; added subtasks are 224 done / 10 todo.
+
+  Next: complete the closed configuration, checkpoint and interaction
+  projections and publish the expanded snapshot with the coordinated
+  foreground /3 and daemon /4 manifests, negotiation and Node workflows.
+  The scan already reduces maintenance and last compact at its public cursor,
+  but `public_snapshot` still emits revision 2 and both attachment mappings
+  still use its previous shape. Initial configuration belongs to immutable
+  genesis; subsequent configuration belongs to the public outbox. Do not read
+  mutable current private state for an older attachment cursor. All broader
+  original tasks and the separate T16 cleanup investigations remain open.
+  No agents, check handles or maintainer questions are pending. The goal stays
+  active on `m7`; closure, merge to main, tags and publication are separate.
+
 - Done: share the existing three-member compact completion across the serial
   writer, both event transports and independent Node connection validators.
   The shared result codec now encodes/decodes required opaque episode/command
@@ -350,7 +375,8 @@ did not resolve them. No paid provider calls were made during this check.
   and failed before tests; the root-directory command corrected those paths.
   This closes one bounded added T05 subtask. T01–T19 originals remain
   56 done / 117 todo / 6 retired; added subtasks are 224 done / 10 todo.
-  A full integration check of the combined scan/completion source is pending.
+  The full integration result for the combined scan/completion source is
+  recorded above at its exact source commit.
 
   Formatting, warning-free compilation, documentation, status and dependency
   checks pass in `/private/tmp/loopex-m7-compact-completion-metadata-v2.log`,
