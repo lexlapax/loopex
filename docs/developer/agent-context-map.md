@@ -6542,3 +6542,24 @@ mixed rows. No provider retry, deadline relaxation, milestone closure, merge,
 release or publication is authorized. In particular, the just-approved legacy
 chat-resume exception is retired: current chat requires its retained physical
 workspace binding, and unsupported older roots receive no migration fallback.
+
+<a id="disposition-m7-standalone-checkpoint-owner-2026-10-03"></a>
+### M7 standalone checkpoint ownership, 2026-10-03
+
+The maintainer selected explicit checkpoint ownership in this chat. Run-owned
+private checkpoints retain `compaction_checkpoint_committed_v1` and `run_id`;
+standalone checkpoints use `standalone_compaction_checkpoint_committed_v1`
+and the actual `command_id`. Shared public checkpoint events and snapshots
+replace their owning `run_id` with the closed `owner: {kind: "run" | "compact",
+id}` object, using the existing opaque identity codec. The episode authenticates
+that owner. Lineage `through_run_id` remains the actual last original run
+traversed; standalone work creates no synthetic run, run deadline, run terminal
+or run accounting. This selects the ADR 0043 amendment described in the retained
+proposal `/private/tmp/loopex-m7-standalone-checkpoint-owner-decision.md`, SHA-256
+`1b16d7d5fc31f5b42a6c807ac46b7ec2064f55e76683993bb5a8353f8601c9d5`.
+Migrate current producers, replay, projections, schemas and independent vectors
+together; keep no old public `run_id` alias or compatibility reader. This
+approval resolves checkpoint ownership only. The maintenance reply-reserve
+refusal and stalled-stderr fixture cutoff remain separate pending decisions.
+Current restart, unknown-commit resolution and backup/restore remain required;
+no check is dropped, milestone closed or publication authorized.

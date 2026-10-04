@@ -330,9 +330,23 @@ did not resolve them. No paid provider calls were made during this check.
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  213 done / 9 todo. The goal remains active. The three recorded maintainer
-  decisions were presented together again and await answers; no dependent
-  contract changes are implemented. No test/check process remains running.
+  213 done / 9 todo. The goal remains active. The maintainer requested the
+  three decisions one at a time and selected explicit checkpoint ownership.
+  The reply-reserve refusal and stalled-stderr cutoff still await answers.
+  No dependent contract implementation or test/check process is running.
+
+- Approved: explicit standalone checkpoint ownership. The maintainer selected
+  distinct private run/compact kinds and actual owner IDs, plus the closed
+  public `{owner: {kind, id}}` object. The
+  [disposition](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
+  binds the retained proposal and preserves actual lineage boundaries, current
+  restart/replay and uncertain-commit proof. Implementing the selected private
+  kind, public projections, current schemas and independent vectors remains
+  under T07/T05; this approval closes no implementation checkbox. The other
+  two decisions remain pending and will be asked separately.
+  The documentation-only check passes in 18 reported seconds. Complete output:
+  `/private/tmp/loopex-m7-checkpoint-owner-decision-docs-v1.log`, SHA-256
+  `8e6f27409661195b4c4a227a1ff7ebf8dfd006fed2cb809e31cc82d815c8c73f`.
 
 - Done: the single full current-pair fast check of clean pushed
   `6058eb95b7b312905e55c7baa0401e6af18ceba1` passes all eleven application
@@ -816,7 +830,8 @@ did not resolve them. No paid provider calls were made during this check.
   | --- | --- | --- |
   | `/private/tmp/loopex-m7-standalone-checkpoint-probe-docs-current-v1.log` | PASS, final metadata bootstrap/docs | `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8` |
 
-- Pending maintainer decision: standalone checkpoint ownership. A compact
+- Historical proposal, now resolved by the
+  [explicit-owner decision](../developer/agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03): standalone checkpoint ownership. A compact
   command owns its episode without a run; the existing checkpoint kind and
   context.compacted projection require run_id. Recommend a distinct closed
   private standalone_compaction_checkpoint_committed_v1 kind with command_id,
