@@ -181,17 +181,18 @@ before those mutations resume. The ledger retains:
   retained object installed before reservation under the same 1 MiB object rules
   as parent creation. Frames retain only its digest/reference, never inline
   base64 genesis; closing credit includes that fixed reference. Keep original options/input and their digest, plus the exact fully
-  resolved v2/v3 genesis submitted at creation, including its normalized options
+  resolved current-v3 genesis submitted at creation, including its normalized options
   and runtime_configuration. The parent creation object retains the same pair.
   Use one planned pure core helper, `Loopex.Runtime.SessionGenesis.normalize/1`,
   shared by the M7 create writer and both retained-genesis paths. It accepts the
-  complete v2/v3 payload and returns `{:ok, normalized_genesis}` or
+  complete current-v3 payload and returns `{:ok, normalized_genesis}` or
   `{:error, :invalid_session_genesis | :session_configuration_too_large}`; it
   inserts no defaults and performs no Store call. Composition must not duplicate
   its closed decoders or normalization. A second pure helper, `SessionGenesis.resolve/2`, accepts normalized session
   options and an explicit closed input map `{genesis_version,
   runtime_configuration, initial_configuration, tool_selection,
-  policy_defer_mode}` for v3; v2 accepts only version and runtime configuration.
+  policy_defer_mode}` for current v3. Superseded genesis refuses under the
+  [pre-1.0 disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02).
   Values are already resolved startup data, including actual cleanup grace and
   exact definitions; tool_selection omits artifact_read, which the resolver derives
   under ADR 0041; it performs no catalog, registry, Store or clock lookup.
@@ -539,7 +540,7 @@ in braces below denote closed plain maps; tagged API results are tuples.
   read-only Store callback `creation_provenance(reference, runtime_id, selector)`
   returns `{:historical, {version: 1, runtime_id, command_id, session_id,
   genesis_version, canonical_create_digest}}`, `:absent`, `:conflict`, or
-  `:unavailable`. IDs retain existing Store limits, `genesis_version` is 2 or 3,
+  `:unavailable`. IDs retain existing Store limits, `genesis_version` is 3,
   and the digest is 64 lowercase hexadecimal characters. The complete historical
   projection is at most 65,536 encoded bytes. Read only an atomically committed
   create mapping; a cross-kind command or wrong-runtime session is `:conflict`.
@@ -571,15 +572,15 @@ in braces below denote closed plain maps; tagged API results are tuples.
 - `Runtime.lookup_create_result(runtime, command_id, session_options,
   retained_genesis)` adds a four-argument exact-history variant. Normalize and
   require `session_options` to equal the retained genesis `options`; validate
-  the complete retained payload under its exact v2 or ADR 0044 v3 decoder and
+  the complete retained payload under the current ADR 0044 v3 decoder and
   65,536-byte cap, then use `Store.create_session/3` only as the pure transaction
   constructor and `Store.runtime_command/2` as the read. Never call transact or
   insert current defaults, cleanup grace, definitions or provider mappings.
   Keep `/3`'s existing result union: `{:ok, {:historical, session_id} | :absent |
   :conflict | :store_unavailable | :unexpected}` or
   `{:error, :runtime_unavailable}`. Invalid supplied genesis returns unexpected;
-  a different retained binding returns conflict. Keep `/3` and v2 history
-  unchanged; parent/child binding recovery uses `/4`. This is the narrow
+  a different retained binding returns conflict. Implicit `/3` uses the [captured runtime template](../developer/agent-context-map.md#disposition-m7-runtime-creation-defaults-2026-10-04);
+  parent/child binding recovery uses `/4` with retained current genesis. This is the narrow
   ADR 0016 amendment for exact-genesis live creation and historical lookup,
   not permission to
   change an existing session's grace or to replay a historical create.
@@ -742,7 +743,7 @@ fence tuple; solicited receipts use the current query ID and owner epoch.
 
 | Retained gap | Stop-only recovery |
 | --- | --- |
-| Reservation; missing create result | Read `Runtime.lookup_create_result/4` with the original options and retained complete v2/v3 genesis; never replay create or rebuild with current runtime defaults. Exact history returns the original session despite changed current cleanup grace. Conflict identifies an incompatible retained binding; diagnose and preserve uncertainty, never treat it as absence. Unexpected/unavailable evidence also remains unknown. Account for the old producer and any in-flight create before treating absence as conclusive. |
+| Reservation; missing create result | Read `Runtime.lookup_create_result/4` with the original options and retained complete current-v3 genesis; never replay create or rebuild with current runtime defaults. Exact history returns the original session despite changed current cleanup grace. Conflict identifies an incompatible retained binding; diagnose and preserve uncertainty, never treat it as absence. Unexpected/unavailable evidence also remains unknown. Account for the old producer and any in-flight create before treating absence as conclusive. |
 | Child known; prompt acknowledgement missing | Never replay prompt. Inspect/rebuild the child through prepared recovery and abort any admitted work. An unprompted child remains unprompted. |
 | Child unfinished | Abort through its live attachment, or use `Loopex.prepare_resume_session/3` to rebuild without scheduling, attach and admit an idempotent abort. Never call `activate_resume/1`; abort invalidates activation. Abandon an unused capability. |
 | Child terminal; receipt missing | Retain the original attempt-bound receipt only from conclusive terminal/cleanup evidence, preserving failure or uncertainty and actual usage. |
@@ -920,7 +921,7 @@ Concept: [Observable consequences](0046-child-session-tool.md#concept-adr-0046-c
   a reserve-only log before create: absence still cannot reset the count. Remove
   a log for a historical child: refuse. Crash after each reconstruction frame;
   replay never repeats its count, settlement or receipt. Changed startup grace
-  does not break an exact retained-v2/v3 lookup; altered retained bytes conflict.
+  does not break an exact retained current-v3 lookup; altered retained bytes conflict.
 - Child lookup after cleanup-grace/default changes uses the retained create
   input; conflict/unavailability remains unknown. Every host refuses independent
   client mutation/resume adoption of both active and settled helper sessions,

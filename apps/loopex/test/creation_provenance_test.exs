@@ -102,6 +102,7 @@ defmodule Loopex.CreationProvenanceTest do
               %{@row | runtime_id: "other"},
               %{@row | command_id: "other"},
               %{@row | genesis_version: 1},
+              %{@row | genesis_version: 2},
               %{@row | canonical_create_digest: String.duplicate("A", 64)},
               %{@row | session_id: String.duplicate("x", 65_537)}
             ] do

@@ -240,7 +240,7 @@ defmodule Loopex.Store.Local.State do
         runtime_id: transaction.runtime_id,
         command_id: transaction.command_id,
         session_id: session,
-        genesis_version: if(genesis.kind == "session_genesis_v2", do: 2, else: 3),
+        genesis_version: 3,
         canonical_create_digest:
           Base.encode16(transaction.canonical_mutation_digest, case: :lower),
         create_ordinal: ordinal

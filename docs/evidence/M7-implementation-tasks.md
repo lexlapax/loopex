@@ -325,6 +325,49 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: remove superseded v2 genesis resolution/normalization and recovery
+  admission. Core and effect-history queries require complete current v3;
+  creation provenance validates version 3 only, and both shipped Stores derive
+  that version from the validated current transaction. No nil configuration,
+  selection or policy fallback is supplied by the genesis reader. The existing
+  pre-1.0 disposition governs this removal; ADR 0044/0046 concept and technical
+  wording now names the same current genesis and read-only identity contract.
+
+  Migrate the genesis-bound cleanup/plain-data/exact-byte matrix, unknown-token
+  recovery, resource receipt replay and literal effect-query prefix token to
+  complete current captures. Resource requests consume their captured sampling,
+  and system descriptors use captured instruction provenance. The complete
+  current resource record still admits exactly 65,536 bytes and its longer
+  empty header refuses at exactly 65,547; an authored fixture command identity
+  supplies the parity needed for exact padding rather than weakening the ceiling.
+  Superseded genesis refuses pure resolution, normalization and recovery, and
+  superseded version-2 provenance is unavailable.
+
+  The current v1 Core output executes 100 cases with five resource-fixture
+  failures in 8.1 measured seconds. The other 95 pass. After correcting captured
+  sampling and boundary padding, all five resource cases pass in 1.0 second;
+  the failed aggregate remains failed. The final floor Core output passes all
+  100 in 7.5 seconds. Both five-case provenance suites pass in 4.1 / 3.6 seconds;
+  both eight-case reusable memory/physical Local Store conformance suites pass
+  in 3.4 / 2.8 seconds, including current creation enumeration, immutable cuts,
+  duplicate command identity, writer fencing and physical reopen. Seven complete
+  outputs and fifteen final immutable source copies are retained in
+  `/private/tmp/loopex-m7-current-genesis-proof-inventory.tsv`, SHA-256
+  `0de6604bf15df62fd589f6f8297bbcedf9ebdc9802fd84e75a87d94fab554a83`.
+  Handles `98153`, `64983`, `59785`, `15891`, `87784`, `15697` and `49457` are
+  terminal and collected. Formatting, warning-free compilation, documentation, status, dependency
+  direction, whitespace and the task reporter pass in 21.0 measured seconds.
+  Complete output is
+  `/private/tmp/loopex-m7-current-genesis-metadata-v1.log`, SHA-256
+  `76cf33156039f2400afcde5749646a704ed781a04f992df37d220ba8642b99da`; handle `92499` is terminal and collected.
+
+  One bounded added T05 subtask closes. T01–T19 originals stay 70 done / 103 todo /
+  6 retired; added work is 246 done / 12 todo. Including T00, originals stay
+  70 / 109 / 7 and added work is 250 / 13. Configuration-less request/admission
+  readers and writers, old instruction fallback, edge/transport fixtures,
+  protocol /3 and /4 and the next full exact-candidate check remain open.
+  No maintainer decision is pending and no integration or closure pass is claimed.
+
 - Done: migrate the complete twenty-six-case context-admission fixture to
   captured current configuration and current admission/request/refusal records.
   The host declares its actual `fixture:v1` route, canonical-history renderer,
@@ -9917,7 +9960,8 @@ or check was relaxed.
 - [x] Migrate headless Core and scripted cancellation/provider/resource/skill fixture hosts to captured creation, retain explicit context origins, current instruction provenance and complete prepared captures, and prove exact complete-genesis byte limits, cleanup bounds, owner handoff, command/retry identity, uncertain publication and resource staging on both toolchains. Retain failed aggregate outputs and the corrected complete skill proof; context-admission fixtures and superseded reader removal remain separate open work.
 
 - [x] Migrate context-admission fixtures to valid captured current configuration, revision-4 receipts and refusal-v2; preserve first-failure order, exact fixed-point bytes, no optional work on required refusal, owner-loss/prepared abandonment, inherited budgets and replay-tampering baselines on both toolchains. Initial system overflow refuses at current creation before Control or Store rather than creating an invalid legacy session.
-- [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove v2 genesis and old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; decoders and edge/transport joins remain.
+- [x] Remove v2 genesis resolution/normalization and recovery admission, require current version-3 creation provenance in both Stores, and migrate pure genesis/resource/query fixtures while preserving exact byte ceilings, captured cleanup, no-default replay, command identity, immutable read cuts and physical Store conformance on both toolchains. Superseded genesis and provenance refuse; configuration-less request readers remain separate open work.
+- [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
 

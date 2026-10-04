@@ -1,3 +1,5 @@
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
+
 defmodule Loopex.ResourceReceiptReplayTest do
   use ExUnit.Case, async: true
 
@@ -19,7 +21,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
                context_receipt: receipt
              )
 
-    assert fixed.kind == "model_request_committed_resources_v1"
+    assert fixed.kind == "model_request_committed_resources_v2"
     assert fixed["context_receipt"]["provider_revision"] == 4
     assert fixed["context_receipt"]["record_byte_cost"] > 0
     assert {:ok, ^fixed, bytes} = Store.normalize_and_measure_item(:record, fixed)
@@ -32,7 +34,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
              )
 
     assert Enum.map(proposal.records, & &1.kind) == [
-             "model_request_committed_resources_v1",
+             "model_request_committed_resources_v2",
              "model_attempt_opened_v1"
            ]
 
@@ -236,9 +238,11 @@ defmodule Loopex.ResourceReceiptReplayTest do
 
     assert {:refused,
             %{
-              "dimension" => "context_record_bytes",
-              "observed" => ^long_bytes,
-              "limit" => limit,
+              "failure" => %{
+                "dimension" => "context_record_bytes",
+                "observed" => ^long_bytes,
+                "limit" => limit
+              },
               "record_byte_cost" => ^long_bytes
             }} =
              SessionState.preflight_model_request(
@@ -251,6 +255,27 @@ defmodule Loopex.ResourceReceiptReplayTest do
     assert limit == Store.max_item_bytes()
   end
 
+  defp configuration do
+    {:ok, instructions} =
+      Loopex.Runtime.Instructions.capture(%{
+        "version" => "host.v1",
+        "base" => "system",
+        "environment" => "",
+        "appendix" => ""
+      })
+
+    Loopex.ConfiguredGenesisFixture.configuration()
+    |> Map.put("model", "fixture:model")
+    |> Map.put("max_tokens", 1)
+    |> Map.put("instructions", instructions)
+    |> put_in(["model_capabilities", "model"], "fixture:model")
+  end
+
+  defp system_text do
+    {:ok, text} = Loopex.Runtime.Instructions.render(configuration()["instructions"])
+    text
+  end
+
   defp resource_history(options \\ []) do
     session_id = "resource-replay"
     incarnation = "owner-one"
@@ -260,11 +285,9 @@ defmodule Loopex.ResourceReceiptReplayTest do
         journal_version: 1,
         owner_epoch: 0,
         owner_incarnation_id: nil,
-        payload: %{
-          "options" => %{},
-          "runtime_configuration" => %{"cleanup_grace_ms" => 1_000},
-          kind: "session_genesis_v2"
-        }
+        payload:
+          Loopex.ConfiguredGenesisFixture.genesis([], configuration())
+          |> put_in(["runtime_configuration", "cleanup_grace_ms"], 1_000)
       },
       %{
         journal_version: 2,
@@ -345,7 +368,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
     {:ok, prompt} =
       SessionState.propose(
         state,
-        %{type: :prompt, command_id: "prompt", content: "operator prompt"},
+        %{type: :prompt, command_id: "resource-prompt", content: "operator prompt"},
         %{max_turns: 2, token_budget: 100, deadline_ms: 30_000, context_token_budget: 8_192}
       )
 
@@ -359,7 +382,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
         "Description: Fixture skill\nPack digest: #{String.duplicate("b", 64)}\nManual only: true\n"
 
     messages = [
-      %{"role" => "system", "content" => "system"},
+      %{"role" => "system", "content" => system_text()},
       %{"role" => "user", "content" => catalog},
       %{"role" => "user", "content" => instruction},
       %{"role" => "user", "content" => support},
@@ -369,7 +392,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
     {:ok, request} =
       Model.request("fixture:model", messages,
         tools: [],
-        sampling: %{"max_tokens" => 1},
+        sampling: Loopex.Runtime.SessionConfiguration.sampling(configuration()),
         deadline: 1
       )
 
@@ -396,12 +419,16 @@ defmodule Loopex.ResourceReceiptReplayTest do
     ]
 
     sources = [
-      source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system"),
+      source(Loopex.Runtime.SessionConfiguration.instruction_source(configuration()), "system"),
       resource_source(resources, 64, 64, Canonical.digest_bytes(fixture.catalog)),
       resource_source(resources, 0, 0, Canonical.digest_bytes(fixture.instruction)),
       resource_source(resources, 0, 1, Canonical.digest_bytes(fixture.support)),
       source(
-        %{"kind" => "session_command", "run_id" => fixture.run_id, "command_id" => "prompt"},
+        %{
+          "kind" => "session_command",
+          "run_id" => fixture.run_id,
+          "command_id" => "resource-prompt"
+        },
         "session"
       )
     ]
@@ -471,7 +498,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
           {padding, request, receipt, record}
         )
 
-      {:refused, %{"dimension" => "context_record_bytes"}} ->
+      {:refused, %{"failure" => %{"dimension" => "context_record_bytes"}}} ->
         largest_short_header_candidate(fixture, low, padding - 1, best)
 
       other ->
@@ -481,23 +508,27 @@ defmodule Loopex.ResourceReceiptReplayTest do
 
   defp required_candidate(fixture, padding, status) do
     messages = [
-      %{"role" => "system", "content" => "system"},
+      %{"role" => "system", "content" => system_text()},
       %{"role" => "user", "content" => String.duplicate("p", padding)}
     ]
 
     {:ok, request} =
       Model.request("fixture:model", messages,
         tools: [],
-        sampling: %{"max_tokens" => 1},
+        sampling: Loopex.Runtime.SessionConfiguration.sampling(configuration()),
         deadline: 1
       )
 
     resources = fixture.state.run_resources[fixture.run_id]
 
     sources = [
-      source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system"),
+      source(Loopex.Runtime.SessionConfiguration.instruction_source(configuration()), "system"),
       source(
-        %{"kind" => "session_command", "run_id" => fixture.run_id, "command_id" => "prompt"},
+        %{
+          "kind" => "session_command",
+          "run_id" => fixture.run_id,
+          "command_id" => "resource-prompt"
+        },
         "session"
       )
     ]
@@ -685,7 +716,7 @@ defmodule Loopex.ResourceReceiptReplayTest do
 
   defp mutate_resource_record(records, mutate) do
     Enum.map(records, fn record ->
-      if record.payload[:kind] == "model_request_committed_resources_v1",
+      if record.payload[:kind] == "model_request_committed_resources_v2",
         do: %{record | payload: mutate.(record.payload)},
         else: record
     end)

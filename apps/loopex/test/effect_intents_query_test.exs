@@ -131,7 +131,7 @@ defmodule Loopex.EffectIntentsQueryTest do
             runtime_id: runtime_id,
             command_id: "create-1",
             session_id: session,
-            genesis_version: 2,
+            genesis_version: 3,
             canonical_create_digest:
               Base.encode16(transaction.canonical_mutation_digest, case: :lower)
           }
@@ -644,17 +644,15 @@ defmodule Loopex.EffectIntentsQueryTest do
   test "available effect-free history has a literal token and complete empty page", context do
     %{runtime: runtime, session: session, reference: reference} = context
 
-    payload = %{
-      "options" => %{},
-      "runtime_configuration" => %{"cleanup_grace_ms" => 1_500},
-      kind: "session_genesis_v2"
-    }
+    payload =
+      Genesis.genesis([])
+      |> put_in(["runtime_configuration", "cleanup_grace_ms"], 1_500)
 
     record = %{journal_version: 1, owner_epoch: 0, owner_incarnation_id: nil, payload: payload}
     Agent.update(reference, &%{&1 | records: [record]})
 
     expected =
-      Base.decode16!("6334e9bd35db1e6e2b33e72716a6a1945b7d2220c8ff305d98248c337c06df55",
+      Base.decode16!("fb9c75d5aca85c0436740273444dfb455a069307689e1677ffca75d8daa2fa98",
         case: :lower
       )
 

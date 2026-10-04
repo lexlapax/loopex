@@ -56,9 +56,8 @@ defmodule Loopex.Runtime.SessionState do
   `session_options` retains the exact normalized genesis options, without
   interpreting a host's workspace binding or treating it as authority.
   `configuration`, `tool_selection` and `policy_defer_mode` retain v3 genesis
-  truth. V2 keeps nil configuration/selection and its historical admit mode;
-  resolving its tool history or explicitly migrating a settled empty session
-  belongs to the live recovery boundary, not this pure decoder.
+  truth. Recovery requires complete current genesis and never supplies missing
+  settings from the live host.
   """
   @context_receipt_keys Enum.sort(~w(
                           blocks continuation_cost context_record_byte_ceiling context_token_budget
@@ -6007,9 +6006,8 @@ defmodule Loopex.Runtime.SessionState do
   # Concept: the session's cleanup period is reconstructed from the record that
   # committed it, never supplied by whatever process happens to be recovering.
   #
-  # Technical depth: the shared decoder admits closed v2/v3 genesis. V3 retains
-  # its full configuration and tools; v2 has no invented configuration or tool
-  # selection. Missing cleanup and the older unversioned kind still refuse.
+  # Technical depth: the shared current decoder retains complete configuration,
+  # tools and policy mode. Missing settings and superseded kinds refuse.
   defp replay_admitted_record(
          %{journal_version: 0} = state,
          %{
@@ -6019,7 +6017,7 @@ defmodule Loopex.Runtime.SessionState do
            payload: %{kind: kind} = payload
          }
        )
-       when kind in ["session_genesis_v2", "session_genesis_v3"] do
+       when kind == "session_genesis_v3" do
     case SessionGenesis.normalize(payload) do
       {:ok, genesis} ->
         grace = genesis["runtime_configuration"]["cleanup_grace_ms"]
@@ -6032,7 +6030,7 @@ defmodule Loopex.Runtime.SessionState do
              session_options: genesis["options"],
              configuration: genesis["initial_configuration"],
              tool_selection: genesis["tool_selection"],
-             policy_defer_mode: Map.get(genesis, "policy_defer_mode", "admit")
+             policy_defer_mode: genesis["policy_defer_mode"]
          }}
 
       {:error, _reason} ->

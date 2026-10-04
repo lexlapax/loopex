@@ -14,7 +14,7 @@ The closed configuration contains exact `model` string, `reasoning`,
 `model_capabilities` envelope and resolved provider mapping defined below. Initial legacy
 fallback may be represented explicitly without rewriting prior requests.
 
-One coordinated `session_genesis_v3` extends ADR 0016's v2 with this initial
+One coordinated current `session_genesis_v3` retains this initial
 configuration, full immutable tool definitions/name mapping and policy-defer
 mode from ADR 0046. The closed payload is:
 
@@ -37,14 +37,11 @@ reject duplicates/unused mappings. Validate `artifact_read` under ADR 0041
 against those exact retained definitions and its fixed table. This derived field
 is not a create/configure option or a grant. Preserve mandatory committed cleanup.
 Preflight the complete genesis against 65,536 bytes before create commits.
-The M7 decoder explicitly reads v2/v3. Preserve v2 staged requests/effects;
-resolve historical selections from retained evidence, rejecting contradictions.
-For a settled session with no historical request, require an explicit host
-selection and commit its migration before dispatch. An unfinished session
-without sufficient evidence refuses unsupported recovery, preserving admission
-and uncertainty; no invented default may dispatch it. Never infer helper status; legacy
-policy uses `admit`. Missing cleanup remains invalid. Prove actual M6 reader
-behavior on disposable v3 copies; no claim that the old binary knows v3 follows.
+Under the [pre-1.0 maintainer disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02),
+the decoder accepts only complete v3 genesis. Superseded kinds, missing cleanup
+or missing captures refuse; no historical selection inference, empty-session
+migration or startup default can authorize dispatch. Current-format restart,
+replay, immutable selection and uncertainty proofs remain required.
 
 Active tools remain the immutable generation under ADR 0009; changing them is out of
 M7's configure command.

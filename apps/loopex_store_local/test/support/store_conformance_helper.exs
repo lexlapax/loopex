@@ -304,7 +304,7 @@ defmodule LoopexStoreLocalTest.Conformance do
         runtime_id: runtime,
         command_id: "create-1",
         session_id: session,
-        genesis_version: 2,
+        genesis_version: 3,
         canonical_create_digest: Base.encode16(first.canonical_mutation_digest, case: :lower)
       }
 
@@ -438,17 +438,8 @@ defmodule LoopexStoreLocalTest.Conformance do
     end)
   end
 
-  defp supported_genesis(index) do
-    if rem(index, 2) == 1 do
-      %{
-        "options" => %{"index" => index},
-        "runtime_configuration" => %{"cleanup_grace_ms" => 5_000},
-        kind: "session_genesis_v2"
-      }
-    else
-      Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.put("options", %{"index" => index})
-    end
-  end
+  defp supported_genesis(index),
+    do: Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.put("options", %{"index" => index})
 
   def replay_audit do
     context = start_store(:local)

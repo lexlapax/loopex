@@ -11,7 +11,8 @@ defmodule Loopex.Store.CreationProvenance do
   ADR 0046 fixes the closed selectors, six-member historical projection and
   contiguous per-runtime creation ordinals. This pure validator is shared by the
   Store port and the shipped memory/local transition owner. It checks scalar
-  bounds before ETF measurement and visits at most sixteen page rows. Missing
+  bounds and current genesis version 3 before ETF measurement and visits at
+  most sixteen page rows. Missing
   callbacks or malformed observations remain unavailable, never empty coverage.
   """
 
@@ -111,7 +112,7 @@ defmodule Loopex.Store.CreationProvenance do
     row[:version] == 1 and row[:runtime_id] == runtime and
       map_size(row) == expected_size and identifier?(row[:runtime_id]) and
       identifier?(row[:command_id]) and identifier?(row[:session_id]) and
-      row[:genesis_version] in [2, 3] and digest?(row[:canonical_create_digest]) and
+      row[:genesis_version] == 3 and digest?(row[:canonical_create_digest]) and
       (not ordinal? or (quantity?(row[:create_ordinal]) and row[:create_ordinal] > 0)) and
       byte_size(:erlang.term_to_binary(row)) <= @row_bytes
   end

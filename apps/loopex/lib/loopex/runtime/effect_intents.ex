@@ -324,7 +324,7 @@ defmodule Loopex.Runtime.EffectIntents do
       end)
 
   defp projection(_session, %{payload: %{kind: kind} = payload} = record)
-       when kind in ["session_genesis_v2", "session_genesis_v3"] do
+       when kind == "session_genesis_v3" do
     with true <-
            record.journal_version == 1 and record.owner_epoch == 0 and
              is_nil(record.owner_incarnation_id),

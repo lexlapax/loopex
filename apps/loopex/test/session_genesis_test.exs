@@ -1,3 +1,5 @@
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
+
 defmodule Loopex.Runtime.SessionGenesisTest do
   use ExUnit.Case, async: true
 
@@ -7,30 +9,27 @@ defmodule Loopex.Runtime.SessionGenesisTest do
 
   @grace_max 18_446_744_073_709_551_615
 
-  test "resolved and retained v2 genesis share normalized bytes with the legacy writer" do
+  test "resolved and retained current genesis share exact normalized creation bytes" do
     options = %{tenant: "tenant-a", nested: %{selection: "coding"}}
-    original = v2(options, 5_000)
+    original = current(options, 5_000)
 
     assert {:ok, normalized} = SessionGenesis.normalize(original)
 
     assert {:ok, ^normalized} =
-             SessionGenesis.resolve(options, %{
-               genesis_version: "session_genesis_v2",
-               runtime_configuration: %{cleanup_grace_ms: 5_000}
-             })
+             SessionGenesis.resolve(options, input(5_000))
 
     assert normalized ==
-             v2(%{"tenant" => "tenant-a", "nested" => %{"selection" => "coding"}}, 5_000)
+             current(%{"tenant" => "tenant-a", "nested" => %{"selection" => "coding"}}, 5_000)
 
-    assert {:ok, legacy} = Store.create_session("runtime", "create", original)
+    assert {:ok, original_transaction} = Store.create_session("runtime", "create", original)
     assert {:ok, resolved} = Store.create_session("runtime", "create", normalized)
-    assert legacy == resolved
+    assert original_transaction == resolved
     assert SessionGenesis.normalize(normalized) == {:ok, normalized}
   end
 
   test "the captured cleanup value replays without startup defaults" do
     for grace <- [1, 5_000, @grace_max] do
-      assert {:ok, normalized} = SessionGenesis.normalize(v2(%{}, grace))
+      assert {:ok, normalized} = SessionGenesis.normalize(current(%{}, grace))
 
       records = [
         %{
@@ -46,8 +45,8 @@ defmodule Loopex.Runtime.SessionGenesisTest do
     end
   end
 
-  test "complete v2 key sets and cleanup domain refuse missing, extra and invented values" do
-    valid = v2(%{}, 5_000)
+  test "complete current key sets and cleanup domain refuse missing, extra and invented values" do
+    valid = current(%{}, 5_000)
 
     invalid = [
       Map.delete(valid, "options"),
@@ -60,7 +59,7 @@ defmodule Loopex.Runtime.SessionGenesisTest do
       Map.put(valid, "runtime_configuration", %{"cleanup_grace_ms" => 5_000, "extra" => true})
     ]
 
-    invalid = invalid ++ Enum.map([nil, 0, -1, 1.0, "5000", @grace_max + 1], &v2(%{}, &1))
+    invalid = invalid ++ Enum.map([nil, 0, -1, 1.0, "5000", @grace_max + 1], &current(%{}, &1))
 
     for payload <- invalid do
       assert SessionGenesis.normalize(payload) == {:error, :invalid_session_genesis}
@@ -68,16 +67,14 @@ defmodule Loopex.Runtime.SessionGenesisTest do
   end
 
   test "resolve's closed explicit inputs cannot silently supply or discard a setting" do
-    valid = %{
-      genesis_version: "session_genesis_v2",
-      runtime_configuration: %{"cleanup_grace_ms" => 5_000}
-    }
+    valid = input(5_000)
 
     for input <- [
           %{},
           Map.delete(valid, :runtime_configuration),
           Map.delete(valid, :genesis_version),
-          Map.put(valid, :initial_configuration, %{}),
+          Map.delete(valid, :initial_configuration),
+          Map.put(valid, :extra, true),
           Map.put(valid, :genesis_version, "session_genesis_v999"),
           Map.put(valid, :runtime_configuration, %{})
         ] do
@@ -96,7 +93,8 @@ defmodule Loopex.Runtime.SessionGenesisTest do
     ]
 
     for options <- invalid_options do
-      assert SessionGenesis.normalize(v2(options, 5_000)) == {:error, :invalid_session_genesis}
+      assert SessionGenesis.normalize(current(options, 5_000)) ==
+               {:error, :invalid_session_genesis}
     end
   end
 
@@ -116,22 +114,62 @@ defmodule Loopex.Runtime.SessionGenesisTest do
   test "the byte limit counts normalized keys rather than a caller's smaller atom encoding" do
     normalized = padded_genesis(65_537, "padding")
     options = %{padding: normalized["options"]["padding"]}
-    caller = v2(options, 5_000)
+    caller = current(options, 5_000)
     assert byte_size(:erlang.term_to_binary(caller, [:deterministic])) < 65_537
     assert SessionGenesis.normalize(caller) == {:error, :session_configuration_too_large}
   end
 
-  defp v2(options, grace) do
+  test "superseded genesis refuses normalization resolution and recovery" do
+    previous = %{
+      :kind => "session_genesis_v2",
+      "options" => %{},
+      "runtime_configuration" => %{"cleanup_grace_ms" => 5_000}
+    }
+
+    assert {:error, :invalid_session_genesis} = SessionGenesis.normalize(previous)
+
+    assert {:error, :invalid_session_genesis} =
+             SessionGenesis.resolve(%{}, %{
+               genesis_version: "session_genesis_v2",
+               runtime_configuration: %{"cleanup_grace_ms" => 5_000}
+             })
+
+    assert {:error, :invalid_private_history} =
+             SessionState.recover(
+               "session",
+               [
+                 %{
+                   journal_version: 1,
+                   owner_epoch: 0,
+                   owner_incarnation_id: nil,
+                   payload: previous
+                 }
+               ],
+               []
+             )
+  end
+
+  defp current(options, grace) do
+    Loopex.ConfiguredGenesisFixture.genesis([])
+    |> Map.put("options", options)
+    |> put_in(["runtime_configuration", "cleanup_grace_ms"], grace)
+  end
+
+  defp input(grace) do
+    genesis = current(%{}, grace)
+
     %{
-      "options" => options,
-      "runtime_configuration" => %{"cleanup_grace_ms" => grace},
-      kind: "session_genesis_v2"
+      genesis_version: "session_genesis_v3",
+      runtime_configuration: genesis["runtime_configuration"],
+      initial_configuration: genesis["initial_configuration"],
+      tool_selection: Map.drop(genesis["tool_selection"], ["artifact_read"]),
+      policy_defer_mode: genesis["policy_defer_mode"]
     }
   end
 
   defp padded_genesis(wanted, key) do
-    empty = v2(%{key => ""}, 5_000)
+    empty = current(%{key => ""}, 5_000)
     {:ok, _normalized, overhead} = Store.normalize_and_measure_item(:record, empty)
-    v2(%{key => String.duplicate("g", wanted - overhead)}, 5_000)
+    current(%{key => String.duplicate("g", wanted - overhead)}, 5_000)
   end
 end

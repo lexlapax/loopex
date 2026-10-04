@@ -201,10 +201,11 @@ readable journal history or frozen tool definition, and adds no dual service.
 A shared genesis revision retains initial configuration, immutable tool
 definitions and policy-defer mode with the existing mandatory cleanup value.
 ADR 0046 uses this same revision; it does not create a competing session shape.
-For legacy sessions derive model from their latest committed request, using an
-explicit host model only for sessions with no prior model request. Conflicting
-or ambiguous legacy history refuses with a migration diagnostic. Never choose
-an arbitrary current file default for an unfinished legacy run.
+The [pre-1.0 maintainer disposition](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
+requires only complete current v3 genesis. Superseded genesis and missing
+configuration refuse recovery; no migration or startup fallback supplies
+settings to retained history. Current restart and exact retained creation
+identity remain required.
 
 ## Governance Record
 

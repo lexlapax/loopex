@@ -8,11 +8,11 @@ defmodule Loopex.Runtime.SessionGenesis do
 
   ## Technical depth
 
-  The v2 payload retains its closed options/runtime-configuration shape and
-  mandatory cleanup grace. V3 adds captured configuration, immutable tool
-  definitions/name bindings and explicit policy-defer mode. Artifact retrieval
-  derives from the literal exact-generation table. `resolve/2` constructs genesis from explicit startup
-  data; `normalize/1` admits complete retained payloads. Both use the Store
+  The current v3 payload retains mandatory cleanup grace, captured configuration,
+  immutable tool definitions/name bindings and explicit policy-defer mode.
+  Artifact retrieval derives from the literal exact-generation table.
+  `resolve/2` constructs genesis from explicit startup data; `normalize/1` admits
+  complete retained payloads. Both use the Store
   facade's pure plain-data traversal and measure the normalized complete item
   against 65,536 bytes. Neither function calls a Store adapter, registry,
   catalog or clock.
@@ -25,7 +25,6 @@ defmodule Loopex.Runtime.SessionGenesis do
 
   @max_bytes 65_536
   @uint64_max 18_446_744_073_709_551_615
-  @v2_keys Enum.sort([:kind, "options", "runtime_configuration"])
   @v3_keys Enum.sort([
              :kind,
              "options",
@@ -68,29 +67,14 @@ defmodule Loopex.Runtime.SessionGenesis do
 
   ## Technical depth
 
-  The v2 input has exactly `genesis_version` and `runtime_configuration`. V3
-  adds initial_configuration, tool_selection and policy_defer_mode. Its tool
+  The input has exactly genesis_version, runtime_configuration,
+  initial_configuration, tool_selection and policy_defer_mode. Its tool
   selection has definitions and names; artifact_read is derived rather than
   accepted from a caller.
   Missing or unknown fields refuse rather than being filled or discarded.
   The constructed payload passes through the same decoder as replay.
   """
   @spec resolve(term(), term()) :: {:ok, genesis()} | {:error, refusal()}
-  def resolve(
-        options,
-        %{
-          genesis_version: "session_genesis_v2",
-          runtime_configuration: configuration
-        } = input
-      )
-      when map_size(input) == 2 do
-    normalize(%{
-      "options" => options,
-      "runtime_configuration" => configuration,
-      kind: "session_genesis_v2"
-    })
-  end
-
   def resolve(
         options,
         %{
@@ -147,20 +131,6 @@ defmodule Loopex.Runtime.SessionGenesis do
     else
       _invalid -> {:error, :invalid_session_genesis}
     end
-  end
-
-  defp validate(
-         %{
-           "options" => options,
-           "runtime_configuration" => %{"cleanup_grace_ms" => grace} = configuration,
-           kind: "session_genesis_v2"
-         } = payload
-       )
-       when is_map(options) and map_size(configuration) == 1 and is_integer(grace) and
-              grace >= 1 and grace <= @uint64_max do
-    if Enum.sort(Map.keys(payload)) == @v2_keys,
-      do: :ok,
-      else: {:error, :invalid_session_genesis}
   end
 
   defp validate(

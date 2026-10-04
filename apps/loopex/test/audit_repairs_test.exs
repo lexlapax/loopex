@@ -146,11 +146,9 @@ defmodule Loopex.AuditRepairsTest do
         journal_version: 1,
         owner_epoch: 0,
         owner_incarnation_id: nil,
-        payload: %{
-          :kind => "session_genesis_v2",
-          "options" => %{},
-          "runtime_configuration" => %{"cleanup_grace_ms" => 1_000}
-        }
+        payload:
+          Loopex.ConfiguredGenesisFixture.genesis([])
+          |> put_in(["runtime_configuration", "cleanup_grace_ms"], 1_000)
       },
       %{
         journal_version: 2,
