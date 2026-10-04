@@ -1309,7 +1309,7 @@ defmodule Loopex.Runtime.SessionState do
       %{"attempts" => attempts, kind: "standalone_maintenance_episode_admitted_v1"}
       when attempts > 0 ->
         with :ok <- check.(),
-             {:ok, record} <- standalone_settlement_completion_record(state, clock),
+             {:ok, record} <- standalone_settlement_completion_record(state, clock, check),
              true <- record["result"]["failure"] == failure,
              :ok <- check.() do
           {:ok, record}
@@ -2467,9 +2467,11 @@ defmodule Loopex.Runtime.SessionState do
   # Technical depth: the pending reply is already settled and charged. This
   # pending-checkpoint probe authenticates its whole-unit cut against originals,
   # renders the owner-computed summary provenance, and measures both ordinary
-  # q=0 candidates through the same complete record fixed point. It captures no
-  # public or journal fact and consumes no provider attempt. Partial progress
-  # can remain above ordinary hard limits; both bytes and tokens must decrease.
+  # q=0 candidates through the same complete record fixed point. Standalone
+  # candidates retain their command identity and captured cutoff. It captures
+  # no public or journal fact and consumes no provider attempt. Size-triggered
+  # progress may remain above hard limits but decreases both bytes and tokens;
+  # rendering repair advances raw coverage and must fit every hard limit.
   @doc false
   @spec preflight_maintenance_checkpoint(t(), integer(), function()) ::
           {:ok, map()} | {:error, term()}
@@ -2482,27 +2484,22 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp checkpoint_progress?(%{trigger: "canonical_rendering"} = candidate),
+    do: candidate.consumed_range["unit_count"] > 0 and match?({:ok, _}, candidate.after.admission)
+
   defp checkpoint_progress?(candidate),
     do:
       candidate.after.record_bytes < candidate.before.record_bytes and
         candidate.after.tokens < candidate.before.tokens
 
   defp pending_checkpoint_measurements(state, now, check) do
-    with %{
-           "stage" => "checkpoint_pending",
-           "summary" => summary,
-           "trigger" => trigger
-         } = episode
-         when trigger in ["ordinary_limit", "thinking_headroom"] <-
+    with %{"stage" => "checkpoint_pending", "summary" => summary} = episode <-
            state.maintenance_episodes[state.active_maintenance],
-         true <- is_nil(state.aborting) and episode["run_id"] == state.active_run_id,
+         :ok <- pending_checkpoint_owner(state, episode, now),
          true <- episode["prior_checkpoint_id"] == state.active_checkpoint,
-         true <- is_integer(now) and now >= episode["request_staged_at"] and now <= @uint64_max,
-         true <- is_integer(state.deadlines[episode["run_id"]]),
-         true <- now < state.deadlines[episode["run_id"]],
          :ok <- pending_checkpoint_capacity(state, episode),
          :ok <- check.(),
-         {:ok, units} <- compaction_units(state, episode["run_id"]),
+         {:ok, units} <- compaction_units(state, maintenance_scope(episode)),
          count = episode["covered_range"]["unit_count"],
          true <- count > 0 and count <= length(Enum.take_while(units, &(not &1.protected?))),
          {:ok, consumed} <- maintenance_covered_range(state, episode, units, count, check),
@@ -2518,30 +2515,8 @@ defmodule Loopex.Runtime.SessionState do
          checkpoint_id =
            stable_id("compaction-checkpoint", episode["episode_id"], episode["summary_ordinal"]),
          {:ok, entry} <- Loopex.Runtime.CompactionSummary.project(checkpoint_id, captured),
-         staging = %{
-           run_id: episode["run_id"],
-           elements: Enum.flat_map(units, & &1.elements),
-           steer: episode["ordinary_steer"],
-           resources: state.run_resources[episode["run_id"]],
-           deadline: state.deadlines[episode["run_id"]],
-           excerpt_allowance: 0
-         },
-         project = %{
-           "class" => "project_resource",
-           "receipt_revision" => 2,
-           "disposition" => "not_evaluated_required_failure",
-           "detail" => nil
-         },
-         header = Loopex.Runtime.ResourceContext.initial_header(staging.resources),
-         header = if(header, do: Map.put(header, "status", "retained_content_missing"), else: nil),
-         {:ok, before} <-
-           checkpoint_projection_measurement(state, staging, project, header, check),
-         after_staging =
-           staging
-           |> Map.put(:elements, units |> Enum.drop(count) |> Enum.flat_map(& &1.elements))
-           |> Map.put(:checkpoint_entries, [entry]),
-         {:ok, after_value} <-
-           checkpoint_projection_measurement(state, after_staging, project, header, check),
+         {:ok, before, after_value} <-
+           pending_checkpoint_projections(state, episode, units, count, entry, check),
          :ok <- check.() do
       {:ok,
        %{
@@ -2551,6 +2526,7 @@ defmodule Loopex.Runtime.SessionState do
          consumed_range: consumed,
          summary: captured,
          entry: entry,
+         trigger: episode["trigger"],
          before: before,
          after: after_value
        }}
@@ -2558,6 +2534,115 @@ defmodule Loopex.Runtime.SessionState do
       false -> pending_checkpoint_refusal(state, now)
       {:error, _} = error -> error
       _ -> {:error, :no_pending_maintenance_checkpoint}
+    end
+  end
+
+  # Concept: a pending summary remains under its actual owner's captured cutoff.
+  # Technical depth: standalone measurement requires the idle command's current
+  # binding and fixed episode deadline; run-owned measurement retains its active
+  # run and deadline. Neither reads a new setting, clock or provider result.
+  defp pending_checkpoint_owner(
+         state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = episode,
+         now
+       ) do
+    with :ok <- maintenance_source_owner(state, episode),
+         true <- episode["trigger"] in ~w(explicit ordinary_limit canonical_rendering),
+         true <- is_integer(now) and now >= episode["request_staged_at"] and now <= @uint64_max,
+         true <- now < episode["deadline"] do
+      :ok
+    else
+      false -> pending_checkpoint_refusal(state, now)
+      {:error, _} = error -> error
+    end
+  end
+
+  defp pending_checkpoint_owner(state, episode, now) do
+    if episode["trigger"] in ~w(ordinary_limit thinking_headroom) and is_nil(state.aborting) and
+         episode["run_id"] == state.active_run_id and is_integer(now) and
+         now >= episode["request_staged_at"] and now <= @uint64_max and
+         is_integer(state.deadlines[episode["run_id"]]) and
+         now < state.deadlines[episode["run_id"]],
+       do: :ok,
+       else: pending_checkpoint_refusal(state, now)
+  end
+
+  # Concept: both checkpoint owners compare the exact context they will expose.
+  # Technical depth: standalone probes use their command-owned whole-session
+  # record, existing fixed-point receipt and current hard limits. Run probes
+  # retain frozen steer/resources and their run-owned record. Both substitute
+  # one projected summary plus the unsummarized raw tail without altering history.
+  defp pending_checkpoint_projections(
+         state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = episode,
+         units,
+         count,
+         entry,
+         check
+       ) do
+    with {:ok, before} <-
+           standalone_checkpoint_projection(
+             state,
+             episode,
+             %{elements: Enum.flat_map(units, & &1.elements)},
+             check
+           ),
+         {:ok, after_value} <-
+           standalone_checkpoint_projection(
+             state,
+             episode,
+             %{
+               elements: units |> Enum.drop(count) |> Enum.flat_map(& &1.elements),
+               checkpoint_entries: [entry]
+             },
+             check
+           ) do
+      {:ok, before, after_value}
+    end
+  end
+
+  defp pending_checkpoint_projections(state, episode, units, count, entry, check) do
+    staging = %{
+      run_id: episode["run_id"],
+      elements: Enum.flat_map(units, & &1.elements),
+      steer: episode["ordinary_steer"],
+      resources: state.run_resources[episode["run_id"]],
+      deadline: state.deadlines[episode["run_id"]],
+      excerpt_allowance: 0
+    }
+
+    project = %{
+      "class" => "project_resource",
+      "receipt_revision" => 2,
+      "disposition" => "not_evaluated_required_failure",
+      "detail" => nil
+    }
+
+    header = Loopex.Runtime.ResourceContext.initial_header(staging.resources)
+    header = if(header, do: Map.put(header, "status", "retained_content_missing"), else: nil)
+
+    after_staging =
+      staging
+      |> Map.put(:elements, units |> Enum.drop(count) |> Enum.flat_map(& &1.elements))
+      |> Map.put(:checkpoint_entries, [entry])
+
+    with {:ok, before} <-
+           checkpoint_projection_measurement(state, staging, project, header, check),
+         {:ok, after_value} <-
+           checkpoint_projection_measurement(state, after_staging, project, header, check),
+         do: {:ok, before, after_value}
+  end
+
+  defp standalone_checkpoint_projection(state, episode, replacement, check) do
+    with {:ok, measured} <-
+           preflight_standalone_context(state, episode["deadline"], check, replacement) do
+      {:ok,
+       Map.merge(measured, %{
+         record_bytes: measured.receipt["record_byte_cost"],
+         tokens: measured.receipt["provider_estimated_tokens"],
+         admission:
+           if(measured.failure, do: {:refused, measured.failure}, else: {:ok, measured.record})
+       })}
     end
   end
 
@@ -2853,8 +2938,8 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, originals} <-
            compaction_units_from(
              state,
-             episode["run_id"],
-             lineage_elements(state, episode["run_id"])
+             maintenance_scope(episode),
+             lineage_elements(state, maintenance_scope(episode))
            ),
          covered = originals |> Enum.take(prior_count) |> Enum.flat_map(& &1.elements),
          true <- MapSet.new(covered, &Conversation.source_reference/1) == state.compacted_sources,
@@ -2869,6 +2954,16 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp pending_checkpoint_capacity(
+         _state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"} = episode
+       ),
+       do:
+         if(episode["usage"]["total_tokens"] < episode["bounds"]["token_budget"],
+           do: :ok,
+           else: {:error, :maintenance_bounds_exhausted}
+         )
+
   defp pending_checkpoint_capacity(state, episode) do
     {_bounds, charged} = accounting(state, episode["run_id"])
 
@@ -2876,6 +2971,17 @@ defmodule Loopex.Runtime.SessionState do
          maintenance_parent_call_units(state, episode["run_id"]) < episode["bounds"]["max_turns"],
        do: :ok,
        else: {:error, :maintenance_bounds_exhausted}
+  end
+
+  defp pending_checkpoint_refusal(%{pending_compact: %{}} = state, now) do
+    episode = state.maintenance_episodes[state.active_maintenance]
+
+    cond do
+      maintenance_abort?(state, episode) -> {:error, :maintenance_not_quiescent}
+      not is_integer(now) or now < 0 or now > @uint64_max -> {:error, :clock_out_of_domain}
+      now >= episode["deadline"] -> {:error, :standalone_deadline_reached}
+      true -> {:error, :context_projection_invalid}
+    end
   end
 
   defp pending_checkpoint_refusal(state, now) do
@@ -4221,7 +4327,7 @@ defmodule Loopex.Runtime.SessionState do
   # failure. Failed settlements defer charging until the terminal/completion pair;
   # readable summary failures and exhausted retry allowances use already retained
   # charges. Replay derives this exact result and never charges a run or settles twice.
-  defp standalone_settlement_completion_record(state, observed_at) do
+  defp standalone_settlement_completion_record(state, observed_at, check \\ fn -> :ok end) do
     with %{} = pending <- state.pending_compact,
          %{kind: "standalone_maintenance_episode_admitted_v1"} = episode <-
            state.maintenance_episodes[state.active_maintenance],
@@ -4238,7 +4344,7 @@ defmodule Loopex.Runtime.SessionState do
            is_integer(observed_at) and observed_at >= episode["request_staged_at"] and
              observed_at <= @uint64_max,
          {_preview, charged} = standalone_settlement_charge(state, episode),
-         %{} = failure <- standalone_settlement_failure(state, charged, observed_at),
+         {:ok, failure} <- standalone_completion_failure(state, charged, observed_at, check),
          true <- failure["bound"] != "deadline_ms" or observed_at >= episode["deadline"],
          result = %{
            "disposition" => "failed",
@@ -4261,9 +4367,42 @@ defmodule Loopex.Runtime.SessionState do
          "result" => result
        }}
     else
+      {:error, _} = error -> error
       _ -> {:error, :invalid_compact_completion_transition}
     end
   end
+
+  defp standalone_completion_failure(state, episode, observed_at, check) do
+    case standalone_settlement_failure(state, episode, observed_at) do
+      %{} = failure -> {:ok, failure}
+      nil -> standalone_nonprogress_failure(state, episode, observed_at, check)
+    end
+  end
+
+  defp standalone_nonprogress_failure(
+         state,
+         %{"stage" => "checkpoint_pending"},
+         observed_at,
+         check
+       ) do
+    with {:ok, candidate} <- pending_checkpoint_measurements(state, observed_at, check),
+         false <- checkpoint_progress?(candidate) do
+      {:ok,
+       %{
+         "version" => 2,
+         "category" => "context_preparation_failed",
+         "retryable" => false,
+         "measurement_scope" => "ordinary",
+         "cause" => "compaction_no_progress"
+       }}
+    else
+      true -> {:error, :invalid_compact_completion_transition}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp standalone_nonprogress_failure(_, _, _, _),
+    do: {:error, :invalid_compact_completion_transition}
 
   defp standalone_settlement_charge(state, %{"stage" => "settlement_pending_terminal"} = episode),
     do: charge_maintenance_settlement(state, episode, episode["settlement"])

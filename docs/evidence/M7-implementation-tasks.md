@@ -325,6 +325,93 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: standalone pending checkpoints now reuse exact whole-record substitution
+  under the actual compact command and captured cutoff. Pure probes authenticate
+  original whole-unit coverage, prior checkpoint, source omission and settled
+  summary provenance without changing history or charging another attempt.
+  Explicit/size triggers require strict record-byte and token reduction; rendering
+  repair advances contiguous raw coverage and must fit every ordinary hard limit,
+  allowing byte/token growth. Non-progress completes through the existing leading
+  episode terminal and compact completion with retained usage, no checkpoint and
+  no second settlement. Useful substitutions cannot claim a non-progress ending.
+  Abort, absolute expiry, invalid clocks, changed ranges and every cancellable
+  traversal stop refuse before adoption. Six new pure-projection tests, one new
+  actual-tool-history hard-overflow test and the extended actual rendering-growth
+  case pass with existing coverage. The ten-file current/floor selections pass
+  282 cases with two existing exclusions in 15.3 and 14.8 seconds. Checkpoint
+  emission, public owner encoding and the live standalone workflow remain open.
+
+  Development failures remain failed. New fixtures were corrected to declare
+  coherent system/context ceilings, an explicit custom-budget origin and a valid
+  summary body. No production bound, required assertion or check was weakened.
+  The v4 run followed a failed edit script against unchanged source and supplies
+  no additional boundary proof. Complete outputs are retained read-only:
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-current-v1.log` | FAIL, 121/122 passed, two excluded; new fixture system ceiling exceeded its context ceiling | `768a4dc9f1377de06910d3bb41ea9f6dc6dc9d82cf36d6a7d3480bfea823adbe` |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-current-v2.log` | FAIL, 121/122 passed, two excluded; new fixture still retained the default system ceiling | `f2f0e506fb0b31c40e8a8e10dcdf3d9b853d1ae28c32827e4a1a04176f2b56db` |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-current-v3.log` | PASS, 122 cases, two excluded, 7.4 seconds | `69852fa3eb7e8a4ed04b2744971dc937443f9e58cb9ca93ba9cba2ccd72af270` |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-current-v4.log` | PASS, 122 cases, two excluded, 7.3 seconds; unchanged focused rerun after an edit script failed, no additional proof | `d19685c90124945547f79edfc7898f7cf312fff30b1ecc26f392d315eb4c6b14` |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-current-v5.log` | FAIL, 122/123 passed, two excluded; new custom-budget fixture lacked an explicit origin | `b1ee8de059f901a299323d7622825ceae21c7441470960f07f8629bec063ea3b` |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-current-v6.log` | FAIL, 122/123 passed, two excluded; new summary fixture exceeded the existing 4,094-byte body ceiling | `662209d44dcc17056323d4726244441ae72a863d3a76c28f87616736c8309323` |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-current-v7.log` | PASS, 123 cases, two excluded, 7.6 seconds | `af545c5f50c72af7247506d5144bc795e44858f6eaae47d9c59c485301570706` |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-focused-current-v1.log` | PASS, 282 cases, two excluded, 15.3 seconds | `60105b7b293a9362d397239daba02409aded7c675d5f640d5ad4a755fd99ec70` |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-focused-floor-v1.log` | PASS, 282 cases, two excluded, 14.8 seconds | `2ec2de9120be576d777403b64c38d4ddc91cb24e3577562cdd2c958ee1e6db54` |
+
+  This closes one added pure checkpoint-measurement/non-progress subtask only.
+  T01–T19 originals remain 54 done / 119 todo / 6 retired; added subtasks are
+  206 done / 9 todo, including T07's 39 done / 1 todo. The complete current
+  Core suite passes 1,197 cases with eight existing exclusions in 217.2 seconds.
+  Warning-free compilation, formatting, bootstrap/status, compiled documentation,
+  dependency direction and version checks pass. These are development proofs,
+  not the full integration fast check, provider lanes or closure matrix.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-static-current-v1.log` | PASS, compilation/format/bootstrap/docs/dependencies/version | `035a294b6c953811856e60b09690672f2d39c0d19f9161478842a148486fb816` |
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-core-current-v1.log` | PASS, 1,197 cases, eight excluded | `c4169419cfcd289d6b6e440b1c19c53f6f926bfea595b97e19059a113c9638e4` |
+
+  The final metadata bootstrap and compiled-documentation checks also pass;
+  this retained-output identity is appended after collecting that result.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-standalone-checkpoint-probe-docs-current-v1.log` | PASS, final metadata bootstrap/docs | `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8` |
+
+- Pending maintainer decision: standalone checkpoint ownership. A compact
+  command owns its episode without a run; the existing checkpoint kind and
+  context.compacted projection require run_id. Recommend a distinct closed
+  private standalone_compaction_checkpoint_committed_v1 kind with command_id,
+  preserving the existing run-owned kind with run_id. Public checkpoint events
+  and snapshots would replace run_id with exactly owner: {kind: "run" | "compact",
+  id: opaque identity}, derived from the authenticated private variant. The
+  episode binds the actual owner; lineage.through_run_id remains the last actual
+  original run traversed. No synthetic run, run terminal, run accounting or run
+  deadline is introduced.
+
+  The alternative keeps the shared private kind and existing public run_id,
+  permitting null only for standalone ownership and authenticating its command
+  indirectly through the episode. It changes fewer fields but introduces nullable
+  ownership. Either selected current contract must migrate producers, replay,
+  projections, fixtures and independent vectors together with no old aliases.
+  Current-format restart, unknown commits and backup/restore remain required.
+  This is a proposal, not an accepted ADR amendment. AGENTS.md requires a
+  maintainer decision for the persistent/public schema; dependent emission is
+  paused while independent preparation/integration work may proceed. The question
+  has been submitted and has no answer. The complete proposal is retained at
+  `/private/tmp/loopex-m7-standalone-checkpoint-owner-decision.md`, SHA-256
+  `1b16d7d5fc31f5b42a6c807ac46b7ec2064f55e76683993bb5a8353f8601c9d5`.
+
+  Two earlier decisions also remain unanswered: the stalled-stderr fixture's
+  captured 1,000-ms writer-start cutoff and exact exit, and the small maintenance
+  allowance failure branch for a 1,024-token reply reserve. Recommend the closed
+  maintenance_reply_reserve_unavailable cause instead of adding a broad public
+  reply_reserve bound. The existing failed fast-check evidence remains failed.
+
 - Done: standalone maintenance settlement now spends the captured episode's own
   allowance, without changing run accounting, pending work or deadlines. Readable
   usage is charged exactly once, including reported overshoot; unreadable replies
@@ -7814,6 +7901,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Measure standalone pending checkpoint substitution through exact command-owned whole-record probes, authenticate original coverage and source omission, require strict size progress or hard-fitting rendering progress, and replay non-progress completion without a second settlement or charge; prove abort/deadline/clock/range refusal and every cancellable traversal stop on both toolchains. Checkpoint emission and live integration remain open.
 
 - [x] Charge standalone settlements against captured episode allowances, retain exact reported/conservative usage and bounded not-dispatched retry, and complete failed attempts with the leading episode terminal plus settlement/completion pair; prove summary refusal, unreadable replies, owner-loss cleanup, cancellation/deadline precedence, post-settlement endings, duplicate results, strict replay and bounded private coverage on both toolchains. Live dispatch, checkpoints, snapshots and complete cleanup remain open.
 

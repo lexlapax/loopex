@@ -1857,6 +1857,18 @@ The bounded reader validates spent failures without effects. Both-pair tests
 cover these reducers/readers; live standalone dispatch, successful checkpoint
 completion, snapshots and runtime cleanup integration remain open.
 
+Standalone pending checkpoint substitution now uses the same command-owned
+whole-record probe, fixed-point receipt and captured cutoff as initial preflight.
+It authenticates original coverage, prior checkpoint and source omission. Explicit
+and size triggers require strict byte/token reduction; canonical-rendering repair
+advances a contiguous raw cut and fits every ordinary hard limit while allowing
+growth. Non-progress retains settled usage in the existing terminal/completion
+pair without another settlement, charge or checkpoint. Both supported-pair tests
+prove exact cost, actual rendering growth and hard overflow, clock/range refusal,
+abort/expiry and cancellation at every probe stop. These are pure measurement
+and replay proofs; the pending checkpoint-owner schema decision and live
+standalone dispatch/checkpoint/completion integration remain open.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are

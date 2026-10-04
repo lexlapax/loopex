@@ -1643,6 +1643,183 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
              )
   end
 
+  test "standalone pending checkpoint measures exact command-owned substitution without mutating facts" do
+    {state, _, _} = settled_checkpoint([String.duplicate("f", 8_000)])
+    original = state
+
+    assert {:ok, candidate} =
+             SessionState.preflight_maintenance_checkpoint(state, 2_001, fn -> :ok end)
+
+    assert candidate.trigger == "explicit"
+    assert candidate.before.record.kind == "compact_context_probe_v1"
+    assert candidate.after.record.kind == "compact_context_probe_v1"
+    assert candidate.before.record["command_id"] == "compact"
+    assert candidate.after.record["command_id"] == "compact"
+    assert candidate.after.record["request"]["deadline"] == 61_000
+
+    assert candidate.before.record_bytes ==
+             byte_size(:erlang.term_to_binary(candidate.before.record, [:deterministic]))
+
+    assert candidate.after.record_bytes ==
+             byte_size(:erlang.term_to_binary(candidate.after.record, [:deterministic]))
+
+    assert candidate.after.record_bytes < candidate.before.record_bytes
+    assert candidate.after.tokens < candidate.before.tokens
+    assert candidate.after.rendering == :ok
+    assert {:ok, _} = candidate.after.admission
+
+    assert candidate.consumed_range ==
+             state.maintenance_episodes[state.active_maintenance]["covered_range"]
+
+    assert candidate.covered_range == candidate.consumed_range
+    assert candidate.covered_range["first_kept"] == nil
+    assert candidate.summary["covered_range_digest"] == candidate.covered_range["digest"]
+    assert candidate.summary["source_excerpted"] == false
+    assert candidate.prior_checkpoint_id == nil
+    assert state == original
+    assert state.checkpoints == %{}
+    assert state.active_checkpoint == nil
+    assert state.deadlines == %{}
+  end
+
+  test "standalone pending checkpoint uses hard ceilings after a source excerpt" do
+    {state, _, _} =
+      settled_checkpoint([String.duplicate("f", 8_000)],
+        context_token_budget: 2_048,
+        system_class_tokens: 512
+      )
+
+    episode = state.maintenance_episodes[state.active_maintenance]
+    assert episode["trigger"] == "ordinary_limit"
+    assert episode["source_excerpted"] == true
+
+    assert {:ok, candidate} =
+             SessionState.preflight_maintenance_checkpoint(state, 2_001, fn -> :ok end)
+
+    assert candidate.before.admission |> elem(0) == :refused
+    assert candidate.after.admission |> elem(0) == :ok
+    assert candidate.after.record["context_receipt"]["context_token_budget"] == 2_048
+    assert candidate.summary["source_excerpted"] == true
+    assert candidate.after.record["request"]["continuation"] == nil
+    assert candidate.after.record["context_receipt"]["continuation_cost"] == nil
+  end
+
+  test "standalone nonprogress ends with retained usage and no checkpoint or second settlement" do
+    {state, history, events} = settled_checkpoint(["small fact"])
+    failure = preparation_failure("compaction_no_progress", "ordinary")
+
+    assert {:error, :compaction_no_progress} =
+             SessionState.preflight_maintenance_checkpoint(state, 2_001, fn -> :ok end)
+
+    assert {:ok, proposal} =
+             SessionState.propose_standalone_compact_failure(state, failure, 2_001)
+
+    assert [prefix, completed] = proposal.records
+    assert prefix.kind == "maintenance_episode_terminal_v1"
+    assert completed.kind == "compact_command_completed_v1"
+    assert completed["result"]["failure"] == failure
+    assert completed["result"]["usage"]["reported_tokens"] == 56
+    {next, history, events} = commit(state, proposal, history, events)
+    assert {:ok, ^next} = SessionState.recover(state.session_id, history, events)
+    assert next.checkpoints == %{}
+    assert next.compacted_sources == state.compacted_sources
+    assert next.charged == state.charged
+    assert next.conversation == state.conversation
+    assert next.pending_compact == nil
+    assert List.last(events).kind == "context.compaction_finished"
+    refute Enum.any?(proposal.events, &(&1.kind == "context.compacted"))
+    assert Enum.count(history, &(&1.payload.kind == "maintenance_attempt_settled_v3")) == 1
+  end
+
+  test "standalone useful substitution cannot claim a nonprogress ending" do
+    {state, _, _} = settled_checkpoint([String.duplicate("f", 8_000)])
+
+    assert {:error, :invalid_compact_completion_transition} =
+             SessionState.propose_standalone_compact_failure(
+               state,
+               preparation_failure("compaction_no_progress", "ordinary"),
+               2_001
+             )
+  end
+
+  test "standalone checkpoint probes refuse abort, absolute expiry, changed range and clocks before traversal" do
+    {state, history, events} = settled_checkpoint([String.duplicate("f", 8_000)])
+
+    assert {:error, :standalone_deadline_reached} =
+             SessionState.preflight_maintenance_checkpoint(state, 61_000, fn ->
+               flunk("expired probe traversed")
+             end)
+
+    for clock <- [nil, -1, @uint64_max + 1] do
+      assert {:error, :clock_out_of_domain} =
+               SessionState.preflight_maintenance_checkpoint(state, clock, fn ->
+                 flunk("invalid clock traversed")
+               end)
+    end
+
+    assert {:error, :context_projection_invalid} =
+             SessionState.preflight_maintenance_checkpoint(state, 1_499, fn ->
+               flunk("pre-staging clock traversed")
+             end)
+
+    {:ok, abort} = SessionState.propose(state, %{type: :abort, command_id: "stop"})
+    {aborting, _, _} = commit(state, abort, history, events)
+
+    assert {:error, :maintenance_not_quiescent} =
+             SessionState.preflight_maintenance_checkpoint(aborting, 2_001, fn ->
+               flunk("aborted probe traversed")
+             end)
+
+    corrupted =
+      put_in(
+        state.maintenance_episodes[state.active_maintenance]["covered_range"]["digest"],
+        String.duplicate("0", 64)
+      )
+
+    assert {:error, :context_projection_invalid} =
+             SessionState.preflight_maintenance_checkpoint(corrupted, 2_001, fn -> :ok end)
+  end
+
+  test "every standalone pending checkpoint projection check can cancel without changing retained state" do
+    {state, _, _} = settled_checkpoint([String.duplicate("f", 8_000)])
+    counter = :atomics.new(1, [])
+
+    {:ok, _} =
+      SessionState.preflight_maintenance_checkpoint(state, 2_001, fn ->
+        :atomics.add_get(counter, 1, 1)
+        :ok
+      end)
+
+    total = :atomics.get(counter, 1)
+    assert total > 10
+
+    for stop <- 1..total do
+      :atomics.put(counter, 1, 0)
+
+      assert {:error, :cancelled} =
+               SessionState.preflight_maintenance_checkpoint(state, 2_001, fn ->
+                 if :atomics.add_get(counter, 1, 1) == stop, do: {:error, :cancelled}, else: :ok
+               end)
+
+      assert :atomics.get(counter, 1) == stop
+    end
+
+    assert state.active_checkpoint == nil
+    assert state.maintenance_episodes[state.active_maintenance]["stage"] == "checkpoint_pending"
+  end
+
+  defp settled_checkpoint(texts, options \\ []) do
+    {state, history, events} = captured_source(texts, options)
+
+    {:ok, request} =
+      SessionState.propose_selected_maintenance_request(state, 1_500, fn -> :ok end)
+
+    {state, history, events} = commit(state, request, history, events)
+    raw = standalone_reply(state.maintenance_episodes[state.active_maintenance]["request"])
+    {:ok, settled} = SessionState.propose_maintenance_attempt_settled(state, {:reply, raw}, 2_000)
+    commit(state, settled, history, events)
+  end
+
   defp opened_source(options \\ []) do
     {state, history, events} = captured_source(["retained original fact"], options)
 

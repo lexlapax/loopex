@@ -389,8 +389,104 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
     assert captured.maintenance_episodes[captured.active_maintenance]["session_version"] ==
              captured.journal_version
 
+    settled = settle_standalone_source(captured, String.duplicate("g", 3_000))
+
+    assert {:ok, candidate} =
+             SessionState.preflight_maintenance_checkpoint(settled, 2_001, fn -> :ok end)
+
+    assert candidate.trigger == "canonical_rendering"
+    assert candidate.before.rendering == {:error, :canonical_history_rendering_unsupported}
+    assert candidate.after.rendering == :ok
+    assert candidate.after.record_bytes > candidate.before.record_bytes
+    assert candidate.after.tokens > candidate.before.tokens
+    assert candidate.after.admission |> elem(0) == :ok
+    assert candidate.consumed_range["unit_count"] == 1
+    assert candidate.consumed_range["first_kept"] == nil
+    assert settled.conversation == captured.conversation
+    assert settled.conversation_record_sources == captured.conversation_record_sources
+    assert settled.active_checkpoint == nil
+
     assert pending.conversation == replayed.conversation
     assert pending.conversation_record_sources == replayed.conversation_record_sources
+  end
+
+  test "canonical-rendering substitution refuses hard overflow despite advancing raw coverage" do
+    configuration =
+      Genesis.configuration()
+      |> Map.put("context_token_budget", 1_000)
+      |> Map.put("system_class_tokens", 512)
+      |> put_in(["budget_origins", "context_token_budget"], "explicit")
+
+    {fixture, session, attachment} =
+      start(
+        [
+          %{text: "three writes", calls: [call("a"), call("b"), call("c")]}
+        ],
+        outcomes: %{"a" => "outcome_unknown"},
+        configuration: configuration
+      )
+
+    prompt(attachment)
+    finish(attachment)
+    {_, retained, _} = states(fixture, session)
+
+    {:ok, compact} =
+      SessionState.propose(retained, %{
+        type: :compact,
+        command_id: "repair-rendering",
+        bounds: %{max_attempts: 4, deadline_ms: 60_000, token_budget: 32_768}
+      })
+
+    pending = commit_local(compact)
+    parent = pending.configuration
+
+    selection = %{
+      "model" => parent["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{parent["model_capabilities"] | "reasoning_levels" => ["none"]},
+      "provider_mapping" => %{parent["provider_mapping"] | "thinking_disabled" => true}
+    }
+
+    {:ok, instructions} =
+      Loopex.Runtime.MaintenanceConfiguration.capture_instructions(%{
+        "version" => "summary.v1",
+        "body" => "Retain the complete tool outcome"
+      })
+
+    {:ok, capture} =
+      SessionState.propose_standalone_maintenance_episode(
+        pending,
+        selection,
+        instructions,
+        1_000,
+        fn -> :ok end
+      )
+
+    captured = commit_local(capture)
+
+    assert captured.maintenance_episodes[captured.active_maintenance]["trigger"] ==
+             "canonical_rendering"
+
+    settled = settle_standalone_source(captured, String.duplicate("g", 4_000))
+
+    assert {:error, :compaction_no_progress} =
+             SessionState.preflight_maintenance_checkpoint(settled, 2_001, fn -> :ok end)
+
+    failure = %{
+      "version" => 2,
+      "category" => "context_preparation_failed",
+      "retryable" => false,
+      "measurement_scope" => "ordinary",
+      "cause" => "compaction_no_progress"
+    }
+
+    assert {:ok, ended} = SessionState.propose_standalone_compact_failure(settled, failure, 2_001)
+    completed = commit_local(ended)
+    assert completed.active_checkpoint == nil
+    assert completed.conversation == retained.conversation
+    assert completed.conversation_record_sources == retained.conversation_record_sources
+    assert List.last(ended.records)["result"]["usage"]["reported_tokens"] == 56
+    assert Enum.map(ended.events, & &1.kind) == ["context.compaction_finished"]
   end
 
   test "question answers bind the admitted response rather than a fabricated tool result" do
@@ -426,6 +522,33 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
     assert_original(replayed, result, response)
   end
 
+  defp settle_standalone_source(captured, summary) do
+    {:ok, staged} =
+      SessionState.propose_selected_maintenance_request(captured, 1_500, fn -> :ok end)
+
+    opened = commit_local(staged)
+    request = opened.maintenance_episodes[opened.active_maintenance]["request"]
+
+    raw = %{
+      text: ~s({"summary":"#{summary}","carry_forward":{"files_read":[],"files_changed":[]}}),
+      identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+      usage: %{input_tokens: 37, output_tokens: 19},
+      tool_calls: [],
+      delta_count: 0,
+      streamed: false,
+      provider_response_id: nil,
+      canonical_request_bytes: request.canonical_request_bytes,
+      staged_request_digest: request.staged_request_digest,
+      completion: "natural",
+      continuation: nil
+    }
+
+    {:ok, settled} =
+      SessionState.propose_maintenance_attempt_settled(opened, {:reply, raw}, 2_000)
+
+    commit_local(settled)
+  end
+
   defp start(script, options \\ []) do
     fixture = Fixture.start(Keyword.put(options, :script, script))
     on_exit(fn -> Fixture.stop(fixture) end)
@@ -433,7 +556,11 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
     {:ok, session} =
       Loopex.create_session(fixture.runtime, %{},
         command_id: "create",
-        genesis: Genesis.genesis(fixture.definitions)
+        genesis:
+          Genesis.genesis(
+            fixture.definitions,
+            Keyword.get_lazy(options, :configuration, fn -> Genesis.configuration() end)
+          )
       )
 
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
