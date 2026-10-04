@@ -1758,6 +1758,79 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
              SessionState.recover(state.session_id, Enum.drop(final_history, -1), final_events)
   end
 
+  test "standalone zero-attempt token refusal authenticates the reservation and cannot use the run-only cause" do
+    {state, history, events} =
+      captured_source(["retained original fact"],
+        bounds: %{max_attempts: 4, deadline_ms: 60_000, token_budget: 1_023}
+      )
+
+    failure = %{
+      "category" => "bound_reached",
+      "retryable" => false,
+      "bound" => "token_budget",
+      "observed" => 0,
+      "declared_limit" => 1_023,
+      "accounting_source" => nil
+    }
+
+    for changed <- [
+          Map.put(failure, "observed", 1),
+          Map.put(failure, "declared_limit", 1_022),
+          Map.put(failure, "accounting_source", "reported")
+        ] do
+      assert {:error, :invalid_compact_completion_transition} =
+               SessionState.propose_standalone_compact_failure(state, changed, 2_000)
+    end
+
+    assert {:error, :maintenance_bounds_exhausted} =
+             SessionState.propose_standalone_compact_failure(
+               state,
+               preparation_failure("maintenance_reply_reserve_unavailable", nil),
+               2_000
+             )
+
+    assert {:error, :standalone_deadline_reached} =
+             SessionState.propose_standalone_compact_failure(
+               state,
+               failure,
+               state.maintenance_episodes[state.active_maintenance]["deadline"]
+             )
+
+    {:ok, completion} = SessionState.propose_standalone_compact_failure(state, failure, 2_000)
+    {state, history, events} = commit(state, completion, history, events)
+    assert {:ok, ^state} = SessionState.recover(state.session_id, history, events)
+    assert state.commands["compact"].result["usage"]["attempts"] == 0
+  end
+
+  test "a fitted standalone checkpoint completes at its last attempt and refuses fabricated exhaustion" do
+    {state, history, events} =
+      settled_checkpoint([String.duplicate("f", 8_000)],
+        bounds: %{max_attempts: 1, deadline_ms: 60_000, token_budget: 32_768}
+      )
+
+    {:ok, checkpoint} = SessionState.propose_maintenance_checkpoint(state, 2_001, fn -> :ok end)
+    {state, history, events} = commit(state, checkpoint, history, events)
+
+    failure = %{
+      "category" => "bound_reached",
+      "retryable" => false,
+      "bound" => "max_attempts",
+      "observed" => 1,
+      "declared_limit" => 1,
+      "accounting_source" => nil
+    }
+
+    assert {:error, :invalid_compact_completion_transition} =
+             SessionState.propose_standalone_compact_failure(state, failure, 2_002)
+
+    assert {:ok, completion} =
+             SessionState.propose_maintenance_checkpoint_completion(state, 2_002, fn -> :ok end)
+
+    {state, history, events} = commit(state, completion, history, events)
+    assert state.commands["compact"].result["disposition"] == "checkpointed"
+    assert {:ok, ^state} = SessionState.recover(state.session_id, history, events)
+  end
+
   test "standalone abort and expiry after a committed checkpoint retain its usage and raw facts" do
     for action <- [:abort, :deadline] do
       {state, history, events} = settled_checkpoint([String.duplicate("f", 8_000)])

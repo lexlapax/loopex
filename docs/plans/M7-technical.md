@@ -2046,6 +2046,15 @@ owner codec. Both supported pairs pass 171 focused core cases, including
 three-prefix repair, all six checkpoint/completion uncertainty cases, restart
 and private coverage. Both transports and the independent Node owner vectors
 pass their focused selections; exact outputs and digests are indexed in the
-task record. Standalone pre-dispatch bound completion, full generation-3/4
-manifests and checkpoint snapshots remain open. These focused results do not
-replace the next clean candidate's full integration checks.
+task record. Standalone pre-dispatch bound completion now preserves actual
+attempt/token observations, usage and useful partial checkpoints, refusing a
+new summary when the fixed reserve cannot fit. Both supported pairs pass 186
+focused Core cases, including initial/remaining reserve boundaries, fitted
+completion at the last attempt, overshoot and all six initial/partial completion
+uncertainty phases. The existing standalone bound schema applies; the new
+preparation reserve cause remains run-only. Full generation-3/4 manifests and
+checkpoint snapshots remain open. The full current-pair check of the preceding
+`520ff308` checkpoint-owner candidate completed with 3,718 passing cases, one
+shared-cutoff quiesce failure and 40 exclusions. That failure remains open;
+focused capacity proof does not replace full integration. Exact failed and
+passing outputs and digests are indexed in the task record.

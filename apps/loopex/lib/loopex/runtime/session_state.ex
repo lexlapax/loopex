@@ -1453,6 +1453,28 @@ defmodule Loopex.Runtime.SessionState do
          observed <= @uint64_max, do: :ok, else: {:error, :invalid_compact_completion_transition}
   end
 
+  # Concept: standalone token bounds reserve the complete fixed reply before dispatch.
+  # Technical depth: the existing compact bound permits an observed charge below
+  # its ceiling when that reservation cannot fit. Prove the exact zero charge,
+  # captured allowance and unexpired episode; the run-only reserve cause is unused.
+  defp zero_attempt_compact_cause(
+         state,
+         %{} = episode,
+         %{
+           "category" => "bound_reached",
+           "bound" => "token_budget",
+           "observed" => 0,
+           "declared_limit" => limit,
+           "accounting_source" => nil
+         },
+         clock,
+         _check
+       ) do
+    if limit == episode["bounds"]["token_budget"] and limit in 1..1_023,
+      do: maintenance_source_clock(state, episode, clock),
+      else: {:error, :invalid_compact_completion_transition}
+  end
+
   defp zero_attempt_compact_cause(
          state,
          nil,
@@ -4558,8 +4580,13 @@ defmodule Loopex.Runtime.SessionState do
           "cause" => episode["summary_failure"]
         }
 
-      episode["stage"] == "model_retry_permitted" and
-          episode["attempts"] >= episode["bounds"]["max_attempts"] ->
+      episode["attempts"] >= episode["bounds"]["max_attempts"] and
+          (episode["stage"] == "model_retry_permitted" or
+             (episode["stage"] == "checkpoint_committed" and
+                match?(
+                  {:error, {:checkpoint_requires_more_progress, _}},
+                  maintenance_checkpoint_completion_record(state, observed_at, fn -> :ok end)
+                ))) ->
         standalone_bound_failure(
           episode,
           "max_attempts",
@@ -4567,8 +4594,15 @@ defmodule Loopex.Runtime.SessionState do
           episode["bounds"]["max_attempts"]
         )
 
-      episode["stage"] == "checkpoint_pending" and
-          episode["usage"]["total_tokens"] >= episode["bounds"]["token_budget"] ->
+      (episode["stage"] in ["checkpoint_pending", "model_retry_permitted"] and
+         episode["usage"]["total_tokens"] >= episode["bounds"]["token_budget"]) or
+          (episode["stage"] in ["model_retry_permitted", "checkpoint_committed"] and
+             episode["bounds"]["token_budget"] - episode["usage"]["total_tokens"] < 1_024 and
+             (episode["stage"] == "model_retry_permitted" or
+                match?(
+                  {:error, {:checkpoint_requires_more_progress, _}},
+                  maintenance_checkpoint_completion_record(state, observed_at, fn -> :ok end)
+                ))) ->
         standalone_bound_failure(
           episode,
           "token_budget",

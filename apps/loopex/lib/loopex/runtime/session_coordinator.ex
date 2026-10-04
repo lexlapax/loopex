@@ -3496,9 +3496,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp advance_compact_episode(state, %{"stage" => "model_retry_permitted"}, _work) do
     case SessionState.propose_maintenance_attempt_open(state.durable) do
-      {:ok, proposal} -> commit_compact_phase(state, {:ok, proposal})
-      {:error, :maintenance_bounds_exhausted} -> {:noreply, state}
-      {:error, reason} -> {:stop, {:compact_retry_failed, reason}, state}
+      {:ok, proposal} ->
+        commit_compact_phase(state, {:ok, proposal})
+
+      {:error, :maintenance_bounds_exhausted} ->
+        finish_compact_capacity_bound(
+          state,
+          state.durable.maintenance_episodes[state.durable.active_maintenance]
+        )
+
+      {:error, reason} ->
+        {:stop, {:compact_retry_failed, reason}, state}
     end
   end
 
@@ -3688,6 +3696,43 @@ defmodule Loopex.Runtime.SessionCoordinator do
         metadata.admitted_at
       )
 
+  # Concept: standalone preparation cannot renew or overrun captured allowances.
+  # Technical depth: report the existing attempt/token bound when no request can
+  # be admitted. Token bounds retain actual usage when the fixed reply reserve
+  # cannot fit. One clock preserves expiry precedence; replay rederives capacity
+  # and progress, retaining the useful checkpoint without another charge.
+  defp finish_compact_capacity_bound(state, episode) do
+    now = System.system_time(:millisecond)
+
+    failure =
+      cond do
+        now >= episode["deadline"] ->
+          compact_deadline_failure(episode["deadline"], episode["accounting_source"], now)
+
+        episode["attempts"] >= episode["bounds"]["max_attempts"] ->
+          %{
+            "category" => "bound_reached",
+            "retryable" => false,
+            "bound" => "max_attempts",
+            "observed" => episode["attempts"],
+            "declared_limit" => episode["bounds"]["max_attempts"],
+            "accounting_source" => nil
+          }
+
+        true ->
+          %{
+            "category" => "bound_reached",
+            "retryable" => false,
+            "bound" => "token_budget",
+            "observed" => episode["usage"]["total_tokens"],
+            "declared_limit" => episode["bounds"]["token_budget"],
+            "accounting_source" => episode["accounting_source"]
+          }
+      end
+
+    finish_undispatched_compact(state, failure, now)
+  end
+
   defp finish_undispatched_compact(state, failure, clock),
     do:
       commit_compact_phase(
@@ -3734,6 +3779,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:error, reason} ->
         {:stop, {:compact_commit_failed, reason}, state}
     end
+  end
+
+  defp commit_compact_phase(state, {:error, :maintenance_bounds_exhausted}),
+    do:
+      finish_compact_capacity_bound(
+        state,
+        state.durable.maintenance_episodes[state.durable.active_maintenance]
+      )
+
+  defp commit_compact_phase(state, {:error, reason})
+       when reason in [:run_deadline_reached, :standalone_deadline_reached] do
+    send(self(), :advance_work)
+    {:noreply, state}
   end
 
   defp commit_compact_phase(state, {:error, reason}),
@@ -4083,8 +4141,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
           {:ok, proposal} ->
             commit_compact_phase(state, {:ok, proposal})
 
-          {:error, :maintenance_bounds_exhausted} ->
-            {:noreply, state}
+          {:error, reason}
+          when reason in [:maintenance_bounds_exhausted, :maintenance_attempts_exhausted] ->
+            episode = state.durable.maintenance_episodes[state.durable.active_maintenance]
+
+            finish_compact_capacity_bound(state, episode)
 
           {:error, reason}
           when reason in [:compaction_preparation_deadline, :standalone_deadline_reached] ->

@@ -672,7 +672,13 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
 
     before = recover(fixture, session)
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
-    assert {:accepted, "compact"} = Loopex.command(attachment, command())
+
+    cmd =
+      command()
+      |> put_in([:bounds, "max_attempts"], 1)
+      |> put_in([:bounds, "token_budget"], 1_024)
+
+    assert {:accepted, "compact"} = Loopex.command(attachment, cmd)
     completed = await_completed(fixture, session)
     result = completed.commands["compact"].result
 
@@ -717,12 +723,12 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
     assert coordinator.in_flight == %{}
     assert coordinator.pending_cleanup == %{}
     assert Task.Supervisor.children(coordinator.owner_workers) == []
-    assert ^result = Loopex.command(attachment, command())
+    assert ^result = Loopex.command(attachment, cmd)
 
     kill_owner(fixture, session)
     {:ok, _} = Loopex.prepare_resume_session(fixture.runtime, session, "checkpoint-result")
     {:ok, resumed} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
-    assert ^result = Loopex.command(resumed, command())
+    assert ^result = Loopex.command(resumed, cmd)
     assert recover(fixture, session).active_checkpoint == result["checkpoint_id"]
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
     assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "context.compacted")) == 1
@@ -1253,6 +1259,271 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
 
     assert Enum.map(Enum.take(Fixture.records(fixture, session), -2), & &1.payload.kind) ==
              ["maintenance_episode_terminal_v1", "compact_command_completed_v1"]
+  end
+
+  test "exhausted standalone attempts retain a useful checkpoint and finish at their actual bound" do
+    contents = for letter <- ["a", "b", "c", "d"], do: String.duplicate(letter, 18_000)
+
+    {fixture, session} =
+      live_history(
+        [
+          %{
+            text: summary(),
+            reply_overrides: natural(),
+            usage: %{input_tokens: 37, output_tokens: 19}
+          }
+        ],
+        history_contents: contents
+      )
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    cmd = put_in(command(1_000), [:bounds, "max_attempts"], 1)
+    assert {:accepted, "compact"} = Loopex.command(attachment, cmd)
+    completed = await_completed(fixture, session)
+    result = completed.commands["compact"].result
+    assert result["disposition"] == "failed"
+    assert is_binary(result["checkpoint_id"])
+    assert result["usage"]["attempts"] == 1
+    assert result["usage"]["reported_tokens"] == 56
+
+    assert result["failure"] == %{
+             "category" => "bound_reached",
+             "retryable" => false,
+             "bound" => "max_attempts",
+             "observed" => 1,
+             "declared_limit" => 1,
+             "accounting_source" => nil
+           }
+
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  for budget <- [1, 1_023] do
+    @initial_budget budget
+    test "standalone initial budget #{@initial_budget} refuses the fixed reply before dispatch" do
+      {fixture, session} = live_history([], history_content: String.duplicate("f", 8_000))
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      cmd = put_in(command(), [:bounds, "token_budget"], @initial_budget)
+      assert {:accepted, "compact"} = Loopex.command(attachment, cmd)
+      completed = await_completed(fixture, session)
+      result = completed.commands["compact"].result
+
+      assert result == %{
+               "disposition" => "failed",
+               "checkpoint_id" => nil,
+               "failure" => %{
+                 "category" => "bound_reached",
+                 "retryable" => false,
+                 "bound" => "token_budget",
+                 "observed" => 0,
+                 "declared_limit" => @initial_budget,
+                 "accounting_source" => nil
+               },
+               "usage" => zero_usage(),
+               "cleanup" => "confirmed"
+             }
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+
+      refute Enum.any?(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "maintenance_request_committed_v1")
+             )
+
+      assert completed.active_maintenance == nil
+      assert completed.charged == %{}
+    end
+  end
+
+  for remaining <- [1, 1_023] do
+    @remaining_tokens remaining
+    test "standalone partial checkpoint retains #{@remaining_tokens} unspent tokens without another summary" do
+      contents = for letter <- ["a", "b", "c", "d"], do: String.duplicate(letter, 18_000)
+
+      {fixture, session} =
+        live_history(
+          [
+            %{
+              text: summary(),
+              reply_overrides: natural(),
+              usage: %{input_tokens: 999, output_tokens: 25}
+            }
+          ],
+          history_contents: contents
+        )
+
+      before = recover(fixture, session)
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      cmd = put_in(command(), [:bounds, "token_budget"], 1_024 + @remaining_tokens)
+      assert {:accepted, "compact"} = Loopex.command(attachment, cmd)
+      completed = await_completed(fixture, session)
+      result = completed.commands["compact"].result
+
+      assert result["failure"] == %{
+               "category" => "bound_reached",
+               "retryable" => false,
+               "bound" => "token_budget",
+               "observed" => 1_024,
+               "declared_limit" => 1_024 + @remaining_tokens,
+               "accounting_source" => "reported"
+             }
+
+      assert result["disposition"] == "failed"
+      assert result["checkpoint_id"] == completed.active_checkpoint
+      assert is_binary(result["checkpoint_id"])
+
+      assert result["usage"] == %{
+               "attempts" => 1,
+               "reported_tokens" => 1_024,
+               "estimated_tokens" => 0,
+               "total_tokens" => 1_024
+             }
+
+      assert result["cleanup"] == "confirmed"
+      assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+      assert completed.conversation == before.conversation
+      assert completed.charged == before.charged
+      assert completed.deadlines == before.deadlines
+      assert map_size(completed.checkpoints) == 1
+
+      assert Enum.map(Enum.take(Fixture.records(fixture, session), -2), & &1.payload.kind) ==
+               ["maintenance_episode_terminal_v1", "compact_command_completed_v1"]
+    end
+  end
+
+  for charged <- [1_024, 2_048] do
+    @charged_tokens charged
+    test "standalone actual token charge #{@charged_tokens} ends without discarding usage or creating a checkpoint" do
+      {fixture, session} =
+        live_history(
+          [
+            %{
+              text: summary(),
+              reply_overrides: natural(),
+              usage: %{input_tokens: @charged_tokens - 25, output_tokens: 25}
+            }
+          ],
+          history_content: String.duplicate("f", 8_000)
+        )
+
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      cmd = put_in(command(), [:bounds, "token_budget"], 1_024)
+      assert {:accepted, "compact"} = Loopex.command(attachment, cmd)
+      completed = await_completed(fixture, session)
+      result = completed.commands["compact"].result
+
+      assert result["failure"] == %{
+               "category" => "bound_reached",
+               "retryable" => false,
+               "bound" => "token_budget",
+               "observed" => @charged_tokens,
+               "declared_limit" => 1_024,
+               "accounting_source" => "reported"
+             }
+
+      assert result["checkpoint_id"] == nil
+      assert result["usage"]["total_tokens"] == @charged_tokens
+      assert result["usage"]["attempts"] == 1
+      assert completed.active_checkpoint == nil
+      assert completed.charged == %{}
+      assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    end
+  end
+
+  for mode <- [:initial, :partial],
+      phase <- [
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @capacity_mode mode
+    @capacity_phase phase
+    test "standalone #{@capacity_mode} token bound resolves #{@capacity_phase} without spending again" do
+      {fixture, session} =
+        if @capacity_mode == :initial do
+          live_history([], history_content: String.duplicate("f", 8_000))
+        else
+          contents = for letter <- ["a", "b", "c", "d"], do: String.duplicate(letter, 18_000)
+
+          live_history(
+            [
+              %{
+                text: summary(),
+                reply_overrides: natural(),
+                usage: %{input_tokens: 999, output_tokens: 25}
+              }
+            ],
+            history_contents: contents
+          )
+        end
+
+      before = recover(fixture, session)
+      predecessor = owner(fixture, session)
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+      budget = if @capacity_mode == :initial, do: 1_023, else: 1_025
+      cmd = put_in(command(), [:bounds, "token_budget"], budget)
+
+      assert :ok =
+               M1RuntimeTestStore.hold_next_record_before_linearization(
+                 fixture.store,
+                 "maintenance_episode_terminal_v1",
+                 self()
+               )
+
+      assert {:accepted, "compact"} = Loopex.command(attachment, cmd)
+
+      assert_receive {:record_held_before_linearization, waiter, _,
+                      "maintenance_episode_terminal_v1", transaction},
+                     5_000
+
+      assert [terminal, completed] = transaction.records
+      assert terminal.kind == "maintenance_episode_terminal_v1"
+      assert completed.kind == "compact_command_completed_v1"
+      result = completed["result"]
+      assert result["failure"]["bound"] == "token_budget"
+      assert result["failure"]["declared_limit"] == budget
+      assert result["failure"]["observed"] == if(@capacity_mode == :initial, do: 0, else: 1_024)
+      assert result["usage"]["attempts"] == if(@capacity_mode == :initial, do: 0, else: 1)
+
+      refute Enum.any?(
+               Fixture.events(fixture, session),
+               &(&1.kind == "context.compaction_finished")
+             )
+
+      assert :ok =
+               M1RuntimeTestStore.inject(
+                 fixture.store,
+                 {:session_journal_commit, @capacity_phase}
+               )
+
+      M1RuntimeTestStore.release(waiter)
+      await_worker_adoption(predecessor, System.monotonic_time(:millisecond) + 5_000)
+      kill_owner(fixture, session)
+
+      assert {:ok, {:prepared, activation}} =
+               Loopex.prepare_resume_session(fixture.runtime, session, "resolve-capacity")
+
+      assert {:ok, ^session} = Loopex.activate_resume(activation)
+      next = await_completed(fixture, session)
+      assert next.commands["compact"].result == result
+      assert next.active_checkpoint == result["checkpoint_id"]
+      assert next.charged == before.charged
+      assert next.conversation == before.conversation
+      assert next.deadlines == before.deadlines
+
+      assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) ==
+               result["usage"]["attempts"]
+
+      assert Enum.count(
+               Fixture.events(fixture, session),
+               &(&1.kind == "context.compaction_finished")
+             ) == 1
+
+      assert Enum.count(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "compact_command_completed_v1")
+             ) == 1
+    end
   end
 
   defp natural, do: %{completion: "natural", continuation: nil}

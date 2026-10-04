@@ -325,23 +325,71 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: finish standalone pre-dispatch bound completion after partial
-  checkpoints, then join the current protocol/snapshot contracts.
+- Running: investigate the shared-cutoff quiesce failure from the full
+  `520ff308328f9bf033abf87fce57f8b1e6dec254` integration check, then join the
+  current protocol/snapshot contracts. Standalone pre-dispatch capacity completion
+  is implemented and passes the focused selection on both supported pairs.
   The separate concurrent owner-stop Task.Supervisor diagnostic remains open.
   The callback/discovery integration is complete at clean pushed
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  218 done / 9 todo. The goal remains active. The maintainer requested the
+  219 done / 9 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
   and the narrow reply-reserve preparation refusal, then approved the captured
   1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
   decisions are resolved. The reply-reserve implementation and focused proof
   are complete. Combined integration also passes at its named revision. The
   approved standalone checkpoint owner and successful completion are now
-  implemented with focused proof below. Full protocol/snapshot integration and
-  pre-dispatch bound completion remain open. The cleanup repair is committed
+  implemented with focused proof below. Full protocol/snapshot integration
+  remains open. The cleanup repair is committed
   and pushed at `052e0e01`.
+
+- Done: standalone pre-dispatch capacity endings derive the captured attempt
+  and token allowances without waiting for the command deadline. A useful partial
+  checkpoint and actual usage survive exhaustion; a fitted checkpoint still
+  completes at its last attempt or with fewer than 1,024 tokens remaining.
+  Initial budgets 1 and 1,023 refuse before dispatch with zero actual charge.
+  Further-prefix reserve boundaries 1 and 1,023, actual exhaustion and overshoot,
+  forged observations and all six initial/partial completion uncertainty phases
+  preserve the existing standalone bound schema. The new preparation reserve
+  cause remains run-only. No public contract or timeout changes.
+
+  The final four-file Core selection passes 186 cases on each supported pair:
+  current in 10.3 seconds, floor in 10.0 seconds. Complete immutable outputs:
+  `/private/tmp/loopex-m7-standalone-capacity-bounds-current-v4.log`, SHA-256
+  `8b68646cf9b44007e64c0336798c62977aad899489c030598f9b1668e110bb01`, and
+  `/private/tmp/loopex-m7-standalone-capacity-bounds-floor-v4.log`, SHA-256
+  `61865b8aebf36dbbf19f8e6469de149f17dce72222d2dacff8c4c3f66bbb94ae`.
+  The integrated four files match the verified isolated worktree byte for byte.
+  External failing-before probe on `520ff308` reported deadline exhaustion where
+  the actual attempt allowance was already spent; retained source and complete
+  failure are listed in the immutable inventory below. Capacity v2 and v3 on both
+  pairs remain FAIL, 185 of 186 passing, because a rejection assertion expected
+  a different internal error. The v3 retry tested unchanged failing bytes after
+  an edit assertion failed; it supplies no new proof. The corrected v4 assertion
+  requires exact rejection of the run-only cause, and every case passes.
+  Intermediate passing outputs, failed outputs, probe source and integrated patch
+  are retained in `/private/tmp/loopex-m7-standalone-capacity-proof-inventory.tsv`,
+  SHA-256 `3e7256d941309159971a3eba3b8b63efad91d47e46d0f151fcbb770dcc459b3b`.
+  Warning-free compilation, formatting, status, compiled documentation and
+  dependency checks pass. Complete immutable output:
+  `/private/tmp/loopex-m7-standalone-capacity-metadata-v1.log`, SHA-256
+  `d5c3455b52517e1dd085737b8e436dbff9de5f8f28c246f1772836b369662501`.
+  No full integration pass of this later capacity fix is claimed.
+
+- Open integration defect: the clean pushed checkpoint-owner candidate
+  `520ff308328f9bf033abf87fce57f8b1e6dec254` ran the full current-pair fast check
+  once. All eleven application suites completed: 3,718 passed, one failed,
+  40 excluded. The failure is RuntimeQuiesceTest's sixty-three blocked fences
+  sharing one cutoff while a sibling completes; `Quiesce.run/3` returned
+  `{:error, :runtime_unavailable}`. No cause has yet been established. Additional
+  focused current/floor VMs ran during part of this integration run; that fact
+  does not establish resource contention as the cause. This candidate remains
+  FAIL and must not be rerun or relabeled as passing. Complete immutable output:
+  `/private/tmp/loopex-m7-520ff308-fast-check.log`, SHA-256
+  `85eead6f40d2d9d2da4a5c5d534a07fd2df1078e11c7b8793600ad30576b1382`.
+  T16 tracks the investigation separately from the Task.Supervisor diagnostic.
 
 - Done: approved standalone checkpoint ownership and live completion use the
   actual command ID, distinct private checkpoint kind and shared public owner
@@ -8591,7 +8639,7 @@ or check was relaxed.
 - [x] Join standalone initial capture and unchanged/zero-attempt failure completion to the live owner; capture one cutoff, join exact pure workers before adoption, preserve prepared-resume pause, commit admitted-episode terminal/completion together, and prove abort, worker loss, deadline, bounded reader, duplicate results and all three capture/completion uncertainty phases on both toolchains. Provider dispatch, spent/checkpoint results, snapshots and complete cleanup remain open.
 
 - [x] Join standalone captured source selection, request/permit staging, provider dispatch, settlement/spending, checkpoint continuation and final completion to one live workflow using the actual compact identity; prove restart, unknown commits, immutable captures and bounded cleanup without a synthetic run.
-- [ ] Finish standalone pre-dispatch bound completion for initial source, retries and further prefixes after a useful checkpoint; derive captured attempt/token capacity, preserve actual usage and partial checkpoint, prevent another dispatch, and prove truthful terminal/replay and cleanup at the remaining reserve boundaries.
+- [x] Finish standalone pre-dispatch bound completion for initial source, retries and further prefixes after a useful checkpoint; derive captured attempt/token capacity, preserve actual usage and partial checkpoint, prevent another dispatch, and prove truthful terminal/replay and cleanup at the remaining reserve boundaries.
 
 - [x] Retain unchanged standalone completion and its exact event in one replay-checked proposal without an episode, return the completed five-member result on duplicate lookup while preserving admission observation, release the pending slot, validate bounded private coverage, and prove strict result/history/event/cancellation refusal on both toolchains. Live owner scheduling, Store uncertainty, snapshots and failed/cancelled completion remain open.
 
@@ -8915,6 +8963,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
 
 - [x] Verify the combined caller-monitor cleanup and maintenance reply-reserve amendment from one clean committed integration candidate; retain exact SHA, full fast-check output and selected Node release workflow, preserve failed evidence and keep the separate concurrent owner-stop diagnostic open.
 
