@@ -325,6 +325,29 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running: the one full fast check of clean committed and pushed
+  `a8af6e99bec3d4a4d60c53d937d72c79b87bd7e2` started from the existing detached
+  verification checkout, `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`.
+  Complete output streams to `/private/tmp/loopex-m7-a8af6e99-fast-check.log`;
+  execution handle `96751` is live. Resume by collecting that handle, not by
+  starting another run of these bytes. No result or final digest is claimed
+  while it is running. The parent 0823aa50 failure remains immutable below.
+  This exact candidate includes both feature-choice proofs and the explicitly
+  ready quiesce fixture transports. All preceding focused and metadata handles
+  have been terminally collected; no agent or other proof lane is active.
+
+  The prose-only repository check for this running-state record passes;
+  complete output is `/private/tmp/loopex-m7-a8af6e99-running-state-docs-v1.log`,
+  SHA-256 `b5e840438f6ac83f0e5d339844e830b62001db79d2da8027368ee3a1f5648f1f`. Metadata handle `92497` is terminal
+  and collected. The implementation check remains the separate live handle above.
+
+  The administrative progress child changes only this ledger. T01–T19 remain
+  original 69 done / 104 todo / 6 retired; added 239 done / 11 todo.
+  T04 is original 6 / 5 / 0, T13 is 3 / 7 / 0, and T16 is original 1 / 8 / 0,
+  added 45 / 3. Other rows retain the immediately preceding reporter output.
+  M7 and the implementation goal remain in progress; no closure, main merge,
+  tag or publication is authorized by this running check.
+
 - Failed: the one full fast check of clean pushed
   `0823aa5061620b9506ce7399f89f5fee8c52e3d2` finishes exit 1 in 1,016.0 measured
   runner seconds. All ten other application suites pass. Core passes 1,265 of
