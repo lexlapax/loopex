@@ -325,6 +325,83 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: live standalone source preparation, provider dispatch and failed
+  completion now follow the actual compact command through the shared maintenance
+  worker, Control permit, provider guard and settlement path. The tagged command
+  key is transient; durable requests retain the actual episode/summary identity.
+  No synthetic run, ordinary stream, run deadline or run accounting is created.
+  The same captured cutoff covers source work, attempts and settled pending
+  checkpoints. Exact source-worker DOWN and unchanged journal head precede
+  adoption. Irreducible excerpts retain the accepted named nil-scope refusal;
+  frozen summarizer system overflow retains its exact maintenance measurement.
+  Both end before provider intent with zero usage and confirmed cleanup.
+
+  Invalid or non-progressing natural summaries end once with their exact reported
+  usage. One not-dispatched retry reuses the same retained request and accounts
+  for both physical attempts. Abort and expiry collect late usage and join the
+  actual provider callback/tree. A useful settled summary stays pending under
+  its original cutoff; expiry ends it without another settlement or call. The
+  derived attempt owner epoch comes from the authenticated open-record journal
+  stamp, adding no persistent field. A successor reports inherited cleanup as
+  unknown even when a new abort or deadline wins over owner loss. An expired
+  inherited attempt changes no journal fact while prepared pause is active;
+  activation admits the winning ending without redispatch.
+
+  Twenty new live cases include exact source-worker loss/abort/deadline joins,
+  all three Store uncertainty phases at request/open and failed settlement,
+  immutable capture, duplicate/restart results, once-only usage, unchanged raw
+  facts and conservative inherited-attempt spending. The ten-file selection
+  passes 302 cases with two existing exclusions on both supported toolchains.
+  The complete current Core suite passes 1,217 cases with eight existing
+  exclusions in 216.2 seconds. Warning-free compilation, formatting, bootstrap,
+  compiled documentation, dependency direction and version checks pass.
+  This closes one added live source/provider failure-path subtask. T01–T19
+  originals remain 54 done / 119 todo / 6 retired; added subtasks are now
+  207 done / 9 todo, including T07's 40 done / 1 todo. These are development
+  proofs, not a full fast check of these bytes, provider lanes or closure matrix.
+  Successful checkpoint emission, continuation/results, snapshots, complete
+  cleanup integration and real-provider proofs remain open; the checkpoint-owner
+  decision is still unanswered. No original T07 outcome closes here.
+
+  Development failures remain failed. The malformed new expected cause, sampling
+  lookup, estimator namespace and run-budget fixture were repaired. Two commands
+  ran Core-relative selections from the umbrella root; their other application
+  paths were unmatched, so neither whole command is counted as a pass. The new
+  map fixture's keyword ordering was repaired after formatting refused it.
+  The first floor run passed its assertions but warned on literal membership
+  comparisons in the generated recovery cases. A direct case branch preserves
+  the activation/abort assertions and removes those warnings on both pairs.
+  No production limit, receive timeout, required assertion or check was weakened.
+  Complete outputs are retained read-only:
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-live-standalone-provider-current-v1.log` | FAIL, Core 125/126 passed, 4.4 seconds; umbrella selection paths unmatched and wrong new expected cause | `fe8434b99884f401ae3040956b97a4071352dd9764259e47e586c3a6bfdca227` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-current-v2.log` | FAIL, 125/126 passed, 4.5 seconds; new fixture read absent request.reasoning | `107a2339d02bcc35a5a8d078d6017f94ae7a8c136e17f4178ddc383171ac2f46` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-current-v3.log` | PASS, 128 cases, 4.5 seconds | `173014ea0439d07c96d6ec8f856938abb349360e49519738879deeb03e432f67` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-current-v4.log` | PASS, 129 cases, 5.4 seconds | `770d20d8128fade890d70bb8c68bc49873f6308f5354b24176582f6a445b4cb7` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-current-v5.log` | PASS, 135 cases, 6.6 seconds | `234f71dae296431a71bd54a88113139d21577abbde74d7e240a98b46d61a9f52` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-current-v6.log` | FAIL, 134/136 passed, 6.6 seconds; new fixture used wrong estimator namespace and incoherent run configuration | `33d3137fcf9411895a27195a6c438447e23cf19155c0e421cb34e0c38055d3b5` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-current-v7.log` | FAIL, umbrella selection paths unmatched; Core selection alone passed 136 cases in 6.6 seconds | `0d33ba15a956a17f260a33f75571b88b39c94b64e0924920867382a88e5ee7f8` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-focused-current-v1.log` | PASS, 298 cases, two excluded, 18.5 seconds | `44406ae3a40b8833d98e5e3a3084d4858ece8b4c7d9716acbff29166c3b871b8` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-focused-current-v2.log` | PASS, 301 cases, two excluded, 18.6 seconds | `f70bd1bbc30c2628e09c52b2e5bc8c50e13e2f8a0597455fe8ace5c7deafa57d` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-focused-current-v3.log` | PASS, 302 cases, two excluded, 19.8 seconds | `f9ae593287df54e19ed2f0ce5a3161ce6d28fa3f7be43f836ea4f228e0711515` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-focused-floor-v1.log` | Assertions pass, 302 cases, two excluded, 18.9 seconds; four compiler type warnings, not a warning-free checkpoint | `68804efe87eacabe8119a5ba56a0b569a3981e607f0ec5f02e22e07907b83996` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-focused-current-v4.log` | PASS, 302 cases, two excluded, 19.5 seconds; repaired test branch | `d2f96c5cb8a368896d99b973793f1877a388a6fd0c42fe2d74ec3f48f5933ddf` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-focused-floor-v2.log` | PASS, 302 cases, two excluded, 19.0 seconds; repaired test branch, no compiler warnings | `2a1472f2e191fd8998d98f1400e12490b5c2c2dd6ea39aa1b2e1f64755ce2519` |
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-live-standalone-provider-core-current-v1.log` | PASS, 1,217 cases, eight excluded, 216.2 seconds | `e8d8c1c7b0c6389f24b8d675a11bc2706072243b1de7842079f4840c4382cd4e` |
+  | `/private/tmp/loopex-m7-live-standalone-provider-static-current-v1.log` | PASS, compilation/format/bootstrap/docs/dependencies/version | `ebb9516142f74ed63e4d323121aba71b0ec4062106a6992a297a75fbe0bbfd82` |
+
+  The final metadata bootstrap and compiled-documentation checks also pass;
+  this retained-output identity is appended after collecting that result.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-live-standalone-provider-docs-current-v1.log` | PASS, final metadata bootstrap/docs | `46edfa3986660cc1f792a183e0967d9a1c524233ec1b5e1a22022b21fad05da8` |
+
 - Done: standalone pending checkpoints now reuse exact whole-record substitution
   under the actual compact command and captured cutoff. Pure probes authenticate
   original whole-unit coverage, prior checkpoint, source omission and settled
@@ -7901,6 +7978,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [x] Join standalone captured source preparation and guarded provider dispatch to the existing actual-command owner path; prove zero-attempt measured/named refusals, reported/conservative spending, exact not-dispatched retry, source/provider joins, prepared-expiry pause and all three request/failed-settlement uncertainty phases on both toolchains, without a synthetic run or new checkpoint schema. Successful checkpoint continuation/results, snapshots and full standalone workflow remain open.
 
 - [x] Measure standalone pending checkpoint substitution through exact command-owned whole-record probes, authenticate original coverage and source omission, require strict size progress or hard-fitting rendering progress, and replay non-progress completion without a second settlement or charge; prove abort/deadline/clock/range refusal and every cancellable traversal stop on both toolchains. Checkpoint emission and live integration remain open.
 

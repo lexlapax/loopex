@@ -1496,6 +1496,32 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp zero_attempt_compact_cause(
+         state,
+         %{kind: "standalone_maintenance_episode_admitted_v1"},
+         %{"version" => 2} = failure,
+         clock,
+         check
+       ) do
+    case selected_maintenance_source_result(state, clock, check) do
+      {:error, :compaction_excerpt_budget_too_small} = result ->
+        if standalone_source_failure(result) == failure,
+          do: :ok,
+          else: {:error, :invalid_compact_completion_transition}
+
+      {:refused, %{} = _} = result ->
+        if standalone_source_failure(result) == failure,
+          do: :ok,
+          else: {:error, :invalid_compact_completion_transition}
+
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error, :invalid_compact_completion_transition}
+    end
+  end
+
   defp zero_attempt_compact_cause(_, _, _, _, _),
     do: {:error, :invalid_compact_completion_transition}
 
@@ -1567,6 +1593,13 @@ defmodule Loopex.Runtime.SessionState do
   @doc false
   def propose_selected_maintenance_request(state, now, check) do
     case selected_maintenance_source_result(state, now, check) do
+      {:error, :compaction_excerpt_budget_too_small} = result
+      when is_map(state.pending_compact) ->
+        propose_standalone_compact_failure(state, standalone_source_failure(result), now, check)
+
+      {:refused, %{} = _measurement} = result when is_map(state.pending_compact) ->
+        propose_standalone_compact_failure(state, standalone_source_failure(result), now, check)
+
       {:error, :compaction_excerpt_budget_too_small}
       when is_nil(state.pending_compact) ->
         propose_maintenance_source_refusal(state, now, check)
@@ -1615,6 +1648,32 @@ defmodule Loopex.Runtime.SessionState do
       _ -> {:error, :invalid_context_refusal}
     end
   end
+
+  # Concept: standalone preparation retains the accepted measured or named refusal.
+  # Technical depth: the zero-attempt result reselects the same frozen source at
+  # its recorded clock. A captured system ceiling is maintenance scope; an
+  # already-versioned whole-session minimum refusal retains ordinary scope.
+  defp standalone_source_failure({:error, :compaction_excerpt_budget_too_small}),
+    do: %{
+      "version" => 2,
+      "category" => "context_preparation_failed",
+      "retryable" => false,
+      "measurement_scope" => nil,
+      "cause" => "compaction_excerpt_budget_too_small"
+    }
+
+  defp standalone_source_failure({:refused, %{"version" => 2} = failure}), do: failure
+
+  defp standalone_source_failure({:refused, raw}),
+    do:
+      Map.take(raw, ~w(dimension observed limit))
+      |> Map.merge(%{
+        "version" => 2,
+        "category" => "context_budget_exceeded",
+        "retryable" => false,
+        "measurement_scope" => "maintenance",
+        "hard_limit" => raw["limit"]
+      })
 
   defp selected_maintenance_source_result(%{pending_compact: %{}} = state, now, check) do
     with {:ok, episode} <- maintenance_source_episode(state, now, check),
@@ -4352,7 +4411,9 @@ defmodule Loopex.Runtime.SessionState do
            "failure" => failure,
            "usage" => charged["usage"],
            "cleanup" =>
-             if(episode["settlement"]["termination"] == "owner_loss",
+             if(
+               episode["settlement"]["termination"] == "owner_loss" or
+                 episode["attempt_owner_epoch"] != state.owner_epoch,
                do: "unknown",
                else: "confirmed"
              )
@@ -9040,6 +9101,7 @@ defmodule Loopex.Runtime.SessionState do
         |> Map.merge(%{
           "stage" => "model_attempt_open",
           "model_attempt" => 2,
+          "attempt_owner_epoch" => state.owner_epoch,
           "attempts" => episode["attempts"] + 1
         })
 
@@ -9049,6 +9111,10 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: a successor cannot confirm a predecessor's provider cleanup.
+  # Technical depth: the derived attempt owner epoch comes from the authenticated
+  # journal stamp at open, not a new payload field. Replay retains it across
+  # ownership changes, including when abort/deadline wins over owner-loss ending.
   defp open_first_maintenance_attempt(state, record) do
     with :ok <- ProviderAttempt.validate_opened(record),
          %{
@@ -9079,6 +9145,7 @@ defmodule Loopex.Runtime.SessionState do
           "source_excerpted" => staged["source_excerpted"],
           "operation_id" => staged["operation_id"],
           "model_attempt" => 1,
+          "attempt_owner_epoch" => state.owner_epoch,
           "model_termination" => nil
         })
 

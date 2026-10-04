@@ -1230,8 +1230,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          %{phase: :ready, superseded: false} = state
        ) do
     case {state.durable.pending_compact, state.durable.maintenance_episodes[identity]} do
-      {%{"episode_id" => ^identity}, %{"stage" => "source_preparation", "deadline" => ^cutoff}} ->
-        advance_compact(disarm_compact_deadline(state))
+      {%{"episode_id" => ^identity}, %{"deadline" => ^cutoff}} ->
+        advance_work(disarm_compact_deadline(state))
 
       _ ->
         {:noreply, state}
@@ -3426,33 +3426,59 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp advance_work(state), do: {:noreply, state}
 
+  # Concept: standalone work follows its command through the shared maintenance path.
+  # Technical depth: the tagged command key is transient ownership for workers,
+  # permits and cleanup. Durable requests retain only the actual episode/summary
+  # identity; no run, run deadline, ordinary stream or run accounting is created.
   defp advance_compact(state) do
     pending = state.durable.pending_compact
     identity = pending["episode_id"]
     episode = state.durable.maintenance_episodes[identity]
+    key = {:compact, pending["command_id"]}
+    now = System.system_time(:millisecond)
 
     cond do
+      cleaning_up?(state, key) ->
+        {:noreply, state}
+
+      maintenance_open_attempt?(state.durable, key) and
+          (is_binary(pending["abort_command_id"]) or
+             (not compact_resume_paused?(state, identity) and now >= episode["deadline"])) ->
+        purpose = if is_binary(pending["abort_command_id"]), do: :abort, else: {:deadline, %{}}
+
+        case begin_model_termination(state, key, purpose) do
+          {:ok, next} -> {:noreply, next}
+          {:error, reason} -> refuse_model_termination(state, reason)
+        end
+
       is_binary(pending["abort_command_id"]) ->
-        state = cancel_effect_free_preparation(state, identity, :compact_preparation)
+        state =
+          state
+          |> cancel_effect_free_preparation(identity, :compact_preparation)
+          |> cancel_effect_free_preparation(key, :maintenance_preparation)
 
         finish_undispatched_compact(
           state,
           %{"category" => "cancelled", "retryable" => false},
-          System.system_time(:millisecond)
+          now
         )
 
       compact_resume_paused?(state, identity) ->
         {:noreply, state}
 
+      is_map(episode) and now >= episode["deadline"] ->
+        state = cancel_effect_free_preparation(state, key, :maintenance_preparation)
+        observed = System.system_time(:millisecond)
+
+        finish_undispatched_compact(
+          state,
+          compact_deadline_failure(episode["deadline"], episode["accounting_source"], observed),
+          observed
+        )
+
       is_map(episode) ->
-        if System.system_time(:millisecond) >= episode["deadline"],
-          do:
-            finish_undispatched_compact(
-              state,
-              compact_deadline_failure(episode["deadline"]),
-              System.system_time(:millisecond)
-            ),
-          else: {:noreply, arm_compact_deadline(state, identity, episode["deadline"])}
+        state = arm_compact_deadline(state, identity, episode["deadline"])
+        advance_compact_episode(state, episode, %{run_id: nil, owner_key: key})
 
       map_size(state.in_flight) > 0 ->
         {:noreply, state}
@@ -3461,6 +3487,53 @@ defmodule Loopex.Runtime.SessionCoordinator do
         start_compact_preparation(state, pending)
     end
   end
+
+  defp advance_compact_episode(state, %{"stage" => "source_preparation"}, work),
+    do: start_maintenance_preparation(state, work)
+
+  defp advance_compact_episode(%{model: model} = state, %{"stage" => "model_attempt_open"}, work)
+       when is_map(model), do: start_model_work(state, work)
+
+  defp advance_compact_episode(state, %{"stage" => "model_retry_permitted"}, _work) do
+    case SessionState.propose_maintenance_attempt_open(state.durable) do
+      {:ok, proposal} -> commit_compact_phase(state, {:ok, proposal})
+      {:error, :maintenance_bounds_exhausted} -> {:noreply, state}
+      {:error, reason} -> {:stop, {:compact_retry_failed, reason}, state}
+    end
+  end
+
+  defp advance_compact_episode(state, %{"stage" => "checkpoint_pending"}, _work) do
+    result =
+      SessionState.preflight_maintenance_checkpoint(
+        state.durable,
+        System.system_time(:millisecond),
+        checkpoint_clock_check(state, {:compact, state.durable.pending_compact["command_id"]})
+      )
+
+    case result do
+      {:error, :compaction_no_progress} ->
+        finish_undispatched_compact(
+          state,
+          compact_preparation_failure("compaction_no_progress", "ordinary"),
+          System.system_time(:millisecond)
+        )
+
+      {:error, :run_deadline_reached} ->
+        send(self(), :advance_work)
+        {:noreply, state}
+
+      {:ok, _candidate} ->
+        # Concept: checkpoint emission requires the pending owner-schema decision.
+        # Technical depth: the settled summary stays bounded by the same cutoff;
+        # this branch writes no unapproved private record or public owner field.
+        {:noreply, state}
+
+      {:error, reason} ->
+        {:stop, {:compact_checkpoint_failed, reason}, state}
+    end
+  end
+
+  defp advance_compact_episode(state, _episode, _work), do: {:noreply, state}
 
   defp compact_resume_paused?(%{prepared: nil}, _), do: false
   defp compact_resume_paused?(%{prepared: %{state: :spent}}, _), do: false
@@ -3610,19 +3683,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
       "cause" => cause
     }
 
-  defp compact_deadline_failure(cutoff),
-    do: %{
-      "category" => "bound_reached",
-      "retryable" => false,
-      "bound" => "deadline_ms",
-      "observed" => System.system_time(:millisecond),
-      "declared_limit" => cutoff,
-      "accounting_source" => nil
-    }
+  defp compact_deadline_failure(
+         cutoff,
+         accounting_source \\ nil,
+         observed \\ System.system_time(:millisecond)
+       ),
+       do: %{
+         "category" => "bound_reached",
+         "retryable" => false,
+         "bound" => "deadline_ms",
+         "observed" => observed,
+         "declared_limit" => cutoff,
+         "accounting_source" => accounting_source
+       }
 
   defp commit_compact_phase(state, {:ok, proposal}) do
+    key = {:compact, state.durable.pending_compact["command_id"]}
+
     case commit_internal(state, proposal) do
       {:ok, next} ->
+        next =
+          if maintenance_open_attempt?(next.durable, key),
+            do: adopt_run(next, key),
+            else: clear_model_cleanup(next, key)
+
         send(self(), :advance_work)
         {:noreply, next}
 
@@ -3897,7 +3981,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # proposal. Join its exact monitor before adoption; any intervening journal
   # mutation discards that evidence and reselects against current truth.
   defp start_maintenance_preparation(state, work) do
-    if map_size(state.in_flight) > 0 or cleaning_up?(state, work.run_id) do
+    key = model_owner_key(work)
+
+    if map_size(state.in_flight) > 0 or cleaning_up?(state, key) do
       {:noreply, state}
     else
       durable = state.durable
@@ -3905,10 +3991,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
       run_deadline = durable.deadlines[work.run_id]
 
       {deadline, origin} =
-        if episode["attempts"] == 0 and
-             (is_nil(run_deadline) or episode["preparation_deadline"] < run_deadline),
-           do: {episode["preparation_deadline"], :preparation},
-           else: {run_deadline, :run}
+        cond do
+          Map.has_key?(work, :owner_key) ->
+            {episode["deadline"], :compact}
+
+          episode["attempts"] == 0 and
+              (is_nil(run_deadline) or episode["preparation_deadline"] < run_deadline) ->
+            {episode["preparation_deadline"], :preparation}
+
+          true ->
+            {run_deadline, :run}
+        end
 
       check = fn ->
         if System.system_time(:millisecond) < deadline,
@@ -3939,13 +4032,51 @@ defmodule Loopex.Runtime.SessionCoordinator do
         journal_version: durable.journal_version,
         timer:
           arm_slice(
-            {:maintenance_preparation_deadline, task.ref, work.run_id},
+            {:maintenance_preparation_deadline, task.ref, key},
             deadline - System.system_time(:millisecond)
           )
       }
 
       {:noreply,
-       put_in_flight(state, task.ref, {:maintenance_preparation, work.run_id, task.pid, metadata})}
+       put_in_flight(state, task.ref, {:maintenance_preparation, key, task.pid, metadata})}
+    end
+  end
+
+  defp finish_maintenance_preparation(state, {:compact, command_id}, metadata, result) do
+    cond do
+      state.superseded ->
+        continue_after_owner_loss(state)
+
+      not match?(%{"command_id" => ^command_id}, state.durable.pending_compact) ->
+        {:noreply, state}
+
+      state.durable.journal_version != metadata.journal_version ->
+        send(self(), :advance_work)
+        {:noreply, state}
+
+      System.system_time(:millisecond) >= metadata.deadline ->
+        advance_work(state)
+
+      true ->
+        case result do
+          {:ok, proposal} ->
+            commit_compact_phase(state, {:ok, proposal})
+
+          {:error, :maintenance_bounds_exhausted} ->
+            {:noreply, state}
+
+          {:error, reason}
+          when reason in [:compaction_preparation_deadline, :standalone_deadline_reached] ->
+            send(self(), :advance_work)
+            {:noreply, state}
+
+          _ ->
+            finish_undispatched_compact(
+              state,
+              compact_preparation_failure("context_projection_invalid", nil),
+              System.system_time(:millisecond)
+            )
+        end
     end
   end
 
@@ -4013,6 +4144,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  defp finish_maintenance_preparation_cutoff(state, {:compact, _}, %{origin: :compact}),
+    do: advance_work(state)
+
   defp finish_maintenance_preparation_cutoff(state, run_id, %{origin: :run}),
     do: finish_at_deadline(state, run_id)
 
@@ -4028,6 +4162,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
       end
 
     commit_context_preparation_failure(state, work.run_id, cause)
+  end
+
+  defp maintenance_open_attempt?(durable, {:compact, command_id}) do
+    match?(%{"command_id" => ^command_id}, durable.pending_compact) and
+      match?(
+        %{
+          :kind => "standalone_maintenance_episode_admitted_v1",
+          "command_id" => ^command_id,
+          "stage" => "model_attempt_open"
+        },
+        Map.get(durable.maintenance_episodes, durable.active_maintenance)
+      )
   end
 
   defp maintenance_open_attempt?(durable, run_id) do
@@ -5133,6 +5279,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  defp committed_deadline(state, {:compact, command_id}) do
+    case state.durable.maintenance_episodes[state.durable.active_maintenance] do
+      %{
+        :kind => "standalone_maintenance_episode_admitted_v1",
+        "command_id" => ^command_id,
+        "deadline" => cutoff
+      } ->
+        cutoff
+
+      _ ->
+        nil
+    end
+  end
+
   defp committed_deadline(state, run_id) do
     case SessionState.accounting(state.durable, run_id) do
       {%{deadline: deadline}, _charged} -> deadline
@@ -5158,6 +5318,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # run stops owning a live provider call, so a finished run leaves nothing
   # scheduled behind it and a run whose turn moved on to a tool is bounded by the
   # deadline the job itself carries rather than by a second clock here.
+  defp arm_deadline(state, {:compact, _} = key),
+    do:
+      arm_compact_deadline(
+        state,
+        state.durable.active_maintenance,
+        committed_deadline(state, key)
+      )
+
   defp arm_deadline(state, run_id) do
     state = disarm_deadline(state, run_id)
 
@@ -5189,6 +5357,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp arm_slice(message, remaining),
     do: Process.send_after(self(), message, min(max(remaining, 0), @timer_slice_ms))
+
+  defp disarm_deadline(state, {:compact, _}), do: disarm_compact_deadline(state)
 
   defp disarm_deadline(state, run_id) do
     case Map.pop(state.deadline_timers, run_id) do
@@ -5239,16 +5409,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # distinguishes that from a call the transport never entered — so a successor
   # settles it dispatched-or-unknown with owner-loss evidence and opens no
   # second call.
+  defp model_owner_key(%{owner_key: key}), do: key
+  defp model_owner_key(work), do: work.run_id
+
   defp start_model_work(state, work) do
+    key = model_owner_key(work)
+
     cond do
-      in_flight?(state, :model, work.run_id) ->
+      in_flight?(state, :model, key) ->
         {:noreply, state}
 
-      cleaning_up?(state, work.run_id) ->
+      cleaning_up?(state, key) ->
         {:noreply, state}
 
-      not MapSet.member?(state.adopted, work.run_id) ->
-        settle_model_attempt(state, work.run_id, :owner_loss)
+      not MapSet.member?(state.adopted, key) ->
+        settle_model_attempt(state, key, :owner_loss)
 
       true ->
         dispatch_provider_attempt(state, provider_work(state, work))
@@ -5256,7 +5431,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp provider_work(state, work) do
-    if maintenance_open_attempt?(state.durable, work.run_id) do
+    if maintenance_open_attempt?(state.durable, model_owner_key(work)) do
       episode = state.durable.maintenance_episodes[state.durable.active_maintenance]
 
       {:ok, opened} =
@@ -5294,7 +5469,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # timeout. Since a permit may already have been sent, its expiry result is
   # settled conservatively rather than treated as pre-transport proof.
   defp dispatch_provider_attempt(state, work) do
-    run_id = work.run_id
+    run_id = model_owner_key(work)
     request = work.request
     module = state.model.module
     options = state.model.options
@@ -5316,7 +5491,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # span measures is exactly the host's own `complete/3`.
     identities = %{
       session_id: state.session_id,
-      run_id: run_id,
+      run_id: work.run_id,
       attempt: work.model_attempt,
       model: Map.get(request, :model),
       provider: inspect(module)
@@ -6561,7 +6736,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     proposal =
       if maintenance_open_attempt?(state.durable, run_id),
-        do: SessionState.propose_maintenance_attempt_settled(state.durable, outcome),
+        do:
+          SessionState.propose_maintenance_attempt_settled(
+            state.durable,
+            outcome,
+            System.system_time(:millisecond)
+          ),
         else: SessionState.propose_model_attempt_settled(state.durable, run_id, outcome)
 
     case proposal do
@@ -6670,6 +6850,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # plane, emitted after the settlement is retained so it never announces
   # something the journal does not hold. Nothing durable, public, or
   # progress-bearing depends on it.
+  defp report_evidence_only_settlement(_state, {:compact, _}, _settlement), do: :ok
+
   defp report_evidence_only_settlement(state, run_id, %{"conversation" => "evidence_only"}) do
     emit_diagnostic(state, %{
       "kind" => "late_result_discarded",
@@ -6680,6 +6862,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp report_evidence_only_settlement(_state, _run_id, _settlement), do: :ok
+
+  defp clear_model_cleanup(state, {:compact, _} = key) do
+    state = %{state | pending_cleanup: Map.delete(state.pending_cleanup, key)}
+
+    if is_nil(state.durable.pending_compact),
+      do: %{
+        disarm_compact_deadline(state)
+        | adopted: MapSet.delete(state.adopted, key),
+          permit_requested: MapSet.delete(state.permit_requested, key)
+      },
+      else: state
+  end
 
   defp clear_model_cleanup(state, run_id),
     do: %{state | pending_cleanup: Map.delete(state.pending_cleanup, run_id)}
@@ -7458,6 +7652,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # recovered-open attempt stays ambiguous. A request whose Control reply was
   # lost is in `permit_requested`, and stays ambiguous for the same reason
   # Control's own death does.
+  defp unstarted_attempt_outcome(state, {:compact, _} = key) do
+    if MapSet.member?(state.adopted, key),
+      do:
+        if(MapSet.member?(state.permit_requested, key),
+          do: :dispatched_or_unknown,
+          else: :not_dispatched
+        ),
+      else: :owner_loss
+  end
+
   defp unstarted_attempt_outcome(state, run_id) do
     if MapSet.member?(state.adopted, run_id) and
          not MapSet.member?(state.permit_requested, run_id) do
@@ -8751,6 +8955,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp dispatch_result(state, kind, run_id, result) when kind in [:model, :executor],
     do: dispatch_current_result(state, kind, run_id, result)
+
+  defp dispatch_current_result(state, :model, {:compact, _} = key, result) do
+    if maintenance_open_attempt?(state.durable, key),
+      do: accept_model_result(state, key, result),
+      else: {:noreply, state}
+  end
 
   defp dispatch_current_result(state, kind, run_id, result) do
     if Map.has_key?(state.durable.pending_work, run_id) do

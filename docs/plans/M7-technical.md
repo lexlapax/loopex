@@ -1869,6 +1869,37 @@ abort/expiry and cancellation at every probe stop. These are pure measurement
 and replay proofs; the pending checkpoint-owner schema decision and live
 standalone dispatch/checkpoint/completion integration remain open.
 
+Live standalone source/dispatch/failure integration now uses the tagged actual
+command key only in transient worker, adoption, permit and cleanup maps. Durable
+requests retain the authenticated episode/summary operation identity; no run,
+run deadline, ordinary stream or run accounting is introduced. Source workers
+use the captured episode cutoff and propose against one retained journal head;
+exact DOWN precedes adoption. The shared Control permit and provider guard
+perform actual callback dispatch and cleanup. Named excerpt refusals retain nil
+measurement scope; frozen system overflow retains exact maintenance-scope
+measurements. Both complete with zero attempts before provider intent.
+
+Invalid and non-progressing summaries retain reported usage once. One proven
+not-dispatched retry reuses the same request; actual abort and expiry collect
+late usage and join the provider callback/tree. Useful summaries remain pending
+under the original cutoff until the checkpoint-owner decision; expiry ends them
+without another settlement. The attempt owner epoch is derived from the existing
+authenticated journal stamp at open, adding no persistent field. A successor
+cannot confirm predecessor cleanup, including when its new abort/deadline wins
+over owner loss. Prepared inherited attempts remain unchanged after their cutoff
+until activation, then end with conservative spending and unknown cleanup.
+Twenty new live cases prove these paths, source-worker loss/abort/deadline joins
+and all three Store uncertainty phases for request/open and failed settlement.
+The ten-file selection passes 302 cases with two existing exclusions on both
+supported pairs; complete outputs, development failures and the floor test
+warning repair are indexed in the implementation checklist. The complete current
+Core suite passes 1,217 cases with eight existing exclusions in 216.2 seconds;
+warning-free compilation, formatting, bootstrap/status, compiled documentation,
+dependency and version checks also pass. These are development proofs, not a
+full fast check of these bytes, provider lanes or closure matrix. Successful standalone
+checkpoint emission, continuation/results, snapshots, complete runtime cleanup
+and real-provider evidence remain open. No complete T07 workflow is claimed.
+
 Current model requests admit only `loopex.model_request.v2` with receipt
 revision 4, its mandatory null/non-null continuation cost and current estimator.
 Request v1 and receipt revisions 2/3 readers and the per-run lineage bypass are
