@@ -325,6 +325,29 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done within the open T05 snapshot join: the existing paged scan retains one
+  maintenance view at its tail and one at the requested public cursor. Both
+  actual owner kinds use the closed native codec. Duplicate unchanged rows,
+  episode/owner replacement, mismatched runs and overlapping questions refuse.
+  Recovery compares that public reduction with its independent private replay.
+  The expanded public snapshot is not emitted yet; generation-3/4 publication,
+  manifests and independent live workflows remain open. No checklist row closes
+  from this internal scan step, and task counts remain unchanged.
+
+  Focused maintenance, source, recovery and attachment tests pass on both
+  supported pairs: 320 passing with two long-bound exclusions. Current time
+  13.7 seconds, output `/private/tmp/loopex-m7-maintenance-scan-current-v2.log`,
+  SHA-256 `3afc432fe48ef75dc73502d73fe529a146fca9606fb0baee9d22b6e7272e7659`;
+  floor time 13.0 seconds, output
+  `/private/tmp/loopex-m7-maintenance-scan-floor-v2.log`, SHA-256
+  `ea64eb8228a74e4516583ef15a15b644f3149b872426769584c55a9f1fb8436f`.
+  Six new reducer tests cover every cursor and page width, admission-bound
+  retention, exact quantities above uint64, private-field refusal and invalid
+  transitions. The initial 87-case current run also passed in 5.5 seconds,
+  `/private/tmp/loopex-m7-maintenance-scan-current-v1.log`, SHA-256
+  `ba2b41840b75ddf366f65053192d424464b353d9808b15c69d56f16a56fab406`.
+  This is focused evidence, not a new full integration or release run.
+
 - Done: the clean pushed event-writer candidate
   `da1ba2b49a510d43c33dfd30047ade17def81d9d` passed its one full current-pair
   `bash scripts/check.sh` integration run. All eleven application suites pass,

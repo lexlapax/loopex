@@ -376,7 +376,8 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, event_sequence} <- replay_event_sequences(events),
          true <- expected_public_history?(events, state.expected_events),
          {:ok, projection} <- replay_projection(events, event_sequence),
-         true <- projection.active_run_id == state.active_run_id do
+         true <- projection.active_run_id == state.active_run_id,
+         true <- projection.active_maintenance == maintenance_public_view(state) do
       {:ok, %{state | event_sequence: event_sequence}}
     else
       false -> {:error, :private_public_projection_mismatch}
@@ -620,14 +621,14 @@ defmodule Loopex.Runtime.SessionState do
 
   The requested anchor is either a non-negative durable cursor or `nil` for the
   Store tail observed by the scan. The accumulator retains only positions and
-  active-run projection, never event pages.
+  run, interaction and maintenance projections, never event pages.
   """
   @spec start_snapshot_scan(binary(), non_neg_integer() | nil) :: {:ok, map()} | {:error, term()}
   def start_snapshot_scan(session_id, requested_anchor)
       when is_binary(session_id) and
              (is_nil(requested_anchor) or
                 (is_integer(requested_anchor) and requested_anchor >= 0)) do
-    anchor_projection = if requested_anchor == 0, do: {:set, {nil, nil}}, else: :pending
+    anchor_projection = if requested_anchor == 0, do: {:set, {nil, nil, nil}}, else: :pending
 
     {:ok,
      %{
@@ -636,6 +637,7 @@ defmodule Loopex.Runtime.SessionState do
        tail: 0,
        active_run: nil,
        open_interaction: nil,
+       active_maintenance: nil,
        anchor_projection: anchor_projection
      }}
   end
@@ -677,7 +679,13 @@ defmodule Loopex.Runtime.SessionState do
   to distinguish historical backlog from live overflow.
   """
   @spec finish_snapshot_scan(map()) ::
-          {:ok, %{required(:snapshot) => map(), required(:tail) => non_neg_integer()}}
+          {:ok,
+           %{
+             required(:snapshot) => map(),
+             required(:tail) => non_neg_integer(),
+             required(:open_interaction) => map() | nil,
+             required(:active_maintenance) => map() | nil
+           }}
           | {:error, term()}
   def finish_snapshot_scan(%{
         session_id: session_id,
@@ -685,6 +693,7 @@ defmodule Loopex.Runtime.SessionState do
         tail: tail,
         active_run: active_run,
         open_interaction: open_interaction,
+        active_maintenance: active_maintenance,
         anchor_projection: anchor_projection
       }) do
     case {requested_anchor, anchor_projection} do
@@ -693,15 +702,18 @@ defmodule Loopex.Runtime.SessionState do
          %{
            tail: tail,
            snapshot: public_snapshot(session_id, tail, active_run),
-           open_interaction: open_interaction
+           open_interaction: open_interaction,
+           active_maintenance: active_maintenance
          }}
 
-      {anchor, {:set, {anchor_active_run, anchor_interaction}}} when anchor <= tail ->
+      {anchor, {:set, {anchor_active_run, anchor_interaction, anchor_maintenance}}}
+      when anchor <= tail ->
         {:ok,
          %{
            tail: tail,
            snapshot: public_snapshot(session_id, anchor, anchor_active_run),
-           open_interaction: anchor_interaction
+           open_interaction: anchor_interaction,
+           active_maintenance: anchor_maintenance
          }}
 
       {_anchor, _projection} ->
@@ -10241,9 +10253,14 @@ defmodule Loopex.Runtime.SessionState do
   defp replay_projection(events, anchor) do
     with {:ok, scan} <- start_snapshot_scan("replay", anchor),
          {:ok, scan} <- scan_snapshot_page(scan, events),
-         {:ok, %{snapshot: %{active_run_id: active_run_id, event_sequence: ^anchor}}} <-
+         {:ok,
+          %{
+            snapshot: %{active_run_id: active_run_id, event_sequence: ^anchor},
+            active_maintenance: active_maintenance
+          }} <-
            finish_snapshot_scan(scan) do
-      {:ok, %{active_run_id: active_run_id, sequence: anchor}}
+      {:ok,
+       %{active_run_id: active_run_id, active_maintenance: active_maintenance, sequence: anchor}}
     else
       {:error, :cursor_expired} -> {:error, :snapshot_cursor_unavailable}
       {:error, reason} -> {:error, reason}
@@ -10253,12 +10270,14 @@ defmodule Loopex.Runtime.SessionState do
   defp advance_snapshot_scan(scan, event) do
     expected = scan.tail + 1
 
-    with {:ok, active_run} <- advance_public_projection(scan.active_run, event, expected) do
-      open_interaction = advance_open_interaction(scan.open_interaction, event)
+    open_interaction = advance_open_interaction(scan.open_interaction, event)
 
+    with {:ok, active_run} <- advance_public_projection(scan.active_run, event, expected),
+         {:ok, maintenance} <- advance_maintenance_projection(scan.active_maintenance, event),
+         :ok <- valid_public_maintenance_owner(maintenance, active_run, open_interaction) do
       anchor_projection =
         if scan.requested_anchor == expected,
-          do: {:set, {active_run, open_interaction}},
+          do: {:set, {active_run, open_interaction, maintenance}},
           else: scan.anchor_projection
 
       {:ok,
@@ -10267,10 +10286,55 @@ defmodule Loopex.Runtime.SessionState do
          | tail: expected,
            active_run: active_run,
            open_interaction: open_interaction,
+           active_maintenance: maintenance,
            anchor_projection: anchor_projection
        }}
     end
   end
+
+  # Concept: historical maintenance comes from the same cursor as the run view.
+  # Technical depth: retain one allowlisted view, plus the requested anchor's
+  # view, rather than private episodes or event pages. Shape validation uses the
+  # shared native codec. An active episode cannot be replaced by another owner
+  # or episode, repeated unchanged rows are impossible, and run/question facts
+  # cannot overlap maintenance. Recovery also compares this public reduction
+  # with its independently reconstructed private capture.
+  defp advance_maintenance_projection(current, %{kind: "context.maintenance_changed"} = event) do
+    payload = Map.drop(event, [:kind, :event_id, :event_sequence])
+
+    with {:ok, _} <- LoopexProtocol.Session.MaintenanceView.encode_wire(payload),
+         next = payload["active_maintenance"],
+         true <- current != next,
+         true <- same_public_maintenance_episode?(current, next) do
+      {:ok, next}
+    else
+      :error -> {:error, :invalid_public_maintenance_view}
+      false -> {:error, :invalid_public_maintenance_transition}
+    end
+  end
+
+  defp advance_maintenance_projection(current, _event), do: {:ok, current}
+
+  defp same_public_maintenance_episode?(nil, _next), do: true
+  defp same_public_maintenance_episode?(_current, nil), do: true
+
+  defp same_public_maintenance_episode?(current, next),
+    do: current["episode_id"] == next["episode_id"] and current["owner"] == next["owner"]
+
+  defp valid_public_maintenance_owner(nil, _run, _interaction), do: :ok
+
+  defp valid_public_maintenance_owner(
+         %{"owner" => %{"kind" => "run", "id" => id}},
+         {id, _phase},
+         nil
+       ),
+       do: :ok
+
+  defp valid_public_maintenance_owner(%{"owner" => %{"kind" => "compact"}}, nil, nil),
+    do: :ok
+
+  defp valid_public_maintenance_owner(_maintenance, _run, _interaction),
+    do: {:error, :invalid_public_maintenance_transition}
 
   # Concept: the question that is open at this point in history, if any.
   #
