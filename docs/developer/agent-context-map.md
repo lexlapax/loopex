@@ -6563,3 +6563,23 @@ approval resolves checkpoint ownership only. The maintenance reply-reserve
 refusal and stalled-stderr fixture cutoff remain separate pending decisions.
 Current restart, unknown-commit resolution and backup/restore remain required;
 no check is dropped, milestone closed or publication authorized.
+
+<a id="disposition-m7-maintenance-reply-reserve-2026-10-03"></a>
+### M7 maintenance reply-reserve refusal, 2026-10-03
+
+The maintainer selected the narrow preparation-failure option in this chat.
+Amend ADR 0043's closed version-2 `context_preparation_failed` cause union with
+`maintenance_reply_reserve_unavailable`. It applies only when turns remain and
+committed remaining run tokens are positive but below the fixed 1,024-token
+summary reply reserve. Derive that interval from retained accounting and the
+captured configuration; accept no caller-supplied explanation. Commit the
+episode terminal, v2 preparation refusal and failed run terminal atomically,
+retain the actual usage, and dispatch no summary request. Actual token/turn
+exhaustion keeps its existing bound outcome; no `reply_reserve` bound is added.
+A new run with sufficient budget is the remedy. The selected amendment is in
+`/private/tmp/loopex-m7-maintenance-reserve-decision.md`, SHA-256
+`781a4f41a08564326c3dceba2660aa5f871cf436611bce8fd06f4c961047453d`.
+Update the current closed schema, replay, live owner, ADR/plan proof mappings
+and public codec/vector fixtures together. This approval resolves reply-reserve
+refusal only; the stalled-stderr startup cutoff still needs its separate
+decision. No budget is inflated, check dropped or milestone closed.

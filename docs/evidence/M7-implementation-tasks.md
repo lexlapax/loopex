@@ -330,9 +330,10 @@ did not resolve them. No paid provider calls were made during this check.
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  213 done / 9 todo. The goal remains active. The maintainer requested the
-  three decisions one at a time and selected explicit checkpoint ownership.
-  The reply-reserve refusal and stalled-stderr cutoff still await answers.
+  213 done / 10 todo. The goal remains active. The maintainer requested the
+  three decisions one at a time and selected explicit checkpoint ownership
+  and the narrow reply-reserve preparation refusal. Only the stalled-stderr
+  cutoff still awaits an answer.
   No dependent contract implementation or test/check process is running.
 
 - Approved: explicit standalone checkpoint ownership. The maintainer selected
@@ -343,10 +344,24 @@ did not resolve them. No paid provider calls were made during this check.
   restart/replay and uncertain-commit proof. Implementing the selected private
   kind, public projections, current schemas and independent vectors remains
   under T07/T05; this approval closes no implementation checkbox. The other
-  two decisions remain pending and will be asked separately.
+  two decisions were pending at this checkpoint; the reply-reserve choice is
+  now recorded below and the stalled-stderr cutoff will be asked separately.
   The documentation-only check passes in 18 reported seconds. Complete output:
   `/private/tmp/loopex-m7-checkpoint-owner-decision-docs-v1.log`, SHA-256
   `8e6f27409661195b4c4a227a1ff7ebf8dfd006fed2cb809e31cc82d815c8c73f`.
+
+- Approved: `maintenance_reply_reserve_unavailable` in the existing v2
+  preparation-failure cause union. The
+  [disposition](../developer/agent-context-map.md#disposition-m7-maintenance-reply-reserve-2026-10-03)
+  binds the exact retained proposal. It preserves actual usage and zero summary
+  dispatch when positive remaining tokens cannot fit the fixed 1,024-token
+  reserve; actual budget/turn exhaustion keeps its existing bound outcome.
+  The added T07 implementation/proof subtask is open. No contract implementation
+  or checkbox is completed by the approval. The stalled-stderr startup cutoff
+  remains pending.
+  The documentation-only check and reporter pass, 18 reported check seconds.
+  Complete output: `/private/tmp/loopex-m7-maintenance-reserve-decision-docs-v1.log`,
+  SHA-256 `81ed6e34bcdbd03aafca3603cddcf56dd65696bf3cd91d92df78557fa81d6403`.
 
 - Done: the single full current-pair fast check of clean pushed
   `6058eb95b7b312905e55c7baa0401e6af18ceba1` passes all eleven application
@@ -8350,6 +8365,8 @@ or check was relaxed.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
 
 ### Added implementation subtasks
+
+- [ ] Implement the approved maintenance_reply_reserve_unavailable v2 preparation refusal when positive remaining run tokens cannot fit the fixed summary reserve; preserve actual budget/turn exhaustion precedence, actual usage, zero summary dispatch and atomic episode/refusal/run ending, and prove exact replay, forged-cause refusal, boundary vectors and live recovery on both supported pairs.
 
 - [x] Join standalone captured source preparation and guarded provider dispatch to the existing actual-command owner path; prove zero-attempt measured/named refusals, reported/conservative spending, exact not-dispatched retry, source/provider joins, prepared-expiry pause and all three request/failed-settlement uncertainty phases on both toolchains, without a synthetic run or new checkpoint schema. Successful checkpoint continuation/results, snapshots and full standalone workflow remain open.
 
