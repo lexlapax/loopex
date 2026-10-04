@@ -183,6 +183,8 @@ defmodule Loopex.Runtime.MaintenanceConfigurationTest do
           runtime_id: id,
           store: store,
           context_token_budget: 8192,
+          session_creation_defaults:
+            Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
           maintenance_instructions: instructions,
           maintenance_model: selection
         )

@@ -51,6 +51,15 @@ defmodule Loopex.AgentLoopFixture do
       Loopex.ConfiguredGenesisFixture.configuration()
       |> Map.put("model", model_id)
       |> Map.put("max_tokens", Keyword.get(options, :max_tokens, 256))
+      |> Map.put("context_token_budget", Keyword.get(options, :context_token_budget, 8_192))
+      |> Map.put("system_class_tokens", Keyword.get(options, :system_class_tokens, 5_000))
+      |> put_in(
+        ["budget_origins", "context_token_budget"],
+        if(Keyword.has_key?(options, :context_token_budget),
+          do: "explicit",
+          else: "unknown_window"
+        )
+      )
       |> put_in(["model_capabilities", "model"], model_id)
       |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
       |> put_in(["provider_mapping", "mapping_revision"], "loopex.test.scripted.mapping.v1")
@@ -104,7 +113,7 @@ defmodule Loopex.AgentLoopFixture do
 
     {:ok, runtime} =
       Loopex.start_link(
-        context_token_budget: 8_192,
+        context_token_budget: Keyword.get(options, :context_token_budget, 8_192),
         session_creation_defaults: creation_defaults(definitions, options),
         runtime_id: Keyword.get(options, :runtime_id, "agent-loop-runtime"),
         store: store,

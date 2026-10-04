@@ -1,3 +1,4 @@
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
@@ -518,6 +519,8 @@ defmodule Loopex.TelemetryBoundaryTest do
         Keyword.merge(
           [
             context_token_budget: 8_192,
+            session_creation_defaults:
+              Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
             runtime_id: "diagnostics-admission",
             store: store,
             diagnostics_to: self(),

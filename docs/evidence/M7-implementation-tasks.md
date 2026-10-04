@@ -325,6 +325,58 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: migrate the remaining headless Core fixture hosts and scripted
+  cancellation, provider-attempt, resource and skill hosts in twenty-four source
+  files to captured current creation. Request/admission selectors now read the
+  actual configured record kinds, project receipts pin host-instruction
+  version/digest provenance, and prepared recovery proves complete captures
+  with its retained cleanup period. The scripted host retains explicit context
+  ceilings and their origins rather than substituting its default.
+
+  The complete Core diagnostic on clean `fcc47b75286ad89ee765806867c54c843f900a7b`
+  executed 1,274 cases: 1,100 passed and 174 failed, with eight long-bound cases
+  excluded, in 173.4 measured runner seconds. Its complete failed output is
+  `/private/tmp/loopex-m7-fcc47b75-core-caller-scan.log`, SHA-256
+  `38eccbf8e05a7f1aab9e224ac0cdbe21b25057bc5d238b851adfa7a0cdb7306e`;
+  handle `89821` is terminal and collected. It is not integration evidence.
+
+  Both v1 focused outputs execute 275 cases with three failures and four
+  exclusions, in 98.1 current / 97.9 floor runner seconds. Model-route binding
+  and host-instruction provenance corrections preserve their exact assertions.
+  Both v2 outputs execute 455 cases with six failures and five exclusions, in
+  134.1 / 134.0 seconds; all six failures are obsolete resource-record selectors
+  in the skill file. The other 445 cases pass on each pair. After correcting
+  those selectors, the complete ten-case skill file passes on each pair in
+  2.0 / 1.9 seconds. This provides passing focused execution for all 455 affected
+  cases across the unchanged passing files and corrected skill file; the failed
+  aggregate outputs remain failed, not reclassified as passing suites.
+  Handles `40811`, `57334` and `68069` are terminal and collected.
+
+  The exact 65,536-byte complete current genesis is admitted and 65,537 refuses
+  before Store mutation. Cleanup propagation and unsigned bounds retain their
+  original values, phase clocks and process joins. Publication/unknown fences,
+  concurrent command identity, provider permits, zero ambiguous redispatch,
+  resource provenance and physical workspace binding remain asserted. The old
+  nil-capture recovery witness now checks the complete current captures without
+  activation or durable mutation. Seven complete outputs and twenty-four final
+  source identities are retained in
+  `/private/tmp/loopex-m7-core-fixture-migration-proof-inventory.tsv`, SHA-256
+  `3487fd7911695465d5b83a69824b351a9989868410488c6e1414cec026d54138`.
+  Formatting, warning-free compilation, documentation, status, dependency
+  direction, whitespace and the task reporter pass in 16.0 measured seconds.
+  Complete output is retained at
+  `/private/tmp/loopex-m7-core-fixture-migration-metadata-v1.log`, SHA-256
+  `a0cb3d7bb78cb02d25e8bf7f5f4e92079aec9245733cfc81be431e3b88a25608`;
+  handle `76791` is terminal and collected.
+
+  One bounded added T05 subtask closes. T01–T19 originals stay 70 done / 103 todo /
+  6 retired; added work is 244 done / 12 todo. Including T00, originals stay
+  70 / 109 / 7 and added work is 248 / 13. Context-admission fixtures still need
+  migration to valid captured configurations and current receipt/refusal
+  schemas. Superseded genesis/configuration-less decoder removal, edge and
+  transport joins, protocol /3 and /4 and the next full exact-candidate check
+  remain open. No original row closes and no maintainer decision is pending.
+
 - Done: implicit create and lookup consume the approved runtime-local current-v3
   template. Unconfigured implicit creation and superseded explicit genesis refuse
   before Store mutation; the cleanup-only v2 writer is removed. Normalized
@@ -9816,7 +9868,9 @@ or check was relaxed.
 
 - [x] Pin the accepted standalone compact-result schema and literal vectors, and implement an independent Node consumer; prove every closed failure branch, arbitrary exact usage, threshold/accounting relations, opaque checkpoint boundaries and unchanged legacy schema identities on both supported toolchains. Coordinated generation-3/4 contracts and live maintenance remain open.
 
-- [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove v2 genesis and old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate.
+- [x] Migrate headless Core and scripted cancellation/provider/resource/skill fixture hosts to captured creation, retain explicit context origins, current instruction provenance and complete prepared captures, and prove exact complete-genesis byte limits, cleanup bounds, owner handoff, command/retry identity, uncertain publication and resource staging on both toolchains. Retain failed aggregate outputs and the corrected complete skill proof; context-admission fixtures and superseded reader removal remain separate open work.
+
+- [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove v2 genesis and old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop fixture phase is complete; current context-admission fixtures, decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
 

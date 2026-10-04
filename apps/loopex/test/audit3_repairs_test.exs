@@ -479,6 +479,7 @@ defmodule Loopex.Audit3RepairsTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults: Fixture.creation_defaults(fixture.definitions, options),
         runtime_id: "audit3-#{System.unique_integer([:positive])}",
         store: store,
         model: %{

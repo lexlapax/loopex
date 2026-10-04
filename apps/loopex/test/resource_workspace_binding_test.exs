@@ -64,6 +64,12 @@ defmodule Loopex.ResourceWorkspaceBindingTest do
       |> Keyword.update!(:executor, &Map.put(&1, :reference, executor))
       |> Keyword.put(:tools, [Loopex.AgentLoopFixture.tool_definition()])
       |> Keyword.put(:active_tools, ["example.write"])
+      |> Keyword.put(
+        :session_creation_defaults,
+        Loopex.AgentLoopFixture.creation_defaults([Loopex.AgentLoopFixture.tool_definition()],
+          model: "scripted:test"
+        )
+      )
 
     {:ok, writer} = Loopex.start_link(writer_options)
     on_exit(fn -> if Process.alive?(writer.supervisor), do: Loopex.stop(writer) end)

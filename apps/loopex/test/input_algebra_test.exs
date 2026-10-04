@@ -370,7 +370,7 @@ defmodule Loopex.InputAlgebraTest do
     staged_run_ids =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed_v2"))
       |> Enum.map(& &1.payload["run_id"])
 
     assert length(Enum.uniq(staged_run_ids)) == 2,

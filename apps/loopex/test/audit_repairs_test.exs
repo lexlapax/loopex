@@ -1,3 +1,4 @@
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.AuditRepairsTest do
@@ -30,7 +31,7 @@ defmodule Loopex.AuditRepairsTest do
     session_id = create_session!(fixture, "create-fence-attach")
     {:ok, original} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 
-    :ok = M1RuntimeTestStore.delay_after_record(fixture.store_pid, "prompt_admitted_v2", self())
+    :ok = M1RuntimeTestStore.delay_after_record(fixture.store_pid, "prompt_admitted_v3", self())
 
     held =
       Task.async(fn ->
@@ -41,7 +42,7 @@ defmodule Loopex.AuditRepairsTest do
         })
       end)
 
-    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v2", _transition,
+    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v3", _transition,
                     {:committed, _tx_id, _receipt}},
                    5_000
 
@@ -70,7 +71,7 @@ defmodule Loopex.AuditRepairsTest do
     session_id = create_session!(fixture, "create-fence-pump")
     {:ok, reader} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 
-    :ok = M1RuntimeTestStore.delay_after_record(fixture.store_pid, "prompt_admitted_v2", self())
+    :ok = M1RuntimeTestStore.delay_after_record(fixture.store_pid, "prompt_admitted_v3", self())
 
     held =
       Task.async(fn ->
@@ -81,7 +82,7 @@ defmodule Loopex.AuditRepairsTest do
         })
       end)
 
-    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v2", _transition,
+    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v3", _transition,
                     {:committed, _tx_id, _receipt}},
                    5_000
 
@@ -273,6 +274,10 @@ defmodule Loopex.AuditRepairsTest do
       |> Keyword.put(:runtime_id, runtime_id)
       |> Keyword.put(:store, store)
       |> Keyword.put_new(:context_token_budget, 8_192)
+      |> Keyword.put(
+        :session_creation_defaults,
+        Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"])
+      )
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
 

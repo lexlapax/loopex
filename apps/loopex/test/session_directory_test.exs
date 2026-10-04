@@ -1,3 +1,4 @@
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.SessionDirectoryTest do
@@ -39,7 +40,13 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
 
     {:ok, runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: runtime_id,
+        store: store
+      )
 
     on_exit(fn -> stop_runtime(runtime) end)
 
@@ -97,7 +104,13 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
 
     {:ok, creating_runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: runtime_id,
+        store: store
+      )
 
     {:ok, session_id} = Loopex.create_session(creating_runtime, %{}, command_id: "create")
     :ok = SessionDirectory.record_session(state_root, session_id, runtime_id)
@@ -114,7 +127,13 @@ defmodule Loopex.SessionDirectoryTest do
     assert resumed_runtime_id == runtime_id
 
     {:ok, resuming_runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: resumed_runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: resumed_runtime_id,
+        store: store
+      )
 
     on_exit(fn -> stop_runtime(resuming_runtime) end)
 
@@ -241,7 +260,13 @@ defmodule Loopex.SessionDirectoryTest do
     assert state_root == root
 
     {:ok, creator_runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: "runtime-original", store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: "runtime-original",
+        store: store
+      )
 
     on_exit(fn -> stop_runtime(creator_runtime) end)
 
@@ -251,6 +276,8 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, other_runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: "runtime-different",
         store: store
       )
@@ -281,7 +308,13 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
 
     {:ok, runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: runtime_id,
+        store: store
+      )
 
     on_exit(fn -> stop_runtime(runtime) end)
 
@@ -314,7 +347,13 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, runtime_id} = SessionDirectory.runtime_id(root)
 
     {:ok, runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: runtime_id,
+        store: store
+      )
 
     on_exit(fn -> stop_runtime(runtime) end)
 
@@ -339,7 +378,13 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, runtime_id} = SessionDirectory.runtime_id(root)
 
     {:ok, runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: runtime_id,
+        store: store
+      )
 
     on_exit(fn -> stop_runtime(runtime) end)
 
@@ -375,7 +420,13 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, runtime_id} = SessionDirectory.runtime_id(root)
 
     {:ok, runtime} =
-      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: runtime_id,
+        store: store
+      )
 
     on_exit(fn -> stop_runtime(runtime) end)
 

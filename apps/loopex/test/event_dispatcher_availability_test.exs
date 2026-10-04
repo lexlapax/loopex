@@ -1,3 +1,4 @@
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.EventDispatcherAvailabilityTest do
@@ -274,7 +275,13 @@ defmodule Loopex.EventDispatcherAvailabilityTest do
     {:ok, runtime} =
       Loopex.start_link(
         Keyword.merge(
-          [context_token_budget: 8_192, runtime_id: "dispatcher-availability", store: store],
+          [
+            context_token_budget: 8_192,
+            session_creation_defaults:
+              Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+            runtime_id: "dispatcher-availability",
+            store: store
+          ],
           options
         )
       )

@@ -965,7 +965,7 @@ defmodule Loopex.InteractionLifecycleTest do
   defp run_deadline(fixture, session_id) do
     fixture
     |> Fixture.records(session_id)
-    |> Enum.filter(&(&1.payload.kind == "model_request_committed"))
+    |> Enum.filter(&(&1.payload.kind == "model_request_committed_v2"))
     |> List.last()
     |> then(& &1.payload["request"]["deadline"])
   end

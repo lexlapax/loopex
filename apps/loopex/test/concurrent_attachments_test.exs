@@ -1,3 +1,4 @@
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.ConcurrentAttachmentTest do
@@ -12,6 +13,8 @@ defmodule Loopex.ConcurrentAttachmentTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: "concurrent-attachments",
         store: store
       )

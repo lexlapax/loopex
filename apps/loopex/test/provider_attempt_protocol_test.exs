@@ -422,7 +422,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                    5_000
 
     assert Enum.map(transaction.records, &record_kind/1) == [
-             "model_request_committed",
+             "model_request_committed_v2",
              "model_attempt_opened_v1"
            ]
 
@@ -855,8 +855,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     assert Enum.all?(recovery_pages, fn {_after_version, rows} -> length(rows) <= 1 end)
 
-    assert consecutive_page_kinds(recovery_pages, "model_request_committed") == [
-             "model_request_committed",
+    assert consecutive_page_kinds(recovery_pages, "model_request_committed_v2") == [
+             "model_request_committed_v2",
              "model_attempt_opened_v1"
            ]
   end
@@ -2726,7 +2726,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
     [request_record] =
-      fixture |> Fixture.records(session_id) |> records_of_kind("model_request_committed")
+      fixture |> Fixture.records(session_id) |> records_of_kind("model_request_committed_v2")
 
     [settlement] =
       fixture |> Fixture.records(session_id) |> records_of_kind("model_attempt_settled_v3")
@@ -2967,7 +2967,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                    5_000
 
     assert Enum.map(first_transaction.records, &record_kind/1) == [
-             "model_request_committed",
+             "model_request_committed_v2",
              "model_attempt_opened_v1"
            ]
 
@@ -2992,7 +2992,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     records = Fixture.records(fixture, session_id)
-    assert length(records_of_kind(records, "model_request_committed")) == 1
+    assert length(records_of_kind(records, "model_request_committed_v2")) == 1
     assert length(records_of_kind(records, "model_attempt_opened_v1")) == 1
   end
 
@@ -3253,7 +3253,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(exact_attachment, "run.finished")["outcome"] == "completed"
     assert {:error, :no_active_run} = Task.await(result_first_abort, 5_000)
     exact_records = Fixture.records(exact, exact_session)
-    [request] = records_of_kind(exact_records, "model_request_committed")
+    [request] = records_of_kind(exact_records, "model_request_committed_v2")
     [settlement] = records_of_kind(exact_records, "model_attempt_settled_v3")
 
     assert settlement["accounting"] == %{
@@ -3994,7 +3994,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                    5_000
 
     assert Enum.map(transaction.records, &record_kind/1) == [
-             "model_request_committed",
+             "model_request_committed_v2",
              "model_attempt_opened_v1"
            ]
 
@@ -5270,6 +5270,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults: Fixture.creation_defaults(fixture.definitions, options),
         runtime_id: Keyword.fetch!(options, :runtime_id),
         store: page_one_store,
         progress_to: Keyword.get(options, :progress_to),
@@ -5318,6 +5319,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults: Fixture.creation_defaults(fixture.definitions, options),
         runtime_id: Keyword.fetch!(options, :runtime_id),
         store: store,
         cleanup_grace_ms: Keyword.get(options, :cleanup_grace_ms),
@@ -6667,7 +6669,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     deadline =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.find(&(record_kind(&1.payload) == "model_request_committed"))
+      |> Enum.find(&(record_kind(&1.payload) == "model_request_committed_v2"))
       |> then(fn
         nil -> flunk("the committed request row was not retained")
         record -> committed_deadline!(record.payload)

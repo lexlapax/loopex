@@ -279,6 +279,7 @@ defmodule Loopex.CancellationTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults: Fixture.creation_defaults(definitions),
         runtime_id: "cancellation-runtime-#{System.unique_integer([:positive])}",
         store: store,
         model: %{

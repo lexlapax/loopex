@@ -124,6 +124,7 @@ defmodule Loopex.TimerDomainTest do
     start =
       [
         context_token_budget: 8_192,
+        session_creation_defaults: Fixture.creation_defaults(definitions, options),
         runtime_id: "timer-domain-#{System.unique_integer([:positive])}",
         store: store,
         model: %{

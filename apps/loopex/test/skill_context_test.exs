@@ -598,7 +598,7 @@ defmodule Loopex.SkillContextTest do
     recovered =
       context.fixture
       |> Fixture.records(context.session)
-      |> Enum.find(&(&1.payload.kind == "model_request_committed_resources_v1"))
+      |> Enum.find(&(&1.payload.kind == "model_request_committed_resources_v2"))
       |> Map.fetch!(:payload)
 
     assert recovered["request"]["canonical_request_bytes"] == staged_bytes
@@ -785,6 +785,7 @@ defmodule Loopex.SkillContextTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: Keyword.fetch!(options, :context_token_budget),
+        session_creation_defaults: Fixture.creation_defaults(definitions, options),
         runtime_id: "agent-loop-runtime",
         store: store,
         model: %{
@@ -936,7 +937,7 @@ defmodule Loopex.SkillContextTest do
   defp resource_record(context) do
     context.fixture
     |> Fixture.records(context.session)
-    |> Enum.find(&(&1.payload.kind == "model_request_committed_resources_v1"))
+    |> Enum.find(&(&1.payload.kind == "model_request_committed_resources_v2"))
     |> Map.fetch!(:payload)
   end
 

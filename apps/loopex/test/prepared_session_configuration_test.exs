@@ -65,23 +65,27 @@ defmodule Loopex.PreparedSessionConfigurationTest do
     assert :ok = Loopex.abandon_resume(activation)
   end
 
-  test "legacy recovery returns nil captures and its retained grace" do
+  test "implicit current creation preserves captures and retained grace on prepared recovery" do
     fixture = start(script: [], cleanup_grace_ms: 321)
-    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "legacy")
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "captured")
 
     {:ok, {:prepared, activation}} =
       Loopex.prepare_resume_session(fixture.runtime, session, "resume")
 
     before = facts(fixture, session)
+    defaults = Fixture.creation_defaults(fixture.definitions, cleanup_grace_ms: 321)
 
     assert {:ok,
             %{
-              configuration: nil,
-              tool_selection: nil,
+              configuration: configuration,
+              tool_selection: selection,
               policy_defer_mode: "admit",
               cleanup_grace_ms: 321
             }} =
              Loopex.prepared_session_configuration(activation)
+
+    assert configuration == defaults["initial_configuration"]
+    assert selection == defaults["tool_selection"]
 
     assert facts(fixture, session) == before
     assert :ok = Loopex.abandon_resume(activation)

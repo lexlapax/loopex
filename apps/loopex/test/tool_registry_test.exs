@@ -247,7 +247,7 @@ defmodule Loopex.ToolRegistryTest do
     [record] =
       fixture
       |> Loopex.AgentLoopFixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed_v2"))
 
     # The staged request carries the complete definition record, so the
     # generation it used is recomputable from the journal alone rather than by

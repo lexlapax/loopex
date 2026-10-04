@@ -125,7 +125,7 @@ defmodule Loopex.ProjectResourceTrustTest do
   defp receipt(fixture, session_id) do
     fixture
     |> Fixture.records(session_id)
-    |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+    |> Enum.filter(&(&1.payload[:kind] == "model_request_committed_v2"))
     |> List.first()
     |> get_in([Access.key(:payload), "context_receipt"])
   end
@@ -133,7 +133,7 @@ defmodule Loopex.ProjectResourceTrustTest do
   defp receipts(fixture, session_id) do
     fixture
     |> Fixture.records(session_id)
-    |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+    |> Enum.filter(&(&1.payload[:kind] == "model_request_committed_v2"))
     |> Enum.map(&get_in(&1, [Access.key(:payload), "context_receipt"]))
   end
 
@@ -250,8 +250,9 @@ defmodule Loopex.ProjectResourceTrustTest do
       retained["blocks"]
 
     assert system_descriptor["source_reference"] == %{
-             "kind" => "system",
-             "identity" => "loopex.system.v1"
+             "kind" => "host_instructions",
+             "version" => "host.v1",
+             "digest" => "a5d2d4fae514aebf0fa59ddf41df74b288bea67918272bfc2c7904dd4e9731ad"
            }
 
     assert_descriptor(system_descriptor, system_message, "system")
@@ -419,7 +420,11 @@ defmodule Loopex.ProjectResourceTrustTest do
     [_first_receipt, second_receipt] = receipts(fixture, session_id)
 
     assert Enum.map(second_receipt["blocks"], & &1["source_reference"]) == [
-             %{"kind" => "system", "identity" => "loopex.system.v1"},
+             %{
+               "kind" => "host_instructions",
+               "version" => "host.v1",
+               "digest" => "a5d2d4fae514aebf0fa59ddf41df74b288bea67918272bfc2c7904dd4e9731ad"
+             },
              %{
                "kind" => "project_resource",
                "workspace_ref" => "workspace-1",

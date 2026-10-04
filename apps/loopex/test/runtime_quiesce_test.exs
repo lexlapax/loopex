@@ -1,3 +1,4 @@
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.RuntimeQuiesceTest do
@@ -525,6 +526,8 @@ defmodule Loopex.RuntimeQuiesceTest do
     {:ok, restarted} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: fixture.runtime_id,
         store: fixture.store
       )
@@ -600,6 +603,8 @@ defmodule Loopex.RuntimeQuiesceTest do
     {:ok, restarted} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: fixture.runtime_id,
         store: fixture.store
       )
@@ -644,6 +649,8 @@ defmodule Loopex.RuntimeQuiesceTest do
     {:ok, restarted} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: fixture.runtime_id,
         store: fixture.store
       )
@@ -699,6 +706,8 @@ defmodule Loopex.RuntimeQuiesceTest do
     {:ok, restarted} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: fixture.runtime_id,
         store: fixture.store
       )
@@ -1560,6 +1569,8 @@ defmodule Loopex.RuntimeQuiesceTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: runtime_id,
         store: store
       )

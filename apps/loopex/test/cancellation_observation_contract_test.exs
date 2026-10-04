@@ -218,13 +218,16 @@ defmodule Loopex.CancellationObservationContractTest do
       |> M1RuntimeTestStore.inspect_state()
       |> get_in([:sessions, session_id, :records])
 
-    assert %{payload: genesis} = Enum.find(records, &(&1.payload.kind == "session_genesis_v2"))
+    assert %{payload: genesis} = Enum.find(records, &(&1.payload.kind == "session_genesis_v3"))
 
-    assert genesis == %{
-             "options" => %{"tenant" => "contract"},
-             "runtime_configuration" => %{"cleanup_grace_ms" => grace},
-             kind: "session_genesis_v2"
-           }
+    assert genesis ==
+             Map.merge(
+               Loopex.AgentLoopFixture.creation_defaults(
+                 [Loopex.AgentLoopFixture.tool_definition()],
+                 cleanup_grace_ms: grace
+               ),
+               %{:kind => "session_genesis_v3", "options" => %{"tenant" => "contract"}}
+             )
 
     receipt_record = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
     assert receipt_record.payload["receipt"]["cleanup_grace_ms"] == grace
@@ -245,11 +248,14 @@ defmodule Loopex.CancellationObservationContractTest do
     session = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id]
     [genesis | tail] = session.records
 
-    assert genesis.payload == %{
-             "options" => %{"tenant" => "contract"},
-             "runtime_configuration" => %{"cleanup_grace_ms" => grace},
-             kind: "session_genesis_v2"
-           }
+    assert genesis.payload ==
+             Map.merge(
+               Loopex.AgentLoopFixture.creation_defaults(
+                 [Loopex.AgentLoopFixture.tool_definition()],
+                 cleanup_grace_ms: grace
+               ),
+               %{:kind => "session_genesis_v3", "options" => %{"tenant" => "contract"}}
+             )
 
     assert {:ok, %{cleanup_grace_ms: ^grace}} =
              SessionState.recover(session_id, session.records, session.events)
@@ -550,6 +556,7 @@ defmodule Loopex.CancellationObservationContractTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults: Loopex.AgentLoopFixture.creation_defaults([]),
         runtime_id: "genesis-preflight",
         store: store
       )
@@ -624,6 +631,8 @@ defmodule Loopex.CancellationObservationContractTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.AgentLoopFixture.creation_defaults([], cleanup_grace_ms: grace),
         runtime_id: "genesis-exact-boundary",
         store: store,
         cleanup_grace_ms: grace
@@ -663,6 +672,8 @@ defmodule Loopex.CancellationObservationContractTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.AgentLoopFixture.creation_defaults(tools, cleanup_grace_ms: grace),
         runtime_id: "cancellation-observation-#{System.unique_integer([:positive])}",
         store: store,
         model: %{
@@ -720,11 +731,8 @@ defmodule Loopex.CancellationObservationContractTest do
   end
 
   defp genesis_size(options, grace) do
-    %{
-      "options" => options,
-      "runtime_configuration" => %{"cleanup_grace_ms" => grace},
-      kind: "session_genesis_v2"
-    }
+    Loopex.AgentLoopFixture.creation_defaults([], cleanup_grace_ms: grace)
+    |> Map.merge(%{:kind => "session_genesis_v3", "options" => options})
     |> :erlang.term_to_binary([:deterministic])
     |> byte_size()
   end
