@@ -638,6 +638,12 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
 
       events = Fixture.events(successor, session)
       assert Enum.count(events, &(&1.kind == "run.finished")) == 1
+
+      assert [view, %{"active_maintenance" => nil}] =
+               Enum.filter(events, &(&1.kind == "context.maintenance_changed"))
+
+      assert view["active_maintenance"]["episode_id"] == episode["episode_id"]
+      assert view["active_maintenance"]["owner"]["kind"] == "run"
       assert {:ok, recovered} = SessionState.recover(session, rows, events)
       assert recovered.active_maintenance == nil
       assert recovered.active_run_id == nil

@@ -28,7 +28,19 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
                )
 
       [record] = proposal.records
-      assert proposal.events == []
+      assert [event] = proposal.events
+      assert event.kind == "context.maintenance_changed"
+      assert Map.keys(Map.drop(event, [:kind, :event_id])) == ["active_maintenance"]
+
+      assert event["active_maintenance"] == %{
+               "episode_id" => record["episode_id"],
+               "owner" => %{"kind" => "compact", "id" => record["command_id"]},
+               "model" => "scripted:v1",
+               "reasoning" => "none",
+               "configuration_version" => 1,
+               "bounds" => state.pending_compact["bounds"]
+             }
+
       assert record.kind == "standalone_maintenance_episode_admitted_v1"
       assert record["command_id"] == state.pending_compact["command_id"]
       assert record["episode_id"] == state.pending_compact["episode_id"]
@@ -790,7 +802,13 @@ defmodule Loopex.Runtime.StandaloneCompactProjectionTest do
                  else: ["compact_command_completed_v1"]
                )
 
-      assert length(proposal.events) == 1
+      assert Enum.map(proposal.events, & &1.kind) ==
+               if(captured?,
+                 do: ["context.maintenance_changed", "context.compaction_finished"],
+                 else: ["context.compaction_finished"]
+               )
+
+      if captured?, do: assert(hd(proposal.events)["active_maintenance"] == nil)
       result = List.last(proposal.records)["result"]
       assert result["failure"] == failure
 

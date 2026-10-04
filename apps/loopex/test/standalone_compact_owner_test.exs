@@ -308,6 +308,10 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
       assert episode["maintenance_configuration"]["selection"] == model()
       assert episode["attempts"] == 0
       assert :sys.get_state(owner(fixture, session)).in_flight == %{}
+      [view] = maintenance_views(fixture, session)
+      assert view["active_maintenance"]["episode_id"] == episode["episode_id"]
+      assert view["active_maintenance"]["owner"] == %{"kind" => "compact", "id" => "compact"}
+      assert view["active_maintenance"]["bounds"] == episode["bounds"]
 
       assert Enum.count(
                Fixture.records(fixture, session),
@@ -316,6 +320,7 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
 
       assert {:accepted, "stop"} = Loopex.command(successor, %{type: :abort, command_id: "stop"})
       assert await_completed(fixture, session).commands["compact"].result["usage"] == zero_usage()
+      assert [^view, %{"active_maintenance" => nil}] = maintenance_views(fixture, session)
       assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
     end
 
@@ -349,6 +354,15 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
       assert transaction.records |> hd() |> Map.fetch!("episode_id") ==
                captured.active_maintenance
 
+      assert Enum.map(transaction.outbox, & &1.kind) == [
+               "context.maintenance_changed",
+               "context.compaction_finished"
+             ]
+
+      assert hd(transaction.outbox)["active_maintenance"] == nil
+      [admission_view] = maintenance_views(fixture, session)
+      assert admission_view["active_maintenance"]["episode_id"] == captured.active_maintenance
+
       assert :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
       M1RuntimeTestStore.release(waiter)
       await_worker_adoption(predecessor, System.monotonic_time(:millisecond) + 5_000)
@@ -361,6 +375,9 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
       assert result["usage"] == zero_usage()
       assert ^result = Loopex.command(successor, command())
       assert completed.active_maintenance == nil
+
+      assert [^admission_view, %{"active_maintenance" => nil}] =
+               maintenance_views(fixture, session)
 
       assert Enum.count(
                Fixture.records(fixture, session),
@@ -1766,6 +1783,9 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
     {:ok, next} = SessionState.commit_proposal(proposal, receipt)
     next
   end
+
+  defp maintenance_views(fixture, session),
+    do: Enum.filter(Fixture.events(fixture, session), &(&1.kind == "context.maintenance_changed"))
 
   # Concept: initial-capture proofs stop at the source phase they exercise.
   # Technical depth: the Supervisor holds its second exact Task, after the

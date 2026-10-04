@@ -363,7 +363,9 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     assert terminal["outcome"] == "failed"
     assert terminal["failure"] == refusal["failure"]
     assert prefix["result"]["failure"] == refusal["failure"]
-    assert [event, settled] = proposal.events
+    assert [view, event, settled] = proposal.events
+    assert view.kind == "context.maintenance_changed"
+    assert view["active_maintenance"] == nil
     assert event.kind == "run.finished"
     assert event["failure"] == refusal["failure"]
     assert settled.kind == "session.settled"
@@ -855,7 +857,9 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
              "usage" => state.maintenance_episodes[episode_id]["usage"]
            }
 
-    assert completed.events == []
+    assert [view] = completed.events
+    assert view.kind == "context.maintenance_changed"
+    assert view["active_maintenance"] == nil
     {next, rows, events} = commit(state, completed, events)
     assert next.active_maintenance == nil
     assert next.active_run_id == run

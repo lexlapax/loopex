@@ -190,19 +190,25 @@ defmodule Loopex.AppServer.Delivery do
   # Concept: a durable event, with only the members its kind carries.
   #
   # Technical depth: the event's own identity and sequence move into the
-  # envelope. Checkpoint owners use their shared opaque identity codec; other
+  # envelope. Maintenance views and checkpoint owners use their closed codecs; other
   # data members keep the runtime's names and values.
   defp event_record(session_id, event) do
     data = Map.drop(event, [:kind, :event_id, :event_sequence])
 
     data =
-      if event.kind == "context.compacted" do
-        {:ok, owner} =
-          LoopexProtocol.Session.CheckpointOwner.encode_wire(Map.fetch!(data, "owner"))
+      case event.kind do
+        "context.compacted" ->
+          {:ok, owner} =
+            LoopexProtocol.Session.CheckpointOwner.encode_wire(Map.fetch!(data, "owner"))
 
-        Map.put(data, "owner", owner)
-      else
-        data
+          Map.put(data, "owner", owner)
+
+        "context.maintenance_changed" ->
+          {:ok, view} = LoopexProtocol.Session.MaintenanceView.encode_wire(data)
+          view
+
+        _ ->
+          data
       end
 
     %{

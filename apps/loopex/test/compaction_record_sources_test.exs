@@ -486,7 +486,13 @@ defmodule Loopex.Runtime.CompactionRecordSourcesTest do
     assert completed.conversation == retained.conversation
     assert completed.conversation_record_sources == retained.conversation_record_sources
     assert List.last(ended.records)["result"]["usage"]["reported_tokens"] == 56
-    assert Enum.map(ended.events, & &1.kind) == ["context.compaction_finished"]
+
+    assert Enum.map(ended.events, & &1.kind) == [
+             "context.maintenance_changed",
+             "context.compaction_finished"
+           ]
+
+    assert hd(ended.events)["active_maintenance"] == nil
   end
 
   test "question answers bind the admitted response rather than a fabricated tool result" do

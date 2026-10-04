@@ -9,11 +9,87 @@ defmodule Loopex.Runtime.MaintenanceEpisodeAdmissionTest do
 
   @uint64_max 18_446_744_073_709_551_615
 
+  test "the admitted public view excludes captures and is independently authenticated on replay" do
+    {state, history, events} = run_state()
+    private_body = "PRIVATE_MAINTENANCE_INSTRUCTION_CANARY"
+
+    {:ok, private_instructions} =
+      MaintenanceConfiguration.capture_instructions(%{
+        "version" => "private-summary.v1",
+        "body" => private_body
+      })
+
+    assert {:ok, proposal} =
+             SessionState.propose_maintenance_episode(
+               state,
+               state.active_run_id,
+               model(),
+               private_instructions,
+               1_000
+             )
+
+    [event] = proposal.events
+    view = event["active_maintenance"]
+
+    assert Enum.sort(Map.keys(view)) ==
+             Enum.sort(~w(episode_id owner model reasoning configuration_version bounds))
+
+    assert {:ok, _} =
+             LoopexProtocol.Session.MaintenanceView.encode_wire(%{"active_maintenance" => view})
+
+    refute inspect(event) =~ private_body
+    refute inspect(event) =~ "provider_mapping"
+    refute inspect(event) =~ "model_capabilities"
+    refute inspect(event) =~ "rendered"
+
+    assert hd(proposal.records)["maintenance_configuration"]["instructions"] ==
+             private_instructions
+
+    {_committed, rows} = commit(state, proposal)
+    public = append_events(state, events, proposal.events)
+    assert {:ok, _} = SessionState.recover(state.session_id, history ++ rows, public)
+
+    changed_views = [
+      nil,
+      Map.put(view, "instructions", private_body),
+      %{view | "model" => "substituted:model"},
+      %{view | "owner" => %{"kind" => "compact", "id" => state.active_run_id}},
+      put_in(view, ["bounds", "token_budget"], view["bounds"]["token_budget"] + 1)
+    ]
+
+    for altered <- changed_views do
+      forged = append_events(state, events, [%{event | "active_maintenance" => altered}])
+
+      assert {:error, :private_public_projection_mismatch} =
+               SessionState.recover(state.session_id, history ++ rows, forged)
+    end
+
+    assert {:error, :private_public_projection_mismatch} =
+             SessionState.recover(state.session_id, history ++ rows, events)
+
+    duplicated = append_events(state, events, [event, event])
+
+    assert {:error, :private_public_projection_mismatch} =
+             SessionState.recover(state.session_id, history ++ rows, duplicated)
+  end
+
   test "admission freezes the parent, summarizer and fixed preparation clock without dispatch" do
     {state, history, events} = run_state()
     assert {:ok, proposal} = admit(state, 1_000)
     assert [row] = proposal.records
-    assert proposal.events == []
+    assert [event] = proposal.events
+    assert event.kind == "context.maintenance_changed"
+    assert Map.keys(Map.drop(event, [:kind, :event_id])) == ["active_maintenance"]
+
+    assert event["active_maintenance"] == %{
+             "episode_id" => row["episode_id"],
+             "owner" => %{"kind" => "run", "id" => row["run_id"]},
+             "model" => "scripted:v1",
+             "reasoning" => "none",
+             "configuration_version" => 1,
+             "bounds" => row["bounds"]
+           }
+
     assert row.kind == "maintenance_episode_admitted_v1"
     assert row["preparation_deadline"] == 61_000
 
@@ -38,6 +114,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeAdmissionTest do
     assert proposal.next.deadlines == state.deadlines
     assert {:ok, _} = Loopex.Store.admit_bounded(row)
 
+    events = append_events(state, events, proposal.events)
     {committed, rows} = commit(state, proposal)
     assert {:ok, recovered} = SessionState.recover(state.session_id, history ++ rows, events)
     assert recovered.maintenance_episodes == committed.maintenance_episodes
@@ -90,6 +167,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeAdmissionTest do
   test "owner succession retains the admission clock and frozen host capture" do
     {state, history, events} = run_state()
     {:ok, proposal} = admit(state, 1_000)
+    events = append_events(state, events, proposal.events)
     {committed, rows} = commit(state, proposal)
 
     succession = %{
@@ -137,6 +215,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeAdmissionTest do
              SessionState.propose_run_terminal(state, run, "failed", detail)
 
     {:ok, admission} = admit(state, 1_000)
+    events = append_events(state, events, admission.events)
     {committed, rows} = commit(state, admission)
 
     assert {:ok, ending} = SessionState.propose_run_terminal(committed, run, "failed", detail)
@@ -302,7 +381,14 @@ defmodule Loopex.Runtime.MaintenanceEpisodeAdmissionTest do
     assert prefix["result"]["usage"]["total_tokens"] == 0
     assert ending.next.charged == state.charged
     assert ending.next.deadlines == %{}
-    assert Enum.map(ending.events, & &1.kind) == ["run.finished", "session.settled"]
+
+    assert Enum.map(ending.events, & &1.kind) == [
+             "context.maintenance_changed",
+             "run.finished",
+             "session.settled"
+           ]
+
+    assert hd(ending.events)["active_maintenance"] == nil
     assert {:ok, recovered} = replay_ending(state, history, events, ending)
     assert recovered.active_maintenance == nil
     assert recovered.maintenance_terminal == nil
@@ -527,7 +613,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeAdmissionTest do
     {state, history, events} = run_state()
     {:ok, proposal} = admit(state, 1_000)
     {next, rows} = commit(state, proposal)
-    {next, history ++ rows, events}
+    {next, history ++ rows, append_events(state, events, proposal.events)}
   end
 
   defp replay_ending(state, history, events, proposal) do

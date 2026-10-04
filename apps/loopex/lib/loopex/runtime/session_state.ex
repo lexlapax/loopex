@@ -6935,19 +6935,77 @@ defmodule Loopex.Runtime.SessionState do
               next
           end
 
-        if next.conversation == state.conversation do
-          {:ok, next, events}
-        else
-          with {:ok, source} <-
-                 original_record_source(record, version || state.journal_version + 1),
-               {:ok, next} <- retain_conversation_record_sources(state, next, source) do
+        with {:ok, events} <-
+               maintenance_view_events(state, next, version || state.journal_version + 1, events) do
+          if next.conversation == state.conversation do
             {:ok, next, events}
+          else
+            with {:ok, source} <-
+                   original_record_source(record, version || state.journal_version + 1),
+                 {:ok, next} <- retain_conversation_record_sources(state, next, source) do
+              {:ok, next, events}
+            end
           end
         end
       end
     else
       {:error, :incomplete_maintenance_terminal_transaction}
     end
+  end
+
+  # Concept: public maintenance changes are committed facts of the serial owner.
+  # Technical depth: proposal and recovery share this reducer. Derive only the
+  # accepted allowlist from authenticated episode records, preserving captured
+  # admission bounds rather than mutable counters. Emit a changed view before
+  # that row's other events so a terminal outcome never precedes its inactive
+  # view. The journal position fixes the identity across unknown-commit recovery;
+  # unchanged stages, duplicate commands and owner succession add no view row.
+  defp maintenance_view_events(prior, next, version, events) do
+    before = maintenance_public_view(prior)
+    after_view = maintenance_public_view(next)
+
+    if before == after_view do
+      {:ok, events}
+    else
+      payload = %{"active_maintenance" => after_view}
+
+      event =
+        Map.merge(payload, %{
+          kind: "context.maintenance_changed",
+          event_id: stable_id("event-maintenance-view", next.session_id, version)
+        })
+
+      with {:ok, _} <- LoopexProtocol.Session.MaintenanceView.encode_wire(payload),
+           {:ok, _} <- Store.admit_bounded(event) do
+        {:ok, [event | events]}
+      else
+        _ -> {:error, :invalid_maintenance_public_view}
+      end
+    end
+  end
+
+  defp maintenance_public_view(%{active_maintenance: nil}), do: nil
+
+  defp maintenance_public_view(state) do
+    episode = Map.fetch!(state.maintenance_episodes, state.active_maintenance)
+
+    owner =
+      case episode do
+        %{"run_id" => run_id, kind: "maintenance_episode_admitted_v1"} ->
+          %{"kind" => "run", "id" => run_id}
+
+        %{"command_id" => command_id, kind: "standalone_maintenance_episode_admitted_v1"} ->
+          %{"kind" => "compact", "id" => command_id}
+      end
+
+    %{
+      "episode_id" => episode["episode_id"],
+      "owner" => owner,
+      "model" => episode["maintenance_configuration"]["selection"]["model"],
+      "reasoning" => episode["maintenance_configuration"]["selection"]["reasoning"],
+      "configuration_version" => episode["configuration_version"],
+      "bounds" => episode["bounds"]
+    }
   end
 
   defp original_record_source(record, version) do

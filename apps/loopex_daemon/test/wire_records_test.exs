@@ -51,6 +51,35 @@ defmodule LoopexDaemon.WireRecordsTest do
     IO.iodata_to_binary(encoded)
   end
 
+  test "maintenance events share the closed codec with exact quantities and opaque identities" do
+    path = Path.join(:code.priv_dir(:loopex_protocol), "vectors/maintenance-view.v1.json")
+    cases = JSON.decode!(File.read!(path))["cases"]
+
+    for name <- [
+          "inactive",
+          "run-captured-null-deadline",
+          "compact-captured-ceilings",
+          "run-unbounded-bounds.token_budget"
+        ] do
+      wire = Enum.find(cases, &(&1["name"] == name))["input"]
+      assert {:ok, native} = LoopexProtocol.Session.MaintenanceView.decode_wire(wire)
+
+      event =
+        Map.merge(native, %{
+          kind: "context.maintenance_changed",
+          event_id: "view",
+          event_sequence: 1
+        })
+
+      record = WireRecords.event("session", event)
+      assert record["event"]["data"] == wire
+      assert record["event"]["kind"] == "context.maintenance_changed"
+
+      assert {:ok, ^native} =
+               LoopexProtocol.Session.MaintenanceView.decode_wire(record["event"]["data"])
+    end
+  end
+
   test "both checkpoint owner kinds preserve opaque bytes in the daemon envelope" do
     for kind <- ["run", "compact"] do
       event = %{

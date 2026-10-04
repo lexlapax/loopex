@@ -325,6 +325,58 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the serial reducer derives `context.maintenance_changed` from the
+  authenticated before/after episode allowlist for both actual owners. It emits
+  one non-null admission and one null terminal view, preserving retained
+  admission bounds while attempts, stages and usage change. Proposal and
+  recovery share this derivation; the private journal position fixes event
+  identity across uncertainty. A changed view precedes the same private row's
+  outcome events. Source/summary text, instruction captures and provider maps
+  remain absent. Both transports use the closed codec, and both independent
+  connections refuse malformed view events.
+
+  All twelve maintenance/standalone/source/summary files pass: 305 tests on
+  each supported pair, with two long-bound exclusions. Current measured time
+  14.0 seconds, output `/private/tmp/loopex-m7-maintenance-view-events-current-v8.log`,
+  SHA-256 `508a82965bc32b8267187afc26306be990e76d6a349457117e9fe54eb0077a16`;
+  floor time 13.0 seconds, output
+  `/private/tmp/loopex-m7-maintenance-view-events-floor-v8.log`, SHA-256
+  `a8ace83e574bae662d5560d88aceb32cfe336b9f47e9c6e3678c5760cd90b9ad`.
+  Existing capture/cancellation tests now prove one admission and terminal view
+  across all three Store uncertainty phases and exact owner succession; the
+  held terminal transaction includes its null view before linearization.
+  Run-owned recovered cutoff cases also retain exactly that two-view sequence.
+  Public tampering, missing/duplicate rows and private-canary additions refuse.
+  Foreground delivery passes 9 cases in 0.5 seconds on each pair; daemon wire
+  records pass 4 cases in 0.02 seconds on each pair. Each projects null, both
+  owners and a run allowance above uint64 using the exact literal payload.
+
+  The complete current Core run retained a FAIL, 1,253/1,254 passing with
+  eight long-bound exclusions in 215.6 seconds, output
+  `/private/tmp/loopex-m7-maintenance-view-core-current-v7.log`, SHA-256
+  `e9b6502b59dfec05ab6b8d290701832a4da7b4746eff7ac07dc0668b97a6dcf6`.
+  Its sole assertion expected compact completion without the now-required
+  terminal view. The final focused run updates that inventory and preserves
+  the original hard-overflow refusal proof; it does not relabel the full run.
+  That full output also records an OwnerGroup `Supervisor.Default`
+  `shutdown_error/noproc` for a coordinator child; cleanup diagnostics remain
+  unresolved under the expanded T16 investigation.
+
+  All failing attempts, final pair/transport outputs and final source patch are
+  retained in `/private/tmp/loopex-m7-maintenance-view-emitter-proof-inventory.tsv`,
+  SHA-256 `69688dada587b61ed80f0cb3716d9b344068df7cc15856dfbea88f922bee905b`. Earlier failures were assertions expecting private-only
+  admission or terminal inventories and mistakes in new canary/outbox fixture
+  fields. The v4 runs repeated the still-wrong canary body assertion because a
+  text replacement failed to match its formatted lines; both remain failed.
+  No retry is treated as a pass and no bound or existing refusal is weakened.
+  Snapshot reduction, complete generation-3/4 manifests/negotiation, live
+  independent maintenance workflows and publication-watermark fault proof
+  remain open. This completes one added T05 event-writer subtask only.
+  Formatting, warning-free compilation, current-tree status, documentation and
+  dependency direction pass; complete metadata output
+  `/private/tmp/loopex-m7-maintenance-view-emitter-metadata-v1.log`, SHA-256
+  `81f12f05d3898fe8bf133c747bd5cdae38041f80108d6d6a0f681a46dc8e303a`.
+
 - Done: the exact clean `a160e5b073206fa453f208c569012ddf6e4f8402`
   selected Node release lane passed in 342 seconds under Node 22.14.0.
   Fresh-source extraction/build and independent Git-tree/archive checks took
@@ -354,7 +406,8 @@ did not resolve them. No paid provider calls were made during this check.
   SHA-256 `3bc779fa079bb73a1689de5a8439e7c2893d3c6586691969e52f6d287564aeee`.
   The new independent consumer executes all 201 literals plus 15 full-boundary
   and non-plain-object checks. No event writer, snapshot reducer or live
-  transport has adopted the new view yet; those T05 obligations remain open.
+  transport had adopted the new view at this codec-only checkpoint; subsequent
+  event-writer work is recorded above. Snapshot/negotiated T05 obligations remain open.
   Formatting, warning-free current compilation, status/documentation and
   dependency direction pass on the staged source. Complete metadata output
   `/private/tmp/loopex-m7-maintenance-view-metadata-v2.log`, SHA-256
@@ -393,7 +446,7 @@ did not resolve them. No paid provider calls were made during this check.
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  222 done / 10 todo. The goal remains active. The maintainer requested the
+  223 done / 10 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
   and the narrow reply-reserve preparation refusal, then approved the captured
   1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
@@ -8702,6 +8755,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Derive durable changed maintenance views in the shared serial reducer for proposal/recovery, with journal-position event identities, closed capture projection and no unchanged-stage/succession duplicates; join both transport projections and independent connection validators, prove privacy/tamper rejection and once-only admission/terminal views through all three Store fault phases on both supported pairs. Snapshot, manifest/negotiation and live independent workflow joins remain open.
+
 - [x] Pin the approved closed maintenance-view payload in a shared Elixir codec, independent Node decoder and literal schema/vectors; verify both owner bound domains, unbounded exact run/configuration quantities, null inactivity, closed/privacy refusals and complete opaque/UTF-8 byte boundaries on both supported toolchains. Live emission, snapshot reduction, negotiated generation-3/4 workflows and Store uncertainty proofs remain separate open work.
 
 - [ ] Implement the approved closed `context.maintenance_changed` event and active-maintenance snapshot view; authenticate both actual owners and retained admission bounds, emit only changed safe projections in serial-owner transactions, reduce snapshots at the same public cursor, and prove closed numeric/opaque domains, privacy canaries, paged/mid-transaction anchors, duplicate/succession and all three Store uncertainty phases with both independent Node workflows.
@@ -9163,7 +9218,7 @@ or check was relaxed.
 - [x] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
 - [x] Resolve the repeated provider-call public-event identity decision; implement the accepted compatibility path and prove old replay, repeated calls, cancellation, reconciliation and mutation uncertainty without rewriting retained events.
 - [x] Adapt the composition authority inventory to the approved contextual question adapter; retain the failed no-callback assertion and verify absent/nil host refusal plus denied bare/contextual decisions for every shipped tool generation on both toolchains.
-- [ ] Investigate Task.Supervisor shutdown_error/noproc diagnostics for Task.Supervised children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence.
+- [ ] Investigate Task.Supervisor and OwnerGroup shutdown_error/noproc diagnostics for Task.Supervised and coordinator children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence, including the coordinator-child report in the maintenance-view full Core run.
 - [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.
 
 ## T17 — Assemble and test the closure candidate
