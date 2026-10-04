@@ -11,7 +11,10 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
   end
 
   defmodule Facade do
-    def create_session(_runtime, %{"surface" => "embedded"}, command_id: "create") do
+    def create_session(_runtime, %{"surface" => "embedded"},
+          command_id: "create",
+          genesis: _genesis
+        ) do
       Process.put(:test, Application.fetch_env!(:loopex_composition, :settlement_test))
       {:ok, "settlement-session"}
     end
@@ -474,22 +477,24 @@ defmodule LoopexComposition.Ephemeral.SettlementTest do
         "packs" => []
       })
 
-    configuration = %{
-      cwd: root,
-      model: "ollama:test",
-      provider: %{credential_variable: nil},
-      base_url: "http://localhost:11434",
-      policy: Policy,
-      tools: :none,
-      skills: %{manifest: manifest, shadowed_skills: []},
-      max_steps: 16,
-      deadline_ms: 10_000,
-      max_tokens: 128,
-      context_token_budget: 8_192,
-      timeout: 10_000,
-      test_facade: Facade,
-      test_seams: %{temp_root: %{tmp: fn -> root end}}
-    }
+    configuration =
+      %{
+        cwd: root,
+        model: "ollama:test",
+        provider: %{credential_variable: nil},
+        base_url: "http://localhost:11434",
+        policy: Policy,
+        tools: :none,
+        skills: %{manifest: manifest, shadowed_skills: []},
+        max_steps: 16,
+        deadline_ms: 10_000,
+        max_tokens: 128,
+        context_token_budget: 8_192,
+        timeout: 10_000,
+        test_facade: Facade,
+        test_seams: %{temp_root: %{tmp: fn -> root end}}
+      }
+      |> LoopexComposition.PreparedSessionFixture.capture()
 
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     {:ok, activation} = OwnerActivation.start(supervisor)

@@ -8,8 +8,11 @@ defmodule LoopexComposition.Ephemeral.Preflight do
   ## Technical depth
 
   The order is option grammar, workspace, named skills, provider selection and
-  explicit route/maintenance admission, host-global guards, shared application bootstrap, guarded ReqLLM start,
-  provider-registry identity and explicit address. No step reads a provider
+  explicit route/maintenance admission, captured instructions and whole current
+  genesis, host-global guards, shared application bootstrap, guarded ReqLLM start,
+  provider-registry identity and explicit address. Captured configuration and
+  immutable tool selection supply creation and runtime registration together.
+  No step reads a provider
   credential or starts a session. Every dependency refusal is reduced to its
   closed composition reason at this boundary.
   """
@@ -17,6 +20,15 @@ defmodule LoopexComposition.Ephemeral.Preflight do
   alias Loopex.LLM.ReqLLM.InProcess.{Guards, Route}
   alias LoopexComposition.Ephemeral.{Bootstrap, Options}
   alias LoopexComposition.{ReqLLMStarter, ResourcePacks, WorkspaceIdentity}
+  alias LoopexComposition.{ProviderBindings, SessionInstructions}
+  alias Loopex.Runtime.{Instructions, SessionGenesis}
+  alias LoopexProtocol.ToolDefinition
+
+  @profiles %{
+    coding: ~w(loopex.read loopex.write loopex.edit loopex.bash),
+    read_only: ~w(loopex.read loopex.grep loopex.find loopex.ls),
+    none: []
+  }
 
   @doc false
   def prepare(options) do
@@ -31,11 +43,14 @@ defmodule LoopexComposition.Ephemeral.Preflight do
              selected.maintenance_model,
              bindings
            ),
+         {:ok, genesis} <- genesis(selected, cwd, bindings),
          :ok <- composition(Guards.pre_start()),
          :ok <- Bootstrap.start(),
          :ok <- req_llm(selected.req_llm),
          :ok <- composition(Guards.provider(model.provider)),
          {:ok, base_url} <- address(model.provider, selected.base_url) do
+      configuration = genesis["initial_configuration"]
+
       {:ok,
        selected
        |> Map.put(:cwd, cwd)
@@ -43,7 +58,74 @@ defmodule LoopexComposition.Ephemeral.Preflight do
        |> Map.put(:provider, model)
        |> Map.put(:maintenance_model, maintenance)
        |> Map.put(:provider_base_url, selected.base_url)
-       |> Map.put(:base_url, base_url)}
+       |> Map.put(:base_url, base_url)
+       |> Map.put(:genesis, genesis)
+       |> Map.put(:model, configuration["model"])
+       |> Map.put(:context_token_budget, configuration["context_token_budget"])}
+    end
+  end
+
+  @doc false
+  def genesis(selected, cwd, bindings) do
+    ids = Map.fetch!(@profiles, selected.tools)
+
+    definitions =
+      Loopex.Executor.Local.CodingTools.definitions()
+      |> Enum.filter(&(&1["tool_id"] in ids))
+      |> then(fn definitions ->
+        if Map.get(selected, :questions, false),
+          do: definitions ++ [ToolDefinition.question_definition()],
+          else: definitions
+      end)
+
+    profile =
+      if selected.tools == :read_only, do: "read-only", else: Atom.to_string(selected.tools)
+
+    with {:ok, instructions} <- instructions(selected, cwd, profile),
+         declaration <-
+           %{
+             "model" => selected.model,
+             "reasoning" => Map.get(selected, :reasoning, "default"),
+             "configuration_version" => 1,
+             "instructions" => instructions,
+             "max_tokens" => selected.max_tokens
+           }
+           |> ceiling(selected, :context_token_budget)
+           |> ceiling(selected, :system_class_tokens),
+         {:ok, configuration} <-
+           ProviderBindings.resolve_configuration(declaration, bindings, definitions) do
+      names =
+        Map.new(definitions, fn definition ->
+          {id, version, digest} = ToolDefinition.generation(definition)
+
+          {definition["name"],
+           %{"tool_id" => id, "tool_version" => version, "definition_digest" => digest}}
+        end)
+
+      SessionGenesis.resolve(%{"surface" => "embedded"}, %{
+        genesis_version: "session_genesis_v3",
+        runtime_configuration: %{"cleanup_grace_ms" => Loopex.Executor.default_cleanup_grace_ms()},
+        initial_configuration: configuration,
+        tool_selection: %{"definitions" => definitions, "names" => names},
+        policy_defer_mode: "admit"
+      })
+    end
+  end
+
+  defp instructions(selected, cwd, profile) do
+    case Map.get(selected, :instructions) do
+      nil ->
+        SessionInstructions.capture(cwd, profile)
+
+      captured ->
+        with :ok <- Instructions.validate(captured), do: {:ok, captured}
+    end
+  end
+
+  defp ceiling(declaration, selected, key) do
+    case Map.get(selected, key) do
+      nil -> declaration
+      value -> Map.put(declaration, Atom.to_string(key), value)
     end
   end
 

@@ -1,4 +1,4 @@
-defmodule LoopexCli.SessionInstructions do
+defmodule LoopexComposition.SessionInstructions do
   @moduledoc """
   ## Concept
 

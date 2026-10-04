@@ -43,7 +43,7 @@ defmodule LoopexComposition.Ephemeral.ToolPresetBudgetTest do
       request = Jason.decode!(body)
       assert [system | _] = request["messages"]
       assert system["role"] == "system"
-      assert String.starts_with?(system["content"], "loopex.system.v1:")
+      assert String.starts_with?(system["content"], "loopex.reference.v1:")
 
       selected = Enum.filter(definitions, &(&1["tool_id"] in ids))
       assert Enum.map(selected, & &1["tool_id"]) == ids

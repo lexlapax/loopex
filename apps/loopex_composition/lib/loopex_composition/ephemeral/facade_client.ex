@@ -7,7 +7,8 @@ defmodule LoopexComposition.Ephemeral.FacadeClient do
 
   ## Technical depth
 
-  `start/2` returns the actual linked process and its monitor. One owner request
+  `start/3` accepts prepared current genesis and returns the actual linked
+  process and its monitor. One owner request
   `{owner, reference, operation}` produces `{client, reference, :ready}`.
   Only `{owner, reference, :dispatch, native_deadline}` enters the facade;
   `{owner, reference, :cancel}` instead returns `:cancelled`. Results retain
@@ -21,10 +22,10 @@ defmodule LoopexComposition.Ephemeral.FacadeClient do
   """
 
   @doc false
-  def start(owner, runtime), do: start(owner, runtime, Loopex)
+  def start(owner, runtime, genesis), do: start(owner, runtime, genesis, Loopex)
 
   @doc false
-  def start(owner, runtime, facade) when owner == self() do
+  def start(owner, runtime, genesis, facade) when owner == self() do
     :erlang.spawn_opt(
       fn ->
         monitor = Process.monitor(owner)
@@ -34,6 +35,7 @@ defmodule LoopexComposition.Ephemeral.FacadeClient do
           monitor: monitor,
           runtime: runtime,
           facade: facade,
+          genesis: genesis,
           session: nil,
           attachment: nil
         })
@@ -109,7 +111,10 @@ defmodule LoopexComposition.Ephemeral.FacadeClient do
 
   defp invoke(%{session: nil} = state, :create) do
     result =
-      state.facade.create_session(state.runtime, %{"surface" => "embedded"}, command_id: "create")
+      state.facade.create_session(state.runtime, state.genesis["options"],
+        command_id: "create",
+        genesis: state.genesis
+      )
 
     state =
       case result do

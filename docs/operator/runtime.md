@@ -74,6 +74,15 @@ root exists; that path goes unnamed. A reported path never authorizes
 deletion. No later process can resume this profile. Use the durable profile
 when recovery and retained history are required.
 
+Ephemeral startup accepts explicit `instructions`, `reasoning` and
+`system_class_tokens`. Instructions default to the reference host's captured
+workspace prompt; reasoning defaults to `"default"`, and the system ceiling to
+1,000 estimated tokens. Preparation checks the whole selection before allocating
+the session. If instruction or selected-tool costs exceed the ceiling, choose
+shorter instructions or explicitly raise the ceiling within the context budget.
+These startup settings apply across prompts; `ask/3` accepts only a timeout
+override. See the [exact option grammar and context-budget resolution](../developer/runtime-and-embedding.md#technical-embedding-ephemeral).
+
 <a id="operator-runtime-first-run"></a>
 ## Run the Working Loop
 

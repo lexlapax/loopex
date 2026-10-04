@@ -82,6 +82,13 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
                cwd: root,
                tools: :none,
                max_tokens: 128,
+               instructions: %{
+                 "version" => "host.wire.v1",
+                 "base" => "Complete the task 猫",
+                 "environment" => "captured facts",
+                 "appendix" => "trusted appendix"
+               },
+               system_class_tokens: 1000,
                timeout: 15_000
              )
 
@@ -90,6 +97,12 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
 
     assert_receive {:model_request, first_request}, 15_000
     assert first_request =~ "POST /v1/chat/completions HTTP/1.1"
+
+    assert hd(request_body(first_request)["messages"]) == %{
+             "role" => "system",
+             "content" =>
+               "host.wire.v1: Complete the task 猫\n\ncaptured facts\n\ntrusted appendix"
+           }
 
     # The owner-start ticket expires after one second; a running session must
     # outlive it and admit another model call.
@@ -100,6 +113,10 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
 
     assert_receive {:model_request, second_request}, 15_000
     assert second_request =~ "POST /v1/chat/completions HTTP/1.1"
+
+    assert hd(request_body(second_request)["messages"]) ==
+             hd(request_body(first_request)["messages"])
+
     assert :ok = Ephemeral.stop_session(session)
   end
 
@@ -888,6 +905,12 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
       question_responder: callback,
       provider_bindings: %{"ollama" => %{"credential" => %{"none" => true}}},
       max_tokens: 128,
+      instructions: %{
+        "version" => "fixture.questions.v1",
+        "base" => "Ask the operator for a choice or text, then answer.",
+        "environment" => "",
+        "appendix" => ""
+      },
       timeout: 15_000
     ]
   end

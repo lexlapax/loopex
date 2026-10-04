@@ -39,9 +39,19 @@ in-process ReqLLM adapter, the local executor and a temporary root. Its
 questions while the creating process and VM remain live. It has no artifact
 store, durable listing, or recovery path. `LoopexComposition` remains the
 durable reference stack: local Store and artifact store, the separate provider
-companion, and the local executor. Both define seven tools; the durable default
-keeps the original four coding tools active. An embedder that wants different
+companion, and the local executor. The durable stack defines seven tools and
+keeps the original four coding tools active. Ephemeral creation retains and
+registers exactly its selected profile, plus the question tool when enabled.
+An embedder that wants different
 edges composes the ports and calls `Loopex.start_link/1` directly.
+
+An ephemeral host can supply exact instructions, reasoning and a system ceiling
+at startup. Preparation validates the complete settings before creating owned
+resources; later prompts use that captured configuration. Omission captures the
+reference host's default instructions and workspace facts. Instruction content
+never changes tool or policy authority. A selection whose instructions and tools
+exceed its ceiling refuses; the host may explicitly select shorter instructions
+or a larger permitted ceiling.
 
 A direct runtime may also receive a policy with explicit private callback state.
 The host controls that state and its lifetime; it does not become a durable
@@ -384,11 +394,35 @@ this startup selection. The one-shot absence-of-responder path uses a
 host-composition adapter through the optional contextual Policy callback,
 with the original policy identity and no private context in durable data.
 Reusable `start_session/1` does not install that one-shot policy.
-Every model admits every preset. `:skills` accepts at most four named project
+Each preset selects its listed tools; model capacity and complete configuration
+admission still apply. `:skills` accepts at most four named project
 or user skill directories. `:cwd` defaults to the current working directory;
 `:max_steps`, `:deadline_ms`, `:max_tokens`, `:context_token_budget`, `:timeout`
 and `:base_url` set the remaining per-session choices. Only `:timeout` may be
 overridden on an individual `ask/3`.
+
+The current startup grammar also admits `:instructions`, `:reasoning` and
+`:system_class_tokens`. Instructions are the closed binary-keyed
+`version`/`base`/`environment`/`appendix` map in
+[ADR 0042](../adr/0042-host-composed-instructions-technical.md#technical-depth).
+Omission captures `loopex.reference.v1` with the selected physical workspace,
+platform and tool profile. Reasoning is one of the binaries `"default"`,
+`"none"`, `"low"`, `"medium"` or `"high"`; omission selects default. Admission
+requires the exact captured model mapping to support that selection. The system
+ceiling is a positive uint64 and defaults to 1,000; instruction and model-facing
+tool costs must stay strictly below it. It cannot exceed the context ceiling.
+A long workspace capture or enabled question tool can exceed the default;
+preparation refuses without raising it. These values cannot be changed by
+`ask/3` or supplied as arbitrary provider capability/mapping envelopes.
+
+Omitted context capacity derives from the captured model window minus the
+selected reply allowance. Unknown windows use 8,192. An explicit positive
+`:context_token_budget` remains explicit and must fit the captured window.
+Preparation resolves the canonical model identity and retains complete current
+v3 genesis, including exact configuration, cleanup grace and immutable tool/name
+bindings. The complete genesis obeys the existing 65,536-byte record limit.
+Provider route references remain private host startup data. The default capture
+is shared with the chat host in `LoopexComposition.SessionInstructions`.
 
 Optional `:trace` is a closed map with binary keys. `"enabled"` defaults to
 false; `"level"` is `"calls"`, `"returns"` or `"arguments"`, defaulting to

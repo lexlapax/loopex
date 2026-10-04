@@ -36,12 +36,22 @@ defmodule LoopexComposition.Ephemeral do
   begin token gives a single owner permission to start its temporary subtree.
   Its result is withheld until the facade attachment, selected resources and
   active status have all been confirmed under the same startup deadline.
+  Optional `:instructions` is ADR 0042's closed version/base/environment/appendix
+  map. Omission captures the reference host's default with workspace and platform
+  facts. Optional `:reasoning` is default, none, low, medium or high as a binary;
+  omission selects default. Optional `:system_class_tokens` is a positive uint64
+  ceiling; omission selects 1,000. All three are startup settings; per-call
+  changes refuse. Preparation resolves model capabilities and the exact mapping,
+  then admits current genesis with immutable selected tool definitions. Omitted
+  context capacity derives from the captured model window minus the reply
+  reserve, or 8,192 for an unknown window; explicit capacity remains explicit.
+  Invalid whole settings refuse before owner activation or temporary resources.
   Optional `:maintenance_instructions` is the explicit closed version/body
   startup map. It is validated before allocating an owner and forwarded for
   Core's exact capture. Missing or nil stays unconfigured; per-call overrides
   are refused.
   Optional `:provider_bindings` admits only its named provider routes; omission
-  retains the legacy single-route defaults. References stay private and values
+  selects the model provider's reference route. References stay private and values
   are resolved only by each invocation's sensitive caller. Optional
   `:maintenance_model` is a separately selected provider:model string with an
   admitted thinking-off mapping. Missing or nil remains unconfigured.

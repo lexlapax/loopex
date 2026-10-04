@@ -14,7 +14,10 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
   defmodule Facade do
     @moduledoc false
 
-    def create_session(runtime, %{"surface" => "embedded"}, command_id: "create") do
+    def create_session(runtime, %{"surface" => "embedded"},
+          command_id: "create",
+          genesis: _genesis
+        ) do
       send(runtime.token, :created)
       {:ok, "ephemeral-session"}
     end
@@ -50,7 +53,10 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     @moduledoc false
     alias Loopex.ResourcePack
 
-    def create_session(runtime, %{"surface" => "embedded"}, command_id: "create") do
+    def create_session(runtime, %{"surface" => "embedded"},
+          command_id: "create",
+          genesis: _genesis
+        ) do
       send(runtime.token.test, :created)
       {:ok, "ephemeral-session"}
     end
@@ -116,7 +122,10 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
   defmodule FaultFacade do
     @moduledoc false
 
-    def create_session(runtime, %{"surface" => "embedded"}, command_id: "create") do
+    def create_session(runtime, %{"surface" => "embedded"},
+          command_id: "create",
+          genesis: _genesis
+        ) do
       send(runtime.token.test, :created)
 
       if runtime.token.failure == :create,
@@ -203,7 +212,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     assert options[:runtime_id] =~ ~r/^ephemeral-[0-9a-f]{32}$/
     assert options[:policy_identity] == %{"id" => inspect(Policy), "revision" => "0.2.0"}
     assert options[:active_tools] == ~w(loopex.read loopex.grep loopex.find loopex.ls)
-    assert length(options[:tools]) == 7
+    assert Enum.map(options[:tools], & &1["tool_id"]) == options[:active_tools]
     assert options[:resource_manifest] == configuration.skills.manifest
 
     assert options[:executor] == %{
@@ -451,7 +460,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
 
     configuration =
       configuration(tmp, %{
-        facade_client_start: fn _owner, _runtime, _facade ->
+        facade_client_start: fn _owner, _runtime, _genesis, _facade ->
           send(test, :facade_client_start_attempted)
           raise "scripted facade client start failure"
         end,
@@ -799,6 +808,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
           {:ok, nonce}
         end)
     }
+    |> LoopexComposition.PreparedSessionFixture.capture()
   end
 
   defp skill_manifest do

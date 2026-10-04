@@ -570,6 +570,7 @@ defmodule LoopexComposition.Ephemeral.UnknownRootTest do
       context_token_budget: 8_192,
       test_seams: seams
     }
+    |> LoopexComposition.PreparedSessionFixture.capture()
   end
 
   defp candidate_recorded?(owner, path) do

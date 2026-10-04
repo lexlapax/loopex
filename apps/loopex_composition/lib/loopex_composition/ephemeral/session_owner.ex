@@ -61,8 +61,6 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     :trace_bind,
     :trace_start
   ]
-  @coding ~w(loopex.read loopex.write loopex.edit loopex.bash)
-  @read_only ~w(loopex.read loopex.grep loopex.find loopex.ls)
 
   @doc false
   def start_link(creator, proxy, ref, expiry) do
@@ -1408,13 +1406,23 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     defp start_facade_client(startup) do
       start =
         get_in(startup.configuration, [:test_seams, :facade_client_start]) ||
-          (&FacadeClient.start/3)
+          (&FacadeClient.start/4)
 
-      start.(self(), startup.registered.runtime, test_facade(startup.configuration))
+      start.(
+        self(),
+        startup.registered.runtime,
+        startup.configuration.genesis,
+        test_facade(startup.configuration)
+      )
     end
   else
     defp start_facade_client(startup) do
-      FacadeClient.start(self(), startup.registered.runtime, test_facade(startup.configuration))
+      FacadeClient.start(
+        self(),
+        startup.registered.runtime,
+        startup.configuration.genesis,
+        test_facade(startup.configuration)
+      )
     end
   end
 
@@ -3229,20 +3237,8 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     startup = state.startup
     config = startup.configuration
 
-    tools =
-      if config.tools == :none, do: [], else: Loopex.Executor.Local.CodingTools.definitions()
-
-    active =
-      if config.tools == :read_only,
-        do: @read_only,
-        else: if(config.tools == :none, do: [], else: @coding)
-
-    {tools, active} =
-      if Map.get(config, :questions, false) and config.tools != :none do
-        {tools ++ [LoopexProtocol.ToolDefinition.question_definition()], active ++ ["loopex.ask"]}
-      else
-        {tools, active}
-      end
+    tools = config.genesis["tool_selection"]["definitions"]
+    active = Enum.map(tools, & &1["tool_id"])
 
     trace = Map.fetch!(startup.registered, :trace_handle)
 

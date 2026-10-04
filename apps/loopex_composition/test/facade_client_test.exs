@@ -85,7 +85,7 @@ defmodule LoopexComposition.FacadeClientTest do
       )
 
     try do
-      {client, monitor} = FacadeClient.start(self(), runtime)
+      {client, monitor} = FacadeClient.start(self(), runtime, genesis())
       assert {:ok, session} = operation(client, :create)
       assert {:ok, attachment} = operation(client, :attach)
       assert {:ok, _catalog} = operation(client, :resource_catalog)
@@ -127,7 +127,9 @@ defmodule LoopexComposition.FacadeClientTest do
 
     owner =
       spawn(fn ->
-        {client, _monitor} = FacadeClient.start(self(), {runtime, test}, ObservedRealFacade)
+        {client, _monitor} =
+          FacadeClient.start(self(), {runtime, test}, genesis(), ObservedRealFacade)
+
         send(test, {:client, client})
         ref = make_ref()
         send(client, {self(), ref, :create})
@@ -158,7 +160,10 @@ defmodule LoopexComposition.FacadeClientTest do
       refute Process.alive?(client)
 
       assert {:ok, _} =
-               Loopex.create_session(runtime, %{"surface" => "embedded"}, command_id: "create")
+               Loopex.create_session(runtime, %{"surface" => "embedded"},
+                 command_id: "create",
+                 genesis: genesis()
+               )
     after
       if Process.alive?(owner), do: Process.exit(owner, :kill)
 
@@ -183,7 +188,7 @@ defmodule LoopexComposition.FacadeClientTest do
       Enum.any?(messages, fn message ->
         match?(
           {:"$gen_call", {^client, _reply_ref},
-           {:create_session, _token, "create", %{"surface" => "embedded"}, :detailed}},
+           {:create_session_with_genesis, _token, "create", %{"surface" => "embedded"}, _genesis}},
           message
         )
       end)
@@ -251,7 +256,7 @@ defmodule LoopexComposition.FacadeClientTest do
   end
 
   test "only the live owner and current reference grant entry, and loss never retries" do
-    {client, monitor} = FacadeClient.start(self(), self(), Facade)
+    {client, monitor} = FacadeClient.start(self(), self(), genesis(), Facade)
     ref = make_ref()
     send(client, {self(), ref, :create})
     assert_receive {^client, ^ref, :ready}, 1_000
@@ -263,7 +268,11 @@ defmodule LoopexComposition.FacadeClientTest do
     refute_receive {:entered, _, _, _}
     send(client, {self(), ref, :dispatch, deadline()})
     assert_receive {^client, ^ref, {:ok, "session"}}, 1_000
-    assert_received {:entered, ^client, %{"surface" => "embedded"}, [command_id: "create"]}
+
+    assert_received {:entered, ^client, %{"surface" => "embedded"},
+                     [command_id: "create", genesis: expected]}
+
+    assert expected == genesis()
     send(client, {self(), ref, :dispatch, deadline()})
     refute_receive {:entered, _, _, _}
     kill(client, monitor)
@@ -271,7 +280,7 @@ defmodule LoopexComposition.FacadeClientTest do
   end
 
   test "a grant delayed past its absolute deadline never enters the facade" do
-    {client, monitor} = FacadeClient.start(self(), self(), Facade)
+    {client, monitor} = FacadeClient.start(self(), self(), genesis(), Facade)
     ref = make_ref()
     send(client, {self(), ref, :create})
     assert_receive {^client, ^ref, :ready}, 1_000
@@ -283,7 +292,7 @@ defmodule LoopexComposition.FacadeClientTest do
   end
 
   test "application exceptions become a fixed private failure" do
-    {client, monitor} = FacadeClient.start(self(), self(), BlockingFacade)
+    {client, monitor} = FacadeClient.start(self(), self(), genesis(), BlockingFacade)
     on_exit(fn -> if Process.alive?(client), do: Process.exit(client, :kill) end)
     ref = make_ref()
     send(client, {self(), ref, :create})
@@ -300,7 +309,7 @@ defmodule LoopexComposition.FacadeClientTest do
 
     owner =
       spawn(fn ->
-        {client, _monitor} = FacadeClient.start(self(), test, Facade)
+        {client, _monitor} = FacadeClient.start(self(), test, genesis(), Facade)
         send(test, {:client, client})
         ref = make_ref()
         send(client, {self(), ref, :create})
@@ -323,7 +332,7 @@ defmodule LoopexComposition.FacadeClientTest do
 
       owner =
         spawn(fn ->
-          {client, _monitor} = FacadeClient.start(self(), test, BlockingFacade)
+          {client, _monitor} = FacadeClient.start(self(), test, genesis(), BlockingFacade)
           send(test, {:client, client})
           ref = make_ref()
           send(client, {self(), ref, :create})
@@ -366,7 +375,7 @@ defmodule LoopexComposition.FacadeClientTest do
   end
 
   test "cancellation acknowledges the exact queued operation without facade entry" do
-    {client, monitor} = FacadeClient.start(self(), self(), Facade)
+    {client, monitor} = FacadeClient.start(self(), self(), genesis(), Facade)
     true = :erlang.suspend_process(client)
     ref = make_ref()
     send(client, {self(), ref, :create})
@@ -378,5 +387,10 @@ defmodule LoopexComposition.FacadeClientTest do
     Process.unlink(client)
     Process.exit(client, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^client, :killed}, 1_000
+  end
+
+  defp genesis do
+    Loopex.ConfiguredGenesisFixture.genesis([])
+    |> Map.put("options", %{"surface" => "embedded"})
   end
 end

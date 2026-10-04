@@ -27,10 +27,10 @@ defmodule LoopexCli.ConfigInspection do
     ChatConfiguration,
     ConfigFile,
     ConfigOptions,
-    ConfigSelection,
-    SessionInstructions
+    ConfigSelection
   }
 
+  alias LoopexComposition.SessionInstructions
   alias LoopexComposition.ProviderBindings
   alias LoopexComposition.Delegation.Tool
   alias LoopexProtocol.Frame

@@ -78,7 +78,7 @@ defmodule LoopexCli.ConfigSelectionTest do
     assert {:ok, selected} = ConfigSelection.compose(loaded, flags, fixture.invocation, nil)
 
     assert {:ok, instructions} =
-             LoopexCli.SessionInstructions.capture(
+             LoopexComposition.SessionInstructions.capture(
                selected.profile["paths"]["workspace"],
                "none",
                selected.profile["session"]["instructions"]

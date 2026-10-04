@@ -21,7 +21,10 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
     @moduledoc false
     @uint64_max 18_446_744_073_709_551_615
 
-    def create_session(_runtime, %{"surface" => "embedded"}, command_id: "create") do
+    def create_session(_runtime, %{"surface" => "embedded"},
+          command_id: "create",
+          genesis: _genesis
+        ) do
       Process.put(:events, [])
       Process.put(:sequence, 0)
       {:ok, "fault-session"}
@@ -598,31 +601,33 @@ defmodule LoopexComposition.Ephemeral.ApiFaultTest do
 
     test = self()
 
-    configuration = %{
-      cwd: tmp,
-      model: "ollama:test",
-      provider: %{credential_variable: nil},
-      base_url: "http://localhost:11434",
-      policy: Policy,
-      tools: :read_only,
-      skills: %{manifest: manifest, shadowed_skills: []},
-      max_steps: 16,
-      deadline_ms: 60_000,
-      max_tokens: 128,
-      context_token_budget: 8_192,
-      timeout: 60_000,
-      test_facade: Facade,
-      test_seams: %{
-        command_nonce: Keyword.get(opts, :command_nonce),
-        temp_root: %{tmp: fn -> tmp end},
-        group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end,
-        group_drain: fn executor, instance, owner, nonce, _deadline ->
-          send(test, {:group_drain, executor, instance})
-          send(owner, {executor, instance, nonce, :groups_empty})
-          {:ok, nonce}
-        end
+    configuration =
+      %{
+        cwd: tmp,
+        model: "ollama:test",
+        provider: %{credential_variable: nil},
+        base_url: "http://localhost:11434",
+        policy: Policy,
+        tools: :read_only,
+        skills: %{manifest: manifest, shadowed_skills: []},
+        max_steps: 16,
+        deadline_ms: 60_000,
+        max_tokens: 128,
+        context_token_budget: 8_192,
+        timeout: 60_000,
+        test_facade: Facade,
+        test_seams: %{
+          command_nonce: Keyword.get(opts, :command_nonce),
+          temp_root: %{tmp: fn -> tmp end},
+          group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end,
+          group_drain: fn executor, instance, owner, nonce, _deadline ->
+            send(test, {:group_drain, executor, instance})
+            send(owner, {executor, instance, nonce, :groups_empty})
+            {:ok, nonce}
+          end
+        }
       }
-    }
+      |> LoopexComposition.PreparedSessionFixture.capture()
 
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     {:ok, activation} = OwnerActivation.start(supervisor)

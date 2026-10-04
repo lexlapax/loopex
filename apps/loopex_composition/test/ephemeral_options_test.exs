@@ -50,7 +50,10 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
                 max_steps: 16,
                 deadline_ms: 600_000,
                 max_tokens: 4096,
-                context_token_budget: 8192,
+                context_token_budget: nil,
+                reasoning: "default",
+                instructions: nil,
+                system_class_tokens: nil,
                 timeout: 630_000,
                 base_url: nil,
                 maintenance_instructions: nil,
@@ -81,6 +84,49 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
 
     assert Options.ask_options([questions: true], 42) ==
              {:error, {:invalid_option, :unknown_key}}
+  end
+
+  test "instructions reasoning and system ceiling are closed startup selections" do
+    block = %{
+      "version" => "host.v1",
+      "base" => "Exact bytes 猫\n",
+      "environment" => "captured environment",
+      "appendix" => "trusted appendix"
+    }
+
+    for reasoning <- ~w(default none low medium high) do
+      assert {:ok, selected} =
+               Options.parse(
+                 policy: Policy,
+                 instructions: block,
+                 reasoning: reasoning,
+                 system_class_tokens: @max
+               )
+
+      assert selected.reasoning == reasoning
+      assert selected.system_class_tokens == @max
+      assert Map.delete(selected.instructions, "digest") == block
+      assert :ok = Loopex.Runtime.Instructions.validate(selected.instructions)
+    end
+
+    for invalid <- [nil, %{}, Map.put(block, "extra", true), Map.put(block, "digest", "forged")] do
+      assert {:error, {:invalid_option, :instructions}} =
+               Options.parse(policy: Policy, instructions: invalid)
+    end
+
+    for invalid <- [nil, :default, "adaptive", "DEFAULT"] do
+      assert {:error, {:invalid_option, :reasoning}} =
+               Options.parse(policy: Policy, reasoning: invalid)
+    end
+
+    for invalid <- [nil, 0, -1, @max + 1, "1000"] do
+      assert {:error, {:invalid_option, :system_class_tokens}} =
+               Options.parse(policy: Policy, system_class_tokens: invalid)
+    end
+
+    for {key, value} <- [instructions: block, reasoning: "none", system_class_tokens: 1000] do
+      assert {:error, {:invalid_option, :unknown_key}} = Options.ask_options([{key, value}], 42)
+    end
   end
 
   test "run consumes only an enabled unary callback and leaves startup grammar closed" do

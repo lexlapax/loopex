@@ -23,7 +23,8 @@ defmodule LoopexCli.ChatConfiguration do
   remain outer-host integration obligations.
   """
 
-  alias LoopexCli.{ConfigFile, ConfigOptions, ConfigSelection, SessionInstructions}
+  alias LoopexCli.{ConfigFile, ConfigOptions, ConfigSelection}
+  alias LoopexComposition.SessionInstructions
   alias LoopexComposition.DurableOptions
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionConfiguration

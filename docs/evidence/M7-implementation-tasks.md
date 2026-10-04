@@ -325,6 +325,56 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: ephemeral preflight now prepares complete current v3 genesis before
+  owner activation. The accepted startup instructions, reasoning and system
+  ceiling options pass through the shared configuration validator. Omitted
+  context capacity derives from captured model limits; explicit capacity stays
+  explicit. The canonical model identity, exact instructions, cleanup grace and
+  immutable selected tools/name bindings are retained together. The private
+  facade actor forwards that exact genesis through the approved public create
+  API, and runtime registration uses the same retained definitions.
+
+  Reference instruction capture moved from CLI into composition; chat,
+  inspection and ephemeral startup use that one implementation. The old CLI
+  module and old private actor arities are removed. Actual local HTTP requests
+  prove the exact host system bytes across two prompts. Boundary cases prove
+  closed startup grammar, unsupported reasoning, system-cost refusal before
+  owner allocation, derived/explicit origins, route privacy and refusal of an
+  oversized default workspace/question capture without silently raising 1,000.
+
+  Current-format fixture preparation now precedes owner activation. Startup,
+  call-owner loss, exact duplicate creation, question responder joins, hosted
+  credential isolation, unknown-root and cleanup cases retain their existing
+  time bounds. The old one-token failed-run fixture cannot pass current whole
+  configuration admission; it now admits a 1,024-token context and submits a
+  larger prompt, retaining the same real failed-run projection, exact observed
+  limit, last-result and successful cleanup assertions. Question lifecycle
+  fixtures explicitly select short instructions within the unchanged 1,000
+  system ceiling. The hosted Anthropic fixture now returns the admitted dated
+  model identity required by the current native decoder, replacing its old
+  generic model marker. No production limit or decoder was weakened.
+
+  Final complete composition suites pass 502 cases on each supported pair,
+  with the real-provider case excluded: 273.5 current-pair and 266.8 floor-pair
+  seconds. The affected chat/configuration/inspection cases pass 39 each in
+  20.9 and 20.6 seconds. Formatting, warning-free compilation, documentation,
+  status and dependency-direction checks pass. Earlier five/one-case focused
+  failures and the 16-case first complete failure remain retained; their
+  obsolete fixtures and the new fixture's nonexistent validation call were
+  corrected before the final paired runs. All task-owned execution handles are
+  terminal and collected. No paid provider call or full eleven-application,
+  release or closure result is claimed.
+
+  Exact source hashes and ten complete outputs are retained in
+  `/private/tmp/loopex-m7-ephemeral-genesis-proof-inventory.tsv`, SHA-256
+  `1ecfd5f09c9e06a7f8c5e9791e3342c1908bfc195e0bd3776502885ada76b9e3`.
+  This closes one added T04 migration subtask. T01–T19 originals remain
+  56 done / 117 todo / 6 retired; added counts are 229 done / 10 todo.
+  Including T00, originals are 56 / 123 / 7 and added are 233 / 11.
+  Durable ask and transport creation still need prepared current genesis before
+  Core's v2 writer/reader and instruction fallback can be removed. No maintainer
+  decision is pending; M7 remains In progress.
+
 - Done: the thin embedded reference client now requires complete current v3
   genesis and forwards its original options and exact retained payload through
   the approved public creation API. It refuses options-only and superseded
@@ -8968,6 +9018,8 @@ or check was relaxed.
 - [x] Prove configuration inspection reads no credentials and starts no runtime or provider call.
 
 ### Added implementation subtasks
+
+- [x] Prepare complete current ephemeral genesis before owner activation, join the accepted instructions/reasoning/system-ceiling options and derived context origins, share reference instruction capture with chat/inspection, and forward exact genesis through the private facade actor with one retained selected-tool inventory. Prove exact repeated HTTP staging, route privacy, admission negatives, question/call-owner lifetime and cleanup through the complete composition suite and affected CLI cases on both supported pairs without changing production limits or test time bounds. Other host creation paths and Core v2 removal remain open.
 
 - [x] Migrate the thin embedded reference client and its deterministic/real-provider fixtures to exact current v3 host genesis; remove options-only creation from this client, retain captured model/instructions/bounds and immutable tools, update configuration-bound record readers, and prove exact retention, malformed/superseded refusal, duplicate creation and the complete credential-free effect/restart/recovery suite on both supported pairs. Other host creation paths and Core v2 removal remain open.
 

@@ -390,23 +390,25 @@ defmodule LoopexComposition.Ephemeral.TraceTest do
         "packs" => []
       })
 
-    configuration = %{
-      cwd: tmp,
-      model: "ollama:test",
-      provider: %{credential_variable: nil},
-      base_url: "http://localhost:11434",
-      policy: Policy,
-      tools: :read_only,
-      skills: %{manifest: manifest, shadowed_skills: []},
-      max_steps: 16,
-      deadline_ms: 60_000,
-      max_tokens: 128,
-      context_token_budget: 8192,
-      timeout: 60_000,
-      trace: trace,
-      test_facade: Facade,
-      test_seams: Map.merge(%{temp_root: %{tmp: fn -> tmp end}}, seams)
-    }
+    configuration =
+      %{
+        cwd: tmp,
+        model: "ollama:test",
+        provider: %{credential_variable: nil},
+        base_url: "http://localhost:11434",
+        policy: Policy,
+        tools: :read_only,
+        skills: %{manifest: manifest, shadowed_skills: []},
+        max_steps: 16,
+        deadline_ms: 60_000,
+        max_tokens: 128,
+        context_token_budget: 8192,
+        timeout: 60_000,
+        trace: trace,
+        test_facade: Facade,
+        test_seams: Map.merge(%{temp_root: %{tmp: fn -> tmp end}}, seams)
+      }
+      |> LoopexComposition.PreparedSessionFixture.capture()
 
     supervisor = start_supervised!({DynamicSupervisor, strategy: :one_for_one}, id: make_ref())
     {:ok, activation} = OwnerActivation.start(supervisor)

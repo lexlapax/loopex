@@ -1,8 +1,8 @@
-defmodule LoopexCli.SessionInstructionsTest do
+defmodule LoopexComposition.SessionInstructionsTest do
   use ExUnit.Case, async: true
 
   alias Loopex.Runtime.Instructions
-  alias LoopexCli.SessionInstructions
+  alias LoopexComposition.SessionInstructions
 
   @facts %{
     "workspace" => "/workspace",

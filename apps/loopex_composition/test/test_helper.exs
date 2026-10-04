@@ -1,3 +1,5 @@
+Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
+
 defmodule LoopexComposition.TestHost do
   @moduledoc false
 
@@ -19,6 +21,24 @@ defmodule LoopexComposition.TestHost do
     after
       System.delete_env(variable)
     end
+  end
+end
+
+defmodule LoopexComposition.PreparedSessionFixture do
+  @moduledoc false
+
+  def capture(configuration) do
+    {:ok, genesis} =
+      LoopexComposition.Ephemeral.Preflight.genesis(
+        configuration,
+        configuration.cwd,
+        %{"ollama" => %{"credential" => %{"none" => true}}}
+      )
+
+    configuration
+    |> Map.put(:genesis, genesis)
+    |> Map.put(:model, genesis["initial_configuration"]["model"])
+    |> Map.put(:context_token_budget, genesis["initial_configuration"]["context_token_budget"])
   end
 end
 

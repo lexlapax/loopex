@@ -13,8 +13,11 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
   defmodule ScriptedFacade do
     @moduledoc false
 
-    def create_session(_runtime, %{"surface" => "embedded"}, command_id: "create"),
-      do: {:ok, "ephemeral-session"}
+    def create_session(_runtime, %{"surface" => "embedded"},
+          command_id: "create",
+          genesis: _genesis
+        ),
+        do: {:ok, "ephemeral-session"}
 
     def attach(runtime, "ephemeral-session", after_event_sequence: 0) do
       Process.put(:event_sequence, 0)
@@ -209,8 +212,11 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
   defmodule HeldPollFacade do
     @moduledoc false
 
-    def create_session(_runtime, %{"surface" => "embedded"}, command_id: "create"),
-      do: {:ok, "held-poll-session"}
+    def create_session(_runtime, %{"surface" => "embedded"},
+          command_id: "create",
+          genesis: _genesis
+        ),
+        do: {:ok, "held-poll-session"}
 
     def attach(runtime, "held-poll-session", after_event_sequence: 0) do
       Process.put(:events, [])
@@ -357,7 +363,7 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
                model: "ollama:llama3.2",
                cwd: tmp,
                tools: :none,
-               context_token_budget: 1,
+               context_token_budget: 1024,
                timeout: 15_000
              )
 
@@ -380,15 +386,16 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
                    "dimension" => "context_tokens",
                    "retryable" => false,
                    "observed" => observed,
-                   "limit" => 1
+                   "limit" => 1024
                  },
                  "cleanup_grace_ms" => cleanup_grace_ms
                }
-             } = observation}} = Ephemeral.ask(session, "required context cannot fit")
+             } = observation}} =
+             Ephemeral.ask(session, String.duplicate("required context cannot fit\n", 200))
 
     assert is_binary(session_id) and byte_size(session_id) > 0
     assert is_binary(run_id) and byte_size(run_id) > 0
-    assert is_integer(observed) and observed > 1
+    assert is_integer(observed) and observed > 1024
     assert is_integer(cleanup_grace_ms) and cleanup_grace_ms > 0
     assert {:error, {:run, :failed, ^observation}} = Ephemeral.last_result(session)
     assert :ok = Ephemeral.stop_session(session)
@@ -723,31 +730,33 @@ defmodule LoopexComposition.Ephemeral.ApiTest do
 
     test = self()
 
-    config = %{
-      cwd: tmp,
-      model: "ollama:test",
-      provider: %{credential_variable: nil},
-      base_url: "http://localhost:11434",
-      policy: Policy,
-      tools: :read_only,
-      skills: %{manifest: manifest, shadowed_skills: []},
-      max_steps: 16,
-      deadline_ms: 60_000,
-      max_tokens: 128,
-      context_token_budget: 8_192,
-      timeout: 60_000,
-      test_facade: facade,
-      test_seams:
-        Map.merge(extra_seams, %{
-          temp_root: Map.put(temp_root_seams, :tmp, fn -> tmp end),
-          group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end,
-          group_drain: fn executor, instance, owner, nonce, _deadline ->
-            send(test, {:group_drain, executor, instance})
-            send(owner, {executor, instance, nonce, :groups_empty})
-            {:ok, nonce}
-          end
-        })
-    }
+    config =
+      %{
+        cwd: tmp,
+        model: "ollama:test",
+        provider: %{credential_variable: nil},
+        base_url: "http://localhost:11434",
+        policy: Policy,
+        tools: :read_only,
+        skills: %{manifest: manifest, shadowed_skills: []},
+        max_steps: 16,
+        deadline_ms: 60_000,
+        max_tokens: 128,
+        context_token_budget: 8_192,
+        timeout: 60_000,
+        test_facade: facade,
+        test_seams:
+          Map.merge(extra_seams, %{
+            temp_root: Map.put(temp_root_seams, :tmp, fn -> tmp end),
+            group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end,
+            group_drain: fn executor, instance, owner, nonce, _deadline ->
+              send(test, {:group_drain, executor, instance})
+              send(owner, {executor, instance, nonce, :groups_empty})
+              {:ok, nonce}
+            end
+          })
+      }
+      |> LoopexComposition.PreparedSessionFixture.capture()
 
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
     {:ok, activation} = OwnerActivation.start(supervisor)

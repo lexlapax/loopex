@@ -414,29 +414,31 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
       %{tmp: fn -> tmp end}
       |> maybe_remove_seam(options[:rm_rf])
 
-    configuration = %{
-      cwd: tmp,
-      model: "ollama:test",
-      provider: %{credential_variable: nil},
-      base_url: "http://localhost:11434",
-      policy: Policy,
-      tools: :none,
-      skills: %{manifest: manifest, shadowed_skills: []},
-      max_steps: 16,
-      deadline_ms: 60_000,
-      max_tokens: 128,
-      context_token_budget: 8_192,
-      timeout: 60_000,
-      test_seams:
-        Map.merge(
-          %{
-            temp_root: temp_root,
-            group_drain: drain,
-            group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end
-          },
-          Map.new(Keyword.take(options, [:subtree_stop]))
-        )
-    }
+    configuration =
+      %{
+        cwd: tmp,
+        model: "ollama:test",
+        provider: %{credential_variable: nil},
+        base_url: "http://localhost:11434",
+        policy: Policy,
+        tools: :none,
+        skills: %{manifest: manifest, shadowed_skills: []},
+        max_steps: 16,
+        deadline_ms: 60_000,
+        max_tokens: 128,
+        context_token_budget: 8_192,
+        timeout: 60_000,
+        test_seams:
+          Map.merge(
+            %{
+              temp_root: temp_root,
+              group_drain: drain,
+              group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end
+            },
+            Map.new(Keyword.take(options, [:subtree_stop]))
+          )
+      }
+      |> LoopexComposition.PreparedSessionFixture.capture()
 
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 

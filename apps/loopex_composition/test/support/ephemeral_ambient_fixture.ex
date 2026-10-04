@@ -582,7 +582,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
       "id" => "msg-provider-only",
       "type" => "message",
       "role" => "assistant",
-      "model" => "fixture",
+      "model" => "claude-haiku-4-5-20251001",
       "content" => [%{"type" => "text", "text" => content}],
       "stop_reason" => "end_turn",
       "stop_sequence" => nil,

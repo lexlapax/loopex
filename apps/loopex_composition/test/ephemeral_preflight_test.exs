@@ -100,6 +100,116 @@ defmodule LoopexComposition.Ephemeral.PreflightTest do
              )
   end
 
+  test "prepared genesis binds exact host configuration and only selected tools" do
+    instructions = %{
+      "version" => "host.exact.v1",
+      "base" => "Keep these bytes 猫\n",
+      "environment" => "retained host facts",
+      "appendix" => "trusted appendix"
+    }
+
+    routes = %{"openai" => %{"credential" => %{"env" => "M7_NEVER_READ_GENESIS_KEY"}}}
+
+    assert {:ok, selected} =
+             Preflight.prepare(
+               policy: Policy,
+               cwd: File.cwd!(),
+               model: "openai:gpt-4o-mini",
+               provider_bindings: routes,
+               instructions: instructions,
+               tools: :read_only,
+               questions: true,
+               max_tokens: 128
+             )
+
+    genesis = selected.genesis
+    configuration = genesis["initial_configuration"]
+    assert genesis.kind == "session_genesis_v3"
+    assert genesis["options"] == %{"surface" => "embedded"}
+    assert Map.delete(configuration["instructions"], "digest") == instructions
+    assert configuration["reasoning"] == "default"
+    assert configuration["system_class_tokens"] == 1000
+    assert configuration["budget_origins"]["context_token_budget"] == "model_window"
+
+    assert selected.context_token_budget ==
+             configuration["model_capabilities"]["context_window"] - 128
+
+    assert Enum.map(genesis["tool_selection"]["definitions"], & &1["tool_id"]) ==
+             ~w(loopex.read loopex.grep loopex.find loopex.ls loopex.ask)
+
+    refute inspect(genesis) =~ "M7_NEVER_READ_GENESIS_KEY"
+    assert {:ok, ^genesis} = Loopex.Runtime.SessionGenesis.normalize(genesis)
+  end
+
+  test "unsupported reasoning and invalid system cost refuse before owner allocation" do
+    before_children =
+      DynamicSupervisor.count_children(LoopexComposition.Ephemeral.OwnerSupervisor)
+
+    assert {:error, :invalid_model_mapping} =
+             Preflight.prepare(
+               policy: Policy,
+               cwd: File.cwd!(),
+               model: "ollama:llama3.2",
+               reasoning: "high"
+             )
+
+    assert {:error, :invalid_session_configuration} =
+             Preflight.prepare(
+               policy: Policy,
+               cwd: File.cwd!(),
+               model: "ollama:llama3.2",
+               system_class_tokens: 1
+             )
+
+    assert DynamicSupervisor.count_children(LoopexComposition.Ephemeral.OwnerSupervisor) ==
+             before_children
+
+    assert {:ok, selected} =
+             Preflight.prepare(
+               policy: Policy,
+               cwd: File.cwd!(),
+               model: "ollama:llama3.2",
+               context_token_budget: 8192,
+               system_class_tokens: 1000
+             )
+
+    assert selected.genesis["initial_configuration"]["budget_origins"] ==
+             %{"context_token_budget" => "explicit", "system_class_tokens" => "explicit"}
+  end
+
+  test "default workspace capture cannot silently enlarge the question profile ceiling" do
+    {:ok, selected} =
+      LoopexComposition.Ephemeral.Options.parse(
+        policy: Policy,
+        model: "ollama:llama3.2",
+        tools: :read_only,
+        questions: true,
+        max_tokens: 128
+      )
+
+    bindings = %{"ollama" => %{"credential" => %{"none" => true}}}
+    workspace = "/workspace/" <> String.duplicate("w", 1000)
+
+    assert {:error, :invalid_session_configuration} =
+             Preflight.genesis(selected, workspace, bindings)
+
+    {:ok, captured} =
+      Loopex.Runtime.Instructions.capture(%{
+        "version" => "host.questions.v1",
+        "base" => "Ask the operator, then answer.",
+        "environment" => "",
+        "appendix" => ""
+      })
+
+    assert {:ok, genesis} =
+             Preflight.genesis(Map.put(selected, :instructions, captured), workspace, bindings)
+
+    assert genesis["initial_configuration"]["system_class_tokens"] == 1000
+
+    assert genesis["initial_configuration"]["budget_origins"]["system_class_tokens"] ==
+             "legacy_default"
+  end
+
   test "explicit routes admit the ordinary and maintenance models without resolving values" do
     routes = %{
       "openai" => %{"credential" => %{"env" => "M7_UNUSED_FIRST_REFERENCE"}},
