@@ -92,18 +92,29 @@ defmodule LoopexCli.DurableAskWorkflowTest do
         end
       end)
 
+    device_ref = Process.monitor(device)
     on_exit(fn -> Process.exit(device, :kill) end)
 
     {seams, _calls} =
       harness(&completed_events/1,
         trace_hook: fn consumer, _ ->
+          assert self() == caller
+
+          # Concept: fixture startup allows the approved scheduling grace.
+          # Technical depth: one captured cutoff bounds the writer-start wait;
+          # production queue, drain and cleanup limits are unchanged.
+          writer_start_cutoff = System.monotonic_time(:millisecond) + 1_000
+
           send(
             consumer,
             {:loopex_diagnostic, %{"kind" => "trace_call", "message" => "trace-only-secret"}}
           )
 
-          assert_receive {:stalled_trace_writer, writer}
-          send(caller, {:captured_trace_writer, writer})
+          remaining = max(0, writer_start_cutoff - System.monotonic_time(:millisecond))
+          assert_receive {:stalled_trace_writer, writer}, remaining
+          writer_ref = Process.monitor(writer)
+          assert Process.alive?(writer)
+          send(caller, {:captured_trace_writer, writer, writer_ref})
           {:ok, %{active: true}}
         end
       )
@@ -118,10 +129,13 @@ defmodule LoopexCli.DurableAskWorkflowTest do
                Keyword.put(seams, :diagnostic_device, device)
              )
 
-    assert_receive {:captured_trace_writer, writer}
+    assert_receive {:captured_trace_writer, writer, writer_ref}, 0
+    assert_receive {:DOWN, ^writer_ref, :process, ^writer, :shutdown}, 100
     refute Process.alive?(writer)
     refute String.contains?(stdout, "trace-only-secret")
     assert %{"outcome" => "completed"} = JSON.decode!(String.trim_trailing(stdout, "\n"))
+    send(device, :stop)
+    assert_receive {:DOWN, ^device_ref, :process, ^device, :normal}, 100
   end
 
   test "composition startup refusal still joins the prestarted diagnostic actors" do

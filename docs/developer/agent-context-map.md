@@ -6583,3 +6583,18 @@ Update the current closed schema, replay, live owner, ADR/plan proof mappings
 and public codec/vector fixtures together. This approval resolves reply-reserve
 refusal only; the stalled-stderr startup cutoff still needs its separate
 decision. No budget is inflated, check dropped or milestone closed.
+
+<a id="disposition-m7-stalled-stderr-startup-2026-10-03"></a>
+### M7 stalled-stderr fixture startup cutoff, 2026-10-03
+
+The maintainer approved option 1 of the final sequential question: replace the
+CLI stalled-stderr fixture's implicit 100-ms writer-start receive with one
+captured 1,000-ms startup cutoff and exact writer exit/join checks. This explicitly
+changes the fixture's startup scheduling proof by 900 ms. Production queue,
+loss, drain and cleanup bounds remain unchanged; no retry or error filter is
+added. The historical `16110063` integration failure remains failed evidence.
+This decision is separate from the previously approved diagnostic-loss grace.
+All three sequential questions are resolved: explicit checkpoint ownership,
+the narrow maintenance reply-reserve refusal, and this fixture startup cutoff.
+Implementation and relevant current/floor proofs remain required; no milestone
+closure, merge, release or publication is authorized.

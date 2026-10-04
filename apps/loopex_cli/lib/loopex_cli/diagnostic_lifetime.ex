@@ -60,12 +60,12 @@ defmodule LoopexCli.DiagnosticLifetime do
       {:diagnostic_consumer_closed, ^consumer, ^reference, _unproved} ->
         false
 
-      {:DOWN, monitor, :process, pid, _reason} when is_map_key(monitors, pid) ->
-        if monitors[pid] == monitor do
-          await_diagnostics(consumer, reference, deadline, Map.delete(monitors, pid), certified)
-        else
-          await_diagnostics(consumer, reference, deadline, monitors, certified)
-        end
+      # Concept: callers retain messages from their own independent monitors.
+      # Technical depth: match both captured PID and reference in the receive
+      # guard, leaving another monitor's DOWN for the same PID in the mailbox.
+      {:DOWN, monitor, :process, pid, _reason}
+      when is_map_key(monitors, pid) and :erlang.map_get(pid, monitors) == monitor ->
+        await_diagnostics(consumer, reference, deadline, Map.delete(monitors, pid), certified)
     after
       max(deadline - System.monotonic_time(:millisecond), 0) -> false
     end

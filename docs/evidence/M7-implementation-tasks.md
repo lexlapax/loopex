@@ -325,16 +325,55 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: investigate the now-reproduced concurrent owner-stop Task.Supervisor
-  diagnostics. The callback/discovery integration is complete at clean pushed
+- Running: integrate the proved stalled-stderr fixture and monitor-message repair.
+  The separate concurrent owner-stop Task.Supervisor diagnostic remains open.
+  The callback/discovery integration is complete at clean pushed
   `6058eb95b7b312905e55c7baa0401e6af18ceba1`. Original T08 production-contract
   and native-fidelity proofs and added T15 callback migration remain complete.
   Current T01–T19 tally is original 56 done / 117 todo / 6 retired; added
-  213 done / 10 todo. The goal remains active. The maintainer requested the
+  214 done / 10 todo. The goal remains active. The maintainer requested the
   three decisions one at a time and selected explicit checkpoint ownership
-  and the narrow reply-reserve preparation refusal. Only the stalled-stderr
-  cutoff still awaits an answer.
-  No dependent contract implementation or test/check process is running.
+  and the narrow reply-reserve preparation refusal, then approved the captured
+  1,000-ms stalled-stderr startup cutoff with exact writer joins. All three
+  decisions are resolved. The two compaction contract implementations remain
+  open; the fixture proof is the current task.
+
+- Approved: the captured 1,000-ms stalled-stderr writer-start cutoff and exact
+  writer exit/join under the
+  [maintainer disposition](../developer/agent-context-map.md#disposition-m7-stalled-stderr-startup-2026-10-03).
+  The CLI fixture captures one cutoff before diagnostic dispatch, monitors the
+  live IO writer before command cleanup, requires its exact shutdown DOWN and
+  unchanged JSON output separation, then joins its fixture device normally.
+  Production limits are unchanged. The first focused run fails the new exact
+  writer DOWN assertion on both pairs, 32/33 cases pass in 6.5 seconds: the
+  production DiagnosticLifetime join matches a PID then consumes the message
+  even when its monitor reference belongs to the caller. The repair moves both
+  PID and reference matching into the receive guard, retaining the foreign
+  message and every captured cleanup bound. The exact writer-monitor regression
+  stays intact. The second run preserves the exact foreign DOWN but fails the
+  test's mistaken expected `:killed` reason on both pairs, 40/41 cases pass. The
+  consumer stops its private supervisor first, so the writer exits with
+  `:shutdown`. Correcting that expectation preserves the exact PID/reference
+  and join. Both complete ask/chat files now pass 41 cases on each pair, in
+  11.1 current and 10.9 floor seconds. Historical failed runs remain failed.
+  Static formatting, warning-free compilation, repository/status and
+  documentation gates passed. Complete output is retained at
+  `/private/tmp/loopex-m7-stalled-stderr-metadata-v1.log`, SHA-256
+  `c8ce67f3164e77b872ed513663fc891d12bc6bc2195746ffcc593014553f107a`.
+  This closes the added fixture/monitor-message subtask. The separate concurrent
+  owner-stop Task.Supervisor diagnostic remains open.
+
+  | Retained complete failed output | SHA-256 |
+  | --- | --- |
+  | `/private/tmp/loopex-m7-stalled-stderr-startup-current-v1.log` | `98ce9629de66353fef50a1dad8e0c9141aa892aef29f95fcf049b8b076fd878c` |
+  | `/private/tmp/loopex-m7-stalled-stderr-startup-floor-v1.log` | `f9e4f17a25c2915568c21be9c4456ffe3aa17d9d1a9e1fb0961be493cba9e7ea` |
+  | `/private/tmp/loopex-m7-stalled-stderr-startup-current-v2.log` | `6fb24f4d7811738e6d2a4a32a737f7218b490a5be64b5071e637f33f61b4e118` |
+  | `/private/tmp/loopex-m7-stalled-stderr-startup-floor-v2.log` | `a76e38e1eea0f7166110c99086f26f69b0218c81bdc6111024fe02dbd09795a8` |
+
+  | Retained complete passing output | SHA-256 |
+  | --- | --- |
+  | `/private/tmp/loopex-m7-stalled-stderr-startup-current-v3.log` | `a3c4577cfb48d04507486206c2a05fef8b8f2914432297e127e7cc2de9d39469` |
+  | `/private/tmp/loopex-m7-stalled-stderr-startup-floor-v3.log` | `d8119fb6b422db01c4cfd76559e5ede8058c2efead17c4b07729d601e7fde592` |
 
 - Approved: explicit standalone checkpoint ownership. The maintainer selected
   distinct private run/compact kinds and actual owner IDs, plus the closed
@@ -345,7 +384,7 @@ did not resolve them. No paid provider calls were made during this check.
   kind, public projections, current schemas and independent vectors remains
   under T07/T05; this approval closes no implementation checkbox. The other
   two decisions were pending at this checkpoint; the reply-reserve choice is
-  now recorded below and the stalled-stderr cutoff will be asked separately.
+  now recorded below, as is the subsequently approved stalled-stderr cutoff.
   The documentation-only check passes in 18 reported seconds. Complete output:
   `/private/tmp/loopex-m7-checkpoint-owner-decision-docs-v1.log`, SHA-256
   `8e6f27409661195b4c4a227a1ff7ebf8dfd006fed2cb809e31cc82d815c8c73f`.
@@ -358,7 +397,7 @@ did not resolve them. No paid provider calls were made during this check.
   reserve; actual budget/turn exhaustion keeps its existing bound outcome.
   The added T07 implementation/proof subtask is open. No contract implementation
   or checkbox is completed by the approval. The stalled-stderr startup cutoff
-  remains pending.
+  was pending at this checkpoint and is now approved above.
   The documentation-only check and reporter pass, 18 reported check seconds.
   Complete output: `/private/tmp/loopex-m7-maintenance-reserve-decision-docs-v1.log`,
   SHA-256 `81ed6e34bcdbd03aafca3603cddcf56dd65696bf3cd91d92df78557fa81d6403`.
@@ -8703,6 +8742,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Apply the approved single captured 1,000-ms CLI stalled-stderr writer-start cutoff and exact writer/device joins; fix the exposed foreign-monitor DOWN consumption by matching the captured PID/reference in the receive guard, preserve production queue/drop/drain/cleanup limits and JSON separation, retain failed proof and prove the affected workflow and shared chat cleanup on both supported pairs.
 
 - [x] Verify the combined current-only callback and helper-fixture-discovery integration from a clean committed candidate, once per candidate; retain exact SHA, complete terminal output, measured duration and digest, preserving failed discovery and maintenance candidates and the focused buffered predecessor.
 
