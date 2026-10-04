@@ -6483,13 +6483,17 @@ defmodule Loopex.Runtime.SessionState do
       case admission do
         "accepted" ->
           with true <- configuration_settled?(state),
-               :ok <- configuration_candidate(state, command.changes, record["configuration"]) do
-            event = %{
-              "command_id" => command_id,
-              "configuration" => SessionConfiguration.public_view(record["configuration"]),
-              event_id: stable_id("event-configuration", state.session_id, command_id),
-              kind: "session.configured"
-            }
+               :ok <- configuration_candidate(state, command.changes, record["configuration"]),
+               public = %{
+                 "command_id" => command_id,
+                 "configuration" => SessionConfiguration.public_view(record["configuration"])
+               },
+               {:ok, _} <- LoopexProtocol.Session.Configuration.encode_change(public) do
+            event =
+              Map.merge(public, %{
+                event_id: stable_id("event-configuration", state.session_id, command_id),
+                kind: "session.configured"
+              })
 
             {:ok, {:accepted, command_id}, nil, state.pending_work,
              state.expected_events ++ [event], %{configuration: record["configuration"]}}
@@ -7543,7 +7547,15 @@ defmodule Loopex.Runtime.SessionState do
           stable_id("event-compacted", state.session_id, candidate.checkpoint_id)
         )
 
-      with {:ok, _} <- Store.admit_bounded(event), do: {:ok, next, [event]}
+      with {:ok, _} <- Store.admit_bounded(event),
+           {:ok, _} <-
+             LoopexProtocol.Session.Checkpoint.encode_wire(
+               Map.drop(event, [:kind, :event_id, :event_sequence])
+             ) do
+        {:ok, next, [event]}
+      else
+        _ -> {:error, :invalid_compaction_checkpoint_transition}
+      end
     else
       _ -> {:error, :invalid_compaction_checkpoint_transition}
     end

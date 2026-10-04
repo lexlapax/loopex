@@ -1,0 +1,327 @@
+{
+  "contract": "checkpoint_projection",
+  "revision": 1,
+  "required": [
+    "checkpoint_id",
+    "episode_id",
+    "covered_range",
+    "prior_checkpoint_id",
+    "strategy",
+    "strategy_revision",
+    "model",
+    "reasoning",
+    "configuration_version",
+    "usage",
+    "owner",
+    "source_excerpted"
+  ],
+  "additional_members": "refuse",
+  "checkpoint_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "original_min_bytes": 1,
+    "original_max_bytes": 65536,
+    "wire_max_bytes": 87382
+  },
+  "episode_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "original_min_bytes": 1,
+    "original_max_bytes": 65536,
+    "wire_max_bytes": 87382
+  },
+  "prior_checkpoint_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "original_min_bytes": 1,
+    "original_max_bytes": 65536,
+    "wire_max_bytes": 87382,
+    "nullable": true,
+    "must_differ_from": "checkpoint_id"
+  },
+  "owner": {
+    "contract": "checkpoint_owner",
+    "revision": 1,
+    "required": [
+      "kind",
+      "id"
+    ],
+    "additional_members": "refuse",
+    "kind": [
+      "run",
+      "compact"
+    ],
+    "id": {
+      "encoding": "unpadded_base64url_of_original_opaque_bytes",
+      "original_min_bytes": 1,
+      "original_max_bytes": 65536
+    },
+    "authority": "none; owning episode authenticates the binding",
+    "superseded_owning_run_id": "refuse"
+  },
+  "strategy": "loopex.compaction.reference",
+  "strategy_revision": 3,
+  "model": {
+    "encoding": "utf8",
+    "minimum_bytes": 1,
+    "maximum_bytes": 131072
+  },
+  "reasoning": "none",
+  "configuration_version": {
+    "encoding": "canonical_decimal_string",
+    "domain": "arbitrary_positive_integer",
+    "minimum": "1"
+  },
+  "source_excerpted": "boolean",
+  "covered_range": {
+    "required": [
+      "unit_count",
+      "record_count",
+      "source_count",
+      "first",
+      "last",
+      "first_kept",
+      "digest"
+    ],
+    "additional_members": "refuse",
+    "unit_count": {
+      "encoding": "canonical_decimal_string",
+      "domain": "arbitrary_positive_integer",
+      "minimum": "1"
+    },
+    "record_count": {
+      "encoding": "canonical_decimal_string",
+      "domain": "arbitrary_positive_integer",
+      "minimum": "1"
+    },
+    "source_count": {
+      "encoding": "canonical_decimal_string",
+      "domain": "arbitrary_positive_integer",
+      "minimum": "1"
+    },
+    "relations": [
+      "unit_count <= source_count",
+      "record_count <= source_count",
+      "first != first_kept",
+      "last != first_kept"
+    ],
+    "first": {
+      "additional_members": "refuse",
+      "variants": {
+        "session_command": {
+          "required": [
+            "kind",
+            "run_id",
+            "command_id"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "command_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          }
+        },
+        "session_assistant": {
+          "required": [
+            "kind",
+            "run_id",
+            "turn"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "turn": {
+            "encoding": "canonical_decimal_string",
+            "domain": "arbitrary_positive_integer",
+            "minimum": "1"
+          }
+        },
+        "session_tool_result": {
+          "required": [
+            "kind",
+            "run_id",
+            "turn",
+            "call_id"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "turn": {
+            "encoding": "canonical_decimal_string",
+            "domain": "arbitrary_positive_integer",
+            "minimum": "1"
+          },
+          "call_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          }
+        }
+      }
+    },
+    "last": {
+      "additional_members": "refuse",
+      "variants": {
+        "session_command": {
+          "required": [
+            "kind",
+            "run_id",
+            "command_id"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "command_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          }
+        },
+        "session_assistant": {
+          "required": [
+            "kind",
+            "run_id",
+            "turn"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "turn": {
+            "encoding": "canonical_decimal_string",
+            "domain": "arbitrary_positive_integer",
+            "minimum": "1"
+          }
+        },
+        "session_tool_result": {
+          "required": [
+            "kind",
+            "run_id",
+            "turn",
+            "call_id"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "turn": {
+            "encoding": "canonical_decimal_string",
+            "domain": "arbitrary_positive_integer",
+            "minimum": "1"
+          },
+          "call_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          }
+        }
+      }
+    },
+    "first_kept": {
+      "additional_members": "refuse",
+      "variants": {
+        "session_command": {
+          "required": [
+            "kind",
+            "run_id",
+            "command_id"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "command_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          }
+        },
+        "session_assistant": {
+          "required": [
+            "kind",
+            "run_id",
+            "turn"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "turn": {
+            "encoding": "canonical_decimal_string",
+            "domain": "arbitrary_positive_integer",
+            "minimum": "1"
+          }
+        },
+        "session_tool_result": {
+          "required": [
+            "kind",
+            "run_id",
+            "turn",
+            "call_id"
+          ],
+          "run_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          },
+          "turn": {
+            "encoding": "canonical_decimal_string",
+            "domain": "arbitrary_positive_integer",
+            "minimum": "1"
+          },
+          "call_id": {
+            "encoding": "canonical_unpadded_base64url",
+            "original_min_bytes": 1,
+            "original_max_bytes": 65536,
+            "wire_max_bytes": 87382
+          }
+        }
+      },
+      "nullable": true
+    },
+    "digest": {
+      "encoding": "lowercase_hex_sha256",
+      "bytes": 64
+    }
+  },
+  "usage": {
+    "required": [
+      "attempts",
+      "reported_tokens",
+      "estimated_tokens",
+      "total_tokens"
+    ],
+    "additional_members": "refuse",
+    "quantities": {
+      "encoding": "canonical_decimal_string",
+      "domain": "arbitrary_nonnegative_integer",
+      "minimum": "0"
+    },
+    "relation": "total_tokens == reported_tokens + estimated_tokens"
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "contract": "configuration_projection",
+  "revision": 1,
+  "required": [
+    "configuration_version",
+    "model",
+    "reasoning",
+    "max_tokens",
+    "context_token_budget",
+    "system_class_tokens",
+    "instructions"
+  ],
+  "additional_members": "refuse",
+  "configuration_version": {
+    "encoding": "canonical_decimal_string",
+    "domain": "arbitrary_positive_integer",
+    "minimum": "1"
+  },
+  "model": {
+    "encoding": "utf8",
+    "minimum_bytes": 1,
+    "maximum_bytes": 131072
+  },
+  "reasoning": [
+    "default",
+    "none",
+    "low",
+    "medium",
+    "high"
+  ],
+  "max_tokens": {
+    "encoding": "canonical_decimal_string",
+    "domain": "positive_uint64",
+    "minimum": "1",
+    "maximum": "18446744073709551615"
+  },
+  "context_token_budget": {
+    "encoding": "canonical_decimal_string",
+    "domain": "positive_uint64",
+    "minimum": "1",
+    "maximum": "18446744073709551615"
+  },
+  "system_class_tokens": {
+    "encoding": "canonical_decimal_string",
+    "domain": "positive_uint64",
+    "minimum": "1",
+    "maximum": "18446744073709551615"
+  },
+  "instructions": {
+    "required": [
+      "version",
+      "digest"
+    ],
+    "additional_members": "refuse",
+    "version": {
+      "encoding": "ascii",
+      "minimum_bytes": 1,
+      "maximum_bytes": 64,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+    },
+    "digest": {
+      "encoding": "lowercase_hex_sha256",
+      "bytes": 64
+    }
+  },
+  "configured_event": {
+    "required": [
+      "command_id",
+      "configuration"
+    ],
+    "additional_members": "refuse",
+    "command_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "original_min_bytes": 1,
+      "original_max_bytes": 65536,
+      "wire_max_bytes": 87382
+    },
+    "configuration": {
+      "contract": "configuration_projection",
+      "revision": 1,
+      "required": [
+        "configuration_version",
+        "model",
+        "reasoning",
+        "max_tokens",
+        "context_token_budget",
+        "system_class_tokens",
+        "instructions"
+      ],
+      "additional_members": "refuse",
+      "configuration_version": {
+        "encoding": "canonical_decimal_string",
+        "domain": "arbitrary_positive_integer",
+        "minimum": "1"
+      },
+      "model": {
+        "encoding": "utf8",
+        "minimum_bytes": 1,
+        "maximum_bytes": 131072
+      },
+      "reasoning": [
+        "default",
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "max_tokens": {
+        "encoding": "canonical_decimal_string",
+        "domain": "positive_uint64",
+        "minimum": "1",
+        "maximum": "18446744073709551615"
+      },
+      "context_token_budget": {
+        "encoding": "canonical_decimal_string",
+        "domain": "positive_uint64",
+        "minimum": "1",
+        "maximum": "18446744073709551615"
+      },
+      "system_class_tokens": {
+        "encoding": "canonical_decimal_string",
+        "domain": "positive_uint64",
+        "minimum": "1",
+        "maximum": "18446744073709551615"
+      },
+      "instructions": {
+        "required": [
+          "version",
+          "digest"
+        ],
+        "additional_members": "refuse",
+        "version": {
+          "encoding": "ascii",
+          "minimum_bytes": 1,
+          "maximum_bytes": 64,
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+        },
+        "digest": {
+          "encoding": "lowercase_hex_sha256",
+          "bytes": 64
+        }
+      }
+    }
+  }
+}

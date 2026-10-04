@@ -28,6 +28,9 @@ imports anything outside Node's own standard library.
 | `checkpoint-owner-vectors.mjs` | Independently check literal owner vectors, superseded aliases and identity boundaries |
 | `maintenance-view.mjs` | Decode the closed active-maintenance payload, exact admission bounds and opaque owner/episode identities |
 | `maintenance-view-vectors.mjs` | Independently check maintenance literals, private-field refusals and full UTF-8/identity byte boundaries |
+| `configuration.mjs` | Decode the closed committed configuration and configuration-change payload, preserving exact quantities and instruction identity |
+| `checkpoint.mjs` | Decode the complete checkpoint projection, actual owner, original-source references and exact coverage/usage quantities |
+| `snapshot-payload-vectors.mjs` | Independently check configuration/checkpoint literals and every opaque identity and text byte boundary |
 
 Run the M7 answer payload checks with the pinned Node interpreter:
 
@@ -36,6 +39,7 @@ node clients/node/question-answer-vectors.mjs apps/loopex_protocol/priv/vectors/
 node clients/node/compact-result-vectors.mjs apps/loopex_protocol/priv/vectors/standalone-compact-result.v1.json apps/loopex_protocol/priv/vectors/standalone-compact-completion.v1.json
 node clients/node/checkpoint-owner-vectors.mjs apps/loopex_protocol/priv/vectors/checkpoint-owner.v1.json
 node clients/node/maintenance-view-vectors.mjs apps/loopex_protocol/priv/vectors/maintenance-view.v1.json
+node clients/node/snapshot-payload-vectors.mjs apps/loopex_protocol/priv/vectors/configuration-projection.v1.json apps/loopex_protocol/priv/vectors/checkpoint-projection.v1.json
 ```
 
 This checks payloads only. The foreground and daemon clients still require

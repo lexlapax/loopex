@@ -325,6 +325,48 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: closed configuration/change and complete checkpoint codecs now share
+  the accepted native projection with future snapshot and event consumers.
+  Configuration carries seven public settings/provenance members, exact
+  positive version and positive uint64 ceilings; no instruction body, capability,
+  provider or credential map is admitted. Checkpoint carries the twelve existing
+  public members, actual run/compact owner, three original-source reference
+  variants, exact coverage/accounting and inherited source_excerpted. Summary,
+  consumed source and private recovery fields refuse. The strategy revision
+  remains the literal integer 3, distinct from decimal quantity fields.
+
+  Complete schemas and 123 configuration/change plus 259 checkpoint vectors
+  have pinned byte identities. Independent Node decoders retain BigInt counts
+  and opaque Buffers; 34 full-byte checks exercise every identity position,
+  model UTF-8 and instruction-version boundaries. Both supported pairs pass
+  the complete protocol suite including eight Node cases: 120 tests in 0.3
+  seconds. The serial reducer validates both actual native projections before
+  retaining their existing event shapes. Configuration, compaction, owner
+  recovery and uncertainty tests pass 352 on each pair, with two long-bound
+  exclusions, in 19.0 current / 18.5 floor seconds. Complete outputs and digests
+  are retained in `/private/tmp/loopex-m7-snapshot-payload-proof-inventory.tsv`,
+  SHA-256 `5859f4e8bdac98ebaaac01409462a8b6030094ea05cb65530e71931961bde026`.
+  An initial format command used a root-relative path from the application
+  directory and stopped before tests; formatting from the root corrected it.
+  All actual test runs pass. The codecs are not yet joined to generation-3/4
+  wire emission or expanded snapshots. No new full integration or live client
+  workflow is claimed by this focused component proof.
+
+  One added T05 subtask closes. T01–T19 originals remain 56 done / 117 todo /
+  6 retired; added subtasks are 225 done / 10 todo. Next is same-cursor
+  configuration/checkpoint/question reduction and the complete negotiated
+  protocol join. No agents or maintainer decisions are pending.
+
+  Repository metadata checks pass in
+  `/private/tmp/loopex-m7-snapshot-payload-metadata-v2.log`, SHA-256
+  `f1e7dc7c8cfded05775d56301c0dcaf5c80a566476bee55d50a24c483e0b4fb7`:
+  formatting, warning-free compilation, documentation, status and dependency
+  direction. The initial formatting check requested a new test's argument
+  layout; its failed output remains
+  `/private/tmp/loopex-m7-snapshot-payload-metadata-v1.log`, SHA-256
+  `b67e3e10e83646f3825a7d3b75bf0ab57cff38d9af38d09d4924c2db73622d9e`.
+  The layout correction changes no assertion or bound.
+
 - Done: clean pushed source `1c9ac8c8a552afa55d92bea8e117cf3b4dba7cc4`
   passed its one full current-pair fast integration check. All eleven suites
   pass: 3,759 tests with 42 lane-selected exclusions. The suite step took
@@ -8854,6 +8896,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Pin the complete closed configuration/change and checkpoint projections in shared Elixir codecs, literal schemas/vectors and independent Node decoders; preserve exact domains, all original-source variants, actual owners and full identity/text byte limits. Join native serial-owner validation and prove configuration, checkpoint, replay and Store uncertainty on both supported pairs. Coordinated wire emission, snapshot reduction and live negotiated workflows remain open.
 
 - [x] Share the closed episode/command/result compact completion through the serial writer, both transport event projections and independent Node decoders; pin the complete nested schema and literal variants, and reduce one last completion at every paged cursor with exact identity/usage and private-field/overlap refusal on both supported pairs. Publishing last_compact in the coordinated public snapshot and live negotiated workflow proof remain open.
 

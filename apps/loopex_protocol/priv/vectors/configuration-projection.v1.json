@@ -1,0 +1,2219 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "configuration_projection",
+  "cases": [
+    {
+      "name": "initial",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "reasoning-default",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "reasoning-none",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "none",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "none",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "reasoning-low",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "low",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "low",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "reasoning-medium",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "medium",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "medium",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "reasoning-high",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "high",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "high",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "unicode-model",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:模型",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:模型",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "unbounded-version",
+      "input": {
+        "configuration_version": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "uint64-ceiling-max_tokens",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "18446744073709551615",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "18446744073709551615",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "invalid-max_tokens-0",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "18446744073709551616",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-1",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": 0,
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-2",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": 1,
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-3",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": true,
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-4",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": null,
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-5",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": [],
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-6",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": {},
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-7",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "0",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-8",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "01",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-9",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "+1",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-10",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "1.0",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-11",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "-1",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-max_tokens-12",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "1\n",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "uint64-ceiling-context_token_budget",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "18446744073709551615",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "18446744073709551615",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "invalid-context_token_budget-0",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "18446744073709551616",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-1",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": 0,
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-2",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": 1,
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-3",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": true,
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-4",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": null,
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-5",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": [],
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-6",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": {},
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-7",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "0",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-8",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "01",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-9",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "+1",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-10",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "1.0",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-11",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "-1",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-context_token_budget-12",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "1\n",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "uint64-ceiling-system_class_tokens",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "18446744073709551615",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "decoded": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "18446744073709551615",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "invalid-system_class_tokens-0",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "18446744073709551616",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-1",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": 0,
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-2",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": 1,
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-3",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": true,
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-4",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": null,
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-5",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": [],
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-6",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": {},
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-7",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "0",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-8",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "01",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-9",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "+1",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-10",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1.0",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-11",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "-1",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-system_class_tokens-12",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1\n",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-0",
+      "input": {
+        "configuration_version": 0,
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-1",
+      "input": {
+        "configuration_version": 1,
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-2",
+      "input": {
+        "configuration_version": true,
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-3",
+      "input": {
+        "configuration_version": null,
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-4",
+      "input": {
+        "configuration_version": [],
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-5",
+      "input": {
+        "configuration_version": {},
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-6",
+      "input": {
+        "configuration_version": "0",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-7",
+      "input": {
+        "configuration_version": "01",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-8",
+      "input": {
+        "configuration_version": "+1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-9",
+      "input": {
+        "configuration_version": "1.0",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-10",
+      "input": {
+        "configuration_version": "-1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-configuration_version-11",
+      "input": {
+        "configuration_version": "1\n",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-configuration_version",
+      "input": {
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-model",
+      "input": {
+        "configuration_version": "1",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-reasoning",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-max_tokens",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-context_token_budget",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-system_class_tokens",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-instructions",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000"
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-instructions.version",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-instructions.digest",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "private-budget_origins",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "budget_origins": "PRIVATE_CONFIGURATION_CANARY"
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "private-model_capabilities",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "model_capabilities": "PRIVATE_CONFIGURATION_CANARY"
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "private-provider_mapping",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "provider_mapping": "PRIVATE_CONFIGURATION_CANARY"
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "private-credential_ref",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "credential_ref": "PRIVATE_CONFIGURATION_CANARY"
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "private-summary",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "summary": "PRIVATE_CONFIGURATION_CANARY"
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-0",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-1",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": ".aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-2",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-3",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "a\n",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-4",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "a\r",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-5",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "a x",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-6",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "模型",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-7",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": null,
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-8",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": [],
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.version-9",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": {},
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.digest-0",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.digest-1",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.digest-2",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.digest-3",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.digest-4",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.digest-5",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": null
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-instructions.digest-6",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": 1
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-model-0",
+      "input": {
+        "configuration_version": "1",
+        "model": "",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-model-1",
+      "input": {
+        "configuration_version": "1",
+        "model": null,
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-model-2",
+      "input": {
+        "configuration_version": "1",
+        "model": 1,
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-model-3",
+      "input": {
+        "configuration_version": "1",
+        "model": [],
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-model-4",
+      "input": {
+        "configuration_version": "1",
+        "model": {},
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-reasoning-0",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "auto",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-reasoning-1",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "None",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-reasoning-2",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": null,
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-reasoning-3",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": 1,
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-reasoning-4",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": [],
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "private-instruction-body",
+      "input": {
+        "configuration_version": "1",
+        "model": "provider:exact-model",
+        "reasoning": "default",
+        "max_tokens": "4096",
+        "context_token_budget": "8192",
+        "system_class_tokens": "1000",
+        "instructions": {
+          "version": "host.v3",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "base": "PRIVATE_INSTRUCTIONS"
+        }
+      },
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "committed-change",
+      "input": {
+        "command_id": "AP8K",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "decoded": {
+        "command_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      }
+    },
+    {
+      "name": "committed-unbounded-version",
+      "input": {
+        "command_id": "AP8K",
+        "configuration": {
+          "configuration_version": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "decoded": {
+        "command_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "configuration": {
+          "configuration_version": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      }
+    },
+    {
+      "name": "missing-command_id",
+      "input": {
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "missing-configuration",
+      "input": {
+        "command_id": "AP8K"
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-0",
+      "input": {
+        "command_id": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-1",
+      "input": {
+        "command_id": "",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-2",
+      "input": {
+        "command_id": 1,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-3",
+      "input": {
+        "command_id": true,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-4",
+      "input": {
+        "command_id": [],
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-5",
+      "input": {
+        "command_id": {},
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-6",
+      "input": {
+        "command_id": "_x",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-7",
+      "input": {
+        "command_id": "_w=",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "invalid-command_id-8",
+      "input": {
+        "command_id": "_w\n",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "private-change-route",
+      "input": {
+        "command_id": "AP8K",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "route": "PRIVATE_ROUTE"
+      },
+      "scope": "configured_event",
+      "error": "invalid"
+    },
+    {
+      "name": "non-object-0",
+      "input": null,
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "non-object-1",
+      "input": [],
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "non-object-2",
+      "input": false,
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "non-object-3",
+      "input": "configuration",
+      "scope": "configuration",
+      "error": "invalid"
+    },
+    {
+      "name": "non-object-4",
+      "input": 1,
+      "scope": "configuration",
+      "error": "invalid"
+    }
+  ]
+}
