@@ -6,6 +6,35 @@ defmodule Loopex.ReferenceClientTest do
   alias Loopex.ReferenceClient
   alias Loopex.ReferenceClientRuntimeFixture, as: Fixture
 
+  test "creation requires complete current host genesis and retains it exactly" do
+    label = "captured-genesis"
+    fixture = Fixture.start(label, Loopex.ReferenceClientTestModel)
+    on_exit(fn -> Fixture.stop(fixture) end)
+    command_id = "create-#{label}"
+    genesis = Fixture.genesis(fixture, label)
+
+    for unsupported <- [
+          %{"fixture" => label},
+          %{"options" => %{"fixture" => label}, kind: "session_genesis_v2"},
+          Map.delete(genesis, "initial_configuration"),
+          put_in(genesis, ["tool_selection", "names"], %{})
+        ] do
+      assert {:error, :invalid_session_creation} =
+               ReferenceClient.create(fixture.client, unsupported, command_id)
+    end
+
+    assert {:ok, client} = ReferenceClient.create(fixture.client, genesis, command_id)
+    created = %{fixture | client: client}
+    assert hd(Fixture.records(created, client.session_id)).payload == genesis
+
+    assert {:ok, replayed} = ReferenceClient.create(fixture.client, genesis, command_id)
+    assert replayed.session_id == client.session_id
+
+    assert Enum.count(Fixture.records(created, client.session_id), fn record ->
+             record.payload.kind == "session_genesis_v3"
+           end) == 1
+  end
+
   # Concept: a real-provider fixture consumes its credential when it composes:
   # afterwards this VM's environment no longer names it, and custody alone
   # holds it.
@@ -113,10 +142,10 @@ defmodule Loopex.ReferenceClientTest do
     Fixture.await_terminal(fixture)
 
     records = Fixture.records(fixture, fixture.client.session_id)
-    # ADR 0013: a prompt admission is `prompt_admitted_v2`, which commits the declared
-    # `deadline_ms` duration rather than a `deadline` instant fixed at admission.
-    admitted = Enum.find(records, &(&1.payload.kind == "prompt_admitted_v2"))
-    staged = Enum.find(records, &(&1.payload.kind == "model_request_committed"))
+    # The configuration-bound admission retains ADR 0013's declared duration;
+    # staging derives the deadline instant from that captured duration.
+    admitted = Enum.find(records, &(&1.payload.kind == "prompt_admitted_v3"))
+    staged = Enum.find(records, &(&1.payload.kind == "model_request_committed_v2"))
 
     assert admitted.payload["deadline_ms"] == 300_000
     refute Map.has_key?(admitted.payload, "deadline")
@@ -143,10 +172,9 @@ defmodule Loopex.ReferenceClientTest do
                }
              )
 
-    # ADR 0013: the refused prompt must leave no `prompt_admitted_v2` record; the
-    # pre-rename kind this checked is now written only by non-prompt commands.
+    # A refused bound must leave no configuration-bound prompt admission.
     refute Enum.any?(Fixture.records(fixture, fixture.client.session_id), fn record ->
-             record.payload.kind == "prompt_admitted_v2"
+             record.payload.kind == "prompt_admitted_v3"
            end)
   end
 

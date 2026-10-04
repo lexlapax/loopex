@@ -325,6 +325,42 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: the thin embedded reference client now requires complete current v3
+  genesis and forwards its original options and exact retained payload through
+  the approved public creation API. It refuses options-only and superseded
+  input. Host preparation remains outside this client; no runtime settings,
+  capabilities or instructions are inferred by its production code.
+
+  Its reference fixtures explicitly capture instructions, model facts, reply
+  and context bounds, cleanup grace and immutable tool/name bindings. Real
+  provider fixtures use the existing capability/mapping capture; deterministic
+  adapters retain explicit fixture provenance. Record readers now require
+  configuration-bound prompt and request kinds, including the retained real
+  provider witness. The new case proves exact genesis retention, refusal of
+  missing configuration or forged name bindings without consuming the command,
+  and same-command duplicate creation with one retained genesis.
+
+  The complete credential-free reference-client suite passes all 21 cases on
+  both supported pairs, in 3.8 current-pair and 3.6 floor-pair seconds. Both
+  real-provider cases remain excluded and unproved here. Current-format real
+  Local effect/restart, prepared activation, receipt reconciliation and cancel
+  recovery cases pass without changing their bounds. Formatting, warning-free
+  compilation, documentation, status and dependency checks pass. The first
+  runnable suite failed two old record-kind assertions; those readers were
+  migrated before the final paired runs. The sandbox TCP-lock failure remains
+  unavailable evidence, not a passing run.
+
+  Complete run outputs and exact source hashes are retained in
+  `/private/tmp/loopex-m7-reference-genesis-proof-inventory.tsv`, SHA-256
+  `21f5306e167b6ae8ba289b522cefa42467511c515049389d8d198dfd3b3bc504`.
+  This closes one added T04 migration subtask. Original T01–T19 counts remain
+  56 done / 117 todo / 6 retired; added counts are 228 done / 10 todo.
+  Including T00, originals are 56 / 123 / 7 and added are 232 / 11.
+  Ephemeral, durable ask and transport creation still need prepared current
+  genesis. Core's v2 writer/reader and instruction fallback remain open until
+  all their callers migrate. This is focused evidence, not a full integration,
+  release or milestone-closure result. No maintainer decision is pending.
+
 - Done: shared Elixir and independent Node codecs now pin the complete
   revision-3 snapshot and its closed pending-question projection. The snapshot
   has ten fixed members: the existing session/cursor/run/phase fields plus
@@ -8932,6 +8968,8 @@ or check was relaxed.
 - [x] Prove configuration inspection reads no credentials and starts no runtime or provider call.
 
 ### Added implementation subtasks
+
+- [x] Migrate the thin embedded reference client and its deterministic/real-provider fixtures to exact current v3 host genesis; remove options-only creation from this client, retain captured model/instructions/bounds and immutable tools, update configuration-bound record readers, and prove exact retention, malformed/superseded refusal, duplicate creation and the complete credential-free effect/restart/recovery suite on both supported pairs. Other host creation paths and Core v2 removal remain open.
 
 - [x] Expose the approved public prepared configure facade with separate authored input and resolved candidate; prove live admission, replay, refusal, unknown commits, restart and malformed routing on both supported toolchains.
 - [x] Share the v2 resolver/decoder between creation and replay; pin unchanged transaction bytes and exact normalized byte boundaries.

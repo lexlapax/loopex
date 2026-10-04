@@ -30,7 +30,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
 
     committed =
       Enum.find(records, fn record ->
-        record.payload.kind == "model_request_committed" and
+        record.payload.kind == "model_request_committed_v2" and
           record.payload["request"]["staged_request_digest"] ==
             dispatched.staged_request_digest
       end)
@@ -85,7 +85,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
         Fixture.await_terminal(fixture, 6_000)
         records = Fixture.records(fixture, fixture.client.session_id)
 
-        requests = Enum.filter(records, &(&1.payload.kind == "model_request_committed"))
+        requests = Enum.filter(records, &(&1.payload.kind == "model_request_committed_v2"))
         # ADR 0018: a turn's reply is retained on the attempt settlement whose
         # conversation is canonical, as the eight-key durable projection under
         # `result`, joined to its request by the staged request digest.
@@ -157,7 +157,8 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
 
           %{
             diagnostic: "m3_real_model_session_failure",
-            request_count: Enum.count(records, &(&1.payload.kind == "model_request_committed")),
+            request_count:
+              Enum.count(records, &(&1.payload.kind == "model_request_committed_v2")),
             canonical_settlement_count:
               Enum.count(records, fn record ->
                 record.payload.kind == "model_attempt_settled_v3" and

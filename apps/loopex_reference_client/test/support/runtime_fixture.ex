@@ -73,8 +73,10 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.WorkspaceLease
   alias Loopex.ReferenceClient
+  alias Loopex.Runtime.{Instructions, SessionConfiguration, SessionGenesis}
   alias Loopex.Store
   alias Loopex.Store.Local, as: LocalStore
+  alias LoopexProtocol.ToolDefinition
 
   @demo_tool_wall_time_ms 30_000
 
@@ -209,10 +211,91 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   end
 
   def create(fixture, label) do
+    genesis = genesis(fixture, label)
+
     {:ok, client} =
-      ReferenceClient.create(fixture.client, %{"fixture" => label}, "create-#{label}")
+      ReferenceClient.create(fixture.client, genesis, "create-#{label}")
 
     %{fixture | client: client}
+  end
+
+  def genesis(fixture, label) do
+    runtime = fixture.runtime_options
+    definitions = Keyword.fetch!(runtime, :tools)
+    model = Keyword.fetch!(runtime, :model)
+    max_tokens = Keyword.get(runtime, :sampling, %{"max_tokens" => 4_096})["max_tokens"]
+
+    {:ok, instructions} =
+      Instructions.capture(%{
+        "version" => "reference-fixture.v1",
+        "base" => "Use the registered tools to complete the requested workspace task.",
+        "environment" => "Workspace: " <> fixture.workspace,
+        "appendix" => ""
+      })
+
+    {capabilities, mapping} = configuration_facts(model, max_tokens)
+
+    {:ok, configuration} =
+      SessionConfiguration.resolve(
+        %{
+          "model" => model.model,
+          "reasoning" => "default",
+          "configuration_version" => 1,
+          "instructions" => instructions,
+          "max_tokens" => max_tokens,
+          "context_token_budget" => Keyword.fetch!(runtime, :context_token_budget)
+        },
+        capabilities,
+        mapping,
+        definitions
+      )
+
+    names =
+      Map.new(definitions, fn definition ->
+        {id, version, digest} = ToolDefinition.generation(definition)
+
+        {definition["name"],
+         %{"tool_id" => id, "tool_version" => version, "definition_digest" => digest}}
+      end)
+
+    {:ok, genesis} =
+      SessionGenesis.resolve(%{"fixture" => label}, %{
+        genesis_version: "session_genesis_v3",
+        runtime_configuration: %{
+          "cleanup_grace_ms" =>
+            Keyword.get(runtime, :cleanup_grace_ms, Executor.default_cleanup_grace_ms())
+        },
+        initial_configuration: configuration,
+        tool_selection: %{"definitions" => definitions, "names" => names},
+        policy_defer_mode: "admit"
+      })
+
+    genesis
+  end
+
+  defp configuration_facts(%{module: Loopex.LLM.ReqLLM, model: model}, max_tokens) do
+    {:ok, capabilities} = Loopex.LLM.ReqLLM.ModelCapabilities.capture(model)
+    {:ok, mapping} = Loopex.LLM.ReqLLM.ModelCapabilities.mapping(model, "default", max_tokens)
+    {capabilities, mapping}
+  end
+
+  defp configuration_facts(%{model: model}, _max_tokens) do
+    {%{
+       "model" => model,
+       "context_window" => nil,
+       "output_limit" => nil,
+       "reasoning_levels" => [],
+       "source_revision" => "reference-fixture.v1",
+       "source_digest" => String.duplicate("0", 64)
+     },
+     %{
+       "mapping_revision" => "loopex.unregistered.default.v1",
+       "renderer_revision" => "loopex.reqllm.canonical.v1",
+       "continuation_required" => false,
+       "canonical_terminal_tool_history" => false,
+       "thinking_disabled" => false,
+       "thinking" => %{"mode" => "omitted"}
+     }}
   end
 
   def resume(fixture, session_id, cursor \\ 0) do

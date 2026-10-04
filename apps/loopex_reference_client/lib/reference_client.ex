@@ -2,7 +2,7 @@ defmodule Loopex.ReferenceClient do
   @moduledoc """
   ## Concept
 
-  The thin M1 embedded client. It starts one explicit runtime, creates or
+  The thin embedded client. It starts one explicit runtime, creates or
   resumes one session, attaches, submits commands, consumes committed events,
   offers recovery evidence, and stops through `Loopex` only.
 
@@ -59,16 +59,27 @@ defmodule Loopex.ReferenceClient do
 
   ## Technical depth
 
+  The host supplies complete current genesis, including original options,
+  captured configuration and immutable tool selection. Creation forwards those
+  exact bytes through the public facade; this client resolves no host settings.
   The returned client retains only the opaque attachment supplied by the API.
   """
   @spec create(t(), map(), binary()) :: {:ok, t()} | {:error, term()}
   def create(%__MODULE__{runtime: runtime} = client, genesis, command_id)
       when is_map(genesis) and is_binary(command_id) do
-    with {:ok, session_id} <- Loopex.create_session(runtime, genesis, command_id: command_id),
+    with {:ok, options} <- creation_options(genesis),
+         {:ok, session_id} <-
+           Loopex.create_session(runtime, options, command_id: command_id, genesis: genesis),
          {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
       {:ok, %{client | session_id: session_id, attachment: attachment}}
     end
   end
+
+  defp creation_options(%{"options" => options, kind: "session_genesis_v3"})
+       when is_map(options) and not is_struct(options),
+       do: {:ok, options}
+
+  defp creation_options(_genesis), do: {:error, :invalid_session_creation}
 
   @doc """
   ## Concept

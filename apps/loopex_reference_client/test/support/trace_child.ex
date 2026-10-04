@@ -140,7 +140,7 @@ defmodule Loopex.ReferenceClientTraceChild do
 
     projected =
       records
-      |> Enum.filter(&(&1.payload.kind == "model_request_committed"))
+      |> Enum.filter(&(&1.payload.kind == "model_request_committed_v2"))
       |> List.last()
       |> then(& &1.payload["request"]["messages"])
       |> Enum.map(fn message ->
