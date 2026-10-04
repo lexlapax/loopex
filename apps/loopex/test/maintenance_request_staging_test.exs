@@ -1901,7 +1901,7 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     for {reply, cause} <- [
           {%{raw | completion: "limit"}, "maintenance_summary_incomplete"},
           {%{raw | completion: "unknown"}, "maintenance_summary_incomplete"},
-          {Map.drop(raw, [:completion, :continuation]), "maintenance_summary_incomplete"},
+          {%{raw | completion: "unknown", text: "not JSON"}, "maintenance_summary_incomplete"},
           {%{raw | text: "{}"}, "maintenance_summary_invalid"},
           {%{raw | text: summary_json(Map.put(summary_output(), "extra", true))},
            "maintenance_summary_invalid"},
@@ -2164,15 +2164,39 @@ defmodule Loopex.Runtime.MaintenanceRequestStagingTest do
     {state, history, events} = opened()
     episode_id = state.active_maintenance
     request = state.maintenance_episodes[episode_id]["request"]
+    raw = summary_reply(request)
 
-    for outcome <- [:owner_loss, {:reply, Map.put(summary_reply(request), :extra, true)}] do
+    for outcome <- [
+          :owner_loss,
+          {:reply, Map.put(raw, :extra, true)},
+          {:reply, Map.drop(raw, [:completion, :continuation])},
+          {:reply, Map.delete(raw, :completion)},
+          {:reply, Map.delete(raw, :continuation)},
+          {:reply, Map.delete(raw, :provider_response_id)}
+        ] do
       assert {:ok, proposal} = SessionState.propose_maintenance_attempt_settled(state, outcome)
-      assert [prefix, settlement, _terminal] = proposal.records
+      assert [prefix, settlement, terminal] = proposal.records
       assert settlement["accounting"]["source"] == "estimated"
       assert prefix["result"]["usage"]["estimated_tokens"] == 10_000
+      assert prefix["result"]["usage"]["reported_tokens"] == 0
+
+      if match?({:reply, _}, outcome) do
+        assert settlement["result"] == %{
+                 "kind" => "error",
+                 "category" => "unreadable_model_answer",
+                 "accounting_evidence" => %{"kind" => "none"}
+               }
+
+        assert terminal["reason"] == "unreadable_model_answer"
+      end
+
       {next, rows, all_events} = commit(state, proposal, events)
       assert next.charged[state.active_run_id] == %{tokens: 10_000, source: :estimated}
       assert next.maintenance_episodes[episode_id]["checkpoint_id"] == nil
+      assert next.maintenance_episodes[episode_id]["usage"]["attempts"] == 1
+      assert next.active_run_id == nil
+      assert next.active_maintenance == nil
+      assert next.conversation == state.conversation
 
       assert {:ok, recovered} =
                SessionState.recover(state.session_id, history ++ rows, all_events)

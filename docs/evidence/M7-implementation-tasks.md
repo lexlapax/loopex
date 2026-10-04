@@ -325,14 +325,54 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running: verify the combined current-only callback and support-fixture
-  discovery integration candidate once after its clean commit/push. All focused
-  handles are terminal and collected. No full check has started for these bytes;
-  no earlier full-check result covers them. Preserve the failed `3aa21960`
-  discovery result and its repaired focused proof below. The goal remains active
-  on `m7`; the three recorded maintainer decisions remain pending.
+- Running: commit the proved maintenance fixture repair, then run the next
+  clean exact integration candidate once. The added T15 callback migration is
+  complete again after correcting the dynamic `Map.drop` control missed by the
+  literal AST inventory. Original T08 production-contract and native-fidelity
+  proof rows remain complete. Current T01–T19 tally is original
+  56 done / 117 todo / 6 retired; added 212 done / 10 todo. The goal remains
+  active. The three recorded maintainer decisions were presented together
+  again and await answers; no dependent contract changes are implemented.
 
-- Done: migrate the model boundary to exact eleven-field current v3 callbacks
+- Failed: the single full current-pair fast check of clean pushed
+  `bad9f2203e8e346d25309e95d6e94a773741a9bb` ended exit 1 after 924 measured
+  shell seconds. All ten other suites pass, including composition's complete
+  489-case automatic discovery with one expected exclusion. Core passes
+  1,216 of 1,217 cases with eight exclusions; the maintenance summary test at
+  `maintenance_request_staging_test.exs:1895` still expected a dropped-nine-field
+  callback to retain reported usage and become an incomplete summary. The current
+  decoder correctly rejects it before accounting, producing the episode terminal,
+  estimated remaining-allowance settlement and run terminal together. No production
+  contract is changed to accept the retired shape. Aggregate is 3,695 passed /
+  one failed / 39 excluded. Complete immutable output is
+  `/private/tmp/loopex-m7-bad9f220-fast-check.log`, SHA-256
+  `06f8022ccefcb5e145289602c69f96da7a320277bf6ce68e768461c941be5154`.
+  Handle `29111` is terminal and collected. Do not poll it or rerun these failed
+  bytes into green. The next exact candidate includes the current fixture repair.
+
+  The positive summary matrix now uses a current eleven-field callback with
+  unknown completion and invalid JSON, preserving all seven positive controls,
+  exact reported 37/19 usage, single 56-token charge, atomic parent ending and
+  replay/mutation checks. The retired nine-field callback moves to the malformed
+  reply matrix with extra/missing response/completion/continuation fields.
+  Those cases prove zero reported usage, the exact 10,000-token remaining charge,
+  unchanged conversation, no checkpoint, one attempt, closed run/episode,
+  exact unreadable result/terminal reason and no retry. The complete maintenance
+  staging, summary, current provider reply and accounting provenance files pass
+  all 72 cases on each supported pair with warnings-as-errors: current 2.1 seconds,
+  floor 2.0 seconds. Known Task.Supervisor shutdown_error/noproc diagnostics
+  remain under the separate open T16 investigation; these passes do not resolve
+  it. Static compilation, formatting, bootstrap/status, documentation, dependency
+  and version gates pass. No assertion, timeout or required check was weakened.
+
+  | Retained complete output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-maintenance-current-callback-current-v1.log` | PASS, 72 cases, current pair | `3a243ef5f5959d1ceda7968af83f736a7ee0c1f328f766578e7653eff6fa9c09` |
+  | `/private/tmp/loopex-m7-maintenance-current-callback-floor-v1.log` | PASS, 72 cases, floor pair | `655d743db7df687e58da22d57ac5c71698618b4c2d50b5b1627751ff3a5a1032` |
+  | `/private/tmp/loopex-m7-maintenance-current-callback-static-current-v1.log` | PASS, complete collected static-check output | `ee072b28724e538287f9d157ae16e9e689f9a3cc61c805c18041bdf07360fed6` |
+  | `/private/tmp/loopex-m7-maintenance-current-callback-final-metadata-v1.log` | PASS, final formatting/bootstrap/status/docs/tally/whitespace | `cfdd5db0125ed44cc1c54cc88c93aca4361ba7da196af81d88a41120c147a52c` |
+
+- Prior checkpoint: migrate the model boundary to exact eleven-field current v3 callbacks
   and ten-field canonical replies, under the pre-1.0 current-contract decision.
   Remove public `ProviderAttempt.canonical_reply/2`, its eight-field projection
   and the nine-field fallback in `/3`. Current adapters, fixtures, types and
@@ -8588,7 +8628,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Verify the combined current-only callback and helper-fixture-discovery integration candidate once from a clean committed checkout; retain exact SHA, complete terminal output, measured duration and digest, preserving the failed discovery candidate and focused buffered predecessor.
+- [ ] Verify the combined current-only callback and helper-fixture-discovery integration from a clean committed candidate, once per candidate; retain exact SHA, complete terminal output, measured duration and digest, preserving failed discovery and maintenance candidates and the focused buffered predecessor.
 
 - [x] Declare the support-only retained-genesis fixture in composition's existing discovery ignore list; preserve every codec/admission case, automatic test-load patterns and warnings-as-errors, retain the failed exact-candidate integration and verify the unchanged focused case count on both supported pairs.
 

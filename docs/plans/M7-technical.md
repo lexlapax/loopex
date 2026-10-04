@@ -1977,6 +1977,23 @@ pairs with warnings-as-errors. Complete failed output and repaired focused
 outputs are retained in the task checklist. A new exact candidate must prove
 full discovery; the failed candidate will not be rerun into green.
 
+The combined clean callback/discovery candidate `bad9f220` then failed its
+single full fast check after 924 measured shell seconds, with 3,695 passed,
+one failed and 39 excluded. All ten other suites pass; Core's only failure
+is a maintenance fixture that dynamically dropped the required completion and
+continuation fields but still expected reported incomplete-summary evidence.
+Current v3 correctly rejects the retired callback and charges the remaining
+allowance atomically. The fixture repair retains
+all seven readable summary controls and moves obsolete/missing-field replies
+into the conservative-accounting, unchanged-conversation, no-checkpoint,
+no-retry and exact replay proof. All 72 focused cases pass with warnings-as-errors
+on both supported pairs, and static compilation, formatting, bootstrap/status,
+documentation, dependency and version gates pass. The callback migration is
+complete again; full integration on the new committed repair remains pending.
+Complete failed and focused outputs are retained in the task checklist; the
+failed candidate will not be rerun into green. Existing Task.Supervisor cleanup
+diagnostics remain a separate open T16 investigation.
+
 The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes the older-reader, upgrade and cross-version rollback bullets above.
 The old archive runner, helpers and exclusive fixtures have been removed.
