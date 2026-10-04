@@ -15,7 +15,8 @@ defmodule LoopexComposition.MixProject do
       elixir: "~> 1.17",
       test_ignore_filters: [
         "test/support/req_llm_start_fixture.ex",
-        "test/support/ephemeral_ambient_fixture.ex"
+        "test/support/ephemeral_ambient_fixture.ex",
+        "test/support/delegation_genesis_fixture.exs"
       ],
       start_permanent: Mix.env() == :prod,
       deps: deps()

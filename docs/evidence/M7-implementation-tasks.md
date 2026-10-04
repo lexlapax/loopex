@@ -325,6 +325,58 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running: remove the remaining pre-1.0 model callback compatibility path
+  under the maintainer's current-contract-only disposition. The current core
+  still accepts nine-field callbacks through `canonical_reply/3` and exposes
+  the older eight-field canonical projection through `/2`; those paths keep
+  the original T08 exact-reply item open. A read-only AST inventory identifies
+  twenty complete nine-field callback literals and nineteen old projection
+  calls across fifteen files, plus the adapter and core reply types. Migrate
+  current producers/fixtures and calls before deleting the old decoder/API.
+  Retain eleven-field v3 callbacks, ten-field canonical replies, current v3
+  settlements, exact request echo, raw admission before projection, captured
+  continuation requirements and whole-reply accounting. No new wire generation,
+  persistent kind, stop classification, deadline or compatibility shim is added.
+  Original native block/string/order/identity/argument fidelity also has a
+  source-to-test audit in progress; original rows remain open until their full
+  proof mappings and current both-pair results are recorded.
+
+- Failed: the single full current-pair fast check of clean, pushed
+  `3aa219605d46748dbf8d3e6b777cf44321ad90bf` ended with exit 1 after 925
+  measured shell seconds. Ten application suites passed. Composition executed
+  all 489 cases successfully with one expected exclusion, but Mix's
+  warnings-as-errors rejected the new `test/support/delegation_genesis_fixture.exs`
+  because it matched neither the configured test-load nor test-ignore filters.
+  Aggregate assertions are 3,696 passed / 39 excluded; the required integration
+  verdict is FAIL, not PASS. Complete output is retained read-only at
+  `/private/tmp/loopex-m7-3aa21960-fast-check.log`, SHA-256
+  `1029e090dd41e41c665679fc6fb2f4b7580a6ee6fc97aa7e3e48332a34e693a2`.
+  Execution handle `62407` is terminal and collected. Do not poll or rerun this
+  failed candidate into green.
+
+  The support-only module is now listed alongside the two existing supporting
+  modules in composition's explicit `test_ignore_filters`. It defines fixture
+  construction and contains no test cases; the codec test explicitly requires
+  it. No `_test.exs` file is ignored, no assertion or check is removed and
+  warnings remain errors. The same three focused files still execute all 28
+  cases with `--warnings-as-errors` on both pairs, in 2.7 and 2.8 seconds.
+  This focused result does not establish a full automatic-discovery integration
+  pass; a new clean candidate must run once after the repair.
+
+  | Retained output | Result | SHA-256 |
+  | --- | --- | --- |
+  | `/private/tmp/loopex-m7-helper-fixture-discovery-focused-current-v1.log` | PASS, 28 cases, 2.7 seconds, warnings-as-errors | `da016e21e11301f555926839b1a4c87f008764914b986482121937aa29bda237` |
+  | `/private/tmp/loopex-m7-helper-fixture-discovery-focused-floor-v1.log` | PASS, 28 cases, 2.8 seconds, warnings-as-errors | `daf4371998bd72ea342b8d28dbbc8d9a553112a9e077a443613644e34a3ba3a8` |
+
+  Warning-free compilation, formatting, bootstrap/status, documentation,
+  dependency direction and version checks pass. Complete read-only output:
+  `/private/tmp/loopex-m7-helper-fixture-discovery-static-current-v1.log`, SHA-256
+  `a1a19310d07d01925d0e62c1bd81761c9563efc2b9615f52f267bcba6334170b`.
+  One added T16 discovery repair subtask closes, leaving T16 added 38 done /
+  1 todo. The newly identified T15 callback migration is open. T01–T19 originals
+  remain 54 done / 119 todo / 6 retired; added is now 211 done / 10 todo.
+  No original row closes, and the failed full check remains failed.
+
 - Done: T11's accepted private retained-genesis codec is implemented for
   parent creation objects and child reservation objects. It writes exactly
   `encoding`, padded base64 `bytes` and lowercase `sha256`, using the normalized
@@ -8434,6 +8486,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Migrate current model adapters, fixtures, conformance callers and reply types to exact eleven-field v3 callbacks; remove the nine-field callback fallback and old two-argument canonical projection, preserving current ten-field replies, v3 settlement, raw-admission order, exact echoes, captured requirements and once-only accounting on both supported toolchains.
+
 - [x] Remove the historical lineage-projection cutover cache and fallback; require the captured current artifact projection from the first request, preserve current null-projection sessions, and prove unchanged restart plus null/missing-first/missing-later/fully-removed provenance refusal and adjacent artifact/maintenance/accounting behavior on both supported toolchains.
 - [x] Remove model-request v1 and receipt revision 2/3 readers, old per-run conversation query and lineage bypass; migrate current resource/source-binding fixtures and prove self-consistent retired-version refusal, exact unchanged bounds and current recovery on both toolchains.
 - [x] Remove provider settlement v1/v2 readers, legacy accounting branches, cutover state and exclusive historical-reader interaction fixtures; prove current v3 verdict/accounting/source/terminal/restart and effect-query obligations on both toolchains.
@@ -8458,6 +8512,8 @@ or check was relaxed.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Declare the support-only retained-genesis fixture in composition's existing discovery ignore list; preserve every codec/admission case, automatic test-load patterns and warnings-as-errors, retain the failed exact-candidate integration and verify the unchanged focused case count on both supported pairs.
 
 - [x] Run the standalone-dispatch and artifact-retention repair integration candidate once from a clean committed checkout; retain its exact SHA, complete terminal output, both measured durations and SHA-256, while preserving the failed parent's evidence.
 

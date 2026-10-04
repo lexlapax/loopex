@@ -1947,6 +1947,16 @@ checklist. This prepares parent/child retained objects; ledger framing and
 closing credit, host bindings, allowance, routing, classification and live
 helper execution remain open.
 
+The single full current-pair fast check of clean `3aa21960` then executed all
+3,696 assertions successfully with 39 expected exclusions, but ended FAIL after
+925 measured shell seconds because composition's supporting genesis fixture was
+not classified by its test discovery configuration. Adding that support-only
+module to the existing explicit ignore list removes no test case or check; the
+codec test continues to require it, and the same 28 focused cases pass on both
+pairs with warnings-as-errors. Complete failed output and repaired focused
+outputs are retained in the task checklist. A new exact candidate must prove
+full discovery; the failed candidate will not be rerun into green.
+
 The [pre-1.0 maintainer override](../developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 supersedes the older-reader, upgrade and cross-version rollback bullets above.
 The old archive runner, helpers and exclusive fixtures have been removed.
