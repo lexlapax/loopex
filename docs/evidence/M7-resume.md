@@ -5,8 +5,8 @@ acceptance, milestone closure or verification waiver.
 
 ## Concept
 
-The maintainer requested a safe pause for restart on 2026-10-05. Resume the
-existing M7 implementation goal on branch `m7`; do not use `m8`. Read this file,
+M7 implementation resumed after the maintainer restart on 2026-10-05. Continue
+the existing active goal on branch `m7`; do not use `m8`. Read this file,
 [AGENTS.md](../../AGENTS.md), the [plans register](../plans/README.md), the
 accepted [M7 plan](../plans/M7.md#concept) and its
 [technical companion](../plans/M7-technical.md#technical-depth), then the
@@ -25,22 +25,151 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current resumed work
 
-The diagnostic decision is approved and the paired repairs are committed/pushed.
-Manifest worker source is joined as described below; all its handles are
-terminal and its verification slot has returned to root. The private-task
-trace remains unverified source-only `57c110d73cdbe2cf90fa16b32c304f2b52c5c419`
-on the existing isolated branch, pushed without integration. No trace VM ran.
+Primary `m7` is clean and pushed at
+`e327e46c51298d49deee045e3cb03fc9e375dc94`. The active goal remains authorized;
+this checkpoint does not pause it. The approved diagnostic setup cutoff and
+complete physical manifest source are integrated. The full current fast check
+of e327 failed; never retry or relabel that candidate PASS.
 
-New complete outputs are in the durable external directory
-`/Users/spuri/projects/lexlapax/loopex-evidence/M7`, with exact digests in the
-[task ledger](M7-implementation-tasks.md). Earlier temporary output remains
-absent. The next proof is the combined integration candidate, including actual
-release selection. Reconstruct queued public decisions from current sources;
-a new read-only policy vocabulary report is available at
-`/Users/spuri/projects/lexlapax/loopex-evidence/M7/policy-wire-reconstruction-20261005-v1/report.md`,
-SHA-256 `2cdeafa61a5607be195826ff090daf9fe19c2336091103e2aacf2fa3269659ad`.
-Root read it; it proposes no implementation or approval. Its native integer
-turn must be encoded as a canonical decimal string on wire, never a JSON number.
+The selected `bash scripts/check-release.sh --only long_bound` is terminal PASS
+on exact e327, exit 0 in 1090.005 seconds. Root collected handle 9847; do not poll
+or rerun it. All20 selected cases pass: Core 10, executor 2, daemon 5, composition 2
+and provider transport-drain 1. This closes only the release selection subtask;
+full integration/closure/provider/attended evidence remain separate. Source
+remained exact e327 and clean throughout. Complete output is retained at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/selected-long-bound-e327e46c-v1`.
+Completion SHA-256
+`829697a9d2a53c9d708d3dce6866aad6b8a95381970b43dfbbce02eca0305a77`;
+selected-release.log SHA-256
+`ccf32d1fa06d9561b1410499c42a1f07fec108e8ad9b5789d94fa3b242504ac3`.
+Root rehashed all 14 retained outputs, parsed the exact NUL manifest with no
+malformed/duplicate records, compared all 1,242 complete kind/mode/path records
+against independent Git projection, and compared all 1,097 source blobs against
+Git. Exported SOURCE_IDENTITY binds exact commit and committer date. The archive
+build changes only the declared apps/loopex_cli/loopex output outside excluded
+_build/deps. Initial root comparison mistakenly expected root-level escripts;
+source-script inspection corrected that verifier expectation, without rerunning
+the release or changing its result. Both escript inventories pass.
+
+Exact NUL source-archive-manifest SHA-256
+`c589f6439bfc99816a305a0ae91e902f20d091ef56e31d7142b3039609c6f7aa`;
+composition lane log SHA-256
+`2083d0b4781f56eb821ee3bce632794de6167c1d014018eede2a0d68de1832e8`.
+No Linux/native invalid-byte witness or full release closure is inferred.
+
+Root has granted the exclusive verification slot to the foreground worker for
+queued c35d94b5 both-pair proof; current cold dev compilation is active. Store and
+private-task workers have no VM permission. Query actual agent/runner state
+before any new launch. Main can receive this evidence checkpoint because the
+primary selected run has ended; foreground source is frozen in its own worktree.
+
+Terminal full fast-check FAIL is retained in
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/integration-e327e46c-v1`.
+Completion SHA-256
+`106174758d98d3ab54708c9ec098f2139bc40283cc61fbd881e6697dea0678b0`;
+complete current-fast-check.log SHA-256
+`a5f16c563ec3c17df75031fb57add5bb336a40d45bf2f926c9f61ce89cf28b83`.
+Exit1, 2274.262 seconds, exact final e327 and clean tree. Ten application suites
+passed; AppServer passed 100/102, with five exclusions. Its two failures expose
+an incomplete revision-3 snapshot mapping and a superseded generic policy-answer
+admission assertion. Complete six additional application outputs were retained;
+inventory digests are in the latest task-ledger entry. Core's three actual
+shutdown_error/noproc reports remain an open causal investigation.
+
+The foreground worker alone owns the verification slot. Queued source
+checkpoints, all clean and pushed, are:
+
+1. Foreground repair `c35d94b57adde87b4cd839a42ef38c8330929670`,
+   branch `codex/m7-current-foreground-fixtures`, worktree
+   `/Users/spuri/.codex/worktrees/m7-inspection-rejoin/loopex`. Only Mapping and
+   FoundationMapping tests changed: full captured ten-field shared snapshot,
+   exact old-cursor parity after live advancement, and the current distinct
+   policy-answer admission order. No generation activation or ADR 0052 work.
+   Unformatted/uncompiled/unproved. Prepared external runner
+   `.../M7/foreground-c35d94b5-v2/run.py`, SHA-256
+   `0cfdefbddd80dcace416512a4f970ee2b628b0e60ec9aba1f2a1ab2bb087853a`.
+   Both supported pairs, pinned Node22.14.0, expected focused 13/0 exclusions and
+   full ordinary 102/5 exclusions. Preserve first failures and exact populations.
+2. Pure internal Store byte decoder `7dc5fe51a4c646f9179ef715add641cf688bde82`,
+   branch `codex/m7-offline-store-audit`, worktree
+   `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Only Log and existing
+   log_encoding tests changed. Decode captured bytes using the same current
+   frame decoder/schema loading and256 MiB predecode cap; no actors/IO/repair.
+   Unformatted/uncompiled/unproved. Prepared external runner
+   `.../M7/store-byte-decoder-20261005-v1/run-stage.py`, SHA-256
+   `8d8da5dfa7157e4a6c08d4c0b4d2a9cb8312aed23ce0fa2bdc34cbbdea7311cb`.
+   Both pairs: focused encoding/capacity 10 then whole ordinary Store suite.
+3. Private-task causal witness `6a39e0bbc3237222207eeeed3daccdde0444a419`,
+   branch `codex/m7-private-task-witness-wip`, worktree
+   `/Users/spuri/.codex/worktrees/m7-pipe-deadline-witness/loopex`. Sole shutdown
+   fixture source; exact unlink/return/actor/kill/stop-ack metadata, floor/current
+   trace shapes, exact shutdown:noproc retained separately from ordinary noproc.
+   Preserve original 1000 ms captured cutoff, 8192 cap, 32 serial/concurrent cases,
+   quiet assertions and actual joins. No new proof ran; earlier v3 failures stay
+   FAIL. Do not integrate as a passing regression or change production custody
+   without actual causal evidence.
+
+Finish foreground verification first, then Store, one VM slot at a time. Root reviews exact diffs/output/source identities before joining
+proved changes. Keep both project dev and test compilation before no-compile
+runs. New clean integration candidates get one full check; failed e327 is not a
+passing baseline. Worker source-only branches and prepared runner plans grant
+no test result.
+
+The one pending human question asks acceptance of the exact ADR 0052 pair at
+`ec9e8fbe6c2ed3fb427a93a5d3361e356de01795`, clean/pushed on
+`codex/m7-policy-wire-decision` in
+`/Users/spuri/.codex/worktrees/m7-protocol-manifests/loopex`.
+Concept Proposed SHA-256
+`50350c393f74002a4123031ac7f36e393371336c89ff4ae132efb552acebb8e8`;
+Technical SHA-256
+`2c59a51bef945000f4083360de3ceee7590d30a44597a3541cc22bcf168ad82c`.
+Exact docs gate passed once in 64.538 seconds, retained at
+`.../M7/policy-proposal-ec9e8fbe-v1/documentation-check.log`, SHA-256
+`b55d80763de8239699c36e4c18b02da179062ed9d115031d7c0d2610c5f4683d`;
+completion SHA-256
+`b9a437aabfd83541d502f36eb15e1ddc4c10f8e621f517f46adcd126aa12414d`.
+The proposal remains unaccepted. Do not implement dependent events, change its
+Proposed bytes while acceptance is pending, or treat a default option as approval.
+Queue further configure/accounting/attempts/helper decisions individually.
+
+Current reconstructive reports, all read-only and independently rehashed by root:
+
+- Whole restore audit report at `.../M7/restore-audit-reconstruction-20261005-v1/report.md`,
+  SHA-256 `b397bd7a187b1b2aa5adea015da8b5077e268df680c9f159732e979c8ff7dd0c`;
+ 50-input inventory SHA-256
+ `7615e7660c1b81a6349b8c69c0465a4812baabebe1da54eff53e9f79c2746dee`.
+ All50 Git blobs/lengths/hashes and report/completion match. Full current
+ Store/SessionState replay, Local receipt ledgers including resource-pack imports,
+ artifacts/private references, catalog/owner-marker caps, current daemon format,
+ complete historical restore lineage/claims/retirement/activation remain required.
+ No actors, backup or restore ran for this report.
+- Configure wire reconstruction at `.../M7/configure-wire-reconstruction-20261005-v1/report.md`,
+ SHA-256 `5e9c9f2112db57e41fd6bb269aff56036eded0fee49eb7d621679a90dd7c0783`;
+ exact28-source inventory SHA-256
+ `d20bad6b7e3c645c6c806c5e500ba2c94e015fe04d0b0071e1d6f7f76cff2bbd`.
+ Required closed nonempty changes wrapper is recommended for future /3-/4
+ ingress; native authored changes/private v2 identity stay unchanged. Not accepted.
+ Reports and sources are copied byte-exact to durable sibling storage; the old
+ artifact-digests file retains temporary path labels as a historical record.
+
+`LegacyImport` reads the current offline SessionDirectory marker and supports
+the current promised prepare-index transfer. No old-schema decoder/fallback was
+found. The earlier deletion recommendation was overbroad and is superseded:
+preserve this workflow and its current proofs. A private terminology refactor
+may remove the misleading name, but deleting the command or adding new semantic
+Store/session admission is a separate scope decision. Pre1.0 removes superseded
+contracts, not current behavior bearing an old name.
+
+Linux invalid-byte physical filename proof remains unavailable. A read-only
+BatchMode SSH uname probe to serenity returned255 Host is down; no Linux witness
+ran, no source was copied and no request-refusal case replaces it. The actual
+macOS EILSEQ fixture failure remains retained as FAIL.
+
+Paths abbreviated above by ... start with
+`/Users/spuri/projects/lexlapax/loopex-evidence`; they name current available
+external outputs. Old missing temporary files below remain historical references,
+not recovered evidence. This Git checkpoint records completed results and current worker state without
+changing the source tested at e327. The checklist's latest section supplies the exact tally.
 
 ### Resume audit after restart
 

@@ -29,6 +29,82 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Resumed integration failure and queued proof — 2026-10-05
+
+Exact clean e327e46c full current fast check ran once and failed, exit 1 in
+2274.262seconds. Metadata/build gates and ten application suites passed;
+AppServer passed 100/102 with 5 excluded. The full current-fast-check.log in
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/integration-e327e46c-v1`
+has SHA-256 `a5f16c563ec3c17df75031fb57add5bb336a40d45bf2f926c9f61ce89cf28b83`;
+completion SHA-256
+`106174758d98d3ab54708c9ec098f2139bc40283cc61fbd881e6697dea0678b0`.
+The final source remained exact e327 and clean. Complete composition/Core/provider
+application-output inventory SHA-256
+`fedfac6d3a4a2a4d79871f194cf81c99f5902bca00be836264650c5eda55f186`;
+executor/CLI/AppServer inventory SHA-256
+`462837bf6ae891690f9d8fe9a0405b8f48c85c97e6e57e0225a092c9c18434d0`.
+Root independently rehashed the completion, complete main log and all six outputs.
+No full-check PASS or unchanged-candidate retry is claimed. The combined full
+integration subtask remains open.
+
+The two failures expose incomplete five-member snapshot mapping labelled
+revision 3 and a superseded generic command-admitted policy-answer assertion.
+Complete ten-field captured snapshot/shared-codec mapping and historical cursor
+fixture repair is source-only c35d94b5, clean and pushed offside. Pure Store
+captured-byte decoder prerequisite is source-only 7dc5fe51, also clean/pushed.
+Both new proof rows below remain open until supported-pair checks. Private-task
+causal WIP 6a39e0bb preserves all original cutoffs/joins/quiet assertions and has
+no new proof. Core's three retained shutdown_error/noproc reports remain open;
+an ordinary Core passing suite alone supplies no causal correction.
+
+The real selected release long_bound run passed at exact clean e327 in
+1090.005 seconds, exit 0: Core 10, executor 2, daemon 5, composition 2 and provider
+drain 1, all 20 actual cases. The actual composition lane executed both restore
+IO cases and passes, 30 seconds including lane overhead. Complete retained
+selected-release.log SHA-256
+`ccf32d1fa06d9561b1410499c42a1f07fec108e8ad9b5789d94fa3b242504ac3`;
+completion SHA-256
+`829697a9d2a53c9d708d3dce6866aad6b8a95381970b43dfbbce02eca0305a77`;
+composition lane SHA-256
+`2083d0b4781f56eb821ee3bce632794de6167c1d014018eede2a0d68de1832e8`.
+Root rehashed all 14 outputs and independently compared 1,242 complete archive
+kind/mode/path records plus 1,097 source blobs with Git. Exact retained NUL
+manifest SHA-256
+`c589f6439bfc99816a305a0ae91e902f20d091ef56e31d7142b3039609c6f7aa`.
+Only the declared CLI escript is added outside excluded build/deps; SOURCE_IDENTITY
+matches exact commit/date and both escript inventories pass. This closes the
+selection subtask only, not full fast-check, closure, live provider or attendance.
+Foreground now owns the exclusive verification slot; no other worker can launch
+VM proof. Complete process/evidence instructions are in
+[M7-resume](M7-resume.md#technical-depth).
+
+The separately proposed exact ADR 0052 pair at ec9e8fbe is clean/pushed and
+passes one docs-only gate in 64.538 seconds; complete log SHA-256
+`b55d80763de8239699c36e4c18b02da179062ed9d115031d7c0d2610c5f4683d`,
+completion SHA-256
+`b9a437aabfd83541d502f36eb15e1ddc4c10f8e621f517f46adcd126aa12414d`.
+Root rehashed the exact Proposed pair and outputs. The required exact-pair
+acceptance question remains unanswered; proposal preparation closes only its
+new narrow added subtask, not native/public event implementation or serving.
+Configure wire report recommends changes on new /3-/4 ingress, with current
+native authored identity unchanged; its 28 source blobs and report were rehashed.
+Full restore audit 50-source reconstruction is available; neither report is a
+new contract acceptance or executed proof.
+
+The component called LegacyImport accepts the current marker written by offline
+sessions and implements the current prepare-index workflow. No obsolete-format
+branch was found. Preserve that workflow; the prior whole-facility deletion
+recommendation was overbroad. Linux invalid-byte native-name proof remains
+unavailable after read-only SSH Host is down; request-refusal cases are not a
+substitute. Whole restore/helper grammar/paid and attended workflows remain open.
+
+This checkpoint adds two open proof subtasks and one completed proposal-only
+subtask, and closes one actual release-selection subtask. Original T01–T19 stays
+78 done / 95 todo / 6 retired; added 288 done / 20 todo. Including T00: originals
+78/101/7; added292/21. The tested e327 retains its historical tally; this checkpoint
+records newly discovered work and terminal proof without changing those tested
+implementation bytes.
+
 ## Supported physical manifest implementation — 2026-10-05
 
 The two owned manifest paths from `8885e0db` through worker
@@ -12083,6 +12159,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Prepare the exact proposed ADR0052 policy public-event pair from current native/accepted sources, retain root review and complete once-only docs gate at ec9e8fbe with bound Proposed digests; required maintainer acceptance, native/event implementation, complete /3-/4 manifests and live clients remain open.
+
 - [x] Commit the approved distinct policy answer-admitted transaction and public event, bounded immutable committed native inspection and complete revision-3 snapshot publication; prove exact-prefix pending/answered/terminal views, recovery correspondence, configuration and checkpoint privacy, native compact admission and mutation-uncertainty fencing on both supported toolchains. Complete /3-/4 payload manifests, transport projection and independent live clients remain separate.
 
 - [x] Implement the approved standalone fifteen-member model requested-question payload codec, literal schema/vectors and independent Node encoder/decoder; preserve all five null captures and current OpenInteraction domains, refuse policy and terminal branches, and prove complete codec files and descriptor/byte boundaries on both supported pairs after root integration. Serving imports, negotiated manifests and live generation activation remain open.
@@ -12573,6 +12651,8 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Extract and prove bounded internal Store captured-byte decoding through the existing current decoder, preserving actual whole-log caps, complete/torn/corrupt evidence, cold fixed-schema loading and no IO/actors/repair; verify actual boundary/capacity and complete Store suite on both supported pairs before full backup audit integration.
+
 - [x] Enforce the current Store writer's deterministic uncompressed whole-payload ETF format before offline restore auditing reuses its decoder. Reproduce checksummed compressed over-ceiling, trailing-byte and reversed-map acceptance, refuse all three without changing written bytes or repairing input, and prove complete Store conformance on both supported toolchains.
 
 - [ ] Produce the accepted complete physical manifest through the existing single owned restore IO worker: stream exact file hashes, preserve all paths/modes/empty directories and prior metadata, enforce all count/byte caps while accumulating, reject links/special/unsafe entries and prove actual faults and cleanup on both supported toolchains. Full history audit and restore orchestration remain separate.
@@ -12610,7 +12690,9 @@ open.
 
 ### Added implementation subtasks
 
-- [ ] Include composition's actual owned restore IO long-bound cases in the existing release long_bound group and prove the real selected composition lane. Preserve nonzero executed-case judgment, credential exclusion, all deadlines and prior required lanes; focused worker runs do not substitute for runner selection.
+- [ ] Repair the e327e46c incomplete foreground revision-3 snapshot and superseded policy-answer admission fixture; prove all ten captured fields, exact historical cursor parity after live advancement, actual answer-admission order and the complete AppServer population on both supported pairs without changing generation activation or implementing unaccepted ADR0052.
+
+- [x] Include composition's actual owned restore IO long-bound cases in the existing release long_bound group and prove the real selected composition lane. Preserve nonzero executed-case judgment, credential exclusion, all deadlines and prior required lanes; focused worker runs do not substitute for runner selection.
 
 - [x] Repair the 6290ac47 wrapper-related integration failures in credential-plane, ephemeral trace, foreground, daemon and offline CLI witnesses; distinguish stale internal observations from actual option/dispatch regressions, preserve exact original adapter options, host-option allowlist, exclusion and credential/lifetime proofs, and verify both pairs with failed outputs retained.
 - [x] Repair the 6290ac47 diagnostic broken-IO/writer-death setup observation under the maintainer-approved single captured 1,000-ms setup cutoff per disposition; preserve real blocked IO, exact counts, writer death, privacy, sealing and post-fault cleanup proofs, and verify the complete twenty-case diagnostic file on both supported toolchains. The override explicitly replaces the original implicit 100-ms setup allowance.
