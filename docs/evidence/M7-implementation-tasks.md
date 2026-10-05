@@ -382,7 +382,16 @@ did not resolve them. No paid provider calls were made during this check.
   Original T10 item 7 and its added tracing-matrix row close. T01–T19 originals
   become 78 done / 95 todo / 6 retired; added work becomes 267 / 16. Including
   T00, originals are 78 / 101 / 7 and added work is 271 / 17. Root post-rejoin
-  metadata remains the next check; identical tested suites are not repeated.
+  metadata passes at exact clean root candidate
+  `05ec7e618d51cba696d741427f5c2ee3c29a0c87`, current/floor in 14.6 / 13.1
+  measured seconds. Handle `66912` is terminal and collected. Complete immutable
+  outputs `/private/tmp/loopex-m7-chat-file-trace-root-current-metadata.log`
+  and `/private/tmp/loopex-m7-chat-file-trace-root-floor-metadata.log` have SHA-256
+  `3f9e8b8eb5781e22796b87e590006c9eeecb0bc774430810d9e995dd399e0b48`
+  and `5bdbc97615efd7779273993fe7c040c473e78b2a0765e41870618639f8987b6c`.
+  Identical tested suites are not repeated. The clean completed unmanaged writer
+  checkout was removed after rejoin; no branch or local edits remained there.
+  All agents and verification VMs for this workstream are finished.
   No built-command, daemon tracing, paid-provider, floor closure or whole-M7
   completion claim follows from this bounded proof.
 
@@ -11015,7 +11024,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Encode closed input, question and error records with exact branch fields, producer-specific choices, opaque identities and the inclusive 65,536-byte cap; prove hostile content cannot forge a second record, legacy oversize refuses without truncation and output drains unchanged on both toolchains. Wait, status, closing and driver integration remain pending.
 - [x] Implement the shared independently draining diagnostic consumer with a 256-entry pending queue, one supervised writer, separate trace/ordinary delivery/drop/unconfirmed counters and captured cleanup bounds; prove observed mailbox growth separately, redaction, stalled/broken IO and owner/drain/supervisor loss on both toolchains. Host startup and trace integration remain pending.
 - [x] Share trusted-module selector resolution between CLI and composition, and validate the accepted closed host trace map into diagnostics-only runtime configuration; prove disabled-field validation, exact lowered ceilings, no atom creation or application startup, and unchanged CLI configuration behavior on both toolchains. Owning startup/teardown remains pending.
-- [x] Join explicit trace flags to both ask profiles, activate durable tracing before session creation and forward ephemeral startup selection; prove disabled validation, startup refusal, diagnostic actor joins, lost cleanup proof, stalled stderr, real local HTTP JSON separation and a separate-VM trace-enabled OS signal on both toolchains. Chat/file/daemon integration remains pending.
+- [x] Join explicit trace flags to both ask profiles, activate durable tracing before session creation and forward ephemeral startup selection; prove disabled validation, startup refusal, diagnostic actor joins, lost cleanup proof, stalled stderr, real local HTTP JSON separation and a separate-VM trace-enabled OS signal on both toolchains. Daemon integration remains pending.
 
 ## T11 — Implement specialized read-only helpers
 
