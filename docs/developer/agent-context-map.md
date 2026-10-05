@@ -6780,3 +6780,25 @@ and independent Node codecs, snapshots, reducers, vectors and manifests
 together. This decision completes the inspection packet's two approvals; it
 does not accept compact_pending, restore contracts, helper accounting, live
 generation activation or milestone closure.
+
+<a id="disposition-m7-native-compact-busy-2026-10-05"></a>
+### M7 native compact busy observation approved, 2026-10-05
+
+The maintainer replied "1. approved" to the standalone compact busy question.
+Approve option A in `/private/tmp/loopex-m7-compact-busy-decision.md`, SHA-256
+`bce0cacdb119977efdd4c80fa84a1e5e8aa6a48e96fba33023b7c971fbeeceaa`.
+The public native `Loopex.session_status/2` result requires the Boolean
+`compact_pending`, derived from the serial owner's committed pending compact
+slot. It remains true through preparation, episode, abort and cleanup until
+committed completion clears that slot. Refuse definitive status with
+`{:error, :session_unavailable}` while the session mutation domain is unresolved;
+uncertainty cannot produce a false idle observation.
+
+This amends ADR 0049's native barrier/read obligations. Chat drains the observed
+public tail and settles only with `compact_pending: false` and the existing
+run, question, follow-up and uncertainty conditions satisfied. A resumed or
+external pre-episode compact remains busy. Missing or non-Boolean values refuse
+under the current-contract rule. Preserve the existing abort target, captured
+cleanup cutoff and exact joins. This adds no wire inspection member, durable
+compact-admission event, snapshot field or chat wait/closing JSON field. It does
+not accept restore/accounting contracts, activate generations or close M7.

@@ -333,9 +333,9 @@ did not resolve them. No paid provider calls were made during this check.
   The completed command-bounds managed writer is now archived (confirmed by
   artifact inventory); do not reuse its former filesystem path. All retained
   source/log manifests remain external and intact. Workers have no active
-  verification handles. The next runtime work is the approved full inspection
-  integration, with policy-answer event/persistence dependent work held for the
-  separately presented decision. Diagnostic dispatch, actual pipe nonjoin and
+  verification handles. The approved full inspection and distinct policy-answer transaction are
+  being implemented in separate Core and protocol writers. The native compact
+  busy observation is also approved; its dependent barrier work may proceed. Diagnostic dispatch, actual pipe nonjoin and
   Task.Supervisor lifetime investigations remain open; failed 6290ac47 is not
   relabeled by either focused repair.
 
@@ -1072,17 +1072,12 @@ did not resolve them. No paid provider calls were made during this check.
   `3a452dcf7b12aba2f10e4d8d0bce0d7c19ac7b68ef2bd0f494853327e547370f`.
   No original outcome closes from these bounded corrections.
 
-- Prepared decision packet, not accepted or implemented: resumed/external
-  standalone compact admission has no public observation before its first
-  episode. The smallest proposal adds required native `compact_pending` to
-  existing same-owner/journal status and refuses definitive status while a
-  session mutation remains unresolved. The alternative adds public admission
-  events and snapshot projection for remote observers. Exact fields, read cut,
-  busy/barrier/abort rules and required proofs are retained in
-  `/private/tmp/loopex-m7-compact-busy-decision.md`, SHA-256
-  `bce0cacdb119977efdd4c80fa84a1e5e8aa6a48e96fba33023b7c971fbeeceaa`.
-  It queues behind ADR 0050 and other already queued decisions. No public or
-  persistence change follows from this read-only proposal.
+- Approved native compact busy observation: the maintainer selected the
+  required Boolean `compact_pending` and definitive-status refusal during
+  unresolved session mutation. The
+  [disposition](../developer/agent-context-map.md#disposition-m7-native-compact-busy-2026-10-05)
+  binds the exact packet and ADR 0049 barrier amendment. Implementation and
+  both-pair proofs remain open. This adds no wire or chat JSON fields.
 
 - Done: integrate the actual Chat file/flag tracing matrix as `da90bef2`
   from worker `00158a9a8487253c67fffc7c5bbe36a8380e2115`. Three cases prove
