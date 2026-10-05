@@ -18,6 +18,17 @@ const binary = (value) => {
 const list = (members) => members.length === 0 ? Buffer.from([106]) :
   Buffer.concat([Buffer.from([108]), uint32(members.length), ...members, Buffer.from([106])]);
 
+// Concept: schema values contain data properties, so encoding reads no getter.
+// Technical depth: inspect every own descriptor before taking member values;
+// frozen ordinary properties remain data descriptors and retain the same bytes.
+function dataDescriptors(value) {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Object.values(descriptors).some((descriptor) => !Object.hasOwn(descriptor, "value"))) {
+    throw new Error("accessor schema properties refused");
+  }
+  return descriptors;
+}
+
 function encode(value) {
   if (value === null) return atom("nil");
   if (typeof value === "boolean") return atom(value ? "true" : "false");
@@ -37,17 +48,20 @@ function encode(value) {
     if (Reflect.ownKeys(value).length !== value.length + 1 || Object.keys(value).length !== value.length) {
       throw new Error("plain dense JSON array required");
     }
-    if (value.length > 0 && value.length <= 65535 && value.every((member) =>
+    const descriptors = dataDescriptors(value);
+    const members = Array.from({ length: descriptors.length.value }, (_unused, index) => descriptors[index].value);
+    if (members.length > 0 && members.length <= 65535 && members.every((member) =>
       Number.isInteger(member) && member >= 0 && member <= 255)) {
-      const size = Buffer.alloc(2); size.writeUInt16BE(value.length);
-      return Buffer.concat([Buffer.from([107]), size, Buffer.from(value)]);
+      const size = Buffer.alloc(2); size.writeUInt16BE(members.length);
+      return Buffer.concat([Buffer.from([107]), size, Buffer.from(members)]);
     }
-    return list(value.map(encode));
+    return list(members.map(encode));
   }
   if (typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
     if (Reflect.ownKeys(value).some((key) => typeof key !== "string") ||
       Reflect.ownKeys(value).length !== Object.keys(value).length) throw new Error("binary map keys required");
-    const entries = Object.entries(value).map(([key, member]) => [binary(key), encode(member)]);
+    const descriptors = dataDescriptors(value);
+    const entries = Object.entries(descriptors).map(([key, descriptor]) => [binary(key), encode(descriptor.value)]);
     entries.sort(([left], [right]) => Buffer.compare(left, right));
     return tuple([atom("loopex_map"), list(entries.map((pair) => tuple(pair)))]);
   }

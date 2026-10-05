@@ -56,6 +56,17 @@ assert.throws(() => parseSchemaJson(Buffer.from([0xff])));
 for (const value of [undefined, 1.5, NaN, Infinity, 9007199254740992, new Map(), Object.create(null), Array(2), Object.assign([], { extra: 1 }), Object.defineProperty({}, "hidden", { value: 1 }), Symbol("x"), "\ud800"]) {
   assert.throws(() => canonicalSchemaBytes(value));
 }
+let getterInvocations = 0;
+const objectGetter = Object.defineProperty({}, "x", { enumerable: true, get() { getterInvocations++; return 1; } });
+const arrayGetter = Object.defineProperty([1], "0", { enumerable: true, get() { getterInvocations++; return 1; } });
+const objectSetter = Object.defineProperty({}, "x", { enumerable: true, set(_value) { throw new Error("setter invoked"); } });
+const arraySetter = Object.defineProperty([1], "0", { enumerable: true, get: undefined, set(_value) { throw new Error("setter invoked"); } });
+for (const value of [objectGetter, arrayGetter, objectSetter, arraySetter]) {
+  assert.throws(() => canonicalSchemaBytes(value), /accessor/);
+}
+assert.equal(getterInvocations, 0);
+assert.equal(canonicalSchemaDigest(Object.freeze({ x: 1 })), canonicalSchemaDigest({ x: 1 }));
+assert.equal(canonicalSchemaDigest(Object.freeze([1, "x"])), canonicalSchemaDigest([1, "x"]));
 const expected = { generation: "test-generation", schemaDigest: fixture.payloads[0].canonical_sha256 };
 const reply = { type: "initialized", selected_generation: expected.generation, exact_schema_sha256: expected.schemaDigest };
 assert.equal(matchesContractIdentity(reply, expected), true);
@@ -64,4 +75,4 @@ assert.equal(matchesContractIdentity({ ...reply, exact_schema_sha256: "0".repeat
 assert.equal(matchesContractIdentity({ ...reply, type: "error" }, expected), false);
 assert.equal(matchesContractIdentity(null, expected), false);
 assert.equal(matchesContractIdentity(reply, { ...expected, schemaDigest: expected.schemaDigest.toUpperCase() }), false);
-process.stdout.write(JSON.stringify({ canonical_cases: fixture.cases.length, approved_payloads: fixture.payloads.length, embedded_leaf_mutations: mutations, rejected_json: rejectedJson.length + 1, identity_checks: 6 }) + "\n");
+process.stdout.write(JSON.stringify({ canonical_cases: fixture.cases.length, approved_payloads: fixture.payloads.length, embedded_leaf_mutations: mutations, rejected_json: rejectedJson.length + 1, identity_checks: 6, accessor_checks: 4, frozen_data_checks: 2 }) + "\n");

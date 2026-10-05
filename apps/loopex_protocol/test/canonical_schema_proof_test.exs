@@ -76,7 +76,9 @@ defmodule LoopexProtocol.CanonicalSchemaProofTest do
               "approved_payloads" => 11,
               "embedded_leaf_mutations" => 1307,
               "rejected_json" => 13,
-              "identity_checks" => 6
+              "identity_checks" => 6,
+              "accessor_checks" => 4,
+              "frozen_data_checks" => 2
             }} = Frame.decode(String.trim_trailing(output, "\n"), 65_536)
   end
 end
