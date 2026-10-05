@@ -1184,6 +1184,144 @@ defmodule LoopexCli.ChatDriverTest do
     assert ChatDriver.close(driver, :confirmed) == 1
   end
 
+  test "steer names the public active run and reaches the next model turn" do
+    fixture =
+      start_fixture(
+        [
+          %{
+            text: "first",
+            hold: self(),
+            calls: [
+              %{
+                id: "steer-write",
+                name: "write",
+                arguments: %{"path" => "note.txt", "content" => "retained"}
+              }
+            ]
+          },
+          %{text: "steered", calls: [], require_previous_worker_down: true}
+        ],
+        tools: [Fixture.tool_definition()]
+      )
+
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    {:ok, input} = StringIO.open("one\n/steer exact steer\n/wait\n/quit\n", encoding: :latin1)
+    output = observing_output()
+    test = self()
+
+    facade = fn
+      module, :command, [attachment, %{type: :steer} = command] ->
+        send(test, {:steer_target, command})
+        apply(module, :command, [attachment, command])
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end
+
+    {host, driver} = start_host(fixture.runtime, session, input, output, facade: facade)
+    assert_receive {:holding, model}, 5_000
+    monitor = Process.monitor(model)
+    assert_receive {:steer_target, command}, 5_000
+    assert {:ok, %{active_run_id: run}} = Loopex.session_status(fixture.runtime, session)
+    assert command.run_id == run
+    assert command.content == "exact steer"
+    admitted = await_record(&(&1["event"] == "input" and &1["input_sequence"] == "2"))
+    assert admitted["disposition"] == "admitted"
+    await_record(&(&1["event"] == "input" and &1["input_sequence"] == "3"))
+    send(model, :release)
+    assert_receive {:DOWN, ^monitor, :process, ^model, :normal}, 5_000
+    assert_receive {:provisional, ^host, %{exit_code: 0, cleanup: :confirmed}}, 5_000
+    [_, steered] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    assert Enum.any?(steered.messages, &(&1["content"] == "exact steer"))
+    assert [job] = Loopex.AgentLoopTestExecutor.jobs(fixture.executor)
+    assert job.tool_call_id == "steer-write"
+    close_host_and_fixture(fixture, host, driver, 0)
+    stop_devices([output])
+  end
+
+  test "idle steer is locally refused and interactive chat still accepts a prompt" do
+    fixture = start_fixture([%{text: "done", calls: []}])
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    {:ok, input} = StringIO.open("/steer idle text\none\n/wait\n/quit\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+
+    {:ok, driver} =
+      ChatDriver.start_link(fixture.runtime, session, input, output, mode: :interactive)
+
+    assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
+    assert ChatDriver.close(driver, :confirmed) == 0
+    {_, transcript} = StringIO.contents(output)
+    [refused | admissions] = Enum.filter(records(transcript), &(&1["event"] == "input"))
+    assert refused["disposition"] == "refused"
+    assert refused["code"] == "no_active_run"
+    assert Enum.map(admissions, & &1["input_sequence"]) == ~w(2 3 4)
+    assert Enum.all?(admissions, &(&1["disposition"] == "admitted"))
+    [request] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    refute Enum.any?(request.messages, &(&1["content"] == "idle text"))
+  end
+
+  test "steer refuses its observed run when a follow-up replaces it before admission" do
+    fixture =
+      start_fixture([
+        %{text: "first", calls: [], hold: self()},
+        %{text: "followed", calls: [], hold: self(), require_previous_worker_down: true}
+      ])
+
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+
+    {:ok, input} =
+      StringIO.open("one\n/follow-up next\n/steer stale text\n/wait\n/quit\n",
+        encoding: :latin1
+      )
+
+    output = observing_output()
+    test = self()
+
+    facade = fn module, function, arguments ->
+      result = apply(module, function, arguments)
+
+      if function == :session_status and not Process.get(:steer_status_observed, false) do
+        case result do
+          {:ok, %{active_run_id: run}} when is_binary(run) ->
+            Process.put(:steer_status_observed, true)
+            send(test, {:steer_status_observed, self(), run})
+            receive do: (:submit_observed_steer -> :ok)
+
+          _ ->
+            :ok
+        end
+      end
+
+      result
+    end
+
+    {host, driver} =
+      start_host(fixture.runtime, session, input, output, mode: :interactive, facade: facade)
+
+    assert_receive {:holding, first}, 5_000
+    assert_receive {:steer_status_observed, holder, old_run}, 5_000
+    first_monitor = Process.monitor(first)
+    send(first, :release)
+    assert_receive {:DOWN, ^first_monitor, :process, ^first, :normal}, 5_000
+    assert_receive {:holding, second}, 5_000
+    second_monitor = Process.monitor(second)
+    assert {:ok, %{active_run_id: new_run}} = Loopex.session_status(fixture.runtime, session)
+    assert new_run != old_run
+    send(holder, :submit_observed_steer)
+    refused = await_record(&(&1["event"] == "input" and &1["input_sequence"] == "3"))
+    assert refused["disposition"] == "refused"
+    assert refused["code"] == "run_mismatch"
+    await_record(&(&1["event"] == "input" and &1["input_sequence"] == "4"))
+    send(second, :release)
+    assert_receive {:DOWN, ^second_monitor, :process, ^second, :normal}, 5_000
+    assert_receive {:provisional, ^host, %{exit_code: 0, cleanup: :confirmed}}, 5_000
+    [_, request] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    assert Enum.any?(request.messages, &(&1["content"] == "next"))
+    refute Enum.any?(request.messages, &(&1["content"] == "stale text"))
+    close_host_and_fixture(fixture, host, driver, 0)
+    stop_devices([output])
+  end
+
   test "captured invocation bounds reach each prompt while queued follow-up inherits the active run" do
     fixture =
       start_fixture([

@@ -525,7 +525,7 @@ defmodule LoopexCli.ChatDriver do
       {^parent, ^ref, :command, command} ->
         send(
           parent,
-          {self(), ref, :reply, state.facade.(Loopex, :command, [attachment, command])}
+          {self(), ref, :reply, submit_command(attachment, command, state)}
         )
 
         command_loop(parent, ref, attachment, state)
@@ -552,6 +552,26 @@ defmodule LoopexCli.ChatDriver do
         command_loop(parent, ref, attachment, state)
     end
   end
+
+  # Concept: terminal steering names the run observed by this command holder.
+  # Technical depth: events can lag admission, including on resume. Read the
+  # public active run before submission; Core refuses if it changes before
+  # admission, rather than putting the input into another run.
+  defp submit_command(attachment, %{type: :steer} = command, state) do
+    case state.facade.(Loopex, :session_status, [state.runtime, state.session]) do
+      {:ok, %{active_run_id: run}} when is_binary(run) ->
+        state.facade.(Loopex, :command, [attachment, Map.put(command, :run_id, run)])
+
+      {:ok, %{active_run_id: nil}} ->
+        {:error, :no_active_run}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp submit_command(attachment, command, state),
+    do: state.facade.(Loopex, :command, [attachment, command])
 
   defp configure(attachment, command, state) do
     with {:ok, changes, candidate} <-

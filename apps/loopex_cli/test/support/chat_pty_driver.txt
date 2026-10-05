@@ -1,0 +1,298 @@
+defmodule LoopexCli.ChatPTYDriver do
+  @moduledoc false
+  alias Loopex.AgentLoopFixture, as: Fixture
+
+  def main do
+    {:ok, _} = Application.ensure_all_started(:loopex_cli)
+    :ok = :io.setopts(:standard_io, encoding: :latin1)
+
+    {:ok, socket} =
+      :gen_tcp.connect(
+        {127, 0, 0, 1},
+        String.to_integer(System.fetch_env!("LOOPEX_CHAT_PTY_PORT")),
+        [:binary, active: false, packet: 4],
+        5000
+      )
+
+    send_control(socket, {:pid, System.pid()})
+    scenario = System.fetch_env!("LOOPEX_CHAT_PTY_SCENARIO")
+    path = System.fetch_env!("LOOPEX_CHAT_PTY_CONFIG")
+    argv = ["chat", "--config", path]
+    {:ok, prepared} = LoopexCli.ChatConfiguration.load(argv, Path.dirname(path), nil)
+    host = self()
+    controller = spawn(fn -> model_controller(socket, host) end)
+    receiver = spawn(fn -> receive_control(socket, controller) end)
+    helpers = monitor_actors([controller, receiver])
+
+    result =
+      LoopexCli.Chat.run(argv,
+        cwd: Path.dirname(path),
+        home: nil,
+        acquire_placement: fn _, _ -> {:ok, "pty-placement"} end,
+        release_placement: fn "pty-placement", _ -> :ok end,
+        placement_id: fn _ -> {:ok, "pty-runtime"} end,
+        with_runtime: fn options, callback ->
+          fixture =
+            Fixture.start(
+              script: script(scenario, controller),
+              tools: prepared.genesis["tool_selection"]["definitions"],
+              model: prepared.selection.configuration["model"],
+              runtime_id: "pty-runtime",
+              cleanup_grace_ms: options[:cleanup_grace_ms],
+              diagnostics_to: options[:diagnostics_to]
+            )
+
+          runtime_monitor = monitor_actors([fixture.runtime.supervisor])
+          actors = [fixture.model, fixture.executor, fixture.store]
+          actor_monitors = monitor_actors(actors)
+
+          {provisional, evidence} =
+            try do
+              provisional = callback.(fixture.runtime)
+
+              receive do
+                {:driver, driver, transport_monitors, outer_monitors, session} ->
+                  state = :sys.get_state(driver)
+                  true = state.workers == %{} and state.input_worker == nil
+                  join_actors(transport_monitors)
+                  send(host, {:outer_monitors, outer_monitors})
+
+                  {:ok, events} =
+                    Loopex.M1RuntimeTestStore.load_events(fixture.store, session, 0, 1000)
+
+                  # Concept: inspect the child's actual evidence in an independent VM.
+                  # Technical depth: atom tables are VM-local. Concrete binary-keyed
+                  # observations preserve safe term decoding without preloading every
+                  # runtime implementation or admitting new atoms in the parent.
+                  events =
+                    Enum.map(events, fn event ->
+                      Map.new(event, fn {key, value} ->
+                        {if(is_atom(key), do: Atom.to_string(key), else: key), value}
+                      end)
+                    end)
+
+                  requests =
+                    Enum.map(Loopex.AgentLoopTestModel.dispatched(fixture.model), fn request ->
+                      %{
+                        "messages" => request.messages,
+                        "deadline" => request.deadline,
+                        "canonical_request_bytes" => request.canonical_request_bytes,
+                        "staged_request_digest" => request.staged_request_digest
+                      }
+                    end)
+
+                  jobs =
+                    Enum.map(Loopex.AgentLoopTestExecutor.jobs(fixture.executor), fn job ->
+                      %{
+                        "tool_call_id" => job.tool_call_id,
+                        "validated_arguments" => job.validated_arguments,
+                        "operation_id" => job.operation_id,
+                        "canonical_request_digest" => job.canonical_request_digest
+                      }
+                    end)
+
+                  {provisional,
+                   %{
+                     events: events,
+                     requests: requests,
+                     jobs: jobs,
+                     provisional: %{
+                       "exit_code" => provisional.exit_code,
+                       "cleanup" => Atom.to_string(provisional.cleanup)
+                     }
+                   }}
+              after
+                5000 -> raise "actual chat driver was not captured"
+              end
+            after
+              # Concept: fixture cleanup also follows an evidence projection failure.
+              # Technical depth: observe the runtime and every concrete adapter DOWN
+              # before any successful evidence can leave the child.
+              try do
+                :ok = Loopex.stop(fixture.runtime)
+                join_actors(runtime_monitor)
+              after
+                Enum.each(actors, fn actor ->
+                  if Process.alive?(actor), do: GenServer.stop(actor, :normal)
+                end)
+
+                join_actors(actor_monitors)
+              end
+            end
+
+          send(host, {:evidence, Map.put(evidence, :runtime_joined, true)})
+          provisional
+        end,
+        install_signal: fn driver, reference, grace, nil ->
+          {:ok, manager} = LoopexCli.Interrupt.install_chat(driver, reference, grace)
+          state = :sys.get_state(driver)
+          true = state.startup == :ready and state.input_worker == nil
+          true = state.mode == :interactive
+          true = LoopexComposition.ProjectResources.operator_present?()
+          true = MapSet.size(state.ready) == 2
+          monitors = monitor_actors(Map.keys(state.workers))
+          outer_monitors = monitor_actors([driver, state.writer])
+          send(host, {:driver, driver, monitors, outer_monitors, state.session})
+          send(receiver, {:driver, driver, host})
+          send_control(socket, {:ready, state.mode, state.sequence, System.pid()})
+          {:ok, manager}
+        end
+      )
+
+    receive do
+      {:outer_monitors, monitors} -> join_actors(monitors)
+    after
+      5000 -> raise "driver and output manager monitors were not captured"
+    end
+
+    if scenario in ["controls", "interrupt"] do
+      receive do
+        :model_joined -> :ok
+      after
+        5000 -> raise "held model monitor was not joined"
+      end
+    end
+
+    if scenario == "interrupt" do
+      receive do
+        :reader_joined -> :ok
+      after
+        5000 -> raise "blocked reader monitor was not joined"
+      end
+    end
+
+    receive do
+      {:evidence, evidence} ->
+        send_control(socket, {:evidence, Map.put(evidence, :transport_joined, true), result})
+    after
+      5000 -> raise "retained evidence was not collected"
+    end
+
+    Enum.each([controller, receiver], &Process.exit(&1, :kill))
+    join_actors(helpers)
+    send_control(socket, :helpers_joined)
+    :gen_tcp.close(socket)
+    System.halt(result)
+  end
+
+  defp script("controls", controller),
+    do: [
+      %{
+        text: "first",
+        hold: controller,
+        calls: [
+          %{
+            id: "pty-write",
+            name: "write",
+            arguments: %{"path" => "note.txt", "content" => "retained"}
+          }
+        ]
+      },
+      %{text: "steered", calls: [], require_previous_worker_down: true},
+      %{text: "followed", calls: [], require_previous_worker_down: true}
+    ]
+
+  defp script("interrupt", controller),
+    do: [%{text: "never returned", calls: [], hold: controller}]
+
+  defp script(scenario, _) when scenario in ["answer", "decline"],
+    do: [
+      %{
+        text: "Question",
+        calls: [%{id: "pty-ask", name: "ask", arguments: %{"question" => "PTY question?"}}]
+      },
+      %{text: "responded", calls: [], require_previous_worker_down: true}
+    ]
+
+  defp model_controller(socket, host) do
+    receive do
+      {:holding, worker} ->
+        monitor = Process.monitor(worker)
+        send_control(socket, :holding)
+
+        receive do
+          :release ->
+            send(worker, :release)
+
+            receive do
+              {:DOWN, ^monitor, :process, ^worker, reason} ->
+                send_control(socket, {:model_down, reason})
+            after
+              5000 -> raise "model worker did not join"
+            end
+
+          {:DOWN, ^monitor, :process, ^worker, reason} ->
+            send_control(socket, {:model_down, reason})
+        after
+          5000 -> raise "held model did not finish"
+        end
+
+        send(host, :model_joined)
+        model_controller(socket, host)
+    end
+  end
+
+  defp receive_control(socket, controller) do
+    receive do
+      {:driver, driver, host} -> receive_commands(socket, controller, driver, host)
+    end
+  end
+
+  defp receive_commands(socket, controller, driver, host) do
+    case :gen_tcp.recv(socket, 0) do
+      {:ok, bytes} ->
+        case :erlang.binary_to_term(bytes, [:safe]) do
+          :release ->
+            send(controller, :release)
+
+          :inspect_reader ->
+            reader = await_reader(driver, System.monotonic_time(:millisecond) + 5000)
+            monitor = Process.monitor(reader)
+            send_control(socket, :reader_blocked)
+
+            receive do
+              {:DOWN, ^monitor, :process, ^reader, reason} ->
+                send_control(socket, {:reader_down, reason})
+            after
+              5000 -> raise "PTY input reader did not join"
+            end
+
+            send(host, :reader_joined)
+        end
+
+        receive_commands(socket, controller, driver, host)
+
+      {:error, :closed} ->
+        :ok
+    end
+  end
+
+  defp await_reader(driver, cutoff) do
+    state = :sys.get_state(driver)
+
+    if is_pid(state.input_worker) do
+      state.input_worker
+    else
+      if System.monotonic_time(:millisecond) >= cutoff, do: raise("PTY reader did not block")
+
+      receive do
+      after
+        1 -> await_reader(driver, cutoff)
+      end
+    end
+  end
+
+  defp monitor_actors(actors), do: Enum.map(actors, &{&1, Process.monitor(&1)})
+
+  defp join_actors(monitors) do
+    for {pid, monitor} <- monitors do
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, _} -> false = Process.alive?(pid)
+      after
+        5000 -> raise "owned actor did not join"
+      end
+    end
+  end
+
+  defp send_control(socket, value), do: :gen_tcp.send(socket, :erlang.term_to_binary(value))
+end
