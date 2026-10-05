@@ -27,6 +27,43 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST VERIFICATION: Causal v2 handle52711 is terminal exit1 and collected.
+Current compile/matrix passed but focused exited2 with0/4 passed, zero
+exclusions/skips, because all four retain calls rejected runner-selected
+/private/tmp outside the fixture's System.tmp_dir boundary. Floor did not run;
+all68 required trace artifacts are missing and fixture cleanup proof is
+unavailable. All nine launched process groups are absent; source5fa9d9ce is
+clean. Root independently rehashed38 report artifacts and read the exact guard
+and raw failure. Retain raw provider_cleanup_unproved/shutdown:noproc reports
+without attribution. SiblingM7/private-task-causal-runner-91784948-v2/execution-001;
+terminal digest04354b47c9e031a554b30f305fa194b5011d7b0508e3f1597f482b1999b23176,
+raw focused8e4ef3b1356f67e2494c98b12b14b24fb194756a31a354826de9170a923dad76,
+collection399cca1b1bc8ec0a009a5f51458574c1e3b9472f3b5d8d362ceeb72fde810ac5.
+Do not poll/restart52711 or relabel this failure.
+
+EXCLUSIVE VM SLOT is now CAUSAL V3, live handle38955. Exact source remains
+5fa9d9ce3d1f723aa31d877e096110c1d688e804. Root reviewed the complete delta,
+all five packet digests and Python AST: native tempfile parent and identical
+child TMPDIR replace the invalid fixed directory; fixture/assertions/bounds
+stay unchanged. Runner siblingM7/private-task-causal-runner-5fa9d9ce-v3/run.py
+SHA-25607fdfcae751cf0f141fbb62ac29faaccefc5fcccc678366abf34c4a7666ec571;
+separate execution-001. Exact current versions passed; formatter stage began.
+Worker owns polling and returns the slot only after terminal collection/sealing.
+All active-run statements below are historical; no other verification VM.
+
+Resource fully merged plain worktree/local branch are removed; complete evidence
+and tested ancestry remain saved/pushed at0a857ca6. Its bounded T15 row is
+closed; whole catalog, physical capture, Linux filename and restore remain open.
+Counts originals78/95/6, added293/21. Native checkpoint4168dee7 runner is ready
+but unexecuted: siblingM7/configure-checkpoint-runner-4168dee7-v1/run.py,
+digest4357ca153f0ee99a75be1cfd9f70bd0fb92503cd02eb0d21773da37966489c86.
+Root read complete runner/helpers and independently verified all8 packet
+artifacts plus1,098 actual/Git source blobs, including literal symlinks.
+Expected new10/0excluded, adjacent63/1excluded, ordinaryCore1323/10excluded,
+zero skips; actual populations remain authoritative. Queue is causal, native
+checkpoint, captured ledger; all latter proofs remain unexecuted. An independent
+read-only review of ledger205afb7a is underway with no VM or write authority.
+
 LATEST: Resource cc8ac30ff1ab6732233c3d3d53f93d0ab01000fb is terminal PASS,
 joined through32cf240e40ab0ab3a807a2a6e17726d64c5cce1d. Both pairs pass
 33focused/0excluded and596ordinary/3excluded, zero skips; all31 logged stages
