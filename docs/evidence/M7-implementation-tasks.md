@@ -325,14 +325,19 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Documentation corrections prepared: the current embedding guide now
+- Done: the current embedding guide now
   distinguishes runtime tool declarations from captured immutable session
   selection, lists shipped `command_with_configuration/3` and
   `command_disposition/2`, explains admission versus completion and names
   distinct maintenance-startup errors. The read-only audit checked actual
   current facade and coordinator behavior; no proposed Model callback is
-  described as shipped. Documentation metadata is the next check. No original
-  outcome closes from these bounded corrections.
+  described as shipped. Clean committed documentation candidate
+  `13f0a6941d38bdc4e6162e15c24101e3528888f7` passed
+  `bash scripts/check.sh --docs` once in 17.6 measured seconds. Handle `1433`
+  is terminal and collected. Complete immutable output:
+  `/private/tmp/loopex-m7-13f0a694-docs-check.log`, SHA-256
+  `3a452dcf7b12aba2f10e4d8d0bce0d7c19ac7b68ef2bd0f494853327e547370f`.
+  No original outcome closes from these bounded corrections.
 
 - Prepared decision packet, not accepted or implemented: resumed/external
   standalone compact admission has no public observation before its first
@@ -346,13 +351,16 @@ did not resolve them. No paid provider calls were made during this check.
   It queues behind ADR 0050 and other already queued decisions. No public or
   persistence change follows from this read-only proposal.
 
-- Running independent source preparation: the T10 tracing writer owns only
+- Running isolated focused verification: the T10 tracing writer owns only
   `apps/loopex_cli/test/chat_workflow_test.exs` in the temporary detached Git
   worktree `/private/tmp/loopex-m7-chat-file-trace-worktree`, based exactly on
   `7570d0c8`. Git worktree creation ran no setup or VM. The three-case live
   file/flag matrix uses existing Chat, diagnostic consumer and trace APIs;
-  full handle `13537` passed; formatter, compile and suite VMs wait only
-  for root documentation metadata before the isolated focused verification.
+  full handle `13537` and root documentation handle `1433` passed and were
+  collected. The writer now runs the complete eleven-case Chat workflow and
+  complete diagnostic-consumer/ephemeral-trace companions, sequentially on both
+  supported pairs with applications in separate VMs. Root holds its own VMs
+  until those checks terminate.
   Root owns rejoin and post-rejoin verification. One added pending T10 row
   tracks this bounded proof. T01–T19 originals are 77 / 96 / 6; added work is
   266 done / 17 todo. No public boundary or original row closes from preparation.
