@@ -325,6 +325,48 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Completed native Core/chat unit, 2026-10-05: tested root candidate
+  `ea535ad6fab97cc5ac3f2538603708c65dbf4af8` passes all 41 cases in the
+  complete changed ChatDriver file on current, 23.334 seconds, and all 181
+  cases in the complete fourteen-file chat selection on floor, 99.528 seconds.
+  Current/floor source compilation, whole formatting, status, compiled docs
+  and dependency gates pass. Floor's joined six-file Core selection passes
+  53 cases, with one long-bound case excluded. Current's unchanged same Core
+  production passed 53 cases at `ce650854`, and unchanged other current chat
+  files passed in the retained 180/181 run at `7a32b10b`; that aggregate
+  remains FAIL. Root compared the exact three Core modules and ChatDriver
+  production across those candidates. These focused results do not claim a
+  final current full-chat aggregate or a full integration check.
+
+  Thirteen complete joined outputs were rehashed against
+  `/private/tmp/loopex-m7-ea535ad6-rejoin/completion.json`, SHA-256
+  `d1adeeac56d10635533514b168a3f3bded247941cf49f3dbf6125ce7768f14b4`.
+  Current ChatDriver log SHA-256
+  `ee7d52b2b4c265c33402b6a0d87588c3bfa2378bb5d7baeb9b4de1aa0f4f9236`;
+  floor chat log SHA-256
+  `b191809beec687d40a8928148f534734e61a6697c033b42f6312b17bdd29cfb9`.
+  The actual new compact cases prove resumed external pre-episode admission,
+  untouched subsequent stdin while `/wait` is busy, unchanged and interrupted
+  committed completion, zero provider dispatch and exact owned actor joins.
+  Missing/non-Boolean native busy facts refuse before input. This closes the
+  added T06 native-busy/barrier unit and one added T05 native inspection unit;
+  complete wire manifests, transports and live client activation stay open.
+
+  All root runners are terminal. The private Task.Supervisor causal fixture
+  holds the next exclusive VM slot; its first two setup failures remain
+  retained and prove no cause. The six-file dormant model-question requested
+  codec is source-ready without activation and awaits its own verification.
+  Restore codec/raw-IO prerequisite source is in progress under accepted
+  ADR 0051. Guard placement is reviewed with seventeen exact commit-source
+  hashes: `/private/tmp/loopex-m7-store-restore-guard-placement-20261005-v1.md`,
+  SHA-256 `a3c5b78bc93367474684a398837bd11232ad1526eb9a9927b3de76a5c5238e36`;
+  source inventory SHA-256
+  `72a447f0fab9562a9022e65d6b7f0fe36c39d0647899a235677a9b6428eae1c4`.
+  Composition/Placement guard known roots before writes; Local validates its
+  own imported lineage. No new Store sibling dependency or universal direct
+  Store root-discovery contract is introduced.
+
+
 - Joined native inspection and chat candidate, 2026-10-05: Core source is
   committed at `9a5f810d` and chat compact barriers at `ce650854`.
   Core worker `9c7f39b7f68364643013e26b5ed33a731aeba1ca` passed
@@ -11555,6 +11597,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Commit the approved distinct policy answer-admitted transaction and public event, bounded immutable committed native inspection and complete revision-3 snapshot publication; prove exact-prefix pending/answered/terminal views, recovery correspondence, configuration and checkpoint privacy, native compact admission and mutation-uncertainty fencing on both supported toolchains. Complete /3-/4 payload manifests, transport projection and independent live clients remain separate.
+
 - [x] Join the approved current eleven-member Inspection, pending/answered policy OpenInteraction and distinct answer-admitted event in shared Elixir and independent Node codecs; migrate Snapshot and retire superseded PendingInteraction. Prove exact nested schemas, quantities, opaque/UTF-8 boundaries, privacy refusals, canonical mutations and the complete 32-case selection on both pairs after root integration. Core transactions/publication, manifests and live generations remain open.
 
 - [x] Implement the approved standalone four-member ActiveBounds codec/schema with arbitrary positive counters, uint64 duration and null/nonnegative uint64 retained cutoff; prove 121 literal vectors and strict independent Node native/object boundaries, both supported toolchains and exact source inventories. Enclosing inspection, policy-answer union and generation activation remain separate obligations.
@@ -11618,7 +11662,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Implement the approved required native compact_pending observation and definitive-status uncertainty fence; hold chat barriers through resumed/external pre-episode preparation, episode, abort and cleanup until committed completion, reject missing/non-Boolean busy values, and prove actual owner/recovery and exact joins on both supported toolchains. Add no wire or chat JSON members.
+- [x] Implement the approved required native compact_pending observation and definitive-status uncertainty fence; hold chat barriers through resumed/external pre-episode preparation, episode, abort and cleanup until committed completion, reject missing/non-Boolean busy values, and prove actual owner/recovery and exact joins on both supported toolchains. Add no wire or chat JSON members.
 
 
 - [x] Join the public chat entrypoint to exact creation, session tracking, prepared resume, guarded signals, effective report and existing input/output driver; share ask diagnostic joins and prove actual built startup/quit plus scripted continuity/restart/refusal/cleanup behavior on both pairs. Built multi-prompt/provider, attended, maintenance and helper proof remains open.
