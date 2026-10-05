@@ -325,6 +325,34 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Verification handoff update: alias-preparation writer saved local draft
+  `e49ae7a7f14bf161f2264f194de29c9f56f14be8` with 25 owned paths, not
+  integrated or pushed. Its corrected current Core run has 323 passes, one
+  failed new public-refusal expectation and five exclusions in 60.269 seconds.
+  The earlier run had 305 passes/19 failures/five exclusions in 55.034 seconds;
+  fixture startup prevented 17 new callbacks, one AST proof assumed a single
+  clause, and the retired-record fixture produced no configure record.
+  Those source corrections are retained; neither run is PASS. Compilation
+  and source review do not complete the implementation. The writer corrects
+  the remaining expectation, then proves complete affected files, actual
+  adapter pass-through and the real preparation cutoff on both pairs.
+  It retains the exclusive VM slot; root has no live runners.
+
+  Read-only restore research is retained at
+  `/private/tmp/loopex-m7-current-restore-option-b-research-v1.md`, SHA-256
+  `65f9ffdee66f6998d7691aa5bb2c33803bfee440cf951617c64f1cb37798ec67`;
+  source inventory SHA-256
+  `7c0b7b5576ee012c7d1d8037cbe1abe2b26f59739aefacb2d441b954e372e442`.
+  Minimal B requires a latest quiescent complete state cut, fresh physical
+  ledger generation, exact retained receipts/unknown fences and unchanged
+  external workspace identity. Private generation epoch differs from the
+  host-supplied public executor epoch, so original reconciliation tuples can
+  remain intact. Host exclusion/freshness attestations cannot be inferred from
+  copied bytes. No arbitrary snapshot rewind, lost-workspace recovery, new
+  administrative API or persistent transition is approved from this research.
+  The restore direction question remains pending. Helper accounting/mutation
+  guard research proceeds independently without source edits or new authority.
+
 - Resume handoff: verified chat unit is committed and pushed as
   `cfed3bccca0f0e36069de994d4ac90957258d3b8`; root was clean and matched
   `origin/m7` after push. All root VM runners are terminal. The alias-preparation
