@@ -299,7 +299,9 @@ defmodule Loopex.Runtime.SessionConfiguration do
 
   ## Technical depth
 
-  The caller supplies complete retained lineage and exact terminal-run identities.
+  The caller supplies complete surviving lineage after committed checkpoint
+  coverage and exact terminal-run identities. Raw covered records stay retained;
+  their summarized tool groups no longer require the new renderer's capability.
   The captured mapping must explicitly declare canonical_terminal_tool_history
   when any terminal tool turn lacks a nonempty assistant completion. Malformed
   lineage refuses even when the capability is declared. This check performs no

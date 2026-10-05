@@ -6849,7 +6849,7 @@ defmodule Loopex.Runtime.SessionState do
       :ok ->
         SessionConfiguration.preflight_history(
           candidate,
-          Enum.flat_map(state.run_order, &elements(state, &1)),
+          uncompacted_elements(state, lineage_elements(state, :session)),
           state.run_order
         )
 
