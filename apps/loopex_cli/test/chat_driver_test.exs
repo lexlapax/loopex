@@ -1784,7 +1784,8 @@ defmodule LoopexCli.ChatDriverTest do
       remaining = captured - System.monotonic_time(:millisecond)
       assert remaining >= 0
 
-      assert_receive {:trace, ^writer, :receive, {:"$gen_call", {^driver, _}, {:finish, ^captured}}},
+      assert_receive {:trace, ^writer, :receive,
+                      {:"$gen_call", {^driver, _}, {:finish, ^captured}}},
                      remaining
 
       finish_deadline = :sys.get_state(writer).finish_deadline
