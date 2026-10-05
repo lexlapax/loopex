@@ -97,6 +97,31 @@ defmodule Loopex.Store.Local.Log do
     end
   end
 
+  @doc """
+  ## Concept
+
+  Decodes a captured log image for internal read-only inspection.
+
+  ## Technical depth
+
+  The existing 256 MiB log ceiling is checked before schema loading or safe
+  term decoding. The fixed trusted envelope modules are loaded exactly as for
+  `read/1`, and the same frame decoder returns complete, torn or corrupt tails.
+  Torn evidence includes the captured byte length and whole-image SHA-256.
+
+  This internal entry point performs no Store path IO, actor startup, creation,
+  sync or repair. The caller must establish physical file presence and integrity
+  separately and require a complete tail when auditing a backup. Transaction
+  and session semantics still require their respective pure reducers.
+  """
+  @spec decode_bytes(binary()) :: {:ok, [map()], tail()} | {:error, term()}
+  def decode_bytes(bytes) when is_binary(bytes) and byte_size(bytes) <= @max_log_bytes do
+    with :ok <- load_envelope_atom_modules(), do: decode_bounded(bytes)
+  end
+
+  def decode_bytes(bytes) when is_binary(bytes),
+    do: {:error, {:store_log_too_large, byte_size(bytes), @max_log_bytes}}
+
   @doc false
   @spec sync_recovered(Path.t()) :: :ok | {:error, term()}
   def sync_recovered(path) when is_binary(path) do

@@ -19,9 +19,81 @@ defmodule Loopex.Store.Local.LogEncodingTest do
         bytes
       end)
 
+    assert {:ok, ^frames, :complete} = Log.decode_bytes(bytes)
     File.write!(path, bytes)
     assert {:ok, ^frames, :complete} = Log.read(path)
     assert File.read!(path) == bytes
+  end
+
+  test "empty byte decoding and missing-file reads do not create a log", %{path: path} do
+    assert {:ok, [], :complete} = Log.decode_bytes(<<>>)
+    refute File.exists?(path)
+    assert {:ok, [], :complete} = Log.read(path)
+    refute File.exists?(path)
+
+    File.write!(path, <<>>)
+    assert {:ok, [], :complete} = Log.read(path)
+    assert File.read!(path) == <<>>
+  end
+
+  test "captured torn evidence agrees with read without repairing the file", %{path: path} do
+    frame = %{"prefix" => "retained"}
+    {:ok, prefix} = Log.encode(frame)
+    {:ok, next} = Log.encode(%{"next" => "incomplete"})
+    bytes = prefix <> binary_part(next, 0, byte_size(next) - 1)
+    tail = {:torn, byte_size(prefix), byte_size(bytes), :crypto.hash(:sha256, bytes)}
+
+    assert {:ok, [^frame], ^tail} = Log.decode_bytes(bytes)
+    File.write!(path, bytes)
+    assert {:ok, [^frame], ^tail} = Log.read(path)
+    assert File.read!(path) == bytes
+  end
+
+  test "a non-header byte prefix is corrupt at its original offset" do
+    assert {:ok, [], {:corrupt, 0}} = Log.decode_bytes("invalid")
+  end
+
+  test "the byte decoder enforces the actual whole-log ceiling before decoding" do
+    ceiling = 256 * 1_048_576
+    oversized = :binary.copy(<<0>>, ceiling + 1)
+
+    assert {:error, {:store_log_too_large, observed, ^ceiling}} =
+             Log.decode_bytes(oversized)
+
+    assert observed == ceiling + 1
+    bounded = binary_part(oversized, 0, ceiling)
+    assert {:ok, [], {:corrupt, 0}} = Log.decode_bytes(bounded)
+  end
+
+  test "byte decoding loads the fixed envelope schema in a cold VM" do
+    executable = System.find_executable("elixir") || raise "elixir executable unavailable"
+    core_ebin = Loopex.Store |> :code.which() |> List.to_string() |> Path.dirname()
+    local_ebin = Log |> :code.which() |> List.to_string() |> Path.dirname()
+    {:ok, bytes} = Log.encode(%{orphan_resolutions: %{}})
+    encoded = Base.encode64(bytes)
+
+    script = """
+    modules = [Loopex.Store, Loopex.Store.Transitions, Loopex.Store.Local.State]
+
+    if Enum.any?(modules, &Code.loaded?/1) do
+      System.halt(20)
+    end
+
+    with {:ok, [_frame], :complete} <-
+           Loopex.Store.Local.Log.decode_bytes(Base.decode64!(#{inspect(encoded)})),
+         true <- Enum.all?(modules, &Code.loaded?/1) do
+      IO.write("cold-byte-decode-ok")
+    else
+      _other -> System.halt(21)
+    end
+    """
+
+    assert {"cold-byte-decode-ok", 0} =
+             System.cmd(
+               executable,
+               ["--erl", "+S 1:1", "-pa", core_ebin, "-pa", local_ebin, "-e", script],
+               stderr_to_stdout: true
+             )
   end
 
   test "a checksummed compressed payload cannot bypass the expanded frame ceiling", %{path: path} do
@@ -58,7 +130,10 @@ defmodule Loopex.Store.Local.LogEncodingTest do
 
     File.write!(path, bytes)
 
-    assert {:ok, [%{"prefix" => "retained"}], {:corrupt, offset}} = Log.read(path)
+    assert {:ok, [%{"prefix" => "retained"}], {:corrupt, offset}} =
+             Log.decode_bytes(bytes)
+
+    assert {:ok, [%{"prefix" => "retained"}], {:corrupt, ^offset}} = Log.read(path)
     assert offset == byte_size(prefix)
     assert File.read!(path) == bytes
   end
